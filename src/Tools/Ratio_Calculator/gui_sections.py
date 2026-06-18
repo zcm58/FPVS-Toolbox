@@ -365,8 +365,8 @@ class RatioSectionsMixin:
         self.palette_combo.addItems(["vibrant", "muted", "colorblind_safe"])
 
         self.png_dpi_spin = QSpinBox()
-        self.png_dpi_spin.setRange(72, 600)
-        self.png_dpi_spin.setValue(300)
+        self.png_dpi_spin.setRange(600, 600)
+        self.png_dpi_spin.setValue(600)
 
         self.use_stable_ylims_check = QCheckBox("Use stable y-limits")
         self.use_stable_ylims_check.setChecked(True)
@@ -392,7 +392,7 @@ class RatioSectionsMixin:
         form.addRow("Sum up to (Hz):", self.sum_up_spin)
         form.addRow("Excluded freqs (Hz):", self.excluded_edit)
         form.addRow("Palette:", self.palette_combo)
-        form.addRow("PNG DPI:", self.png_dpi_spin)
+        form.addRow("Figure DPI:", self.png_dpi_spin)
         form.addRow(self.use_stable_ylims_check)
         form.addRow("YLIM raw Z:", self.ylim_raw_z_edit)
         form.addRow("YLIM raw SNR:", self.ylim_raw_snr_edit)

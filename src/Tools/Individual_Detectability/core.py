@@ -1012,7 +1012,6 @@ def generate_condition_figure(
             "axes.labelsize": 9,
             "xtick.labelsize": 8,
             "ytick.labelsize": 8,
-            "svg.fonttype": "none",  # keep text as text in SVG when possible
         }
     )
 
@@ -1255,8 +1254,8 @@ def generate_condition_figure(
         fontsize=_LEGEND_SIDE_TEXT_FONTSIZE,
     )
 
-    svg_path = output_dir / f"{sanitize_filename_stem(output_stem)}.svg"
-    fig.savefig(svg_path, format="svg", dpi=FIG_DPI)
+    pdf_path = output_dir / f"{sanitize_filename_stem(output_stem)}.pdf"
+    fig.savefig(pdf_path, format="pdf", dpi=FIG_DPI)
 
     if export_png:
         png_path = output_dir / f"{sanitize_filename_stem(output_stem)}.png"

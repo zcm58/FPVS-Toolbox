@@ -24,10 +24,11 @@ plt.rcParams.update(
 
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
+FIGURE_EXPORT_DPI = 600
 
 
 class PlotRenderingMixin:
-    """Worker-state helpers for PNG/SVG line and overlay plot rendering."""
+    """Worker-state helpers for PNG/PDF line and overlay plot rendering."""
 
     def _plot(
         self,
@@ -215,17 +216,23 @@ class PlotRenderingMixin:
 
             fig.tight_layout(rect=[0, 0, 1, 0.93])
             fname = f"{self.condition}_{roi}_{self.metric}.png"
-            save_kwargs = {"dpi": 300, "pad_inches": 0.05, "bbox_inches": "tight"}
+            save_kwargs = {
+                "dpi": FIGURE_EXPORT_DPI,
+                "pad_inches": 0.05,
+                "bbox_inches": "tight",
+            }
             out_path = self.out_dir / fname
+            pdf_path = out_path.with_suffix(".pdf")
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
                 fig.savefig(out_path, **save_kwargs)
-                fig.savefig(out_path.with_suffix(".svg"), format="svg")
+                fig.savefig(pdf_path, format="pdf", **save_kwargs)
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)
             self._record_generated_path(out_path)
+            self._record_generated_path(pdf_path)
             self._emit(f"Saved {fname}")
 
     def _plot_overlay(
@@ -342,21 +349,24 @@ class PlotRenderingMixin:
 
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             out_path = self.out_dir / fname
+            pdf_path = out_path.with_suffix(".pdf")
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
                 fig.savefig(
                     out_path,
-                    dpi=300,
+                    dpi=FIGURE_EXPORT_DPI,
                     pad_inches=0.05,
                 )
                 fig.savefig(
-                    out_path.with_suffix(".svg"),
-                    format="svg",
+                    pdf_path,
+                    format="pdf",
+                    dpi=FIGURE_EXPORT_DPI,
                     pad_inches=0.05,
                 )
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)
             self._record_generated_path(out_path)
+            self._record_generated_path(pdf_path)
             self._emit(f"Saved {fname}")

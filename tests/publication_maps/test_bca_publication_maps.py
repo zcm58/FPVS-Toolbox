@@ -213,9 +213,9 @@ def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
     assert workbook_path.stat().st_size > 0
     assert figures
     assert all(path.exists() and path.stat().st_size > 0 for path in figures)
-    svg = next(path for path in figures if path.suffix == ".svg")
-    svg_text = svg.read_text(encoding="utf-8")
-    assert "fill: #ffffff" not in svg_text.lower()
+    pdf = next(path for path in figures if path.suffix == ".pdf")
+    assert pdf.read_bytes().startswith(b"%PDF")
+    assert not list(output_root.rglob("*.svg"))
     png = next(path for path in figures if path.suffix == ".png")
     with Image.open(png) as image:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
@@ -316,7 +316,7 @@ def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
     figures = render_publication_figures(result, request)
 
     paired = [path for path in figures if "_and_" in path.stem]
-    assert {path.suffix for path in paired} == {".png", ".svg"}
+    assert {path.suffix for path in paired} == {".png", ".pdf"}
     assert {path.stem for path in paired} == {"Objects_and_Faces_bca_snr_paired"}
     paired_png = next(path for path in paired if path.suffix == ".png")
     with Image.open(paired_png) as image:
@@ -356,7 +356,7 @@ def test_exports_combined_paired_condition_figure_with_z_score_third_row(
     figures = render_publication_figures(result, request)
 
     paired = [path for path in figures if "_and_" in path.stem]
-    assert {path.suffix for path in paired} == {".png", ".svg"}
+    assert {path.suffix for path in paired} == {".png", ".pdf"}
     assert {path.stem for path in paired} == {
         "Objects_and_Faces_bca_snr_z_score_paired"
     }
@@ -539,7 +539,7 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
         assert seen_result is result
         assert seen_request is request
         calls.append("render")
-        return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.svg"]
+        return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.pdf"]
 
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.build_publication_map_result",

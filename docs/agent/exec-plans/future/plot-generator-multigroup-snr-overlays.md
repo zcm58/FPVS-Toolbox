@@ -146,7 +146,7 @@ Current normalization behavior:
   markers and the second uses triangle markers; additional groups use square
   markers with no extra peak legend label.
 - Current filenames remain unchanged:
-  `{condition}_{roi}_{metric}.png` and `{condition}_{roi}_{metric}.svg`.
+  `{condition}_{roi}_{metric}.png` and `{condition}_{roi}_{metric}.pdf`.
 - This means group overlays currently overwrite the same output path shape as
   a non-group single-condition plot for the same condition/ROI/metric.
 
@@ -162,7 +162,7 @@ Current focused coverage already pins:
 - known participant IDs taking precedence over legacy `P#` parsing;
 - grouped Excel files under condition/group folders;
 - group curves matching project participant IDs;
-- PNG/SVG files being written for group overlays;
+- PNG/PDF files being written for group overlays;
 - group color assignment following selected-group order;
 - custom legend defaults switching to selected group labels;
 - pytest-qt GUI smoke for single-group defaults, group overlay selection, and
@@ -248,7 +248,7 @@ Goal: make generated files distinguishable enough for users.
 1. Decide between:
    - preserve current filename shape, or
    - add a suffix such as `_group_overlay`.
-2. If suffixing, update `rendering.py` and tests around generated PNG/SVG
+2. If suffixing, update `rendering.py` and tests around generated PNG/PDF
    filenames.
 3. Preserve non-group filenames exactly.
 
@@ -284,7 +284,7 @@ Goal: prove grouped overlays work beyond the one-ROI happy path.
 
 1. Add a non-GUI worker/rendering test for `ALL_ROIS_OPTION` with at least two
    ROIs.
-2. Verify one PNG/SVG pair per ROI.
+2. Verify one PNG/PDF pair per ROI.
 3. Verify current line-plot baseline/grid/oddball behavior remains unchanged
    for non-group plots.
 
@@ -303,7 +303,7 @@ Goal: make the feature executable by users and future agents.
    - enable group overlay;
    - uncheck one group and generate one ROI plot;
    - verify log warnings for unassigned participants, if present;
-   - verify PNG/SVG output and legend colors.
+   - verify PNG/PDF output and legend colors.
 
 ## Verification Plan
 

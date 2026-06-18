@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from PIL import Image
 
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
@@ -11,14 +12,15 @@ from Tools.LORETA_Visualizer.gui import (
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
-    PublicationSplitSvgPanel,
+    PublicationSplitFigurePanel,
+    SPLIT_FIGURE_EXPORT_DPI,
     _SplitHemisphereState,
     _configure_transparency_backend,
     _cortical_paint_display_values,
     _publication_hemisphere_points,
     _publication_surface_rgb,
-    write_publication_split_hemisphere_stack_svg,
-    write_publication_split_hemisphere_svg,
+    write_publication_split_hemisphere_figures,
+    write_publication_split_hemisphere_stack_figures,
 )
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, format_scalar_value, resolve_scalar_limits
 from Tools.LORETA_Visualizer.source_payloads import (
@@ -333,7 +335,7 @@ def test_cortical_paint_display_values_hide_values_below_color_minimum() -> None
     assert display_values[2:].tolist() == [2.0, 5.0]
 
 
-def test_publication_split_svg_export_writes_transparent_labeled_view(tmp_path) -> None:
+def test_publication_split_figure_export_writes_pdf_and_png(tmp_path) -> None:
     state = _SplitHemisphereState(
         points=np.asarray(
             [
@@ -348,29 +350,26 @@ def test_publication_split_svg_export_writes_transparent_labeled_view(tmp_path) 
         shade_values=np.asarray([0.0, 0.5, 1.0], dtype=float),
     )
 
-    output_path = write_publication_split_hemisphere_svg(
-        tmp_path / "split.svg",
+    pdf_path, png_path = write_publication_split_hemisphere_figures(
+        tmp_path / "split.pdf",
         left_state=state,
         right_state=state,
         scalar_range=(1.64, 5.0),
         activation_visible=True,
     )
 
-    text = output_path.read_text(encoding="utf-8")
-    assert "<svg" in text
-    assert 'width="6.5in"' in text
-    assert 'height="3in"' in text
-    assert "Segoe UI" in text
-    assert "background" not in text.lower()
-    assert "Left" in text
-    assert "Right" in text
-    assert text.count(">Left<") == 1
-    assert text.count(">Right<") == 1
-    assert "loretaActivationGradient" in text
-    assert 'href="data:image/png;base64,' in text
+    assert pdf_path.suffix == ".pdf"
+    assert png_path.suffix == ".png"
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+    with Image.open(png_path) as image:
+        assert image.size == (
+            int(6.5 * SPLIT_FIGURE_EXPORT_DPI),
+            int(3.0 * SPLIT_FIGURE_EXPORT_DPI),
+        )
+        assert image.getbbox() is not None
 
 
-def test_publication_split_svg_export_embeds_full_surface_raster(tmp_path) -> None:
+def test_publication_split_figure_export_renders_full_surface_png(tmp_path) -> None:
     points = np.asarray(
         [
             [0.0, 0.0, 0.0],
@@ -416,23 +415,25 @@ def test_publication_split_svg_export_embeds_full_surface_raster(tmp_path) -> No
     state = _SplitHemisphereState(
         points=points,
         faces=faces,
-        values=np.asarray([np.nan, 2.0, np.nan, 3.0, np.nan, 4.0, np.nan, 5.0], dtype=float),
+        values=np.asarray(
+            [np.nan, 2.0, np.nan, 3.0, np.nan, 4.0, np.nan, 5.0],
+            dtype=float,
+        ),
     )
 
-    output_path = write_publication_split_hemisphere_svg(
-        tmp_path / "small.svg",
+    _pdf_path, png_path = write_publication_split_hemisphere_figures(
+        tmp_path / "small.pdf",
         left_state=state,
         right_state=state,
         scalar_range=(1.64, 5.0),
         activation_visible=True,
     )
 
-    text = output_path.read_text(encoding="utf-8")
-    assert text.count("<image") == 1
-    assert "<path" not in text
+    with Image.open(png_path) as image:
+        assert image.getbbox() is not None
 
 
-def test_publication_split_stack_svg_export_labels_conditions(tmp_path) -> None:
+def test_publication_split_stack_figure_export_writes_pdf_and_png(tmp_path) -> None:
     state = _SplitHemisphereState(
         points=np.asarray(
             [
@@ -447,14 +448,14 @@ def test_publication_split_stack_svg_export_labels_conditions(tmp_path) -> None:
         shade_values=np.asarray([0.0, 0.5, 1.0], dtype=float),
     )
     panels = (
-        PublicationSplitSvgPanel(
+        PublicationSplitFigurePanel(
             label="CR",
             left_state=state,
             right_state=state,
             scalar_range=(1.64, 5.0),
             activation_visible=True,
         ),
-        PublicationSplitSvgPanel(
+        PublicationSplitFigurePanel(
             label="SR",
             left_state=state,
             right_state=state,
@@ -463,17 +464,18 @@ def test_publication_split_stack_svg_export_labels_conditions(tmp_path) -> None:
         ),
     )
 
-    output_path = write_publication_split_hemisphere_stack_svg(tmp_path / "stack.svg", panels=panels)
+    pdf_path, png_path = write_publication_split_hemisphere_stack_figures(
+        tmp_path / "stack.pdf",
+        panels=panels,
+    )
 
-    text = output_path.read_text(encoding="utf-8")
-    assert 'width="6.5in"' in text
-    assert 'height="6.75in"' in text
-    assert ">CR<" in text
-    assert ">SR<" in text
-    assert text.count(">Left<") == 1
-    assert text.count(">Right<") == 1
-    assert text.count("loretaActivationGradient") == 2
-    assert text.count("<image") == 2
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+    with Image.open(png_path) as image:
+        assert image.size == (
+            int(6.5 * SPLIT_FIGURE_EXPORT_DPI),
+            int(6.75 * SPLIT_FIGURE_EXPORT_DPI),
+        )
+        assert image.getbbox() is not None
 
 
 def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeypatch) -> None:

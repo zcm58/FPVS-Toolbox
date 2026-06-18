@@ -42,8 +42,8 @@ The Scalp Maps tool saves publication figures and
 
 Common figure exports include:
 
-- condition-level BCA scalp-map `.png` files;
-- transparent `.svg` files for PowerPoint or vector editing;
+- condition-level BCA scalp-map 600 DPI `.png` files;
+- matching 600 DPI `.pdf` files for PowerPoint or figure editing;
 - paired-condition figures when the paired export option is enabled.
 
 The source workbook records the selected significant harmonics, plotted BCA

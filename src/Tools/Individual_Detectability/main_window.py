@@ -217,13 +217,15 @@ class IndividualDetectabilityWindow(QWidget):
         format_layout = QHBoxLayout(format_row)
         format_layout.setContentsMargins(0, 0, 0, 0)
         format_layout.setSpacing(10)
-        self.export_svg_check = QCheckBox("Export SVG")
-        self.export_svg_check.setChecked(True)
-        self.export_svg_check.setEnabled(False)
-        self.export_png_check = QCheckBox("Also export PNG (600 DPI)")
+        self.export_pdf_check = QCheckBox("Export PDF (600 DPI)")
+        self.export_pdf_check.setChecked(True)
+        self.export_pdf_check.setEnabled(False)
+        self.export_png_check = QCheckBox("Export PNG (600 DPI)")
+        self.export_png_check.setChecked(True)
+        self.export_png_check.setEnabled(False)
         self.open_on_complete_check = QCheckBox("Open output folder on completion")
         self.open_on_complete_check.setChecked(True)
-        format_layout.addWidget(self.export_svg_check)
+        format_layout.addWidget(self.export_pdf_check)
         format_layout.addWidget(self.export_png_check)
         format_layout.addStretch(1)
 
@@ -757,7 +759,6 @@ class IndividualDetectabilityWindow(QWidget):
             output_stems=self._collect_output_stems(),
             excluded_participants=self._excluded_participants(),
             settings=settings,
-            export_png=self.export_png_check.isChecked(),
         )
         self.log_box.clear()
         self.progress.setValue(0)

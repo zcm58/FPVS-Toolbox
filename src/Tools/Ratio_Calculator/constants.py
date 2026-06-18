@@ -31,6 +31,7 @@ EXCEL_MIN_COL_WIDTH = 8
 EXCEL_MAX_COL_WIDTH = 70
 
 EPS = 1e-12
+FIGURE_EXPORT_DPI = 600
 
 
 @dataclass
@@ -39,7 +40,7 @@ class RatioCalculatorSettings:
     sum_up_to_hz: float = 16.8
     excluded_freqs_hz: set[float] = field(default_factory=lambda: {6.0, 12.0, 18.0, 24.0})
     palette_choice: str = "vibrant"
-    png_dpi: int = 300
+    png_dpi: int = FIGURE_EXPORT_DPI
     use_stable_ylims: bool = True
     ylim_raw_sum_z: Optional[Tuple[float, float]] = None
     ylim_raw_sum_snr: Optional[Tuple[float, float]] = None

@@ -20,7 +20,7 @@ Primary paths:
   BCA-only publication scalp maps. It calls the Stats group-significant harmonic
   selection builder so significant harmonics and cache reuse stay aligned with
   the locked Stats method, then sums exact selected `BCA (uV)` columns per
-  electrode before condition-level averaging and PNG/SVG/source-data export.
+  electrode before condition-level averaging and PNG/PDF/source-data export.
   Its GUI reads base frequency and BCA upper-limit values from Settings and
   exposes low/high BCA color selectors plus an optional fixed BCA colorbar
   range for rendered palette endpoints and scaling. Rendered labels use shared

@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import logging
-import base64
 from dataclasses import dataclass
-from html import escape
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
-from Main_App.gui.typography import APP_FONT_FAMILY, FONT_ROLES
+from Main_App.gui.typography import FONT_ROLES
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from Tools.LORETA_Visualizer.cortical_paint import (
@@ -54,16 +51,13 @@ _RIGHT_HEMISPHERE_OFFSET = (1.08, 0.0, 0.0)
 _PUBLICATION_HEMISPHERE_RADIUS = 0.82
 _PUBLICATION_SHADE_DARK = "#636b6d"
 _PUBLICATION_SHADE_LIGHT = "#d8dcda"
-DEFAULT_SPLIT_SVG_WIDTH = 1950
-DEFAULT_SPLIT_SVG_SINGLE_HEIGHT = 900
-DEFAULT_SPLIT_SVG_STACK_HEIGHT = 2025
-DEFAULT_SPLIT_SVG_WIDTH_IN = 6.5
-DEFAULT_SPLIT_SVG_SINGLE_HEIGHT_IN = 3.0
-DEFAULT_SPLIT_SVG_STACK_HEIGHT_IN = 6.75
-DEFAULT_SPLIT_SVG_MAX_FACES_PER_HEMISPHERE: int | None = None
-_SPLIT_SVG_UNITS_PER_INCH = DEFAULT_SPLIT_SVG_WIDTH / DEFAULT_SPLIT_SVG_WIDTH_IN
-_SPLIT_SVG_RASTER_SCALE = 2
-_SVG_FONT_FAMILY = f"'{APP_FONT_FAMILY}', Arial, sans-serif"
+DEFAULT_SPLIT_FIGURE_WIDTH = 1950
+DEFAULT_SPLIT_FIGURE_WIDTH_IN = 6.5
+DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN = 3.0
+DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN = 6.75
+DEFAULT_SPLIT_FIGURE_MAX_FACES_PER_HEMISPHERE: int | None = None
+_SPLIT_FIGURE_UNITS_PER_INCH = DEFAULT_SPLIT_FIGURE_WIDTH / DEFAULT_SPLIT_FIGURE_WIDTH_IN
+SPLIT_FIGURE_EXPORT_DPI = 600
 
 
 class RenderBackendError(RuntimeError):
@@ -81,8 +75,8 @@ class _SplitHemisphereState:
 
 
 @dataclass(frozen=True)
-class PublicationSplitSvgPanel:
-    """One labeled split-hemisphere panel for SVG export."""
+class PublicationSplitFigurePanel:
+    """One labeled split-hemisphere panel for figure export."""
 
     label: str
     left_state: _SplitHemisphereState
@@ -767,21 +761,21 @@ class BrainRendererWidget(QWidget):
         plotter.reset_camera()
         plotter.render()
 
-    def can_export_split_hemisphere_svg(self) -> bool:
+    def can_export_split_hemisphere_figure(self) -> bool:
         return self._split_hemisphere_active and self._split_left_state is not None and self._split_right_state is not None
 
-    def split_hemisphere_svg_panel_for_payload(
+    def split_hemisphere_figure_panel_for_payload(
         self,
         payload: SourcePayload,
         *,
         label: str = "",
         scalar_range: tuple[float, float] | None = None,
-    ) -> PublicationSplitSvgPanel:
-        """Prepare a split-hemisphere SVG panel without changing the live renderer."""
+    ) -> PublicationSplitFigurePanel:
+        """Prepare a split-hemisphere figure panel without changing the live renderer."""
         mesh = self._current_mesh
         if mesh is None or mesh.left_hemisphere is None or mesh.right_hemisphere is None:
-            raise RuntimeError("Split-hemisphere SVG export requires fsaverage hemisphere meshes.")
-        return PublicationSplitSvgPanel(
+            raise RuntimeError("Split-hemisphere figure export requires fsaverage hemisphere meshes.")
+        return PublicationSplitFigurePanel(
             label=label,
             left_state=self._project_split_hemisphere(mesh.left_hemisphere, payload),
             right_state=self._project_split_hemisphere(mesh.right_hemisphere, payload),
@@ -791,14 +785,11 @@ class BrainRendererWidget(QWidget):
             right_rotation_degrees=self._split_right_rotation_degrees,
         )
 
-    def write_split_hemisphere_svg(self, output_path: str | Path) -> Path:
-        if not self.can_export_split_hemisphere_svg():
-            raise RuntimeError("Publication split hemispheres must be visible before exporting SVG.")
-        path = Path(output_path)
-        if path.suffix.lower() != ".svg":
-            path = path.with_suffix(".svg")
-        write_publication_split_hemisphere_svg(
-            path,
+    def write_split_hemisphere_figures(self, output_path: str | Path) -> tuple[Path, Path]:
+        if not self.can_export_split_hemisphere_figure():
+            raise RuntimeError("Publication split hemispheres must be visible before exporting figures.")
+        return write_publication_split_hemisphere_figures(
+            output_path,
             left_state=self._split_left_state,
             right_state=self._split_right_state,
             scalar_range=self._activation_scalar_range,
@@ -806,15 +797,14 @@ class BrainRendererWidget(QWidget):
             left_rotation_degrees=self._split_left_rotation_degrees,
             right_rotation_degrees=self._split_right_rotation_degrees,
         )
-        return path
 
-    def write_split_hemisphere_stack_svg(
+    def write_split_hemisphere_stack_figures(
         self,
         output_path: str | Path,
         *,
-        panels: Sequence[PublicationSplitSvgPanel],
-    ) -> Path:
-        return write_publication_split_hemisphere_stack_svg(output_path, panels=panels)
+        panels: Sequence[PublicationSplitFigurePanel],
+    ) -> tuple[Path, Path]:
+        return write_publication_split_hemisphere_stack_figures(output_path, panels=panels)
 
     def shutdown(self) -> None:
         plotter = self._plotter
@@ -858,7 +848,7 @@ def _configure_transparency_backend(plotter: Any) -> None:
         logger.debug("loreta_depth_peeling_disable_failed", exc_info=True)
 
 
-def write_publication_split_hemisphere_svg(
+def write_publication_split_hemisphere_figures(
     output_path: str | Path,
     *,
     left_state: _SplitHemisphereState,
@@ -867,14 +857,13 @@ def write_publication_split_hemisphere_svg(
     activation_visible: bool,
     left_rotation_degrees: float = 0.0,
     right_rotation_degrees: float = 0.0,
-    width: int = DEFAULT_SPLIT_SVG_WIDTH,
-    height: int = DEFAULT_SPLIT_SVG_SINGLE_HEIGHT,
-    width_inches: float = DEFAULT_SPLIT_SVG_WIDTH_IN,
-    height_inches: float = DEFAULT_SPLIT_SVG_SINGLE_HEIGHT_IN,
-    max_faces_per_hemisphere: int | None = DEFAULT_SPLIT_SVG_MAX_FACES_PER_HEMISPHERE,
-) -> Path:
-    """Write a transparent SVG of the current publication split-hemisphere view."""
-    panel = PublicationSplitSvgPanel(
+    width_inches: float = DEFAULT_SPLIT_FIGURE_WIDTH_IN,
+    height_inches: float = DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN,
+    dpi: int = SPLIT_FIGURE_EXPORT_DPI,
+    max_faces_per_hemisphere: int | None = DEFAULT_SPLIT_FIGURE_MAX_FACES_PER_HEMISPHERE,
+) -> tuple[Path, Path]:
+    """Write 600 DPI PDF and PNG files for the current split-hemisphere view."""
+    panel = PublicationSplitFigurePanel(
         label="",
         left_state=left_state,
         right_state=right_state,
@@ -883,60 +872,84 @@ def write_publication_split_hemisphere_svg(
         left_rotation_degrees=left_rotation_degrees,
         right_rotation_degrees=right_rotation_degrees,
     )
-    return _write_publication_split_svg(
+    return _write_publication_split_figures(
         output_path,
         panels=(panel,),
-        width=width,
-        height=height,
         width_inches=width_inches,
         height_inches=height_inches,
+        dpi=dpi,
         max_faces_per_hemisphere=max_faces_per_hemisphere,
     )
 
 
-def write_publication_split_hemisphere_stack_svg(
+def write_publication_split_hemisphere_stack_figures(
     output_path: str | Path,
     *,
-    panels: Sequence[PublicationSplitSvgPanel],
-    width: int = DEFAULT_SPLIT_SVG_WIDTH,
-    height: int = DEFAULT_SPLIT_SVG_STACK_HEIGHT,
-    width_inches: float = DEFAULT_SPLIT_SVG_WIDTH_IN,
-    height_inches: float = DEFAULT_SPLIT_SVG_STACK_HEIGHT_IN,
-    max_faces_per_hemisphere: int | None = DEFAULT_SPLIT_SVG_MAX_FACES_PER_HEMISPHERE,
-) -> Path:
-    """Write a stacked transparent SVG of publication split-hemisphere panels."""
-    return _write_publication_split_svg(
+    panels: Sequence[PublicationSplitFigurePanel],
+    width_inches: float = DEFAULT_SPLIT_FIGURE_WIDTH_IN,
+    height_inches: float = DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN,
+    dpi: int = SPLIT_FIGURE_EXPORT_DPI,
+    max_faces_per_hemisphere: int | None = DEFAULT_SPLIT_FIGURE_MAX_FACES_PER_HEMISPHERE,
+) -> tuple[Path, Path]:
+    """Write 600 DPI PDF and PNG files for stacked split-hemisphere panels."""
+    return _write_publication_split_figures(
         output_path,
         panels=panels,
-        width=width,
-        height=height,
         width_inches=width_inches,
         height_inches=height_inches,
+        dpi=dpi,
         max_faces_per_hemisphere=max_faces_per_hemisphere,
     )
 
 
-def _write_publication_split_svg(
+def _write_publication_split_figures(
     output_path: str | Path,
     *,
-    panels: Sequence[PublicationSplitSvgPanel],
-    width: int,
-    height: int,
+    panels: Sequence[PublicationSplitFigurePanel],
     width_inches: float,
     height_inches: float,
+    dpi: int,
     max_faces_per_hemisphere: int | None,
-) -> Path:
+) -> tuple[Path, Path]:
     path = Path(output_path)
-    if path.suffix.lower() != ".svg":
-        path = path.with_suffix(".svg")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    base_path = path.with_suffix("")
+    pdf_path = base_path.with_suffix(".pdf")
+    png_path = base_path.with_suffix(".png")
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not panels:
-        raise RuntimeError("At least one split-hemisphere panel is required for SVG export.")
+        raise RuntimeError("At least one split-hemisphere panel is required for figure export.")
 
+    width = max(1, int(round(float(width_inches) * int(dpi))))
+    height = max(1, int(round(float(height_inches) * int(dpi))))
+    prepared_panels = _prepare_split_figure_panels(
+        panels,
+        max_faces_per_hemisphere=max_faces_per_hemisphere,
+    )
+    image = _render_publication_split_image(
+        prepared_panels,
+        width=width,
+        height=height,
+    )
+    image.save(png_path, format="PNG", dpi=(int(dpi), int(dpi)))
+    _save_publication_split_pdf(
+        image,
+        pdf_path,
+        width_inches=width_inches,
+        height_inches=height_inches,
+        dpi=int(dpi),
+    )
+    return pdf_path, png_path
+
+
+def _prepare_split_figure_panels(
+    panels: Sequence[PublicationSplitFigurePanel],
+    *,
+    max_faces_per_hemisphere: int | None,
+) -> list[tuple[PublicationSplitFigurePanel, dict[str, Any], dict[str, Any]]]:
     prepared_panels = []
     for panel in panels:
-        left = _svg_surface_faces(
+        left = _figure_surface_faces(
             panel.left_state,
             side="left",
             extra_yaw_degrees=panel.left_rotation_degrees,
@@ -944,7 +957,7 @@ def _write_publication_split_svg(
             activation_visible=panel.activation_visible,
             max_faces=max_faces_per_hemisphere,
         )
-        right = _svg_surface_faces(
+        right = _figure_surface_faces(
             panel.right_state,
             side="right",
             extra_yaw_degrees=panel.right_rotation_degrees,
@@ -954,50 +967,50 @@ def _write_publication_split_svg(
         )
         prepared_panels.append((panel, left, right))
     if not any(left["faces"] or right["faces"] for _panel, left, right in prepared_panels):
-        raise RuntimeError("No split-hemisphere triangles are available for SVG export.")
+        raise RuntimeError("No split-hemisphere triangles are available for figure export.")
+    return prepared_panels
 
-    panel_markup = []
+
+def _render_publication_split_image(
+    prepared_panels: Sequence[tuple[PublicationSplitFigurePanel, dict[str, Any], dict[str, Any]]],
+    *,
+    width: int,
+    height: int,
+):
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (int(width), int(height)), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
     panel_count = len(prepared_panels)
-    legend = _svg_legend(width=width, height=height, scalar_range=prepared_panels[-1][0].scalar_range)
-    legend_reserved_height = 225.0
+    scale = float(width) / float(DEFAULT_SPLIT_FIGURE_WIDTH)
+    legend_reserved_height = 225.0 * scale
     panel_height = max((float(height) - legend_reserved_height) / panel_count, 1.0)
     for index, (panel, left, right) in enumerate(prepared_panels):
-        panel_markup.append(
-            _svg_panel_markup(
-                panel,
-                left,
-                right,
-                width=width,
-                panel_top=float(index) * panel_height,
-                panel_height=panel_height,
-                show_condition_label=panel_count > 1,
-                show_hemisphere_labels=index == 0,
-            )
+        _draw_split_figure_panel(
+            draw,
+            panel,
+            left,
+            right,
+            width=width,
+            panel_top=float(index) * panel_height,
+            panel_height=panel_height,
+            show_condition_label=panel_count > 1,
+            show_hemisphere_labels=index == 0,
+            scale_factor=scale,
         )
-
-    svg = "\n".join(
-        (
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            (
-                f'<svg xmlns="http://www.w3.org/2000/svg" width="{_svg_number(width_inches)}in" '
-                f'height="{_svg_number(height_inches)}in" viewBox="0 0 {int(width)} {int(height)}" '
-                'role="img" aria-label="LORETA publication split hemisphere source map">'
-            ),
-            "  <defs>",
-            f"    {_svg_legend_gradient()}",
-            "  </defs>",
-            *panel_markup,
-            f"  {legend}",
-            "</svg>",
-            "",
-        )
+    _draw_split_figure_legend(
+        draw,
+        width=width,
+        height=height,
+        scalar_range=prepared_panels[-1][0].scalar_range,
+        scale_factor=scale,
     )
-    path.write_text(svg, encoding="utf-8")
-    return path
+    return image
 
 
-def _svg_panel_markup(
-    panel: PublicationSplitSvgPanel,
+def _draw_split_figure_panel(
+    draw,
+    panel: PublicationSplitFigurePanel,
     left: dict[str, Any],
     right: dict[str, Any],
     *,
@@ -1006,120 +1019,175 @@ def _svg_panel_markup(
     panel_height: float,
     show_condition_label: bool,
     show_hemisphere_labels: bool,
-) -> str:
+    scale_factor: float,
+) -> None:
     all_points = np.vstack((left["points_2d"], right["points_2d"]))
     min_xy = np.min(all_points, axis=0)
     max_xy = np.max(all_points, axis=0)
     span = np.maximum(max_xy - min_xy, 1e-9)
-    side_margin = 110.0
-    top_margin = 120.0 if show_condition_label else 105.0
-    bottom_margin = 35.0
+    side_margin = 110.0 * scale_factor
+    top_margin = (120.0 if show_condition_label else 105.0) * scale_factor
+    bottom_margin = 35.0 * scale_factor
     draw_width = max(float(width) - 2.0 * side_margin, 1.0)
     draw_height = max(float(panel_height) - top_margin - bottom_margin, 1.0)
-    scale = min(draw_width / float(span[0]), draw_height / float(span[1]))
-    used_width = float(span[0]) * scale
-    x_offset = (float(width) - used_width) / 2.0 - float(min_xy[0]) * scale
-    y_offset = panel_top + top_margin + float(max_xy[1]) * scale
+    coordinate_scale = min(draw_width / float(span[0]), draw_height / float(span[1]))
+    used_width = float(span[0]) * coordinate_scale
+    x_offset = (float(width) - used_width) / 2.0 - float(min_xy[0]) * coordinate_scale
+    y_offset = panel_top + top_margin + float(max_xy[1]) * coordinate_scale
 
     face_rows = []
     for surface in (left, right):
         screen = np.column_stack(
             (
-                surface["points_2d"][:, 0] * scale + x_offset,
-                y_offset - surface["points_2d"][:, 1] * scale,
+                surface["points_2d"][:, 0] * coordinate_scale + x_offset,
+                y_offset - surface["points_2d"][:, 1] * coordinate_scale,
             )
         )
         for face in surface["faces"]:
             triangle = screen[face["triangle"]]
             if not np.all(np.isfinite(triangle)):
                 continue
-            face_rows.append(
-                (
-                    float(face["depth"]),
-                    triangle,
-                    face["color"],
-                )
-            )
+            face_rows.append((float(face["depth"]), triangle, face["color"]))
     face_rows.sort(key=lambda row: row[0], reverse=True)
 
-    left_center = _svg_label_center(left["points_2d"], scale=scale, x_offset=x_offset)
-    right_center = _svg_label_center(right["points_2d"], scale=scale, x_offset=x_offset)
-    image = _svg_panel_raster_image(
-        face_rows,
-        width=width,
-        panel_top=panel_top,
-        panel_height=panel_height,
-    )
-    label_y = panel_top + (88.0 if show_condition_label else 70.0)
-    condition_label = ""
+    for _depth, triangle, color in face_rows:
+        draw.polygon(
+            [(float(point[0]), float(point[1])) for point in triangle],
+            fill=_hex_to_rgba(color),
+        )
+
+    left_center = _figure_label_center(left["points_2d"], scale=coordinate_scale, x_offset=x_offset)
+    right_center = _figure_label_center(right["points_2d"], scale=coordinate_scale, x_offset=x_offset)
     if show_condition_label and panel.label.strip():
-        condition_label = (
-            f'  <text x="{float(width) / 2.0:.1f}" y="{panel_top + 54.0:.1f}" text-anchor="middle" '
-            f'font-family="{escape(_SVG_FONT_FAMILY, quote=True)}" '
-            f'font-size="{_svg_font_size("figure_title")}" '
-            f'font-weight="{_svg_font_weight("figure_title")}" '
-            f'fill="#111111">{escape(panel.label.strip())}</text>'
+        _draw_centered_text(
+            draw,
+            float(width) / 2.0,
+            panel_top + 54.0 * scale_factor,
+            panel.label.strip(),
+            role="figure_title",
+            scale_factor=scale_factor,
         )
-    rows = [image]
-    if condition_label:
-        rows.append(condition_label)
     if show_hemisphere_labels:
-        rows.extend(
-            (
-                (
-                    f'  <text x="{left_center:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-                    f'font-family="{escape(_SVG_FONT_FAMILY, quote=True)}" '
-                    f'font-size="{_svg_font_size("figure_axis_label")}" '
-                    f'font-weight="{_svg_font_weight("figure_axis_label")}" fill="#111111">Left</text>'
-                ),
-                (
-                    f'  <text x="{right_center:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-                    f'font-family="{escape(_SVG_FONT_FAMILY, quote=True)}" '
-                    f'font-size="{_svg_font_size("figure_axis_label")}" '
-                    f'font-weight="{_svg_font_weight("figure_axis_label")}" fill="#111111">Right</text>'
-                ),
-            )
-        )
-    return "\n".join(rows)
+        label_y = panel_top + (88.0 if show_condition_label else 70.0) * scale_factor
+        _draw_centered_text(draw, left_center, label_y, "Left", role="figure_axis_label", scale_factor=scale_factor)
+        _draw_centered_text(draw, right_center, label_y, "Right", role="figure_axis_label", scale_factor=scale_factor)
 
 
-def _svg_panel_raster_image(
-    face_rows: Sequence[tuple[float, np.ndarray, str]],
+def _draw_split_figure_legend(
+    draw,
     *,
     width: int,
-    panel_top: float,
-    panel_height: float,
-) -> str:
-    from PIL import Image, ImageDraw
-
-    image_width = int(width)
-    image_height = max(1, int(round(panel_height)))
-    highres_width = image_width * _SPLIT_SVG_RASTER_SCALE
-    highres_height = image_height * _SPLIT_SVG_RASTER_SCALE
-    image = Image.new("RGBA", (highres_width, highres_height), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(image)
-    for _depth, triangle, color in face_rows:
-        polygon = [
+    height: int,
+    scalar_range: tuple[float, float],
+    scale_factor: float,
+) -> None:
+    legend_width = int(round(860 * scale_factor))
+    legend_height = int(round(52 * scale_factor))
+    legend_x = (int(width) - legend_width) / 2.0
+    legend_y = int(height) - 150.0 * scale_factor
+    ramp = np.asarray([_hex_to_rgb(color) for color in LORETA_SCALAR_COLORS], dtype=float)
+    max_x = max(legend_width - 1, 1)
+    for x in range(legend_width):
+        t = x / max_x
+        position = t * (len(ramp) - 1)
+        lower = int(np.floor(position))
+        upper = min(lower + 1, len(ramp) - 1)
+        mix = position - lower
+        rgb = ramp[lower] * (1.0 - mix) + ramp[upper] * mix
+        rgba = tuple(np.clip(np.rint(rgb * 255.0), 0, 255).astype(np.uint8).tolist()) + (255,)
+        draw.line(
             (
-                float(point[0]) * _SPLIT_SVG_RASTER_SCALE,
-                (float(point[1]) - panel_top) * _SPLIT_SVG_RASTER_SCALE,
-            )
-            for point in triangle
-        ]
-        draw.polygon(polygon, fill=_hex_to_rgba(color))
-    if _SPLIT_SVG_RASTER_SCALE != 1:
-        image = image.resize((image_width, image_height), Image.Resampling.LANCZOS)
-    buffer = BytesIO()
-    image.save(buffer, format="PNG", optimize=True)
-    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-    return (
-        f'  <image x="0" y="{_svg_number(panel_top)}" width="{int(width)}" '
-        f'height="{_svg_number(panel_height)}" preserveAspectRatio="none" '
-        f'href="data:image/png;base64,{encoded}"/>'
+                (legend_x + x, legend_y),
+                (legend_x + x, legend_y + legend_height),
+            ),
+            fill=rgba,
+        )
+    stroke_width = max(1, int(round(2 * scale_factor)))
+    draw.rectangle(
+        [
+            (legend_x, legend_y),
+            (legend_x + legend_width, legend_y + legend_height),
+        ],
+        outline="#111111",
+        width=stroke_width,
+    )
+    label_y = legend_y + legend_height + 54.0 * scale_factor
+    vmin, vmax = scalar_range
+    _draw_centered_text(
+        draw,
+        legend_x,
+        label_y,
+        _format_figure_scalar(vmin),
+        role="figure_tick",
+        scale_factor=scale_factor,
+    )
+    _draw_centered_text(
+        draw,
+        legend_x + legend_width,
+        label_y,
+        _format_figure_scalar(vmax),
+        role="figure_tick",
+        scale_factor=scale_factor,
     )
 
 
-def _svg_surface_faces(
+def _save_publication_split_pdf(
+    image,
+    output_path: Path,
+    *,
+    width_inches: float,
+    height_inches: float,
+    dpi: int,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(float(width_inches), float(height_inches)), dpi=dpi)
+    fig.patch.set_alpha(0)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
+    ax.imshow(image, interpolation="nearest")
+    try:
+        fig.savefig(output_path, format="pdf", dpi=dpi, transparent=True)
+    finally:
+        plt.close(fig)
+
+
+def _draw_centered_text(
+    draw,
+    x: float,
+    y: float,
+    text: str,
+    *,
+    role: str,
+    scale_factor: float,
+) -> None:
+    font = _pil_font(role, scale_factor=scale_factor)
+    draw.text((float(x), float(y)), str(text), fill="#111111", font=font, anchor="mm")
+
+
+def _pil_font(role: str, *, scale_factor: float):
+    from PIL import ImageFont
+
+    spec = FONT_ROLES[role]
+    size = max(8, int(round(spec.point_size * _SPLIT_FIGURE_UNITS_PER_INCH * scale_factor / 72.0)))
+    bold = int(spec.css_weight) >= 600
+    candidates = (
+        ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf")
+        if bold
+        else ("segoeui.ttf", "arial.ttf", "DejaVuSans.ttf")
+    )
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _figure_surface_faces(
     state: _SplitHemisphereState,
     *,
     side: str,
@@ -1154,25 +1222,25 @@ def _svg_surface_faces(
         )
     return {
         "points_2d": points_3d[:, [0, 2]],
-        "faces": _limit_svg_face_rows(face_rows, max_faces),
+        "faces": _limit_figure_face_rows(face_rows, max_faces),
     }
 
 
-def _limit_svg_face_rows(face_rows: list[dict[str, Any]], max_faces: int | None) -> list[dict[str, Any]]:
+def _limit_figure_face_rows(face_rows: list[dict[str, Any]], max_faces: int | None) -> list[dict[str, Any]]:
     if max_faces is None or max_faces <= 0 or len(face_rows) <= max_faces:
         return face_rows
     active_rows = [row for row in face_rows if row.get("active")]
     base_rows = [row for row in face_rows if not row.get("active")]
     if not active_rows:
-        return _sample_svg_face_rows(face_rows, max_faces)
+        return _sample_figure_face_rows(face_rows, max_faces)
     base_budget = min(len(base_rows), max(1, max_faces // 4))
     active_budget = max(max_faces - base_budget, 0)
-    sampled_active = _sample_svg_face_rows(active_rows, active_budget)
-    sampled_base = _sample_svg_face_rows(base_rows, max_faces - len(sampled_active))
+    sampled_active = _sample_figure_face_rows(active_rows, active_budget)
+    sampled_base = _sample_figure_face_rows(base_rows, max_faces - len(sampled_active))
     return [*sampled_active, *sampled_base]
 
 
-def _sample_svg_face_rows(face_rows: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
+def _sample_figure_face_rows(face_rows: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
     if count <= 0:
         return []
     if len(face_rows) <= count:
@@ -1185,71 +1253,33 @@ def _vtk_faces_to_triangle_rows(faces: np.ndarray, *, point_count: int) -> np.nd
     face_array = np.asarray(faces, dtype=np.int64)
     if face_array.ndim == 1:
         if len(face_array) % 4 != 0:
-            raise ValueError("SVG export requires VTK triangular face records.")
+            raise ValueError("Figure export requires VTK triangular face records.")
         vtk_faces = face_array.reshape(-1, 4)
         if not np.all(vtk_faces[:, 0] == 3):
-            raise ValueError("SVG export requires triangular faces.")
+            raise ValueError("Figure export requires triangular faces.")
         triangles = vtk_faces[:, 1:4]
     elif face_array.ndim == 2 and face_array.shape[1] == 3:
         triangles = face_array
     elif face_array.ndim == 2 and face_array.shape[1] == 4:
         if not np.all(face_array[:, 0] == 3):
-            raise ValueError("SVG export requires triangular faces.")
+            raise ValueError("Figure export requires triangular faces.")
         triangles = face_array[:, 1:4]
     else:
-        raise ValueError("SVG export requires triangle rows or VTK triangular face records.")
+        raise ValueError("Figure export requires triangle rows or VTK triangular face records.")
     if len(triangles) == 0:
         return np.empty((0, 3), dtype=np.int64)
     if not np.all((triangles >= 0) & (triangles < int(point_count))):
-        raise ValueError("SVG export faces refer to missing points.")
+        raise ValueError("Figure export faces refer to missing points.")
     return triangles.astype(np.int64)
 
 
-def _svg_path_for_triangle(points: np.ndarray) -> str:
-    return (
-        f"M{_svg_number(points[0, 0])},{_svg_number(points[0, 1])}"
-        f"L{_svg_number(points[1, 0])},{_svg_number(points[1, 1])}"
-        f"L{_svg_number(points[2, 0])},{_svg_number(points[2, 1])}Z"
-    )
-
-
-def _svg_label_center(points_2d: np.ndarray, *, scale: float, x_offset: float) -> float:
+def _figure_label_center(points_2d: np.ndarray, *, scale: float, x_offset: float) -> float:
     if len(points_2d) == 0:
         return 0.0
     return float(np.mean(points_2d[:, 0]) * scale + x_offset)
 
 
-def _svg_legend(*, width: int, height: int, scalar_range: tuple[float, float]) -> str:
-    legend_width = 860
-    legend_height = 52
-    legend_x = (int(width) - legend_width) / 2.0
-    legend_y = int(height) - 150
-    vmin, vmax = scalar_range
-    label_y = legend_y + legend_height + 54
-    return (
-        f'<g id="legend" font-family="{escape(_SVG_FONT_FAMILY, quote=True)}" fill="#111111">'
-        f'<rect x="{legend_x:.1f}" y="{legend_y:.1f}" width="{legend_width}" height="{legend_height}" '
-        f'fill="url(#loretaActivationGradient)" stroke="#111111" stroke-width="2"/>'
-        f'<text x="{legend_x:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-        f'font-size="{_svg_font_size("figure_tick")}" font-weight="{_svg_font_weight("figure_tick")}">'
-        f'{escape(_format_svg_scalar(vmin))}</text>'
-        f'<text x="{legend_x + legend_width:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-        f'font-size="{_svg_font_size("figure_tick")}" font-weight="{_svg_font_weight("figure_tick")}">'
-        f'{escape(_format_svg_scalar(vmax))}</text>'
-        f'</g>'
-    )
-
-
-def _svg_legend_gradient() -> str:
-    max_index = max(len(LORETA_SCALAR_COLORS) - 1, 1)
-    stops = "\n".join(
-        f'    <stop offset="{100.0 * index / max_index:.2f}%" stop-color="{escape(color)}"/>'
-        for index, color in enumerate(LORETA_SCALAR_COLORS)
-    )
-    return f'<linearGradient id="loretaActivationGradient" x1="0%" y1="0%" x2="100%" y2="0%">\n{stops}\n  </linearGradient>'
-
-
-def _format_svg_scalar(value: float) -> str:
+def _format_figure_scalar(value: float) -> str:
     numeric = float(value)
     if numeric == 0.0:
         return "0"
@@ -1271,19 +1301,6 @@ def _hex_to_rgba(color: str) -> tuple[int, int, int, int]:
     if len(value) != 6:
         return (0, 0, 0, 255)
     return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4)) + (255,)
-
-
-def _svg_number(value: float) -> str:
-    return f"{float(value):.2f}".rstrip("0").rstrip(".")
-
-
-def _svg_font_size(role: str) -> str:
-    spec = FONT_ROLES[role]
-    return _svg_number(spec.point_size * _SPLIT_SVG_UNITS_PER_INCH / 72.0)
-
-
-def _svg_font_weight(role: str) -> int:
-    return int(FONT_ROLES[role].css_weight)
 
 
 def _publication_surface_rgb(

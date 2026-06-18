@@ -17,8 +17,8 @@ It is useful when you need:
 - condition-level grand-average BCA, SNR, and z-score scalp maps;
 - one shared significant-harmonic list selected with the Statistics tool
   method;
-- transparent SVG figures for PowerPoint, Illustrator, Inkscape, Affinity
-  Designer, or similar figure-composition software;
+- 600 DPI PNG and PDF figures for manuscripts, slides, and figure-composition
+  software;
 - a selected pair of condition scalp maps on one figure;
 - source data that documents exactly which values were plotted.
 
@@ -105,14 +105,11 @@ grand-average maps before building the paired figure.
 
 The output folder can contain:
 
-- `.png` figures for direct manuscript or presentation use;
-- transparent `.svg` figures for editing and figure composition;
-- selected paired-condition `.png` and `.svg` figures when the paired option is
+- 600 DPI `.png` figures for direct manuscript or presentation use;
+- 600 DPI `.pdf` figures for editing and figure composition;
+- selected paired-condition `.png` and `.pdf` figures when the paired option is
   enabled;
 - `Publication_Scalp_Maps_Source_Data.xlsx`.
-
-SVG files are saved without a white background so they can be placed over a
-slide, panel background, or multipart figure design.
 
 ## Source workbook
 

@@ -16,7 +16,13 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
-from .constants import EPS, MANUAL_EXCLUDED_POINT_COLOR, MANUAL_EXCLUDED_POINT_MARKER, PALETTES
+from .constants import (
+    EPS,
+    FIGURE_EXPORT_DPI,
+    MANUAL_EXCLUDED_POINT_COLOR,
+    MANUAL_EXCLUDED_POINT_MARKER,
+    PALETTES,
+)
 
 
 @dataclass(frozen=True)
@@ -261,9 +267,16 @@ def make_raincloud_figure(
     )
     ax.legend(handles=roi_handles + [excl_handle], loc="upper right", frameon=True)
 
-    fig.savefig(out_path_no_ext.with_suffix(".pdf"), bbox_inches="tight")
-    fig.savefig(out_path_no_ext.with_suffix(".png"), dpi=png_dpi, bbox_inches="tight")
-    fig.savefig(out_path_no_ext.with_suffix(".svg"), bbox_inches="tight")
+    fig.savefig(
+        out_path_no_ext.with_suffix(".pdf"),
+        dpi=FIGURE_EXPORT_DPI,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        out_path_no_ext.with_suffix(".png"),
+        dpi=FIGURE_EXPORT_DPI,
+        bbox_inches="tight",
+    )
 
 
 def make_raincloud_figure_roi_x(
@@ -422,6 +435,13 @@ def make_raincloud_figure_roi_x(
     )
     ax.legend(handles=roi_handles + [excl_handle], loc="upper right", frameon=True)
 
-    fig.savefig(out_path_no_ext.with_suffix(".pdf"), bbox_inches="tight")
-    fig.savefig(out_path_no_ext.with_suffix(".png"), dpi=png_dpi, bbox_inches="tight")
-    fig.savefig(out_path_no_ext.with_suffix(".svg"), bbox_inches="tight")
+    fig.savefig(
+        out_path_no_ext.with_suffix(".pdf"),
+        dpi=FIGURE_EXPORT_DPI,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        out_path_no_ext.with_suffix(".png"),
+        dpi=FIGURE_EXPORT_DPI,
+        bbox_inches="tight",
+    )

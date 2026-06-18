@@ -175,17 +175,17 @@ def render_publication_figures(
                 dpi=request.png_dpi,
             )
             rendered.append(png_path)
-        if request.export_svg:
-            svg_path = request.output_root / f"{stem}.svg"
+        if request.export_pdf:
+            pdf_path = request.output_root / f"{stem}.pdf"
             render_topomap(
                 montage_group,
                 metric=metric,
                 title=title,
-                output_path=svg_path,
+                output_path=pdf_path,
                 bounds=bounds,
                 dpi=request.png_dpi,
             )
-            rendered.append(svg_path)
+            rendered.append(pdf_path)
     if request.export_paired_figures:
         rendered.extend(_render_paired_condition_figures(result, request))
     result.figure_paths = rendered
@@ -305,19 +305,19 @@ def _render_paired_condition_figures(
                     dpi=request.png_dpi,
                 )
                 rendered.append(png_path)
-            if request.export_svg:
-                svg_path = request.output_root / f"{stem}.svg"
+            if request.export_pdf:
+                pdf_path = request.output_root / f"{stem}.pdf"
                 _render_paired_topomap(
                     first_group,
                     second_group,
                     metric=metric,
                     first_title=str(first),
                     second_title=str(second),
-                    output_path=svg_path,
+                    output_path=pdf_path,
                     bounds=bounds,
                     dpi=request.png_dpi,
                 )
-                rendered.append(svg_path)
+                rendered.append(pdf_path)
     return rendered
 
 
@@ -366,18 +366,18 @@ def _render_combined_paired_condition_figures(
                 dpi=request.png_dpi,
             )
             rendered.append(png_path)
-        if request.export_svg:
-            svg_path = request.output_root / f"{stem}.svg"
+        if request.export_pdf:
+            pdf_path = request.output_root / f"{stem}.pdf"
             _render_combined_paired_topomap(
                 groups,
                 metrics=metrics,
                 first_title=str(first),
                 second_title=str(second),
-                output_path=svg_path,
+                output_path=pdf_path,
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
             )
-            rendered.append(svg_path)
+            rendered.append(pdf_path)
     return rendered
 
 
@@ -665,9 +665,9 @@ def _style_colorbar(
 
 
 def _save_figure(fig: plt.Figure, output_path: Path, *, dpi: int) -> None:
-    """Save figure with transparent backgrounds for SVG composition workflows."""
+    """Save figure with transparent backgrounds for PDF composition workflows."""
 
-    transparent = output_path.suffix.lower() == ".svg"
+    transparent = output_path.suffix.lower() == ".pdf"
     if transparent:
         fig.patch.set_alpha(0)
         for ax in fig.axes:

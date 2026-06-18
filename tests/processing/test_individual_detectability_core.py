@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from Tools.Individual_Detectability.core import (
+    ConditionInfo,
+    DetectabilitySettings,
     ELECTRODE_COL,
     build_fullfft_harmonic_plan,
     discover_conditions,
@@ -10,7 +12,12 @@ from Tools.Individual_Detectability.core import (
     _plot_topomap_compat,
     parse_participant_id,
     roi_summed_z_from_fullfft_frame,
+    sanitize_filename_stem,
     summed_harmonic_z_from_bin_amplitudes,
+)
+from Tools.Individual_Detectability.worker import (
+    IndividualDetectabilityWorker,
+    RunRequest,
 )
 
 
@@ -72,7 +79,7 @@ def test_missingness_across_conditions_keeps_union_of_participants(tmp_path: Pat
     assert participants == {"P1", "P11"}
 
 
-def test_topomap_wrapper_saves_svg(tmp_path: Path) -> None:
+def test_topomap_wrapper_saves_pdf(tmp_path: Path) -> None:
     import pytest
 
     np = pytest.importorskip("numpy")
@@ -100,12 +107,51 @@ def test_topomap_wrapper_saves_svg(tmp_path: Path) -> None:
         z_threshold,
         float(z_values.max()),
     )
-    output = tmp_path / "compat_topomap.svg"
-    fig.savefig(output, format="svg")
+    output = tmp_path / "compat_topomap.pdf"
+    fig.savefig(output, format="pdf", dpi=600)
     plt.close(fig)
 
     assert output.exists()
+    assert output.read_bytes().startswith(b"%PDF")
     assert output.stat().st_size > 100
+
+
+def test_worker_forces_png_export_with_pdf(tmp_path: Path, monkeypatch) -> None:
+    condition = ConditionInfo(
+        name="CondA",
+        path=tmp_path / "CondA",
+        files=[tmp_path / "CondA" / "P1_CondA_Results.xlsx"],
+    )
+    request = RunRequest(
+        input_root=tmp_path,
+        output_root=tmp_path / "out",
+        conditions=[condition],
+        output_stems={"CondA": "cond_a_grid"},
+        excluded_participants=set(),
+        settings=DetectabilitySettings(),
+    )
+    seen: dict[str, object] = {}
+
+    def fake_generate_condition_figure(**kwargs):
+        seen["export_png"] = kwargs["export_png"]
+        output_dir = kwargs["output_dir"]
+        stem = sanitize_filename_stem(kwargs["output_stem"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / f"{stem}.pdf").write_bytes(b"%PDF-test")
+        (output_dir / f"{stem}.png").write_bytes(b"png-test")
+        return (1, 1)
+
+    monkeypatch.setattr(
+        "Tools.Individual_Detectability.worker.generate_condition_figure",
+        fake_generate_condition_figure,
+    )
+
+    worker = IndividualDetectabilityWorker(request)
+    worker._run()
+
+    assert seen["export_png"] is True
+    assert (tmp_path / "out" / "CondA" / "cond_a_grid.pdf").exists()
+    assert (tmp_path / "out" / "CondA" / "cond_a_grid.png").exists()
 
 
 def _amplitude_by_bin(harmonic_bins: tuple[int, ...], target_value: float) -> dict[int, float]:

@@ -61,8 +61,8 @@ behavior.
 - Read the source color scale from the control-panel color ramp and min/max
   labels.
 - Open **Export Figures** to export the current publication split-hemisphere
-  SVG or launch the condition-stack SVG export. Future figure exports for other
-  displays will live in the same dialog.
+  view or a two-condition stack as 600 DPI PDF and PNG files. Future figure
+  exports for other displays will live in the same dialog.
 - Open **Source Map Options** to rebuild project maps with Stats/QC-flagged
   participants excluded by default or explicitly included for comparison, load a
   prepared source payload JSON file, load a prepared source manifest, or choose
