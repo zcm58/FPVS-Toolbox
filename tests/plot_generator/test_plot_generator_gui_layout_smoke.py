@@ -53,6 +53,7 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.xmax_spin.width() >= 100
     assert window.ymin_spin.width() >= 100
     assert window.ymax_spin.width() >= 100
+    assert window.ymin_spin.value() == 0.5
     assert not hasattr(window, "scalp_check")
     assert not hasattr(window, "scalp_min_spin")
     assert not hasattr(window, "scalp_max_spin")

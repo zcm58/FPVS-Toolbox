@@ -160,7 +160,7 @@ class PlotGeneratorWindow(
             "ylabel_snr": "SNR",
             "x_min": "0.0",
             "x_max": plot_x_max_default,
-            "y_min_snr": "0.0",
+            "y_min_snr": "0.5",
             "y_max_snr": "3.0",
             "input_folder": default_in,
             "output_folder": default_out,
