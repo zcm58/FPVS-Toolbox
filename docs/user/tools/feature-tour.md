@@ -20,6 +20,7 @@ This page lists the main FPVS Toolbox features and when to use each one.
 | Scalp Maps | Builds publication-ready BCA scalp maps with Statistics-selected significant harmonics | After processing when you need condition-level scalp figures | PNG/PDF scalp maps and source-data workbook |
 | LORETA Visualizer | Displays an experimental 3D brain mesh with synthetic maps and beta project L2-MNE cortical z-score source maps | When reviewing source-visualization behavior and beta source maps after preprocessing and Stats export | Interactive viewport plus project-local source JSON |
 | Ratio Calculator | Compares two condition folders and computes participant-level ratios | When a ratio between two processed conditions is part of the analysis | Ratio tables and plots |
+| Sequence Figure | Builds a five-slot FPVS stimulus sequence illustration from manually selected images | When preparing methods figures for slides, posters, theses, or manuscripts | 600 DPI PNG plus PDF/SVG figure files |
 | Image Resizer | Batch-resizes stimulus images and converts file formats | Before running an FPVS experiment that needs standardized image dimensions | Resized stimulus image folder |
 | Epoch Averaging | Combines preprocessed epochs before post-processing | When multiple preprocessed files should contribute to one averaged response | Averaged files for downstream processing |
 | Individual-level detectability tool | Creates participant-level topomap plus mini-spectrum figures | Participant-level reporting and diagnostics | Detectability figures |
@@ -41,5 +42,6 @@ This page lists the main FPVS Toolbox features and when to use each one.
 - [Scalp Maps](scalp-maps.md)
 - [LORETA Visualizer](loreta-visualizer.md)
 - [Ratio Calculator](ratio-calculator.md)
+- [Sequence Figure](sequence-figure.md)
 - [Image Resizer](image-resizer.md)
 - [Epoch Averaging](epoch-averaging.md)

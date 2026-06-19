@@ -37,6 +37,7 @@ Activate the repo environment before Python commands:
 | LORETA Visualizer, source visualization, or source-localization-adjacent rendering | `legacy-boundary-review` plus focused tool tests | `docs/agent/exec-plans/active/loreta-3d-visualizer.md`; `src/Tools/LORETA_Visualizer/AGENTS.md`; `src/Tools/LORETA_Visualizer/ARCHITECTURE.md` |
 | Publication scalp maps and source-data exports | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
 | Publication report workflow, source workbook, manuscript diagnostics, narrative, and embedded page | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Report/AGENTS.md`; `docs/agent/exec-plans/active/publication-report-workflow.md` |
+| FPVS sequence illustration figures, manual stimulus image slots, and high-DPI export | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Sequence_Figure/AGENTS.md` |
 | GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; do not run pytest-qt/offscreen locally |
 | Generated files, temp folders, local caches | `cleanup-generated-files` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 | Plan pressure-testing, design interrogation, dependency-aware decision trees | `grillme` | Explore code first when the answer is discoverable locally; ask one question at a time |
@@ -80,6 +81,7 @@ outside the repo-local skill set; they do not override `AGENTS.md`,
 - Publication Maps: `python -m pytest tests/publication_maps/test_bca_publication_maps.py -q`
 - Publication Report: `python -m pytest tests/publication_report/test_publication_report_runner.py -q`
 - Ratio Calculator: `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`
+- Sequence Figure: `python -m pytest tests/sequence_figure -q`
 - Stats GUI/pipeline: `python -m pytest tests/stats/gui/test_stats_layout_smoke.py tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/data/test_stats_project_context.py -q`
 - Stats FullSNR regression: `python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py -q`
 - Stats-ready workbook export: `python -m pytest tests/stats/io/test_stats_ready_export.py -q`

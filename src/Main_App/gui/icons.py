@@ -86,6 +86,13 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         painter.drawLine(QPointF(size * 0.28, size * 0.68), QPointF(size * 0.43, size * 0.55))
         painter.drawLine(QPointF(size * 0.43, size * 0.55), QPointF(size * 0.55, size * 0.64))
         painter.drawLine(QPointF(size * 0.55, size * 0.64), QPointF(size * 0.68, size * 0.48))
+    elif kind == "sequence":
+        for index in range(3):
+            x = size * (0.16 + index * 0.25)
+            painter.drawRoundedRect(QRectF(x, size * 0.22, size * 0.17, size * 0.17), 1.5, 1.5)
+        painter.drawLine(QPointF(size * 0.18, size * 0.64), QPointF(size * 0.82, size * 0.64))
+        painter.drawLine(QPointF(size * 0.18, size * 0.64), QPointF(size * 0.18, size * 0.78))
+        painter.drawLine(QPointF(size * 0.82, size * 0.64), QPointF(size * 0.82, size * 0.78))
     elif kind == "report":
         painter.drawRoundedRect(QRectF(size * 0.24, size * 0.16, size * 0.52, size * 0.68), 2, 2)
         painter.drawLine(QPointF(size * 0.35, size * 0.34), QPointF(size * 0.65, size * 0.34))

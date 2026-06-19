@@ -47,6 +47,10 @@ Current `Legacy_App` runtime couplings:
   `gui_sections.py`, `gui_rois.py`, `gui_participants.py`,
   `gui_settings.py`, and `gui_run_workflow.py` own focused GUI-only behavior.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
+- `src/Tools/Sequence_Figure/`: embedded FPVS stimulus sequence figure generator.
+  `renderer.py` owns widget-free image validation, stimulus-slot drawing, timing
+  labels, and PNG/PDF/SVG export; `gui.py` owns the manual image-slot sidebar
+  page; `worker.py` keeps rendering off the UI thread.
 - `src/Tools/Publication_Maps/`: publication-oriented scalp-map source workbook and figure generation.
 - `src/Tools/Publication_Report/`: embedded single-group report workflow. `runner.py`
   owns GUI-agnostic report generation, `gui.py` owns the manually-run sidebar

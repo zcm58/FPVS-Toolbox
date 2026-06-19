@@ -298,6 +298,13 @@ def init_sidebar(self) -> None:
         sidebar_icon("detectability", ICON_PX),
         self.open_individual_detectability,
     )
+    make_button(
+        tools_layout,
+        "btn_sequence_figure",
+        "Sequence Figure",
+        sidebar_icon("sequence", ICON_PX),
+        self.open_sequence_figure,
+    )
     image_btn = make_button(
         tools_layout,
         "btn_image",

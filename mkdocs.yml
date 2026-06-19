@@ -80,6 +80,7 @@ nav:
       - LORETA Visualizer: tools/loreta-visualizer.md
       - Source Localization Method: tools/source-localization-method.md
       - Ratio Calculator: tools/ratio-calculator.md
+      - Sequence Figure: tools/sequence-figure.md
       - Image Resizer: tools/image-resizer.md
       - Epoch Averaging: tools/epoch-averaging.md
       - Individual-level Detectability: tools/individual-level-detectability.md
