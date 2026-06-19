@@ -29,6 +29,9 @@ Rules:
   combined figure: BCA on the first row, SNR on the second row, and, when
   selected, Z Score on the third row, with condition titles only above the first
   row.
+- Paired-condition export is paired-only and is the GUI default: when it is
+  enabled, render only the combined paired `.png` and `.pdf`, not individual
+  condition figures.
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:

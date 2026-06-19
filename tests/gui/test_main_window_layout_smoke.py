@@ -639,11 +639,10 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     page.metric_snr_check.setChecked(False)
     assert not page.fixed_snr_range_check.isEnabled()
     page.metric_snr_check.setChecked(True)
+    assert page.paired_figures_check.isChecked()
+    assert page.paired_conditions_widget.isVisible()
     assert page.paired_condition_a_combo.currentText() == "CondA"
     assert page.paired_condition_b_combo.currentText() == "CondB"
-    assert not page.paired_conditions_widget.isVisible()
-    page.paired_figures_check.setChecked(True)
-    assert page.paired_conditions_widget.isVisible()
     assert page.paired_condition_a_combo.isEnabled()
     assert page.paired_condition_b_combo.isEnabled()
     assert not page.status_label.isVisible()

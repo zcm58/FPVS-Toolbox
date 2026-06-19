@@ -89,8 +89,9 @@ requires a different palette.
 
 ## Paired condition figures
 
-Check **Also export paired condition figures** when you want two scalp maps on
-one figure. The paired controls let you choose **Condition A** and
+**Export paired condition figure only** is checked by default. Use it when you
+want the selected two conditions on one combined figure instead of separate
+single-condition figures. The paired controls let you choose **Condition A** and
 **Condition B** from the checked condition list, following the same general
 condition-pair layout as the SNR Plot Generator.
 
@@ -103,13 +104,14 @@ grand-average maps before building the paired figure.
 
 ## Output files
 
-The output folder can contain:
+When paired export is off, the output folder can contain:
 
 - 600 DPI `.png` figures for direct manuscript or presentation use;
 - 600 DPI `.pdf` figures for editing and figure composition;
-- selected paired-condition `.png` and `.pdf` figures when the paired option is
-  enabled;
 - `Publication_Scalp_Maps_Source_Data.xlsx`.
+
+When paired export is on, the output folder contains only the selected
+paired-condition `.png` and `.pdf` figure files plus the source-data workbook.
 
 ## Source workbook
 
