@@ -45,13 +45,20 @@ def _build_ratio_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
     return df_part_all, df_group_used
 
 
-def test_ratio_plot_saves_png(tmp_path: Path) -> None:
+def test_ratio_plot_saves_png_and_pdf(tmp_path: Path) -> None:
     df_part_all, df_group_used = _build_ratio_frames()
     out_base = tmp_path / "ratio_plot"
     make_raincloud_figure_roi_x(
         df_part_all,
         df_group_used,
-        PlotPanel(val_col="val", mean_col="mean", sem_col="sem", ylabel="Ratio", hline_y=1.0, ylim=None),
+        PlotPanel(
+            val_col="val",
+            mean_col="mean",
+            sem_col="sem",
+            ylabel="Ratio",
+            hline_y=1.0,
+            ylim=None,
+        ),
         out_base,
         ROI_DEFS_DEFAULT,
         palette_choice="vibrant",
@@ -62,3 +69,4 @@ def test_ratio_plot_saves_png(tmp_path: Path) -> None:
 
     assert out_base.with_suffix(".png").exists()
     assert out_base.with_suffix(".pdf").exists()
+    assert not out_base.with_suffix(".svg").exists()

@@ -41,7 +41,8 @@ Rules:
   Generator scalp renderers on the same ramp unless a task explicitly scopes a
   split.
 - The BCA colorbar label is `Baseline-corrected amplitude (µV)`. Figure fonts
-  should use shared component typography roles, not one-off Matplotlib defaults.
+  should use `Main_App.exports.figure_style`, not GUI typography roles or
+  one-off Matplotlib defaults.
 - The SNR colorbar label is `Signal to Noise Ratio`.
 - Z-score maps render values below the configurable z threshold as white. The
   default threshold is `1.64`, and the upper z color limit is always automatic

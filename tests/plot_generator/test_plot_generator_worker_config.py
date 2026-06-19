@@ -32,11 +32,6 @@ def test_worker_config_defaults_match_worker_constructor(tmp_path) -> None:
     assert config.selected_groups is None
     assert config.enable_group_overlay is False
     assert config.multi_group_mode is False
-    assert config.include_scalp_maps is False
-    assert config.scalp_vmin == -1.0
-    assert config.scalp_vmax == 1.0
-    assert config.scalp_title_a_template == "{condition} {roi} scalp map"
-    assert config.scalp_title_b_template == "{condition} {roi} scalp map"
     assert config.legend_custom_enabled is False
     assert config.legend_condition_a is None
     assert config.legend_condition_b is None
@@ -60,11 +55,6 @@ def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, mon
         selected_groups=["Group A", ""],
         enable_group_overlay=True,
         multi_group_mode=True,
-        include_scalp_maps=True,
-        scalp_vmin=-2.0,
-        scalp_vmax=2.0,
-        scalp_title_a_template="A {condition}",
-        scalp_title_b_template="B {condition}",
         legend_custom_enabled=True,
         legend_condition_a="Custom A",
         legend_condition_b="Custom B",
@@ -76,7 +66,6 @@ def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, mon
     assert isinstance(worker.config, PlotWorkerConfig)
     assert worker.config.condition_b == "CondB"
     assert worker.config.overlay is True
-    assert worker.config.include_scalp_maps is True
     assert worker.config.project_root == str(tmp_path)
     assert worker.stem_color == "green"
     assert worker.stem_color_b == "purple"
@@ -85,5 +74,4 @@ def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, mon
     assert worker.selected_groups == ["Group A"]
     assert worker.enable_group_overlay is True
     assert worker.multi_group_mode is True
-    assert worker.scalp_title_a_template == "A {condition}"
     assert worker.legend_custom_enabled is True

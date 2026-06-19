@@ -98,11 +98,6 @@ def test_multigroup_project_settings_drop_stale_saved_input_folder() -> None:
         stem_color_b="#0000ff",
         folder_edit=_Value("C:/Browse/Other"),
         out_edit=_Value("C:/Project/2 - SNR Plots"),
-        scalp_check=_Value(False),
-        scalp_min_spin=_Value(-1.0),
-        scalp_max_spin=_Value(1.0),
-        scalp_title_a_edit=_Value("{condition} {roi} scalp map"),
-        scalp_title_b_edit=_Value("{condition} {roi} scalp map"),
         _append_log=lambda _message: None,
     )
 

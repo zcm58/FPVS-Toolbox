@@ -81,8 +81,8 @@ SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
 SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE = "rebuild_amplitude"
-EXPORT_FIGURES_ACTION_SPLIT_SVG = "split_svg"
-EXPORT_FIGURES_ACTION_STACKED_SPLIT_SVG = "stacked_split_svg"
+EXPORT_FIGURES_ACTION_SPLIT_FIGURES = "split_figures"
+EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES = "stacked_split_figures"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
 ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 1.64 (~one-tailed p < .05)", 1.64),
@@ -223,44 +223,44 @@ def default_project_zscore_manifest_path(project_root: Path | None) -> Path | No
     return manifest_path if manifest_path.is_file() else None
 
 
-def default_split_svg_export_path(
+def default_split_figure_export_path(
     *,
     project_root: Path | None,
     last_import_dir: Path | None,
     condition_label: str,
 ) -> str:
-    """Return a helpful default path for publication split SVG exports."""
+    """Return a helpful default path for publication split figure exports."""
     start_dir_text = resolve_loreta_import_start_dir(
         project_root=project_root,
         last_import_dir=last_import_dir,
     )
     stem = _safe_export_stem(f"loreta_split_hemispheres_{condition_label}")
     if start_dir_text:
-        return str(Path(start_dir_text) / f"{stem}.svg")
-    return f"{stem}.svg"
+        return str(Path(start_dir_text) / f"{stem}.pdf")
+    return f"{stem}.pdf"
 
 
-def default_stacked_split_svg_export_path(
+def default_stacked_split_figure_export_path(
     *,
     project_root: Path | None,
     last_import_dir: Path | None,
     top_condition_label: str,
     bottom_condition_label: str,
 ) -> str:
-    """Return a helpful default path for stacked publication split SVG exports."""
-    top_code = split_svg_condition_code(top_condition_label)
-    bottom_code = split_svg_condition_code(bottom_condition_label)
+    """Return a helpful default path for stacked publication split figure exports."""
+    top_code = split_figure_condition_code(top_condition_label)
+    bottom_code = split_figure_condition_code(bottom_condition_label)
     start_dir_text = resolve_loreta_import_start_dir(
         project_root=project_root,
         last_import_dir=last_import_dir,
     )
     stem = _safe_export_stem(f"loreta_split_hemispheres_{top_code}_{bottom_code}")
     if start_dir_text:
-        return str(Path(start_dir_text) / f"{stem}.svg")
-    return f"{stem}.svg"
+        return str(Path(start_dir_text) / f"{stem}.pdf")
+    return f"{stem}.pdf"
 
 
-def split_svg_condition_code(condition_label: str) -> str:
+def split_figure_condition_code(condition_label: str) -> str:
     """Return the compact condition code used in stacked split-hemisphere figures."""
     label = str(condition_label).strip()
     lowered = label.lower()
@@ -665,35 +665,35 @@ class ExportFiguresDialog(AppDialog):
         self,
         parent: QWidget,
         *,
-        can_export_split_svg: bool,
-        can_export_stacked_split_svg: bool,
+        can_export_split_figures: bool,
+        can_export_stacked_split_figures: bool,
     ) -> None:
         super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=230, min_width=380))
         self.selected_action: str | None = None
 
-        self.split_svg_btn = make_action_button("Export split hemisphere SVG", compact=True, parent=self)
-        self.split_svg_btn.setObjectName("loreta_export_figures_split_svg_btn")
-        self.split_svg_btn.setEnabled(can_export_split_svg)
-        self.split_svg_btn.setToolTip(
-            "Export the current publication split-hemisphere view as a transparent SVG."
-            if can_export_split_svg
+        self.split_figures_btn = make_action_button("Export split hemisphere figures", compact=True, parent=self)
+        self.split_figures_btn.setObjectName("loreta_export_figures_split_figures_btn")
+        self.split_figures_btn.setEnabled(can_export_split_figures)
+        self.split_figures_btn.setToolTip(
+            "Export the current publication split-hemisphere view as 600 DPI PDF and PNG files."
+            if can_export_split_figures
             else "Switch to Publication split hemispheres with a loaded source map to export this figure."
         )
-        self.split_svg_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_SPLIT_SVG))
-        self.root_layout.addWidget(self.split_svg_btn)
+        self.split_figures_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_SPLIT_FIGURES))
+        self.root_layout.addWidget(self.split_figures_btn)
 
-        self.stacked_split_svg_btn = make_action_button("Export condition stack SVG", compact=True, parent=self)
-        self.stacked_split_svg_btn.setObjectName("loreta_export_figures_stacked_split_svg_btn")
-        self.stacked_split_svg_btn.setEnabled(can_export_stacked_split_svg)
-        self.stacked_split_svg_btn.setToolTip(
-            "Choose two conditions and export them as one transparent split-hemisphere SVG."
-            if can_export_stacked_split_svg
+        self.stacked_split_figures_btn = make_action_button("Export condition stack figures", compact=True, parent=self)
+        self.stacked_split_figures_btn.setObjectName("loreta_export_figures_stacked_split_figures_btn")
+        self.stacked_split_figures_btn.setEnabled(can_export_stacked_split_figures)
+        self.stacked_split_figures_btn.setToolTip(
+            "Choose two conditions and export them as 600 DPI PDF and PNG files."
+            if can_export_stacked_split_figures
             else "Load at least two source-map conditions before exporting a condition stack."
         )
-        self.stacked_split_svg_btn.clicked.connect(
-            lambda: self._select_action(EXPORT_FIGURES_ACTION_STACKED_SPLIT_SVG)
+        self.stacked_split_figures_btn.clicked.connect(
+            lambda: self._select_action(EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES)
         )
-        self.root_layout.addWidget(self.stacked_split_svg_btn)
+        self.root_layout.addWidget(self.stacked_split_figures_btn)
 
         coming_next_label = QLabel(
             "Coming next: current view, transparent mesh, brain mesh, batch figure export.",
@@ -713,8 +713,8 @@ class ExportFiguresDialog(AppDialog):
         self.accept()
 
 
-class StackedSplitSvgExportDialog(AppDialog):
-    """Modal for choosing the two conditions in a stacked split-hemisphere SVG."""
+class StackedSplitFigureExportDialog(AppDialog):
+    """Modal for choosing the two conditions in a stacked split-hemisphere figure."""
 
     def __init__(
         self,
@@ -723,7 +723,7 @@ class StackedSplitSvgExportDialog(AppDialog):
         condition_options: tuple[tuple[str, str], ...],
         current_condition_id: str,
     ) -> None:
-        super().__init__("Export Stacked Split SVG", parent, size=SurfaceSize(width=420, height=220, min_width=380))
+        super().__init__("Export Stacked Split Figures", parent, size=SurfaceSize(width=420, height=220, min_width=380))
         self._condition_options = condition_options
 
         top_label = QLabel("Top panel", self)
@@ -1259,72 +1259,72 @@ class LoretaVisualizerWindow(QWidget):
 
     def _open_export_figures(self) -> None:
         renderer = self.renderer
-        can_export_split_svg = (
+        can_export_split_figures = (
             renderer is not None
             and renderer.display_mode() == DISPLAY_MODE_SPLIT_HEMISPHERE
-            and renderer.can_export_split_hemisphere_svg()
+            and renderer.can_export_split_hemisphere_figure()
         )
-        can_export_stacked_split_svg = len(self._condition_options()) >= 2
+        can_export_stacked_split_figures = len(self._condition_options()) >= 2
         dialog = ExportFiguresDialog(
             self,
-            can_export_split_svg=can_export_split_svg,
-            can_export_stacked_split_svg=can_export_stacked_split_svg,
+            can_export_split_figures=can_export_split_figures,
+            can_export_stacked_split_figures=can_export_stacked_split_figures,
         )
         if not dialog.exec():
             return
-        if dialog.selected_action == EXPORT_FIGURES_ACTION_SPLIT_SVG:
-            self._export_split_hemisphere_svg()
-        elif dialog.selected_action == EXPORT_FIGURES_ACTION_STACKED_SPLIT_SVG:
-            self._export_stacked_split_hemisphere_svg()
+        if dialog.selected_action == EXPORT_FIGURES_ACTION_SPLIT_FIGURES:
+            self._export_split_hemisphere_figures()
+        elif dialog.selected_action == EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES:
+            self._export_stacked_split_hemisphere_figures()
 
-    def _export_split_hemisphere_svg(self) -> None:
+    def _export_split_hemisphere_figures(self) -> None:
         renderer = self.renderer
         if renderer is None:
             return
-        if renderer.display_mode() != DISPLAY_MODE_SPLIT_HEMISPHERE or not renderer.can_export_split_hemisphere_svg():
+        if renderer.display_mode() != DISPLAY_MODE_SPLIT_HEMISPHERE or not renderer.can_export_split_hemisphere_figure():
             self._set_source_export_status(
-                "Switch to Publication split hemispheres with a loaded source map before exporting SVG.",
+                "Switch to Publication split hemispheres with a loaded source map before exporting figures.",
                 variant="warning",
             )
             return
         project_root = self._refresh_project_root()
-        default_path = default_split_svg_export_path(
+        default_path = default_split_figure_export_path(
             project_root=project_root,
             last_import_dir=self._last_import_dir,
             condition_label=self._selected_condition_label(),
         )
         file_name, _selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Export publication split hemisphere SVG",
+            "Export publication split hemisphere figures",
             default_path,
-            "SVG files (*.svg)",
+            "PDF files (*.pdf)",
         )
         if not file_name:
             return
         output_path = Path(file_name)
-        if output_path.suffix.lower() != ".svg":
-            output_path = output_path.with_suffix(".svg")
+        if output_path.suffix.lower() != ".pdf":
+            output_path = output_path.with_suffix(".pdf")
         try:
-            written_path = renderer.write_split_hemisphere_svg(output_path)
+            pdf_path, png_path = renderer.write_split_hemisphere_figures(output_path)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.warning("loreta_split_svg_export_failed", extra={"path": str(output_path), "error": str(exc)})
-            self._set_source_export_status(f"Split hemisphere SVG export failed: {exc}", variant="warning")
+            logger.warning("loreta_split_figure_export_failed", extra={"path": str(output_path), "error": str(exc)})
+            self._set_source_export_status(f"Split hemisphere figure export failed: {exc}", variant="warning")
             return
-        self._last_import_dir = written_path.parent
-        self._set_source_export_status(f"Exported split hemisphere SVG: {written_path}", variant="success")
+        self._last_import_dir = pdf_path.parent
+        self._set_source_export_status(f"Exported split hemisphere figures: {pdf_path}; {png_path}", variant="success")
 
-    def _export_stacked_split_hemisphere_svg(self) -> None:
+    def _export_stacked_split_hemisphere_figures(self) -> None:
         renderer = self.renderer
         if renderer is None:
             return
         condition_options = self._condition_options()
         if len(condition_options) < 2:
             self._set_source_export_status(
-                "Load at least two source-map conditions before exporting a stacked SVG.",
+                "Load at least two source-map conditions before exporting stacked figures.",
                 variant="warning",
             )
             return
-        dialog = StackedSplitSvgExportDialog(
+        dialog = StackedSplitFigureExportDialog(
             self,
             condition_options=condition_options,
             current_condition_id=self._selected_condition_id,
@@ -1333,31 +1333,31 @@ class LoretaVisualizerWindow(QWidget):
             return
         (top_id, top_label), (bottom_id, bottom_label) = dialog.selected_conditions()
         if top_id == bottom_id:
-            self._set_source_export_status("Choose two different conditions for the stacked SVG.", variant="warning")
+            self._set_source_export_status("Choose two different conditions for the stacked figure.", variant="warning")
             return
         try:
             top_payload = self._condition_payload_for_export(top_id)
             bottom_payload = self._condition_payload_for_export(bottom_id)
             scalar_range = self._stacked_split_scalar_range((top_payload, bottom_payload))
             panels = (
-                renderer.split_hemisphere_svg_panel_for_payload(
+                renderer.split_hemisphere_figure_panel_for_payload(
                     top_payload,
-                    label=split_svg_condition_code(top_label),
+                    label=split_figure_condition_code(top_label),
                     scalar_range=scalar_range,
                 ),
-                renderer.split_hemisphere_svg_panel_for_payload(
+                renderer.split_hemisphere_figure_panel_for_payload(
                     bottom_payload,
-                    label=split_svg_condition_code(bottom_label),
+                    label=split_figure_condition_code(bottom_label),
                     scalar_range=scalar_range,
                 ),
             )
         except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
-            logger.warning("loreta_stacked_split_svg_prepare_failed", extra={"error": str(exc)})
-            self._set_source_export_status(f"Stacked split SVG export failed: {exc}", variant="warning")
+            logger.warning("loreta_stacked_split_figure_prepare_failed", extra={"error": str(exc)})
+            self._set_source_export_status(f"Stacked split figure export failed: {exc}", variant="warning")
             return
 
         project_root = self._refresh_project_root()
-        default_path = default_stacked_split_svg_export_path(
+        default_path = default_stacked_split_figure_export_path(
             project_root=project_root,
             last_import_dir=self._last_import_dir,
             top_condition_label=top_label,
@@ -1365,23 +1365,23 @@ class LoretaVisualizerWindow(QWidget):
         )
         file_name, _selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Export stacked split hemisphere SVG",
+            "Export stacked split hemisphere figures",
             default_path,
-            "SVG files (*.svg)",
+            "PDF files (*.pdf)",
         )
         if not file_name:
             return
         output_path = Path(file_name)
-        if output_path.suffix.lower() != ".svg":
-            output_path = output_path.with_suffix(".svg")
+        if output_path.suffix.lower() != ".pdf":
+            output_path = output_path.with_suffix(".pdf")
         try:
-            written_path = renderer.write_split_hemisphere_stack_svg(output_path, panels=panels)
+            pdf_path, png_path = renderer.write_split_hemisphere_stack_figures(output_path, panels=panels)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.warning("loreta_stacked_split_svg_export_failed", extra={"path": str(output_path), "error": str(exc)})
-            self._set_source_export_status(f"Stacked split SVG export failed: {exc}", variant="warning")
+            logger.warning("loreta_stacked_split_figure_export_failed", extra={"path": str(output_path), "error": str(exc)})
+            self._set_source_export_status(f"Stacked split figure export failed: {exc}", variant="warning")
             return
-        self._last_import_dir = written_path.parent
-        self._set_source_export_status(f"Exported stacked split SVG: {written_path}", variant="success")
+        self._last_import_dir = pdf_path.parent
+        self._set_source_export_status(f"Exported stacked split figures: {pdf_path}; {png_path}", variant="success")
 
     def _selected_condition_label(self) -> str:
         manifest_entry = self._manifest_conditions.get(self._selected_condition_id)

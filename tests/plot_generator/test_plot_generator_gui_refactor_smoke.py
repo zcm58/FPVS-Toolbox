@@ -4,7 +4,7 @@ from Tools.Plot_Generator.gui import PlotGeneratorWindow
 
 
 @pytest.mark.usefixtures("qtbot")
-def test_scalp_title_clearing_disables_generate(qtbot, tmp_path):
+def test_condition_changes_do_not_require_removed_scalp_titles(qtbot, tmp_path):
     excel_root = tmp_path / "excel"
     excel_root.mkdir()
     (excel_root / "CondA").mkdir()
@@ -21,25 +21,16 @@ def test_scalp_title_clearing_disables_generate(qtbot, tmp_path):
     win.condition_combo.setCurrentText("CondA")
     win.overlay_check.setChecked(True)
     win.condition_b_combo.setCurrentText("CondB")
-    win.scalp_check.setChecked(True)
-    win.scalp_title_a_edit.setText("Title A")
-    win.scalp_title_b_edit.setText("Title B")
     win._check_required()
     assert win.gen_btn.isEnabled()
 
     win.condition_combo.setCurrentText("CondB")
     qtbot.wait(50)
-    assert win.scalp_title_a_edit.text() == ""
-    assert not win.gen_btn.isEnabled()
-
-    win.scalp_title_a_edit.setText("Again")
-    qtbot.wait(50)
     assert win.gen_btn.isEnabled()
 
     win.condition_b_combo.setCurrentText("CondA")
     qtbot.wait(50)
-    assert win.scalp_title_b_edit.text() == ""
-    assert not win.gen_btn.isEnabled()
+    assert win.gen_btn.isEnabled()
 
 
 @pytest.mark.usefixtures("qtbot")

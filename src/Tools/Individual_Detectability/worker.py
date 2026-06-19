@@ -23,7 +23,6 @@ class RunRequest:
     output_stems: dict[str, str]
     excluded_participants: set[str]
     settings: DetectabilitySettings
-    export_png: bool
 
 
 class IndividualDetectabilityWorker(QObject):
@@ -81,7 +80,7 @@ class IndividualDetectabilityWorker(QObject):
                     output_stem=stem,
                     excluded=req.excluded_participants,
                     settings=req.settings,
-                    export_png=req.export_png,
+                    export_png=True,
                     log=write_log,
                 )
                 write_log(
@@ -114,4 +113,5 @@ class IndividualDetectabilityWorker(QObject):
         log(f"SNR mid xtick: {req.settings.snr_show_mid_xtick}")
         log(f"Grid columns: {req.settings.grid_ncols}")
         log(f"Letter portrait: {req.settings.use_letter_portrait}")
-        log(f"Export PNG: {req.export_png}")
+        log("Export PDF: True")
+        log("Export PNG: True")

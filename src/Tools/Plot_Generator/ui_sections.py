@@ -195,11 +195,6 @@ class PlotGeneratorUiSectionsMixin:
         overlay_layout.setSpacing(8)
         overlay_layout.addStretch(1)
         overlay_layout.addWidget(self.overlay_check)
-
-        self.scalp_check = QCheckBox("Include scalp maps")
-        self.scalp_check.setChecked(self.include_scalp_maps)
-        self.scalp_check.toggled.connect(self._toggle_scalp_controls)
-        overlay_layout.addWidget(self.scalp_check)
         overlay_layout.addStretch(1)
 
         params_layout.addWidget(self.overlay_row)
@@ -304,29 +299,11 @@ class PlotGeneratorUiSectionsMixin:
         self.group_box.setVisible(False)
         # Added below the legend in the left column; hidden unless multi-group data is present.
 
-        self.scalp_title_a_edit = QLineEdit(self.scalp_title_a_template)
-        self.scalp_title_a_edit.setPlaceholderText("{condition} {roi} scalp map")
-        self.scalp_title_a_edit.setToolTip(
-            "Title template for scalp maps. Use {condition} and {roi} placeholders."
-        )
-        self.scalp_title_a_edit.setProperty("invalid", False)
-        scalp_form = make_form_layout()
-        scalp_form.addRow(QLabel("Scalp title (A):"), self.scalp_title_a_edit)
-
-        self.scalp_title_b_edit = QLineEdit(self.scalp_title_b_template)
-        self.scalp_title_b_edit.setPlaceholderText("{condition} {roi} scalp map")
-        self.scalp_title_b_edit.setToolTip(
-            "Title template for Condition B scalp maps. Use {condition} and {roi}."
-        )
-        self.scalp_title_b_edit.setProperty("invalid", False)
-        self.scalp_title_b_label = QLabel("Scalp title (B):")
-        scalp_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
-        params_layout.addLayout(scalp_form)
         params_layout.addStretch(1)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
-        self.title_edit.setToolTip("Title shown on the plot")
+        self.title_edit.setToolTip("Base name used for exported figure files")
 
         self.xlabel_edit = QLineEdit(self._defaults["xlabel"])
         self.xlabel_edit.setPlaceholderText("e.g. Frequency (Hz)")
@@ -384,24 +361,6 @@ class PlotGeneratorUiSectionsMixin:
         ranges_grid.addWidget(QLabel("to"), 1, 2)
         ranges_grid.addWidget(self.ymax_spin, 1, 3)
 
-        self.scalp_min_spin = QDoubleSpinBox()
-        self.scalp_min_spin.setRange(-9999.0, 9999.0)
-        self.scalp_min_spin.setDecimals(2)
-        self.scalp_min_spin.setSingleStep(0.1)
-        self.scalp_min_spin.setValue(float(self.scalp_min))
-        self.scalp_min_spin.setSuffix(" uV")
-        self.scalp_min_spin.setMinimumWidth(105)
-        self.scalp_max_spin = QDoubleSpinBox()
-        self.scalp_max_spin.setRange(-9999.0, 9999.0)
-        self.scalp_max_spin.setDecimals(2)
-        self.scalp_max_spin.setSingleStep(0.1)
-        self.scalp_max_spin.setValue(float(self.scalp_max))
-        self.scalp_max_spin.setSuffix(" uV")
-        self.scalp_max_spin.setMinimumWidth(105)
-        ranges_grid.addWidget(QLabel("Scalp range (uV):"), 2, 0)
-        ranges_grid.addWidget(self.scalp_min_spin, 2, 1)
-        ranges_grid.addWidget(QLabel("to"), 2, 2)
-        ranges_grid.addWidget(self.scalp_max_spin, 2, 3)
         ranges_grid.setColumnStretch(1, 1)
         ranges_grid.setColumnStretch(3, 1)
 
@@ -414,7 +373,7 @@ class PlotGeneratorUiSectionsMixin:
         advanced_layout.setSpacing(6)
 
         advanced_form = make_form_layout()
-        advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
+        advanced_form.addRow(QLabel("Figure name:"), self.title_edit)
         advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
         advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
         advanced_layout.addLayout(advanced_form)
@@ -520,7 +479,4 @@ class PlotGeneratorUiSectionsMixin:
         self.condition_combo.currentTextChanged.connect(self._on_condition_a_changed)
         self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_changed)
         self.overlay_check.toggled.connect(self._check_required)
-        self.scalp_title_a_edit.textChanged.connect(self._check_required)
-        self.scalp_title_b_edit.textChanged.connect(self._check_required)
-        self._toggle_scalp_controls(self.include_scalp_maps)
         self._check_required()

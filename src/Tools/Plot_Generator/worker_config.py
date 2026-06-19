@@ -32,11 +32,6 @@ class PlotWorkerConfig:
     selected_groups: Sequence[str] | None = None
     enable_group_overlay: bool = False
     multi_group_mode: bool = False
-    include_scalp_maps: bool = False
-    scalp_vmin: float = -1.0
-    scalp_vmax: float = 1.0
-    scalp_title_a_template: str = "{condition} {roi} scalp map"
-    scalp_title_b_template: str = "{condition} {roi} scalp map"
     legend_custom_enabled: bool = False
     legend_condition_a: str | None = None
     legend_condition_b: str | None = None

@@ -17,7 +17,7 @@ This page lists the main FPVS Toolbox features and when to use each one.
 | Baseline vs zero tests | Tests whether a condition ROI response is above no-response baseline | Detectability checks | Baseline vs Zero workbook |
 | Outliers and QC | Flags unusual values and separates flags from exclusions | Before final inferential reporting | Flagged and excluded participant reports |
 | SNR Plot Generator | Builds publication-oriented SNR or BCA plots from processed Excel outputs | After processing when you need ROI or condition figures | Plot image files |
-| Scalp Maps | Builds publication-ready BCA scalp maps with Statistics-selected significant harmonics | After processing when you need condition-level scalp figures | PNG/SVG scalp maps and source-data workbook |
+| Scalp Maps | Builds publication-ready BCA scalp maps with Statistics-selected significant harmonics | After processing when you need condition-level scalp figures | PNG/PDF scalp maps and source-data workbook |
 | LORETA Visualizer | Displays an experimental 3D brain mesh with synthetic maps and beta project L2-MNE cortical z-score source maps | When reviewing source-visualization behavior and beta source maps after preprocessing and Stats export | Interactive viewport plus project-local source JSON |
 | Ratio Calculator | Compares two condition folders and computes participant-level ratios | When a ratio between two processed conditions is part of the analysis | Ratio tables and plots |
 | Image Resizer | Batch-resizes stimulus images and converts file formats | Before running an FPVS experiment that needs standardized image dimensions | Resized stimulus image folder |

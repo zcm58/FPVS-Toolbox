@@ -3,7 +3,6 @@ import importlib.util
 import pandas as pd
 import pytest
 
-from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.worker import _Worker
 
 
@@ -11,10 +10,7 @@ if importlib.util.find_spec("matplotlib") is None:
     pytest.skip("matplotlib not available", allow_module_level=True)
 
 
-def test_snr_export_svg_smoke(qtbot, tmp_path, monkeypatch):
-    window = PlotGeneratorWindow()
-    qtbot.addWidget(window)
-
+def test_snr_export_pdf_smoke(tmp_path, monkeypatch):
     cond_dir = tmp_path / "Cond"
     cond_dir.mkdir()
     df = pd.DataFrame(
@@ -46,10 +42,11 @@ def test_snr_export_svg_smoke(qtbot, tmp_path, monkeypatch):
 
     worker._run()
 
-    svg_files = list(out_dir.rglob("*.svg"))
-    assert svg_files
+    pdf_files = list(out_dir.rglob("*.pdf"))
+    assert pdf_files
     png_files = list(out_dir.rglob("*.png"))
     assert png_files
-    svg_stems = {path.with_suffix("").name for path in svg_files}
+    pdf_stems = {path.with_suffix("").name for path in pdf_files}
     png_stems = {path.with_suffix("").name for path in png_files}
-    assert svg_stems == png_stems
+    assert pdf_stems == png_stems
+    assert pdf_stems == {"SNR Plot - All"}

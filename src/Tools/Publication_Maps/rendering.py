@@ -14,7 +14,11 @@ import mne
 import numpy as np
 import pandas as pd
 
-from Main_App.gui.components import matplotlib_font_kwargs
+from Main_App.exports.figure_style import (
+    apply_axis_text_style,
+    apply_matplotlib_figure_style,
+    figure_text_kwargs,
+)
 from Tools.Publication_Maps.colormaps import scalp_colormap
 from Tools.Publication_Maps.models import (
     DIAGNOSTICS_SHEET,
@@ -30,6 +34,8 @@ from Tools.Publication_Maps.models import (
     PublicationMetric,
 )
 from Tools.Publication_Maps.scalp_io import align_render_values
+
+apply_matplotlib_figure_style()
 
 BCA_CMAP = scalp_colormap(name="FpvsDetailedScalpSequential")
 JOURNAL_TEXT_WIDTH_IN = 6.5
@@ -175,17 +181,17 @@ def render_publication_figures(
                 dpi=request.png_dpi,
             )
             rendered.append(png_path)
-        if request.export_svg:
-            svg_path = request.output_root / f"{stem}.svg"
+        if request.export_pdf:
+            pdf_path = request.output_root / f"{stem}.pdf"
             render_topomap(
                 montage_group,
                 metric=metric,
                 title=title,
-                output_path=svg_path,
+                output_path=pdf_path,
                 bounds=bounds,
                 dpi=request.png_dpi,
             )
-            rendered.append(svg_path)
+            rendered.append(pdf_path)
     if request.export_paired_figures:
         rendered.extend(_render_paired_condition_figures(result, request))
     result.figure_paths = rendered
@@ -221,7 +227,7 @@ def render_topomap(
             extend=_colorbar_extend(metric),
         )
         _style_colorbar(cbar, metric=metric)
-        ax.set_title(title, pad=8, **matplotlib_font_kwargs("figure_title"))
+        ax.set_title(title, pad=8, **figure_text_kwargs("condition_label"))
         if missing_count:
             ax.text(
                 0.5,
@@ -230,7 +236,7 @@ def render_topomap(
                 transform=ax.transAxes,
                 ha="center",
                 va="top",
-                **matplotlib_font_kwargs("figure_note"),
+                **figure_text_kwargs("small"),
             )
         fig.tight_layout()
         _save_figure(fig, output_path, dpi=dpi)
@@ -305,19 +311,19 @@ def _render_paired_condition_figures(
                     dpi=request.png_dpi,
                 )
                 rendered.append(png_path)
-            if request.export_svg:
-                svg_path = request.output_root / f"{stem}.svg"
+            if request.export_pdf:
+                pdf_path = request.output_root / f"{stem}.pdf"
                 _render_paired_topomap(
                     first_group,
                     second_group,
                     metric=metric,
                     first_title=str(first),
                     second_title=str(second),
-                    output_path=svg_path,
+                    output_path=pdf_path,
                     bounds=bounds,
                     dpi=request.png_dpi,
                 )
-                rendered.append(svg_path)
+                rendered.append(pdf_path)
     return rendered
 
 
@@ -366,18 +372,18 @@ def _render_combined_paired_condition_figures(
                 dpi=request.png_dpi,
             )
             rendered.append(png_path)
-        if request.export_svg:
-            svg_path = request.output_root / f"{stem}.svg"
+        if request.export_pdf:
+            pdf_path = request.output_root / f"{stem}.pdf"
             _render_combined_paired_topomap(
                 groups,
                 metrics=metrics,
                 first_title=str(first),
                 second_title=str(second),
-                output_path=svg_path,
+                output_path=pdf_path,
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
             )
-            rendered.append(svg_path)
+            rendered.append(pdf_path)
     return rendered
 
 
@@ -447,8 +453,8 @@ def _render_paired_topomap(
             bounds=bounds,
             vlim_override=shared_vlim,
         )
-        axes[0].set_title(first_title, pad=8, **matplotlib_font_kwargs("figure_title"))
-        axes[1].set_title(second_title, pad=8, **matplotlib_font_kwargs("figure_title"))
+        axes[0].set_title(first_title, pad=8, **figure_text_kwargs("condition_label"))
+        axes[1].set_title(second_title, pad=8, **figure_text_kwargs("condition_label"))
         if first_missing:
             _add_missing_note(axes[0], first_missing)
         if second_missing:
@@ -512,8 +518,8 @@ def _render_combined_paired_topomap(
                 vlim_override=shared_vlim,
             )
             if row_idx == 0:
-                row_axes[0].set_title(first_title, pad=8, **matplotlib_font_kwargs("figure_title"))
-                row_axes[1].set_title(second_title, pad=8, **matplotlib_font_kwargs("figure_title"))
+                row_axes[0].set_title(first_title, pad=8, **figure_text_kwargs("condition_label"))
+                row_axes[1].set_title(second_title, pad=8, **figure_text_kwargs("condition_label"))
             if first_missing:
                 _add_missing_note(row_axes[0], first_missing)
             if second_missing:
@@ -625,7 +631,7 @@ def _add_missing_note(ax: plt.Axes, missing_count: int) -> None:
         transform=ax.transAxes,
         ha="center",
         va="top",
-        **matplotlib_font_kwargs("figure_note"),
+        **figure_text_kwargs("small"),
     )
 
 
@@ -653,21 +659,17 @@ def _style_colorbar(
     metric: PublicationMetric,
     label_position: str = "right",
 ) -> None:
-    label_kwargs = matplotlib_font_kwargs("figure_axis_label")
-    tick_kwargs = matplotlib_font_kwargs("figure_tick")
+    label_kwargs = figure_text_kwargs("axis_label")
     cbar.ax.set_ylabel(colorbar_label_for_metric(metric), **label_kwargs)
     cbar.ax.yaxis.set_label_position(label_position)
     cbar.ax.yaxis.set_ticks_position("right")
-    cbar.ax.tick_params(labelsize=tick_kwargs["fontsize"])
-    for tick_label in cbar.ax.get_yticklabels():
-        tick_label.set_fontfamily(str(tick_kwargs["fontfamily"]))
-        tick_label.set_fontweight(tick_kwargs["fontweight"])
+    apply_axis_text_style(cbar.ax)
 
 
 def _save_figure(fig: plt.Figure, output_path: Path, *, dpi: int) -> None:
-    """Save figure with transparent backgrounds for SVG composition workflows."""
+    """Save figure with transparent backgrounds for PDF composition workflows."""
 
-    transparent = output_path.suffix.lower() == ".svg"
+    transparent = output_path.suffix.lower() == ".pdf"
     if transparent:
         fig.patch.set_alpha(0)
         for ax in fig.axes:

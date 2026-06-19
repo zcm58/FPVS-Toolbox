@@ -619,6 +619,10 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.snr_vmax_spin.isEnabled()
     assert page.z_threshold_spin.value() == pytest.approx(1.64)
     assert page.z_threshold_spin.isEnabled()
+    assert page.export_png_check.isChecked()
+    assert not page.export_png_check.isEnabled()
+    assert page.export_pdf_check.isChecked()
+    assert not page.export_pdf_check.isEnabled()
     assert page.run_btn.isEnabled()
     page.metric_bca_check.setChecked(False)
     assert page.run_btn.isEnabled()
@@ -663,7 +667,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert not page.z_threshold_spin.isEnabled()
     assert not page.output_root_row.isEnabled()
     assert not page.export_png_check.isEnabled()
-    assert not page.export_svg_check.isEnabled()
+    assert not page.export_pdf_check.isEnabled()
     assert not page.paired_figures_check.isEnabled()
     assert not page.paired_condition_a_combo.isEnabled()
     assert not page.paired_condition_b_combo.isEnabled()
@@ -691,8 +695,8 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.snr_vmax_spin.isEnabled()
     assert page.z_threshold_spin.isEnabled()
     assert page.output_root_row.isEnabled()
-    assert page.export_png_check.isEnabled()
-    assert page.export_svg_check.isEnabled()
+    assert not page.export_png_check.isEnabled()
+    assert not page.export_pdf_check.isEnabled()
     assert page.paired_condition_a_combo.isEnabled()
     assert page.paired_condition_b_combo.isEnabled()
     assert not page.cancel_btn.isEnabled()
@@ -849,6 +853,36 @@ def test_loreta_sidebar_open_shows_beta_warning_once(
         (
             "Source Localization Beta",
             "Warning: the source localization tool is currently in beta. Features are subject to change.",
+        )
+    ]
+    assert win.workspace_stack.currentWidget() is page
+
+
+def test_publication_report_sidebar_open_shows_beta_warning_once(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    page = QWidget(win.workspace_stack)
+    page.setObjectName("embedded_publication_report_page")
+    win.workspace_stack.addWidget(page)
+    warning_calls: list[tuple[str, str]] = []
+
+    def fake_warning(parent, title, message, *args):
+        warning_calls.append((title, message))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(main_window_module.QMessageBox, "warning", fake_warning)
+    monkeypatch.setattr(win, "_ensure_publication_report_page", lambda: page)
+
+    win.open_publication_report()
+    win.open_publication_report()
+
+    assert warning_calls == [
+        (
+            "Publication Report Beta",
+            "Warning: the publication report tool is currently in beta. Features are subject to change.",
         )
     ]
     assert win.workspace_stack.currentWidget() is page

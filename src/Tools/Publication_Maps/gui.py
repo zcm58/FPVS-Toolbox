@@ -362,10 +362,12 @@ class PublicationMapsWindow(QWidget):
         form.addRow("Output folder:", self.output_root_row)
         group.content_layout.addLayout(form)
 
-        self.export_png_check = QCheckBox("PNG", group)
+        self.export_png_check = QCheckBox("PNG (600 DPI)", group)
         self.export_png_check.setChecked(True)
-        self.export_svg_check = QCheckBox("SVG", group)
-        self.export_svg_check.setChecked(True)
+        self.export_png_check.setEnabled(False)
+        self.export_pdf_check = QCheckBox("PDF (600 DPI)", group)
+        self.export_pdf_check.setChecked(True)
+        self.export_pdf_check.setEnabled(False)
         self.paired_figures_check = QCheckBox("Also export paired condition figures", group)
         self.paired_figures_check.setToolTip(
             "When at least two conditions are selected, export side-by-side scalp maps."
@@ -412,7 +414,7 @@ class PublicationMapsWindow(QWidget):
 
         formats = ActionRow(group, alignment=Qt.AlignLeft, spacing=12)
         formats.row_layout.addWidget(self.export_png_check)
-        formats.row_layout.addWidget(self.export_svg_check)
+        formats.row_layout.addWidget(self.export_pdf_check)
         group.content_layout.addWidget(formats)
         group.content_layout.addWidget(self.paired_figures_check)
         group.content_layout.addWidget(self.paired_conditions_widget)
@@ -587,7 +589,6 @@ class PublicationMapsWindow(QWidget):
         ready = ready and bool(self.output_root_edit.text().strip())
         ready = ready and bool(self._selected_conditions())
         ready = ready and bool(self._selected_metrics())
-        ready = ready and (self.export_png_check.isChecked() or self.export_svg_check.isChecked())
         ready = ready and self._paired_conditions_valid()
         self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
 
@@ -752,8 +753,6 @@ class PublicationMapsWindow(QWidget):
             self.snr_vmax_spin,
             self.z_threshold_spin,
             self.output_root_row,
-            self.export_png_check,
-            self.export_svg_check,
             self.paired_figures_check,
             self.paired_condition_a_combo,
             self.paired_condition_b_combo,
@@ -843,8 +842,8 @@ class PublicationMapsWindow(QWidget):
             max_frequency_hz=self._analysis_bca_upper_limit_hz(),
             metrics=metrics,
             color_bounds=color_bounds,
-            export_png=self.export_png_check.isChecked(),
-            export_svg=self.export_svg_check.isChecked(),
+            export_png=True,
+            export_pdf=True,
             export_paired_figures=(
                 self.paired_figures_check.isChecked()
                 and len(self._selected_conditions()) >= 2

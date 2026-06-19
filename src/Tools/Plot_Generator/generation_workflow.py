@@ -83,11 +83,6 @@ class PlotGeneratorWorkflowMixin:
         if len(params) == 6:
             folder, out_dir, x_min, x_max, y_min, y_max = params
             group_kwargs = {}
-            include_scalp = self.scalp_check.isChecked()
-            scalp_min = self.scalp_min_spin.value()
-            scalp_max = self.scalp_max_spin.value()
-            scalp_title_a = self.scalp_title_a_edit.text().strip()
-            scalp_title_b = self.scalp_title_b_edit.text().strip()
             legend_payload = self._legend_settings_payload()
         else:
             (
@@ -98,11 +93,6 @@ class PlotGeneratorWorkflowMixin:
                 y_min,
                 y_max,
                 group_kwargs,
-                include_scalp,
-                scalp_min,
-                scalp_max,
-                scalp_title_a,
-                scalp_title_b,
                 legend_payload,
             ) = params
         condition = self._conditions_queue.pop(0)
@@ -141,11 +131,6 @@ class PlotGeneratorWorkflowMixin:
             y_max,
             str(cond_out),
             self.stem_color,
-            include_scalp_maps=include_scalp,
-            scalp_vmin=scalp_min,
-            scalp_vmax=scalp_max,
-            scalp_title_a_template=scalp_title_a,
-            scalp_title_b_template=scalp_title_b,
             legend_custom_enabled=bool(legend_payload["custom_labels_enabled"]),
             legend_condition_a=str(legend_payload["condition_a_label"]),
             legend_condition_b=str(legend_payload["condition_b_label"]),
@@ -266,29 +251,6 @@ class PlotGeneratorWorkflowMixin:
                 QMessageBox.critical(self, "Error", "Invalid axis limits.")
                 return
 
-            include_scalp = self.scalp_check.isChecked()
-            scalp_min = self.scalp_min_spin.value()
-            scalp_max = self.scalp_max_spin.value()
-
-            if include_scalp:
-                if not self.scalp_title_a_edit.text().strip():
-                    QMessageBox.warning(
-                        self,
-                        "Scalp Title",
-                        "Please enter a scalp title for Condition A.",
-                    )
-                    return
-                if (
-                    self.overlay_check.isChecked()
-                    and not self.scalp_title_b_edit.text().strip()
-                ):
-                    QMessageBox.warning(
-                        self,
-                        "Scalp Title",
-                        "Please enter a scalp title for Condition B.",
-                    )
-                    return
-
             overlay_groups = self._group_overlay_enabled()
             selected_groups = self._selected_groups() if overlay_groups else []
             if overlay_groups and not selected_groups:
@@ -314,8 +276,6 @@ class PlotGeneratorWorkflowMixin:
             legend_payload = self._legend_settings_payload()
             if self._project is not None:
                 self._persist_project_plot_settings(include_paths=True)
-            else:
-                self._persist_scalp_settings(save=True)
 
             self.gen_btn.setEnabled(False)
             self.cancel_btn.setEnabled(True)
@@ -358,11 +318,6 @@ class PlotGeneratorWorkflowMixin:
                     condition_b=cond_b,
                     stem_color_b=self.stem_color_b,
                     overlay=True,
-                    include_scalp_maps=include_scalp,
-                    scalp_vmin=scalp_min,
-                    scalp_vmax=scalp_max,
-                    scalp_title_a_template=self.scalp_title_a_edit.text(),
-                    scalp_title_b_template=self.scalp_title_b_edit.text(),
                     legend_custom_enabled=bool(legend_payload["custom_labels_enabled"]),
                     legend_condition_a=str(legend_payload["condition_a_label"]),
                     legend_condition_b=str(legend_payload["condition_b_label"]),
@@ -407,11 +362,6 @@ class PlotGeneratorWorkflowMixin:
                     y_min,
                     y_max,
                     group_kwargs.copy(),
-                    include_scalp,
-                    scalp_min,
-                    scalp_max,
-                    self.scalp_title_a_edit.text(),
-                    self.scalp_title_b_edit.text(),
                     legend_payload.copy(),
                 )
                 self._start_next_condition()

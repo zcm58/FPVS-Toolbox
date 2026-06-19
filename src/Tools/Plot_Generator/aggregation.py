@@ -5,9 +5,30 @@ from __future__ import annotations
 import time
 from typing import Dict, Iterable, List
 
-import pandas as pd
+import numpy as np
 
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+
+
+def _nanmean_columns(rows: List[List[float]]) -> List[float]:
+    try:
+        values = np.asarray(rows, dtype=float)
+    except ValueError:
+        width = max(len(row) for row in rows)
+        values = np.full((len(rows), width), np.nan, dtype=float)
+        for idx, row in enumerate(rows):
+            values[idx, : len(row)] = np.asarray(row, dtype=float)
+    if values.ndim == 1:
+        values = values.reshape(1, -1)
+    valid = ~np.isnan(values)
+    counts = valid.sum(axis=0)
+    sums = np.nansum(values, axis=0)
+    return np.divide(
+        sums,
+        counts,
+        out=np.full(sums.shape, np.nan, dtype=float),
+        where=counts > 0,
+    ).tolist()
 
 
 class PlotAggregationMixin:
@@ -35,7 +56,7 @@ class PlotAggregationMixin:
                     if values:
                         rows.append(values)
                 if rows:
-                    aggregated[roi] = list(pd.DataFrame(rows).mean(axis=0))
+                    aggregated[roi] = _nanmean_columns(rows)
             return aggregated
         finally:
             self._mark_timing("roi_aggregate", started)

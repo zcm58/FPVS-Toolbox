@@ -69,7 +69,7 @@ def test_group_overlay_matches_project_participant_ids_from_excel_names(
     )
     captured: dict[str, object] = {}
 
-    def fake_plot(freqs, roi_data, group_curves=None, scalp_inputs=None):  # noqa: ARG001
+    def fake_plot(freqs, roi_data, group_curves=None):
         captured["roi_data"] = roi_data
         captured["group_curves"] = group_curves or {}
 
@@ -122,5 +122,5 @@ def test_group_overlay_renderer_writes_overlay_plot(tmp_path, monkeypatch) -> No
         },
     )
 
-    assert (out_dir / "Angry_Central_SNR.png").is_file()
-    assert (out_dir / "Angry_Central_SNR.svg").is_file()
+    assert (out_dir / "Angry - Central.png").is_file()
+    assert (out_dir / "Angry - Central.pdf").is_file()

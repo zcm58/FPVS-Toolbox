@@ -15,11 +15,11 @@ from Tools.LORETA_Visualizer.gui import (
     _project_root_from_object,
     _project_source_export_failure_text,
     _source_export_status_text,
-    default_stacked_split_svg_export_path,
-    default_split_svg_export_path,
+    default_stacked_split_figure_export_path,
+    default_split_figure_export_path,
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
-    split_svg_condition_code,
+    split_figure_condition_code,
 )
 from Tools.LORETA_Visualizer.fsaverage_cache import (
     DEFAULT_FSAVERAGE_SUBJECTS_DIR,
@@ -209,39 +209,39 @@ def test_loreta_import_dialog_prefers_last_dir_then_project_source_dir(tmp_path)
     assert resolve_loreta_import_start_dir(project_root=None, last_import_dir=None) == ""
 
 
-def test_loreta_split_svg_export_path_prefers_project_source_dir(tmp_path) -> None:
+def test_loreta_split_figure_export_path_prefers_project_source_dir(tmp_path) -> None:
     project_root = tmp_path / "Project"
     zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
     zscore_dir.mkdir(parents=True)
 
-    path = default_split_svg_export_path(
+    path = default_split_figure_export_path(
         project_root=project_root,
         last_import_dir=None,
         condition_label="Semantic Response 2",
     )
 
-    assert path == str(zscore_dir / "loreta_split_hemispheres_Semantic_Response_2.svg")
+    assert path == str(zscore_dir / "loreta_split_hemispheres_Semantic_Response_2.pdf")
 
 
-def test_loreta_stacked_split_svg_export_path_uses_cr_sr_codes(tmp_path) -> None:
+def test_loreta_stacked_split_figure_export_path_uses_cr_sr_codes(tmp_path) -> None:
     project_root = tmp_path / "Project"
     zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
     zscore_dir.mkdir(parents=True)
 
-    path = default_stacked_split_svg_export_path(
+    path = default_stacked_split_figure_export_path(
         project_root=project_root,
         last_import_dir=None,
         top_condition_label="Color Response 2",
         bottom_condition_label="Semantic Response",
     )
 
-    assert path == str(zscore_dir / "loreta_split_hemispheres_CR_SR.svg")
+    assert path == str(zscore_dir / "loreta_split_hemispheres_CR_SR.pdf")
 
 
-def test_loreta_split_svg_condition_code_labels_color_and_semantic_responses() -> None:
-    assert split_svg_condition_code("Color Response") == "CR"
-    assert split_svg_condition_code("Semantic Response 2") == "SR"
-    assert split_svg_condition_code("Oddball Baseline") == "OB"
+def test_loreta_split_figure_condition_code_labels_color_and_semantic_responses() -> None:
+    assert split_figure_condition_code("Color Response") == "CR"
+    assert split_figure_condition_code("Semantic Response 2") == "SR"
+    assert split_figure_condition_code("Oddball Baseline") == "OB"
 
 
 def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_path) -> None:

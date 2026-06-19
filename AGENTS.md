@@ -25,6 +25,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - New or migrated GUI surfaces should start from `src/Main_App/gui/components/` for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers before adding local UI primitives.
 - Subsection headers should use `Main_App.gui.components.SubsectionHeaderLabel`; edit shared subsection-header font, weight, color, and padding in `src/Main_App/gui/widgets/labels.py`, not per-surface QSS.
 - Avoid card-within-card GUI designs unless the user explicitly asks for that visual treatment. `SectionCard` should frame a top-level subsection; tab panes, splitters, setup areas, and other parent layout containers should stay visually flat when they contain section cards.
+- Publication-oriented figure generation must follow [docs/agent/quality/figure-generation.md](docs/agent/quality/figure-generation.md): matching `.pdf`/`.png` outputs, 600 dpi, Arial figure typography, and figure typography separated from GUI typography.
 - Active worker/process-runner imports should use `src/Main_App/workers/`.
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
 - Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.

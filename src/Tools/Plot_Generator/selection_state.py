@@ -81,12 +81,9 @@ class PlotGeneratorSelectionMixin:
             self._set_all_conditions_enabled(True)
             self._update_selector_columns(False)
             self._update_chart_title_state(self.condition_combo.currentText())
-            self.scalp_title_b_edit.clear()
             if self.group_box.isVisible():
                 self.group_overlay_check.setEnabled(True)
                 self.group_list.setEnabled(self.group_overlay_check.isChecked())
-        self._update_scalp_title_b_visibility()
-        self._update_scalp_title_warnings()
         self._update_legend_group_visibility()
 
     def _on_group_overlay_toggled(self, checked: bool) -> None:
@@ -125,20 +122,14 @@ class PlotGeneratorSelectionMixin:
 
     def _on_condition_a_changed(self, condition: str) -> None:
         self._update_chart_title_state(condition)
-        if not (self._ui_initializing or self._populating_conditions):
-            self.scalp_title_a_edit.clear()
         if hasattr(self, "legend_custom_check"):
             self._sync_legend_defaults_with_conditions()
-        self._update_scalp_title_warnings()
         self._check_required()
 
     def _on_condition_b_changed(self, condition: str) -> None:
         _ = condition
-        if not (self._ui_initializing or self._populating_conditions):
-            self.scalp_title_b_edit.clear()
         if hasattr(self, "legend_custom_check"):
             self._sync_legend_defaults_with_conditions()
-        self._update_scalp_title_warnings()
         self._check_required()
 
     def _update_chart_title_state(self, condition: str) -> None:
@@ -194,7 +185,6 @@ class PlotGeneratorSelectionMixin:
                 if subfolders
                 else self.condition_combo.currentText()
             )
-            self._update_scalp_title_warnings()
             self._check_required()
         finally:
             self._populating_conditions = False
@@ -278,12 +268,7 @@ class PlotGeneratorSelectionMixin:
         if multi_group:
             if self.overlay_check.isChecked():
                 self.overlay_check.setChecked(False)
-            if self.scalp_check.isChecked():
-                self.scalp_check.setChecked(False)
-            self.include_scalp_maps = False
             self._update_selector_columns(False)
-        self._update_scalp_title_b_visibility()
-        self._update_scalp_title_warnings()
 
     def _folder_is_canonical_project_excel_root(self, folder: str) -> bool:
         canonical = getattr(self, "_canonical_project_excel_root", None)

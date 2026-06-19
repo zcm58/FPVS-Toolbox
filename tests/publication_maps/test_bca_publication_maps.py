@@ -8,7 +8,12 @@ import pandas as pd
 from PIL import Image
 import pytest
 
-from Main_App.gui.components import matplotlib_font_kwargs
+from Main_App.exports.figure_style import (
+    FIGURE_FONT_FAMILY,
+    FIGURE_PANEL_LABEL_SIZE_PT,
+    FIGURE_TEXT_SIZE_PT,
+    figure_text_kwargs,
+)
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
 from Tools.Publication_Maps.excel_inputs import discover_conditions
@@ -213,9 +218,9 @@ def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
     assert workbook_path.stat().st_size > 0
     assert figures
     assert all(path.exists() and path.stat().st_size > 0 for path in figures)
-    svg = next(path for path in figures if path.suffix == ".svg")
-    svg_text = svg.read_text(encoding="utf-8")
-    assert "fill: #ffffff" not in svg_text.lower()
+    pdf = next(path for path in figures if path.suffix == ".pdf")
+    assert pdf.read_bytes().startswith(b"%PDF")
+    assert not list(output_root.rglob("*.svg"))
     png = next(path for path in figures if path.suffix == ".png")
     with Image.open(png) as image:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
@@ -316,7 +321,7 @@ def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
     figures = render_publication_figures(result, request)
 
     paired = [path for path in figures if "_and_" in path.stem]
-    assert {path.suffix for path in paired} == {".png", ".svg"}
+    assert {path.suffix for path in paired} == {".png", ".pdf"}
     assert {path.stem for path in paired} == {"Objects_and_Faces_bca_snr_paired"}
     paired_png = next(path for path in paired if path.suffix == ".png")
     with Image.open(paired_png) as image:
@@ -356,7 +361,7 @@ def test_exports_combined_paired_condition_figure_with_z_score_third_row(
     figures = render_publication_figures(result, request)
 
     paired = [path for path in figures if "_and_" in path.stem]
-    assert {path.suffix for path in paired} == {".png", ".svg"}
+    assert {path.suffix for path in paired} == {".png", ".pdf"}
     assert {path.stem for path in paired} == {
         "Objects_and_Faces_bca_snr_z_score_paired"
     }
@@ -489,17 +494,21 @@ def test_z_score_metric_limits_use_threshold_and_auto_upper_limit() -> None:
     )
 
 
-def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
-    axis_font = matplotlib_font_kwargs("figure_axis_label")
-    title_font = matplotlib_font_kwargs("figure_title")
+def test_bca_colorbar_label_and_fonts_use_shared_figure_typography() -> None:
+    axis_font = figure_text_kwargs("axis_label")
+    condition_font = figure_text_kwargs("condition_label")
+    panel_font = figure_text_kwargs("panel_label")
 
     assert colorbar_label_for_metric(PublicationMetric.BCA) == (
         "Baseline-corrected amplitude (µV)"
     )
     assert colorbar_label_for_metric(PublicationMetric.SNR) == "Signal to Noise Ratio"
     assert colorbar_label_for_metric(PublicationMetric.Z_SCORE) == "Z Score"
-    assert axis_font["fontsize"] >= 12
-    assert title_font["fontsize"] >= axis_font["fontsize"]
+    assert axis_font["fontfamily"] == FIGURE_FONT_FAMILY
+    assert axis_font["fontsize"] == FIGURE_TEXT_SIZE_PT
+    assert condition_font["fontsize"] == FIGURE_TEXT_SIZE_PT
+    assert panel_font["fontsize"] == FIGURE_PANEL_LABEL_SIZE_PT
+    assert panel_font["fontweight"] == "bold"
 
 
 def test_worker_emits_progress_messages_and_finished_without_widgets(
@@ -539,7 +548,7 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
         assert seen_result is result
         assert seen_request is request
         calls.append("render")
-        return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.svg"]
+        return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.pdf"]
 
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.build_publication_map_result",

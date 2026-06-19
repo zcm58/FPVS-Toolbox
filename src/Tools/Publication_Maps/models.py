@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -23,6 +25,7 @@ DEFAULT_BCA_UPPER_MID_COLOR = "#fee08b"
 DEFAULT_BCA_HIGH_MID_COLOR = "#fdae61"
 DEFAULT_BCA_HIGH_COLOR = "#b2182b"
 DEFAULT_Z_SCORE_THRESHOLD = 1.64
+DEFAULT_FIGURE_DPI = FIGURE_EXPORT_DPI
 
 
 class PublicationMetric(str, Enum):
@@ -92,10 +95,10 @@ class PublicationMapRequest:
     metrics: tuple[PublicationMetric, ...] = (PublicationMetric.BCA,)
     color_bounds: dict[PublicationMetric, ColorBounds] = field(default_factory=dict)
     export_png: bool = True
-    export_svg: bool = True
+    export_pdf: bool = True
     export_paired_figures: bool = False
     paired_conditions: tuple[str, ...] = ()
-    png_dpi: int = 300
+    png_dpi: int = DEFAULT_FIGURE_DPI
     project_root: Path | None = None
 
     def selected_harmonics_label(self, values: tuple[float, ...]) -> str:

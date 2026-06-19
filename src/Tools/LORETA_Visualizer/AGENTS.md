@@ -302,6 +302,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   expose a single Export Figures entry point; individual export formats or
   display-specific figure actions should be added inside that modal as they
   become real, enabled workflows.
+- Publication figure exports should follow
+  `docs/agent/quality/figure-generation.md`: write matching 600 DPI PNG/PDF
+  outputs and use `Main_App.exports.figure_style` for Arial figure typography.
 
 ## Verification
 

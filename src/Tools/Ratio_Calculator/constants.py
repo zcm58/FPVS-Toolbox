@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
+
 
 ROI_DEFS_DEFAULT: dict[str, list[str]] = {
     "Bilateral OT": ["P7", "P9", "PO7", "PO3", "O1", "Oz", "O2", "P8", "P10", "PO8", "PO4"],
@@ -39,7 +41,7 @@ class RatioCalculatorSettings:
     sum_up_to_hz: float = 16.8
     excluded_freqs_hz: set[float] = field(default_factory=lambda: {6.0, 12.0, 18.0, 24.0})
     palette_choice: str = "vibrant"
-    png_dpi: int = 300
+    png_dpi: int = FIGURE_EXPORT_DPI
     use_stable_ylims: bool = True
     ylim_raw_sum_z: Optional[Tuple[float, float]] = None
     ylim_raw_sum_snr: Optional[Tuple[float, float]] = None
