@@ -17,6 +17,10 @@ from typing import Callable, Sequence
 from Tools.LORETA_Visualizer.source_producers.contracts import SourceProducerRunResult
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
+    DEFAULT_CLUSTER_ALPHA,
+    DEFAULT_CLUSTER_FORMING_P_VALUE,
+    DEFAULT_CLUSTER_PERMUTATION_COUNT,
+    DEFAULT_CLUSTER_PERMUTATION_SEED,
     DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS,
     DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
     DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS,
@@ -101,10 +105,10 @@ def write_project_l2_mne_hauk_zscore_payloads(
     aggregations: Sequence[str] = DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS,
     trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
     cluster_mask_enabled: bool = True,
-    cluster_forming_p_value: float = 0.05,
-    cluster_alpha: float = 0.05,
-    cluster_permutation_count: int = 10000,
-    cluster_permutation_seed: int = 20260609,
+    cluster_forming_p_value: float = DEFAULT_CLUSTER_FORMING_P_VALUE,
+    cluster_alpha: float = DEFAULT_CLUSTER_ALPHA,
+    cluster_permutation_count: int = DEFAULT_CLUSTER_PERMUTATION_COUNT,
+    cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED,
     progress_callback: ProgressCallback | None = None,
 ) -> ProjectL2MNEHaukZScoreExportResult:
     """Write Hauk-style source-space z-score JSON for an existing project.

@@ -36,6 +36,7 @@ from Main_App.gui.components import (
 from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
 from Tools.LORETA_Visualizer.cortical_paint import (
     DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    payload_cluster_mask_is_empty,
     payload_cluster_mask_is_underpowered,
     payload_cluster_mask_minimum_p,
     payload_cluster_mask,
@@ -355,8 +356,10 @@ def _activation_display_filter_readout(
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
         if payload_cluster_mask_is_underpowered(payload):
             return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
+        if payload_cluster_mask_is_empty(payload):
+            return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
         if payload_has_cluster_mask(payload):
-            return "; display: source-space cluster mask"
+            return "; display: Hauk et al. (2025) cluster mask"
         return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
     if payload.metadata.get("display_value_filter") != "values_above_threshold":
         return ""
@@ -387,7 +390,7 @@ def _activation_scale_values(
     values = np.asarray(payload.values, dtype=float)
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
         cluster_mask = payload_cluster_mask(payload)
-        if cluster_mask is not None:
+        if cluster_mask is not None and np.any(cluster_mask):
             return values[cluster_mask & np.isfinite(values)]
         return values[values >= float(zscore_display_threshold)]
     return values
@@ -502,7 +505,7 @@ class SourceMapOptionsDialog(AppDialog):
         threshold_row = QHBoxLayout()
         threshold_row.setContentsMargins(0, 0, 0, 0)
         threshold_row.setSpacing(8)
-        threshold_spin_label = QLabel("z cutoff", display_tab)
+        threshold_spin_label = QLabel("Exploratory z cutoff", display_tab)
         threshold_spin_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.zscore_threshold_spin = QDoubleSpinBox(display_tab)
         self.zscore_threshold_spin.setObjectName("loreta_zscore_threshold_spin")
@@ -515,8 +518,9 @@ class SourceMapOptionsDialog(AppDialog):
         display_layout.addLayout(threshold_row)
 
         threshold_note = QLabel(
-            "Values below this display cutoff render as gray cortex. "
-            "Cluster-masked payloads use their producer-computed mask first.",
+            "For Hauk et al., 2025 cluster-masked maps, this cutoff is used only "
+            "when the mask is underpowered or no vertices survive. Otherwise the "
+            "source-space cluster mask is used.",
             display_tab,
         )
         threshold_note.setObjectName("loreta_zscore_threshold_note")
@@ -1857,6 +1861,19 @@ class LoretaVisualizerWindow(QWidget):
         if underpowered_text is not None:
             self._set_source_export_status(underpowered_text, variant="warning")
             return
+        if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+            if payload_cluster_mask_is_empty(payload):
+                self._set_source_export_status(
+                    "No vertices survived the Hauk et al. (2025) cluster-permutation mask.",
+                    variant="warning",
+                )
+                return
+            if payload_has_cluster_mask(payload):
+                self._set_source_export_status(
+                    "Loaded Hauk et al. (2025) source-estimation cluster mask.",
+                    variant="info",
+                )
+                return
         if (
             uses_cortical_surface_paint(payload)
             and _source_payload_uses_zscores(payload)

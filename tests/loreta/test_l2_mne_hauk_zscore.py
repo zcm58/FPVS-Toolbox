@@ -186,10 +186,10 @@ def test_cluster_permutation_mask_keeps_significant_connected_positive_cluster()
         config=config,
     )
 
-    assert result.cluster_forming_p_value == pytest.approx(0.05)
+    assert result.cluster_forming_p_value == pytest.approx(0.00001)
     assert result.cluster_alpha == pytest.approx(0.05)
-    assert result.tail == "two-sided"
-    assert result.cluster_forming_threshold > 2.0
+    assert result.tail == "positive"
+    assert result.cluster_forming_threshold > 10.0
     assert result.permutation_count == 64
     assert result.mask.tolist() == [True, True, True, False, False]
     assert len(result.significant_clusters) == 1
@@ -197,8 +197,8 @@ def test_cluster_permutation_mask_keeps_significant_connected_positive_cluster()
     assert result.significant_clusters[0].p_value <= 0.05
 
 
-def test_two_tailed_cluster_permutation_keeps_positive_and_negative_clusters_separate() -> None:
-    participant_values = _two_tailed_cluster_participant_values()
+def test_hauk_cluster_permutation_ignores_negative_clusters_by_default() -> None:
+    participant_values = _mixed_sign_cluster_participant_values()
     config = L2MNEHaukZScoreConfig(
         selected_harmonics_hz=(1.0,),
         apply_average_reference=False,
@@ -212,11 +212,19 @@ def test_two_tailed_cluster_permutation_keeps_positive_and_negative_clusters_sep
         config=config,
     )
 
-    assert result.tail == "two-sided"
+    assert result.tail == "positive"
     assert result.permutation_count == 64
-    assert result.mask.tolist() == [True, True, True, True, False]
-    assert [cluster.tail for cluster in result.significant_clusters] == ["positive", "negative"]
+    assert result.mask.tolist() == [True, True, False, False, False]
+    assert [cluster.tail for cluster in result.significant_clusters] == ["positive"]
     assert all(cluster.p_value <= 0.05 for cluster in result.significant_clusters)
+
+
+def test_hauk_cluster_config_rejects_non_publication_tail() -> None:
+    with pytest.raises(ValueError, match="positive-tail"):
+        L2MNEHaukZScoreConfig(
+            selected_harmonics_hz=(1.0,),
+            cluster_tail="two-sided",
+        )
 
 
 def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) -> None:
@@ -250,8 +258,9 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     assert payload["metadata"]["source_map_model"] == "participant_first"
     assert payload["metadata"]["participant_count"] == 2
     assert payload["metadata"]["cluster_mask"] == "source_space_cluster_permutation"
-    assert payload["metadata"]["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass_two_tailed"
-    assert payload["metadata"]["cluster_forming_tail"] == "two-sided"
+    assert payload["metadata"]["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass_positive_tail"
+    assert payload["metadata"]["cluster_forming_tail"] == "positive"
+    assert payload["metadata"]["cluster_forming_p_value"] == pytest.approx(0.00001)
     assert payload["metadata"]["cluster_mask_vertex_count"] == 0
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["format"] == PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT
@@ -339,7 +348,7 @@ def _cluster_participant_values() -> tuple[L2MNEHaukParticipantZScoreValues, ...
     return tuple(rows)
 
 
-def _two_tailed_cluster_participant_values() -> tuple[L2MNEHaukParticipantZScoreValues, ...]:
+def _mixed_sign_cluster_participant_values() -> tuple[L2MNEHaukParticipantZScoreValues, ...]:
     rows = []
     for index, scale in enumerate((0.92, 0.96, 1.0, 1.04, 1.08, 1.12), start=1):
         values = np.asarray([4.2 * scale, 4.0 * scale, -4.2 * scale, -4.0 * scale, 0.02], dtype=float)

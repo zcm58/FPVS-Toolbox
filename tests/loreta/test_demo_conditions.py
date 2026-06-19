@@ -6,6 +6,7 @@ from PIL import Image
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.gui import (
+    LoretaVisualizerWindow,
     _activation_display_payload,
     _activation_value_readout,
     _underpowered_cluster_mask_status_text,
@@ -281,6 +282,121 @@ def test_underpowered_cluster_mask_readout_marks_exploratory_threshold_display()
     assert "small sample size (4 participants)" in warning
     assert "minimum possible cluster p = 0.0588" in warning
     assert "not group-masked" in warning
+
+
+def test_hauk_cluster_mask_readout_names_publication_mask() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [0],
+            "cluster_mask_vertex_count": 1,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: Hauk et al. (2025) cluster mask"
+    )
+
+
+def test_empty_hauk_cluster_mask_readout_marks_exploratory_fallback() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "participant_count": 24,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: exploratory z >= 1.64"
+    )
+
+
+def test_hauk_cluster_mask_load_status_messages() -> None:
+    valid_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [1],
+            "cluster_mask_vertex_count": 1,
+        },
+        normalize_values=False,
+    )
+    empty_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+    status = _StatusProbe()
+    window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
+    window.mesh_status = status
+
+    window._set_payload_display_status(valid_payload)
+    assert status.variant == "info"
+    assert status.text == "Loaded Hauk et al. (2025) source-estimation cluster mask."
+
+    window._set_payload_display_status(empty_payload)
+    assert status.variant == "warning"
+    assert status.text == "No vertices survived the Hauk et al. (2025) cluster-permutation mask."
+
+
+class _StatusProbe:
+    def __init__(self) -> None:
+        self.variant = ""
+        self.text = ""
+
+    def set_variant(self, variant: str) -> None:
+        self.variant = variant
+
+    def set_text(self, text: str) -> None:
+        self.text = text
 
 
 def test_split_hemisphere_projection_uses_projection_points_for_values() -> None:

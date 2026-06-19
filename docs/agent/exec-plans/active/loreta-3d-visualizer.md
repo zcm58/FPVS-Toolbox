@@ -36,9 +36,10 @@ normalization, and `lambda2 = 1 / 9`. Phase 6H-A(2) changes the default
 Hauk-style project z-score export to participant-first source-space z-scores,
 then group raw mean, median, and 20% trimmed-mean summaries, while keeping the
 older group-first model as a deprecated advanced fallback. Phase 6H-A(3)
-computes a one-sample two-tailed sign-flip source-space cluster-permutation
-mask from participant z-score maps and stores the significant source vertices
-in prepared payload metadata for publication-style L2-MNE display. Phase
+computes a Hauk et al. 2025-aligned one-sample positive-tail sign-flip
+source-space cluster-permutation mask from participant z-score maps and stores
+the significant source vertices in prepared payload metadata for
+publication-style L2-MNE display. Phase
 6H-A(4) writes producer-side descriptive source-space
 lateralization CSV/JSON sidecars for participant and group-summary maps.
 Phase 6H-A(5) preserves fsaverage source-space vertex IDs and hemisphere
@@ -1363,14 +1364,14 @@ Objective:
 
 Implemented scope:
 
-- `l2_mne_hauk_zscore.py` computes one-sample, two-tailed sign-flip
+- `l2_mne_hauk_zscore.py` computes one-sample, positive-tail sign-flip
   source-space cluster-permutation masks from participant z-score maps.
 - Candidate clusters are formed from source vertices whose one-sample t
-  statistic against zero passes the two-tailed cluster-forming threshold.
-  Positive and negative clusters are formed separately, and mesh adjacency comes
-  from the fsaverage/source-space surface faces.
+  statistic against zero passes the Hauk et al. 2025 publication-code
+  positive-tail cluster-forming threshold. Mesh adjacency comes from the
+  fsaverage/source-space surface faces.
 - Cluster-level correction uses the maximum sign-corrected cluster mass from
-  sign-flipped participant maps. Defaults are cluster-forming `p = .05`,
+  sign-flipped participant maps. Defaults are cluster-forming `p = .00001`,
   corrected cluster `alpha = .05`, deterministic seed `20260609`, and up to
   `10000` permutations, with exact sign flips when the participant count is
   small enough.
@@ -1380,22 +1381,25 @@ Implemented scope:
   summaries in metadata. Payload `values` remain unchanged.
 - The participant sidecar records condition-level cluster-mask summaries for
   future individual/QC tooling.
-- `cortical_paint.py` treats a producer-provided cluster mask as primary for
-  L2-MNE cortical paint. Older unmasked payloads fall back to the manual
-  z-score display cutoff.
-- `gui.py` labels masked maps as source-space cluster masked and uses the
-  retained signed source z-score range for cluster-masked cortical displays.
+- `cortical_paint.py` treats a non-empty producer-provided cluster mask as
+  primary for L2-MNE cortical paint. Older unmasked payloads and empty Hauk
+  masks fall back to the manual exploratory z-score display cutoff.
+- `gui.py` labels masked maps as Hauk et al. (2025) cluster masked, warns when
+  no vertices survive the cluster mask, and uses retained signed source z-score
+  ranges for non-empty cluster-masked cortical displays.
 
 Locked decisions:
 
 - Cluster masking is enabled by default only for participant-first Hauk-style
   L2-MNE source-space z-score exports. The deprecated group-first model cannot
   produce this inferential mask.
-- The cluster test is two-tailed against zero so publication-style displays can
-  retain significant positive and negative source-space clusters.
+- The cluster test is positive-tail against zero to match the Hauk et al. 2025
+  source-space publication code. Negative source-space clusters are not part of
+  the default Hauk mask.
 - The manual z-score display cutoff remains available in Source Map Options
-  for exploratory/unmasked payloads and future display modes, but it is not
-  the primary publication mask when a cluster mask is present.
+  for exploratory/unmasked payloads, underpowered masks, empty Hauk masks, and
+  future display modes, but it is not the primary publication mask when a
+  non-empty cluster mask is present.
 - Cluster masks are source-space statistical results, not renderer filters.
   Future LORETA/eLORETA volume methods must add their own method-appropriate
   statistical masks rather than reusing cortical surface assumptions blindly.

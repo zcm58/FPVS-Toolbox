@@ -80,6 +80,13 @@ def payload_has_cluster_mask(payload: SourcePayload) -> bool:
     return payload_cluster_mask(payload) is not None
 
 
+def payload_cluster_mask_is_empty(payload: SourcePayload) -> bool:
+    """Return whether a declared cluster mask retained no source vertices."""
+    if not _payload_declares_cluster_mask(payload.metadata):
+        return False
+    return _cluster_mask_retained_count(payload) == 0
+
+
 def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
     """Return whether a saved empty cluster mask is resolution-limited.
 
@@ -135,8 +142,9 @@ def project_cortical_surface_payload(
     projection_values = source_values.copy()
     is_zscore_payload = source_payload_uses_zscores(payload)
     source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload else None
+    cluster_mask_has_vertices = source_cluster_mask is not None and bool(np.any(source_cluster_mask))
     if is_zscore_payload:
-        if source_cluster_mask is not None:
+        if cluster_mask_has_vertices:
             projection_values = np.where(source_cluster_mask, projection_values, 0.0)
         else:
             threshold = _valid_z_threshold(z_threshold)
@@ -149,7 +157,7 @@ def project_cortical_surface_payload(
         neighbors=neighbors,
         power=power,
     )
-    if is_zscore_payload and source_cluster_mask is not None:
+    if is_zscore_payload and cluster_mask_has_vertices:
         display_cluster_mask = _nearest_mask_values(target_points, source_points, source_cluster_mask)
         interpolated = np.where(display_cluster_mask & np.isfinite(interpolated), interpolated, np.nan)
     elif is_zscore_payload:
