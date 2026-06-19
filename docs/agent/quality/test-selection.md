@@ -114,6 +114,13 @@ via pytest-qt/offscreen unless explicitly approved.
   plus its focused GUI mixins; do not run pytest-qt/offscreen locally without
   explicit approval.
 
+## Sequence Figure
+
+- Renderer behavior and high-DPI export: `python -m pytest tests/sequence_figure -q`
+- GUI wiring changes should use `py_compile` on `src/Tools/Sequence_Figure/gui.py`,
+  focused `ruff`, GUI import audits, and a documented visible/manual smoke path.
+  Do not run pytest-qt/offscreen locally.
+
 ## Statistics
 
 The GUI targets below identify relevant coverage only; do not run them locally

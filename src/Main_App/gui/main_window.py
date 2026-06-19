@@ -55,6 +55,7 @@ from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
 from Tools.Publication_Report.gui import PublicationReportWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
+from Tools.Sequence_Figure.gui import SequenceFigureWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui import update_manager
@@ -576,6 +577,28 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_individual_detectability_page())
         self._set_sidebar_selection("btn_individual_detectability")
+
+    def _ensure_sequence_figure_page(self) -> SequenceFigureWindow:
+        page = getattr(self, "_sequence_figure_page", None)
+        if page is None:
+            project_root = None
+            project = getattr(self, "currentProject", None)
+            if project is not None and hasattr(project, "project_root"):
+                project_root = str(project.project_root)
+            page = SequenceFigureWindow(
+                parent=self.workspace_stack,
+                project_root=project_root,
+            )
+            page.setObjectName("embedded_sequence_figure_page")
+            self.workspace_stack.addWidget(page)
+            self._sequence_figure_page = page
+        return page
+
+    def open_sequence_figure(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_sequence_figure_page())
+        self._set_sidebar_selection("btn_sequence_figure")
 
     def _ensure_plot_generator_page(self) -> PlotGeneratorWindow:
         page = getattr(self, "_plot_generator_page", None)
