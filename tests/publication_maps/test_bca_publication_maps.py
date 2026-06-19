@@ -656,7 +656,7 @@ def test_bca_colorbar_label_and_fonts_use_shared_figure_typography() -> None:
     assert panel_font["fontweight"] == "bold"
 
 
-def test_paired_headers_and_colorbar_legend_text_are_bold() -> None:
+def test_paired_headers_and_colorbar_label_are_bold_but_ticks_are_not() -> None:
     header_font = _paired_condition_title_kwargs()
     legend_font = _colorbar_text_kwargs()
 
@@ -676,7 +676,7 @@ def test_paired_headers_and_colorbar_legend_text_are_bold() -> None:
 
         assert cbar.ax.yaxis.label.get_fontweight() == "bold"
         assert all(
-            tick_label.get_fontweight() == "bold"
+            tick_label.get_fontweight() == "normal"
             for tick_label in cbar.ax.get_yticklabels()
             if tick_label.get_text()
         )

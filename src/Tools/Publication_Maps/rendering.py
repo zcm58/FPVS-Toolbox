@@ -675,8 +675,6 @@ def _style_colorbar(
     cbar.ax.yaxis.set_label_position(label_position)
     cbar.ax.yaxis.set_ticks_position("right")
     apply_axis_text_style(cbar.ax)
-    for tick_label in cbar.ax.get_yticklabels():
-        tick_label.set_fontweight("bold")
 
 
 def _paired_condition_title_kwargs() -> dict[str, object]:
