@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from Tools.Stats.analysis import dv_policies
+from Tools.Stats.analysis import dv_policy_fixed_predefined as fixed_policy
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Stats.analysis.dv_policy_fixed_predefined import build_fixed_harmonic_selection
 from Tools.Stats.analysis.dv_policy_group_significant import (
@@ -136,6 +137,69 @@ def test_fixed_predefined_policy_sums_bca_uniformly_and_ignores_z(tmp_path: Path
     assert result["S1"]["C1"]["Posterior"] == pytest.approx(1.5)
     assert result["S1"]["C1"]["Central"] == pytest.approx(0.0001)
     assert result["S2"]["C2"]["Posterior"] == pytest.approx(4.5)
+
+
+def test_fixed_predefined_policy_reads_selected_bca_once_per_workbook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "fixed_selected_read.xlsx"
+    _write_workbook(path, subject_idx=1, condition_idx=1)
+    original_selected_reader = fixed_policy.read_xlsx_sheet_selected_columns
+    calls: list[dict[str, object]] = []
+
+    def _recording_selected_reader(path, *, sheet_name, required_columns, **kwargs):
+        calls.append(
+            {
+                "path": str(path),
+                "sheet_name": sheet_name,
+                "required_columns": list(required_columns),
+            }
+        )
+        return original_selected_reader(
+            path,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        fixed_policy,
+        "read_xlsx_sheet_selected_columns",
+        _recording_selected_reader,
+    )
+
+    result = dv_policies.prepare_summed_bca_data(
+        subjects=["S1"],
+        conditions=["C1"],
+        subject_data={"S1": {"C1": str(path)}},
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois={"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+        provenance_map={},
+        dv_policy={
+            "name": FIXED_PREDEFINED_POLICY_NAME,
+            "fixed_harmonic_frequencies_hz": "1.2, 2.4, 3.6, 4.8, 6.0, 7.2",
+            "fixed_harmonic_auto_exclude_base": True,
+        },
+        dv_metadata={},
+    )
+
+    assert result is not None
+    assert calls == [
+        {
+            "path": str(path),
+            "sheet_name": "BCA (uV)",
+            "required_columns": [
+                "Electrode",
+                "1.2000_Hz",
+                "2.4000_Hz",
+                "3.6000_Hz",
+                "4.8000_Hz",
+                "7.2000_Hz",
+            ],
+        }
+    ]
 
 
 def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_path: Path) -> None:
@@ -309,28 +373,26 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
         _write_group_policy_workbook(path, scale=idx)
         subject_data["S1"][condition] = str(path)
 
-    original_read_excel = group_policy.safe_read_excel
+    original_selected_reader = group_policy.read_xlsx_sheet_selected_columns
     original_fullfft_loader = group_policy._load_mean_amplitude_series
     original_fullfft_plan = group_policy._plan_workbook_full_fft_usecols_from_header
     calls: list[dict[str, object]] = []
     fullfft_load_count = 0
     planned_fullfft_usecols: list[list[str]] = []
 
-    def _recording_read_excel(path, sheet_name, *, index_col=None, usecols=None, use_cache=True):
+    def _recording_selected_reader(path, *, sheet_name, required_columns, **kwargs):
         calls.append(
             {
                 "path": str(path),
                 "sheet_name": sheet_name,
-                "usecols": list(usecols) if isinstance(usecols, list) else usecols,
-                "use_cache": use_cache,
+                "required_columns": list(required_columns),
             }
         )
-        return original_read_excel(
+        return original_selected_reader(
             path,
-            sheet_name,
-            index_col=index_col,
-            usecols=usecols,
-            use_cache=use_cache,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+            **kwargs,
         )
 
     def _recording_fullfft_loader(*args, **kwargs):
@@ -343,7 +405,11 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
         planned_fullfft_usecols.append(list(usecols))
         return usecols, mapping
 
-    monkeypatch.setattr(group_policy, "safe_read_excel", _recording_read_excel)
+    monkeypatch.setattr(
+        group_policy,
+        "read_xlsx_sheet_selected_columns",
+        _recording_selected_reader,
+    )
     monkeypatch.setattr(
         group_policy,
         "_load_mean_amplitude_series",
@@ -371,13 +437,19 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
     assert result is not None
     bca_calls = [call for call in calls if call["sheet_name"] == "BCA (uV)"]
 
-    assert not [call for call in calls if call["sheet_name"] == "FullFFT Amplitude (uV)"]
+    assert len([call for call in calls if call["sheet_name"] == "FullFFT Amplitude (uV)"]) == len(
+        conditions
+    )
+    assert fullfft_load_count == len(conditions)
     assert len(planned_fullfft_usecols) == len(conditions)
     assert all("Electrode" in usecols for usecols in planned_fullfft_usecols)
     assert all(len(usecols) < 36 for usecols in planned_fullfft_usecols)
 
     assert len(bca_calls) == len(conditions)
-    assert all(call["use_cache"] is False for call in bca_calls)
+    assert all(
+        call["required_columns"] == ["Electrode", "1.2000_Hz", "3.6000_Hz"]
+        for call in bca_calls
+    )
     group_policy.clear_group_significant_selection_cache()
 
 
@@ -395,19 +467,18 @@ def test_group_significant_policy_reuses_cached_selection_between_runs(
         _write_group_policy_workbook(path, scale=idx)
         subject_data["S1"][condition] = str(path)
 
-    original_read_excel = group_policy.safe_read_excel
+    original_selected_reader = group_policy.read_xlsx_sheet_selected_columns
     original_fullfft_loader = group_policy._load_mean_amplitude_series
     calls: list[dict[str, object]] = []
     fullfft_load_count = 0
 
-    def _recording_read_excel(path, sheet_name, *, index_col=None, usecols=None, use_cache=True):
+    def _recording_selected_reader(path, *, sheet_name, required_columns, **kwargs):
         calls.append({"path": str(path), "sheet_name": sheet_name})
-        return original_read_excel(
+        return original_selected_reader(
             path,
-            sheet_name,
-            index_col=index_col,
-            usecols=usecols,
-            use_cache=use_cache,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+            **kwargs,
         )
 
     def _recording_fullfft_loader(*args, **kwargs):
@@ -415,7 +486,11 @@ def test_group_significant_policy_reuses_cached_selection_between_runs(
         fullfft_load_count += 1
         return original_fullfft_loader(*args, **kwargs)
 
-    monkeypatch.setattr(group_policy, "safe_read_excel", _recording_read_excel)
+    monkeypatch.setattr(
+        group_policy,
+        "read_xlsx_sheet_selected_columns",
+        _recording_selected_reader,
+    )
     monkeypatch.setattr(
         group_policy,
         "_load_mean_amplitude_series",
@@ -570,16 +645,20 @@ def test_group_significant_policy_fails_fast_when_any_workbook_lacks_exact_harmo
         fullfft_row_reads.append("called")
         raise AssertionError("FullFFT row loading should not run before exact-column preflight fails")
 
-    def _unexpected_excel_read(path, sheet_name, **_kwargs):
+    def _unexpected_selected_read(path, *, sheet_name, **_kwargs):
         bca_reads.append(f"{path}:{sheet_name}")
-        raise AssertionError("BCA sheets should not be read before exact-column preflight fails")
+        raise AssertionError("Source rows should not be read before exact-column preflight fails")
 
     monkeypatch.setattr(
         group_policy,
         "_load_mean_amplitude_series",
         _unexpected_fullfft_row_read,
     )
-    monkeypatch.setattr(group_policy, "safe_read_excel", _unexpected_excel_read)
+    monkeypatch.setattr(
+        group_policy,
+        "read_xlsx_sheet_selected_columns",
+        _unexpected_selected_read,
+    )
 
     with pytest.raises(
         RuntimeError,

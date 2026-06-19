@@ -9,7 +9,6 @@ from time import perf_counter
 from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
-from openpyxl import load_workbook
 import pandas as pd
 
 from Tools.Stats.analysis.dv_policy_settings import (
@@ -26,7 +25,11 @@ from Tools.Stats.data.group_harmonic_cache import (
     lookup_cached_group_harmonic_selection,
     save_cached_group_harmonic_selection,
 )
-from Tools.Stats.io.excel_io import safe_read_excel
+from Tools.Stats.io.xlsx_selected_reader import (
+    MissingXlsxColumnsError,
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+)
 
 logger = logging.getLogger("Tools.Stats")
 
@@ -1403,17 +1406,11 @@ def _find_first_full_fft_columns(
             if not file_path or not Path(file_path).exists():
                 continue
             try:
-                workbook = load_workbook(
+                return read_xlsx_sheet_header(
                     file_path,
-                    read_only=True,
-                    data_only=True,
+                    sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
                 )
-                try:
-                    worksheet = workbook[FULL_FFT_AMPLITUDE_SHEET_NAME]
-                    return [cell.value for cell in next(worksheet.iter_rows(max_row=1))]
-                finally:
-                    workbook.close()
-            except KeyError as exc:
+            except ValueError as exc:
                 raise RuntimeError(
                     "Group-level significant harmonic selection requires regenerated "
                     f"workbooks with a '{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet: {file_path}"
@@ -1429,94 +1426,96 @@ def _load_mean_amplitude_series(
     reference_frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
 ) -> tuple[pd.Series, list[str], int]:
-    workbook = None
     try:
-        workbook = load_workbook(file_path, read_only=True, data_only=True)
-        worksheet = workbook[FULL_FFT_AMPLITUDE_SHEET_NAME]
-        header_columns = [cell.value for cell in next(worksheet.iter_rows(max_row=1))]
-    except KeyError as exc:
-        if workbook is not None:
-            workbook.close()
+        header_columns = read_xlsx_sheet_header(
+            file_path,
+            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
+        )
+    except ValueError as exc:
         raise RuntimeError(
             "Group-level significant harmonic selection requires regenerated "
             f"workbooks with a '{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet: {file_path}"
         ) from exc
-    except StopIteration:
-        if workbook is not None:
-            workbook.close()
+
+    if not header_columns:
         return pd.Series(dtype=float), [], 0
 
+    usecols, local_to_reference = _plan_workbook_full_fft_usecols_from_header(
+        header_columns,
+        reference_frequency_columns=reference_frequency_columns,
+        required_indices=required_indices,
+    )
+    required_columns = [
+        str(column)
+        for _freq, column, idx in reference_frequency_columns
+        if int(idx) in set(required_indices)
+    ]
+    matched_reference_columns = {
+        str(reference_column)
+        for reference_items in local_to_reference.values()
+        for _reference_freq, reference_column in reference_items
+    }
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in matched_reference_columns
+    ]
+    if missing_columns:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires matching "
+            f"FullFFT columns in every included workbook. Missing columns in {file_path}: "
+            f"{missing_columns[:8]}"
+        )
+
+    ordered_local_columns = [column for column in usecols[1:] if column in header_columns]
+    if not ordered_local_columns:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires matching "
+            f"FullFFT columns in every included workbook: {file_path}"
+        )
+
+    wanted_electrodes = _wanted_electrodes_for_scope(
+        rois=rois,
+        electrode_scope=electrode_scope,
+    )
     try:
-        usecols, local_to_reference = _plan_workbook_full_fft_usecols_from_header(
-            header_columns,
-            reference_frequency_columns=reference_frequency_columns,
-            required_indices=required_indices,
+        df_fft = read_xlsx_sheet_selected_columns(
+            file_path,
+            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
+            required_columns=["Electrode", *ordered_local_columns],
+            included_electrodes_upper=wanted_electrodes,
         )
-        required_columns = [
-            str(column)
-            for _freq, column, idx in reference_frequency_columns
-            if int(idx) in set(required_indices)
-        ]
-        matched_reference_columns = {
-            str(reference_column)
-            for reference_items in local_to_reference.values()
-            for _reference_freq, reference_column in reference_items
-        }
-        missing_columns = [
-            column
-            for column in required_columns
-            if column not in matched_reference_columns
-        ]
-        if missing_columns:
-            raise RuntimeError(
-                "Group-level significant harmonic selection requires matching "
-                f"FullFFT columns in every included workbook. Missing columns in {file_path}: "
-                f"{missing_columns[:8]}"
-            )
+    except MissingXlsxColumnsError as exc:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires matching "
+            f"FullFFT columns in every included workbook. Missing columns in {file_path}: "
+            f"{exc.missing_columns[:8]}"
+        ) from exc
 
-        ordered_local_columns = [column for column in usecols[1:] if column in header_columns]
-        if not ordered_local_columns:
-            raise RuntimeError(
-                "Group-level significant harmonic selection requires matching "
-                f"FullFFT columns in every included workbook: {file_path}"
-            )
-
-        wanted_electrodes = _wanted_electrodes_for_scope(
-            rois=rois,
-            electrode_scope=electrode_scope,
+    if "Electrode" not in df_fft.columns:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires matching "
+            f"FullFFT columns in every included workbook. Missing columns in {file_path}: "
+            "['Electrode']"
         )
-        position_by_column = {
-            str(column): index
-            for index, column in enumerate(header_columns)
-            if isinstance(column, str)
-        }
-        selected_positions = {
-            column: position_by_column[column]
-            for column in ordered_local_columns
-            if column in position_by_column
-        }
-        local_values = {column: [] for column in selected_positions}
-        electrode_count = 0
-        for row in worksheet.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            electrode = str(row[0]).upper().strip() if row[0] is not None else ""
-            if not electrode:
-                continue
-            if wanted_electrodes is not None and electrode not in wanted_electrodes:
-                continue
-            electrode_count += 1
-            for column, position in selected_positions.items():
-                value = row[position] if position < len(row) else np.nan
-                local_values[column].append(_numeric_or_nan(value))
-    finally:
-        if workbook is not None:
-            workbook.close()
+
+    electrodes = (
+        df_fft["Electrode"]
+        .where(df_fft["Electrode"].notna(), "")
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
+    df_fft = df_fft.loc[electrodes != ""].copy()
+    electrode_count = len(df_fft)
 
     values: dict[float, float] = {}
     reference_columns: list[str] = []
     for local_column in ordered_local_columns:
-        column_values = np.asarray(local_values.get(local_column, []), dtype=float)
+        column_values = pd.to_numeric(
+            df_fft.get(local_column, pd.Series(dtype=float)),
+            errors="coerce",
+        ).to_numpy(dtype=float)
         finite_values = column_values[np.isfinite(column_values)]
         value = float(finite_values.mean()) if finite_values.size else np.nan
         for reference_freq, reference_column in local_to_reference.get(local_column, []):
@@ -1562,17 +1561,16 @@ def _plan_workbook_full_fft_usecols_from_header(
 
 
 def _read_full_fft_header(file_path: str | Path) -> list[object]:
-    workbook = load_workbook(file_path, read_only=True, data_only=True)
     try:
-        worksheet = workbook[FULL_FFT_AMPLITUDE_SHEET_NAME]
-        return [cell.value for cell in next(worksheet.iter_rows(max_row=1))]
-    except KeyError as exc:
+        return read_xlsx_sheet_header(
+            file_path,
+            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
+        )
+    except ValueError as exc:
         raise RuntimeError(
             "Group-level significant harmonic selection requires regenerated "
             f"workbooks with a '{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet: {file_path}"
         ) from exc
-    finally:
-        workbook.close()
 
 
 def _aggregate_bca_for_all_rois(
@@ -1590,20 +1588,33 @@ def _aggregate_bca_for_all_rois(
         return values, provenance
 
     started = perf_counter()
+    cols_to_sum = [f"{float(freq_val):.4f}_Hz" for freq_val in harmonic_freqs]
     try:
-        df_bca = safe_read_excel(
+        df_bca = read_xlsx_sheet_selected_columns(
             file_path,
             sheet_name="BCA (uV)",
-            index_col="Electrode",
-            use_cache=False,
+            required_columns=["Electrode", *cols_to_sum],
         )
+    except MissingXlsxColumnsError as exc:
+        missing_bca_columns = [column for column in cols_to_sum if column in exc.missing_columns]
+        if missing_bca_columns:
+            raise RuntimeError(
+                "Group-level significant harmonic summation requires exact selected "
+                f"BCA harmonic columns in every included workbook. Missing columns in {file_path}: "
+                f"{missing_bca_columns[:8]}"
+            ) from exc
+        log_func(f"Error reading BCA sheet for {file_path}: {exc}")
+        return values, provenance
     except Exception as exc:  # noqa: BLE001
         log_func(f"Error reading BCA sheet for {file_path}: {exc}")
         return values, provenance
 
     read_elapsed = perf_counter() - started
+    if "Electrode" not in df_bca.columns:
+        log_func(f"Error reading BCA sheet for {file_path}: missing Electrode column")
+        return values, provenance
+    df_bca = df_bca.set_index("Electrode")
     df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
-    cols_to_sum = [f"{float(freq_val):.4f}_Hz" for freq_val in harmonic_freqs]
     missing_bca_columns = [column for column in cols_to_sum if column not in df_bca.columns]
     if missing_bca_columns:
         raise RuntimeError(

@@ -41,8 +41,8 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
             "P3_B.xlsx",
         )
     }
-    for path in paths.values():
-        path.touch()
+    for name, path in paths.items():
+        _write_bca_workbook(path, _make_bca_df(1000.0 if name == "P3_B.xlsx" else 0.1))
 
     subject_data = {
         "P1": {"A": str(paths["P1_A.xlsx"]), "B": str(paths["P1_B.xlsx"])},
@@ -61,10 +61,6 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
         return normal_df.copy()
 
     monkeypatch.setattr(excel_io, "safe_read_excel", _fake_read_excel)
-    monkeypatch.setattr(
-        "Tools.Stats.analysis.dv_policy_fixed_predefined.safe_read_excel",
-        _fake_read_excel,
-    )
 
     report = run_qc_exclusion(
         subjects=list(subject_data.keys()),
@@ -96,6 +92,11 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
     assert dv_data is not None
     assert set(dv_data.keys()) == set(subject_data.keys())
     assert set(dv_data["P1"].keys()) == {"A"}
+
+
+def _write_bca_workbook(path, frame: pd.DataFrame) -> None:
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        frame.to_excel(writer, sheet_name="BCA (uV)")
 
 
 def test_format_qc_violation_is_human_readable() -> None:
