@@ -29,7 +29,6 @@ from Main_App.gui.components import (
     AppDialog,
     SectionCard,
     StatusBanner,
-    SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
     make_action_button,
@@ -91,7 +90,7 @@ ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
 )
 DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE = (0.0, 3.5)
 DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Publication split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
+    ("Split Hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
     ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
     ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
 )
@@ -565,6 +564,7 @@ class SourceMapOptionsDialog(AppDialog):
         include_flagged_subjects: bool,
         zscore_display_threshold: float,
         use_cluster_mask: bool,
+        source_map_visible: bool,
         project_available: bool,
         export_busy: bool,
     ) -> None:
@@ -625,6 +625,12 @@ class SourceMapOptionsDialog(AppDialog):
             "Turn off for exploratory viewing with the selected z-score cutoff instead of the saved cluster mask."
         )
         display_layout.addWidget(self.use_cluster_mask_check)
+
+        self.source_map_visible_check = QCheckBox("Show source map", display_tab)
+        self.source_map_visible_check.setObjectName("loreta_source_map_visible_check")
+        self.source_map_visible_check.setChecked(bool(source_map_visible))
+        self.source_map_visible_check.setToolTip("Turn off to inspect the anatomical cortical surface without source colors.")
+        display_layout.addWidget(self.source_map_visible_check)
 
         threshold_note = QLabel(
             "For Hauk et al., 2025 cluster-masked maps, this cutoff is used when "
@@ -762,7 +768,7 @@ class ExportFiguresDialog(AppDialog):
         self.split_figures_btn.setToolTip(
             "Export the current publication split-hemisphere view as 600 DPI PDF and PNG files."
             if can_export_split_figures
-            else "Switch to Publication split hemispheres with a loaded source map to export this figure."
+            else "Switch to Split Hemispheres with a loaded source map to export this figure."
         )
         self.split_figures_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_SPLIT_FIGURES))
         self.root_layout.addWidget(self.split_figures_btn)
@@ -902,14 +908,13 @@ class LoretaVisualizerWindow(QWidget):
         self._include_flagged_subjects = False
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._use_cluster_mask = True
+        self._activation_visible = True
         self._display_mode = DEFAULT_DISPLAY_MODE
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(8, 2, 8, 8)
         root.setSpacing(8)
 
-        header = SubsectionHeaderLabel("LORETA Visualizer", self)
-        root.addWidget(header, 0)
         self.mesh_status = StatusBanner(
             "Preparing fsaverage brain mesh...",
             self,
@@ -966,92 +971,107 @@ class LoretaVisualizerWindow(QWidget):
 
     def _build_controls(self) -> SectionCard:
         controls = SectionCard("Source Map", self, object_name="loreta_view_controls")
-        controls.setFixedWidth(240)
+        controls.setFixedWidth(260)
+        controls.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        controls.header.setVisible(False)
+        controls.shell_layout.setSpacing(0)
+        controls.content_layout.setSpacing(8)
 
-        def add_group_header(text: str) -> None:
-            header = SubsectionHeaderLabel(text, controls)
-            header.setObjectName(f"loreta_{_object_name_slug(text)}_group_header")
-            controls.content_layout.addSpacing(4)
-            controls.content_layout.addWidget(header)
+        def add_control_section(text: str, *, accent: bool = False) -> tuple[QWidget, QVBoxLayout]:
+            _ = (text, accent)
+            if controls.content_layout.count() > 0:
+                controls.content_layout.addSpacing(10)
+            return controls, controls.content_layout
 
-        condition_label = QLabel("Condition", controls)
-        condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(condition_label)
+        def make_field_label(text: str, parent: QWidget) -> QLabel:
+            label = QLabel(text, parent)
+            label.setProperty("caption", True)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            return label
 
-        self.condition_combo = QComboBox(controls)
+        def add_label_value_row(target_layout: QVBoxLayout, label: QLabel, value_label: QLabel) -> None:
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            row.addWidget(label, 1)
+            row.addWidget(value_label, 0)
+            target_layout.addLayout(row)
+
+        selection_section, selection_layout = add_control_section("Selection", accent=True)
+
+        condition_label = make_field_label("Condition", selection_section)
+        selection_layout.addWidget(condition_label)
+
+        self.condition_combo = QComboBox(selection_section)
         self.condition_combo.setObjectName("loreta_condition_combo")
         self.condition_combo.setPlaceholderText("No source maps loaded")
         self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
-        controls.content_layout.addWidget(self.condition_combo)
+        selection_layout.addWidget(self.condition_combo)
 
-        summary_label = QLabel("Summary", controls)
-        summary_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(summary_label)
+        summary_label = make_field_label("Summary", selection_section)
+        selection_layout.addWidget(summary_label)
 
-        self.summary_combo = QComboBox(controls)
+        self.summary_combo = QComboBox(selection_section)
         self.summary_combo.setObjectName("loreta_source_summary_combo")
         self.summary_combo.currentIndexChanged.connect(self._on_summary_changed)
-        controls.content_layout.addWidget(self.summary_combo)
+        selection_layout.addWidget(self.summary_combo)
 
-        display_mode_label = QLabel("Display", controls)
-        display_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(display_mode_label)
+        display_mode_label = make_field_label("Display", selection_section)
+        selection_layout.addWidget(display_mode_label)
 
-        self.display_mode_combo = QComboBox(controls)
+        self.display_mode_combo = QComboBox(selection_section)
         self.display_mode_combo.setObjectName("loreta_display_mode_combo")
         for label, mode in DISPLAY_MODE_OPTIONS:
             self.display_mode_combo.addItem(label, mode)
         self.display_mode_combo.currentIndexChanged.connect(self._on_display_mode_changed)
-        controls.content_layout.addWidget(self.display_mode_combo)
+        selection_layout.addWidget(self.display_mode_combo)
         self._set_display_mode_combo_data(self._display_mode)
 
-        add_group_header("Color")
+        color_section, color_layout = add_control_section("Color")
 
-        self.activation_auto_scale_check = QCheckBox("Auto color scale", controls)
+        self.activation_auto_scale_check = QCheckBox("Auto color scale", color_section)
         self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
         self.activation_auto_scale_check.setChecked(True)
         self.activation_auto_scale_check.toggled.connect(self._on_activation_auto_scale_changed)
-        controls.content_layout.addWidget(self.activation_auto_scale_check)
+        color_layout.addWidget(self.activation_auto_scale_check)
 
-        self.activation_scale_mode_label = QLabel("Auto color scale", controls)
+        self.activation_scale_mode_label = make_field_label("Auto color scale", color_section)
         self.activation_scale_mode_label.setObjectName("loreta_activation_scale_mode_label")
-        self.activation_scale_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.activation_scale_mode_label)
+        color_layout.addWidget(self.activation_scale_mode_label)
 
         scale_row = QHBoxLayout()
         scale_row.setContentsMargins(0, 0, 0, 0)
         scale_row.setSpacing(6)
-        self.activation_scale_min_label = QLabel("", controls)
+        self.activation_scale_min_label = QLabel("", color_section)
         self.activation_scale_min_label.setObjectName("loreta_activation_scale_min_label")
         self.activation_scale_min_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.activation_color_ramp = QLabel("", controls)
+        self.activation_color_ramp = QLabel("", color_section)
         self.activation_color_ramp.setObjectName("loreta_activation_color_ramp")
         self.activation_color_ramp.setFixedHeight(12)
         self.activation_color_ramp.setMinimumWidth(72)
         self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
-        self.activation_scale_max_label = QLabel("", controls)
+        self.activation_scale_max_label = QLabel("", color_section)
         self.activation_scale_max_label.setObjectName("loreta_activation_scale_max_label")
         self.activation_scale_max_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         scale_row.addWidget(self.activation_scale_min_label, 0)
         scale_row.addWidget(self.activation_color_ramp, 1)
         scale_row.addWidget(self.activation_scale_max_label, 0)
-        controls.content_layout.addLayout(scale_row)
+        color_layout.addLayout(scale_row)
 
-        range_label = QLabel("Color range", controls)
-        range_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(range_label)
+        range_label = make_field_label("Color range", color_section)
+        color_layout.addWidget(range_label)
 
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         range_row.setSpacing(6)
-        self.activation_min_spin = QDoubleSpinBox(controls)
+        self.activation_min_spin = QDoubleSpinBox(color_section)
         self.activation_min_spin.setObjectName("loreta_activation_min_spin")
         self.activation_min_spin.setDecimals(2)
         self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.activation_min_spin.setSingleStep(0.05)
         self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
         self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
-        self.activation_max_spin = QDoubleSpinBox(controls)
+        self.activation_max_spin = QDoubleSpinBox(color_section)
         self.activation_max_spin.setObjectName("loreta_activation_max_spin")
         self.activation_max_spin.setDecimals(2)
         self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
@@ -1059,55 +1079,42 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
         self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
         range_row.addWidget(self.activation_min_spin)
-        range_row.addWidget(QLabel("to", controls), 0)
+        range_row.addWidget(make_field_label("to", color_section), 0)
         range_row.addWidget(self.activation_max_spin)
-        controls.content_layout.addLayout(range_row)
+        color_layout.addLayout(range_row)
 
-        add_group_header("Layers")
+        view_section, view_layout = add_control_section("View")
 
-        self.activation_visible_check = QCheckBox("Source map", controls)
-        self.activation_visible_check.setObjectName("loreta_activation_visible_check")
-        self.activation_visible_check.setChecked(True)
-        self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
-        controls.content_layout.addWidget(self.activation_visible_check)
+        self.opacity_label = make_field_label("Brain opacity", view_section)
 
-        add_group_header("View")
-
-        self.opacity_label = QLabel("Brain opacity", controls)
-        self.opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.opacity_label)
-
-        self.transparency_value_label = QLabel("", controls)
+        self.transparency_value_label = make_field_label("", view_section)
         self.transparency_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        add_label_value_row(view_layout, self.opacity_label, self.transparency_value_label)
 
-        self.transparency_slider = QSlider(Qt.Horizontal, controls)
+        self.transparency_slider = QSlider(Qt.Horizontal, view_section)
         self.transparency_slider.setObjectName("loreta_transparency_slider")
         self.transparency_slider.setRange(5, 100)
         self.transparency_slider.setValue(DEFAULT_OPACITY_PERCENT)
         self.transparency_slider.valueChanged.connect(self._on_transparency_changed)
-        controls.content_layout.addWidget(self.transparency_slider)
-        controls.content_layout.addWidget(self.transparency_value_label)
+        view_layout.addWidget(self.transparency_slider)
 
-        self.activation_opacity_label = QLabel("Source opacity", controls)
-        self.activation_opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.activation_opacity_label)
+        self.activation_opacity_label = make_field_label("Source opacity", view_section)
 
-        self.activation_opacity_value_label = QLabel("", controls)
+        self.activation_opacity_value_label = make_field_label("", view_section)
         self.activation_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        add_label_value_row(view_layout, self.activation_opacity_label, self.activation_opacity_value_label)
 
-        self.activation_opacity_slider = QSlider(Qt.Horizontal, controls)
+        self.activation_opacity_slider = QSlider(Qt.Horizontal, view_section)
         self.activation_opacity_slider.setObjectName("loreta_activation_opacity_slider")
         self.activation_opacity_slider.setRange(0, 100)
         self.activation_opacity_slider.setValue(DEFAULT_ACTIVATION_OPACITY_PERCENT)
         self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
-        controls.content_layout.addWidget(self.activation_opacity_slider)
-        controls.content_layout.addWidget(self.activation_opacity_value_label)
+        view_layout.addWidget(self.activation_opacity_slider)
 
-        self.split_rotation_label = QLabel("Hemisphere rotation", controls)
-        self.split_rotation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.split_rotation_label)
+        self.split_rotation_label = make_field_label("Hemisphere rotation", view_section)
+        view_layout.addWidget(self.split_rotation_label)
 
-        self.left_split_rotation_row = QWidget(controls)
+        self.left_split_rotation_row = QWidget(view_section)
         left_split_rotation_layout = QHBoxLayout(self.left_split_rotation_row)
         left_split_rotation_layout.setContentsMargins(0, 0, 0, 0)
         left_split_rotation_layout.setSpacing(6)
@@ -1126,9 +1133,9 @@ class LoretaVisualizerWindow(QWidget):
         )
         left_split_rotation_layout.addWidget(self.left_split_rotate_minus_btn, 0)
         left_split_rotation_layout.addWidget(self.left_split_rotate_plus_btn, 0)
-        controls.content_layout.addWidget(self.left_split_rotation_row)
+        view_layout.addWidget(self.left_split_rotation_row)
 
-        self.right_split_rotation_row = QWidget(controls)
+        self.right_split_rotation_row = QWidget(view_section)
         right_split_rotation_layout = QHBoxLayout(self.right_split_rotation_row)
         right_split_rotation_layout.setContentsMargins(0, 0, 0, 0)
         right_split_rotation_layout.setSpacing(6)
@@ -1147,27 +1154,32 @@ class LoretaVisualizerWindow(QWidget):
         )
         right_split_rotation_layout.addWidget(self.right_split_rotate_minus_btn, 0)
         right_split_rotation_layout.addWidget(self.right_split_rotate_plus_btn, 0)
-        controls.content_layout.addWidget(self.right_split_rotation_row)
+        view_layout.addWidget(self.right_split_rotation_row)
 
-        self.reset_camera_btn = make_action_button("Reset view", compact=True, parent=controls)
+        self.reset_camera_btn = make_action_button("Reset view", compact=True, parent=view_section)
         self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
         self.reset_camera_btn.setToolTip("Reset view")
         self.reset_camera_btn.clicked.connect(self._reset_camera)
-        controls.content_layout.addWidget(self.reset_camera_btn)
+        view_layout.addWidget(self.reset_camera_btn)
 
-        add_group_header("Actions")
+        actions_section, actions_layout = add_control_section("Actions")
 
-        self.export_figures_btn = make_action_button("Export Figures...", compact=True, parent=controls)
+        self.export_figures_btn = make_action_button(
+            "Export Figures...",
+            variant="primary",
+            compact=True,
+            parent=actions_section,
+        )
         self.export_figures_btn.setObjectName("loreta_export_figures_btn")
         self.export_figures_btn.setToolTip("Open figure export actions.")
         self.export_figures_btn.clicked.connect(self._open_export_figures)
-        controls.content_layout.addWidget(self.export_figures_btn)
+        actions_layout.addWidget(self.export_figures_btn)
 
-        self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=controls)
+        self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=actions_section)
         self.source_options_btn.setObjectName("loreta_source_options_btn")
         self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
         self.source_options_btn.clicked.connect(self._open_source_map_options)
-        controls.content_layout.addWidget(self.source_options_btn)
+        actions_layout.addWidget(self.source_options_btn)
         controls.content_layout.addStretch(1)
 
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
@@ -1209,7 +1221,6 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_activation_range_enabled()
         self._sync_source_map_selectors_enabled()
         self.display_mode_combo.setEnabled(enabled)
-        self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.export_figures_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
@@ -1323,7 +1334,7 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is not None:
             renderer.set_display_mode(mode)
             renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
-            renderer.set_activation_visible(self.activation_visible_check.isChecked())
+            renderer.set_activation_visible(self._activation_visible)
         self._sync_activation_render_mode_controls()
         self._apply_activation_scalar_range()
 
@@ -1332,10 +1343,11 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is not None:
             renderer.rotate_split_hemisphere(side, degrees)
 
-    def _on_activation_visibility_changed(self, checked: bool) -> None:
+    def _set_activation_visibility_enabled(self, checked: bool) -> None:
+        self._activation_visible = bool(checked)
         renderer = self.renderer
         if renderer is not None:
-            renderer.set_activation_visible(checked)
+            renderer.set_activation_visible(self._activation_visible)
 
     def _on_condition_changed(self, _index: int) -> None:
         condition_id = self.condition_combo.currentData()
@@ -1394,7 +1406,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         if renderer.display_mode() != DISPLAY_MODE_SPLIT_HEMISPHERE or not renderer.can_export_split_hemisphere_figure():
             self._set_source_export_status(
-                "Switch to Publication split hemispheres with a loaded source map before exporting figures.",
+                "Switch to Split Hemispheres with a loaded source map before exporting figures.",
                 variant="warning",
             )
             return
@@ -1604,6 +1616,7 @@ class LoretaVisualizerWindow(QWidget):
             include_flagged_subjects=self._include_flagged_subjects,
             zscore_display_threshold=self._zscore_display_threshold,
             use_cluster_mask=self._use_cluster_mask,
+            source_map_visible=self._activation_visible,
             project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
@@ -1611,6 +1624,7 @@ class LoretaVisualizerWindow(QWidget):
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
+        self._set_activation_visibility_enabled(dialog.source_map_visible_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD:
@@ -2049,7 +2063,7 @@ class LoretaVisualizerWindow(QWidget):
         renderer.set_activation_payload(display_payload)
         self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
-        renderer.set_activation_visible(self.activation_visible_check.isChecked())
+        renderer.set_activation_visible(self._activation_visible)
 
     def _apply_activation_scalar_range(self) -> None:
         renderer = self.renderer

@@ -24,6 +24,8 @@ from Tools.LORETA_Visualizer.renderer import (
     SPLIT_FIGURE_EXPORT_DPI,
     SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
     SPLIT_FIGURE_SINGLE_TOP_MARGIN,
+    _PUBLICATION_CAMERA_DISTANCE,
+    _PUBLICATION_CAMERA_PARALLEL_SCALE,
     _SplitHemisphereState,
     _configure_transparency_backend,
     _cortical_paint_display_values,
@@ -717,6 +719,62 @@ def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeyp
 class _FakePlotter:
     def render(self) -> None:
         return None
+
+
+class _FakePublicationCamera:
+    def __init__(self) -> None:
+        self.position: tuple[float, float, float] | None = None
+        self.focal_point: tuple[float, float, float] | None = None
+        self.view_up: tuple[float, float, float] | None = None
+        self.parallel_projection_enabled = False
+        self.parallel_scale: float | None = None
+
+    def SetPosition(self, x: float, y: float, z: float) -> None:
+        self.position = (x, y, z)
+
+    def SetFocalPoint(self, x: float, y: float, z: float) -> None:
+        self.focal_point = (x, y, z)
+
+    def SetViewUp(self, x: float, y: float, z: float) -> None:
+        self.view_up = (x, y, z)
+
+    def ParallelProjectionOn(self) -> None:
+        self.parallel_projection_enabled = True
+
+    def SetParallelScale(self, scale: float) -> None:
+        self.parallel_scale = scale
+
+
+class _FakePublicationCameraPlotter:
+    def __init__(self) -> None:
+        self.camera = _FakePublicationCamera()
+        self.reset_camera_calls = 0
+        self.reset_camera_clipping_range_calls = 0
+        self.camera_position: str | None = None
+
+    def reset_camera(self) -> None:
+        self.reset_camera_calls += 1
+
+    def reset_camera_clipping_range(self) -> None:
+        self.reset_camera_clipping_range_calls += 1
+
+
+def test_publication_camera_opens_split_view_zoomed_out() -> None:
+    plotter = _FakePublicationCameraPlotter()
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = plotter
+
+    BrainRendererWidget._set_publication_camera(renderer)
+
+    assert plotter.reset_camera_calls == 1
+    assert plotter.reset_camera_clipping_range_calls == 1
+    assert plotter.camera.position == (0.0, -_PUBLICATION_CAMERA_DISTANCE, 0.25)
+    assert plotter.camera.focal_point == (0.0, 0.0, 0.0)
+    assert plotter.camera.view_up == (0.0, 0.0, 1.0)
+    assert plotter.camera.parallel_projection_enabled is True
+    assert plotter.camera.parallel_scale == _PUBLICATION_CAMERA_PARALLEL_SCALE
+    assert _PUBLICATION_CAMERA_DISTANCE > 5.0
+    assert _PUBLICATION_CAMERA_PARALLEL_SCALE > 2.0
 
 
 class _FakeTransparencyPlotter:

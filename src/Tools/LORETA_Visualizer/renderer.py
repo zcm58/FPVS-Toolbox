@@ -54,6 +54,8 @@ _RIGHT_HEMISPHERE_DEFAULT_YAW = -90.0
 _LEFT_HEMISPHERE_OFFSET = (-1.08, 0.0, 0.0)
 _RIGHT_HEMISPHERE_OFFSET = (1.08, 0.0, 0.0)
 _PUBLICATION_HEMISPHERE_RADIUS = 0.82
+_PUBLICATION_CAMERA_DISTANCE = 8.0
+_PUBLICATION_CAMERA_PARALLEL_SCALE = 2.25
 _PUBLICATION_SHADE_DARK = "#636b6d"
 _PUBLICATION_SHADE_LIGHT = "#d8dcda"
 DEFAULT_SPLIT_FIGURE_WIDTH = 1950
@@ -595,9 +597,14 @@ class BrainRendererWidget(QWidget):
             return
         try:
             plotter.reset_camera()
-            plotter.camera.SetPosition(0.0, -5.0, 0.25)
+            plotter.camera.SetPosition(0.0, -_PUBLICATION_CAMERA_DISTANCE, 0.25)
             plotter.camera.SetFocalPoint(0.0, 0.0, 0.0)
             plotter.camera.SetViewUp(0.0, 0.0, 1.0)
+            try:
+                plotter.camera.ParallelProjectionOn()
+            except AttributeError:
+                plotter.camera.SetParallelProjection(True)
+            plotter.camera.SetParallelScale(_PUBLICATION_CAMERA_PARALLEL_SCALE)
             plotter.reset_camera_clipping_range()
         except (AttributeError, RuntimeError, TypeError, ValueError):
             logger.debug("loreta_publication_camera_failed", exc_info=True)
@@ -811,7 +818,7 @@ class BrainRendererWidget(QWidget):
 
     def write_split_hemisphere_figures(self, output_path: str | Path) -> tuple[Path, Path]:
         if not self.can_export_split_hemisphere_figure():
-            raise RuntimeError("Publication split hemispheres must be visible before exporting figures.")
+            raise RuntimeError("Split Hemispheres must be visible before exporting figures.")
         return write_publication_split_hemisphere_figures(
             output_path,
             left_state=self._split_left_state,
