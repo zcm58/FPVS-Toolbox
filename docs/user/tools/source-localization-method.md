@@ -124,11 +124,11 @@ compute a positive-tail source-space cluster-permutation mask against zero. The
 visualizer loads the raw mean entries by default when the manifest order is
 unchanged, and the other summaries are available from the condition selector.
 
-Source Map Options can still build the older group-first beta model for
-comparison. That deprecated model averages target and neighboring-bin
-topographies before source estimation. It is retained only as an advanced
-fallback and is intended to be removed after participant-first maps are
-validated.
+The normal **Source Map Options** rebuild path now uses only the
+participant-first model. The older group-first beta producer, which averages
+target and neighboring-bin topographies before source estimation, remains in
+the codebase only for developer/method-review runs and is not exposed as a
+standard GUI rebuild option.
 
 ## What the viewer displays
 
@@ -363,5 +363,6 @@ The diagnostic arbitrary-amplitude exporter writes to:
 
 `6 - Source Localization/L2-MNE Cortical Surface Beta/`
 
-It is available from Source Map Options for method review, but the default
-project display is the Hauk-style z-score manifest above.
+It remains available as a developer/method-review producer, but it is no longer
+exposed as a normal Source Map Options rebuild action. The default project
+display is the Hauk-style z-score manifest above.

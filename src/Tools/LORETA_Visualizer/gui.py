@@ -74,14 +74,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_OPACITY_PERCENT = 48
 DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
-PROJECT_SOURCE_EXPORT_AMPLITUDE = "amplitude"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST = "participant_first"
 PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST = "deprecated_group_first"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
-SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE = "rebuild_amplitude"
 EXPORT_FIGURES_ACTION_SPLIT_FIGURES = "split_figures"
 EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES = "stacked_split_figures"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
@@ -150,31 +148,22 @@ class ProjectSourceMapExportWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            if self._export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
-                    write_project_l2_mne_hauk_zscore_payloads,
-                )
+            if self._export_mode != PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+                raise ValueError(f"Unsupported project source export mode: {self._export_mode}")
+            from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+                write_project_l2_mne_hauk_zscore_payloads,
+            )
 
-                if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
-                    self.progress.emit("Starting deprecated group-first source-space z-score rebuild...")
-                else:
-                    self.progress.emit("Starting participant-first source-space z-score rebuild...")
-                result = write_project_l2_mne_hauk_zscore_payloads(
-                    project_root=self._project_root,
-                    include_flagged_subjects=self._include_flagged_subjects,
-                    zscore_model=self._zscore_model,
-                    progress_callback=self.progress.emit,
-                )
+            if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
+                self.progress.emit("Starting deprecated group-first source-space z-score rebuild...")
             else:
-                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
-                    write_project_l2_mne_cortical_surface_payloads,
-                )
-
-                self.progress.emit("Starting diagnostic L2-MNE amplitude source-map export...")
-                result = write_project_l2_mne_cortical_surface_payloads(
-                    project_root=self._project_root,
-                    include_flagged_subjects=self._include_flagged_subjects,
-                )
+                self.progress.emit("Starting participant-first source-space z-score rebuild...")
+            result = write_project_l2_mne_hauk_zscore_payloads(
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                zscore_model=self._zscore_model,
+                progress_callback=self.progress.emit,
+            )
         except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
             self.failed.emit(str(exc))
         else:
@@ -482,13 +471,12 @@ class SourceMapOptionsDialog(AppDialog):
         parent: QWidget,
         *,
         include_flagged_subjects: bool,
-        zscore_model: str,
         zscore_display_threshold: float,
         use_cluster_mask: bool,
         project_available: bool,
         export_busy: bool,
     ) -> None:
-        super().__init__("Source Map Options", parent, size=SurfaceSize(width=480, height=500, min_width=430))
+        super().__init__("Source Map Options", parent, size=SurfaceSize(width=480, height=440, min_width=430))
         self.selected_action: str | None = None
         self._syncing_threshold_controls = False
 
@@ -563,33 +551,13 @@ class SourceMapOptionsDialog(AppDialog):
         data_layout.setSpacing(8)
         tabs.addTab(data_tab, "Data")
 
-        zscore_model_label = QLabel("Z-score generation model", data_tab)
-        zscore_model_label.setObjectName("loreta_zscore_model_label")
-        data_layout.addWidget(zscore_model_label)
-
-        self.zscore_model_combo = QComboBox(data_tab)
-        self.zscore_model_combo.setObjectName("loreta_zscore_model_combo")
-        self.zscore_model_combo.addItem(
-            "Participant-first source z-scores (default)",
-            PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
-        )
-        self.zscore_model_combo.addItem(
-            "Deprecated group-first beta model",
-            PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
-        )
-        for index in range(self.zscore_model_combo.count()):
-            if self.zscore_model_combo.itemData(index) == zscore_model:
-                self.zscore_model_combo.setCurrentIndex(index)
-                break
-        data_layout.addWidget(self.zscore_model_combo)
-
-        deprecated_note = QLabel(
-            "The deprecated group-first model is retained only for comparison and is planned for removal.",
+        data_note = QLabel(
+            "Project rebuilds generate participant-first source-space z-score maps for the active project.",
             data_tab,
         )
-        deprecated_note.setObjectName("loreta_zscore_model_deprecated_note")
-        deprecated_note.setWordWrap(True)
-        data_layout.addWidget(deprecated_note)
+        data_note.setObjectName("loreta_source_options_data_note")
+        data_note.setWordWrap(True)
+        data_layout.addWidget(data_note)
 
         self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
         self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
@@ -616,12 +584,6 @@ class SourceMapOptionsDialog(AppDialog):
         self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
         data_layout.addWidget(self.rebuild_zscore_btn)
 
-        self.rebuild_amplitude_btn = make_action_button("Build diagnostic amplitude maps", compact=True, parent=self)
-        self.rebuild_amplitude_btn.setObjectName("loreta_options_rebuild_amplitude_btn")
-        self.rebuild_amplitude_btn.setToolTip("Write diagnostic beta L2-MNE amplitude JSON and load it.")
-        self.rebuild_amplitude_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE))
-        data_layout.addWidget(self.rebuild_amplitude_btn)
-
         self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=self)
         self.load_source_payload_btn.setObjectName("loreta_options_load_source_payload_btn")
         self.load_source_payload_btn.setToolTip("Load a prepared source payload JSON file.")
@@ -637,7 +599,6 @@ class SourceMapOptionsDialog(AppDialog):
 
         rebuild_enabled = project_available and not export_busy
         self.rebuild_zscore_btn.setEnabled(rebuild_enabled)
-        self.rebuild_amplitude_btn.setEnabled(rebuild_enabled)
         self._set_threshold_controls_value(zscore_display_threshold)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
@@ -845,7 +806,6 @@ class LoretaVisualizerWindow(QWidget):
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
-        self._zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._use_cluster_mask = True
         self._display_mode = DEFAULT_DISPLAY_MODE
@@ -1525,7 +1485,6 @@ class LoretaVisualizerWindow(QWidget):
         dialog = SourceMapOptionsDialog(
             self,
             include_flagged_subjects=self._include_flagged_subjects,
-            zscore_model=self._zscore_model,
             zscore_display_threshold=self._zscore_display_threshold,
             use_cluster_mask=self._use_cluster_mask,
             project_available=project_root is not None,
@@ -1533,13 +1492,10 @@ class LoretaVisualizerWindow(QWidget):
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
-        self._zscore_model = str(dialog.zscore_model_combo.currentData() or PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST)
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
-        elif dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE:
-            self._build_project_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD:
             self._load_prepared_source_payload()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_MANIFEST:
@@ -1597,9 +1553,6 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._import_prepared_source_manifest(Path(file_name))
 
-    def _build_project_source_maps(self) -> None:
-        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_AMPLITUDE)
-
     def _build_project_zscore_source_maps(self) -> None:
         self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE)
 
@@ -1628,7 +1581,7 @@ class LoretaVisualizerWindow(QWidget):
             )
             return
         include_flagged_subjects = self._include_flagged_subjects
-        zscore_model = self._zscore_model
+        zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         status_text = _source_export_status_text(
             export_mode,
             automatic=automatic,
@@ -1688,7 +1641,7 @@ class LoretaVisualizerWindow(QWidget):
         method_id = str(getattr(producer_result, "method_id", ""))
         source_label = "source-space z-score maps" if "zscore" in method_id or "z_score" in method_id else "source maps"
         project_inputs = getattr(result, "project_inputs", None)
-        export_model = str(getattr(result, "export_model", self._zscore_model))
+        export_model = str(getattr(result, "export_model", PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST))
         flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
         excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
         logger.info(
@@ -1716,7 +1669,7 @@ class LoretaVisualizerWindow(QWidget):
             extra={
                 "error": message,
                 "include_flagged_subjects": self._include_flagged_subjects,
-                "zscore_model": self._zscore_model,
+                "zscore_model": PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
             },
         )
         self._set_source_export_status(_project_source_export_failure_text(message), variant="warning")

@@ -74,8 +74,9 @@ each participant independently, compute participant source-space z-score maps,
 and only then aggregate those z-score maps into group raw mean, median, and 20%
 trimmed-mean payloads. The participant sidecar is for future individual viewing;
 the renderer still loads the group prepared payloads. The older group-first
-model is a deprecated advanced fallback only and must not be treated as the
-default design precedent.
+model is a deprecated advanced fallback only, must not be treated as the
+default design precedent, and should stay out of the normal Source Map Options
+GUI.
 
 Phase 6H-A(3) adds source-space cluster-permutation masks for participant-first
 Hauk-style L2-MNE z-score maps. The mask is computed only in

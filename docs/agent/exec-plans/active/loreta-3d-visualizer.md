@@ -832,8 +832,9 @@ Implementation notes:
 - The `Load source JSON` and `Load manifest` dialogs now prefer the last import
   folder, then the active project's 6D z-score output folder, then the 6C
   diagnostic amplitude output folder, then the active project root.
-- The diagnostic amplitude exporter remains available from Source Map Options.
-  When run, its project-local manifest path is
+- The diagnostic amplitude exporter is no longer exposed from Source Map
+  Options. Manual/developer producer runs still write the project-local
+  manifest path
   `6 - Source Localization/L2-MNE Cortical Surface Beta/project_l2_mne_cortical_surface_beta_manifest.json`.
   The current default project path is the Phase 6D Hauk-style z-score export;
   a diagnostic amplitude manifest is not required for the viewer to display the
@@ -1049,11 +1050,11 @@ Implementation notes completed:
   - a short method summary;
   - `Include Stats QC flagged participants in source-map calculations`;
   - `Rebuild z-score maps`;
-  - `Build diagnostic amplitude maps`;
   - `Load source JSON`;
   - `Load manifest`.
-- `ProjectSourceMapExportWorker` now carries `include_flagged_subjects` to both
-  the Hauk-style z-score producer and the diagnostic amplitude producer.
+- `ProjectSourceMapExportWorker` now carries `include_flagged_subjects` to the
+  Hauk-style z-score producer. The diagnostic amplitude producer is no longer a
+  normal GUI rebuild path.
 - The GUI logs one compact start line and one compact completion/failure line
   for project source-map rebuilds, including method/export mode, manifest path
   when available, condition count, and flagged/excluded participant counts.
@@ -1274,9 +1275,9 @@ Implemented scope:
 - `project_l2_mne_hauk_zscore_export.py` defaults real-project z-score exports
   to the participant-first model and retains the old group-first export as
   `deprecated_group_first`.
-- The Source Map Options dialog exposes the participant-first default and the
-  deprecated group-first model selector without moving calculation logic into
-  the GUI.
+- The Source Map Options dialog uses the participant-first default and no longer
+  exposes the deprecated group-first model selector. The fallback producer path
+  remains outside the normal GUI.
 - User and agent docs describe the participant-first calculation order,
   summary outputs, deprecated fallback, Stats-QC inclusion rule, and
   pre-cluster-mask limitation addressed by Phase 6H-A(3).
@@ -1338,8 +1339,8 @@ Done means:
   individual viewing.
 - Existing viewer condition selection can load the new group-summary payloads
   without renderer changes.
-- Advanced settings can still opt into the deprecated group-first model, with
-  clear labeling and low-noise status/log messages.
+- Manual/developer producer runs can still opt into the deprecated group-first
+  model with explicit metadata and low-noise status/log messages.
 - JSON metadata distinguishes participant-first summaries from deprecated
   group-first exports and records the aggregation method, participant inclusion
   rule, harmonic list, neighboring-bin policy, and inverse settings.

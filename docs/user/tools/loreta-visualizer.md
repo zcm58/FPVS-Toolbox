@@ -63,11 +63,11 @@ behavior.
 - Open **Export Figures** to export the current publication split-hemisphere
   view or a two-condition stack as 600 DPI PDF and PNG files. Future figure
   exports for other displays will live in the same dialog.
-- Open **Source Map Options** to rebuild project maps with Stats/QC-flagged
-  participants excluded by default or explicitly included for comparison, load a
-  prepared source payload JSON file, load a prepared source manifest, or choose
-  the deprecated group-first z-score model for comparison. The Display tab also
-  lets you turn off the saved cluster mask for exploratory z-threshold viewing.
+- Open **Source Map Options** to rebuild participant-first project source-space
+  z-score maps with Stats/QC-flagged participants excluded by default or
+  explicitly included for comparison, load a prepared source payload JSON file,
+  or load a prepared source manifest. The Display tab also lets you turn off the
+  saved cluster mask for exploratory z-threshold viewing.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
@@ -140,14 +140,19 @@ the quick review artifact for payload validation status, cluster-mask coverage,
 source lateralization highlights, beta limitations, and the manual comparison
 checks that should be completed before treating maps as validated.
 
-The older 6C diagnostic amplitude exporter remains available in Source Map
-Options and writes project-local output under:
+The older 6C diagnostic amplitude exporter is no longer exposed as a normal
+Source Map Options rebuild action. It remains available in the
+`source_producers` package for developer/method-review runs and writes
+project-local output under:
 
 `6 - Source Localization/L2-MNE Cortical Surface Beta/`
 
 The main file to load manually is:
 
 `project_l2_mne_cortical_surface_beta_manifest.json`
+
+Existing diagnostic manifests can still be loaded manually from **Source Map
+Options** when method review requires them.
 
 The source JSON and manifest load actions live in **Source Map Options**. Their
 dialogs start in the last import folder when possible. Otherwise, they open to
@@ -284,8 +289,9 @@ publication view, the resulting display values are drawn on the inflated
 hemisphere canvas when available. This does not improve or change the
 underlying source-estimation precision.
 
-The older arbitrary-amplitude L2-MNE cortical-surface export remains available
-in Source Map Options as a diagnostic action. Those values are
+The older arbitrary-amplitude L2-MNE cortical-surface export remains a
+manual/developer diagnostic producer outside the normal GUI rebuild controls.
+When those prepared diagnostic manifests are loaded manually, the values are
 arbitrary/template-scaled source amplitudes proportional to the sensor
 topographies used as input
 (`summed BCA uV` by default). They are not calibrated current density, dipole

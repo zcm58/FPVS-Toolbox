@@ -236,7 +236,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
   computes participant source-space z-score maps, and the export writes group
   raw mean, median, and 20% trimmed-mean prepared payloads plus a participant
   sidecar for future individual viewing. The deprecated group-first z-score
-  model is retained only as an advanced comparison fallback. Phase 6H-A(3)
+  model is retained only as an advanced comparison fallback and is not exposed
+  in the normal Source Map Options GUI. Phase 6H-A(3)
   computes participant-first source-space cluster-permutation masks and stores
   the significant source vertices in payload metadata for publication-style
   display. Phase 6H-A(4) writes a descriptive source-space lateralization
