@@ -17,9 +17,9 @@ Hauk-style L2-MNE cortical-surface source-space z-score maps. This is an early
 method-validation path, not a final validated LORETA, eLORETA, sLORETA,
 deep-source, or subject-MRI workflow.
 
-For details about the current source-localization method, assumptions,
+For details about the current source-estimation method, assumptions,
 citations, z-score calculation, and participant QC behavior, see
-[Source Localization Method](source-localization-method.md).
+[Source Estimation](source-localization-method.md).
 
 The visible occipital, frontal, and deep medial temporal demo activations are
 still synthetic. The real-project path is separate: it reads existing project
@@ -66,7 +66,8 @@ behavior.
 - Open **Source Map Options** to rebuild project maps with Stats/QC-flagged
   participants excluded by default or explicitly included for comparison, load a
   prepared source payload JSON file, load a prepared source manifest, or choose
-  the deprecated group-first z-score model for comparison.
+  the deprecated group-first z-score model for comparison. The Display tab also
+  lets you turn off the saved cluster mask for exploratory z-threshold viewing.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
@@ -78,11 +79,14 @@ used for the current source map. When auto-scale is on, the min/max labels
 update from the loaded payload values after cortical paint masking. For
 regenerated participant-first maps, the primary mask is the producer-computed
 source-space cluster-permutation mask. Older unmasked maps fall back to the
-selected display cutoff. Hidden vertices are shown as the neutral gray cortex
-color. If an exact small-sample permutation mask cannot reach the selected
-cluster alpha, the visualizer warns that the cortical render is underpowered
-and falls back to the selected exploratory z-score display cutoff instead of
-showing an empty group-level mask.
+selected display cutoff. In **Source Map Options > Display**, uncheck **Use
+cluster mask when available** to temporarily ignore a saved mask and view the
+same source values with the selected exploratory z-score cutoff. Hidden
+vertices are shown as the neutral gray cortex color. If an exact small-sample
+permutation mask cannot reach the selected cluster alpha, the visualizer warns
+that the cortical render is underpowered and falls back to the selected
+exploratory z-score display cutoff instead of showing an empty group-level
+mask.
 
 ## Inputs
 
@@ -257,12 +261,11 @@ FreeSurfer `curv` shading when available, `sulc` as a fallback, and a simple
 geometry-derived underlay if neither file is available. The same payload can
 also be shown on a single fsaverage pial surface or in the transparent mesh
 view. The signed z-score payload is still preserved in the generated JSON for
-QC. Regenerated participant-first payloads include a source-space
-two-tailed cluster-permutation mask, and opaque cortical paint mode uses that
-mask as the primary publication-style display. Source vertices outside
-significant clusters show the gray-white shaded cortex rather than activation
-colors. Significant positive and negative retained source z-scores can both be
-painted. Older unmasked payloads fall back to the selected display threshold.
+QC. Regenerated participant-first payloads include a source-space positive-tail
+cluster-permutation mask, and opaque cortical paint mode uses that mask as the
+primary publication-style display. Source vertices outside significant clusters
+show the gray-white shaded cortex rather than activation colors. Older unmasked
+payloads fall back to the selected display threshold.
 If an exact small-sample permutation mask cannot reach the selected cluster
 alpha, the visualizer warns that the render is underpowered, not group-masked,
 and exploratory, then uses the selected display threshold. The default

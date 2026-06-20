@@ -57,10 +57,17 @@ _PUBLICATION_HEMISPHERE_RADIUS = 0.82
 _PUBLICATION_SHADE_DARK = "#636b6d"
 _PUBLICATION_SHADE_LIGHT = "#d8dcda"
 DEFAULT_SPLIT_FIGURE_WIDTH = 1950
-DEFAULT_SPLIT_FIGURE_WIDTH_IN = 6.5
-DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN = 3.0
-DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN = 6.75
+MM_PER_INCH = 25.4
+ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM = 140.0
+DEFAULT_SPLIT_FIGURE_WIDTH_IN = ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM / MM_PER_INCH
+_SPLIT_FIGURE_ELSEVIER_SCALE = DEFAULT_SPLIT_FIGURE_WIDTH_IN / 6.5
+DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN = 3.0 * _SPLIT_FIGURE_ELSEVIER_SCALE
+DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN = 6.75 * _SPLIT_FIGURE_ELSEVIER_SCALE
 DEFAULT_SPLIT_FIGURE_MAX_FACES_PER_HEMISPHERE: int | None = None
+SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT = 14
+SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT = 14
+SPLIT_FIGURE_CONDITION_TOP_MARGIN = 150.0
+SPLIT_FIGURE_SINGLE_TOP_MARGIN = 130.0
 _SPLIT_FIGURE_UNITS_PER_INCH = DEFAULT_SPLIT_FIGURE_WIDTH / DEFAULT_SPLIT_FIGURE_WIDTH_IN
 SPLIT_FIGURE_EXPORT_DPI = FIGURE_EXPORT_DPI
 
@@ -122,6 +129,7 @@ class BrainRendererWidget(QWidget):
         self._split_left_rotation_degrees = 0.0
         self._split_right_rotation_degrees = 0.0
         self._cortical_paint_z_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
+        self._cortical_paint_use_cluster_mask = True
         self._last_activation_payload: SourcePayload | None = None
 
         layout = QVBoxLayout(self)
@@ -445,6 +453,7 @@ class BrainRendererWidget(QWidget):
                 mesh.points,
                 payload,
                 z_threshold=self._cortical_paint_z_threshold,
+                use_cluster_mask=self._use_cortical_paint_cluster_mask(),
             )
             paint_surface = surface.copy(deep=True)
             paint_surface["activation"] = _cortical_paint_display_values(
@@ -502,6 +511,7 @@ class BrainRendererWidget(QWidget):
             projection_points,
             payload,
             z_threshold=self._cortical_paint_z_threshold,
+            use_cluster_mask=self._use_cortical_paint_cluster_mask(),
         )
         return _SplitHemisphereState(
             points=display_points.copy(),
@@ -599,6 +609,15 @@ class BrainRendererWidget(QWidget):
         payload = self._last_activation_payload
         if self._cortical_paint_active and payload is not None:
             self.set_activation_payload(payload)
+
+    def set_cortical_paint_cluster_mask_enabled(self, enabled: bool) -> None:
+        self._cortical_paint_use_cluster_mask = bool(enabled)
+        payload = self._last_activation_payload
+        if self._cortical_paint_active and payload is not None:
+            self.set_activation_payload(payload)
+
+    def _use_cortical_paint_cluster_mask(self) -> bool:
+        return bool(getattr(self, "_cortical_paint_use_cluster_mask", True))
 
     def _restore_base_brain_actor(self, *, render: bool) -> None:
         if not self._cortical_paint_active:
@@ -1031,7 +1050,9 @@ def _draw_split_figure_panel(
     max_xy = np.max(all_points, axis=0)
     span = np.maximum(max_xy - min_xy, 1e-9)
     side_margin = 110.0 * scale_factor
-    top_margin = (120.0 if show_condition_label else 105.0) * scale_factor
+    top_margin = (
+        SPLIT_FIGURE_CONDITION_TOP_MARGIN if show_condition_label else SPLIT_FIGURE_SINGLE_TOP_MARGIN
+    ) * scale_factor
     bottom_margin = 35.0 * scale_factor
     draw_width = max(float(width) - 2.0 * side_margin, 1.0)
     draw_height = max(float(panel_height) - top_margin - bottom_margin, 1.0)
@@ -1069,13 +1090,33 @@ def _draw_split_figure_panel(
             float(width) / 2.0,
             panel_top + 54.0 * scale_factor,
             panel.label.strip(),
-            role="condition_label",
+            role="panel_label",
+            point_size=SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT,
+            bold=True,
             scale_factor=scale_factor,
         )
     if show_hemisphere_labels:
         label_y = panel_top + (88.0 if show_condition_label else 70.0) * scale_factor
-        _draw_centered_text(draw, left_center, label_y, "Left", role="axis_label", scale_factor=scale_factor)
-        _draw_centered_text(draw, right_center, label_y, "Right", role="axis_label", scale_factor=scale_factor)
+        _draw_centered_text(
+            draw,
+            left_center,
+            label_y,
+            "Left",
+            role="axis_label",
+            point_size=SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
+            bold=True,
+            scale_factor=scale_factor,
+        )
+        _draw_centered_text(
+            draw,
+            right_center,
+            label_y,
+            "Right",
+            role="axis_label",
+            point_size=SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
+            bold=True,
+            scale_factor=scale_factor,
+        )
 
 
 def _draw_split_figure_legend(
@@ -1169,18 +1210,27 @@ def _draw_centered_text(
     *,
     role: str,
     scale_factor: float,
+    point_size: int | None = None,
+    bold: bool | None = None,
 ) -> None:
-    font = _pil_font(role, scale_factor=scale_factor)
+    font = _pil_font(role, scale_factor=scale_factor, point_size=point_size, bold=bold)
     draw.text((float(x), float(y)), str(text), fill="#111111", font=font, anchor="mm")
 
 
-def _pil_font(role: str, *, scale_factor: float):
+def _pil_font(
+    role: str,
+    *,
+    scale_factor: float,
+    point_size: int | None = None,
+    bold: bool | None = None,
+):
     from PIL import ImageFont
 
     spec = figure_text_spec(role)
-    size = max(8, int(round(spec.point_size * _SPLIT_FIGURE_UNITS_PER_INCH * scale_factor / 72.0)))
-    bold = str(spec.weight).lower() == "bold"
-    for candidate in pil_font_candidates(bold=bold):
+    requested_point_size = spec.point_size if point_size is None else int(point_size)
+    size = max(8, int(round(requested_point_size * _SPLIT_FIGURE_UNITS_PER_INCH * scale_factor / 72.0)))
+    requested_bold = str(spec.weight).lower() == "bold" if bold is None else bool(bold)
+    for candidate in pil_font_candidates(bold=requested_bold):
         try:
             return ImageFont.truetype(candidate, size=size)
         except OSError:

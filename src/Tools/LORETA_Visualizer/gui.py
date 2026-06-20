@@ -92,6 +92,7 @@ ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 3.29 (~two-tailed p < .001)", 3.29),
     ("z >= 3.89 (~two-tailed p < .0001)", 3.89),
 )
+DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE = (0.0, 3.5)
 DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Publication split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
     ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
@@ -275,6 +276,17 @@ def split_figure_condition_code(condition_label: str) -> str:
     return "".join(word[0] for word in words[:3]).upper()
 
 
+def split_figure_condition_display_label(condition_label: str) -> str:
+    """Return the publication label shown above stacked split-hemisphere panels."""
+    label = str(condition_label).strip()
+    lowered = label.lower()
+    if "color response" in lowered:
+        return "Color Response"
+    if "semantic response" in lowered:
+        return "Semantic Response"
+    return label
+
+
 def _safe_export_stem(text: str) -> str:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text).strip())
     stem = re.sub(r"_+", "_", stem).strip("._-")
@@ -327,6 +339,7 @@ def _activation_value_readout(
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     cortical_threshold_display: bool = True,
+    use_cluster_mask: bool = True,
 ) -> str:
     if payload is None:
         return "Value: source activation"
@@ -337,6 +350,7 @@ def _activation_value_readout(
         payload,
         zscore_display_threshold=zscore_display_threshold,
         cortical_threshold_display=cortical_threshold_display,
+        use_cluster_mask=use_cluster_mask,
     )
     if source_unit and sensor_unit:
         return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}{filter_text}"
@@ -352,8 +366,13 @@ def _activation_display_filter_readout(
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     cortical_threshold_display: bool = True,
+    use_cluster_mask: bool = True,
 ) -> str:
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        if not use_cluster_mask:
+            if payload_has_cluster_mask(payload) or payload_cluster_mask_is_underpowered(payload):
+                return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
+            return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
         if payload_cluster_mask_is_underpowered(payload):
             return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
         if payload_cluster_mask_is_empty(payload):
@@ -386,10 +405,11 @@ def _activation_scale_values(
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     cortical_threshold_display: bool = True,
+    use_cluster_mask: bool = True,
 ) -> np.ndarray:
     values = np.asarray(payload.values, dtype=float)
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
-        cluster_mask = payload_cluster_mask(payload)
+        cluster_mask = payload_cluster_mask(payload) if use_cluster_mask else None
         if cluster_mask is not None and np.any(cluster_mask):
             return values[cluster_mask & np.isfinite(values)]
         return values[values >= float(zscore_display_threshold)]
@@ -464,6 +484,7 @@ class SourceMapOptionsDialog(AppDialog):
         include_flagged_subjects: bool,
         zscore_model: str,
         zscore_display_threshold: float,
+        use_cluster_mask: bool,
         project_available: bool,
         export_busy: bool,
     ) -> None:
@@ -517,10 +538,17 @@ class SourceMapOptionsDialog(AppDialog):
         threshold_row.addWidget(self.zscore_threshold_spin, 1)
         display_layout.addLayout(threshold_row)
 
+        self.use_cluster_mask_check = QCheckBox("Use cluster mask when available", display_tab)
+        self.use_cluster_mask_check.setObjectName("loreta_use_cluster_mask_check")
+        self.use_cluster_mask_check.setChecked(bool(use_cluster_mask))
+        self.use_cluster_mask_check.setToolTip(
+            "Turn off for exploratory viewing with the selected z-score cutoff instead of the saved cluster mask."
+        )
+        display_layout.addWidget(self.use_cluster_mask_check)
+
         threshold_note = QLabel(
-            "For Hauk et al., 2025 cluster-masked maps, this cutoff is used only "
-            "when the mask is underpowered or no vertices survive. Otherwise the "
-            "source-space cluster mask is used.",
+            "For Hauk et al., 2025 cluster-masked maps, this cutoff is used when "
+            "the mask is unavailable, underpowered, empty, or disabled for exploratory viewing.",
             display_tab,
         )
         threshold_note.setObjectName("loreta_zscore_threshold_note")
@@ -819,6 +847,7 @@ class LoretaVisualizerWindow(QWidget):
         self._include_flagged_subjects = False
         self._zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
+        self._use_cluster_mask = True
         self._display_mode = DEFAULT_DISPLAY_MODE
 
         root = QVBoxLayout(self)
@@ -1106,6 +1135,7 @@ class LoretaVisualizerWindow(QWidget):
 
         self.viewport_layout.addWidget(self.renderer, 1)
         self.renderer.set_display_mode(self._display_mode)
+        self.renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
         self._set_controls_enabled(True)
         self._refresh_dummy_activation()
 
@@ -1346,12 +1376,12 @@ class LoretaVisualizerWindow(QWidget):
             panels = (
                 renderer.split_hemisphere_figure_panel_for_payload(
                     top_payload,
-                    label=split_figure_condition_code(top_label),
+                    label=split_figure_condition_display_label(top_label),
                     scalar_range=scalar_range,
                 ),
                 renderer.split_hemisphere_figure_panel_for_payload(
                     bottom_payload,
-                    label=split_figure_condition_code(bottom_label),
+                    label=split_figure_condition_display_label(bottom_label),
                     scalar_range=scalar_range,
                 ),
             )
@@ -1444,6 +1474,7 @@ class LoretaVisualizerWindow(QWidget):
                 payload,
                 zscore_display_threshold=self._zscore_display_threshold,
                 cortical_threshold_display=uses_cortical_surface_paint(payload),
+                use_cluster_mask=self._use_cluster_mask,
             )
             for payload in payloads
         ]
@@ -1454,7 +1485,9 @@ class LoretaVisualizerWindow(QWidget):
             for payload in payloads
         )
         if all_cortical_zscore:
-            has_cluster_mask = any(payload_has_cluster_mask(payload) for payload in payloads)
+            if self.activation_auto_scale_check.isChecked():
+                return DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE
+            has_cluster_mask = self._use_cluster_mask and any(payload_has_cluster_mask(payload) for payload in payloads)
             if has_cluster_mask:
                 return resolve_scalar_limits(
                     scale_values,
@@ -1494,6 +1527,7 @@ class LoretaVisualizerWindow(QWidget):
             include_flagged_subjects=self._include_flagged_subjects,
             zscore_model=self._zscore_model,
             zscore_display_threshold=self._zscore_display_threshold,
+            use_cluster_mask=self._use_cluster_mask,
             project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
@@ -1501,6 +1535,7 @@ class LoretaVisualizerWindow(QWidget):
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
         self._zscore_model = str(dialog.zscore_model_combo.currentData() or PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST)
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
+        self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE:
@@ -1534,6 +1569,13 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is not None:
             renderer.set_cortical_paint_z_threshold(self._zscore_display_threshold)
+        self._apply_activation_scalar_range()
+
+    def _set_cluster_mask_enabled(self, enabled: bool) -> None:
+        self._use_cluster_mask = bool(enabled)
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
         self._apply_activation_scalar_range()
 
     def _load_prepared_source_manifest(self) -> None:
@@ -1862,6 +1904,15 @@ class LoretaVisualizerWindow(QWidget):
             self._set_source_export_status(underpowered_text, variant="warning")
             return
         if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+            if not getattr(self, "_use_cluster_mask", True) and payload_has_cluster_mask(payload):
+                self._set_source_export_status(
+                    (
+                        "Cluster mask display is disabled. Showing exploratory "
+                        f"z >= {format_scalar_value(self._zscore_display_threshold)} instead."
+                    ),
+                    variant="info",
+                )
+                return
             if payload_cluster_mask_is_empty(payload):
                 self._set_source_export_status(
                     "No vertices survived the Hauk et al. (2025) cluster-permutation mask.",
@@ -1892,6 +1943,7 @@ class LoretaVisualizerWindow(QWidget):
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
         renderer.set_display_mode(self._display_mode)
+        renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
         renderer.set_activation_payload(display_payload)
         self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
@@ -1906,9 +1958,10 @@ class LoretaVisualizerWindow(QWidget):
             payload,
             zscore_display_threshold=self._zscore_display_threshold,
             cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
+            use_cluster_mask=self._use_cluster_mask,
         )
         if self._activation_uses_opaque_cortical_mode() and _source_payload_uses_zscores(payload):
-            if payload_has_cluster_mask(payload):
+            if self._use_cluster_mask and payload_has_cluster_mask(payload):
                 vmin, vmax = resolve_scalar_limits(
                     scale_values,
                     auto_scale=self.activation_auto_scale_check.isChecked(),

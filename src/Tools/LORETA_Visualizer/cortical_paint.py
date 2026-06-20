@@ -123,6 +123,7 @@ def project_cortical_surface_payload(
     neighbors: int = DEFAULT_CORTICAL_PAINT_NEIGHBORS,
     power: float = DEFAULT_CORTICAL_PAINT_POWER,
     z_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    use_cluster_mask: bool = True,
 ) -> CorticalPaintProjection:
     """Project an L2-MNE cortical source mesh onto the display brain mesh.
 
@@ -141,7 +142,7 @@ def project_cortical_surface_payload(
     original_max = float(np.max(source_values))
     projection_values = source_values.copy()
     is_zscore_payload = source_payload_uses_zscores(payload)
-    source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload else None
+    source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload and use_cluster_mask else None
     cluster_mask_has_vertices = source_cluster_mask is not None and bool(np.any(source_cluster_mask))
     if is_zscore_payload:
         if cluster_mask_has_vertices:

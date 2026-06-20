@@ -206,13 +206,15 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   cortical-surface z-score payloads render as opaque cortical paint with
   producer-provided cluster masks shown as activation and unmasked vertices
   shown as gray cortex. If no producer mask is present, the manual z-score
-  display cutoff remains the fallback behavior. Empty masks also use the
-  exploratory manual cutoff as a display fallback: underpowered exact
-  small-sample masks warn that the mask cannot be resolved, while adequately
-  powered empty Hauk masks warn that no vertices survived the cluster mask. In
-  both cases, saved source values remain unchanged and the renderer does not
-  compute statistics. Non-surface z-score payloads may still use positive-only
-  display filtering.
+  display cutoff remains the fallback behavior. Users may disable a saved
+  cluster mask for exploratory viewing; that toggle must only affect display
+  and figure export, not payload metadata, source statistics, or sidecars.
+  Empty masks also use the exploratory manual cutoff as a display fallback:
+  underpowered exact small-sample masks warn that the mask cannot be resolved,
+  while adequately powered empty Hauk masks warn that no vertices survived the
+  cluster mask. In both cases, saved source values remain unchanged and the
+  renderer does not compute statistics. Non-surface z-score payloads may still
+  use positive-only display filtering.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer

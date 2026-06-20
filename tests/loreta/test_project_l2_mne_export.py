@@ -9,6 +9,7 @@ import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
+    DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
     _coerce_existing_project_root,
@@ -20,6 +21,7 @@ from Tools.LORETA_Visualizer.gui import (
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
     split_figure_condition_code,
+    split_figure_condition_display_label,
 )
 from Tools.LORETA_Visualizer.fsaverage_cache import (
     DEFAULT_FSAVERAGE_SUBJECTS_DIR,
@@ -242,6 +244,13 @@ def test_loreta_split_figure_condition_code_labels_color_and_semantic_responses(
     assert split_figure_condition_code("Color Response") == "CR"
     assert split_figure_condition_code("Semantic Response 2") == "SR"
     assert split_figure_condition_code("Oddball Baseline") == "OB"
+
+
+def test_loreta_split_figure_display_labels_write_out_color_and_semantic_responses() -> None:
+    assert split_figure_condition_display_label("Color Response 2") == "Color Response"
+    assert split_figure_condition_display_label("Semantic Response Raw mean z-score") == "Semantic Response"
+    assert split_figure_condition_display_label("Oddball Baseline") == "Oddball Baseline"
+    assert DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE == (0.0, 3.5)
 
 
 def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_path) -> None:

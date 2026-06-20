@@ -88,6 +88,36 @@ def test_cortical_paint_cluster_mask_overrides_display_threshold() -> None:
     assert np.isnan(projection.values[1])
 
 
+def test_cortical_paint_can_disable_cluster_mask_for_exploratory_display() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.0], dtype=float),
+        label="cluster masked surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [0],
+        },
+        normalize_values=False,
+    )
+
+    projection = project_cortical_surface_payload(
+        payload.points,
+        payload,
+        neighbors=1,
+        z_threshold=1.64,
+        use_cluster_mask=False,
+    )
+
+    assert payload_has_cluster_mask(payload) is True
+    assert np.isnan(projection.values[0])
+    assert projection.values[1] == 4.0
+
+
 def test_underpowered_empty_cluster_mask_falls_back_to_threshold_display() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),

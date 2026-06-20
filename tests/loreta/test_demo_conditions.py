@@ -13,9 +13,17 @@ from Tools.LORETA_Visualizer.gui import (
 )
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
+    DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN,
+    DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN,
+    DEFAULT_SPLIT_FIGURE_WIDTH_IN,
+    ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
     PublicationSplitFigurePanel,
+    SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT,
+    SPLIT_FIGURE_CONDITION_TOP_MARGIN,
     SPLIT_FIGURE_EXPORT_DPI,
+    SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
+    SPLIT_FIGURE_SINGLE_TOP_MARGIN,
     _SplitHemisphereState,
     _configure_transparency_backend,
     _cortical_paint_display_values,
@@ -311,6 +319,31 @@ def test_hauk_cluster_mask_readout_names_publication_mask() -> None:
     )
 
 
+def test_hauk_cluster_mask_readout_marks_disabled_mask_as_exploratory() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [0],
+            "cluster_mask_vertex_count": 1,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload, use_cluster_mask=False) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: exploratory z >= 1.64"
+    )
+
+
 def test_empty_hauk_cluster_mask_readout_marks_exploratory_fallback() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
@@ -386,6 +419,12 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     assert status.variant == "warning"
     assert status.text == "No vertices survived the Hauk et al. (2025) cluster-permutation mask."
 
+    window._use_cluster_mask = False
+    window._zscore_display_threshold = 2.32
+    window._set_payload_display_status(valid_payload)
+    assert status.variant == "info"
+    assert status.text == "Cluster mask display is disabled. Showing exploratory z >= 2.32 instead."
+
 
 class _StatusProbe:
     def __init__(self) -> None:
@@ -421,6 +460,7 @@ def test_split_hemisphere_projection_uses_projection_points_for_values() -> None
     )
     renderer = BrainRendererWidget.__new__(BrainRendererWidget)
     renderer._cortical_paint_z_threshold = 1.64
+    renderer._cortical_paint_use_cluster_mask = True
 
     state = BrainRendererWidget._project_split_hemisphere(renderer, hemisphere, payload)
 
@@ -513,8 +553,8 @@ def test_publication_split_figure_export_writes_pdf_and_png(tmp_path) -> None:
     assert pdf_path.read_bytes().startswith(b"%PDF")
     with Image.open(png_path) as image:
         assert image.size == (
-            int(6.5 * SPLIT_FIGURE_EXPORT_DPI),
-            int(3.0 * SPLIT_FIGURE_EXPORT_DPI),
+            int(round(DEFAULT_SPLIT_FIGURE_WIDTH_IN * SPLIT_FIGURE_EXPORT_DPI)),
+            int(round(DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN * SPLIT_FIGURE_EXPORT_DPI)),
         )
         assert image.getbbox() is not None
 
@@ -622,10 +662,19 @@ def test_publication_split_stack_figure_export_writes_pdf_and_png(tmp_path) -> N
     assert pdf_path.read_bytes().startswith(b"%PDF")
     with Image.open(png_path) as image:
         assert image.size == (
-            int(6.5 * SPLIT_FIGURE_EXPORT_DPI),
-            int(6.75 * SPLIT_FIGURE_EXPORT_DPI),
+            int(round(DEFAULT_SPLIT_FIGURE_WIDTH_IN * SPLIT_FIGURE_EXPORT_DPI)),
+            int(round(DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN * SPLIT_FIGURE_EXPORT_DPI)),
         )
         assert image.getbbox() is not None
+
+
+def test_publication_split_stack_figure_uses_elsevier_one_and_half_column_dimensions_and_labels() -> None:
+    assert DEFAULT_SPLIT_FIGURE_WIDTH_IN * 25.4 == ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM
+    assert DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN * 25.4 < 240.0
+    assert SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT >= 14
+    assert SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT >= 14
+    assert SPLIT_FIGURE_CONDITION_TOP_MARGIN >= 150.0
+    assert SPLIT_FIGURE_SINGLE_TOP_MARGIN >= 130.0
 
 
 def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeypatch) -> None:

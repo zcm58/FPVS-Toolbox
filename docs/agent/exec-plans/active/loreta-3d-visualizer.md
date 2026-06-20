@@ -83,15 +83,17 @@ summaries so source maps can be compared against known sensor-space BCA
   Hauk-style z-score exports also write project-local JSON/Markdown validation
   reports that summarize generated files, payload validation, cluster-mask
   coverage, source lateralization highlights, beta limitations, and recommended
-  manual checks. The next recommended development slice is manual scientific
+  manual checks. The next recommended development slices are manual scientific
   validation of masked maps against scalp maps, unmasked maps, source-space
-  lateralization summaries, and the deprecated group-first output before
-  expanding cluster controls or adding another source method.
+  lateralization summaries, and the deprecated group-first output, plus a
+  source-map build performance slice that adds selected-column FullFFT parsing
+  and a project-local inverse-model cache before expanding cluster controls or
+  adding another source method.
 
 ## Date
 
 Created: 2026-06-05
-Updated: 2026-06-09
+Updated: 2026-06-19
 
 ## Goal
 
@@ -1533,6 +1535,107 @@ Done means:
 - Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
   protected-edit/source-localization audits, and a documented visible/manual
   smoke path pass. Do not run offscreen Qt tests locally.
+
+#### Phase 6H-A(6): Source-Map Build Performance
+
+Status: Planned.
+
+Objective:
+
+- Speed up first-time and manual real-project source-map builds without
+  changing source-localization math, project input formats, or renderer
+  behavior.
+- Preserve the calculation/rendering boundary. Excel parsing, inverse-model
+  cache management, source estimation, and performance logging belong in
+  `source_producers/` and project export orchestration; the renderer and
+  importer continue to consume prepared payloads only.
+- Prefer project-local source-model caches over a global inverse cache so future
+  projects can vary by acquisition format, montage, channel set, BIDS metadata,
+  covariance policy, source method, or head/source model without silently
+  reusing the wrong inverse model.
+
+Planned scope:
+
+- Replace the Hauk z-score FullFFT `openpyxl.load_workbook(..., read_only=True)`
+  hot path in `project_fullfft_inputs.py` with an exact selected-column `.xlsx`
+  XML reader, reusing `Tools.Stats.io.xlsx_selected_reader` where practical.
+  The reader must load only `Electrode` plus the target and neighboring-bin
+  columns required by `ProjectFullFftBinPlan`.
+- Keep the existing FullFFT validation unchanged: exact selected harmonic
+  columns, target/noise-bin plan consistency, BioSemi64 electrode count/order,
+  finite numeric source topography values, flagged/excluded participant policy,
+  and flat or condition/group workbook layouts.
+- Add structured timing for source-map builds so logs separate FullFFT workbook
+  parsing, input assembly, fsaverage/inverse-model preparation, participant
+  source estimation, cluster-mask computation, payload writing, manifest
+  validation, and validation-report generation.
+- Add a project-local inverse-model cache under the source-localization output
+  area, for example
+  `6 - Source Localization/.inverse_cache/<method_signature>/`, with cache
+  metadata that records the exact scientific/model inputs used to build it.
+- Cache entries must be keyed by a strict model signature, not by project name
+  alone. The signature should include method ID, MNE version, source spacing,
+  channel names and order, montage/sensor-coordinate source, reference and
+  projection policy, covariance policy or covariance hash, inverse settings
+  (`method`, `lambda2`, `loose`, `depth`, `fixed`), fsaverage/template identity
+  or path/hash, and any future project-specific acquisition/source-model inputs
+  such as BIDS metadata, subject/head model identifiers, bad-channel policy, or
+  source method.
+- A cache hit may reuse only the inverse/model components. It must still read
+  current project FullFFT inputs and regenerate z-score payloads, masks,
+  lateralization summaries, manifests, and validation reports from the current
+  project data and user options.
+- A cache miss, missing/corrupt cache file, MNE version/signature mismatch, or
+  method-setting mismatch must rebuild the inverse model and overwrite or
+  create a new signature-specific project-local cache entry. It must not fall
+  back to a stale global cache silently.
+- The initial implementation may support only the current fsaverage BioSemi64
+  `ico3` Hauk-style L2-MNE path. It should be structured so future BioSemi,
+  BIDS, montage-varying, subject-specific, or alternate inverse-method projects
+  can add their own signature fields and cache builders.
+- Keep disk usage transparent in metadata and logs. Current `ico3` expectations
+  are about 30-50 MiB per project cache entry; higher source spacings may be
+  substantially larger and should remain opt-in.
+- Consider a second optimization that batches all participant target/noise
+  topographies for a condition through the estimator in one call, then splits
+  results back into participant z-score maps. This must be guarded by focused
+  equivalence tests because it changes execution shape while preserving
+  numerical results.
+
+Locked decisions:
+
+- The root `.fpvs_cache/mne/MNE-fsaverage-data/` remains the shared fsaverage
+  template data cache and is not duplicated per project.
+- The inverse-model cache is project-local by default. A future global
+  deduplication layer may be added only if it is signature-safe and never
+  obscures which inverse model a project used.
+- Cached inverse models are reusable model/preparation artifacts, not cached
+  source-map results. They must not cache participant z-score values,
+  condition maps, cluster masks, lateralization rows, validation reports, or
+  renderer payloads as substitutes for rebuilding from current project inputs.
+- Cache invalidation is scientific and structural: if any signature field
+  changes, rebuild the inverse model rather than adapting the old cache.
+- Manual rebuild and first-time automatic build must use the same optimized
+  input reader and cache validation path.
+
+Done means:
+
+- First-time source-map builds and manual rebuilds use the selected-column
+  FullFFT reader and continue to pass existing focused LORETA input and export
+  tests.
+- Rebuilding the same project with an unchanged inverse-model signature uses
+  the project-local inverse cache and logs a clear cache hit. Changing spacing,
+  channel order, inverse settings, MNE version, covariance policy, or other
+  signature inputs causes a clear cache miss and rebuild.
+- Cache metadata is written beside the project-local cache and includes enough
+  information to audit the model used for generated source maps.
+- Focused tests prove reader equivalence to the previous FullFFT adapter,
+  missing-sheet/column diagnostics, cache hit/miss behavior, signature
+  invalidation, corrupt-cache fallback, and optional batched-estimator numerical
+  equivalence if batching is implemented.
+- Compile, ruff, focused `tests/loreta`, protected-edit/source-localization
+  audits, project-path audit, and a documented visible/manual smoke path pass.
+  Do not run offscreen Qt tests locally.
 
 ## Integration Safety
 
