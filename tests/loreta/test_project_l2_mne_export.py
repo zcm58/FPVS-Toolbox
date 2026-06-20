@@ -12,9 +12,15 @@ from Tools.LORETA_Visualizer.gui import (
     DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    SOURCE_SUMMARY_MEDIAN,
+    SOURCE_SUMMARY_RAW_MEAN,
+    SOURCE_SUMMARY_TRIMMED_MEAN,
     _coerce_existing_project_root,
+    _group_manifest_conditions,
+    _ordered_source_summary_ids,
     _project_root_from_object,
     _project_source_export_failure_text,
+    _source_summary_label,
     _source_export_status_text,
     default_stacked_split_figure_export_path,
     default_split_figure_export_path,
@@ -33,6 +39,7 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
 )
 from Tools.LORETA_Visualizer import fsaverage_mesh
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
+from Tools.LORETA_Visualizer.prepared_payload_importer import PreparedSourceManifestEntry
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
     DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
@@ -251,6 +258,53 @@ def test_loreta_split_figure_display_labels_write_out_color_and_semantic_respons
     assert split_figure_condition_display_label("Semantic Response Raw mean z-score") == "Semantic Response"
     assert split_figure_condition_display_label("Oddball Baseline") == "Oddball Baseline"
     assert DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE == (0.0, 3.5)
+
+
+def test_loreta_manifest_conditions_group_participant_summary_entries(tmp_path) -> None:
+    entries = (
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
+            label="Color Response Raw mean z-score",
+            payload_path=tmp_path / "color_mean.json",
+            metadata={"participant_zscore_aggregation": "mean"},
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:2:color_response_median",
+            label="Color Response Median z-score",
+            payload_path=tmp_path / "color_median.json",
+            metadata={"participant_zscore_aggregation": "median"},
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:3:color_response_trimmed_mean",
+            label="Color Response 20% trimmed mean z-score",
+            payload_path=tmp_path / "color_trimmed.json",
+            metadata={"participant_zscore_aggregation": "trimmed_mean"},
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:4:semantic_response_raw_mean",
+            label="Semantic Response Raw mean z-score",
+            payload_path=tmp_path / "semantic_mean.json",
+            metadata={"participant_zscore_aggregation": "mean"},
+        ),
+    )
+
+    groups = _group_manifest_conditions(entries)
+
+    assert list(groups) == ["color_response", "semantic_response"]
+    assert groups["color_response"].label == "Color Response"
+    assert _ordered_source_summary_ids(groups["color_response"]) == (
+        SOURCE_SUMMARY_RAW_MEAN,
+        SOURCE_SUMMARY_MEDIAN,
+        SOURCE_SUMMARY_TRIMMED_MEAN,
+    )
+    assert (
+        groups["color_response"].entries_by_summary[SOURCE_SUMMARY_RAW_MEAN].condition_id
+        == "manifest:1:color_response_mean"
+    )
+    assert groups["semantic_response"].entries_by_summary[SOURCE_SUMMARY_RAW_MEAN].condition_id == (
+        "manifest:4:semantic_response_raw_mean"
+    )
+    assert _source_summary_label(SOURCE_SUMMARY_TRIMMED_MEAN) == "20% trimmed mean z-score"
 
 
 def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_path) -> None:

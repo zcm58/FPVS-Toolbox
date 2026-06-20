@@ -186,7 +186,8 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   display canvas. No source estimates.
 - `synthetic_brain.py`: fallback/demo mesh model.
 - `conditions.py` and `dummy_activation.py`: deterministic synthetic conditions
-  and demo-only source maps.
+  and demo-only source maps retained for tests/developer validation, not normal
+  live selector options.
 - `prepared_source_fixture.py`: in-memory source-map fixture shaped like a
   future real-data handoff, with coordinates/scalars/faces/metadata adapted
   through the payload bridge and no inverse-solution math.

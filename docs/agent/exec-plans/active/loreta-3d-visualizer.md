@@ -174,7 +174,8 @@ New tool implementation:
   - `fsaverage_cache.py`: root-local/configured fsaverage cache policy.
   - `fsaverage_mesh.py`: lazy fsaverage fetch/load/decimation helpers for Slice 2.
   - `dummy_activation.py`: deterministic synthetic LORETA-like condition data for Slice 3, Slice 4, and source-model-agnostic 5A demos.
-  - `conditions.py`: condition list/model helpers for Slice 4.
+- `conditions.py`: synthetic condition list/model helpers retained for
+  tests/developer validation.
   - `source_payloads.py`: renderer-facing payload contract for cortical surface points, cortical/deep meshes, volume/deep source representations, and future ROI meshes.
   - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
@@ -398,7 +399,8 @@ Implementation notes:
 
 Done means:
 
-- The condition selector offers occipital, frontal, and deep medial-temporal synthetic demos.
+- Historical synthetic demos remain available to tests/developer validation,
+  but the live condition selector no longer exposes them.
 - Switching to the deep demo updates the heatmap layer immediately and places smooth internal mesh blobs inside the transparent brain volume.
 - The renderer accepts a general source payload without knowing how values were calculated.
 - Existing opacity, visibility, zoom, rotate, and reset behavior still works.
@@ -459,7 +461,10 @@ Done means:
 
 ### Phase 5D: Prepared Source Payload Fixture
 
-Status: Implemented. The condition selector includes a `Prepared source-map fixture` demo condition that routes prepared coordinates/scalars through the same adapter bridge future real source outputs should use.
+Status: Implemented and later removed from the normal live selector. The
+prepared source-map fixture still routes prepared coordinates/scalars through
+the same adapter bridge future real source outputs should use in validation
+contexts.
 
 Objective:
 
@@ -515,8 +520,10 @@ Objective:
 - Load multiple prepared source payloads as a named condition set.
 - Keep the manifest format separate from real LORETA calculation and project-output discovery.
 - Resolve manifest payload paths relative to the manifest file and reject paths that escape the manifest folder.
-- Let the condition selector switch among imported prepared source maps using the same renderer path as single-file imports.
-- Preserve existing synthetic demo conditions and the single-payload JSON import.
+- Let the condition selector switch among imported prepared source-map
+  conditions using the same renderer path as single-file imports.
+- Preserve the single-payload JSON import while keeping synthetic demo
+  conditions out of the normal live selector.
 
 Implementation notes:
 

@@ -7,8 +7,8 @@ The LORETA Visualizer opens from the main app sidebar as **LORETA Visualizer**.
 The first time you open it in an app session, FPVS Toolbox shows a beta warning
 that must be acknowledged before the workspace switches to the visualizer. Its
 current implementation is an experimental visualization and beta source-map
-viewer: it renders a brain mesh, synthetic source maps, prepared JSON payloads,
-and early real-project cortical L2-MNE maps.
+viewer: it renders a brain mesh, prepared JSON payloads, and early real-project
+cortical L2-MNE maps.
 
 ## Current status
 
@@ -21,12 +21,11 @@ For details about the current source-estimation method, assumptions,
 citations, z-score calculation, and participant QC behavior, see
 [Source Estimation](source-localization-method.md).
 
-The visible occipital, frontal, and deep medial temporal demo activations are
-still synthetic. The real-project path is separate: it reads existing project
-workbooks, uses the oddball harmonic list exported by the Stats tool, builds a
-template BioSemi64/fsaverage cortical forward model through MNE, writes
-prepared z-score source JSON files when needed, and loads them through the same
-manifest importer used by the demo fixtures.
+The real-project path reads existing project workbooks, uses the oddball
+harmonic list exported by the Stats tool, builds a template BioSemi64/fsaverage
+cortical forward model through MNE, writes prepared z-score source JSON files
+when needed, and loads them through the same manifest importer used by prepared
+source payloads.
 
 Use the current version to verify rendering behavior, camera controls, color
 scaling, and whether source maps can be drawn in the intended mode. Current
@@ -54,8 +53,8 @@ behavior.
   unavailable.
 - Show or hide the source map independently from the brain mesh.
 - Adjust source-map opacity for transparent overlay views.
-- Switch among project source-map conditions when available, or synthetic
-  demonstration conditions otherwise.
+- Switch among project source-map conditions, then choose whether to display
+  the raw mean, median, or 20% trimmed mean source-space z-score summary.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
   bounds.
 - Read the source color scale from the control-panel color ramp and min/max
@@ -71,8 +70,8 @@ behavior.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
-Higher synthetic values are mapped toward red. Lower values appear lighter or
-less intense depending on the current color range.
+Higher source values are mapped toward red. Lower values appear lighter or less
+intense depending on the current color range.
 
 For beta L2-MNE project maps, the color scale shows the actual scalar range
 used for the current source map. When auto-scale is on, the min/max labels
@@ -129,10 +128,12 @@ The main file loaded by default is:
 
 `project_l2_mne_hauk_zscore_beta_manifest.json`
 
-That manifest contains participant-first source-space z-score group summaries:
-raw mean, median, and 20% trimmed mean entries for each condition. The same
-folder also stores `participant_l2_mne_hauk_zscore_maps.json`, a participant
-sidecar reserved for future individual-viewer support.
+That manifest contains participant-first source-space z-score group summaries.
+The condition selector shows each source-map condition once, and the adjacent
+summary selector chooses the raw mean, median, or 20% trimmed mean entry for
+that condition. The same folder also stores
+`participant_l2_mne_hauk_zscore_maps.json`, a participant sidecar reserved for
+future individual-viewer support.
 
 Each project rebuild also writes `source_validation_report.md` and
 `source_validation_report.json` in the same folder. Use the Markdown report as
@@ -159,20 +160,16 @@ dialogs start in the last import folder when possible. Otherwise, they open to
 the active project's source-map output folder when it exists, then the active
 project root.
 
-## Interpreting the demo maps
+## Interpreting source maps
 
-Treat synthetic demo activations as rendering tests only. Beta project source
-maps are estimated from project EEG-derived topographies, but they are still
-exploratory and should not be used as final reportable source-localization
-results until the method is validated for your study.
+Beta project source maps are estimated from project EEG-derived topographies,
+but they are still exploratory and should not be used as final reportable
+source-localization results until the method is validated for your study.
 
-The deep medial temporal demo shows that the renderer can display a smooth
-internal 3D source blob inside the transparent brain. It is not a hippocampal
-source-localization result.
-
-The prepared source-map fixture is shaped like a future real-data handoff with
-coordinates, scalar values, faces, source-model metadata, and coordinate-space
-conversion. It is still synthetic and should be used only to inspect rendering.
+The checked-in source-map examples are shaped like future real-data handoffs
+with coordinates, scalar values, faces, source-model metadata, and
+coordinate-space conversion. They remain synthetic validation fixtures and are
+not shown as live demo conditions in the normal selector.
 
 When the tool opens inside a project, it automatically prepares fsaverage and
 then prefers the project-local Hauk-style source-space z-score manifest. If the

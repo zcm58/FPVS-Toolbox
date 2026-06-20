@@ -121,8 +121,9 @@ The default viewer condition entries are group summaries of participant-level
 source-space z-scores. The export writes raw mean, median, and 20% trimmed mean
 summaries for each condition. The same participant-level maps are also used to
 compute a positive-tail source-space cluster-permutation mask against zero. The
-visualizer loads the raw mean entries by default when the manifest order is
-unchanged, and the other summaries are available from the condition selector.
+visualizer shows each condition once in the condition selector, then uses the
+separate summary selector to choose raw mean, median, or 20% trimmed mean
+z-score maps.
 
 The normal **Source Map Options** rebuild path now uses only the
 participant-first model. The older group-first beta producer, which averages

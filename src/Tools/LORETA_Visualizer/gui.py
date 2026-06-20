@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +34,6 @@ from Main_App.gui.components import (
     configure_window_surface,
     make_action_button,
 )
-from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
 from Tools.LORETA_Visualizer.cortical_paint import (
     DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     payload_cluster_mask_is_empty,
@@ -44,7 +44,6 @@ from Tools.LORETA_Visualizer.cortical_paint import (
     source_payload_uses_zscores,
     uses_cortical_surface_paint,
 )
-from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
     PreparedSourceManifestEntry,
@@ -67,7 +66,7 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     format_scalar_value,
     resolve_scalar_limits,
 )
-from Tools.LORETA_Visualizer.source_payloads import SourcePayload, filter_source_payload_values_above
+from Tools.LORETA_Visualizer.source_payloads import SourcePayload, empty_source_payload, filter_source_payload_values_above
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +95,23 @@ DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
     ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
 )
+SOURCE_SUMMARY_RAW_MEAN = "mean"
+SOURCE_SUMMARY_MEDIAN = "median"
+SOURCE_SUMMARY_TRIMMED_MEAN = "trimmed_mean"
+SOURCE_SUMMARY_DIRECT = "__source_map__"
+SOURCE_SUMMARY_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Raw mean z-score", SOURCE_SUMMARY_RAW_MEAN),
+    ("Median z-score", SOURCE_SUMMARY_MEDIAN),
+    ("20% trimmed mean z-score", SOURCE_SUMMARY_TRIMMED_MEAN),
+)
+SOURCE_SUMMARY_ORDER = tuple(summary_id for _label, summary_id in SOURCE_SUMMARY_OPTIONS)
+
+
+@dataclass
+class _ManifestConditionGroup:
+    condition_id: str
+    label: str
+    entries_by_summary: dict[str, PreparedSourceManifestEntry]
 
 
 class FsaverageLoadWorker(QObject):
@@ -274,6 +290,82 @@ def split_figure_condition_display_label(condition_label: str) -> str:
     if "semantic response" in lowered:
         return "Semantic Response"
     return label
+
+
+def _source_summary_label(summary_id: str) -> str:
+    for label, candidate_id in SOURCE_SUMMARY_OPTIONS:
+        if candidate_id == summary_id:
+            return label
+    return "Source map"
+
+
+def _manifest_entry_summary_id(entry: PreparedSourceManifestEntry) -> str:
+    summary_id = str(entry.metadata.get("participant_zscore_aggregation", "")).strip().lower()
+    if summary_id in SOURCE_SUMMARY_ORDER:
+        return summary_id
+    return SOURCE_SUMMARY_DIRECT
+
+
+def _manifest_entry_raw_id(entry: PreparedSourceManifestEntry) -> str:
+    condition_id = str(entry.condition_id).strip()
+    manifest_match = re.match(r"^manifest:\d+:(?P<raw_id>.+)$", condition_id)
+    if manifest_match is not None:
+        return manifest_match.group("raw_id")
+    return condition_id
+
+
+def _manifest_entry_condition_id(entry: PreparedSourceManifestEntry) -> str:
+    summary_id = _manifest_entry_summary_id(entry)
+    condition_id = _manifest_entry_raw_id(entry)
+    if summary_id != SOURCE_SUMMARY_DIRECT:
+        suffixes = {
+            SOURCE_SUMMARY_RAW_MEAN: ("_raw_mean", "_mean"),
+            SOURCE_SUMMARY_MEDIAN: ("_median",),
+            SOURCE_SUMMARY_TRIMMED_MEAN: ("_20_trimmed_mean", "_trimmed_mean"),
+        }.get(summary_id, (f"_{summary_id}",))
+        for suffix in suffixes:
+            if condition_id.endswith(suffix):
+                return condition_id[: -len(suffix)] or condition_id
+    return condition_id
+
+
+def _manifest_entry_condition_label(entry: PreparedSourceManifestEntry) -> str:
+    label = str(entry.label).strip()
+    if _manifest_entry_summary_id(entry) == SOURCE_SUMMARY_DIRECT:
+        return label
+    return re.sub(
+        r"\s+(raw mean|median|\d+%\s+trimmed mean)\s+z-score$",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    ).strip() or label
+
+
+def _group_manifest_conditions(
+    entries: tuple[PreparedSourceManifestEntry, ...],
+) -> dict[str, _ManifestConditionGroup]:
+    groups: dict[str, _ManifestConditionGroup] = {}
+    for entry in entries:
+        condition_id = _manifest_entry_condition_id(entry)
+        summary_id = _manifest_entry_summary_id(entry)
+        group = groups.get(condition_id)
+        if group is None:
+            group = _ManifestConditionGroup(
+                condition_id=condition_id,
+                label=_manifest_entry_condition_label(entry),
+                entries_by_summary={},
+            )
+            groups[condition_id] = group
+        if summary_id in group.entries_by_summary:
+            summary_id = entry.condition_id
+        group.entries_by_summary[summary_id] = entry
+    return groups
+
+
+def _ordered_source_summary_ids(group: _ManifestConditionGroup) -> tuple[str, ...]:
+    known = [summary_id for summary_id in SOURCE_SUMMARY_ORDER if summary_id in group.entries_by_summary]
+    unknown = [summary_id for summary_id in group.entries_by_summary if summary_id not in SOURCE_SUMMARY_ORDER]
+    return tuple(known + unknown)
 
 
 def _safe_export_stem(text: str) -> str:
@@ -800,10 +892,12 @@ class LoretaVisualizerWindow(QWidget):
         self._mesh_worker: FsaverageLoadWorker | None = None
         self._source_export_thread: QThread | None = None
         self._source_export_worker: ProjectSourceMapExportWorker | None = None
-        self._selected_condition_id = default_condition().condition_id
+        self._selected_condition_id = ""
+        self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
+        self._manifest_condition_groups: dict[str, _ManifestConditionGroup] = {}
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
@@ -886,10 +980,18 @@ class LoretaVisualizerWindow(QWidget):
 
         self.condition_combo = QComboBox(controls)
         self.condition_combo.setObjectName("loreta_condition_combo")
-        for condition in DEMO_LORETA_CONDITIONS:
-            self.condition_combo.addItem(condition.label, condition.condition_id)
+        self.condition_combo.setPlaceholderText("No source maps loaded")
         self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
         controls.content_layout.addWidget(self.condition_combo)
+
+        summary_label = QLabel("Summary", controls)
+        summary_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(summary_label)
+
+        self.summary_combo = QComboBox(controls)
+        self.summary_combo.setObjectName("loreta_source_summary_combo")
+        self.summary_combo.currentIndexChanged.connect(self._on_summary_changed)
+        controls.content_layout.addWidget(self.summary_combo)
 
         display_mode_label = QLabel("Display", controls)
         display_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -1097,7 +1199,7 @@ class LoretaVisualizerWindow(QWidget):
         self.renderer.set_display_mode(self._display_mode)
         self.renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
         self._set_controls_enabled(True)
-        self._refresh_dummy_activation()
+        self._clear_activation_payload()
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         opacity_enabled = enabled and not self._activation_uses_opaque_cortical_mode()
@@ -1105,7 +1207,7 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_opacity_slider.setEnabled(opacity_enabled)
         self.activation_auto_scale_check.setEnabled(enabled)
         self._sync_activation_range_enabled()
-        self.condition_combo.setEnabled(enabled)
+        self._sync_source_map_selectors_enabled()
         self.display_mode_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
@@ -1123,6 +1225,14 @@ class LoretaVisualizerWindow(QWidget):
                 )
             else:
                 self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
+
+    def _sync_source_map_selectors_enabled(self) -> None:
+        if not hasattr(self, "condition_combo") or not hasattr(self, "summary_combo"):
+            return
+        has_conditions = bool(self._manifest_condition_groups)
+        renderer_available = self.renderer is not None
+        self.condition_combo.setEnabled(renderer_available and has_conditions)
+        self.summary_combo.setEnabled(renderer_available and has_conditions and self.summary_combo.count() > 1)
 
     def _on_transparency_changed(self, value: int) -> None:
         self._update_transparency_label(value)
@@ -1231,11 +1341,18 @@ class LoretaVisualizerWindow(QWidget):
         condition_id = self.condition_combo.currentData()
         if isinstance(condition_id, str):
             self._selected_condition_id = condition_id
+            self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
         self._update_condition_status()
-        self._refresh_dummy_activation()
+        self._refresh_current_activation()
+
+    def _on_summary_changed(self, _index: int) -> None:
+        summary_id = self.summary_combo.currentData()
+        if isinstance(summary_id, str):
+            self._selected_summary_id = summary_id
+        self._refresh_current_activation()
 
     def _update_condition_status(self) -> None:
-        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        manifest_entry = self._selected_manifest_entry()
         if manifest_entry is not None:
             return
 
@@ -1378,23 +1495,32 @@ class LoretaVisualizerWindow(QWidget):
         self._set_source_export_status(f"Exported stacked split figures: {pdf_path}; {png_path}", variant="success")
 
     def _selected_condition_label(self) -> str:
-        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
-        if manifest_entry is not None:
-            return manifest_entry.label
-        return condition_by_id(self._selected_condition_id).label
+        group = self._manifest_condition_groups.get(self._selected_condition_id)
+        if group is not None:
+            return group.label
+        return "source map"
+
+    def _selected_manifest_entry(self) -> PreparedSourceManifestEntry | None:
+        return self._manifest_entry_for(self._selected_condition_id, self._selected_summary_id)
+
+    def _manifest_entry_for(
+        self,
+        condition_id: str,
+        summary_id: str | None = None,
+    ) -> PreparedSourceManifestEntry | None:
+        group = self._manifest_condition_groups.get(condition_id)
+        if group is None:
+            return None
+        requested_summary = summary_id or self._selected_summary_id
+        entry = group.entries_by_summary.get(requested_summary)
+        if entry is not None:
+            return entry
+        for fallback_summary in _ordered_source_summary_ids(group):
+            return group.entries_by_summary[fallback_summary]
+        return None
 
     def _condition_options(self) -> tuple[tuple[str, str], ...]:
-        options: list[tuple[str, str]] = []
-        for index in range(self.condition_combo.count()):
-            condition_id = self.condition_combo.itemData(index)
-            if not isinstance(condition_id, str):
-                continue
-            manifest_entry = self._manifest_conditions.get(condition_id)
-            if manifest_entry is not None:
-                options.append((condition_id, manifest_entry.label))
-            else:
-                options.append((condition_id, condition_by_id(condition_id).label))
-        return tuple(options)
+        return tuple((group.condition_id, group.label) for group in self._manifest_condition_groups.values())
 
     def _condition_payload_for_export(self, condition_id: str) -> SourcePayload:
         renderer = self.renderer
@@ -1403,28 +1529,19 @@ class LoretaVisualizerWindow(QWidget):
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
             raise RuntimeError("No mesh transform is available.")
-        manifest_entry = self._manifest_conditions.get(condition_id)
-        if manifest_entry is not None:
-            payload = load_prepared_source_payload_json(
-                manifest_entry.payload_path,
-                display_transform=display_transform,
-            )
-            payload.metadata.update(
-                {
-                    "manifest_condition_id": manifest_entry.condition_id,
-                    "manifest_condition_label": manifest_entry.label,
-                    "manifest_metadata": manifest_entry.metadata,
-                }
-            )
-            return _activation_display_payload(payload)
-        mesh_points = renderer.mesh_points()
-        if mesh_points is None:
-            raise RuntimeError("No display mesh is available.")
-        payload = make_demo_condition_activation(
-            mesh_points,
-            mesh_faces=renderer.mesh_faces(),
-            condition=condition_by_id(condition_id),
+        manifest_entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+        if manifest_entry is None:
+            raise RuntimeError("No prepared source-map payload is available for the selected condition.")
+        payload = load_prepared_source_payload_json(
+            manifest_entry.payload_path,
             display_transform=display_transform,
+        )
+        payload.metadata.update(
+            {
+                "manifest_condition_id": manifest_entry.condition_id,
+                "manifest_condition_label": manifest_entry.label,
+                "manifest_metadata": manifest_entry.metadata,
+            }
         )
         return _activation_display_payload(payload)
 
@@ -1714,29 +1831,62 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = path.parent
         self._replace_manifest_conditions(entries)
-        first_entry = entries[0]
-        self._selected_condition_id = first_entry.condition_id
-        self._set_condition_combo_data(first_entry.condition_id)
-        self._refresh_dummy_activation()
+        first_group = next(iter(self._manifest_condition_groups.values()), None)
+        if first_group is None:
+            self._clear_activation_payload()
+            return
+        self._selected_condition_id = first_group.condition_id
+        self._set_condition_combo_data(first_group.condition_id)
+        self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
+        self._refresh_current_activation()
 
     def _replace_manifest_conditions(self, entries: tuple[PreparedSourceManifestEntry, ...]) -> None:
         previous_block_state = self.condition_combo.blockSignals(True)
+        previous_summary_block_state = self.summary_combo.blockSignals(True)
         try:
-            for index in range(self.condition_combo.count() - 1, -1, -1):
-                item_data = self.condition_combo.itemData(index)
-                if isinstance(item_data, str) and item_data in self._manifest_conditions:
-                    self.condition_combo.removeItem(index)
+            self.condition_combo.clear()
+            self.summary_combo.clear()
             self._manifest_conditions = {entry.condition_id: entry for entry in entries}
-            for entry in entries:
-                self.condition_combo.addItem(f"Imported: {entry.label}", entry.condition_id)
+            self._manifest_condition_groups = _group_manifest_conditions(entries)
+            for group in self._manifest_condition_groups.values():
+                self.condition_combo.addItem(group.label, group.condition_id)
         finally:
             self.condition_combo.blockSignals(previous_block_state)
+            self.summary_combo.blockSignals(previous_summary_block_state)
+        self._sync_source_map_selectors_enabled()
 
     def _set_condition_combo_data(self, condition_id: str) -> None:
         for index in range(self.condition_combo.count()):
             if self.condition_combo.itemData(index) == condition_id:
                 self.condition_combo.setCurrentIndex(index)
                 return
+
+    def _sync_summary_combo_for_selected_condition(self, *, preferred_summary: str | None = None) -> None:
+        previous_block_state = self.summary_combo.blockSignals(True)
+        try:
+            self.summary_combo.clear()
+            group = self._manifest_condition_groups.get(self._selected_condition_id)
+            if group is None:
+                self.summary_combo.addItem("No source maps loaded", SOURCE_SUMMARY_DIRECT)
+                self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
+            else:
+                summary_ids = _ordered_source_summary_ids(group)
+                for summary_id in summary_ids:
+                    self.summary_combo.addItem(_source_summary_label(summary_id), summary_id)
+                selected_summary = preferred_summary if preferred_summary in summary_ids else None
+                if selected_summary is None and SOURCE_SUMMARY_RAW_MEAN in summary_ids:
+                    selected_summary = SOURCE_SUMMARY_RAW_MEAN
+                if selected_summary is None and summary_ids:
+                    selected_summary = summary_ids[0]
+                if selected_summary is not None:
+                    self._selected_summary_id = selected_summary
+                    for index in range(self.summary_combo.count()):
+                        if self.summary_combo.itemData(index) == selected_summary:
+                            self.summary_combo.setCurrentIndex(index)
+                            break
+        finally:
+            self.summary_combo.blockSignals(previous_block_state)
+        self._sync_source_map_selectors_enabled()
 
     def _start_fsaverage_load(self, *, allow_fetch: bool) -> None:
         if self._mesh_thread is not None:
@@ -1768,7 +1918,7 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is None or not isinstance(result, FsaverageMeshResult):
             return
         renderer.replace_brain_mesh(result.mesh, reset_camera=True)
-        self._refresh_dummy_activation()
+        self._refresh_current_activation()
         self.mesh_status.set_variant("success")
         split_note = (
             f" Split view uses fsaverage {result.split_surface} hemispheres."
@@ -1797,29 +1947,18 @@ class LoretaVisualizerWindow(QWidget):
         self._mesh_worker = None
         self._sync_project_source_button()
 
-    def _refresh_dummy_activation(self) -> None:
+    def _refresh_current_activation(self) -> None:
         renderer = self.renderer
         if renderer is None:
             return
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
             return
-        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        manifest_entry = self._selected_manifest_entry()
         if manifest_entry is not None:
             self._render_manifest_condition(manifest_entry)
             return
-        mesh_points = renderer.mesh_points()
-        if mesh_points is None:
-            return
-        mesh_faces = renderer.mesh_faces()
-        condition = condition_by_id(self._selected_condition_id)
-        payload = make_demo_condition_activation(
-            mesh_points,
-            mesh_faces=mesh_faces,
-            condition=condition,
-            display_transform=display_transform,
-        )
-        self._set_activation_payload(payload)
+        self._clear_activation_payload()
 
     def _render_manifest_condition(self, entry: PreparedSourceManifestEntry) -> None:
         renderer = self.renderer
@@ -1887,6 +2026,16 @@ class LoretaVisualizerWindow(QWidget):
                 "Loaded unmasked source map. Rebuild z-score maps to add cluster masks.",
                 variant="warning",
             )
+
+    def _clear_activation_payload(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        self._current_activation_payload = None
+        self._sync_activation_render_mode_controls()
+        renderer.set_activation_payload(empty_source_payload("No source map loaded"))
+        self.activation_scale_min_label.setText("")
+        self.activation_scale_max_label.setText("")
 
     def _set_activation_payload(self, payload: SourcePayload) -> None:
         renderer = self.renderer

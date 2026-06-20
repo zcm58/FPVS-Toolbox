@@ -23,7 +23,7 @@ The first durable goal is rendering:
   display mode;
 - an external fsaverage-derived anatomical mesh when available;
 - a synthetic fallback mesh when fsaverage is unavailable;
-- synthetic scalar source maps for surface/deep rendering validation;
+- synthetic scalar source maps for tests/developer rendering validation;
 - a payload contract that future real source-localization producers can feed
   without changing renderer internals.
 
@@ -197,8 +197,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   It must not calculate source estimates.
 - `synthetic_brain.py`: deterministic fallback brain mesh and `BrainMesh`
   dataclass.
-- `conditions.py`: synthetic demo condition metadata.
-- `dummy_activation.py`: deterministic demo-only scalar source maps.
+- `conditions.py`: synthetic demo condition metadata retained for validation.
+- `dummy_activation.py`: deterministic demo-only scalar source maps retained for
+  tests/developer validation, not normal live selector options.
 - `prepared_source_fixture.py`: in-memory fixture that is shaped like a
   prepared source-map handoff from a future real calculation path. It validates
   and adapts coordinates/scalars but does not calculate source estimates.
@@ -276,8 +277,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
 - `scalar_fields.py`: visual scalar color stops and auto/manual color-limit
   resolution.
 
-When the current mesh exposes a non-identity native/display transform, the GUI
-demo payloads intentionally round-trip through native coordinates and
+When validation code exercises a non-identity native/display transform, demo
+payloads intentionally round-trip through native coordinates and
 `source_payload_to_display(...)`. This exercises the same bridge that future
 real source payloads should use, while keeping the values synthetic.
 
