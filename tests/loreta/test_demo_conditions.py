@@ -261,6 +261,38 @@ def test_l2_mne_surface_zscore_display_uses_cortical_paint_without_filtering_poi
     )
 
 
+def test_transparent_surface_zscore_display_filters_nonpositive_values_before_auto_scale() -> None:
+    payload = make_source_payload(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.5, 1.5, 0.0],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-6.0, 0.0, 0.5, 2.0, 4.2], dtype=float),
+        label="Semantic Response",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 2, 3], [2, 3, 4], [1, 2, 4]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score", "sensor_value_unit": "raw FFT amplitude uV"},
+        normalize_values=False,
+    )
+
+    display_payload = _activation_display_payload(payload, transparent_mesh_display=True)
+
+    assert display_payload.values.tolist() == [0.5, 2.0, 4.2]
+    assert np.array_equal(display_payload.faces, np.asarray([[0, 1, 2]], dtype=np.int64))
+    assert resolve_scalar_limits(display_payload.values, auto_scale=True) == (0.0, 4.2)
+    assert _activation_value_readout(display_payload, cortical_threshold_display=False) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; display: > 0"
+    )
+
+
 def test_underpowered_cluster_mask_readout_marks_exploratory_threshold_display() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),

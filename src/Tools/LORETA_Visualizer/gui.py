@@ -474,8 +474,10 @@ def _source_payload_uses_zscores(payload: SourcePayload) -> bool:
     return source_payload_uses_zscores(payload)
 
 
-def _activation_display_payload(payload: SourcePayload) -> SourcePayload:
-    if _source_payload_uses_zscores(payload) and not uses_cortical_surface_paint(payload):
+def _activation_display_payload(payload: SourcePayload, *, transparent_mesh_display: bool = False) -> SourcePayload:
+    if _source_payload_uses_zscores(payload) and (
+        transparent_mesh_display or not uses_cortical_surface_paint(payload)
+    ):
         return filter_source_payload_values_above(payload, threshold=0.0)
     return payload
 
@@ -900,6 +902,7 @@ class LoretaVisualizerWindow(QWidget):
         self._source_export_worker: ProjectSourceMapExportWorker | None = None
         self._selected_condition_id = ""
         self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
+        self._source_activation_payload: SourcePayload | None = None
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
@@ -1332,11 +1335,14 @@ class LoretaVisualizerWindow(QWidget):
         self._display_mode = mode
         renderer = self.renderer
         if renderer is not None:
-            renderer.set_display_mode(mode)
-            renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
-            renderer.set_activation_visible(self._activation_visible)
-        self._sync_activation_render_mode_controls()
-        self._apply_activation_scalar_range()
+            if self._source_activation_payload is not None:
+                self._set_activation_payload(self._source_activation_payload)
+            else:
+                renderer.set_display_mode(mode)
+                renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
+                renderer.set_activation_visible(self._activation_visible)
+                self._sync_activation_render_mode_controls()
+                self._apply_activation_scalar_range()
 
     def _rotate_split_hemisphere(self, side: str, degrees: float) -> None:
         renderer = self.renderer
@@ -2045,6 +2051,7 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
+        self._source_activation_payload = None
         self._current_activation_payload = None
         self._sync_activation_render_mode_controls()
         renderer.set_activation_payload(empty_source_payload("No source map loaded"))
@@ -2055,7 +2062,11 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
-        display_payload = _activation_display_payload(payload)
+        self._source_activation_payload = payload
+        display_payload = _activation_display_payload(
+            payload,
+            transparent_mesh_display=self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH,
+        )
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
         renderer.set_display_mode(self._display_mode)
