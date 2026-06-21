@@ -8,7 +8,15 @@ import numpy as np
 
 COORDINATE_SPACE_DISPLAY = "normalized_display"
 COORDINATE_SPACE_FSAVERAGE = "fsaverage_surface"
+COORDINATE_SPACE_FSAVERAGE_VOLUME = "fsaverage_volume"
 COORDINATE_SPACE_UNKNOWN = "unknown"
+
+_FSAVERAGE_COMPATIBLE_COORDINATE_SPACES = frozenset(
+    {
+        COORDINATE_SPACE_FSAVERAGE,
+        COORDINATE_SPACE_FSAVERAGE_VOLUME,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -59,7 +67,10 @@ class MeshDisplayTransform:
         source_space = self.native_coordinate_space if coordinate_space is None else str(coordinate_space)
         if source_space == self.display_coordinate_space:
             return payload_points.astype(float)
-        if source_space != self.native_coordinate_space:
+        if not _coordinate_spaces_are_transform_compatible(
+            source_space,
+            self.native_coordinate_space,
+        ):
             raise ValueError(
                 f"Cannot transform {source_space!r} points with a {self.native_coordinate_space!r} display transform."
             )
@@ -80,3 +91,9 @@ def _validate_points(points: np.ndarray) -> np.ndarray:
     if not np.all(np.isfinite(payload_points)):
         raise ValueError("Coordinate transforms require finite points.")
     return payload_points
+
+
+def _coordinate_spaces_are_transform_compatible(source_space: str, native_space: str) -> bool:
+    if source_space == native_space:
+        return True
+    return {source_space, native_space}.issubset(_FSAVERAGE_COMPATIBLE_COORDINATE_SPACES)

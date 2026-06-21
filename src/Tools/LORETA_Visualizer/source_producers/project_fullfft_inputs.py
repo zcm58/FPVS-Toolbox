@@ -13,10 +13,14 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-import openpyxl
 import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Tools.Stats.io.xlsx_selected_reader import (
+    MissingXlsxColumnsError,
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+)
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS,
     DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
@@ -452,21 +456,10 @@ def _read_fullfft_topographies(
     excluded_offsets: tuple[int, ...],
     min_noise_bins: int,
 ) -> _WorkbookFullFftTopographies:
-    workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
-    try:
-        try:
-            worksheet = workbook[FULL_FFT_AMPLITUDE_SHEET_NAME]
-        except KeyError as exc:
-            raise ProjectFullFftInputError(
-                f"Phase 6D source-space z-score mode requires the "
-                f"'{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet in every included participant workbook. "
-                f"Missing in: {workbook_path.name}."
-            ) from exc
-        rows = worksheet.iter_rows(values_only=True)
-        try:
-            header = [str(value) if value is not None else "" for value in next(rows)]
-        except StopIteration as exc:
-            raise ProjectFullFftInputError(f"{workbook_path.name} FullFFT sheet is empty.") from exc
+    if plan is None:
+        header = _read_fullfft_header(workbook_path)
+        if not header:
+            raise ProjectFullFftInputError(f"{workbook_path.name} FullFFT sheet is empty.")
         workbook_plan = plan or _build_fullfft_bin_plan(
             header,
             selected_harmonics=selected_harmonics,
@@ -475,19 +468,12 @@ def _read_fullfft_topographies(
             excluded_offsets=excluded_offsets,
             min_noise_bins=min_noise_bins,
         )
-        if plan is not None:
-            _validate_fullfft_plan_columns(header, plan=plan, workbook_path=workbook_path)
-        columns = ("Electrode", *workbook_plan.required_columns)
-        indexes = _column_indexes(header, columns, workbook_path=workbook_path)
-        data: list[list[object]] = []
-        for row in rows:
-            if row is None or row[indexes[0]] is None:
-                continue
-            data.append([row[index] for index in indexes])
-    finally:
-        workbook.close()
+    else:
+        workbook_plan = plan
 
-    frame = pd.DataFrame(data, columns=columns)
+    columns = ("Electrode", *workbook_plan.required_columns)
+    frame = _read_fullfft_columns(workbook_path, columns=columns)
+    frame = frame.loc[frame["Electrode"].notna()].reset_index(drop=True)
     if len(frame) != len(expected_electrodes):
         raise ProjectFullFftInputError(
             f"{workbook_path.name} {FULL_FFT_AMPLITUDE_SHEET_NAME} expected "
@@ -520,6 +506,55 @@ def _read_fullfft_topographies(
         target_by_harmonic=target_by_harmonic,
         noise_by_harmonic_offset=noise_by_harmonic_offset,
     )
+
+
+def _read_fullfft_header(workbook_path: Path) -> list[str]:
+    try:
+        header = read_xlsx_sheet_header(
+            workbook_path,
+            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
+        )
+    except ValueError as exc:
+        _raise_missing_fullfft_sheet_if_needed(exc, workbook_path=workbook_path)
+        raise
+    return [str(value) if value is not None else "" for value in header]
+
+
+def _read_fullfft_columns(workbook_path: Path, *, columns: Sequence[str]) -> pd.DataFrame:
+    try:
+        return read_xlsx_sheet_selected_columns(
+            workbook_path,
+            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
+            required_columns=columns,
+        )
+    except MissingXlsxColumnsError as exc:
+        non_electrode_missing = [
+            column
+            for column in exc.missing_columns
+            if column != "Electrode"
+        ]
+        if non_electrode_missing:
+            raise ProjectFullFftInputError(
+                f"{workbook_path.name} is missing Phase 6D FullFFT source z-score columns: "
+                f"{', '.join(non_electrode_missing[:8])}"
+            ) from exc
+        raise ProjectFullFftInputError(
+            f"{workbook_path.name} {FULL_FFT_AMPLITUDE_SHEET_NAME} is missing columns: "
+            f"{', '.join(exc.missing_columns)}"
+        ) from exc
+    except ValueError as exc:
+        _raise_missing_fullfft_sheet_if_needed(exc, workbook_path=workbook_path)
+        raise
+
+
+def _raise_missing_fullfft_sheet_if_needed(exc: ValueError, *, workbook_path: Path) -> None:
+    if f"Worksheet named '{FULL_FFT_AMPLITUDE_SHEET_NAME}' not found" not in str(exc):
+        return
+    raise ProjectFullFftInputError(
+        f"Phase 6D source-space z-score mode requires the "
+        f"'{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet in every included participant workbook. "
+        f"Missing in: {workbook_path.name}."
+    ) from exc
 
 
 def _build_fullfft_bin_plan(
@@ -590,20 +625,6 @@ def _build_fullfft_bin_plan(
     )
 
 
-def _validate_fullfft_plan_columns(
-    header: Sequence[str],
-    *,
-    plan: ProjectFullFftBinPlan,
-    workbook_path: Path,
-) -> None:
-    missing = [column for column in plan.required_columns if column not in header]
-    if missing:
-        raise ProjectFullFftInputError(
-            f"{workbook_path.name} is missing Phase 6D FullFFT source z-score columns: "
-            f"{', '.join(missing[:8])}"
-        )
-
-
 def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str, int]]:
     out: list[tuple[float, str, int]] = []
     frequency_index = 0
@@ -656,23 +677,3 @@ def _frequency_resolution(frequencies: Sequence[float]) -> float | None:
     if diffs.size == 0:
         return None
     return float(np.median(diffs))
-
-
-def _column_indexes(
-    header: Sequence[str],
-    columns: Sequence[str],
-    *,
-    workbook_path: Path,
-) -> list[int]:
-    indexes: list[int] = []
-    missing: list[str] = []
-    for column in columns:
-        if column in header:
-            indexes.append(header.index(column))
-        else:
-            missing.append(column)
-    if missing:
-        raise ProjectFullFftInputError(
-            f"{workbook_path.name} {FULL_FFT_AMPLITUDE_SHEET_NAME} is missing columns: {', '.join(missing)}"
-        )
-    return indexes

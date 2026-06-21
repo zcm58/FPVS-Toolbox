@@ -315,6 +315,9 @@ Allowed bridge behavior:
 - preserve faces, labels, source model metadata, and value labels;
 - reject mismatched coordinate-space labels;
 - convert native anatomical/source coordinates into renderer display space;
+- treat `fsaverage_surface` and `fsaverage_volume` as compatible
+  FreeSurfer/fsaverage millimeter spaces for display normalization while
+  preserving their distinct payload labels;
 - normalize or bound values for visual color mapping;
 - adapt future real data into `SourcePayload`.
 
@@ -387,7 +390,10 @@ same prepared-manifest importer as every other source payload. Its displayed
 values are source-space z-scores, not arbitrary L2-MNE amplitude. It reads
 `FullFFT Amplitude (uV)` only and refuses BCA-only or compact-summary-only
 workbooks with a user-facing prerequisite message instead of fabricating
-source-space z-scores. The generated payloads preserve the signed z-score field
+source-space z-scores. FullFFT ingestion uses the shared selected-column XLSX
+XML reader so project source-map generation streams only `Electrode` plus the
+target/noise-bin columns required by the current bin plan. The generated
+payloads preserve the signed z-score field
 for QC. The default L2-MNE cortical
 surface view paints those values onto an opaque split-hemisphere display using
 fsaverage inflated hemispheres when available and pial split hemispheres as a
