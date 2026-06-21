@@ -704,11 +704,12 @@ class SourceMapOptionsDialog(AppDialog):
         zscore_display_threshold: float,
         use_cluster_mask: bool,
         source_map_visible: bool,
+        transparent_spin_enabled: bool,
         selected_source_method_id: str,
         project_available: bool,
         export_busy: bool,
     ) -> None:
-        super().__init__("Source Map Options", parent, size=SurfaceSize(width=480, height=440, min_width=430))
+        super().__init__("Options", parent, size=SurfaceSize(width=480, height=440, min_width=430))
         self.selected_action: str | None = None
         self._syncing_threshold_controls = False
 
@@ -770,6 +771,14 @@ class SourceMapOptionsDialog(AppDialog):
         self.source_map_visible_check.setChecked(bool(source_map_visible))
         self.source_map_visible_check.setToolTip("Turn off to inspect the anatomical cortical surface without source colors.")
         display_layout.addWidget(self.source_map_visible_check)
+
+        self.transparent_spin_check = QCheckBox("Spin transparent mesh view", display_tab)
+        self.transparent_spin_check.setObjectName("loreta_transparent_spin_check")
+        self.transparent_spin_check.setChecked(bool(transparent_spin_enabled))
+        self.transparent_spin_check.setToolTip(
+            "Slowly rotate the transparent mesh view; user interaction pauses it for 10 seconds."
+        )
+        display_layout.addWidget(self.transparent_spin_check)
 
         threshold_note = QLabel(
             "For Hauk et al., 2025 cluster-masked maps, this cutoff is used when "
@@ -1066,6 +1075,7 @@ class LoretaVisualizerWindow(QWidget):
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._use_cluster_mask = True
         self._activation_visible = True
+        self._transparent_spin_enabled = False
         self._display_mode = DEFAULT_DISPLAY_MODE
 
         root = QVBoxLayout(self)
@@ -1340,9 +1350,9 @@ class LoretaVisualizerWindow(QWidget):
         self.export_figures_btn.clicked.connect(self._open_export_figures)
         actions_layout.addWidget(self.export_figures_btn)
 
-        self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=actions_section)
+        self.source_options_btn = make_action_button("Options...", compact=True, parent=actions_section)
         self.source_options_btn.setObjectName("loreta_source_options_btn")
-        self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
+        self.source_options_btn.setToolTip("Open display, source-map rebuild, import, and participant QC options.")
         self.source_options_btn.clicked.connect(self._open_source_map_options)
         actions_layout.addWidget(self.source_options_btn)
         controls.content_layout.addStretch(1)
@@ -1375,6 +1385,7 @@ class LoretaVisualizerWindow(QWidget):
         self.viewport_layout.addWidget(self.renderer, 1)
         self.renderer.set_display_mode(self._display_mode)
         self.renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
+        self.renderer.set_transparent_spin_enabled(self._transparent_spin_enabled)
         self._set_controls_enabled(True)
         self._clear_activation_payload()
 
@@ -1400,7 +1411,7 @@ class LoretaVisualizerWindow(QWidget):
                     "A source-map rebuild is running. Options remain available, but rebuild actions are paused."
                 )
             else:
-                self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
+                self.source_options_btn.setToolTip("Open display, source-map rebuild, import, and participant QC options.")
 
     def _sync_source_map_selectors_enabled(self) -> None:
         if (
@@ -1817,6 +1828,7 @@ class LoretaVisualizerWindow(QWidget):
             zscore_display_threshold=self._zscore_display_threshold,
             use_cluster_mask=self._use_cluster_mask,
             source_map_visible=self._activation_visible,
+            transparent_spin_enabled=self._transparent_spin_enabled,
             selected_source_method_id=self._selected_source_method_id,
             project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
@@ -1829,6 +1841,7 @@ class LoretaVisualizerWindow(QWidget):
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
         self._set_activation_visibility_enabled(dialog.source_map_visible_check.isChecked())
+        self._set_transparent_spin_enabled(dialog.transparent_spin_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD:
@@ -1870,6 +1883,12 @@ class LoretaVisualizerWindow(QWidget):
             if self._source_activation_payload is not None:
                 self._set_activation_payload(self._source_activation_payload)
         self._apply_activation_scalar_range()
+
+    def _set_transparent_spin_enabled(self, enabled: bool) -> None:
+        self._transparent_spin_enabled = bool(enabled)
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_transparent_spin_enabled(self._transparent_spin_enabled)
 
     def _load_prepared_source_manifest(self) -> None:
         renderer = self.renderer

@@ -14,6 +14,7 @@ from Main_App.exports.figure_style import (
     figure_text_spec,
     pil_font_candidates,
 )
+from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from Tools.LORETA_Visualizer.cortical_paint import (
@@ -74,6 +75,22 @@ SPLIT_FIGURE_CONDITION_TOP_MARGIN = 150.0
 SPLIT_FIGURE_SINGLE_TOP_MARGIN = 130.0
 _SPLIT_FIGURE_UNITS_PER_INCH = DEFAULT_SPLIT_FIGURE_WIDTH / DEFAULT_SPLIT_FIGURE_WIDTH_IN
 SPLIT_FIGURE_EXPORT_DPI = FIGURE_EXPORT_DPI
+TRANSPARENT_SPIN_INTERVAL_MS = 50
+TRANSPARENT_SPIN_RESUME_DELAY_MS = 10_000
+TRANSPARENT_SPIN_DEGREES_PER_TICK = 0.3
+_TRANSPARENT_SPIN_DISTANCE_SCALE = 4.0
+_TRANSPARENT_SPIN_MIN_DISTANCE = 3.0
+_TRANSPARENT_SPIN_INTERACTION_EVENTS = frozenset(
+    {
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.Wheel,
+        QEvent.Type.KeyPress,
+        QEvent.Type.TouchBegin,
+        QEvent.Type.TouchUpdate,
+        QEvent.Type.TabletPress,
+    }
+)
 
 
 class RenderBackendError(RuntimeError):
@@ -136,6 +153,15 @@ class BrainRendererWidget(QWidget):
         self._cortical_paint_use_cluster_mask = True
         self._last_activation_payload: SourcePayload | None = None
         self._volume_overlay_active = False
+        self._transparent_spin_enabled = False
+        self._transparent_spin_angle_degrees = 0.0
+        self._transparent_spin_timer = QTimer(self)
+        self._transparent_spin_timer.setInterval(TRANSPARENT_SPIN_INTERVAL_MS)
+        self._transparent_spin_timer.timeout.connect(self._advance_transparent_spin)
+        self._transparent_spin_resume_timer = QTimer(self)
+        self._transparent_spin_resume_timer.setSingleShot(True)
+        self._transparent_spin_resume_timer.setInterval(TRANSPARENT_SPIN_RESUME_DELAY_MS)
+        self._transparent_spin_resume_timer.timeout.connect(self._resume_transparent_spin_after_interaction)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -156,6 +182,7 @@ class BrainRendererWidget(QWidget):
         plotter.set_background("#f7f9fc")
         plotter.enable_trackball_style()
         _configure_transparency_backend(plotter)
+        self._install_transparent_spin_event_filter(plotter)
         layout.addWidget(plotter)
         self._plotter = plotter
 
@@ -318,6 +345,32 @@ class BrainRendererWidget(QWidget):
         except (AttributeError, RuntimeError, TypeError):
             logger.debug("loreta_publication_material_failed", exc_info=True)
 
+    def _install_transparent_spin_event_filter(self, plotter: Any) -> None:
+        for candidate in (plotter, getattr(plotter, "interactor", None)):
+            if candidate is None:
+                continue
+            try:
+                candidate.installEventFilter(self)
+            except (AttributeError, RuntimeError, TypeError):
+                logger.debug("loreta_transparent_spin_event_filter_unavailable", exc_info=True)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, ANN001
+        if self._transparent_spin_event_is_user_interaction(event):
+            self._pause_transparent_spin_for_interaction()
+        return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _transparent_spin_event_is_user_interaction(event: QEvent) -> bool:
+        event_type = event.type()
+        if event_type in _TRANSPARENT_SPIN_INTERACTION_EVENTS:
+            return True
+        if event_type == QEvent.Type.MouseMove:
+            try:
+                return bool(event.buttons() != Qt.MouseButton.NoButton)
+            except (AttributeError, RuntimeError, TypeError):
+                return False
+        return False
+
     def set_brain_opacity(self, opacity: float) -> None:
         opacity = max(0.05, min(1.0, float(opacity)))
         self._brain_opacity = opacity
@@ -379,6 +432,7 @@ class BrainRendererWidget(QWidget):
         if reset_camera:
             plotter.reset_camera()
         plotter.render()
+        self._sync_transparent_spin_state(reset_orientation=reset_camera)
 
     def set_activation_payload(self, payload: SourcePayload) -> None:
         plotter = self._plotter
@@ -397,6 +451,7 @@ class BrainRendererWidget(QWidget):
         if len(payload.points) == 0:
             self._restore_base_brain_actor(render=False)
             plotter.render()
+            self._sync_transparent_spin_state()
             return
         if uses_cortical_surface_paint(payload):
             if (
@@ -404,13 +459,16 @@ class BrainRendererWidget(QWidget):
                 and self._set_split_hemisphere_payload(payload, reset_camera=not preserve_split_view)
             ):
                 plotter.render()
+                self._sync_transparent_spin_state()
                 return
             if self._display_mode == DISPLAY_MODE_CORTICAL_SURFACE and self._set_cortical_paint_payload(payload):
                 plotter.render()
+                self._sync_transparent_spin_state()
                 return
         self._restore_base_brain_actor(render=False)
         self._add_activation_overlay(pv, payload)
         plotter.render()
+        self._sync_transparent_spin_state()
 
     def _add_activation_overlay(self, pv: Any, payload: SourcePayload) -> None:
         plotter = self._plotter
@@ -723,6 +781,7 @@ class BrainRendererWidget(QWidget):
     def set_display_mode(self, display_mode: str, *, refresh: bool = True) -> None:
         mode = display_mode if display_mode in DISPLAY_MODES else DISPLAY_MODE_SPLIT_HEMISPHERE
         if mode == self._display_mode:
+            self._sync_transparent_spin_state()
             return
         self._display_mode = mode
         if mode == DISPLAY_MODE_SPLIT_HEMISPHERE:
@@ -732,9 +791,127 @@ class BrainRendererWidget(QWidget):
             self.set_activation_payload(payload)
             return
         self._restore_base_brain_actor(render=refresh)
+        self._sync_transparent_spin_state(reset_orientation=mode == DISPLAY_MODE_TRANSPARENT_MESH)
 
     def display_mode(self) -> str:
         return self._display_mode
+
+    def set_transparent_spin_enabled(self, enabled: bool) -> None:
+        self._transparent_spin_enabled = bool(enabled)
+        self._sync_transparent_spin_state(reset_orientation=True)
+
+    def transparent_spin_enabled(self) -> bool:
+        return bool(getattr(self, "_transparent_spin_enabled", False))
+
+    def _sync_transparent_spin_state(self, *, reset_orientation: bool = False) -> None:
+        if self._transparent_spin_should_run():
+            self._start_transparent_spin(reset_orientation=reset_orientation)
+            return
+        self._stop_transparent_spin()
+
+    def _transparent_spin_should_run(self) -> bool:
+        return (
+            bool(getattr(self, "_transparent_spin_enabled", False))
+            and self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH
+            and self._plotter is not None
+        )
+
+    def _start_transparent_spin(self, *, reset_orientation: bool) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        self._transparent_spin_resume_timer.stop()
+        if reset_orientation:
+            self._reset_transparent_spin_camera()
+        if not self._transparent_spin_timer.isActive():
+            self._transparent_spin_timer.start()
+
+    def _stop_transparent_spin(self) -> None:
+        for timer_name in ("_transparent_spin_timer", "_transparent_spin_resume_timer"):
+            timer = getattr(self, timer_name, None)
+            if timer is not None:
+                timer.stop()
+
+    def _pause_transparent_spin_for_interaction(self) -> None:
+        if not self._transparent_spin_should_run():
+            return
+        self._transparent_spin_timer.stop()
+        self._transparent_spin_resume_timer.start(TRANSPARENT_SPIN_RESUME_DELAY_MS)
+
+    def _resume_transparent_spin_after_interaction(self) -> None:
+        if self._transparent_spin_should_run():
+            self._start_transparent_spin(reset_orientation=True)
+
+    def _advance_transparent_spin(self) -> None:
+        if not self._transparent_spin_should_run():
+            self._stop_transparent_spin()
+            return
+        angle = (
+            float(getattr(self, "_transparent_spin_angle_degrees", 0.0)) + TRANSPARENT_SPIN_DEGREES_PER_TICK
+        ) % 360.0
+        self._transparent_spin_angle_degrees = angle
+        self._set_transparent_spin_camera(angle_degrees=angle, render=True)
+
+    def _reset_transparent_spin_camera(self) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        self._transparent_spin_angle_degrees = 0.0
+        try:
+            plotter.reset_camera()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_transparent_spin_reset_camera_failed", exc_info=True)
+        self._set_transparent_spin_camera(angle_degrees=0.0, render=True)
+
+    def _set_transparent_spin_camera(self, *, angle_degrees: float, render: bool) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        focal = self._transparent_spin_focal_point()
+        distance = self._transparent_spin_camera_distance(focal)
+        radians = np.deg2rad(float(angle_degrees))
+        position = focal + np.asarray(
+            [np.cos(radians) * distance, np.sin(radians) * distance, 0.0],
+            dtype=float,
+        )
+        try:
+            camera = plotter.camera
+            camera.SetFocalPoint(*_xyz_tuple(focal))
+            camera.SetPosition(*_xyz_tuple(position))
+            camera.SetViewUp(0.0, 0.0, 1.0)
+            try:
+                camera.OrthogonalizeViewUp()
+            except AttributeError:
+                pass
+            plotter.reset_camera_clipping_range()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_transparent_spin_camera_failed", exc_info=True)
+            return
+        if render:
+            plotter.render()
+
+    def _transparent_spin_focal_point(self) -> np.ndarray:
+        mesh = self._current_mesh
+        if mesh is None or len(mesh.points) == 0:
+            return np.zeros(3, dtype=float)
+        points = np.asarray(mesh.points, dtype=float)
+        finite_points = points[np.all(np.isfinite(points), axis=1)]
+        if len(finite_points) == 0:
+            return np.zeros(3, dtype=float)
+        return np.mean(finite_points, axis=0).astype(float)
+
+    def _transparent_spin_camera_distance(self, focal: np.ndarray) -> float:
+        mesh = self._current_mesh
+        if mesh is None or len(mesh.points) == 0:
+            return _TRANSPARENT_SPIN_MIN_DISTANCE
+        points = np.asarray(mesh.points, dtype=float)
+        finite_points = points[np.all(np.isfinite(points), axis=1)]
+        if len(finite_points) == 0:
+            return _TRANSPARENT_SPIN_MIN_DISTANCE
+        radius = float(np.max(np.linalg.norm(finite_points - focal, axis=1)))
+        if not np.isfinite(radius) or radius <= 1e-9:
+            return _TRANSPARENT_SPIN_MIN_DISTANCE
+        return max(radius * _TRANSPARENT_SPIN_DISTANCE_SCALE, _TRANSPARENT_SPIN_MIN_DISTANCE)
 
     def rotate_split_hemisphere(self, side: str, degrees: float) -> None:
         if side == "left":
@@ -949,6 +1126,9 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         if plotter is None:
             return
+        if self._transparent_spin_should_run():
+            self._start_transparent_spin(reset_orientation=True)
+            return
         if self._split_hemisphere_active:
             self._reset_split_rotations()
             self._render_split_hemispheres(render=False)
@@ -1005,6 +1185,7 @@ class BrainRendererWidget(QWidget):
         return write_publication_split_hemisphere_stack_figures(output_path, panels=panels)
 
     def shutdown(self) -> None:
+        self._stop_transparent_spin()
         plotter = self._plotter
         self._plotter = None
         self._brain_actor = None
@@ -1031,6 +1212,11 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
     if len(value) != 6:
         return (0.79, 0.80, 0.82)
     return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _xyz_tuple(values: np.ndarray) -> tuple[float, float, float]:
+    vector = np.asarray(values, dtype=float).reshape(3)
+    return (float(vector[0]), float(vector[1]), float(vector[2]))
 
 
 def _configure_transparency_backend(plotter: Any) -> None:

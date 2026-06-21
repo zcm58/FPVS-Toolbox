@@ -16,14 +16,18 @@ from Tools.LORETA_Visualizer.renderer import (
     DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN,
     DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN,
     DEFAULT_SPLIT_FIGURE_WIDTH_IN,
+    DISPLAY_MODE_CORTICAL_SURFACE,
     ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
+    DISPLAY_MODE_TRANSPARENT_MESH,
     PublicationSplitFigurePanel,
     SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT,
     SPLIT_FIGURE_CONDITION_TOP_MARGIN,
     SPLIT_FIGURE_EXPORT_DPI,
     SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
     SPLIT_FIGURE_SINGLE_TOP_MARGIN,
+    TRANSPARENT_SPIN_DEGREES_PER_TICK,
+    TRANSPARENT_SPIN_RESUME_DELAY_MS,
     _PUBLICATION_CAMERA_DISTANCE,
     _PUBLICATION_CAMERA_PARALLEL_SCALE,
     _SplitHemisphereState,
@@ -807,6 +811,111 @@ def test_publication_camera_opens_split_view_zoomed_out() -> None:
     assert plotter.camera.parallel_scale == _PUBLICATION_CAMERA_PARALLEL_SCALE
     assert _PUBLICATION_CAMERA_DISTANCE > 5.0
     assert _PUBLICATION_CAMERA_PARALLEL_SCALE > 2.0
+
+
+class _FakeTransparentSpinTimer:
+    def __init__(self) -> None:
+        self.active = False
+        self.started_intervals: list[int | None] = []
+        self.stop_calls = 0
+
+    def isActive(self) -> bool:
+        return self.active
+
+    def start(self, interval: int | None = None) -> None:
+        self.active = True
+        self.started_intervals.append(interval)
+
+    def stop(self) -> None:
+        self.active = False
+        self.stop_calls += 1
+
+
+class _FakeTransparentSpinCamera(_FakePublicationCamera):
+    def __init__(self) -> None:
+        super().__init__()
+        self.orthogonalize_calls = 0
+
+    def OrthogonalizeViewUp(self) -> None:
+        self.orthogonalize_calls += 1
+
+
+class _FakeTransparentSpinPlotter:
+    def __init__(self) -> None:
+        self.camera = _FakeTransparentSpinCamera()
+        self.reset_camera_calls = 0
+        self.reset_camera_clipping_range_calls = 0
+        self.render_calls = 0
+
+    def reset_camera(self) -> None:
+        self.reset_camera_calls += 1
+
+    def reset_camera_clipping_range(self) -> None:
+        self.reset_camera_clipping_range_calls += 1
+
+    def render(self) -> None:
+        self.render_calls += 1
+
+
+def _make_transparent_spin_renderer(display_mode: str = DISPLAY_MODE_TRANSPARENT_MESH) -> BrainRendererWidget:
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = _FakeTransparentSpinPlotter()
+    renderer._current_mesh = make_synthetic_brain_mesh()
+    renderer._display_mode = display_mode
+    renderer._transparent_spin_enabled = False
+    renderer._transparent_spin_angle_degrees = 0.0
+    renderer._transparent_spin_timer = _FakeTransparentSpinTimer()
+    renderer._transparent_spin_resume_timer = _FakeTransparentSpinTimer()
+    return renderer
+
+
+def test_transparent_spin_starts_from_x_axis_with_z_vertical() -> None:
+    renderer = _make_transparent_spin_renderer()
+    plotter = renderer._plotter
+
+    renderer.set_transparent_spin_enabled(True)
+
+    assert renderer._transparent_spin_timer.isActive()
+    assert not renderer._transparent_spin_resume_timer.isActive()
+    assert plotter.camera.focal_point is not None
+    assert plotter.camera.position is not None
+    assert plotter.camera.view_up == (0.0, 0.0, 1.0)
+    assert plotter.camera.position[0] > plotter.camera.focal_point[0]
+    assert np.isclose(plotter.camera.position[1], plotter.camera.focal_point[1])
+    assert np.isclose(plotter.camera.position[2], plotter.camera.focal_point[2])
+    assert plotter.reset_camera_calls == 1
+    assert plotter.reset_camera_clipping_range_calls == 1
+    assert plotter.render_calls == 1
+
+
+def test_transparent_spin_waits_for_transparent_mesh_mode() -> None:
+    renderer = _make_transparent_spin_renderer(display_mode=DISPLAY_MODE_CORTICAL_SURFACE)
+
+    renderer.set_transparent_spin_enabled(True)
+
+    assert renderer.transparent_spin_enabled()
+    assert not renderer._transparent_spin_timer.isActive()
+    assert not renderer._transparent_spin_resume_timer.isActive()
+
+
+def test_transparent_spin_pauses_then_resets_orientation_after_interaction() -> None:
+    renderer = _make_transparent_spin_renderer()
+
+    renderer.set_transparent_spin_enabled(True)
+    renderer._advance_transparent_spin()
+    assert np.isclose(renderer._transparent_spin_angle_degrees, TRANSPARENT_SPIN_DEGREES_PER_TICK)
+
+    renderer._pause_transparent_spin_for_interaction()
+
+    assert not renderer._transparent_spin_timer.isActive()
+    assert renderer._transparent_spin_resume_timer.isActive()
+    assert renderer._transparent_spin_resume_timer.started_intervals[-1] == TRANSPARENT_SPIN_RESUME_DELAY_MS
+
+    renderer._resume_transparent_spin_after_interaction()
+
+    assert renderer._transparent_spin_timer.isActive()
+    assert renderer._transparent_spin_angle_degrees == 0.0
+    assert renderer._plotter.camera.view_up == (0.0, 0.0, 1.0)
 
 
 class _FakeTransparencyPlotter:
