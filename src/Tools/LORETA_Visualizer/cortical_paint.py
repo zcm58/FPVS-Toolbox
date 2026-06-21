@@ -62,7 +62,9 @@ def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
         mask = np.asarray(raw_mask, dtype=bool).reshape(-1)
         if len(mask) == source_count:
             return mask
-    raw_indices = metadata.get("cluster_mask_vertex_indices")
+    raw_indices = metadata.get("cluster_mask_source_indices")
+    if raw_indices is None:
+        raw_indices = metadata.get("cluster_mask_vertex_indices")
     if raw_indices is None:
         return None
     indices = np.asarray(raw_indices, dtype=np.int64).reshape(-1)
@@ -184,7 +186,9 @@ def _payload_declares_cluster_mask(metadata: dict[str, object]) -> bool:
 
 def _cluster_mask_retained_count(payload: SourcePayload) -> int | None:
     metadata = payload.metadata
-    count = _optional_int(metadata.get("cluster_mask_vertex_count"))
+    count = _optional_int(metadata.get("cluster_mask_source_index_count"))
+    if count is None:
+        count = _optional_int(metadata.get("cluster_mask_vertex_count"))
     if count is not None:
         return count
     raw_mask = metadata.get("cluster_mask_values")
@@ -194,7 +198,9 @@ def _cluster_mask_retained_count(payload: SourcePayload) -> int | None:
         except (TypeError, ValueError):
             return None
         return int(np.count_nonzero(mask))
-    raw_indices = metadata.get("cluster_mask_vertex_indices")
+    raw_indices = metadata.get("cluster_mask_source_indices")
+    if raw_indices is None:
+        raw_indices = metadata.get("cluster_mask_vertex_indices")
     if raw_indices is not None:
         try:
             indices = np.asarray(raw_indices, dtype=np.int64).reshape(-1)

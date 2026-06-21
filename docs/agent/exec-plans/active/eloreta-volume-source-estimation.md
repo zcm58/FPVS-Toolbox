@@ -4,6 +4,15 @@
 
 Active plan for `codex/loreta-volume-method-spike`.
 
+Implementation started 2026-06-20:
+
+- added a method-neutral source-space cluster statistics helper;
+- added beta eLORETA volume producer/exporter modules under
+  `src/Tools/LORETA_Visualizer/source_producers/`;
+- added GUI source-method grouping/selection between L2-MNE surface and
+  eLORETA volume manifests;
+- preserved L2-MNE normalization and aggregation behavior as the default path.
+
 This plan scopes a beta eLORETA volume source-space method for the LORETA
 Visualizer. It extends the current participant-first Hauk-style source-map
 workflow by adding a second source-space method that is as close as practical to

@@ -43,6 +43,19 @@ if TYPE_CHECKING:
         write_l2_mne_hauk_participant_zscore_surface_payloads,
         write_l2_mne_hauk_zscore_surface_payloads,
     )
+    from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
+        ELORETAVolumeForwardModel,
+        ELORETAVolumeParticipantZScoreSummary,
+        ELORETAVolumeParticipantZScoreValues,
+        ELORETAVolumeParticipantZScoreWriteResult,
+        ELORETAVolumeZScoreConfig,
+        ELORETAVolumeZScoreValues,
+        compute_eloreta_volume_participant_zscore_source_values,
+        compute_eloreta_volume_source_cluster_mask,
+        compute_eloreta_volume_zscore_source_values,
+        summarize_eloreta_volume_participant_zscores,
+        write_eloreta_volume_participant_zscore_payloads,
+    )
     from Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs import (
         ProjectFullFftBinPlan,
         ProjectParticipantSourceFrequencyBinInputSet,
@@ -68,6 +81,12 @@ if TYPE_CHECKING:
         build_mne_fsaverage_l2_mne_forward_model,
         default_project_l2_mne_output_dir,
         write_project_l2_mne_cortical_surface_payloads,
+    )
+    from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+        ProjectELORETAVolumeExportResult,
+        build_mne_fsaverage_eloreta_volume_forward_model,
+        default_project_eloreta_volume_output_dir,
+        write_project_eloreta_volume_hauk_zscore_payloads,
     )
     from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
         SOURCE_LATERALIZATION_SUMMARY_FORMAT,
@@ -114,6 +133,19 @@ _L2_MNE_HAUK_ZSCORE_EXPORTS = {
     "write_l2_mne_hauk_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_zscore_surface_payloads",
 }
+_ELORETA_VOLUME_EXPORTS = {
+    "ELORETAVolumeForwardModel",
+    "ELORETAVolumeParticipantZScoreSummary",
+    "ELORETAVolumeParticipantZScoreValues",
+    "ELORETAVolumeParticipantZScoreWriteResult",
+    "ELORETAVolumeZScoreConfig",
+    "ELORETAVolumeZScoreValues",
+    "compute_eloreta_volume_participant_zscore_source_values",
+    "compute_eloreta_volume_source_cluster_mask",
+    "compute_eloreta_volume_zscore_source_values",
+    "summarize_eloreta_volume_participant_zscores",
+    "write_eloreta_volume_participant_zscore_payloads",
+}
 _PROJECT_FULLFFT_INPUT_EXPORTS = {
     "ProjectFullFftBinPlan",
     "ProjectParticipantSourceFrequencyBinInputSet",
@@ -131,6 +163,12 @@ _PROJECT_L2_MNE_EXPORTS = {
     "build_mne_fsaverage_l2_mne_forward_model",
     "default_project_l2_mne_output_dir",
     "write_project_l2_mne_cortical_surface_payloads",
+}
+_PROJECT_ELORETA_VOLUME_EXPORTS = {
+    "ProjectELORETAVolumeExportResult",
+    "build_mne_fsaverage_eloreta_volume_forward_model",
+    "default_project_eloreta_volume_output_dir",
+    "write_project_eloreta_volume_hauk_zscore_payloads",
 }
 _PROJECT_HAUK_ZSCORE_EXPORTS = {
     "PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST",
@@ -169,10 +207,17 @@ __all__ = [
     "L2MNEHaukZScoreCondition",
     "L2MNEHaukZScoreConfig",
     "L2MNEProducerConfig",
+    "ELORETAVolumeForwardModel",
+    "ELORETAVolumeParticipantZScoreSummary",
+    "ELORETAVolumeParticipantZScoreValues",
+    "ELORETAVolumeParticipantZScoreWriteResult",
+    "ELORETAVolumeZScoreConfig",
+    "ELORETAVolumeZScoreValues",
     "PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST",
     "PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST",
     "ProducedPayload",
     "ProjectConditionTopographySummary",
+    "ProjectELORETAVolumeExportResult",
     "ProjectFullFftBinPlan",
     "ProjectL2MNEHaukZScoreExportResult",
     "ProjectL2MNEExportResult",
@@ -190,20 +235,28 @@ __all__ = [
     "build_l2_mne_hauk_participant_zscore_summary_payload",
     "build_l2_mne_hauk_zscore_conditions_from_project",
     "build_l2_mne_hauk_zscore_surface_payload",
+    "build_mne_fsaverage_eloreta_volume_forward_model",
     "build_mne_fsaverage_l2_mne_forward_model",
     "build_l2_mne_cortical_surface_payload",
     "build_l2_mne_conditions_from_project",
     "build_source_lateralization_rows",
+    "compute_eloreta_volume_participant_zscore_source_values",
+    "compute_eloreta_volume_source_cluster_mask",
+    "compute_eloreta_volume_zscore_source_values",
     "compute_l2_mne_hauk_participant_zscore_source_values",
     "compute_l2_mne_hauk_source_cluster_mask",
     "compute_l2_mne_hauk_zscore_source_values",
     "compute_l2_mne_source_values",
+    "default_project_eloreta_volume_output_dir",
     "default_project_l2_mne_hauk_zscore_output_dir",
     "default_project_l2_mne_output_dir",
     "make_l2_mne_cortical_surface_beta_fixture",
+    "summarize_eloreta_volume_participant_zscores",
     "summarize_l2_mne_hauk_participant_zscores",
+    "write_eloreta_volume_participant_zscore_payloads",
     "write_l2_mne_hauk_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_zscore_surface_payloads",
+    "write_project_eloreta_volume_hauk_zscore_payloads",
     "write_project_l2_mne_hauk_zscore_group_first_payloads",
     "write_project_l2_mne_hauk_zscore_payloads",
     "write_project_l2_mne_cortical_surface_payloads",
@@ -228,6 +281,11 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore"
         )
         return getattr(l2_mne_hauk_zscore, name)
+    if name in _ELORETA_VOLUME_EXPORTS:
+        eloreta_volume = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.eloreta_volume"
+        )
+        return getattr(eloreta_volume, name)
     if name in _PROJECT_FULLFFT_INPUT_EXPORTS:
         project_fullfft_inputs = importlib.import_module(
             "Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs"
@@ -243,6 +301,11 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export"
         )
         return getattr(project_l2_mne_export, name)
+    if name in _PROJECT_ELORETA_VOLUME_EXPORTS:
+        project_eloreta_volume_export = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export"
+        )
+        return getattr(project_eloreta_volume_export, name)
     if name in _PROJECT_HAUK_ZSCORE_EXPORTS:
         project_l2_mne_hauk_zscore_export = importlib.import_module(
             "Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export"

@@ -103,6 +103,9 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
     values = [float(value) for value in raw.get("values", [])]
     metadata = raw.get("metadata", {}) if isinstance(raw.get("metadata"), dict) else {}
     cluster_vertex_count = _int_or_none(metadata.get("cluster_mask_vertex_count"))
+    cluster_source_count = _int_or_none(metadata.get("cluster_mask_source_index_count"))
+    if cluster_source_count is None:
+        cluster_source_count = cluster_vertex_count
     return {
         "condition_id": payload.condition_id,
         "label": payload.label,
@@ -121,6 +124,7 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
         "cluster_mask": str(metadata.get("cluster_mask", "none")),
         "cluster_mask_status": str(metadata.get("cluster_mask_status", "")),
         "cluster_mask_vertex_count": cluster_vertex_count,
+        "cluster_mask_source_count": cluster_source_count,
         "cluster_mask_primary_display": bool(metadata.get("cluster_mask_primary_display", False)),
         "selected_harmonics_hz": list(metadata.get("selected_harmonics_hz", [])),
     }
@@ -146,6 +150,10 @@ def _participant_sidecar_summary(path: Path | None) -> dict[str, Any]:
                 "cluster_mask": str(cluster_mask.get("cluster_mask", "none")),
                 "cluster_mask_status": str(cluster_mask.get("cluster_mask_status", "")),
                 "cluster_mask_vertex_count": _int_or_none(cluster_mask.get("cluster_mask_vertex_count")),
+                "cluster_mask_source_count": _first_int(
+                    cluster_mask.get("cluster_mask_source_index_count"),
+                    cluster_mask.get("cluster_mask_vertex_count"),
+                ),
             }
         )
     return {
@@ -253,6 +261,9 @@ def _forward_model_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "noise_normalization",
         "fsaverage_subject",
         "fsaverage_spacing",
+        "volume_pos_mm",
+        "source_space_kind",
+        "source_count",
         "sensor_modalities",
         "subject_mri",
     )
@@ -282,7 +293,7 @@ def _validation_checks(
 def _beta_limitations() -> list[str]:
     return [
         "This is a beta source-localization workflow.",
-        "The current real-project method is EEG-only L2-MNE on an fsaverage/template cortical surface.",
+        "Current real-project source methods are EEG-only template-source workflows, including L2-MNE surface maps and beta eLORETA volume maps when enabled.",
         "The workflow does not use subject-specific MRIs or subject-specific forward models.",
         "Cluster masks are source-space producer outputs; the renderer only displays prepared masks.",
         "Source-space lateralization summaries are descriptive companion metrics and do not replace sensor-space BCA lateralization statistics.",
@@ -346,7 +357,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
             "",
             "## Payload Summary",
             "",
-            "| Payload | Source model | Aggregation | Value range | Cluster vertices |",
+            "| Payload | Source model | Aggregation | Value range | Cluster sources |",
             "| --- | --- | --- | ---: | ---: |",
         )
     )
@@ -356,7 +367,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
             "| "
             f"{payload['file']} | {payload['source_model']} | "
             f"{payload['participant_zscore_aggregation']} | {value_range} | "
-            f"{_format_number(payload['cluster_mask_vertex_count'])} |"
+            f"{_format_number(payload['cluster_mask_source_count'])} |"
         )
     lines.extend(("", "## Limitations", ""))
     lines.extend(f"- {item}" for item in report["limitations"])
@@ -391,6 +402,14 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _first_int(*values: Any) -> int | None:
+    for value in values:
+        numeric = _int_or_none(value)
+        if numeric is not None:
+            return numeric
+    return None
 
 
 def _float_or_none(value: Any) -> float | None:

@@ -114,6 +114,16 @@ manifest, payload, participant-sidecar, and lateralization files. It is a
 review artifact only and must not compute inverse estimates, cluster masks,
 lateralization statistics, or renderer-derived facts.
 
+The eLORETA volume branch adds a beta sibling method under `source_producers/`.
+It reuses the project FullFFT participant-first z-score contract but estimates
+values in an fsaverage/template volume source space with MNE eLORETA. It writes
+`volume_points` payloads under `6 - Source Localization/eLORETA Volume Beta/`.
+Its cluster masks are recomputed in volume source space using method-neutral
+`cluster_mask_source_indices`; do not reuse or modify the L2 cortical-surface
+mask. The GUI may switch between loaded L2-MNE surface and eLORETA volume
+manifests, but numerical method selection and source estimation stay in
+`source_producers/`.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -215,8 +225,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   underpowered exact small-sample masks warn that the mask cannot be resolved,
   while adequately powered empty Hauk masks warn that no vertices survived the
   cluster mask. In both cases, saved source values remain unchanged and the
-  renderer does not compute statistics. Non-surface z-score payloads may still
-  use positive-only display filtering.
+  renderer does not compute statistics. Non-surface z-score payloads may use
+  saved `cluster_mask_source_indices` when the cluster mask is enabled, and
+  positive-only display filtering when the mask is disabled or unavailable.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer
@@ -245,7 +256,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   perform lateralization statistics, or inspect renderer state.
   `source_validation_report.py` summarizes already-written source output files
   into project-local JSON/Markdown review artifacts; it must not calculate
-  source values, run statistics, or inspect renderer state.
+  source values, run statistics, or inspect renderer state. The eLORETA volume
+  implementation adds `source_space_statistics.py` for source-space-neutral
+  cluster permutation helpers, `eloreta_volume.py` for participant-first
+  eLORETA volume payloads, and `project_eloreta_volume_export.py` for the
+  project-local beta export. These modules are additive siblings to the L2-MNE
+  producers and must not change L2 normalization semantics.
 
 ## Boundary Rules
 

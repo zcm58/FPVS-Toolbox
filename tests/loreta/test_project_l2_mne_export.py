@@ -10,13 +10,18 @@ import pytest
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
     DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
+    PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    SOURCE_METHOD_ELORETA_VOLUME,
+    SOURCE_METHOD_L2_MNE_SURFACE,
     SOURCE_SUMMARY_MEDIAN,
     SOURCE_SUMMARY_RAW_MEAN,
     SOURCE_SUMMARY_TRIMMED_MEAN,
+    _activation_display_payload,
     _coerce_existing_project_root,
     _group_manifest_conditions,
+    _group_manifest_methods,
     _ordered_source_summary_ids,
     _project_root_from_object,
     _project_source_export_failure_text,
@@ -24,6 +29,7 @@ from Tools.LORETA_Visualizer.gui import (
     _source_export_status_text,
     default_stacked_split_figure_export_path,
     default_split_figure_export_path,
+    default_project_source_manifest_paths,
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
     split_figure_condition_code,
@@ -40,6 +46,11 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
 from Tools.LORETA_Visualizer import fsaverage_mesh
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.prepared_payload_importer import PreparedSourceManifestEntry
+from Tools.LORETA_Visualizer.source_payloads import make_source_payload
+from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+    DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME,
+    default_project_eloreta_volume_output_dir,
+)
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
     DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
@@ -307,6 +318,61 @@ def test_loreta_manifest_conditions_group_participant_summary_entries(tmp_path) 
     assert _source_summary_label(SOURCE_SUMMARY_TRIMMED_MEAN) == "20% trimmed mean z-score"
 
 
+def test_loreta_manifest_methods_group_l2_and_eloreta_entries_separately(tmp_path) -> None:
+    entries = (
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
+            label="Color Response Raw mean z-score",
+            payload_path=tmp_path / "color_l2_mean.json",
+            metadata={
+                "producer_method": "l2_mne_fsaverage_participant_zscore_mean",
+                "participant_zscore_aggregation": "mean",
+            },
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
+            label="Color Response eLORETA volume Raw mean z-score",
+            payload_path=tmp_path / "color_eloreta_mean.json",
+            metadata={
+                "source_method": "eloreta_volume",
+                "producer_method": "eloreta_volume_participant_zscore_mean",
+                "participant_zscore_aggregation": "mean",
+            },
+        ),
+    )
+
+    groups = _group_manifest_methods(entries)
+
+    assert set(groups) == {SOURCE_METHOD_L2_MNE_SURFACE, SOURCE_METHOD_ELORETA_VOLUME}
+    assert list(groups[SOURCE_METHOD_L2_MNE_SURFACE].condition_groups) == ["color_response"]
+    assert list(groups[SOURCE_METHOD_ELORETA_VOLUME].condition_groups) == ["color_response"]
+
+
+def test_volume_display_payload_uses_source_cluster_mask_then_positive_exploratory_values() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([-1.0, 0.5, 3.0], dtype=float),
+        label="eLORETA volume",
+        kind="volume_points",
+        source_model="eloreta_volume_participant_zscore_mean",
+        value_label="source-space z-score",
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_source_indices": [0, 2],
+        },
+        normalize_values=False,
+    )
+
+    masked = _activation_display_payload(payload, transparent_mesh_display=True, use_cluster_mask=True)
+    exploratory = _activation_display_payload(payload, transparent_mesh_display=True, use_cluster_mask=False)
+
+    assert masked.values.tolist() == [-1.0, 3.0]
+    assert masked.metadata["display_value_filter"] == "cluster_mask"
+    assert exploratory.values.tolist() == [0.5, 3.0]
+    assert exploratory.metadata["display_value_filter_threshold"] == 0.0
+
+
 def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_path) -> None:
     project_root = tmp_path / "Project"
     zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
@@ -317,6 +383,21 @@ def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_pat
 
     manifest_path.write_text("{}", encoding="utf-8")
     assert default_project_zscore_manifest_path(project_root) == manifest_path
+
+
+def test_default_project_source_manifest_paths_returns_l2_then_eloreta(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
+    eloreta_dir = default_project_eloreta_volume_output_dir(project_root)
+    zscore_dir.mkdir(parents=True)
+    eloreta_dir.mkdir(parents=True)
+    zscore_manifest = zscore_dir / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
+    eloreta_manifest = eloreta_dir / DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME
+
+    zscore_manifest.write_text("{}", encoding="utf-8")
+    eloreta_manifest.write_text("{}", encoding="utf-8")
+
+    assert default_project_source_manifest_paths(project_root) == (zscore_manifest, eloreta_manifest)
 
 
 def test_loreta_project_root_resolver_reads_current_project(tmp_path) -> None:
@@ -357,6 +438,11 @@ def test_source_export_status_text_reports_flagged_participant_choice() -> None:
         include_flagged_subjects=False,
         zscore_model=PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
     ) == "Building deprecated group-first source-space z-score JSON from the active project (excluding flagged participants)..."
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+        automatic=False,
+        include_flagged_subjects=False,
+    ) == "Building beta eLORETA volume source-space z-score JSON from the active project (excluding flagged participants)..."
 
 
 def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -> None:

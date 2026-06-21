@@ -43,6 +43,13 @@ export for selected harmonics; the Hauk-style z-score path also requires
 `FullFFT Amplitude (uV)` target and neighboring-bin columns in included
 participant workbooks.
 
+The beta eLORETA volume method is implemented as a sibling source producer. It
+uses the same project FullFFT participant-first z-score contract as the current
+L2-MNE surface path, but estimates values in an fsaverage/template volume source
+space and renders those prepared `volume_points` payloads through the
+transparent brain mesh mode. It is additive and must not change the L2-MNE
+normalization or aggregation methods.
+
 ## Non-Goals
 
 Outside the dedicated `source_producers/` subpackage, this directory must not
@@ -145,6 +152,14 @@ Later LORETA/eLORETA volume methods should become sibling producers that emit
 `volume_points`, `volume_mesh`, or ROI mesh payloads. They should not require
 renderer, importer, or bridge-helper rewrites.
 
+The first beta eLORETA volume path follows that sibling-producer rule. It adds
+`source_space_statistics.py` for method-neutral source-space cluster
+permutation helpers, `eloreta_volume.py` for participant-first eLORETA volume
+payloads, and `project_eloreta_volume_export.py` for project-local export under
+`6 - Source Localization/eLORETA Volume Beta/`. Volume masks are recomputed
+with volume adjacency and stored as `cluster_mask_source_indices` rather than
+surface vertex indices.
+
 Phase 6C adds `project_l2_mne_export.py` as calculation-side orchestration. It
 is allowed to read existing project workbooks through `project_inputs.py`, use
 MNE to build an fsaverage/BioSemi64 template forward model, and write generated
@@ -174,7 +189,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   user-triggered renderer updates. Source-map rebuild/import controls live in
   the Source Map Options modal. Figure export actions live behind the compact
   Export Figures modal so future display-specific exports can be added without
-  crowding the side panel.
+  crowding the side panel. The method selector groups loaded manifests by
+  source method, keeps condition/summary selection method-local, and restricts
+  non-cortical volume payloads to Transparent brain mesh display.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
@@ -250,7 +267,12 @@ compact rebuild summaries, but source-estimation math still belongs only to
   from already-generated manifest, payload, participant-sidecar, and
   lateralization files. It is a reporting helper only: it must not estimate
   sources, run statistics, inspect renderer state, or mutate project inputs.
-  Later producers may use LORETA/eLORETA volume or mixed source-space models.
+  The beta eLORETA volume producer set uses the same participant-first
+  FullFFT/z-score input contract, writes `volume_points` payloads and a
+  participant sidecar, and emits method-neutral source-index cluster-mask
+  metadata. It intentionally does not emit surface lateralization rows.
+  Later producers may use other LORETA/eLORETA volume or mixed source-space
+  models.
 - `source_rois.py`: producer-side anatomical ROI helpers that map named
   fsaverage label definitions onto already-computed source spaces using stable
   source vertex IDs and hemisphere labels. It must not estimate sources, render
@@ -323,7 +345,9 @@ payload with:
   For participant-first L2-MNE z-score payloads, metadata may include
   `cluster_mask=source_space_cluster_permutation` and
   `cluster_mask_vertex_indices` so the renderer can display only
-  producer-computed significant source vertices.
+  producer-computed significant source vertices. For volume or other
+  non-surface payloads, metadata may include `cluster_mask_source_indices` for
+  the same display-only mask behavior without implying cortical vertices.
 
 If a future method changes from LORETA to another inverse model, the renderer
 should stay unchanged. The adapter/bridge should map the method output into this
@@ -385,6 +409,15 @@ neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space
 noise mean and population SD.
+
+The project eLORETA volume exporter writes generated files under
+`6 - Source Localization/eLORETA Volume Beta/` by default. Its manifest can be
+loaded alongside the L2-MNE Hauk z-score manifest; the GUI Method selector
+switches between the L2-MNE surface and eLORETA volume condition groups. The
+volume view uses the same saved cluster-mask toggle semantics: when enabled,
+saved source-index cluster masks filter displayed source locations; when
+disabled or unavailable, transparent volume z-score overlays use positive-only
+exploratory display filtering. Neither path changes saved payload values.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in
