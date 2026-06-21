@@ -26,6 +26,7 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     DEFAULT_SCALAR_MAX,
     DEFAULT_SCALAR_MIN,
     LORETA_SCALAR_COLORS,
+    LORETA_SMOOTH_SCALAR_COLORS,
 )
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_ROI_MESH,
@@ -37,6 +38,7 @@ from Tools.LORETA_Visualizer.source_payloads import (
 )
 from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh, make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import MeshDisplayTransform
+from Tools.LORETA_Visualizer.volume_overlay import build_smoothed_volume_overlay
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +135,7 @@ class BrainRendererWidget(QWidget):
         self._cortical_paint_z_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._cortical_paint_use_cluster_mask = True
         self._last_activation_payload: SourcePayload | None = None
+        self._volume_overlay_active = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -262,8 +265,9 @@ class BrainRendererWidget(QWidget):
         actor = plotter.add_mesh(
             surface,
             scalars="activation",
-            cmap=list(LORETA_SCALAR_COLORS),
+            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
             clim=self._activation_scalar_range,
+            interpolate_before_map=True,
             color=CORTICAL_PAINT_BASE_COLOR,
             nan_color=CORTICAL_PAINT_BASE_COLOR,
             nan_opacity=1.0,
@@ -412,6 +416,9 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         if plotter is None:
             return
+        self._volume_overlay_active = False
+        if payload.kind == SOURCE_KIND_VOLUME_POINTS and self._add_smoothed_volume_overlay(pv, payload):
+            return
         mesh_kinds = {SOURCE_KIND_ROI_MESH, SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH}
         has_faces = payload.faces is not None and len(payload.faces) > 0
         if payload.kind in mesh_kinds and has_faces:
@@ -423,15 +430,16 @@ class BrainRendererWidget(QWidget):
             cloud = pv.PolyData(payload.points)
             is_volume_points = payload.kind == SOURCE_KIND_VOLUME_POINTS
             is_surface_points = payload.kind == SOURCE_KIND_SURFACE_POINTS
-            render_points_as_spheres = is_volume_points
-            point_size = 14 if is_volume_points else 22
-            style = "points_gaussian" if is_surface_points else "points"
+            render_points_as_spheres = False
+            point_size = 18 if is_volume_points else 22
+            style = "points_gaussian" if (is_surface_points or is_volume_points) else "points"
         cloud["activation"] = payload.values
         self._activation_actor = plotter.add_mesh(
             cloud,
             scalars="activation",
-            cmap=list(LORETA_SCALAR_COLORS),
+            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
             clim=self._activation_scalar_range,
+            interpolate_before_map=True,
             opacity=self._activation_opacity,
             render_points_as_spheres=render_points_as_spheres,
             point_size=point_size,
@@ -444,6 +452,144 @@ class BrainRendererWidget(QWidget):
             show_scalar_bar=False,
         )
         self._activation_actor.SetVisibility(self._activation_visible)
+
+    def _add_smoothed_volume_overlay(self, pv: Any, payload: SourcePayload) -> bool:
+        plotter = self._plotter
+        if plotter is None:
+            return False
+        payload = self._volume_payload_inside_brain_surface(pv, payload)
+        if payload is None:
+            self._volume_overlay_active = True
+            return True
+        try:
+            overlay = build_smoothed_volume_overlay(
+                payload.points,
+                payload.values,
+                display_bounds=self._volume_display_bounds(),
+                min_visible_value=self._volume_min_visible_value(),
+            )
+        except (ImportError, ValueError) as exc:
+            logger.debug("loreta_volume_overlay_smoothing_failed", extra={"error": str(exc)})
+            return False
+        if overlay is None:
+            return False
+
+        try:
+            grid = pv.ImageData(
+                dimensions=overlay.dimensions,
+                spacing=overlay.spacing,
+                origin=overlay.origin,
+            )
+            grid.point_data["activation"] = overlay.values.ravel(order="F")
+            self._clip_volume_grid_to_brain_surface(pv, grid)
+            if not np.any(np.asarray(grid.point_data["activation"], dtype=float) >= min(overlay.contour_values)):
+                self._volume_overlay_active = True
+                return True
+            surface = grid.contour(
+                isosurfaces=list(overlay.contour_values),
+                scalars="activation",
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            logger.debug("loreta_volume_overlay_contour_failed", extra={"error": str(exc)})
+            return False
+        if getattr(surface, "n_points", 0) <= 0 or getattr(surface, "n_cells", 0) <= 0:
+            return False
+
+        self._activation_actor = plotter.add_mesh(
+            surface,
+            scalars="activation",
+            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+            clim=self._activation_scalar_range,
+            interpolate_before_map=True,
+            opacity=self._activation_opacity,
+            lighting=False,
+            ambient=1.0,
+            diffuse=0.0,
+            specular=0.0,
+            smooth_shading=True,
+            show_scalar_bar=False,
+        )
+        self._activation_actor.SetVisibility(self._activation_visible)
+        self._volume_overlay_active = True
+        return True
+
+    def _volume_payload_inside_brain_surface(self, pv: Any, payload: SourcePayload) -> SourcePayload | None:
+        mask = self._volume_enclosed_point_mask(pv, payload.points)
+        if mask is None:
+            return payload
+        if not np.any(mask):
+            return None
+        if np.all(mask):
+            return payload
+        metadata = dict(payload.metadata)
+        metadata.update(
+            {
+                "display_surface_clip": "current_brain_mesh_enclosed_points",
+                "display_surface_clip_original_point_count": int(len(payload.points)),
+                "display_surface_clip_rendered_point_count": int(np.count_nonzero(mask)),
+            }
+        )
+        return SourcePayload(
+            points=np.asarray(payload.points, dtype=float)[mask],
+            values=np.asarray(payload.values, dtype=float).reshape(-1)[mask],
+            label=payload.label,
+            kind=payload.kind,
+            coordinate_space=payload.coordinate_space,
+            source_model=payload.source_model,
+            value_label=payload.value_label,
+            faces=None,
+            metadata=metadata,
+        )
+
+    def _clip_volume_grid_to_brain_surface(self, pv: Any, grid: Any) -> None:
+        points = getattr(grid, "points", None)
+        if points is None:
+            return
+        mask = self._volume_enclosed_point_mask(pv, np.asarray(points, dtype=float))
+        if mask is None:
+            return
+        try:
+            activation = np.asarray(grid.point_data["activation"], dtype=float).reshape(-1).copy()
+        except (KeyError, TypeError, ValueError):
+            return
+        if len(mask) != len(activation):
+            return
+        activation[~mask] = 0.0
+        grid.point_data["activation"] = activation
+
+    def _volume_enclosed_point_mask(self, pv: Any, points: np.ndarray) -> np.ndarray | None:
+        surface = getattr(self, "_surface", None)
+        if surface is None or getattr(surface, "n_points", 0) <= 0 or getattr(surface, "n_cells", 0) <= 0:
+            return None
+        source_points = np.asarray(points, dtype=float)
+        if source_points.ndim != 2 or source_points.shape[1] != 3 or len(source_points) == 0:
+            return None
+        try:
+            cloud = pv.PolyData(source_points)
+            enclosed = cloud.select_enclosed_points(surface, tolerance=0.0, check_surface=False)
+            mask = np.asarray(enclosed.point_data["SelectedPoints"], dtype=bool).reshape(-1)
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_volume_surface_clip_failed", exc_info=True)
+            return None
+        if len(mask) != len(source_points):
+            return None
+        return mask
+
+    def _volume_display_bounds(self) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+        mesh = self._current_mesh
+        if mesh is None or len(mesh.points) == 0:
+            return None
+        points = np.asarray(mesh.points, dtype=float)
+        return (
+            tuple(float(value) for value in np.min(points, axis=0)),
+            tuple(float(value) for value in np.max(points, axis=0)),
+        )
+
+    def _volume_min_visible_value(self) -> float | None:
+        vmin = float(self._activation_scalar_range[0])
+        if not np.isfinite(vmin) or vmin < 0.0:
+            return None
+        return vmin
 
     def _set_cortical_paint_payload(self, payload: SourcePayload) -> bool:
         mesh = self._current_mesh
@@ -653,6 +799,11 @@ class BrainRendererWidget(QWidget):
             if payload is not None:
                 self.set_activation_payload(payload)
             return
+        if getattr(self, "_volume_overlay_active", False):
+            payload = self._last_activation_payload
+            if payload is not None:
+                self.set_activation_payload(payload)
+            return
         actors = self._active_scalar_actors()
         plotter = self._plotter
         if not actors or plotter is None:
@@ -743,6 +894,7 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         actor = self._activation_actor
         self._activation_actor = None
+        self._volume_overlay_active = False
         if plotter is None or actor is None:
             return
         try:

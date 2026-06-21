@@ -152,6 +152,8 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   - `scalar_fields.py` owns visual color limits and color stops.
   - `cortical_paint.py` owns display-only projection from prepared L2-MNE
     cortical source meshes onto the pial display mesh.
+  - `volume_overlay.py` owns display-only smoothing from prepared volume
+    source points onto a regular renderer grid for transparent volume overlays.
   - `fsaverage_mesh.py` owns anatomical mesh loading and display transforms.
 - Helper modules may adapt, validate, normalize for display, and transform
   already-computed values. They must not compute inverse solutions, frequency
@@ -212,10 +214,10 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   prepared source-map contract. Keep examples small, deterministic, and clearly
   marked as not computed from EEG. Keep JSON Schema files here aligned with the
   Python validator and checked-in examples.
-- `source_payloads.py`, `transforms.py`, `scalar_fields.py`, and
-  `cortical_paint.py`: bridge helpers that adapt prepared source payloads to
-  the renderer. Z-score payloads should keep signed values in JSON. L2-MNE
-  cortical-surface z-score payloads render as opaque cortical paint with
+- `source_payloads.py`, `transforms.py`, `scalar_fields.py`,
+  `cortical_paint.py`, and `volume_overlay.py`: bridge helpers that adapt
+  prepared source payloads to the renderer. Z-score payloads should keep signed
+  values in JSON. L2-MNE cortical-surface z-score payloads render as opaque cortical paint with
   producer-provided cluster masks shown as activation and unmasked vertices
   shown as gray cortex. If no producer mask is present, the manual z-score
   display cutoff remains the fallback behavior. Users may disable a saved
@@ -228,6 +230,11 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   renderer does not compute statistics. Non-surface z-score payloads may use
   saved `cluster_mask_source_indices` when the cluster mask is enabled, and
   positive-only display filtering when the mask is disabled or unavailable.
+  Volume point payloads render through a display-only smoothed grid/contour
+  overlay in transparent mesh mode rather than as source-point sphere glyphs.
+  The transparent mesh view clips volume overlays to the current brain surface
+  so values outside the displayed anatomical context are hidden without
+  changing saved payload values or source-space statistics.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer

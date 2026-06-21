@@ -90,7 +90,7 @@ prepared_payload_validator.py
         | validated coordinates, scalar values, source metadata
         v
 Tool-local bridge helpers
-source_payloads.py + transforms.py + scalar_fields.py
+source_payloads.py + transforms.py + scalar_fields.py + cortical_paint.py + volume_overlay.py
         |
         | SourcePayload in renderer display space
         v
@@ -159,6 +159,14 @@ payloads, and `project_eloreta_volume_export.py` for project-local export under
 `6 - Source Localization/eLORETA Volume Beta/`. Volume masks are recomputed
 with volume adjacency and stored as `cluster_mask_source_indices` rather than
 surface vertex indices.
+
+The renderer displays prepared eLORETA `volume_points` through a smoothed,
+display-space grid/contour overlay in transparent mesh mode. This smoothing is
+for visualization only: it is applied after source-mask/exploratory filtering
+and does not modify saved source values, source-space statistics, or payload
+metadata. The transparent mesh view additionally clips volume overlays to the
+currently displayed brain surface so outside-shell volume activity is not
+painted against a cortical mesh that does not anatomically contain it.
 
 Phase 6C adds `project_l2_mne_export.py` as calculation-side orchestration. It
 is allowed to read existing project workbooks through `project_inputs.py`, use
