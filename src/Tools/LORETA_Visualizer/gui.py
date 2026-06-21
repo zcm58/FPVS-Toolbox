@@ -2385,20 +2385,19 @@ class LoretaVisualizerWindow(QWidget):
             transparent_mesh_display=self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH,
             use_cluster_mask=self._use_cluster_mask,
         )
+        display_payload = renderer.display_payload_for_current_mesh(display_payload)
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
-        renderer.set_display_mode(self._display_mode)
+        renderer.set_display_mode(self._display_mode, refresh=False)
         renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
+        vmin, vmax = self._resolve_activation_scalar_range(display_payload)
+        renderer.set_activation_scalar_range(vmin, vmax, refresh=False)
+        self._update_activation_scale_readout(vmin, vmax)
         renderer.set_activation_payload(display_payload)
-        self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
         renderer.set_activation_visible(self._activation_visible)
 
-    def _apply_activation_scalar_range(self) -> None:
-        renderer = self.renderer
-        payload = self._current_activation_payload
-        if renderer is None or payload is None:
-            return
+    def _resolve_activation_scalar_range(self, payload: SourcePayload) -> tuple[float, float]:
         scale_values = _activation_scale_values(
             payload,
             zscore_display_threshold=self._zscore_display_threshold,
@@ -2413,9 +2412,7 @@ class LoretaVisualizerWindow(QWidget):
                     manual_min=self.activation_min_spin.value(),
                     manual_max=self.activation_max_spin.value(),
                 )
-                renderer.set_activation_scalar_range(vmin, vmax)
-                self._update_activation_scale_readout(vmin, vmax)
-                return
+                return vmin, vmax
             lower_bound = self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
@@ -2440,6 +2437,14 @@ class LoretaVisualizerWindow(QWidget):
                 manual_min=self.activation_min_spin.value(),
                 manual_max=self.activation_max_spin.value(),
             )
+        return vmin, vmax
+
+    def _apply_activation_scalar_range(self) -> None:
+        renderer = self.renderer
+        payload = self._current_activation_payload
+        if renderer is None or payload is None:
+            return
+        vmin, vmax = self._resolve_activation_scalar_range(payload)
         renderer.set_activation_scalar_range(vmin, vmax)
         self._update_activation_scale_readout(vmin, vmax)
 

@@ -139,12 +139,41 @@ def test_renderer_clips_volume_payload_to_brain_surface() -> None:
     renderer = BrainRendererWidget.__new__(BrainRendererWidget)
     renderer._surface = pv.Sphere(radius=0.35, theta_resolution=24, phi_resolution=24)
 
-    clipped = renderer._volume_payload_inside_brain_surface(pv, payload)
+    clipped = renderer.display_payload_for_current_mesh(payload)
 
-    assert clipped is not None
     assert len(clipped.points) == 2
     assert np.allclose(clipped.values, [1.0, 2.0])
     assert clipped.metadata["display_surface_clip_rendered_point_count"] == 2
+
+
+def test_renderer_display_payload_clip_removes_hidden_high_values_from_scale_inputs() -> None:
+    import pyvista as pv
+
+    points = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [0.12, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    payload = make_source_payload(
+        points=points,
+        values=np.asarray([1.0, 2.0, 20.0], dtype=float),
+        label="eLORETA volume",
+        kind=SOURCE_KIND_VOLUME_POINTS,
+        source_model="eloreta_volume_participant_zscore_mean",
+        value_label="source-space z-score",
+        normalize_values=False,
+    )
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._surface = pv.Sphere(radius=0.35, theta_resolution=24, phi_resolution=24)
+
+    clipped = renderer.display_payload_for_current_mesh(payload)
+
+    assert len(clipped.points) == 2
+    assert float(np.nanmax(clipped.values)) == 2.0
+    assert clipped.metadata["display_surface_clip_original_point_count"] == 3
 
 
 def test_smooth_scalar_color_ramp_keeps_palette_endpoints() -> None:

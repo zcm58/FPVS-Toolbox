@@ -453,12 +453,25 @@ class BrainRendererWidget(QWidget):
         )
         self._activation_actor.SetVisibility(self._activation_visible)
 
+    def display_payload_for_current_mesh(self, payload: SourcePayload) -> SourcePayload:
+        """Return the renderer-facing payload after display-only mesh clipping."""
+        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+            return payload
+        try:
+            import pyvista as pv
+        except (ImportError, ModuleNotFoundError):
+            return payload
+        clipped_payload = self._volume_payload_inside_brain_surface(pv, payload)
+        if clipped_payload is None:
+            return _empty_clipped_volume_payload(payload)
+        return clipped_payload
+
     def _add_smoothed_volume_overlay(self, pv: Any, payload: SourcePayload) -> bool:
         plotter = self._plotter
         if plotter is None:
             return False
-        payload = self._volume_payload_inside_brain_surface(pv, payload)
-        if payload is None:
+        payload = self.display_payload_for_current_mesh(payload)
+        if len(payload.points) == 0:
             self._volume_overlay_active = True
             return True
         try:
@@ -707,7 +720,7 @@ class BrainRendererWidget(QWidget):
         )
         return surface
 
-    def set_display_mode(self, display_mode: str) -> None:
+    def set_display_mode(self, display_mode: str, *, refresh: bool = True) -> None:
         mode = display_mode if display_mode in DISPLAY_MODES else DISPLAY_MODE_SPLIT_HEMISPHERE
         if mode == self._display_mode:
             return
@@ -715,10 +728,10 @@ class BrainRendererWidget(QWidget):
         if mode == DISPLAY_MODE_SPLIT_HEMISPHERE:
             self._reset_split_rotations()
         payload = self._last_activation_payload
-        if payload is not None:
+        if refresh and payload is not None:
             self.set_activation_payload(payload)
             return
-        self._restore_base_brain_actor(render=True)
+        self._restore_base_brain_actor(render=refresh)
 
     def display_mode(self) -> str:
         return self._display_mode
@@ -787,10 +800,12 @@ class BrainRendererWidget(QWidget):
         if render:
             plotter.render()
 
-    def set_activation_scalar_range(self, vmin: float, vmax: float) -> None:
+    def set_activation_scalar_range(self, vmin: float, vmax: float, *, refresh: bool = True) -> None:
         if vmax <= vmin:
             vmax = vmin + 1.0
         self._activation_scalar_range = (float(vmin), float(vmax))
+        if not refresh:
+            return
         if self._split_hemisphere_active:
             self._render_split_hemispheres(render=True)
             return
@@ -1536,6 +1551,28 @@ def _cortical_paint_display_values(values: np.ndarray, *, scalar_range: tuple[fl
     scalar_values = np.asarray(values, dtype=float).reshape(-1)
     vmin = float(scalar_range[0])
     return np.where(np.isfinite(scalar_values) & (scalar_values >= vmin), scalar_values, np.nan)
+
+
+def _empty_clipped_volume_payload(payload: SourcePayload) -> SourcePayload:
+    metadata = dict(payload.metadata)
+    metadata.update(
+        {
+            "display_surface_clip": "current_brain_mesh_enclosed_points",
+            "display_surface_clip_original_point_count": int(len(payload.points)),
+            "display_surface_clip_rendered_point_count": 0,
+        }
+    )
+    return SourcePayload(
+        points=np.empty((0, 3), dtype=float),
+        values=np.empty((0,), dtype=float),
+        label=payload.label,
+        kind=payload.kind,
+        coordinate_space=payload.coordinate_space,
+        source_model=payload.source_model,
+        value_label=payload.value_label,
+        faces=None,
+        metadata=metadata,
+    )
 
 
 def _publication_base_rgb(count: int, shade_values: np.ndarray | None) -> np.ndarray:
