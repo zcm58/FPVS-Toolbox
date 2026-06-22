@@ -253,14 +253,19 @@ compact rebuild summaries, but source-estimation math still belongs only to
   The transparent mesh view may clip this overlay to the displayed cortical
   surface, but it must not mutate saved source values or source-space masks.
 - `volume_slices.py`: display/export-only orthogonal MRI slice rendering for
-  prepared volume point payloads. It loads and caches the required
-  `fsaverage/mri/brain.mgz` MRI anatomy, surfaces a visible error when that
-  file or the all-condition slice reference is unavailable, converts display
-  points back to native voxel space, reuses a standard slice triplet across
-  conditions, interpolates already computed source values onto slice planes
-  with the same Gaussian-neighbor policy family as the transparent mesh overlay,
-  crops each panel to the anatomy bounds for high-detail embedded viewing, and
-  writes matched 600-DPI PDF/PNG figures. It must not compute inverse estimates,
+  prepared volume point payloads. It requires `fsaverage/mri/brain.mgz`, builds
+  a visualizer-only 0.5 mm display template in the untracked root
+  `.fpvs_cache/loreta_visualizer/mri_templates/` cache, and loads that higher
+  sampling underlay for embedded and exported MRI slices. The cache preserves
+  the fsaverage RAS frame and must not replace or mutate the fsaverage cache
+  used by source producers, mesh loading, or other toolbox modules. It surfaces
+  a visible error when the source anatomy, display-template generation, or the
+  all-condition slice reference is unavailable, converts display points back to
+  native voxel space, reuses a standard slice triplet across conditions,
+  interpolates already computed source values onto slice planes with the same
+  Gaussian-neighbor policy family as the transparent mesh overlay, crops each
+  panel to the anatomy bounds for high-detail embedded viewing, and writes
+  matched 600-DPI PDF/PNG figures. It must not compute inverse estimates,
   z-scores, cluster masks, or condition effects.
 - `source_producers/`: swappable source-localization calculation methods that
   read explicit source-ready inputs and write validated prepared

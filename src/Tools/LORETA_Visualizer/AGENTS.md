@@ -251,14 +251,18 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   The MRI slice view/export uses cached fsaverage MRI anatomy, the current
   display transform, and prepared `volume_points` values to render axial,
   coronal, and sagittal slices. It requires cached `fsaverage/mri/brain.mgz`
-  anatomy and should surface a visible render/export error if that file or the
-  all-condition slice reference is unavailable. It should keep slice planes
-  stable across conditions, use the same source-mask/exploratory filtering as
-  transparent volume display, crop panels to the anatomy bounds for high-detail
-  embedded viewing, and use a comparable Gaussian-neighbor smoothing policy. It
-  may interpolate values for display and write matched PDF/PNG figures, but it
-  must not compute inverse estimates, z-scores, cluster masks, or condition
-  effects.
+  anatomy and builds a visualizer-only 0.5 mm display template under the
+  untracked root `.fpvs_cache/loreta_visualizer/mri_templates/` cache. That
+  display underlay must not replace, mutate, or become a source-estimation
+  dependency for fsaverage, source producers, or other toolbox modules. The
+  MRI slice view/export should surface a visible render/export error if the
+  source anatomy, display template generation, or all-condition slice reference
+  is unavailable. It should keep slice planes stable across conditions, use the
+  same source-mask/exploratory filtering as transparent volume display, crop
+  panels to the anatomy bounds for high-detail embedded viewing, and use a
+  comparable Gaussian-neighbor smoothing policy. It may interpolate values for
+  display and write matched PDF/PNG figures, but it must not compute inverse
+  estimates, z-scores, cluster masks, or condition effects.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer

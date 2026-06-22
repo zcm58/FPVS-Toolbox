@@ -14,8 +14,10 @@ from Tools.LORETA_Visualizer.volume_slices import (
     DEFAULT_MRI_SLICE_FIGURE_HEIGHT_IN,
     DEFAULT_MRI_SLICE_FIGURE_WIDTH_IN,
     DEFAULT_MRI_SLICE_SUPPORT_SIGMA,
+    LORETA_DISPLAY_MRI_VOXEL_SIZE_MM,
     MriAnatomyVolume,
     build_mri_slice_panels,
+    ensure_loreta_display_mri_template,
     load_fsaverage_mri_volume,
     mri_slice_indices_for_payload,
     payload_points_in_native_space,
@@ -28,7 +30,7 @@ from Tools.LORETA_Visualizer.volume_overlay import DEFAULT_VOLUME_GAUSSIAN_NEIGH
 
 def test_volume_slice_payload_points_map_from_display_to_mri_voxels(tmp_path) -> None:
     fsaverage_dir = _write_tiny_mri(tmp_path)
-    anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+    anatomy = _load_tiny_display_mri(fsaverage_dir, tmp_path)
     desired_voxels = np.asarray(
         [
             [16.0, 16.0, 18.0],
@@ -63,7 +65,9 @@ def test_volume_slice_payload_points_map_from_display_to_mri_voxels(tmp_path) ->
     assert max(float(np.max(panel.overlay)) for panel in panels) > 0.0
 
 
-def test_load_fsaverage_mri_requires_skull_stripped_brain_mgz(tmp_path) -> None:
+def test_load_fsaverage_mri_requires_skull_stripped_brain_mgz_and_builds_half_millimeter_display_template(
+    tmp_path,
+) -> None:
     nib = pytest.importorskip("nibabel")
     fsaverage_dir = tmp_path / "fsaverage"
     mri_dir = fsaverage_dir / "mri"
@@ -71,14 +75,36 @@ def test_load_fsaverage_mri_requires_skull_stripped_brain_mgz(tmp_path) -> None:
     nib.save(nib.MGHImage(np.ones((8, 8, 8), dtype=np.float32), np.eye(4)), str(mri_dir / "T1.mgz"))
 
     with pytest.raises(FileNotFoundError, match=r"mri\\brain\.mgz|mri/brain\.mgz"):
-        load_fsaverage_mri_volume(fsaverage_dir)
+        load_fsaverage_mri_volume(fsaverage_dir, display_template_cache_dir=tmp_path / "mri_template_cache")
 
     nib.save(nib.MGHImage(np.full((8, 8, 8), 2.0, dtype=np.float32), np.eye(4)), str(mri_dir / "brain.mgz"))
 
-    anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+    anatomy = load_fsaverage_mri_volume(fsaverage_dir, display_template_cache_dir=tmp_path / "mri_template_cache")
 
-    assert anatomy.source_path.name == "brain.mgz"
+    assert anatomy.source_path.name == "brain_0p5mm.nii"
+    assert anatomy.source_path.is_relative_to(tmp_path / "mri_template_cache")
+    assert tuple(int(value) for value in anatomy.data.shape) == (16, 16, 16)
+    assert np.isclose(np.linalg.norm(anatomy.vox_to_ras[:3, 0]), LORETA_DISPLAY_MRI_VOXEL_SIZE_MM)
     assert float(np.nanmax(anatomy.data)) == 2.0
+
+
+def test_loreta_display_mri_template_cache_refreshes_when_source_changes(tmp_path) -> None:
+    nib = pytest.importorskip("nibabel")
+    fsaverage_dir = tmp_path / "fsaverage"
+    mri_dir = fsaverage_dir / "mri"
+    mri_dir.mkdir(parents=True)
+    source_path = mri_dir / "brain.mgz"
+    cache_dir = tmp_path / "mri_template_cache"
+    nib.save(nib.MGHImage(np.ones((8, 8, 8), dtype=np.float32), np.eye(4)), str(source_path))
+
+    first_template = ensure_loreta_display_mri_template(source_path, display_template_cache_dir=cache_dir)
+    first_mtime = first_template.stat().st_mtime_ns
+    nib.save(nib.MGHImage(np.full((8, 8, 8), 3.0, dtype=np.float32), np.eye(4)), str(source_path))
+    second_template = ensure_loreta_display_mri_template(source_path, display_template_cache_dir=cache_dir)
+
+    assert second_template == first_template
+    assert second_template.stat().st_mtime_ns >= first_mtime
+    assert float(np.nanmax(nib.load(str(second_template)).get_fdata(dtype=np.float32))) == 3.0
 
 
 def test_volume_slice_panels_crop_to_anatomy_for_high_detail_rendering() -> None:
@@ -108,7 +134,7 @@ def test_volume_slice_panels_crop_to_anatomy_for_high_detail_rendering() -> None
 
 def test_volume_slice_panels_can_use_standard_indices_independent_of_condition_peak(tmp_path) -> None:
     fsaverage_dir = _write_tiny_mri(tmp_path)
-    anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+    anatomy = _load_tiny_display_mri(fsaverage_dir, tmp_path)
     source_voxels = np.asarray(
         [
             [6.0, 7.0, 8.0],
@@ -133,7 +159,7 @@ def test_volume_slice_panels_can_use_standard_indices_independent_of_condition_p
 
 def test_volume_slice_indices_can_be_selected_from_reference_payload(tmp_path) -> None:
     fsaverage_dir = _write_tiny_mri(tmp_path)
-    anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+    anatomy = _load_tiny_display_mri(fsaverage_dir, tmp_path)
     desired_voxels = np.asarray(
         [
             [10.0, 11.0, 12.0],
@@ -165,13 +191,13 @@ def test_volume_slice_interpolation_uses_transparent_mesh_gaussian_policy() -> N
 
 def test_render_mri_slice_image_filters_nonpositive_and_out_of_bounds_values(tmp_path) -> None:
     fsaverage_dir = _write_tiny_mri(tmp_path)
-    anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+    anatomy = _load_tiny_display_mri(fsaverage_dir, tmp_path)
     desired_voxels = np.asarray(
         [
             [16.0, 16.0, 18.0],
             [18.0, 18.0, 19.0],
             [14.0, 14.0, 17.0],
-            [40.0, 40.0, 40.0],
+            [80.0, 80.0, 80.0],
         ],
         dtype=float,
     )
@@ -196,6 +222,7 @@ def test_render_mri_slice_image_filters_nonpositive_and_out_of_bounds_values(tmp
         scalar_range=(0.0, 3.5),
         label="Synthetic eLORETA",
         slice_indices=(12, 13, 14),
+        anatomy=anatomy,
         dpi=96,
     )
 
@@ -210,7 +237,7 @@ def test_render_mri_slice_image_filters_nonpositive_and_out_of_bounds_values(tmp
 def test_write_mri_slice_figures_creates_matching_pdf_and_png(tmp_path) -> None:
     pytest.importorskip("matplotlib")
     fsaverage_dir = _write_tiny_mri(tmp_path)
-    anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+    anatomy = _load_tiny_display_mri(fsaverage_dir, tmp_path)
     desired_voxels = np.asarray(
         [
             [16.0, 16.0, 18.0],
@@ -241,6 +268,7 @@ def test_write_mri_slice_figures_creates_matching_pdf_and_png(tmp_path) -> None:
         fsaverage_dir=fsaverage_dir,
         scalar_range=(0.0, 3.5),
         label="Synthetic eLORETA",
+        anatomy=anatomy,
     )
 
     assert pdf_path.is_file()
@@ -270,6 +298,13 @@ def _write_tiny_mri(tmp_path):
     image = nib.MGHImage(anatomy.astype(np.float32), np.eye(4))
     nib.save(image, str(mri_dir / "brain.mgz"))
     return fsaverage_dir
+
+
+def _load_tiny_display_mri(fsaverage_dir: Path, tmp_path: Path) -> MriAnatomyVolume:
+    return load_fsaverage_mri_volume(
+        fsaverage_dir,
+        display_template_cache_dir=tmp_path / "mri_template_cache",
+    )
 
 
 def _ras_points_for_voxels(anatomy: MriAnatomyVolume, voxels: np.ndarray) -> np.ndarray:

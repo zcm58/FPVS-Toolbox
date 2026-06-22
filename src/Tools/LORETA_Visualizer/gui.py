@@ -77,6 +77,8 @@ from Tools.LORETA_Visualizer.source_payloads import (
 )
 from Tools.LORETA_Visualizer.volume_slices import (
     MriAnatomyVolume,
+    ensure_loreta_display_mri_template,
+    find_fsaverage_mri_path,
     load_fsaverage_mri_volume,
     mri_slice_indices_for_payload,
     render_mri_orthogonal_slice_image,
@@ -252,6 +254,7 @@ class FsaverageLoadWorker(QObject):
 
     loaded = Signal(object)
     failed = Signal(str)
+    mri_template_failed = Signal(str)
     finished = Signal()
 
     def __init__(self, *, allow_fetch: bool) -> None:
@@ -267,9 +270,23 @@ class FsaverageLoadWorker(QObject):
         except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, TimeoutError) as exc:
             self.failed.emit(str(exc))
         else:
+            mri_template_error = self._prepare_loreta_display_mri_template(result.fsaverage_dir)
+            if mri_template_error:
+                self.mri_template_failed.emit(mri_template_error)
             self.loaded.emit(result)
         finally:
             self.finished.emit()
+
+    def _prepare_loreta_display_mri_template(self, fsaverage_dir: Path) -> str:
+        mri_path = find_fsaverage_mri_path(fsaverage_dir)
+        if mri_path is None:
+            return f"Required fsaverage MRI anatomy is missing under {fsaverage_dir}."
+        try:
+            ensure_loreta_display_mri_template(mri_path)
+        except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, TimeoutError) as exc:
+            logger.warning("loreta_display_mri_template_prepare_failed", extra={"error": str(exc)})
+            return str(exc)
+        return ""
 
 
 class ProjectSourceMapExportWorker(QObject):
@@ -1208,6 +1225,7 @@ class LoretaVisualizerWindow(QWidget):
         self._fsaverage_dir: Path | None = None
         self._mri_anatomy_cache: MriAnatomyVolume | None = None
         self._mri_anatomy_cache_dir: Path | None = None
+        self._mri_anatomy_error: str | None = None
         self._mri_slice_indices_cache: tuple[int, int, int] | None = None
         self._mri_slice_indices_cache_key: tuple[object, ...] | None = None
         self.status_banner: StatusBanner | None = None
@@ -1920,11 +1938,14 @@ class LoretaVisualizerWindow(QWidget):
         fsaverage_dir = self._fsaverage_dir
         if fsaverage_dir is None:
             raise RuntimeError("Cached fsaverage MRI anatomy is not available.")
+        if self._mri_anatomy_error:
+            raise RuntimeError(f"MRI slice anatomy unavailable: {self._mri_anatomy_error}")
         if self._mri_anatomy_cache is not None and self._mri_anatomy_cache_dir == fsaverage_dir:
             return self._mri_anatomy_cache
         anatomy = load_fsaverage_mri_volume(fsaverage_dir)
         self._mri_anatomy_cache = anatomy
         self._mri_anatomy_cache_dir = fsaverage_dir
+        self._mri_anatomy_error = None
         self._mri_slice_indices_cache = None
         self._mri_slice_indices_cache_key = None
         return anatomy
@@ -2633,6 +2654,7 @@ class LoretaVisualizerWindow(QWidget):
             if allow_fetch
             else "Checking configured/root-local fsaverage cache..."
         )
+        self._mri_anatomy_error = None
 
         thread = QThread(self)
         worker = FsaverageLoadWorker(allow_fetch=allow_fetch)
@@ -2640,6 +2662,7 @@ class LoretaVisualizerWindow(QWidget):
         thread.started.connect(worker.run)
         worker.loaded.connect(self._on_fsaverage_loaded)
         worker.failed.connect(self._on_fsaverage_failed)
+        worker.mri_template_failed.connect(self._on_mri_template_failed)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
@@ -2682,10 +2705,23 @@ class LoretaVisualizerWindow(QWidget):
         self._fsaverage_dir = None
         self._mri_anatomy_cache = None
         self._mri_anatomy_cache_dir = None
+        self._mri_anatomy_error = message
         self._mri_slice_indices_cache = None
         self._mri_slice_indices_cache_key = None
         self.mesh_status.set_variant("warning")
         self.mesh_status.set_text(f"Using synthetic fallback mesh. {message}")
+
+    @Slot(str)
+    def _on_mri_template_failed(self, message: str) -> None:
+        self._mri_anatomy_cache = None
+        self._mri_anatomy_cache_dir = None
+        self._mri_anatomy_error = message
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
+        logger.warning("loreta_mri_slice_anatomy_unavailable", extra={"error": message})
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES and self.mri_slice_view is not None:
+            self.mri_slice_view.clear_slice_image(f"MRI slice anatomy unavailable: {message}")
+        self._set_source_export_status(f"MRI slice anatomy unavailable: {message}", variant="warning")
 
     @Slot()
     def _mesh_load_finished(self) -> None:

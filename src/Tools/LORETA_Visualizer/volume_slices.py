@@ -7,6 +7,7 @@ interpolates those existing values for visualization only.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,7 @@ from Main_App.exports.figure_style import (
     figure_text_kwargs,
 )
 
+from Tools.LORETA_Visualizer.fsaverage_cache import fpvs_toolbox_root
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SMOOTH_SCALAR_COLORS
 from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_POINTS, SourcePayload
 from Tools.LORETA_Visualizer.transforms import (
@@ -46,6 +48,10 @@ DEFAULT_MRI_SLICE_CROP_MIN_PADDING_PIXELS = 8
 PlaneName = Literal["axial", "coronal", "sagittal"]
 
 FSAVERAGE_MRI_RELATIVE_PATH = Path("mri") / "brain.mgz"
+LORETA_MRI_TEMPLATE_CACHE_RELATIVE_DIR = Path(".fpvs_cache") / "loreta_visualizer" / "mri_templates"
+LORETA_DISPLAY_MRI_TEMPLATE_NAME = "brain_0p5mm.nii"
+LORETA_DISPLAY_MRI_VOXEL_SIZE_MM = 0.5
+FSAVERAGE_NATIVE_MRI_VOXEL_SIZE_MM = 1.0
 
 
 @dataclass(frozen=True)
@@ -87,39 +93,73 @@ def find_fsaverage_mri_path(fsaverage_dir: str | Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def load_fsaverage_mri_volume(fsaverage_dir: str | Path) -> MriAnatomyVolume:
-    """Load the fsaverage MRI anatomy used as the slice backdrop."""
+def load_fsaverage_mri_volume(
+    fsaverage_dir: str | Path,
+    *,
+    display_template_cache_dir: str | Path | None = None,
+) -> MriAnatomyVolume:
+    """Load the visualizer-only 0.5 mm fsaverage MRI anatomy used as the slice backdrop."""
 
     mri_path = find_fsaverage_mri_path(fsaverage_dir)
     if mri_path is None:
         expected_path = Path(fsaverage_dir) / FSAVERAGE_MRI_RELATIVE_PATH
         raise FileNotFoundError(f"Required fsaverage MRI anatomy is missing: {expected_path}.")
+    display_mri_path = ensure_loreta_display_mri_template(
+        mri_path,
+        display_template_cache_dir=display_template_cache_dir,
+    )
 
     try:
         import nibabel as nib
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError("nibabel is required to render MRI slice figures.") from exc
 
-    image = nib.load(str(mri_path))
-    data = np.asarray(image.dataobj, dtype=float)
-    data = np.squeeze(data)
-    if data.ndim != 3:
-        raise ValueError(f"Expected a 3D MRI volume, found shape {data.shape!r} in {mri_path}.")
-    if not np.any(np.isfinite(data)):
-        raise ValueError(f"MRI volume contains no finite voxels: {mri_path}.")
+    image = nib.load(str(display_mri_path), mmap=True)
+    data = image.dataobj
+    shape = tuple(int(value) for value in image.shape)
+    if len(shape) != 3:
+        raise ValueError(f"Expected a 3D MRI volume, found shape {shape!r} in {display_mri_path}.")
 
     vox_to_ras = _vox_to_ras_transform(image)
     try:
         ras_to_vox = np.linalg.inv(vox_to_ras)
     except np.linalg.LinAlgError as exc:
-        raise ValueError(f"MRI voxel-to-RAS transform is singular: {mri_path}.") from exc
+        raise ValueError(f"MRI voxel-to-RAS transform is singular: {display_mri_path}.") from exc
 
     return MriAnatomyVolume(
-        data=data.astype(float, copy=False),
+        data=data,
         vox_to_ras=np.asarray(vox_to_ras, dtype=float),
         ras_to_vox=np.asarray(ras_to_vox, dtype=float),
-        source_path=mri_path,
+        source_path=display_mri_path,
     )
+
+
+def ensure_loreta_display_mri_template(
+    source_mri_path: str | Path,
+    *,
+    display_template_cache_dir: str | Path | None = None,
+) -> Path:
+    """Return the visualizer-only 0.5 mm MRI template, generating it if needed."""
+
+    source_path = Path(source_mri_path).expanduser().resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Required fsaverage MRI anatomy is missing: {source_path}.")
+    cache_dir = (
+        Path(display_template_cache_dir).expanduser().resolve()
+        if display_template_cache_dir is not None
+        else default_loreta_display_mri_cache_dir()
+    )
+    cache_key = hashlib.sha256(str(source_path).encode("utf-8")).hexdigest()[:12]
+    output_path = cache_dir / cache_key / LORETA_DISPLAY_MRI_TEMPLATE_NAME
+    if _display_mri_template_current(output_path, source_path):
+        return output_path
+    return _write_loreta_display_mri_template(source_path, output_path)
+
+
+def default_loreta_display_mri_cache_dir() -> Path:
+    """Return the root-local, untracked cache for visualizer-only MRI underlays."""
+
+    return fpvs_toolbox_root() / LORETA_MRI_TEMPLATE_CACHE_RELATIVE_DIR
 
 
 def render_mri_orthogonal_slice_image(
@@ -464,6 +504,80 @@ def _vox_to_ras_transform(image: object) -> np.ndarray:
         if transform is not None:
             return np.asarray(transform, dtype=float)
     return np.asarray(getattr(image, "affine"), dtype=float)
+
+
+def _display_mri_template_current(output_path: Path, source_path: Path) -> bool:
+    if not output_path.is_file():
+        return False
+    try:
+        return output_path.stat().st_mtime_ns >= source_path.stat().st_mtime_ns
+    except OSError:
+        return False
+
+
+def _write_loreta_display_mri_template(source_path: Path, output_path: Path) -> Path:
+    """Build the 0.5 mm display template without modifying fsaverage itself."""
+
+    try:
+        import nibabel as nib
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeError("nibabel is required to prepare the 0.5 mm MRI display template.") from exc
+
+    try:
+        from scipy.ndimage import affine_transform
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeError("scipy is required to prepare the 0.5 mm MRI display template.") from exc
+
+    source_image = nib.load(str(source_path))
+    source_data = np.asarray(source_image.dataobj, dtype=np.float32)
+    source_data = np.squeeze(source_data)
+    if source_data.ndim != 3:
+        raise ValueError(f"Expected a 3D fsaverage MRI volume, found shape {source_data.shape!r} in {source_path}.")
+    if not np.any(np.isfinite(source_data)):
+        raise ValueError(f"fsaverage MRI volume contains no finite voxels: {source_path}.")
+
+    scale = FSAVERAGE_NATIVE_MRI_VOXEL_SIZE_MM / LORETA_DISPLAY_MRI_VOXEL_SIZE_MM
+    output_shape = tuple(max(1, int(round(dimension * scale))) for dimension in source_data.shape)
+    source_to_output = np.eye(3, dtype=float) / scale
+    output_data = affine_transform(
+        source_data,
+        matrix=source_to_output,
+        offset=0.0,
+        output_shape=output_shape,
+        order=3,
+        mode="nearest",
+        prefilter=True,
+    )
+
+    output_data = _coerce_resampled_mri_dtype(output_data, source_image.get_data_dtype())
+    scale_transform = np.diag(
+        [
+            LORETA_DISPLAY_MRI_VOXEL_SIZE_MM / FSAVERAGE_NATIVE_MRI_VOXEL_SIZE_MM,
+            LORETA_DISPLAY_MRI_VOXEL_SIZE_MM / FSAVERAGE_NATIVE_MRI_VOXEL_SIZE_MM,
+            LORETA_DISPLAY_MRI_VOXEL_SIZE_MM / FSAVERAGE_NATIVE_MRI_VOXEL_SIZE_MM,
+            1.0,
+        ]
+    )
+    output_affine = _vox_to_ras_transform(source_image) @ scale_transform
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+    try:
+        nib.save(nib.Nifti1Image(output_data, output_affine), str(temp_path))
+        temp_path.replace(output_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return output_path
+
+
+def _coerce_resampled_mri_dtype(data: np.ndarray, source_dtype: np.dtype) -> np.ndarray:
+    values = np.asarray(data, dtype=np.float32)
+    dtype = np.dtype(source_dtype)
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        return np.clip(np.rint(values), info.min, info.max).astype(dtype, copy=False)
+    return values.astype(np.float32, copy=False)
 
 
 def _valid_visible_source_voxels(

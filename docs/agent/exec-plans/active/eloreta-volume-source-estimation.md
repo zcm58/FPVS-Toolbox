@@ -453,10 +453,14 @@ Done means:
   labels and Desikan-Killiany surface labels. eLORETA volume lateralization
   should not reuse those assumptions blindly. A volume ROI/laterality extension
   should be separately scoped.
-- eLORETA volume figure export currently supports orthogonal fsaverage MRI
-  slice figures. Publication-style MRI plane layout beyond the current
-  three-panel view, ROI labels, and journal-specific variants remain future
-  presentation work.
+- eLORETA volume figure export currently supports orthogonal MRI slice figures
+  using a LORETA-visualizer-only 0.5 mm display template derived from
+  `fsaverage/mri/brain.mgz` and cached under the untracked root `.fpvs_cache`.
+  The derived display underlay preserves the fsaverage RAS frame for rendering
+  and must not replace fsaverage anatomy for source producers or other toolbox
+  modules. Publication-style MRI plane layout beyond the current three-panel
+  view, ROI labels, and journal-specific variants remain future presentation
+  work.
 - Project-local inverse-model caching from the performance plan should be
   considered before full eLORETA runs become expensive, but cache signatures
   must include method, source-space kind, spacing, inverse settings, MNE
