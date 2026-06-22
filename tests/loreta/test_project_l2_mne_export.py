@@ -26,6 +26,7 @@ from Tools.LORETA_Visualizer.gui import (
     SOURCE_SUMMARY_TRIMMED_MEAN,
     _activation_display_payload,
     _coerce_existing_project_root,
+    _display_mode_allowed_for_payload,
     _group_manifest_conditions,
     _group_manifest_methods,
     _ordered_source_summary_ids,
@@ -33,6 +34,7 @@ from Tools.LORETA_Visualizer.gui import (
     _project_source_export_failure_text,
     _source_summary_label,
     _source_export_status_text,
+    default_mri_slice_figure_export_path,
     default_stacked_split_figure_export_path,
     default_split_figure_export_path,
     default_project_source_manifest_paths,
@@ -50,9 +52,19 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     fpvs_toolbox_root,
 )
 from Tools.LORETA_Visualizer import fsaverage_mesh
+from Tools.LORETA_Visualizer.renderer import (
+    DISPLAY_MODE_CORTICAL_SURFACE,
+    DISPLAY_MODE_MRI_SLICES,
+    DISPLAY_MODE_SPLIT_HEMISPHERE,
+    DISPLAY_MODE_TRANSPARENT_MESH,
+)
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.prepared_payload_importer import PreparedSourceManifestEntry
-from Tools.LORETA_Visualizer.source_payloads import make_source_payload
+from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_SURFACE_MESH,
+    SOURCE_KIND_VOLUME_POINTS,
+    make_source_payload,
+)
 from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
     DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME,
     default_project_eloreta_volume_output_dir,
@@ -264,6 +276,20 @@ def test_loreta_stacked_split_figure_export_path_uses_cr_sr_codes(tmp_path) -> N
     assert path == str(zscore_dir / "loreta_split_hemispheres_CR_SR.pdf")
 
 
+def test_loreta_mri_slice_figure_export_path_prefers_project_source_dir(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
+    zscore_dir.mkdir(parents=True)
+
+    path = default_mri_slice_figure_export_path(
+        project_root=project_root,
+        last_import_dir=None,
+        condition_label="Color Response eLORETA volume",
+    )
+
+    assert path == str(zscore_dir / "loreta_mri_slices_Color_Response_eLORETA_volume.pdf")
+
+
 def test_loreta_split_figure_condition_code_labels_color_and_semantic_responses() -> None:
     assert split_figure_condition_code("Color Response") == "CR"
     assert split_figure_condition_code("Semantic Response 2") == "SR"
@@ -275,6 +301,32 @@ def test_loreta_split_figure_display_labels_write_out_color_and_semantic_respons
     assert split_figure_condition_display_label("Semantic Response Raw mean z-score") == "Semantic Response"
     assert split_figure_condition_display_label("Oddball Baseline") == "Oddball Baseline"
     assert DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE == (0.0, 3.5)
+
+
+def test_loreta_display_modes_keep_mri_slices_volume_only() -> None:
+    volume_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [0.1, 0.1, 0.1], [0.2, 0.2, 0.2]], dtype=float),
+        values=np.asarray([1.0, 2.0, 3.0], dtype=float),
+        label="eLORETA volume",
+        kind=SOURCE_KIND_VOLUME_POINTS,
+        normalize_values=False,
+    )
+    surface_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]], dtype=float),
+        values=np.asarray([1.0, 2.0, 3.0], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        label="L2-MNE surface",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        normalize_values=False,
+    )
+
+    assert _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_TRANSPARENT_MESH)
+    assert _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_MRI_SLICES)
+    assert not _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_SPLIT_HEMISPHERE)
+    assert _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_SPLIT_HEMISPHERE)
+    assert _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_CORTICAL_SURFACE)
+    assert not _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_MRI_SLICES)
 
 
 def test_loreta_manifest_conditions_group_participant_summary_entries(tmp_path) -> None:

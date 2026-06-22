@@ -11,6 +11,9 @@ Implementation started 2026-06-20:
   `src/Tools/LORETA_Visualizer/source_producers/`;
 - added GUI source-method grouping/selection between L2-MNE surface and
   eLORETA volume manifests;
+- added orthogonal fsaverage MRI slice display and 600-DPI PDF/PNG figure
+  export for prepared eLORETA `volume_points` payloads, with standard slice
+  planes reused across conditions;
 - preserved L2-MNE normalization and aggregation behavior as the default path.
 
 This plan scopes a beta eLORETA volume source-space method for the LORETA
@@ -450,8 +453,10 @@ Done means:
   labels and Desikan-Killiany surface labels. eLORETA volume lateralization
   should not reuse those assumptions blindly. A volume ROI/laterality extension
   should be separately scoped.
-- Figure export for eLORETA volume is intentionally deferred until the
-  visualization and mask semantics are validated.
+- eLORETA volume figure export currently supports orthogonal fsaverage MRI
+  slice figures. Publication-style MRI plane layout beyond the current
+  three-panel view, ROI labels, and journal-specific variants remain future
+  presentation work.
 - Project-local inverse-model caching from the performance plan should be
   considered before full eLORETA runs become expensive, but cache signatures
   must include method, source-space kind, spacing, inverse settings, MNE
@@ -488,7 +493,11 @@ instead:
 5. Switch source method and confirm condition/summary selectors stay clean.
 6. Confirm L2-MNE defaults to Split Hemispheres.
 7. Confirm eLORETA defaults to Transparent brain mesh.
-8. Toggle the cluster mask on and off and confirm status text distinguishes
+8. Switch eLORETA to MRI slices and confirm axial, coronal, and sagittal panels
+   render without changing the loaded source map. Change conditions and confirm
+   the anatomy slice planes stay fixed while the activation overlay changes.
+9. Export an MRI slice figure and confirm both PDF and PNG files are written.
+10. Toggle the cluster mask on and off and confirm status text distinguishes
    producer-masked display from exploratory unmasked display.
 
 ## Boundary Checklist

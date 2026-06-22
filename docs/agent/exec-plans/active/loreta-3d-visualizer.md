@@ -1713,6 +1713,11 @@ Additional visible smoke path for current and future slices:
 7. Phase 6G: confirm publication split view, single cortical surface view, and
    transparent mesh view all render the same selected condition without
    rebuilding source JSON.
+8. eLORETA volume: switch from Transparent brain mesh to MRI slices, confirm
+   the axial/coronal/sagittal slice view renders from the same selected
+   condition, change conditions and confirm the slice planes remain fixed,
+   then export the MRI slice figure and confirm matched PDF/PNG files are
+   written.
 
 ## Open Decisions
 

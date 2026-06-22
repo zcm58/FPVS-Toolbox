@@ -90,7 +90,7 @@ prepared_payload_validator.py
         | validated coordinates, scalar values, source metadata
         v
 Tool-local bridge helpers
-source_payloads.py + transforms.py + scalar_fields.py + cortical_paint.py + volume_overlay.py
+source_payloads.py + transforms.py + scalar_fields.py + cortical_paint.py + volume_overlay.py + volume_slices.py
         |
         | SourcePayload in renderer display space
         v
@@ -167,6 +167,12 @@ and does not modify saved source values, source-space statistics, or payload
 metadata. The transparent mesh view additionally clips volume overlays to the
 currently displayed brain surface so outside-shell volume activity is not
 painted against a cortical mesh that does not anatomically contain it.
+The GUI also exposes an orthogonal MRI slice display for eLORETA volume
+payloads. That view uses the same prepared payload values and display
+filtering, maps display points back into the fsaverage MRI voxel frame, chooses
+a shared slice triplet from the loaded condition set for the selected
+method/summary/mask state, and interpolates values onto axial, coronal, and
+sagittal slices for visualization and publication figure export only.
 
 Phase 6C adds `project_l2_mne_export.py` as calculation-side orchestration. It
 is allowed to read existing project workbooks through `project_inputs.py`, use
@@ -199,7 +205,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
   Export Figures modal so future display-specific exports can be added without
   crowding the side panel. The method selector groups loaded manifests by
   source method, keeps condition/summary selection method-local, and restricts
-  non-cortical volume payloads to Transparent brain mesh display.
+  non-cortical volume payloads to Transparent brain mesh and MRI slices
+  displays.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
@@ -241,6 +248,20 @@ compact rebuild summaries, but source-estimation math still belongs only to
   surface payload onto the higher-resolution pial display mesh. It may
   interpolate already-computed values for visualization, but it must not compute
   source estimates or change payload values.
+- `volume_overlay.py`: display-only smoothing from prepared volume source
+  points onto a regular PyVista grid for transparent mesh contour overlays.
+  The transparent mesh view may clip this overlay to the displayed cortical
+  surface, but it must not mutate saved source values or source-space masks.
+- `volume_slices.py`: display/export-only orthogonal MRI slice rendering for
+  prepared volume point payloads. It loads and caches the required
+  `fsaverage/mri/brain.mgz` MRI anatomy, surfaces a visible error when that
+  file or the all-condition slice reference is unavailable, converts display
+  points back to native voxel space, reuses a standard slice triplet across
+  conditions, interpolates already computed source values onto slice planes
+  with the same Gaussian-neighbor policy family as the transparent mesh overlay,
+  crops each panel to the anatomy bounds for high-detail embedded viewing, and
+  writes matched 600-DPI PDF/PNG figures. It must not compute inverse estimates,
+  z-scores, cluster masks, or condition effects.
 - `source_producers/`: swappable source-localization calculation methods that
   read explicit source-ready inputs and write validated prepared
   payload/manifest JSON. Phase 6A includes method-neutral producer result

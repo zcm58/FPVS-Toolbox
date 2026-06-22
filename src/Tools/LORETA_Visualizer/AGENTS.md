@@ -127,6 +127,13 @@ button that regenerates both default methods rather than asking the user to pick
 a numerical source method. The GUI may switch between loaded L2-MNE surface and
 eLORETA volume manifests for visualization, but numerical method selection and
 source estimation stay in `source_producers/`.
+eLORETA volume payloads may be viewed as a transparent 3D contour overlay or
+as orthogonal fsaverage MRI slices. The MRI slice view/export is a display
+adapter only: it maps prepared payload points back into MRI voxel space and
+interpolates existing values for visualization without changing source
+statistics, masks, or saved payloads. The slice planes are standardized from
+the loaded condition set for the current method/summary/mask state so changing
+conditions reuses the same anatomy planes.
 
 Allowed outside this directory:
 
@@ -158,6 +165,8 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
     cortical source meshes onto the pial display mesh.
   - `volume_overlay.py` owns display-only smoothing from prepared volume
     source points onto a regular renderer grid for transparent volume overlays.
+  - `volume_slices.py` owns display/export-only orthogonal MRI slice rendering
+    for prepared volume point payloads.
   - `fsaverage_mesh.py` owns anatomical mesh loading and display transforms.
 - Helper modules may adapt, validate, normalize for display, and transform
   already-computed values. They must not compute inverse solutions, frequency
@@ -239,6 +248,17 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   The transparent mesh view clips volume overlays to the current brain surface
   so values outside the displayed anatomical context are hidden without
   changing saved payload values or source-space statistics.
+  The MRI slice view/export uses cached fsaverage MRI anatomy, the current
+  display transform, and prepared `volume_points` values to render axial,
+  coronal, and sagittal slices. It requires cached `fsaverage/mri/brain.mgz`
+  anatomy and should surface a visible render/export error if that file or the
+  all-condition slice reference is unavailable. It should keep slice planes
+  stable across conditions, use the same source-mask/exploratory filtering as
+  transparent volume display, crop panels to the anatomy bounds for high-detail
+  embedded viewing, and use a comparable Gaussian-neighbor smoothing policy. It
+  may interpolate values for display and write matched PDF/PNG figures, but it
+  must not compute inverse estimates, z-scores, cluster masks, or condition
+  effects.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer

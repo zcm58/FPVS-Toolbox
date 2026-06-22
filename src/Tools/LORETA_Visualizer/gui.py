@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -52,6 +53,7 @@ from Tools.LORETA_Visualizer.prepared_payload_importer import (
 )
 from Tools.LORETA_Visualizer.renderer import (
     DISPLAY_MODE_CORTICAL_SURFACE,
+    DISPLAY_MODE_MRI_SLICES,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
     DISPLAY_MODE_TRANSPARENT_MESH,
     SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES,
@@ -66,16 +68,29 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     resolve_scalar_limits,
 )
 from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_VOLUME_POINTS,
     SourcePayload,
     empty_source_payload,
     filter_source_payload_by_mask,
     filter_source_payload_values_above,
+    make_source_payload,
+)
+from Tools.LORETA_Visualizer.volume_slices import (
+    MriAnatomyVolume,
+    load_fsaverage_mri_volume,
+    mri_slice_indices_for_payload,
+    render_mri_orthogonal_slice_image,
+    write_mri_orthogonal_slice_figures,
 )
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_OPACITY_PERCENT = 48
 DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
+MRI_SLICE_PREVIEW_DPI = 300
+MRI_SLICE_PREVIEW_SCALE = 2.25
+MRI_SLICE_PREVIEW_MIN_PIXELS = (1800, 1050)
+MRI_SLICE_PREVIEW_MAX_PIXELS = (3600, 2200)
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 PROJECT_SOURCE_EXPORT_ELORETA_VOLUME = "eloreta_volume_hauk_zscore"
@@ -91,6 +106,7 @@ SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
 EXPORT_FIGURES_ACTION_SPLIT_FIGURES = "split_figures"
 EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES = "stacked_split_figures"
+EXPORT_FIGURES_ACTION_MRI_SLICES = "mri_slices"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
 ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 1.64 (~one-tailed p < .05)", 1.64),
@@ -104,6 +120,7 @@ DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Split Hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
     ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
     ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
+    ("MRI slices", DISPLAY_MODE_MRI_SLICES),
 )
 SOURCE_METHOD_L2_MNE_SURFACE = "l2_mne_surface"
 SOURCE_METHOD_ELORETA_VOLUME = "eloreta_volume"
@@ -141,6 +158,60 @@ class _ManifestMethodGroup:
     method_id: str
     label: str
     condition_groups: dict[str, _ManifestConditionGroup]
+
+
+class MriSliceImageLabel(QLabel):
+    """Aspect-preserving image panel for orthogonal MRI slice renders."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("loreta_mri_slice_view")
+        self.setAlignment(Qt.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(320, 240)
+        self.setWordWrap(True)
+        self._source_pixmap: QPixmap | None = None
+        self.clear_slice_image("MRI slices will appear after an eLORETA volume source map is loaded.")
+
+    def set_slice_image(self, image_rgb: np.ndarray) -> None:
+        image = np.ascontiguousarray(image_rgb, dtype=np.uint8)
+        if image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError("MRI slice image must be an RGB array.")
+        height, width, _channels = image.shape
+        qimage = QImage(
+            image.data,
+            width,
+            height,
+            3 * width,
+            QImage.Format.Format_RGB888,
+        ).copy()
+        self._source_pixmap = QPixmap.fromImage(qimage)
+        self.setText("")
+        self._sync_scaled_pixmap()
+
+    def clear_slice_image(self, message: str = "") -> None:
+        self._source_pixmap = None
+        self.clear()
+        if message:
+            self.setText(message)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override name
+        super().resizeEvent(event)
+        self._sync_scaled_pixmap()
+
+    def _sync_scaled_pixmap(self) -> None:
+        if self._source_pixmap is None or self._source_pixmap.isNull():
+            return
+        size = self.contentsRect().size()
+        if not size.isValid():
+            return
+        self.setPixmap(
+            self._source_pixmap.scaled(
+                size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -385,6 +456,23 @@ def default_stacked_split_figure_export_path(
         last_import_dir=last_import_dir,
     )
     stem = _safe_export_stem(f"loreta_split_hemispheres_{top_code}_{bottom_code}")
+    if start_dir_text:
+        return str(Path(start_dir_text) / f"{stem}.pdf")
+    return f"{stem}.pdf"
+
+
+def default_mri_slice_figure_export_path(
+    *,
+    project_root: Path | None,
+    last_import_dir: Path | None,
+    condition_label: str,
+) -> str:
+    """Return a helpful default path for orthogonal MRI slice figure exports."""
+    start_dir_text = resolve_loreta_import_start_dir(
+        project_root=project_root,
+        last_import_dir=last_import_dir,
+    )
+    stem = _safe_export_stem(f"loreta_mri_slices_{condition_label}")
     if start_dir_text:
         return str(Path(start_dir_text) / f"{stem}.pdf")
     return f"{stem}.pdf"
@@ -705,6 +793,8 @@ def _display_mode_allowed_for_payload(payload: SourcePayload, display_mode: str)
             DISPLAY_MODE_CORTICAL_SURFACE,
             DISPLAY_MODE_TRANSPARENT_MESH,
         }
+    if payload.kind == SOURCE_KIND_VOLUME_POINTS:
+        return display_mode in {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES}
     return display_mode == DISPLAY_MODE_TRANSPARENT_MESH
 
 
@@ -975,8 +1065,9 @@ class ExportFiguresDialog(AppDialog):
         *,
         can_export_split_figures: bool,
         can_export_stacked_split_figures: bool,
+        can_export_mri_slice_figures: bool,
     ) -> None:
-        super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=230, min_width=380))
+        super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=260, min_width=380))
         self.selected_action: str | None = None
 
         self.split_figures_btn = make_action_button("Export split hemisphere figures", compact=True, parent=self)
@@ -1003,13 +1094,16 @@ class ExportFiguresDialog(AppDialog):
         )
         self.root_layout.addWidget(self.stacked_split_figures_btn)
 
-        coming_next_label = QLabel(
-            "Coming next: current view, transparent mesh, brain mesh, batch figure export.",
-            self,
+        self.mri_slice_figures_btn = make_action_button("Export MRI slice figure", compact=True, parent=self)
+        self.mri_slice_figures_btn.setObjectName("loreta_export_figures_mri_slice_figures_btn")
+        self.mri_slice_figures_btn.setEnabled(can_export_mri_slice_figures)
+        self.mri_slice_figures_btn.setToolTip(
+            "Export the current eLORETA volume map as orthogonal MRI slice PDF and PNG files."
+            if can_export_mri_slice_figures
+            else "Load an eLORETA volume source map before exporting an MRI slice figure."
         )
-        coming_next_label.setObjectName("loreta_export_figures_coming_next_label")
-        coming_next_label.setWordWrap(True)
-        self.root_layout.addWidget(coming_next_label)
+        self.mri_slice_figures_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_MRI_SLICES))
+        self.root_layout.addWidget(self.mri_slice_figures_btn)
         self.root_layout.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
@@ -1110,6 +1204,12 @@ class LoretaVisualizerWindow(QWidget):
 
         self._project_root = self._resolve_project_root(project_root)
         self.renderer: BrainRendererWidget | None = None
+        self.mri_slice_view: MriSliceImageLabel | None = None
+        self._fsaverage_dir: Path | None = None
+        self._mri_anatomy_cache: MriAnatomyVolume | None = None
+        self._mri_anatomy_cache_dir: Path | None = None
+        self._mri_slice_indices_cache: tuple[int, int, int] | None = None
+        self._mri_slice_indices_cache_key: tuple[object, ...] | None = None
         self.status_banner: StatusBanner | None = None
         self._mesh_thread: QThread | None = None
         self._mesh_worker: FsaverageLoadWorker | None = None
@@ -1437,11 +1537,24 @@ class LoretaVisualizerWindow(QWidget):
             return
 
         self.viewport_layout.addWidget(self.renderer, 1)
+        self.mri_slice_view = MriSliceImageLabel(self.viewport)
+        self.mri_slice_view.setVisible(False)
+        self.viewport_layout.addWidget(self.mri_slice_view, 1)
         self.renderer.set_display_mode(self._display_mode)
         self.renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
         self.renderer.set_transparent_spin_enabled(self._transparent_spin_enabled)
+        self._sync_viewport_display_widget()
         self._set_controls_enabled(True)
         self._clear_activation_payload()
+
+    def _sync_viewport_display_widget(self) -> None:
+        renderer = self.renderer
+        mri_view = self.mri_slice_view
+        mri_mode = self._display_mode == DISPLAY_MODE_MRI_SLICES
+        if renderer is not None:
+            renderer.setVisible(not mri_mode)
+        if mri_view is not None:
+            mri_view.setVisible(mri_mode)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         opacity_enabled = enabled and not self._activation_uses_opaque_cortical_mode()
@@ -1529,7 +1642,8 @@ class LoretaVisualizerWindow(QWidget):
             return
         opaque_cortical_mode = self._activation_uses_opaque_cortical_mode()
         split_mode_active = opaque_cortical_mode and self._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE
-        opacity_enabled = self.renderer is not None and not opaque_cortical_mode
+        mri_mode_active = self._display_mode == DISPLAY_MODE_MRI_SLICES
+        opacity_enabled = self.renderer is not None and not opaque_cortical_mode and not mri_mode_active
         self.transparency_slider.setEnabled(opacity_enabled)
         self.activation_opacity_slider.setEnabled(opacity_enabled)
         for widget in (
@@ -1540,7 +1654,7 @@ class LoretaVisualizerWindow(QWidget):
             self.activation_opacity_slider,
             self.activation_opacity_value_label,
         ):
-            widget.setVisible(not opaque_cortical_mode)
+            widget.setVisible(not opaque_cortical_mode and not mri_mode_active)
         for widget in (
             self.split_rotation_label,
             self.left_split_rotation_row,
@@ -1571,7 +1685,7 @@ class LoretaVisualizerWindow(QWidget):
             self._display_mode = _preferred_display_mode_for_payload(payload)
             self._set_display_mode_combo_data(self._display_mode)
             self._set_source_export_status(
-                "Volume source maps render in Transparent brain mesh mode.",
+                "This source map uses its compatible display modes.",
                 variant="info",
             )
             return
@@ -1584,6 +1698,7 @@ class LoretaVisualizerWindow(QWidget):
                 renderer.set_display_mode(mode)
                 renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
                 renderer.set_activation_visible(self._activation_visible)
+                self._sync_viewport_display_widget()
                 self._sync_activation_render_mode_controls()
                 self._apply_activation_scalar_range()
 
@@ -1610,6 +1725,9 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is not None:
             renderer.set_activation_visible(self._activation_visible)
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES and self._current_activation_payload is not None:
+            vmin, vmax = self._resolve_activation_scalar_range(self._current_activation_payload)
+            self._render_mri_slice_payload(self._current_activation_payload, scalar_range=(vmin, vmax))
 
     def _on_condition_changed(self, _index: int) -> None:
         condition_id = self.condition_combo.currentData()
@@ -1653,10 +1771,12 @@ class LoretaVisualizerWindow(QWidget):
             self._selected_source_method_id == SOURCE_METHOD_L2_MNE_SURFACE
             and len(self._condition_options()) >= 2
         )
+        can_export_mri_slice_figures = self._can_export_mri_slice_figure()
         dialog = ExportFiguresDialog(
             self,
             can_export_split_figures=can_export_split_figures,
             can_export_stacked_split_figures=can_export_stacked_split_figures,
+            can_export_mri_slice_figures=can_export_mri_slice_figures,
         )
         if not dialog.exec():
             return
@@ -1664,6 +1784,8 @@ class LoretaVisualizerWindow(QWidget):
             self._export_split_hemisphere_figures()
         elif dialog.selected_action == EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES:
             self._export_stacked_split_hemisphere_figures()
+        elif dialog.selected_action == EXPORT_FIGURES_ACTION_MRI_SLICES:
+            self._export_mri_slice_figure()
 
     def _export_split_hemisphere_figures(self) -> None:
         renderer = self.renderer
@@ -1770,6 +1892,188 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = pdf_path.parent
         self._set_source_export_status(f"Exported stacked split figures: {pdf_path}; {png_path}", variant="success")
+
+    def _can_export_mri_slice_figure(self) -> bool:
+        renderer = self.renderer
+        payload = self._source_activation_payload
+        return (
+            renderer is not None
+            and renderer.mesh_display_transform() is not None
+            and self._fsaverage_dir is not None
+            and payload is not None
+            and payload.kind == SOURCE_KIND_VOLUME_POINTS
+        )
+
+    def _mri_slice_payload_for_current_source(self) -> SourcePayload:
+        payload = self._source_activation_payload
+        if payload is None:
+            raise RuntimeError("No source map is loaded.")
+        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+            raise RuntimeError("MRI slice figures require an eLORETA volume source map.")
+        return _activation_display_payload(
+            payload,
+            transparent_mesh_display=True,
+            use_cluster_mask=self._use_cluster_mask,
+        )
+
+    def _load_cached_mri_anatomy(self) -> MriAnatomyVolume:
+        fsaverage_dir = self._fsaverage_dir
+        if fsaverage_dir is None:
+            raise RuntimeError("Cached fsaverage MRI anatomy is not available.")
+        if self._mri_anatomy_cache is not None and self._mri_anatomy_cache_dir == fsaverage_dir:
+            return self._mri_anatomy_cache
+        anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+        self._mri_anatomy_cache = anatomy
+        self._mri_anatomy_cache_dir = fsaverage_dir
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
+        return anatomy
+
+    def _mri_slice_reference_cache_key(self) -> tuple[object, ...]:
+        entries: list[tuple[str, str, int]] = []
+        for condition_id, _label in self._condition_options():
+            entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+            if entry is None:
+                continue
+            try:
+                modified_ns = entry.payload_path.stat().st_mtime_ns
+            except OSError:
+                modified_ns = 0
+            entries.append((condition_id, str(entry.payload_path), int(modified_ns)))
+        return (
+            str(self._fsaverage_dir) if self._fsaverage_dir is not None else "",
+            self._selected_source_method_id,
+            self._selected_summary_id,
+            bool(self._use_cluster_mask),
+            tuple(entries),
+        )
+
+    def _mri_slice_indices_for_current_method(
+        self,
+        *,
+        anatomy: MriAnatomyVolume,
+    ) -> tuple[int, int, int]:
+        renderer = self.renderer
+        if renderer is None:
+            raise RuntimeError("3D renderer is not available.")
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            raise RuntimeError("No mesh transform is available.")
+
+        cache_key = self._mri_slice_reference_cache_key()
+        if self._mri_slice_indices_cache_key == cache_key and self._mri_slice_indices_cache is not None:
+            return self._mri_slice_indices_cache
+
+        reference_payload = self._mri_slice_reference_payload(display_transform)
+        slice_indices = mri_slice_indices_for_payload(
+            reference_payload,
+            display_transform=display_transform,
+            anatomy=anatomy,
+        )
+
+        self._mri_slice_indices_cache = slice_indices
+        self._mri_slice_indices_cache_key = cache_key
+        return slice_indices
+
+    def _mri_slice_reference_payload(self, display_transform) -> SourcePayload:
+        point_chunks: list[np.ndarray] = []
+        value_chunks: list[np.ndarray] = []
+        source_model = "eloreta_volume"
+        value_label = "source-space z-score"
+
+        for condition_id, _label in self._condition_options():
+            entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+            if entry is None:
+                continue
+            payload = load_prepared_source_payload_json(entry.payload_path, display_transform=display_transform)
+            if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+                continue
+            display_payload = _activation_display_payload(
+                payload,
+                transparent_mesh_display=True,
+                use_cluster_mask=self._use_cluster_mask,
+            )
+            if len(display_payload.points) == 0:
+                continue
+            point_chunks.append(np.asarray(display_payload.points, dtype=float))
+            value_chunks.append(np.asarray(display_payload.values, dtype=float).reshape(-1))
+            source_model = display_payload.source_model
+            value_label = display_payload.value_label
+
+        if point_chunks and value_chunks:
+            return make_source_payload(
+                points=np.vstack(point_chunks),
+                values=np.concatenate(value_chunks),
+                label="Standard eLORETA MRI slice reference",
+                kind=SOURCE_KIND_VOLUME_POINTS,
+                source_model=source_model,
+                value_label=value_label,
+                metadata={"slice_reference": "all_loaded_conditions"},
+                normalize_values=False,
+            )
+
+        raise RuntimeError(
+            "MRI slice rendering requires at least one loaded eLORETA volume condition "
+            "to define standard slice planes."
+        )
+
+    def _export_mri_slice_figure(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None or self._fsaverage_dir is None:
+            self._set_source_export_status(
+                "MRI slice export requires cached fsaverage MRI anatomy.",
+                variant="warning",
+            )
+            return
+        try:
+            payload = self._mri_slice_payload_for_current_source()
+            scalar_range = self._resolve_activation_scalar_range(payload)
+            anatomy = self._load_cached_mri_anatomy()
+            slice_indices = self._mri_slice_indices_for_current_method(
+                anatomy=anatomy,
+            )
+        except (OSError, RuntimeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            self._set_source_export_status(f"MRI slice figure export failed: {exc}", variant="warning")
+            return
+
+        project_root = self._refresh_project_root()
+        default_path = default_mri_slice_figure_export_path(
+            project_root=project_root,
+            last_import_dir=self._last_import_dir,
+            condition_label=self._selected_condition_label(),
+        )
+        file_name, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export MRI slice figure",
+            default_path,
+            "PDF files (*.pdf)",
+        )
+        if not file_name:
+            return
+        output_path = Path(file_name)
+        if output_path.suffix.lower() != ".pdf":
+            output_path = output_path.with_suffix(".pdf")
+        try:
+            pdf_path, png_path = write_mri_orthogonal_slice_figures(
+                output_path,
+                payload=payload,
+                display_transform=display_transform,
+                fsaverage_dir=self._fsaverage_dir,
+                scalar_range=scalar_range,
+                label=self._selected_condition_label(),
+                activation_visible=self._activation_visible,
+                anatomy=anatomy,
+                slice_indices=slice_indices,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("loreta_mri_slice_figure_export_failed", extra={"path": str(output_path), "error": str(exc)})
+            self._set_source_export_status(f"MRI slice figure export failed: {exc}", variant="warning")
+            return
+        self._last_import_dir = pdf_path.parent
+        self._set_source_export_status(f"Exported MRI slice figures: {pdf_path}; {png_path}", variant="success")
 
     def _selected_condition_label(self) -> str:
         group = self._manifest_condition_groups.get(self._selected_condition_id)
@@ -2349,6 +2653,11 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None or not isinstance(result, FsaverageMeshResult):
             return
+        self._fsaverage_dir = result.fsaverage_dir
+        self._mri_anatomy_cache = None
+        self._mri_anatomy_cache_dir = None
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
         renderer.replace_brain_mesh(result.mesh, reset_camera=True)
         self._refresh_current_activation()
         self.mesh_status.set_variant("success")
@@ -2370,6 +2679,11 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_fsaverage_failed(self, message: str) -> None:
+        self._fsaverage_dir = None
+        self._mri_anatomy_cache = None
+        self._mri_anatomy_cache_dir = None
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
         self.mesh_status.set_variant("warning")
         self.mesh_status.set_text(f"Using synthetic fallback mesh. {message}")
 
@@ -2467,7 +2781,10 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._source_activation_payload = None
         self._current_activation_payload = None
+        if self.mri_slice_view is not None:
+            self.mri_slice_view.clear_slice_image("MRI slices will appear after an eLORETA volume source map is loaded.")
         self._sync_activation_render_mode_controls()
+        self._sync_viewport_display_widget()
         renderer.set_activation_payload(empty_source_payload("No source map loaded"))
         self.activation_scale_min_label.setText("")
         self.activation_scale_max_label.setText("")
@@ -2482,20 +2799,83 @@ class LoretaVisualizerWindow(QWidget):
             self._set_display_mode_combo_data(self._display_mode)
         display_payload = _activation_display_payload(
             payload,
-            transparent_mesh_display=self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH,
+            transparent_mesh_display=self._display_mode in {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES},
             use_cluster_mask=self._use_cluster_mask,
         )
-        display_payload = renderer.display_payload_for_current_mesh(display_payload)
+        if self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH:
+            display_payload = renderer.display_payload_for_current_mesh(display_payload)
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
         renderer.set_display_mode(self._display_mode, refresh=False)
+        self._sync_viewport_display_widget()
         renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
         vmin, vmax = self._resolve_activation_scalar_range(display_payload)
         renderer.set_activation_scalar_range(vmin, vmax, refresh=False)
         self._update_activation_scale_readout(vmin, vmax)
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._render_mri_slice_payload(display_payload, scalar_range=(vmin, vmax))
+            return
         renderer.set_activation_payload(display_payload)
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
         renderer.set_activation_visible(self._activation_visible)
+
+    def _render_mri_slice_payload(
+        self,
+        payload: SourcePayload,
+        *,
+        scalar_range: tuple[float, float],
+    ) -> None:
+        renderer = self.renderer
+        mri_view = self.mri_slice_view
+        if renderer is None or mri_view is None:
+            return
+        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+            mri_view.clear_slice_image("MRI slices are available for eLORETA volume source maps.")
+            return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            mri_view.clear_slice_image("MRI slices require a loaded fsaverage display transform.")
+            return
+        if self._fsaverage_dir is None:
+            mri_view.clear_slice_image("MRI slices require cached fsaverage MRI anatomy.")
+            return
+        try:
+            anatomy = self._load_cached_mri_anatomy()
+            slice_indices = self._mri_slice_indices_for_current_method(
+                anatomy=anatomy,
+            )
+            preview_figsize, preview_dpi = self._mri_slice_preview_figure_settings()
+            result = render_mri_orthogonal_slice_image(
+                payload,
+                display_transform=display_transform,
+                fsaverage_dir=self._fsaverage_dir,
+                scalar_range=scalar_range,
+                label=self._selected_condition_label(),
+                activation_visible=self._activation_visible,
+                anatomy=anatomy,
+                slice_indices=slice_indices,
+                figsize=preview_figsize,
+                dpi=preview_dpi,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            logger.warning("loreta_mri_slice_render_failed", extra={"error": str(exc)})
+            mri_view.clear_slice_image(f"MRI slice render failed: {exc}")
+            self._set_source_export_status(f"MRI slice render failed: {exc}", variant="warning")
+            return
+        mri_view.set_slice_image(result.image_rgb)
+
+    def _mri_slice_preview_figure_settings(self) -> tuple[tuple[float, float], int]:
+        mri_view = self.mri_slice_view
+        if mri_view is None:
+            width, height = MRI_SLICE_PREVIEW_MIN_PIXELS
+        else:
+            size = mri_view.contentsRect().size()
+            device_scale = max(float(mri_view.devicePixelRatioF()), 1.0)
+            width = int(round(max(size.width(), 1) * MRI_SLICE_PREVIEW_SCALE * device_scale))
+            height = int(round(max(size.height(), 1) * MRI_SLICE_PREVIEW_SCALE * device_scale))
+        width = int(np.clip(width, MRI_SLICE_PREVIEW_MIN_PIXELS[0], MRI_SLICE_PREVIEW_MAX_PIXELS[0]))
+        height = int(np.clip(height, MRI_SLICE_PREVIEW_MIN_PIXELS[1], MRI_SLICE_PREVIEW_MAX_PIXELS[1]))
+        return (width / MRI_SLICE_PREVIEW_DPI, height / MRI_SLICE_PREVIEW_DPI), MRI_SLICE_PREVIEW_DPI
 
     def _resolve_activation_scalar_range(self, payload: SourcePayload) -> tuple[float, float]:
         scale_values = _activation_scale_values(
@@ -2545,6 +2925,10 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is None or payload is None:
             return
         vmin, vmax = self._resolve_activation_scalar_range(payload)
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._update_activation_scale_readout(vmin, vmax)
+            self._render_mri_slice_payload(payload, scalar_range=(vmin, vmax))
+            return
         renderer.set_activation_scalar_range(vmin, vmax)
         self._update_activation_scale_readout(vmin, vmax)
 
