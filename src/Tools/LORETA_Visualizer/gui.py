@@ -79,6 +79,11 @@ DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 PROJECT_SOURCE_EXPORT_ELORETA_VOLUME = "eloreta_volume_hauk_zscore"
+PROJECT_SOURCE_EXPORT_ALL_ZSCORE = "all_zscore"
+PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
+    PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+    PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+)
 PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST = "participant_first"
 PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST = "deprecated_group_first"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
@@ -138,6 +143,39 @@ class _ManifestMethodGroup:
     condition_groups: dict[str, _ManifestConditionGroup]
 
 
+@dataclass(frozen=True)
+class ProjectSourceMapExportFailure:
+    """One failed source-map export within a batch rebuild."""
+
+    export_mode: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ProjectSourceMapExportBatchResult:
+    """One user-facing source-map rebuild action, potentially spanning methods."""
+
+    requested_modes: tuple[str, ...]
+    results: tuple[object, ...]
+    failures: tuple[ProjectSourceMapExportFailure, ...] = ()
+
+    @property
+    def output_dir(self) -> Path | None:
+        for result in reversed(self.results):
+            output_dir = getattr(result, "output_dir", None)
+            if isinstance(output_dir, Path):
+                return output_dir
+        return None
+
+    @property
+    def manifest_path(self) -> Path | None:
+        for result in reversed(self.results):
+            manifest_path = getattr(result, "manifest_path", None)
+            if isinstance(manifest_path, Path):
+                return manifest_path
+        return None
+
+
 class FsaverageLoadWorker(QObject):
     """Load fsaverage mesh data without touching widgets."""
 
@@ -175,53 +213,74 @@ class ProjectSourceMapExportWorker(QObject):
         self,
         *,
         project_root: Path,
-        export_mode: str,
+        export_modes: tuple[str, ...],
         include_flagged_subjects: bool,
         zscore_model: str,
     ) -> None:
         super().__init__()
         self._project_root = project_root
-        self._export_mode = export_mode
+        self._export_modes = export_modes
         self._include_flagged_subjects = include_flagged_subjects
         self._zscore_model = zscore_model
 
     @Slot()
     def run(self) -> None:
+        results: list[object] = []
+        failures: list[ProjectSourceMapExportFailure] = []
         try:
-            if self._export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
-                    write_project_l2_mne_hauk_zscore_payloads,
+            for index, export_mode in enumerate(self._export_modes, start=1):
+                self.progress.emit(
+                    f"Building {_source_export_mode_label(export_mode)} ({index}/{len(self._export_modes)})..."
                 )
-
-                if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
-                    self.progress.emit("Starting deprecated group-first source-space z-score rebuild...")
-                else:
-                    self.progress.emit("Starting participant-first source-space z-score rebuild...")
-                result = write_project_l2_mne_hauk_zscore_payloads(
-                    project_root=self._project_root,
-                    include_flagged_subjects=self._include_flagged_subjects,
-                    zscore_model=self._zscore_model,
-                    progress_callback=self.progress.emit,
-                )
-            elif self._export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
-                from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
-                    write_project_eloreta_volume_hauk_zscore_payloads,
-                )
-
-                self.progress.emit("Starting beta eLORETA volume source-space z-score rebuild...")
-                result = write_project_eloreta_volume_hauk_zscore_payloads(
-                    project_root=self._project_root,
-                    include_flagged_subjects=self._include_flagged_subjects,
-                    progress_callback=self.progress.emit,
+                try:
+                    results.append(self._run_export_mode(export_mode))
+                except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
+                    failures.append(ProjectSourceMapExportFailure(export_mode=export_mode, message=str(exc)))
+                    self.progress.emit(f"{_source_export_mode_label(export_mode)} failed: {exc}")
+            if results:
+                self.exported.emit(
+                    ProjectSourceMapExportBatchResult(
+                        requested_modes=self._export_modes,
+                        results=tuple(results),
+                        failures=tuple(failures),
+                    )
                 )
             else:
-                raise ValueError(f"Unsupported project source export mode: {self._export_mode}")
-        except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
-            self.failed.emit(str(exc))
-        else:
-            self.exported.emit(result)
+                failure_text = "; ".join(
+                    f"{_source_export_mode_label(item.export_mode)}: {item.message}" for item in failures
+                )
+                self.failed.emit(failure_text or "No project source-map exporters ran.")
         finally:
             self.finished.emit()
+
+    def _run_export_mode(self, export_mode: str) -> object:
+        if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+            from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+                write_project_l2_mne_hauk_zscore_payloads,
+            )
+
+            if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
+                self.progress.emit("Starting deprecated group-first L2-MNE source-space z-score rebuild...")
+            else:
+                self.progress.emit("Starting participant-first L2-MNE source-space z-score rebuild...")
+            return write_project_l2_mne_hauk_zscore_payloads(
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                zscore_model=self._zscore_model,
+                progress_callback=self.progress.emit,
+            )
+        if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
+            from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+                write_project_eloreta_volume_hauk_zscore_payloads,
+            )
+
+            self.progress.emit("Starting beta eLORETA volume source-space z-score rebuild...")
+            return write_project_eloreta_volume_hauk_zscore_payloads(
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                progress_callback=self.progress.emit,
+            )
+        raise ValueError(f"Unsupported project source export mode: {export_mode}")
 
 
 def resolve_loreta_import_start_dir(
@@ -663,6 +722,9 @@ def _source_export_status_text(
     zscore_model: str = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
 ) -> str:
     flag_text = "including flagged participants" if include_flagged_subjects else "excluding flagged participants"
+    if export_mode == PROJECT_SOURCE_EXPORT_ALL_ZSCORE:
+        action = "Preparing" if automatic else "Building"
+        return f"{action} L2-MNE surface and eLORETA volume source-space z-score maps ({flag_text})..."
     if automatic:
         return f"Preparing participant-first project source-space z-score maps ({flag_text})..."
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
@@ -672,6 +734,14 @@ def _source_export_status_text(
     if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
         return f"Building beta eLORETA volume source-space z-score JSON from the active project ({flag_text})..."
     return f"Building beta L2-MNE source JSON from the active project ({flag_text})..."
+
+
+def _source_export_mode_label(export_mode: str) -> str:
+    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+        return "L2-MNE surface source maps"
+    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
+        return "eLORETA volume source maps"
+    return "source maps"
 
 
 def _project_source_export_failure_text(message: str) -> str:
@@ -705,7 +775,6 @@ class SourceMapOptionsDialog(AppDialog):
         use_cluster_mask: bool,
         source_map_visible: bool,
         transparent_spin_enabled: bool,
-        selected_source_method_id: str,
         project_available: bool,
         export_busy: bool,
     ) -> None:
@@ -798,27 +867,12 @@ class SourceMapOptionsDialog(AppDialog):
         tabs.addTab(data_tab, "Data")
 
         data_note = QLabel(
-            "Project rebuilds generate participant-first source-space z-score maps for the active project.",
+            "Project rebuilds generate participant-first L2-MNE surface and eLORETA volume z-score maps.",
             data_tab,
         )
         data_note.setObjectName("loreta_source_options_data_note")
         data_note.setWordWrap(True)
         data_layout.addWidget(data_note)
-
-        source_method_label = QLabel("Source method", data_tab)
-        source_method_label.setObjectName("loreta_source_options_method_combo_label")
-        source_method_label.setProperty("caption", True)
-        data_layout.addWidget(source_method_label)
-
-        self.source_method_combo = QComboBox(data_tab)
-        self.source_method_combo.setObjectName("loreta_source_options_method_combo")
-        for label, method_id in SOURCE_METHOD_OPTIONS:
-            self.source_method_combo.addItem(label, method_id)
-        for index in range(self.source_method_combo.count()):
-            if self.source_method_combo.itemData(index) == selected_source_method_id:
-                self.source_method_combo.setCurrentIndex(index)
-                break
-        data_layout.addWidget(self.source_method_combo)
 
         self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
         self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
@@ -839,9 +893,9 @@ class SourceMapOptionsDialog(AppDialog):
         availability_label.setWordWrap(True)
         data_layout.addWidget(availability_label)
 
-        self.rebuild_zscore_btn = make_action_button("Rebuild selected method", compact=True, parent=self)
+        self.rebuild_zscore_btn = make_action_button("Rebuild source maps", compact=True, parent=self)
         self.rebuild_zscore_btn.setObjectName("loreta_options_rebuild_zscore_btn")
-        self.rebuild_zscore_btn.setToolTip("Write source-space z-score JSON for the selected method and load it.")
+        self.rebuild_zscore_btn.setToolTip("Write L2-MNE surface and eLORETA volume source-space z-score JSON.")
         self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
         data_layout.addWidget(self.rebuild_zscore_btn)
 
@@ -1829,14 +1883,10 @@ class LoretaVisualizerWindow(QWidget):
             use_cluster_mask=self._use_cluster_mask,
             source_map_visible=self._activation_visible,
             transparent_spin_enabled=self._transparent_spin_enabled,
-            selected_source_method_id=self._selected_source_method_id,
             project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
         dialog.exec()
-        selected_method = dialog.source_method_combo.currentData()
-        if isinstance(selected_method, str):
-            self._selected_source_method_id = selected_method
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
@@ -1910,12 +1960,7 @@ class LoretaVisualizerWindow(QWidget):
         self._import_prepared_source_manifest(Path(file_name))
 
     def _build_project_zscore_source_maps(self) -> None:
-        export_mode = (
-            PROJECT_SOURCE_EXPORT_ELORETA_VOLUME
-            if self._selected_source_method_id == SOURCE_METHOD_ELORETA_VOLUME
-            else PROJECT_SOURCE_EXPORT_HAUK_ZSCORE
-        )
-        self._build_project_source_maps_for_mode(export_mode)
+        self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES)
 
     def _ensure_default_project_zscore_maps(self) -> None:
         project_root = self._refresh_project_root()
@@ -1928,12 +1973,19 @@ class LoretaVisualizerWindow(QWidget):
             self._last_import_dir = manifest_paths[0].parent
             self._import_prepared_source_manifests(manifest_paths)
             return
-        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE, automatic=True)
+        self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES, automatic=True)
 
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
+        self._build_project_source_maps_for_modes((export_mode,), automatic=automatic)
+
+    def _build_project_source_maps_for_modes(self, export_modes: tuple[str, ...], *, automatic: bool = False) -> None:
         project_root = self._refresh_project_root()
         if project_root is None:
             self._set_source_export_status("Open a project before building beta source JSON.", variant="warning")
+            return
+        modes = tuple(dict.fromkeys(export_modes))
+        if not modes:
+            self._set_source_export_status("No source-map exporters are available.", variant="warning")
             return
         if self._source_export_thread is not None:
             self._set_source_export_status(
@@ -1944,7 +1996,7 @@ class LoretaVisualizerWindow(QWidget):
         include_flagged_subjects = self._include_flagged_subjects
         zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         status_text = _source_export_status_text(
-            export_mode,
+            PROJECT_SOURCE_EXPORT_ALL_ZSCORE if len(modes) > 1 else modes[0],
             automatic=automatic,
             include_flagged_subjects=include_flagged_subjects,
             zscore_model=zscore_model,
@@ -1955,7 +2007,7 @@ class LoretaVisualizerWindow(QWidget):
             "loreta_project_source_maps_export_started",
             extra={
                 "project_root": str(project_root),
-                "export_mode": export_mode,
+                "export_mode": ",".join(modes),
                 "include_flagged_subjects": include_flagged_subjects,
                 "zscore_model": zscore_model,
             },
@@ -1964,7 +2016,7 @@ class LoretaVisualizerWindow(QWidget):
         thread = QThread(self)
         worker = ProjectSourceMapExportWorker(
             project_root=project_root,
-            export_mode=export_mode,
+            export_modes=modes,
             include_flagged_subjects=include_flagged_subjects,
             zscore_model=zscore_model,
         )
@@ -1988,51 +2040,80 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
-        output_dir = getattr(result, "output_dir", None)
-        manifest_path = getattr(result, "manifest_path", None)
-        producer_result = getattr(result, "producer_result", None)
-        payloads = getattr(producer_result, "payloads", ())
-        if not isinstance(output_dir, Path) or not isinstance(manifest_path, Path):
+        export_results = result.results if isinstance(result, ProjectSourceMapExportBatchResult) else (result,)
+        failures = result.failures if isinstance(result, ProjectSourceMapExportBatchResult) else ()
+        valid_manifest_paths: list[Path] = []
+        total_payload_count = 0
+        last_output_dir: Path | None = None
+        method_ids: list[str] = []
+        for export_result in export_results:
+            output_dir = getattr(export_result, "output_dir", None)
+            manifest_path = getattr(export_result, "manifest_path", None)
+            producer_result = getattr(export_result, "producer_result", None)
+            payloads = tuple(getattr(producer_result, "payloads", ()) or ())
+            if not isinstance(output_dir, Path) or not isinstance(manifest_path, Path):
+                continue
+            valid_manifest_paths.append(manifest_path)
+            total_payload_count += len(payloads)
+            last_output_dir = output_dir
+            method_id = str(getattr(producer_result, "method_id", ""))
+            if method_id:
+                method_ids.append(method_id)
+            project_inputs = getattr(export_result, "project_inputs", None)
+            export_model = str(getattr(export_result, "export_model", PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST))
+            flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
+            excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
+            logger.info(
+                "loreta_project_source_maps_export_complete",
+                extra={
+                    "manifest_path": str(manifest_path),
+                    "method_id": method_id,
+                    "condition_count": len(payloads),
+                    "include_flagged_subjects": self._include_flagged_subjects,
+                    "zscore_model": export_model,
+                    "flagged_subject_count": len(flagged_subjects),
+                    "excluded_subject_count": len(excluded_subjects),
+                },
+            )
+        if not valid_manifest_paths or last_output_dir is None:
             self._set_source_export_status(
                 "Project source export failed: unexpected export result.",
                 variant="warning",
             )
             return
-        self._last_import_dir = output_dir
-        method_id = str(getattr(producer_result, "method_id", ""))
-        source_label = "source-space z-score maps" if "zscore" in method_id or "z_score" in method_id else "source maps"
-        project_inputs = getattr(result, "project_inputs", None)
-        export_model = str(getattr(result, "export_model", PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST))
-        flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
-        excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
-        logger.info(
-            "loreta_project_source_maps_export_complete",
-            extra={
-                "manifest_path": str(manifest_path),
-                "method_id": method_id,
-                "condition_count": len(payloads),
-                "include_flagged_subjects": self._include_flagged_subjects,
-                "zscore_model": export_model,
-                "flagged_subject_count": len(flagged_subjects),
-                "excluded_subject_count": len(excluded_subjects),
-            },
-        )
-        self._set_source_export_status(
-            f"Prepared project {source_label} for {len(payloads)} conditions. Loaded regenerated maps.",
-            variant="success",
-        )
-        preferred_method = (
-            SOURCE_METHOD_ELORETA_VOLUME
-            if "eloreta" in method_id.lower() or "eloreta" in str(manifest_path).lower()
-            else SOURCE_METHOD_L2_MNE_SURFACE
-        )
+        self._last_import_dir = last_output_dir
+        if failures:
+            failure_labels = ", ".join(_source_export_mode_label(failure.export_mode) for failure in failures)
+            status_variant = "warning"
+            status_text = (
+                f"Prepared {total_payload_count} source-map condition summaries, but {failure_labels} failed. "
+                "Loaded available regenerated maps."
+            )
+        else:
+            status_variant = "success"
+            status_text = (
+                f"Prepared L2-MNE surface and eLORETA volume source-space z-score maps "
+                f"for {total_payload_count} condition summaries. Loaded regenerated maps."
+            )
+        self._set_source_export_status(status_text, variant=status_variant)
+        joined_methods = " ".join(method_ids).lower()
+        joined_manifests = " ".join(str(path).lower() for path in valid_manifest_paths)
+        preferred_method = self._selected_source_method_id
+        if preferred_method not in {SOURCE_METHOD_L2_MNE_SURFACE, SOURCE_METHOD_ELORETA_VOLUME}:
+            preferred_method = SOURCE_METHOD_L2_MNE_SURFACE
+        if len(valid_manifest_paths) == 1:
+            preferred_method = (
+                SOURCE_METHOD_ELORETA_VOLUME
+                if "eloreta" in joined_methods or "eloreta" in joined_manifests
+                else SOURCE_METHOD_L2_MNE_SURFACE
+            )
         self._selected_source_method_id = preferred_method
         project_root = self._refresh_project_root()
         default_paths = default_project_source_manifest_paths(project_root) if project_root is not None else ()
-        if manifest_path in default_paths:
+        if any(path in default_paths for path in valid_manifest_paths):
             self._import_prepared_source_manifests(default_paths, preferred_source_method_id=preferred_method)
         else:
-            self._import_prepared_source_manifest(manifest_path)
+            self._import_prepared_source_manifests(tuple(valid_manifest_paths), preferred_source_method_id=preferred_method)
 
     @Slot(str)
     def _on_project_source_maps_failed(self, message: str) -> None:

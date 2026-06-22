@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -10,9 +11,14 @@ import pytest
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
     DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
+    PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
+    PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
     PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    ProjectSourceMapExportBatchResult,
+    ProjectSourceMapExportWorker,
     SOURCE_METHOD_ELORETA_VOLUME,
     SOURCE_METHOD_L2_MNE_SURFACE,
     SOURCE_SUMMARY_MEDIAN,
@@ -421,6 +427,18 @@ def test_loreta_project_root_resolver_ignores_empty_string() -> None:
 
 def test_source_export_status_text_reports_flagged_participant_choice() -> None:
     assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
+        automatic=True,
+        include_flagged_subjects=False,
+    ) == "Preparing L2-MNE surface and eLORETA volume source-space z-score maps (excluding flagged participants)..."
+
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
+        automatic=False,
+        include_flagged_subjects=True,
+    ) == "Building L2-MNE surface and eLORETA volume source-space z-score maps (including flagged participants)..."
+
+    assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=False,
         include_flagged_subjects=True,
@@ -443,6 +461,106 @@ def test_source_export_status_text_reports_flagged_participant_choice() -> None:
         automatic=False,
         include_flagged_subjects=False,
     ) == "Building beta eLORETA volume source-space z-score JSON from the active project (excluding flagged participants)..."
+
+
+def _fake_source_export_result(output_dir: Path, *, method_id: str, payload_count: int = 1) -> SimpleNamespace:
+    return SimpleNamespace(
+        output_dir=output_dir,
+        manifest_path=output_dir / "manifest.json",
+        producer_result=SimpleNamespace(
+            method_id=method_id,
+            payloads=tuple(SimpleNamespace() for _index in range(payload_count)),
+        ),
+        project_inputs=SimpleNamespace(flagged_subjects=(), excluded_subjects=()),
+        export_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    )
+
+
+def test_project_source_export_worker_rebuilds_l2_and_eloreta_batch(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer.source_producers import project_eloreta_volume_export
+    from Tools.LORETA_Visualizer.source_producers import project_l2_mne_hauk_zscore_export
+
+    calls: list[tuple[str, bool, str | None]] = []
+
+    def fake_l2_export(**kwargs):
+        calls.append(("l2", kwargs["include_flagged_subjects"], kwargs["zscore_model"]))
+        kwargs["progress_callback"]("l2 done")
+        return _fake_source_export_result(tmp_path / "l2", method_id="l2_mne_fsaverage_participant_zscore", payload_count=2)
+
+    def fake_eloreta_export(**kwargs):
+        calls.append(("eloreta", kwargs["include_flagged_subjects"], kwargs.get("zscore_model")))
+        kwargs["progress_callback"]("eloreta done")
+        return _fake_source_export_result(
+            tmp_path / "eloreta",
+            method_id="eloreta_volume_participant_zscore",
+            payload_count=3,
+        )
+
+    monkeypatch.setattr(project_l2_mne_hauk_zscore_export, "write_project_l2_mne_hauk_zscore_payloads", fake_l2_export)
+    monkeypatch.setattr(project_eloreta_volume_export, "write_project_eloreta_volume_hauk_zscore_payloads", fake_eloreta_export)
+    worker = ProjectSourceMapExportWorker(
+        project_root=tmp_path,
+        export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+        include_flagged_subjects=True,
+        zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    )
+    progress_messages: list[str] = []
+    exported: list[object] = []
+    failed: list[str] = []
+    worker.progress.connect(progress_messages.append)
+    worker.exported.connect(exported.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert failed == []
+    assert calls == [
+        ("l2", True, PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST),
+        ("eloreta", True, None),
+    ]
+    assert len(exported) == 1
+    result = exported[0]
+    assert isinstance(result, ProjectSourceMapExportBatchResult)
+    assert result.requested_modes == PROJECT_SOURCE_EXPORT_DEFAULT_MODES
+    assert len(result.results) == 2
+    assert result.failures == ()
+    assert "Building L2-MNE surface source maps (1/2)" in progress_messages[0]
+    assert any("Building eLORETA volume source maps (2/2)" in message for message in progress_messages)
+
+
+def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer.source_producers import project_eloreta_volume_export
+    from Tools.LORETA_Visualizer.source_producers import project_l2_mne_hauk_zscore_export
+
+    def fake_l2_export(**kwargs):
+        return _fake_source_export_result(tmp_path / "l2", method_id="l2_mne_fsaverage_participant_zscore")
+
+    def fake_eloreta_export(**_kwargs):
+        raise RuntimeError("missing volume model")
+
+    monkeypatch.setattr(project_l2_mne_hauk_zscore_export, "write_project_l2_mne_hauk_zscore_payloads", fake_l2_export)
+    monkeypatch.setattr(project_eloreta_volume_export, "write_project_eloreta_volume_hauk_zscore_payloads", fake_eloreta_export)
+    worker = ProjectSourceMapExportWorker(
+        project_root=tmp_path,
+        export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+        include_flagged_subjects=False,
+        zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    )
+    exported: list[object] = []
+    failed: list[str] = []
+    worker.exported.connect(exported.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert failed == []
+    assert len(exported) == 1
+    result = exported[0]
+    assert isinstance(result, ProjectSourceMapExportBatchResult)
+    assert len(result.results) == 1
+    assert len(result.failures) == 1
+    assert result.failures[0].export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME
+    assert result.failures[0].message == "missing volume model"
 
 
 def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -> None:

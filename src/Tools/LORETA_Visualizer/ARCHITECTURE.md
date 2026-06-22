@@ -432,6 +432,12 @@ volume view uses the same saved cluster-mask toggle semantics: when enabled,
 saved source-index cluster masks filter displayed source locations; when
 disabled or unavailable, transparent volume z-score overlays use positive-only
 exploratory display filtering. Neither path changes saved payload values.
+On first open, if no default project source-map manifests exist, the GUI starts
+one background rebuild that writes both default method outputs. Manual rebuilds
+from the Options dialog use the same batch behavior, so users do not need to
+choose a calculation method before generating source maps. The Method selector
+remains a display selector over already-loaded manifests, not a rebuild-method
+decision.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in

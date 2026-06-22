@@ -120,9 +120,13 @@ values in an fsaverage/template volume source space with MNE eLORETA. It writes
 `volume_points` payloads under `6 - Source Localization/eLORETA Volume Beta/`.
 Its cluster masks are recomputed in volume source space using method-neutral
 `cluster_mask_source_indices`; do not reuse or modify the L2 cortical-surface
-mask. The GUI may switch between loaded L2-MNE surface and eLORETA volume
-manifests, but numerical method selection and source estimation stay in
-`source_producers/`.
+mask. When no project source-map manifests exist, the GUI should automatically
+generate both default source-map methods in one background rebuild action:
+L2-MNE surface and eLORETA volume. The Options dialog should expose one rebuild
+button that regenerates both default methods rather than asking the user to pick
+a numerical source method. The GUI may switch between loaded L2-MNE surface and
+eLORETA volume manifests for visualization, but numerical method selection and
+source estimation stay in `source_producers/`.
 
 Allowed outside this directory:
 

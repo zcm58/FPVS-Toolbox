@@ -61,6 +61,13 @@ should become sibling producers that target the prepared JSON/payload bridge
 and stay separate from the renderer, display fsaverage loader, and project I/O
 unless a new plan explicitly scopes integration.
 
+The current project workflow treats L2-MNE surface and eLORETA volume as the
+default source-map set. If no default project source-map manifests exist on
+first open, the GUI starts one background rebuild that writes both method
+outputs. The Options dialog exposes one manual rebuild action for both default
+methods; the visible Method selector is for choosing among already-loaded maps,
+not for deciding which maps to generate.
+
 The prepared payload contract stage is complete, Phase 6A established the first
 swappable source method, Phase 6B established a read-only project-input
 assembler, Phase 6C established the first real-project beta export and GUI
