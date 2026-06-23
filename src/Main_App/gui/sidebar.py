@@ -279,13 +279,6 @@ def init_sidebar(self) -> None:
     )
     make_button(
         tools_layout,
-        "btn_publication_workflow",
-        "Publication Workflow",
-        sidebar_icon("report", ICON_PX),
-        self.open_publication_workflow,
-    )
-    make_button(
-        tools_layout,
         "btn_publication_report",
         "Publication Report",
         sidebar_icon("report", ICON_PX),
