@@ -198,11 +198,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   display, and mesh display. It explicitly disables depth peeling so
   transparent meshes remain visible across supported Windows/VTK driver stacks.
   No LORETA math.
-- `fsaverage_cache.py`: shared root-local/configured fsaverage cache path
-  helpers. Automatic fetches use `.fpvs_cache/mne/MNE-fsaverage-data/`;
-  explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides are rejected if they point
-  under `src/` or `docs/`, while stale generic MNE config candidates there are
-  ignored so the root-local cache can still be used.
+- `fsaverage_cache.py`: shared fsaverage cache path helpers. Automatic fetches
+  always use `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS Toolbox root,
+  including transient ZIP archives. Configured candidates are rejected if they
+  point under `src/`, `docs/`, temp directories, or common admin-protected
+  system folders; stale generic MNE config candidates there are ignored so the
+  root-local cache can still be used.
 - `fsaverage_mesh.py`: MNE fsaverage discovery/fetch/read/decimation and
   anatomical display transform construction, including display-only
   topology-matched hemisphere meshes for publication layout. The combined mesh
@@ -306,10 +307,11 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not bundle fsaverage MRI/template data in `src/`, `docs/`,
   `src/quarantine/`, or package data. Automatic fetches should install into the
   untracked FPVS Toolbox root cache at
-  `.fpvs_cache/mne/MNE-fsaverage-data/`. Explicit
-  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides may point elsewhere only if they do
-  not target source or docs paths; stale generic MNE config candidates that do
-  target those forbidden paths are ignored.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`, with download archives kept under that
+  same subjects directory instead of `%TEMP%`/`AppData` temp locations.
+  Configured fsaverage paths must not target source, docs, temp directories, or
+  common admin-protected system folders; stale generic MNE config candidates
+  that do target those forbidden paths are ignored.
 - Do not re-enable VTK depth peeling for transparent mesh modes unless the
   target Windows/VTK driver behavior has been visibly retested. The current
   renderer deliberately uses plain alpha blending because depth peeling made

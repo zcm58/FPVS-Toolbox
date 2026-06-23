@@ -468,7 +468,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fetch-fsaverage",
         action="store_true",
-        help="Allow MNE to fetch fsaverage into the external user cache if missing.",
+        help="Allow FPVS Toolbox to fetch fsaverage into the root-local cache if missing.",
     )
     return parser.parse_args()
 

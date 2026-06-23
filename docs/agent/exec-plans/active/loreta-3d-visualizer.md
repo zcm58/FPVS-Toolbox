@@ -138,7 +138,7 @@ producing the same validated prepared payload/manifest contract.
   - `src/Main_App/gui/icons.py` for sidebar icons.
   - `src/Main_App/gui/project_workflows.py` for retiring project-bound embedded page instances after project changes.
 - `requirements.txt` already includes `pyvista`, `pyvistaqt`, `vtk`, and `nibabel`; PyVista/VTK should be the first 3D backend unless implementation testing shows it cannot embed reliably.
-- The local MNE dependency exposes `mne.datasets.fetch_fsaverage(subjects_dir=None)` and `mne.read_surface(...)`, which can support an fsaverage mesh loader without bundling MRI/template data into source.
+- The local MNE dependency exposes fsaverage manifests and `mne.read_surface(...)`, which support an fsaverage mesh loader without bundling MRI/template data into source.
 - Automatic fsaverage fetches target `.fpvs_cache/mne/MNE-fsaverage-data/`
   under the FPVS Toolbox repository root. Generic stale MNE subjects-dir config
   under `src/` or `docs/` is ignored; explicit
@@ -217,10 +217,10 @@ Avoid:
 - Bundling `fsaverage` MRI/template data in `src/`, `docs/`,
   `src/quarantine/`, or package data. Automatic fetches should install into the
   untracked FPVS Toolbox root cache at
-  `.fpvs_cache/mne/MNE-fsaverage-data/`. Explicit
-  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides may point elsewhere only if they do
-  not target source or docs paths; stale generic MNE config candidates that do
-  target those forbidden paths are ignored.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`, including transient ZIP archives.
+  Configured fsaverage paths must not target source, docs, temp directories, or
+  common admin-protected system folders; stale generic MNE config candidates
+  that do target forbidden paths are ignored.
 - Re-enabling VTK depth peeling for transparent mesh modes without visible
   Windows/VTK driver testing. The current renderer deliberately uses plain
   alpha blending so opacity values below 100% still show the brain mesh.
@@ -264,19 +264,18 @@ Done means:
 ## Phase 2: Real Anatomical Brain Mesh
 
 Status: Implemented. The visualizer starts with the synthetic fallback and
-loads/fetches fsaverage through MNE into the untracked FPVS Toolbox root cache
-in a worker when the tool opens. A visible `Fetch/load fsaverage` button is no
-longer part of the primary UI.
+loads/fetches fsaverage through the root-local FPVS cache in a worker when the
+tool opens. A visible `Fetch/load fsaverage` button is no longer part of the
+primary UI.
 
 Objective:
 
 - Replace the Phase 1 placeholder mesh with an actual anatomical brain surface.
-- Prefer fsaverage as the first target, loaded through MNE rather than bundled into the repo.
+- Prefer fsaverage as the first target, loaded through MNE readers rather than bundled into the repo.
 - Use a lazy mesh loader that can:
   - locate an existing fsaverage subject directory if configured;
-  - fetch fsaverage through `mne.datasets.fetch_fsaverage(...)` into
-    `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS Toolbox root when
-    missing;
+  - fetch fsaverage into `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS
+    Toolbox root when missing, including transient ZIP archives;
   - read an appropriate surface with `mne.read_surface(...)`;
   - convert vertices/faces into PyVista `PolyData`;
   - optionally decimate or use a lower-density surface for responsive interaction.

@@ -1,8 +1,8 @@
 """fsaverage mesh loading for the LORETA visualizer.
 
-The fsaverage template is fetched or located through MNE in the FPVS Toolbox
-root-local cache by default. Do not bundle fsaverage data into active source,
-docs, quarantine paths, or package data.
+The fsaverage template is fetched into the FPVS Toolbox root-local cache by
+default and read with MNE surface helpers. Do not bundle fsaverage data into
+active source, docs, quarantine paths, or package data.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import numpy as np
 from Tools.LORETA_Visualizer.fsaverage_cache import (
     candidate_fsaverage_dirs,
     ensure_allowed_fsaverage_dir,
+    fetch_fsaverage_into_subjects_dir,
     fetch_fsaverage_subjects_dir,
     preferred_fsaverage_dirs,
 )
@@ -255,7 +256,7 @@ def _resolve_fsaverage_dir(*, allow_fetch: bool) -> Path:
     except ValueError as exc:
         raise FsaverageMeshError(str(exc)) from exc
     for candidate in candidates:
-        if candidate.is_dir() and (not allow_fetch or _has_default_surface_pair(candidate)):
+        if candidate.is_dir() and _has_default_surface_pair(candidate):
             try:
                 return ensure_allowed_fsaverage_dir(candidate)
             except ValueError as exc:
@@ -269,11 +270,9 @@ def _resolve_fsaverage_dir(*, allow_fetch: bool) -> Path:
     except ValueError as exc:
         raise FsaverageMeshError(str(exc)) from exc
     try:
-        from mne.datasets import fetch_fsaverage
-
-        fs_dir = Path(fetch_fsaverage(subjects_dir=subjects_dir, verbose=False))
+        fs_dir = fetch_fsaverage_into_subjects_dir(subjects_dir)
     except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, URLError, ssl.SSLError, TimeoutError) as exc:
-        raise FsaverageMeshError(f"Unable to fetch fsaverage through MNE: {exc}") from exc
+        raise FsaverageMeshError(f"Unable to fetch fsaverage into the FPVS root-local cache: {exc}") from exc
     try:
         return ensure_allowed_fsaverage_dir(fs_dir)
     except ValueError as exc:

@@ -140,6 +140,13 @@ def test_default_fsaverage_cache_is_root_local(monkeypatch) -> None:
     assert candidate_fsaverage_subjects_dirs(FakeMneConfig())[0] == expected
 
 
+def test_fetch_fsaverage_cache_target_stays_root_local_with_env_override(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("FPVS_FSAVERAGE_SUBJECTS_DIR", str(tmp_path / "external-fsaverage-cache"))
+    monkeypatch.delenv("SUBJECTS_DIR", raising=False)
+
+    assert fetch_fsaverage_subjects_dir() == fpvs_toolbox_root() / DEFAULT_FSAVERAGE_SUBJECTS_DIR
+
+
 def test_fsaverage_cache_ignores_stale_mne_config_under_src(monkeypatch) -> None:
     monkeypatch.delenv("FPVS_FSAVERAGE_SUBJECTS_DIR", raising=False)
     monkeypatch.delenv("SUBJECTS_DIR", raising=False)
@@ -160,25 +167,28 @@ def test_fsaverage_cache_ignores_stale_mne_config_under_src(monkeypatch) -> None
 def test_fsaverage_cache_rejects_source_and_docs_paths() -> None:
     root = fpvs_toolbox_root()
 
-    with pytest.raises(ValueError, match="src/ or docs"):
+    with pytest.raises(ValueError, match="fsaverage cache data cannot live"):
         ensure_allowed_fsaverage_subjects_dir(root / "src" / "fsaverage-cache")
-    with pytest.raises(ValueError, match="src/ or docs"):
+    with pytest.raises(ValueError, match="fsaverage cache data cannot live"):
         ensure_allowed_fsaverage_subjects_dir(root / "docs" / "fsaverage-cache")
 
 
-def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
-    import mne.datasets
+def test_fsaverage_cache_rejects_temp_paths(monkeypatch, tmp_path) -> None:
+    temp_root = tmp_path / "Temp"
+    monkeypatch.setenv("TEMP", str(temp_root))
 
+    with pytest.raises(ValueError, match="temp directories"):
+        ensure_allowed_fsaverage_subjects_dir(temp_root / "fpvs-cache")
+
+
+def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
     target_subjects_dir = tmp_path / "repo-cache" / "mne" / "MNE-fsaverage-data"
     (target_subjects_dir / "fsaverage").mkdir(parents=True)
     calls: list[Path] = []
 
-    def fake_fetch_fsaverage(*, subjects_dir: Path | None = None, verbose: bool | None = None) -> Path:
-        del verbose
-        assert subjects_dir is not None
-        subjects_path = Path(subjects_dir)
-        calls.append(subjects_path)
-        fsaverage_dir = subjects_path / "fsaverage"
+    def fake_fetch_fsaverage(subjects_dir: Path) -> Path:
+        calls.append(subjects_dir)
+        fsaverage_dir = subjects_dir / "fsaverage"
         fsaverage_dir.mkdir(parents=True, exist_ok=True)
         return fsaverage_dir
 
@@ -195,31 +205,29 @@ def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch
         "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export.fetch_fsaverage_subjects_dir",
         lambda: target_subjects_dir,
     )
-    monkeypatch.setattr(mne.datasets, "fetch_fsaverage", fake_fetch_fsaverage)
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export.fetch_fsaverage_into_subjects_dir",
+        fake_fetch_fsaverage,
+    )
 
     assert _resolve_fsaverage_subjects_dir(FakeMneConfig(), allow_fetch=True) == target_subjects_dir
     assert calls == [target_subjects_dir]
 
 
 def test_mesh_loader_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
-    import mne.datasets
-
     target_subjects_dir = tmp_path / "repo-cache" / "mne" / "MNE-fsaverage-data"
     (target_subjects_dir / "fsaverage").mkdir(parents=True)
     calls: list[Path] = []
 
-    def fake_fetch_fsaverage(*, subjects_dir: Path | None = None, verbose: bool | None = None) -> Path:
-        del verbose
-        assert subjects_dir is not None
-        subjects_path = Path(subjects_dir)
-        calls.append(subjects_path)
-        fsaverage_dir = subjects_path / "fsaverage"
+    def fake_fetch_fsaverage(subjects_dir: Path) -> Path:
+        calls.append(subjects_dir)
+        fsaverage_dir = subjects_dir / "fsaverage"
         fsaverage_dir.mkdir(parents=True, exist_ok=True)
         return fsaverage_dir
 
     monkeypatch.setattr(fsaverage_mesh, "preferred_fsaverage_dirs", lambda: [target_subjects_dir / "fsaverage"])
     monkeypatch.setattr(fsaverage_mesh, "fetch_fsaverage_subjects_dir", lambda: target_subjects_dir)
-    monkeypatch.setattr(mne.datasets, "fetch_fsaverage", fake_fetch_fsaverage)
+    monkeypatch.setattr(fsaverage_mesh, "fetch_fsaverage_into_subjects_dir", fake_fetch_fsaverage)
 
     assert fsaverage_mesh._resolve_fsaverage_dir(allow_fetch=True) == target_subjects_dir / "fsaverage"
     assert calls == [target_subjects_dir]

@@ -213,12 +213,13 @@ compact rebuild summaries, but source-estimation math still belongs only to
   disables VTK depth peeling and relies on normal alpha blending so
   transparent brain meshes remain visible across supported Windows graphics
   stacks. It must not calculate source estimates.
-- `fsaverage_cache.py`: shared fsaverage cache path policy. The default durable
-  install location is `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS
-  Toolbox root; `src/`, `docs/`, quarantine, and package-data paths are
-  rejected. Stale generic MNE config candidates under `src/` or `docs/` are
-  ignored; explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths
-  fail fast.
+- `fsaverage_cache.py`: shared fsaverage cache path policy. Automatic fetches
+  install fsaverage and keep transient ZIP archives under
+  `.fpvs_cache/mne/MNE-fsaverage-data/` in the FPVS Toolbox root. `src/`,
+  `docs/`, quarantine, package-data paths, temp directories, and common
+  admin-protected system folders are rejected. Stale generic MNE config
+  candidates under forbidden paths are ignored; explicit
+  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths fail fast.
 - `fsaverage_mesh.py`: fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It also preserves
   display-only left/right hemisphere meshes for publication layout. The
