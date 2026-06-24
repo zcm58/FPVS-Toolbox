@@ -90,12 +90,12 @@ summaries so source maps can be compared against known sensor-space BCA
   Hauk-style z-score exports also write project-local JSON/Markdown validation
   reports that summarize generated files, payload validation, cluster-mask
   coverage, source lateralization highlights, beta limitations, and recommended
-  manual checks. The next recommended development slices are manual scientific
+  manual checks. The next recommended development slice is manual scientific
   validation of masked maps against scalp maps, unmasked maps, source-space
-  lateralization summaries, and the deprecated group-first output, plus a
-  source-map build performance slice that adds selected-column FullFFT parsing
-  and a project-local inverse-model cache before expanding cluster controls or
-  adding another source method.
+  lateralization summaries, and the deprecated group-first output. Source-map
+  build performance work, including selected-column FullFFT parsing and a
+  project-local inverse-model cache, is deferred as a later non-essential fix
+  before expanding cluster controls or adding another source method.
 
 ## Date
 
@@ -1552,7 +1552,8 @@ Done means:
 
 #### Phase 6H-A(6): Source-Map Build Performance
 
-Status: Planned.
+Status: Deferred. Saved as a later non-essential performance fix, not required
+for beta eLORETA volume branch closeout.
 
 Objective:
 
@@ -1725,6 +1726,7 @@ Additional visible smoke path for current and future slices:
   topographies are summed across selected harmonics, matching-offset
   neighboring-bin topographies are summed across selected harmonics, and the
   source-space z-score is computed from those target/noise source estimates.
-- Future method target after beta L2-MNE: LORETA/eLORETA volume, mixed
-  cortical-volume source space, subject-specific forward models, or another
-  explicitly scoped model.
+- Future method target after beta L2-MNE and beta eLORETA volume: mixed
+  cortical-volume source space, subject-specific forward models, another source
+  method, or additional scientific-validation controls should each be
+  explicitly scoped before implementation.

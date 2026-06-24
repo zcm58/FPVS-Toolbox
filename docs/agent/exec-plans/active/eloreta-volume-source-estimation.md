@@ -2,7 +2,7 @@
 
 ## Status
 
-Active plan for `codex/loreta-volume-method-spike`.
+Beta feature closeout for `codex/loreta-volume-method-spike`.
 
 Implementation started 2026-06-20:
 
@@ -14,7 +14,13 @@ Implementation started 2026-06-20:
 - added orthogonal fsaverage MRI slice display and 600-DPI PDF/PNG figure
   export for prepared eLORETA `volume_points` payloads, with standard slice
   planes reused across conditions;
-- preserved L2-MNE normalization and aggregation behavior as the default path.
+- preserved L2-MNE normalization and aggregation behavior as the default path;
+- updated user-facing docs for the beta eLORETA volume method and MRI-slice
+  display.
+
+Source-map build performance improvements, including selected-column FullFFT
+parsing and project-local inverse-model caching, are saved as later
+non-essential follow-up work and are not required for this beta branch closeout.
 
 This plan scopes a beta eLORETA volume source-space method for the LORETA
 Visualizer. It extends the current participant-first Hauk-style source-map
@@ -461,8 +467,8 @@ Done means:
   modules. Publication-style MRI plane layout beyond the current three-panel
   view, ROI labels, and journal-specific variants remain future presentation
   work.
-- Project-local inverse-model caching from the performance plan should be
-  considered before full eLORETA runs become expensive, but cache signatures
+- Project-local inverse-model caching from the performance plan is deferred as
+  a later non-essential performance fix. When implemented, cache signatures
   must include method, source-space kind, spacing, inverse settings, MNE
   version, channel order, and template identity.
 

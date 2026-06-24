@@ -58,10 +58,12 @@ tool has exported `Stats_Ready_Summed_BCA.xlsx`.
 Current project source-map folders include:
 
 - `L2-MNE Hauk Z-Score Beta`: beta Hauk-style source-space z-score maps.
+- `eLORETA Volume Beta`: beta template-volume source-space z-score maps.
 - `L2-MNE Cortical Surface Beta`: diagnostic arbitrary-amplitude maps.
 
 Each folder contains one manifest JSON plus one payload JSON per condition.
-These files are loaded by the visualizer; they are not final validated
+The z-score folders also include participant sidecars and source-validation
+reports. These files are loaded by the visualizer; they are not final validated
 source-localization results.
 
 ## Quick checks when reviewing outputs
