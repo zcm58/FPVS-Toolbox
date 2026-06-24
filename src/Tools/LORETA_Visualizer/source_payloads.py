@@ -152,6 +152,41 @@ def filter_source_payload_values_above(
     )
 
 
+def filter_source_payload_by_mask(
+    payload: SourcePayload,
+    mask: np.ndarray,
+    *,
+    filter_label: str = "source_mask",
+) -> SourcePayload:
+    """Return a display payload containing only points retained by a mask."""
+    keep = np.asarray(mask, dtype=bool).reshape(-1)
+    if len(keep) != len(payload.points):
+        raise ValueError("Source payload mask must have one value per point.")
+
+    filtered_points = payload.points[keep]
+    filtered_values = np.asarray(payload.values, dtype=float).reshape(-1)[keep]
+    filtered_faces = _filter_faces_for_kept_points(payload.faces, keep)
+    metadata = dict(payload.metadata)
+    metadata.update(
+        {
+            "display_value_filter": str(filter_label),
+            "display_value_filter_original_point_count": int(len(payload.points)),
+            "display_value_filter_rendered_point_count": int(len(filtered_points)),
+        }
+    )
+    return SourcePayload(
+        points=np.asarray(filtered_points, dtype=float),
+        values=np.asarray(filtered_values, dtype=float),
+        label=payload.label,
+        kind=payload.kind,
+        coordinate_space=payload.coordinate_space,
+        source_model=payload.source_model,
+        value_label=payload.value_label,
+        faces=filtered_faces,
+        metadata=metadata,
+    )
+
+
 def _filter_faces_for_kept_points(faces: np.ndarray | None, keep: np.ndarray) -> np.ndarray | None:
     if faces is None:
         return None

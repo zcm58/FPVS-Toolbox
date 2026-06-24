@@ -12,6 +12,7 @@ from Tools.LORETA_Visualizer.synthetic_brain import make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import (
     COORDINATE_SPACE_DISPLAY,
     COORDINATE_SPACE_FSAVERAGE,
+    COORDINATE_SPACE_FSAVERAGE_VOLUME,
     MeshDisplayTransform,
 )
 
@@ -60,6 +61,37 @@ def test_mesh_display_transform_rejects_unmatched_coordinate_space() -> None:
             np.asarray([[0.0, 0.0, 0.0]], dtype=float),
             coordinate_space="subject_mri",
         )
+
+
+def test_fsaverage_surface_transform_accepts_fsaverage_volume_points() -> None:
+    surface_points = np.asarray(
+        [
+            [-60.0, -80.0, -35.0],
+            [-55.0, 45.0, 55.0],
+            [58.0, -78.0, -32.0],
+            [56.0, 48.0, 52.0],
+        ],
+        dtype=float,
+    )
+    volume_points = np.asarray(
+        [
+            [-20.0, -62.0, 8.0],
+            [0.0, -70.0, 12.0],
+            [22.0, -61.0, 7.0],
+        ],
+        dtype=float,
+    )
+    transform = MeshDisplayTransform.from_native_points(
+        surface_points,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+
+    display_points = transform.to_display_points(
+        volume_points,
+        coordinate_space=COORDINATE_SPACE_FSAVERAGE_VOLUME,
+    )
+
+    assert np.allclose(display_points, (volume_points - transform.center) / transform.radius)
 
 
 def test_source_payload_to_display_preserves_values_and_faces() -> None:
@@ -127,7 +159,7 @@ def test_fsaverage_like_native_payload_maps_into_display_mesh_space() -> None:
         values=values,
         label="fsaverage native source payload",
         kind=SOURCE_KIND_VOLUME_MESH,
-        coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+        coordinate_space=COORDINATE_SPACE_FSAVERAGE_VOLUME,
         source_model="volume_grid",
         faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
         metadata={"source_space": "fsaverage_like_mm"},
@@ -137,7 +169,7 @@ def test_fsaverage_like_native_payload_maps_into_display_mesh_space() -> None:
     display_payload = source_payload_to_display(native_payload, transform)
     expected_display_points = transform.to_display_points(
         native_source_points,
-        coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+        coordinate_space=COORDINATE_SPACE_FSAVERAGE_VOLUME,
     )
     display_mesh_points = transform.to_display_points(native_mesh_points)
 

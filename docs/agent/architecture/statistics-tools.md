@@ -45,6 +45,34 @@ Primary paths:
   current implementation records figure requests in the manifest while
   automated figure export is deferred.
 
+Publication-ready table figures:
+
+- Use `.agents/skills/publication-table-export/` for reusable table-only
+  SVG/PNG generation that writes final assets under the active project root in
+  `9 - Tables`.
+- Use Great Tables for report-facing table layout when the output is intended
+  for manuscripts, posters, or publication supplements. Keep the data frame
+  small, explicit, and ordered in manuscript reading order; do not infer values
+  from prose when source workbooks are available.
+- Final table figures should be table-only assets by default. Do not embed a
+  table number, title, caption, prose description, source note, or methods
+  explanation in the PNG/SVG unless the user explicitly asks for those elements
+  in the graphic. Put that text in the manuscript, Markdown/DOCX report, source
+  workbook, audit JSON, or adjacent HTML preview instead.
+- Match toolbox figure styling: use `Main_App.gui.typography` roles and
+  `Main_App.gui.style_tokens` colors instead of one-off fonts, weights,
+  borders, or palettes. Table body text should align with `figure_tick`, column
+  headers with `figure_axis_label`, and any preview-only title/note text with
+  `figure_title`/`figure_note`.
+- Export both vector SVG and high-resolution PNG for final publication tables.
+  PNG exports should be 600 DPI unless the user requests a different target.
+  SVGs should keep text as text, not rasterized screenshots, when the exporter
+  can do so reliably.
+- Keep publication table dimensions intentional. Use the 6.5-inch journal text
+  width for broad tables; use a narrower explicit width for compact tables so
+  columns do not look padded out. Verify final pixel dimensions, DPI metadata,
+  and that no embedded caption/title text leaked into table-only exports.
+
 Stats grouping:
 
 - Public entry point: `Tools.Stats.StatsWindow`; implementation lives in `ui.stats_window` and `ui.stats_main_window`.

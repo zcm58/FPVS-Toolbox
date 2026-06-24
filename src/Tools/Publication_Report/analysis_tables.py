@@ -38,6 +38,9 @@ from Tools.Publication_Report.models import (
     PARAMETRIC_VS_NONPARAMETRIC_TESTS_SHEET,
     PLANNED_LATERALIZATION_SHEET,
     PLANNED_ROI_COMPARISONS_HOLM_SHEET,
+    QC_NORMALITY_CHECKS_SHEET,
+    QC_OUTLIER_SUMMARY_SHEET,
+    QC_OUTLIER_VALUES_SHEET,
     ROI_HARMONIC_SUMMARY_SHEET,
     ROI_HARMONIC_VALUES_SHEET,
     ROI_RESPONSE_SUMMARY_SHEET,
@@ -51,6 +54,7 @@ from Tools.Publication_Report.models import (
     ReportRoi,
     Z_SCORE_REPORT_SHEET,
 )
+from Tools.Publication_Report.qc import build_qc_frames
 from Tools.Stats.analysis.dv_policy_group_significant import (
     build_group_significant_harmonic_selection,
 )
@@ -163,6 +167,11 @@ def build_analysis_frames(
         roi_harmonic_summary=roi_harmonic_summary,
         base_rate_summary=base_rate_summary,
     )
+    qc_frames = build_qc_frames(
+        response_values=response_values,
+        individual_roi_summed_z=individual_roi_summed_z,
+        semantic_color_ratio_values=semantic_color_ratio_values,
+    )
     return {
         HARMONIC_SELECTION_SHEET: selection_frame,
         ROI_HARMONIC_VALUES_SHEET: roi_value_frame,
@@ -191,6 +200,9 @@ def build_analysis_frames(
         INDIVIDUAL_DETECTABILITY_COUNTS_SHEET: individual_detectability_counts,
         Z_SCORE_REPORT_SHEET: z_score_report,
         BASE_RATE_SUMMARY_SHEET: base_rate_summary,
+        QC_OUTLIER_VALUES_SHEET: qc_frames[QC_OUTLIER_VALUES_SHEET],
+        QC_OUTLIER_SUMMARY_SHEET: qc_frames[QC_OUTLIER_SUMMARY_SHEET],
+        QC_NORMALITY_CHECKS_SHEET: qc_frames[QC_NORMALITY_CHECKS_SHEET],
     }
 
 

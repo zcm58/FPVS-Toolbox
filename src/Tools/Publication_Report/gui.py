@@ -287,6 +287,8 @@ class PublicationReportWindow(QWidget):
         self.scalp_maps_check.setChecked(True)
         self.individual_figures_check = QCheckBox("Individual detectability figures", group)
         self.individual_figures_check.setChecked(True)
+        self.qc_figures_check = QCheckBox("QC distribution figures", group)
+        self.qc_figures_check.setChecked(True)
 
         for check in (
             self.markdown_check,
@@ -295,6 +297,7 @@ class PublicationReportWindow(QWidget):
             self.spectra_check,
             self.scalp_maps_check,
             self.individual_figures_check,
+            self.qc_figures_check,
         ):
             check.toggled.connect(lambda _checked: self._update_run_state())
             group.content_layout.addWidget(check)
@@ -536,6 +539,7 @@ class PublicationReportWindow(QWidget):
                 spectra=self.spectra_check.isChecked(),
                 scalp_maps=self.scalp_maps_check.isChecked(),
                 individual_figures=self.individual_figures_check.isChecked(),
+                qc_figures=self.qc_figures_check.isChecked(),
             ),
         )
 
@@ -561,6 +565,7 @@ class PublicationReportWindow(QWidget):
             self.spectra_check,
             self.scalp_maps_check,
             self.individual_figures_check,
+            self.qc_figures_check,
         )
 
     def _embedded_host(self) -> QWidget | None:

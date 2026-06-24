@@ -43,7 +43,6 @@ def set_blas_threads_single_process() -> None:
     os.environ.setdefault("OMP_NUM_THREADS", str(cores))
     os.environ.setdefault("NUMEXPR_NUM_THREADS", str(max(1, cores // 2)))
 
-
 def set_blas_threads_multiprocess() -> None:
     """Restrict BLAS to one thread per worker process."""
     os.environ["MKL_NUM_THREADS"] = "1"

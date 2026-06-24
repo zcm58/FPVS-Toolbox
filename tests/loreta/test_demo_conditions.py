@@ -6,14 +6,30 @@ from PIL import Image
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.gui import (
+    LoretaVisualizerWindow,
     _activation_display_payload,
     _activation_value_readout,
+    _underpowered_cluster_mask_status_text,
 )
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
+    DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN,
+    DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN,
+    DEFAULT_SPLIT_FIGURE_WIDTH_IN,
+    DISPLAY_MODE_CORTICAL_SURFACE,
+    ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
+    DISPLAY_MODE_TRANSPARENT_MESH,
     PublicationSplitFigurePanel,
+    SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT,
+    SPLIT_FIGURE_CONDITION_TOP_MARGIN,
     SPLIT_FIGURE_EXPORT_DPI,
+    SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
+    SPLIT_FIGURE_SINGLE_TOP_MARGIN,
+    TRANSPARENT_SPIN_DEGREES_PER_TICK,
+    TRANSPARENT_SPIN_RESUME_DELAY_MS,
+    _PUBLICATION_CAMERA_DISTANCE,
+    _PUBLICATION_CAMERA_PARALLEL_SCALE,
     _SplitHemisphereState,
     _configure_transparency_backend,
     _cortical_paint_display_values,
@@ -249,6 +265,217 @@ def test_l2_mne_surface_zscore_display_uses_cortical_paint_without_filtering_poi
     )
 
 
+def test_transparent_surface_zscore_display_filters_nonpositive_values_before_auto_scale() -> None:
+    payload = make_source_payload(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.5, 1.5, 0.0],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-6.0, 0.0, 0.5, 2.0, 4.2], dtype=float),
+        label="Semantic Response",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 2, 3], [2, 3, 4], [1, 2, 4]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score", "sensor_value_unit": "raw FFT amplitude uV"},
+        normalize_values=False,
+    )
+
+    display_payload = _activation_display_payload(payload, transparent_mesh_display=True)
+
+    assert display_payload.values.tolist() == [0.5, 2.0, 4.2]
+    assert np.array_equal(display_payload.faces, np.asarray([[0, 1, 2]], dtype=np.int64))
+    assert resolve_scalar_limits(display_payload.values, auto_scale=True) == (0.0, 4.2)
+    assert _activation_value_readout(display_payload, cortical_threshold_display=False) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; display: > 0"
+    )
+
+
+def test_underpowered_cluster_mask_readout_marks_exploratory_threshold_display() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Erotic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "participant_count": 4,
+            "cluster_permutation_count": 16,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: exploratory z >= 1.64"
+    )
+    warning = _underpowered_cluster_mask_status_text(payload)
+    assert warning is not None
+    assert "small sample size (4 participants)" in warning
+    assert "minimum possible cluster p = 0.0588" in warning
+    assert "not group-masked" in warning
+
+
+def test_hauk_cluster_mask_readout_names_publication_mask() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [0],
+            "cluster_mask_vertex_count": 1,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: Hauk et al. (2025) cluster mask"
+    )
+
+
+def test_hauk_cluster_mask_readout_marks_disabled_mask_as_exploratory() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [0],
+            "cluster_mask_vertex_count": 1,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload, use_cluster_mask=False) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: exploratory z >= 1.64"
+    )
+
+
+def test_empty_hauk_cluster_mask_readout_marks_exploratory_fallback() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "participant_count": 24,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: exploratory z >= 1.64"
+    )
+
+
+def test_hauk_cluster_mask_load_status_messages() -> None:
+    valid_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [1],
+            "cluster_mask_vertex_count": 1,
+        },
+        normalize_values=False,
+    )
+    empty_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Semantic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+    status = _StatusProbe()
+    window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
+    window.mesh_status = status
+
+    window._set_payload_display_status(valid_payload)
+    assert status.variant == "info"
+    assert status.text == "Loaded Hauk et al. (2025) source-estimation cluster mask."
+
+    window._set_payload_display_status(empty_payload)
+    assert status.variant == "warning"
+    assert status.text == "No vertices survived the Hauk et al. (2025) cluster-permutation mask."
+
+    window._use_cluster_mask = False
+    window._zscore_display_threshold = 2.32
+    window._set_payload_display_status(valid_payload)
+    assert status.variant == "info"
+    assert status.text == "Cluster mask display is disabled. Showing exploratory z >= 2.32 instead."
+
+
+class _StatusProbe:
+    def __init__(self) -> None:
+        self.variant = ""
+        self.text = ""
+
+    def set_variant(self, variant: str) -> None:
+        self.variant = variant
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+
+
 def test_split_hemisphere_projection_uses_projection_points_for_values() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
@@ -271,6 +498,7 @@ def test_split_hemisphere_projection_uses_projection_points_for_values() -> None
     )
     renderer = BrainRendererWidget.__new__(BrainRendererWidget)
     renderer._cortical_paint_z_threshold = 1.64
+    renderer._cortical_paint_use_cluster_mask = True
 
     state = BrainRendererWidget._project_split_hemisphere(renderer, hemisphere, payload)
 
@@ -363,8 +591,8 @@ def test_publication_split_figure_export_writes_pdf_and_png(tmp_path) -> None:
     assert pdf_path.read_bytes().startswith(b"%PDF")
     with Image.open(png_path) as image:
         assert image.size == (
-            int(6.5 * SPLIT_FIGURE_EXPORT_DPI),
-            int(3.0 * SPLIT_FIGURE_EXPORT_DPI),
+            int(round(DEFAULT_SPLIT_FIGURE_WIDTH_IN * SPLIT_FIGURE_EXPORT_DPI)),
+            int(round(DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN * SPLIT_FIGURE_EXPORT_DPI)),
         )
         assert image.getbbox() is not None
 
@@ -472,10 +700,19 @@ def test_publication_split_stack_figure_export_writes_pdf_and_png(tmp_path) -> N
     assert pdf_path.read_bytes().startswith(b"%PDF")
     with Image.open(png_path) as image:
         assert image.size == (
-            int(6.5 * SPLIT_FIGURE_EXPORT_DPI),
-            int(6.75 * SPLIT_FIGURE_EXPORT_DPI),
+            int(round(DEFAULT_SPLIT_FIGURE_WIDTH_IN * SPLIT_FIGURE_EXPORT_DPI)),
+            int(round(DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN * SPLIT_FIGURE_EXPORT_DPI)),
         )
         assert image.getbbox() is not None
+
+
+def test_publication_split_stack_figure_uses_elsevier_one_and_half_column_dimensions_and_labels() -> None:
+    assert DEFAULT_SPLIT_FIGURE_WIDTH_IN * 25.4 == ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM
+    assert DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN * 25.4 < 240.0
+    assert SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT >= 14
+    assert SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT >= 14
+    assert SPLIT_FIGURE_CONDITION_TOP_MARGIN >= 150.0
+    assert SPLIT_FIGURE_SINGLE_TOP_MARGIN >= 130.0
 
 
 def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeypatch) -> None:
@@ -518,6 +755,167 @@ def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeyp
 class _FakePlotter:
     def render(self) -> None:
         return None
+
+
+class _FakePublicationCamera:
+    def __init__(self) -> None:
+        self.position: tuple[float, float, float] | None = None
+        self.focal_point: tuple[float, float, float] | None = None
+        self.view_up: tuple[float, float, float] | None = None
+        self.parallel_projection_enabled = False
+        self.parallel_scale: float | None = None
+
+    def SetPosition(self, x: float, y: float, z: float) -> None:
+        self.position = (x, y, z)
+
+    def SetFocalPoint(self, x: float, y: float, z: float) -> None:
+        self.focal_point = (x, y, z)
+
+    def SetViewUp(self, x: float, y: float, z: float) -> None:
+        self.view_up = (x, y, z)
+
+    def ParallelProjectionOn(self) -> None:
+        self.parallel_projection_enabled = True
+
+    def SetParallelScale(self, scale: float) -> None:
+        self.parallel_scale = scale
+
+
+class _FakePublicationCameraPlotter:
+    def __init__(self) -> None:
+        self.camera = _FakePublicationCamera()
+        self.reset_camera_calls = 0
+        self.reset_camera_clipping_range_calls = 0
+        self.camera_position: str | None = None
+
+    def reset_camera(self) -> None:
+        self.reset_camera_calls += 1
+
+    def reset_camera_clipping_range(self) -> None:
+        self.reset_camera_clipping_range_calls += 1
+
+
+def test_publication_camera_opens_split_view_zoomed_out() -> None:
+    plotter = _FakePublicationCameraPlotter()
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = plotter
+
+    BrainRendererWidget._set_publication_camera(renderer)
+
+    assert plotter.reset_camera_calls == 1
+    assert plotter.reset_camera_clipping_range_calls == 1
+    assert plotter.camera.position == (0.0, -_PUBLICATION_CAMERA_DISTANCE, 0.25)
+    assert plotter.camera.focal_point == (0.0, 0.0, 0.0)
+    assert plotter.camera.view_up == (0.0, 0.0, 1.0)
+    assert plotter.camera.parallel_projection_enabled is True
+    assert plotter.camera.parallel_scale == _PUBLICATION_CAMERA_PARALLEL_SCALE
+    assert _PUBLICATION_CAMERA_DISTANCE > 5.0
+    assert _PUBLICATION_CAMERA_PARALLEL_SCALE > 2.0
+
+
+class _FakeTransparentSpinTimer:
+    def __init__(self) -> None:
+        self.active = False
+        self.started_intervals: list[int | None] = []
+        self.stop_calls = 0
+
+    def isActive(self) -> bool:
+        return self.active
+
+    def start(self, interval: int | None = None) -> None:
+        self.active = True
+        self.started_intervals.append(interval)
+
+    def stop(self) -> None:
+        self.active = False
+        self.stop_calls += 1
+
+
+class _FakeTransparentSpinCamera(_FakePublicationCamera):
+    def __init__(self) -> None:
+        super().__init__()
+        self.orthogonalize_calls = 0
+
+    def OrthogonalizeViewUp(self) -> None:
+        self.orthogonalize_calls += 1
+
+
+class _FakeTransparentSpinPlotter:
+    def __init__(self) -> None:
+        self.camera = _FakeTransparentSpinCamera()
+        self.reset_camera_calls = 0
+        self.reset_camera_clipping_range_calls = 0
+        self.render_calls = 0
+
+    def reset_camera(self) -> None:
+        self.reset_camera_calls += 1
+
+    def reset_camera_clipping_range(self) -> None:
+        self.reset_camera_clipping_range_calls += 1
+
+    def render(self) -> None:
+        self.render_calls += 1
+
+
+def _make_transparent_spin_renderer(display_mode: str = DISPLAY_MODE_TRANSPARENT_MESH) -> BrainRendererWidget:
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = _FakeTransparentSpinPlotter()
+    renderer._current_mesh = make_synthetic_brain_mesh()
+    renderer._display_mode = display_mode
+    renderer._transparent_spin_enabled = False
+    renderer._transparent_spin_angle_degrees = 0.0
+    renderer._transparent_spin_timer = _FakeTransparentSpinTimer()
+    renderer._transparent_spin_resume_timer = _FakeTransparentSpinTimer()
+    return renderer
+
+
+def test_transparent_spin_starts_from_x_axis_with_z_vertical() -> None:
+    renderer = _make_transparent_spin_renderer()
+    plotter = renderer._plotter
+
+    renderer.set_transparent_spin_enabled(True)
+
+    assert renderer._transparent_spin_timer.isActive()
+    assert not renderer._transparent_spin_resume_timer.isActive()
+    assert plotter.camera.focal_point is not None
+    assert plotter.camera.position is not None
+    assert plotter.camera.view_up == (0.0, 0.0, 1.0)
+    assert plotter.camera.position[0] > plotter.camera.focal_point[0]
+    assert np.isclose(plotter.camera.position[1], plotter.camera.focal_point[1])
+    assert np.isclose(plotter.camera.position[2], plotter.camera.focal_point[2])
+    assert plotter.reset_camera_calls == 1
+    assert plotter.reset_camera_clipping_range_calls == 1
+    assert plotter.render_calls == 1
+
+
+def test_transparent_spin_waits_for_transparent_mesh_mode() -> None:
+    renderer = _make_transparent_spin_renderer(display_mode=DISPLAY_MODE_CORTICAL_SURFACE)
+
+    renderer.set_transparent_spin_enabled(True)
+
+    assert renderer.transparent_spin_enabled()
+    assert not renderer._transparent_spin_timer.isActive()
+    assert not renderer._transparent_spin_resume_timer.isActive()
+
+
+def test_transparent_spin_pauses_then_resets_orientation_after_interaction() -> None:
+    renderer = _make_transparent_spin_renderer()
+
+    renderer.set_transparent_spin_enabled(True)
+    renderer._advance_transparent_spin()
+    assert np.isclose(renderer._transparent_spin_angle_degrees, TRANSPARENT_SPIN_DEGREES_PER_TICK)
+
+    renderer._pause_transparent_spin_for_interaction()
+
+    assert not renderer._transparent_spin_timer.isActive()
+    assert renderer._transparent_spin_resume_timer.isActive()
+    assert renderer._transparent_spin_resume_timer.started_intervals[-1] == TRANSPARENT_SPIN_RESUME_DELAY_MS
+
+    renderer._resume_transparent_spin_after_interaction()
+
+    assert renderer._transparent_spin_timer.isActive()
+    assert renderer._transparent_spin_angle_degrees == 0.0
+    assert renderer._plotter.camera.view_up == (0.0, 0.0, 1.0)
 
 
 class _FakeTransparencyPlotter:

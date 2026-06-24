@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,20 +30,20 @@ from Main_App.gui.components import (
     AppDialog,
     SectionCard,
     StatusBanner,
-    SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
     make_action_button,
 )
-from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
 from Tools.LORETA_Visualizer.cortical_paint import (
     DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    payload_cluster_mask_is_empty,
+    payload_cluster_mask_is_underpowered,
+    payload_cluster_mask_minimum_p,
     payload_cluster_mask,
     payload_has_cluster_mask,
     source_payload_uses_zscores,
     uses_cortical_surface_paint,
 )
-from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
     PreparedSourceManifestEntry,
@@ -51,6 +53,7 @@ from Tools.LORETA_Visualizer.prepared_payload_importer import (
 )
 from Tools.LORETA_Visualizer.renderer import (
     DISPLAY_MODE_CORTICAL_SURFACE,
+    DISPLAY_MODE_MRI_SLICES,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
     DISPLAY_MODE_TRANSPARENT_MESH,
     SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES,
@@ -64,23 +67,48 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     format_scalar_value,
     resolve_scalar_limits,
 )
-from Tools.LORETA_Visualizer.source_payloads import SourcePayload, filter_source_payload_values_above
+from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_VOLUME_POINTS,
+    SourcePayload,
+    empty_source_payload,
+    filter_source_payload_by_mask,
+    filter_source_payload_values_above,
+    make_source_payload,
+)
+from Tools.LORETA_Visualizer.volume_slices import (
+    MriAnatomyVolume,
+    ensure_loreta_display_mri_template,
+    find_fsaverage_mri_path,
+    load_fsaverage_mri_volume,
+    mri_slice_indices_for_payload,
+    render_mri_orthogonal_slice_image,
+    write_mri_orthogonal_slice_figures,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_OPACITY_PERCENT = 48
 DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
+MRI_SLICE_PREVIEW_DPI = 300
+MRI_SLICE_PREVIEW_SCALE = 2.25
+MRI_SLICE_PREVIEW_MIN_PIXELS = (1800, 1050)
+MRI_SLICE_PREVIEW_MAX_PIXELS = (3600, 2200)
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
-PROJECT_SOURCE_EXPORT_AMPLITUDE = "amplitude"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
+PROJECT_SOURCE_EXPORT_ELORETA_VOLUME = "eloreta_volume_hauk_zscore"
+PROJECT_SOURCE_EXPORT_ALL_ZSCORE = "all_zscore"
+PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
+    PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+    PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+)
 PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST = "participant_first"
 PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST = "deprecated_group_first"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
-SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE = "rebuild_amplitude"
 EXPORT_FIGURES_ACTION_SPLIT_FIGURES = "split_figures"
 EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES = "stacked_split_figures"
+EXPORT_FIGURES_ACTION_MRI_SLICES = "mri_slices"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
 ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 1.64 (~one-tailed p < .05)", 1.64),
@@ -89,11 +117,136 @@ ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 3.29 (~two-tailed p < .001)", 3.29),
     ("z >= 3.89 (~two-tailed p < .0001)", 3.89),
 )
+DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE = (0.0, 3.5)
 DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Publication split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
+    ("Split Hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
     ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
     ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
+    ("MRI slices", DISPLAY_MODE_MRI_SLICES),
 )
+SOURCE_METHOD_L2_MNE_SURFACE = "l2_mne_surface"
+SOURCE_METHOD_ELORETA_VOLUME = "eloreta_volume"
+SOURCE_METHOD_PREPARED = "prepared_source"
+SOURCE_METHOD_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("L2-MNE surface", SOURCE_METHOD_L2_MNE_SURFACE),
+    ("eLORETA volume", SOURCE_METHOD_ELORETA_VOLUME),
+)
+SOURCE_METHOD_DEFAULT_DISPLAY_MODE = {
+    SOURCE_METHOD_L2_MNE_SURFACE: DISPLAY_MODE_SPLIT_HEMISPHERE,
+    SOURCE_METHOD_ELORETA_VOLUME: DISPLAY_MODE_TRANSPARENT_MESH,
+    SOURCE_METHOD_PREPARED: DEFAULT_DISPLAY_MODE,
+}
+SOURCE_SUMMARY_RAW_MEAN = "mean"
+SOURCE_SUMMARY_MEDIAN = "median"
+SOURCE_SUMMARY_TRIMMED_MEAN = "trimmed_mean"
+SOURCE_SUMMARY_DIRECT = "__source_map__"
+SOURCE_SUMMARY_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Raw mean z-score", SOURCE_SUMMARY_RAW_MEAN),
+    ("Median z-score", SOURCE_SUMMARY_MEDIAN),
+    ("20% trimmed mean z-score", SOURCE_SUMMARY_TRIMMED_MEAN),
+)
+SOURCE_SUMMARY_ORDER = tuple(summary_id for _label, summary_id in SOURCE_SUMMARY_OPTIONS)
+
+
+@dataclass
+class _ManifestConditionGroup:
+    condition_id: str
+    label: str
+    entries_by_summary: dict[str, PreparedSourceManifestEntry]
+
+
+@dataclass
+class _ManifestMethodGroup:
+    method_id: str
+    label: str
+    condition_groups: dict[str, _ManifestConditionGroup]
+
+
+class MriSliceImageLabel(QLabel):
+    """Aspect-preserving image panel for orthogonal MRI slice renders."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("loreta_mri_slice_view")
+        self.setAlignment(Qt.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(320, 240)
+        self.setWordWrap(True)
+        self._source_pixmap: QPixmap | None = None
+        self.clear_slice_image("MRI slices will appear after an eLORETA volume source map is loaded.")
+
+    def set_slice_image(self, image_rgb: np.ndarray) -> None:
+        image = np.ascontiguousarray(image_rgb, dtype=np.uint8)
+        if image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError("MRI slice image must be an RGB array.")
+        height, width, _channels = image.shape
+        qimage = QImage(
+            image.data,
+            width,
+            height,
+            3 * width,
+            QImage.Format.Format_RGB888,
+        ).copy()
+        self._source_pixmap = QPixmap.fromImage(qimage)
+        self.setText("")
+        self._sync_scaled_pixmap()
+
+    def clear_slice_image(self, message: str = "") -> None:
+        self._source_pixmap = None
+        self.clear()
+        if message:
+            self.setText(message)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override name
+        super().resizeEvent(event)
+        self._sync_scaled_pixmap()
+
+    def _sync_scaled_pixmap(self) -> None:
+        if self._source_pixmap is None or self._source_pixmap.isNull():
+            return
+        size = self.contentsRect().size()
+        if not size.isValid():
+            return
+        self.setPixmap(
+            self._source_pixmap.scaled(
+                size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class ProjectSourceMapExportFailure:
+    """One failed source-map export within a batch rebuild."""
+
+    export_mode: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ProjectSourceMapExportBatchResult:
+    """One user-facing source-map rebuild action, potentially spanning methods."""
+
+    requested_modes: tuple[str, ...]
+    results: tuple[object, ...]
+    failures: tuple[ProjectSourceMapExportFailure, ...] = ()
+
+    @property
+    def output_dir(self) -> Path | None:
+        for result in reversed(self.results):
+            output_dir = getattr(result, "output_dir", None)
+            if isinstance(output_dir, Path):
+                return output_dir
+        return None
+
+    @property
+    def manifest_path(self) -> Path | None:
+        for result in reversed(self.results):
+            manifest_path = getattr(result, "manifest_path", None)
+            if isinstance(manifest_path, Path):
+                return manifest_path
+        return None
 
 
 class FsaverageLoadWorker(QObject):
@@ -101,6 +254,7 @@ class FsaverageLoadWorker(QObject):
 
     loaded = Signal(object)
     failed = Signal(str)
+    mri_template_failed = Signal(str)
     finished = Signal()
 
     def __init__(self, *, allow_fetch: bool) -> None:
@@ -116,9 +270,23 @@ class FsaverageLoadWorker(QObject):
         except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, TimeoutError) as exc:
             self.failed.emit(str(exc))
         else:
+            mri_template_error = self._prepare_loreta_display_mri_template(result.fsaverage_dir)
+            if mri_template_error:
+                self.mri_template_failed.emit(mri_template_error)
             self.loaded.emit(result)
         finally:
             self.finished.emit()
+
+    def _prepare_loreta_display_mri_template(self, fsaverage_dir: Path) -> str:
+        mri_path = find_fsaverage_mri_path(fsaverage_dir)
+        if mri_path is None:
+            return f"Required fsaverage MRI anatomy is missing under {fsaverage_dir}."
+        try:
+            ensure_loreta_display_mri_template(mri_path)
+        except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, TimeoutError) as exc:
+            logger.warning("loreta_display_mri_template_prepare_failed", extra={"error": str(exc)})
+            return str(exc)
+        return ""
 
 
 class ProjectSourceMapExportWorker(QObject):
@@ -133,50 +301,74 @@ class ProjectSourceMapExportWorker(QObject):
         self,
         *,
         project_root: Path,
-        export_mode: str,
+        export_modes: tuple[str, ...],
         include_flagged_subjects: bool,
         zscore_model: str,
     ) -> None:
         super().__init__()
         self._project_root = project_root
-        self._export_mode = export_mode
+        self._export_modes = export_modes
         self._include_flagged_subjects = include_flagged_subjects
         self._zscore_model = zscore_model
 
     @Slot()
     def run(self) -> None:
+        results: list[object] = []
+        failures: list[ProjectSourceMapExportFailure] = []
         try:
-            if self._export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
-                    write_project_l2_mne_hauk_zscore_payloads,
+            for index, export_mode in enumerate(self._export_modes, start=1):
+                self.progress.emit(
+                    f"Building {_source_export_mode_label(export_mode)} ({index}/{len(self._export_modes)})..."
                 )
-
-                if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
-                    self.progress.emit("Starting deprecated group-first source-space z-score rebuild...")
-                else:
-                    self.progress.emit("Starting participant-first source-space z-score rebuild...")
-                result = write_project_l2_mne_hauk_zscore_payloads(
-                    project_root=self._project_root,
-                    include_flagged_subjects=self._include_flagged_subjects,
-                    zscore_model=self._zscore_model,
-                    progress_callback=self.progress.emit,
+                try:
+                    results.append(self._run_export_mode(export_mode))
+                except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
+                    failures.append(ProjectSourceMapExportFailure(export_mode=export_mode, message=str(exc)))
+                    self.progress.emit(f"{_source_export_mode_label(export_mode)} failed: {exc}")
+            if results:
+                self.exported.emit(
+                    ProjectSourceMapExportBatchResult(
+                        requested_modes=self._export_modes,
+                        results=tuple(results),
+                        failures=tuple(failures),
+                    )
                 )
             else:
-                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
-                    write_project_l2_mne_cortical_surface_payloads,
+                failure_text = "; ".join(
+                    f"{_source_export_mode_label(item.export_mode)}: {item.message}" for item in failures
                 )
-
-                self.progress.emit("Starting diagnostic L2-MNE amplitude source-map export...")
-                result = write_project_l2_mne_cortical_surface_payloads(
-                    project_root=self._project_root,
-                    include_flagged_subjects=self._include_flagged_subjects,
-                )
-        except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
-            self.failed.emit(str(exc))
-        else:
-            self.exported.emit(result)
+                self.failed.emit(failure_text or "No project source-map exporters ran.")
         finally:
             self.finished.emit()
+
+    def _run_export_mode(self, export_mode: str) -> object:
+        if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+            from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+                write_project_l2_mne_hauk_zscore_payloads,
+            )
+
+            if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
+                self.progress.emit("Starting deprecated group-first L2-MNE source-space z-score rebuild...")
+            else:
+                self.progress.emit("Starting participant-first L2-MNE source-space z-score rebuild...")
+            return write_project_l2_mne_hauk_zscore_payloads(
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                zscore_model=self._zscore_model,
+                progress_callback=self.progress.emit,
+            )
+        if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
+            from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+                write_project_eloreta_volume_hauk_zscore_payloads,
+            )
+
+            self.progress.emit("Starting beta eLORETA volume source-space z-score rebuild...")
+            return write_project_eloreta_volume_hauk_zscore_payloads(
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                progress_callback=self.progress.emit,
+            )
+        raise ValueError(f"Unsupported project source export mode: {export_mode}")
 
 
 def resolve_loreta_import_start_dir(
@@ -188,6 +380,9 @@ def resolve_loreta_import_start_dir(
     if last_import_dir is not None and last_import_dir.is_dir():
         return str(last_import_dir)
     if project_root is not None and project_root.is_dir():
+        from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+            default_project_eloreta_volume_output_dir,
+        )
         from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
             default_project_l2_mne_hauk_zscore_output_dir,
         )
@@ -197,6 +392,7 @@ def resolve_loreta_import_start_dir(
 
         for source_dir in (
             default_project_l2_mne_hauk_zscore_output_dir(project_root),
+            default_project_eloreta_volume_output_dir(project_root),
             default_project_l2_mne_output_dir(project_root),
         ):
             if source_dir.is_dir():
@@ -219,6 +415,30 @@ def default_project_zscore_manifest_path(project_root: Path | None) -> Path | No
         / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
     )
     return manifest_path if manifest_path.is_file() else None
+
+
+def default_project_source_manifest_paths(project_root: Path | None) -> tuple[Path, ...]:
+    """Return existing default project source manifests in preferred display order."""
+    if project_root is None or not project_root.is_dir():
+        return ()
+    paths: list[Path] = []
+    zscore_manifest = default_project_zscore_manifest_path(project_root)
+    if zscore_manifest is not None:
+        paths.append(zscore_manifest)
+    try:
+        from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+            DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME,
+            default_project_eloreta_volume_output_dir,
+        )
+    except (ImportError, ModuleNotFoundError):
+        return tuple(paths)
+    eloreta_manifest = (
+        default_project_eloreta_volume_output_dir(project_root)
+        / DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME
+    )
+    if eloreta_manifest.is_file():
+        paths.append(eloreta_manifest)
+    return tuple(paths)
 
 
 def default_split_figure_export_path(
@@ -258,6 +478,23 @@ def default_stacked_split_figure_export_path(
     return f"{stem}.pdf"
 
 
+def default_mri_slice_figure_export_path(
+    *,
+    project_root: Path | None,
+    last_import_dir: Path | None,
+    condition_label: str,
+) -> str:
+    """Return a helpful default path for orthogonal MRI slice figure exports."""
+    start_dir_text = resolve_loreta_import_start_dir(
+        project_root=project_root,
+        last_import_dir=last_import_dir,
+    )
+    stem = _safe_export_stem(f"loreta_mri_slices_{condition_label}")
+    if start_dir_text:
+        return str(Path(start_dir_text) / f"{stem}.pdf")
+    return f"{stem}.pdf"
+
+
 def split_figure_condition_code(condition_label: str) -> str:
     """Return the compact condition code used in stacked split-hemisphere figures."""
     label = str(condition_label).strip()
@@ -270,6 +507,135 @@ def split_figure_condition_code(condition_label: str) -> str:
     if not words:
         return "MAP"
     return "".join(word[0] for word in words[:3]).upper()
+
+
+def split_figure_condition_display_label(condition_label: str) -> str:
+    """Return the publication label shown above stacked split-hemisphere panels."""
+    label = str(condition_label).strip()
+    lowered = label.lower()
+    if "color response" in lowered:
+        return "Color Response"
+    if "semantic response" in lowered:
+        return "Semantic Response"
+    return label
+
+
+def _source_summary_label(summary_id: str) -> str:
+    for label, candidate_id in SOURCE_SUMMARY_OPTIONS:
+        if candidate_id == summary_id:
+            return label
+    return "Source map"
+
+
+def _source_method_label(method_id: str) -> str:
+    for label, candidate_id in SOURCE_METHOD_OPTIONS:
+        if candidate_id == method_id:
+            return label
+    return "Prepared source"
+
+
+def _manifest_entry_source_method_id(entry: PreparedSourceManifestEntry) -> str:
+    metadata = entry.metadata
+    identifiers = (
+        metadata.get("source_method"),
+        metadata.get("producer_method"),
+        metadata.get("base_producer_method"),
+        metadata.get("source_model"),
+        entry.label,
+        entry.condition_id,
+    )
+    joined = " ".join(str(value).lower() for value in identifiers if value is not None)
+    if "eloreta" in joined or "eloreta_volume" in joined:
+        return SOURCE_METHOD_ELORETA_VOLUME
+    if "l2_mne" in joined or "l2-mne" in joined or "hauk_zscore" in joined:
+        return SOURCE_METHOD_L2_MNE_SURFACE
+    return SOURCE_METHOD_PREPARED
+
+
+def _manifest_entry_summary_id(entry: PreparedSourceManifestEntry) -> str:
+    summary_id = str(entry.metadata.get("participant_zscore_aggregation", "")).strip().lower()
+    if summary_id in SOURCE_SUMMARY_ORDER:
+        return summary_id
+    return SOURCE_SUMMARY_DIRECT
+
+
+def _manifest_entry_raw_id(entry: PreparedSourceManifestEntry) -> str:
+    condition_id = str(entry.condition_id).strip()
+    manifest_match = re.match(r"^manifest:\d+:(?P<raw_id>.+)$", condition_id)
+    if manifest_match is not None:
+        return manifest_match.group("raw_id")
+    return condition_id
+
+
+def _manifest_entry_condition_id(entry: PreparedSourceManifestEntry) -> str:
+    summary_id = _manifest_entry_summary_id(entry)
+    condition_id = _manifest_entry_raw_id(entry)
+    if summary_id != SOURCE_SUMMARY_DIRECT:
+        suffixes = {
+            SOURCE_SUMMARY_RAW_MEAN: ("_raw_mean", "_mean"),
+            SOURCE_SUMMARY_MEDIAN: ("_median",),
+            SOURCE_SUMMARY_TRIMMED_MEAN: ("_20_trimmed_mean", "_trimmed_mean"),
+        }.get(summary_id, (f"_{summary_id}",))
+        for suffix in suffixes:
+            if condition_id.endswith(suffix):
+                return condition_id[: -len(suffix)] or condition_id
+    return condition_id
+
+
+def _manifest_entry_condition_label(entry: PreparedSourceManifestEntry) -> str:
+    label = str(entry.label).strip()
+    if _manifest_entry_summary_id(entry) == SOURCE_SUMMARY_DIRECT:
+        return label
+    return re.sub(
+        r"\s+(raw mean|median|\d+%\s+trimmed mean)\s+z-score$",
+        "",
+        label,
+        flags=re.IGNORECASE,
+    ).strip() or label
+
+
+def _group_manifest_conditions(
+    entries: tuple[PreparedSourceManifestEntry, ...],
+) -> dict[str, _ManifestConditionGroup]:
+    groups: dict[str, _ManifestConditionGroup] = {}
+    for entry in entries:
+        condition_id = _manifest_entry_condition_id(entry)
+        summary_id = _manifest_entry_summary_id(entry)
+        group = groups.get(condition_id)
+        if group is None:
+            group = _ManifestConditionGroup(
+                condition_id=condition_id,
+                label=_manifest_entry_condition_label(entry),
+                entries_by_summary={},
+            )
+            groups[condition_id] = group
+        if summary_id in group.entries_by_summary:
+            summary_id = entry.condition_id
+        group.entries_by_summary[summary_id] = entry
+    return groups
+
+
+def _group_manifest_methods(
+    entries: tuple[PreparedSourceManifestEntry, ...],
+) -> dict[str, _ManifestMethodGroup]:
+    grouped_entries: dict[str, list[PreparedSourceManifestEntry]] = {}
+    for entry in entries:
+        grouped_entries.setdefault(_manifest_entry_source_method_id(entry), []).append(entry)
+    methods: dict[str, _ManifestMethodGroup] = {}
+    for method_id, method_entries in grouped_entries.items():
+        method_tuple = tuple(method_entries)
+        methods[method_id] = _ManifestMethodGroup(
+            method_id=method_id,
+            label=_source_method_label(method_id),
+            condition_groups=_group_manifest_conditions(method_tuple),
+        )
+    return methods
+
+
+def _ordered_source_summary_ids(group: _ManifestConditionGroup) -> tuple[str, ...]:
+    known = [summary_id for summary_id in SOURCE_SUMMARY_ORDER if summary_id in group.entries_by_summary]
+    unknown = [summary_id for summary_id in group.entries_by_summary if summary_id not in SOURCE_SUMMARY_ORDER]
+    return tuple(known + unknown)
 
 
 def _safe_export_stem(text: str) -> str:
@@ -324,6 +690,7 @@ def _activation_value_readout(
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     cortical_threshold_display: bool = True,
+    use_cluster_mask: bool = True,
 ) -> str:
     if payload is None:
         return "Value: source activation"
@@ -334,6 +701,7 @@ def _activation_value_readout(
         payload,
         zscore_display_threshold=zscore_display_threshold,
         cortical_threshold_display=cortical_threshold_display,
+        use_cluster_mask=use_cluster_mask,
     )
     if source_unit and sensor_unit:
         return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}{filter_text}"
@@ -349,12 +717,24 @@ def _activation_display_filter_readout(
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     cortical_threshold_display: bool = True,
+    use_cluster_mask: bool = True,
 ) -> str:
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        if not use_cluster_mask:
+            if payload_has_cluster_mask(payload) or payload_cluster_mask_is_underpowered(payload):
+                return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
+            return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
+        if payload_cluster_mask_is_underpowered(payload):
+            return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
+        if payload_cluster_mask_is_empty(payload):
+            return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
         if payload_has_cluster_mask(payload):
-            return "; display: source-space cluster mask"
+            return "; display: Hauk et al. (2025) cluster mask"
         return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
-    if payload.metadata.get("display_value_filter") != "values_above_threshold":
+    filter_name = payload.metadata.get("display_value_filter")
+    if filter_name == "cluster_mask":
+        return "; display: Hauk et al. (2025) cluster mask"
+    if filter_name != "values_above_threshold":
         return ""
     threshold = payload.metadata.get("display_value_filter_threshold")
     try:
@@ -368,8 +748,19 @@ def _source_payload_uses_zscores(payload: SourcePayload) -> bool:
     return source_payload_uses_zscores(payload)
 
 
-def _activation_display_payload(payload: SourcePayload) -> SourcePayload:
-    if _source_payload_uses_zscores(payload) and not uses_cortical_surface_paint(payload):
+def _activation_display_payload(
+    payload: SourcePayload,
+    *,
+    transparent_mesh_display: bool = False,
+    use_cluster_mask: bool = True,
+) -> SourcePayload:
+    if _source_payload_uses_zscores(payload) and (
+        transparent_mesh_display or not uses_cortical_surface_paint(payload)
+    ):
+        if use_cluster_mask:
+            cluster_mask = payload_cluster_mask(payload)
+            if cluster_mask is not None and np.any(cluster_mask):
+                return filter_source_payload_by_mask(payload, cluster_mask, filter_label="cluster_mask")
         return filter_source_payload_values_above(payload, threshold=0.0)
     return payload
 
@@ -379,14 +770,55 @@ def _activation_scale_values(
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     cortical_threshold_display: bool = True,
+    use_cluster_mask: bool = True,
 ) -> np.ndarray:
     values = np.asarray(payload.values, dtype=float)
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
-        cluster_mask = payload_cluster_mask(payload)
-        if cluster_mask is not None:
+        cluster_mask = payload_cluster_mask(payload) if use_cluster_mask else None
+        if cluster_mask is not None and np.any(cluster_mask):
             return values[cluster_mask & np.isfinite(values)]
         return values[values >= float(zscore_display_threshold)]
     return values
+
+
+def _underpowered_cluster_mask_status_text(payload: SourcePayload) -> str | None:
+    if not (
+        _source_payload_uses_zscores(payload)
+        and payload_cluster_mask_is_underpowered(payload)
+    ):
+        return None
+    participant_count = payload.metadata.get("participant_count")
+    minimum_p = payload_cluster_mask_minimum_p(payload)
+    sample_text = ""
+    try:
+        sample_text = f" ({int(participant_count)} participants)"
+    except (TypeError, ValueError):
+        pass
+    p_text = f"; minimum possible cluster p = {format_scalar_value(minimum_p)}" if np.isfinite(minimum_p) else ""
+    render_text = "Opaque cortical renders" if uses_cortical_surface_paint(payload) else "Volume renders"
+    return (
+        f"Due to the small sample size{sample_text}, the cluster-based permutation mask cannot be "
+        f"applied at the selected alpha{p_text}. {render_text} are underpowered, "
+        "not group-masked, and should be considered exploratory."
+    )
+
+
+def _display_mode_allowed_for_payload(payload: SourcePayload, display_mode: str) -> bool:
+    if uses_cortical_surface_paint(payload):
+        return display_mode in {
+            DISPLAY_MODE_SPLIT_HEMISPHERE,
+            DISPLAY_MODE_CORTICAL_SURFACE,
+            DISPLAY_MODE_TRANSPARENT_MESH,
+        }
+    if payload.kind == SOURCE_KIND_VOLUME_POINTS:
+        return display_mode in {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES}
+    return display_mode == DISPLAY_MODE_TRANSPARENT_MESH
+
+
+def _preferred_display_mode_for_payload(payload: SourcePayload) -> str:
+    if uses_cortical_surface_paint(payload):
+        return DISPLAY_MODE_SPLIT_HEMISPHERE
+    return DISPLAY_MODE_TRANSPARENT_MESH
 
 
 def _source_export_status_text(
@@ -397,13 +829,26 @@ def _source_export_status_text(
     zscore_model: str = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
 ) -> str:
     flag_text = "including flagged participants" if include_flagged_subjects else "excluding flagged participants"
+    if export_mode == PROJECT_SOURCE_EXPORT_ALL_ZSCORE:
+        action = "Preparing" if automatic else "Building"
+        return f"{action} L2-MNE surface and eLORETA volume source-space z-score maps ({flag_text})..."
     if automatic:
         return f"Preparing participant-first project source-space z-score maps ({flag_text})..."
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
         if zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
             return f"Building deprecated group-first source-space z-score JSON from the active project ({flag_text})..."
         return f"Building participant-first source-space z-score JSON from the active project ({flag_text})..."
+    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
+        return f"Building beta eLORETA volume source-space z-score JSON from the active project ({flag_text})..."
     return f"Building beta L2-MNE source JSON from the active project ({flag_text})..."
+
+
+def _source_export_mode_label(export_mode: str) -> str:
+    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+        return "L2-MNE surface source maps"
+    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
+        return "eLORETA volume source maps"
+    return "source maps"
 
 
 def _project_source_export_failure_text(message: str) -> str:
@@ -433,19 +878,20 @@ class SourceMapOptionsDialog(AppDialog):
         parent: QWidget,
         *,
         include_flagged_subjects: bool,
-        zscore_model: str,
         zscore_display_threshold: float,
+        use_cluster_mask: bool,
+        source_map_visible: bool,
+        transparent_spin_enabled: bool,
         project_available: bool,
         export_busy: bool,
     ) -> None:
-        super().__init__("Source Map Options", parent, size=SurfaceSize(width=480, height=500, min_width=430))
+        super().__init__("Options", parent, size=SurfaceSize(width=480, height=440, min_width=430))
         self.selected_action: str | None = None
         self._syncing_threshold_controls = False
 
         method_label = QLabel(
-            "Default project maps use participant-first beta Hauk-style L2-MNE source-space z-scores. "
-            "The method uses project FullFFT target/noise bins, Stats-selected oddball harmonics, "
-            "and a BioSemi64/fsaverage cortical template.",
+            "Project maps use participant-first source-space z-scores from project FullFFT target/noise bins "
+            "and Stats-selected oddball harmonics. Choose the source method to rebuild below.",
             self,
         )
         method_label.setObjectName("loreta_source_options_method_label")
@@ -476,7 +922,7 @@ class SourceMapOptionsDialog(AppDialog):
         threshold_row = QHBoxLayout()
         threshold_row.setContentsMargins(0, 0, 0, 0)
         threshold_row.setSpacing(8)
-        threshold_spin_label = QLabel("z cutoff", display_tab)
+        threshold_spin_label = QLabel("Exploratory z cutoff", display_tab)
         threshold_spin_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.zscore_threshold_spin = QDoubleSpinBox(display_tab)
         self.zscore_threshold_spin.setObjectName("loreta_zscore_threshold_spin")
@@ -488,9 +934,31 @@ class SourceMapOptionsDialog(AppDialog):
         threshold_row.addWidget(self.zscore_threshold_spin, 1)
         display_layout.addLayout(threshold_row)
 
+        self.use_cluster_mask_check = QCheckBox("Use cluster mask when available", display_tab)
+        self.use_cluster_mask_check.setObjectName("loreta_use_cluster_mask_check")
+        self.use_cluster_mask_check.setChecked(bool(use_cluster_mask))
+        self.use_cluster_mask_check.setToolTip(
+            "Turn off for exploratory viewing with the selected z-score cutoff instead of the saved cluster mask."
+        )
+        display_layout.addWidget(self.use_cluster_mask_check)
+
+        self.source_map_visible_check = QCheckBox("Show source map", display_tab)
+        self.source_map_visible_check.setObjectName("loreta_source_map_visible_check")
+        self.source_map_visible_check.setChecked(bool(source_map_visible))
+        self.source_map_visible_check.setToolTip("Turn off to inspect the anatomical cortical surface without source colors.")
+        display_layout.addWidget(self.source_map_visible_check)
+
+        self.transparent_spin_check = QCheckBox("Spin transparent mesh view", display_tab)
+        self.transparent_spin_check.setObjectName("loreta_transparent_spin_check")
+        self.transparent_spin_check.setChecked(bool(transparent_spin_enabled))
+        self.transparent_spin_check.setToolTip(
+            "Slowly rotate the transparent mesh view; user interaction pauses it for 10 seconds."
+        )
+        display_layout.addWidget(self.transparent_spin_check)
+
         threshold_note = QLabel(
-            "Values below this display cutoff render as gray cortex. "
-            "Cluster-masked payloads use their producer-computed mask first.",
+            "For Hauk et al., 2025 cluster-masked maps, this cutoff is used when "
+            "the mask is unavailable, underpowered, empty, or disabled for exploratory viewing.",
             display_tab,
         )
         threshold_note.setObjectName("loreta_zscore_threshold_note")
@@ -505,33 +973,13 @@ class SourceMapOptionsDialog(AppDialog):
         data_layout.setSpacing(8)
         tabs.addTab(data_tab, "Data")
 
-        zscore_model_label = QLabel("Z-score generation model", data_tab)
-        zscore_model_label.setObjectName("loreta_zscore_model_label")
-        data_layout.addWidget(zscore_model_label)
-
-        self.zscore_model_combo = QComboBox(data_tab)
-        self.zscore_model_combo.setObjectName("loreta_zscore_model_combo")
-        self.zscore_model_combo.addItem(
-            "Participant-first source z-scores (default)",
-            PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
-        )
-        self.zscore_model_combo.addItem(
-            "Deprecated group-first beta model",
-            PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
-        )
-        for index in range(self.zscore_model_combo.count()):
-            if self.zscore_model_combo.itemData(index) == zscore_model:
-                self.zscore_model_combo.setCurrentIndex(index)
-                break
-        data_layout.addWidget(self.zscore_model_combo)
-
-        deprecated_note = QLabel(
-            "The deprecated group-first model is retained only for comparison and is planned for removal.",
+        data_note = QLabel(
+            "Project rebuilds generate participant-first L2-MNE surface and eLORETA volume z-score maps.",
             data_tab,
         )
-        deprecated_note.setObjectName("loreta_zscore_model_deprecated_note")
-        deprecated_note.setWordWrap(True)
-        data_layout.addWidget(deprecated_note)
+        data_note.setObjectName("loreta_source_options_data_note")
+        data_note.setWordWrap(True)
+        data_layout.addWidget(data_note)
 
         self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
         self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
@@ -552,17 +1000,11 @@ class SourceMapOptionsDialog(AppDialog):
         availability_label.setWordWrap(True)
         data_layout.addWidget(availability_label)
 
-        self.rebuild_zscore_btn = make_action_button("Rebuild z-score maps", compact=True, parent=self)
+        self.rebuild_zscore_btn = make_action_button("Rebuild source maps", compact=True, parent=self)
         self.rebuild_zscore_btn.setObjectName("loreta_options_rebuild_zscore_btn")
-        self.rebuild_zscore_btn.setToolTip("Write Hauk-style source-space z-score JSON and load it.")
+        self.rebuild_zscore_btn.setToolTip("Write L2-MNE surface and eLORETA volume source-space z-score JSON.")
         self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
         data_layout.addWidget(self.rebuild_zscore_btn)
-
-        self.rebuild_amplitude_btn = make_action_button("Build diagnostic amplitude maps", compact=True, parent=self)
-        self.rebuild_amplitude_btn.setObjectName("loreta_options_rebuild_amplitude_btn")
-        self.rebuild_amplitude_btn.setToolTip("Write diagnostic beta L2-MNE amplitude JSON and load it.")
-        self.rebuild_amplitude_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE))
-        data_layout.addWidget(self.rebuild_amplitude_btn)
 
         self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=self)
         self.load_source_payload_btn.setObjectName("loreta_options_load_source_payload_btn")
@@ -579,7 +1021,6 @@ class SourceMapOptionsDialog(AppDialog):
 
         rebuild_enabled = project_available and not export_busy
         self.rebuild_zscore_btn.setEnabled(rebuild_enabled)
-        self.rebuild_amplitude_btn.setEnabled(rebuild_enabled)
         self._set_threshold_controls_value(zscore_display_threshold)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
@@ -641,8 +1082,9 @@ class ExportFiguresDialog(AppDialog):
         *,
         can_export_split_figures: bool,
         can_export_stacked_split_figures: bool,
+        can_export_mri_slice_figures: bool,
     ) -> None:
-        super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=230, min_width=380))
+        super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=260, min_width=380))
         self.selected_action: str | None = None
 
         self.split_figures_btn = make_action_button("Export split hemisphere figures", compact=True, parent=self)
@@ -651,7 +1093,7 @@ class ExportFiguresDialog(AppDialog):
         self.split_figures_btn.setToolTip(
             "Export the current publication split-hemisphere view as 600 DPI PDF and PNG files."
             if can_export_split_figures
-            else "Switch to Publication split hemispheres with a loaded source map to export this figure."
+            else "Switch to Split Hemispheres with a loaded source map to export this figure."
         )
         self.split_figures_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_SPLIT_FIGURES))
         self.root_layout.addWidget(self.split_figures_btn)
@@ -669,13 +1111,16 @@ class ExportFiguresDialog(AppDialog):
         )
         self.root_layout.addWidget(self.stacked_split_figures_btn)
 
-        coming_next_label = QLabel(
-            "Coming next: current view, transparent mesh, brain mesh, batch figure export.",
-            self,
+        self.mri_slice_figures_btn = make_action_button("Export MRI slice figure", compact=True, parent=self)
+        self.mri_slice_figures_btn.setObjectName("loreta_export_figures_mri_slice_figures_btn")
+        self.mri_slice_figures_btn.setEnabled(can_export_mri_slice_figures)
+        self.mri_slice_figures_btn.setToolTip(
+            "Export the current eLORETA volume map as orthogonal MRI slice PDF and PNG files."
+            if can_export_mri_slice_figures
+            else "Load an eLORETA volume source map before exporting an MRI slice figure."
         )
-        coming_next_label.setObjectName("loreta_export_figures_coming_next_label")
-        coming_next_label.setWordWrap(True)
-        self.root_layout.addWidget(coming_next_label)
+        self.mri_slice_figures_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_MRI_SLICES))
+        self.root_layout.addWidget(self.mri_slice_figures_btn)
         self.root_layout.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
@@ -776,27 +1221,39 @@ class LoretaVisualizerWindow(QWidget):
 
         self._project_root = self._resolve_project_root(project_root)
         self.renderer: BrainRendererWidget | None = None
+        self.mri_slice_view: MriSliceImageLabel | None = None
+        self._fsaverage_dir: Path | None = None
+        self._mri_anatomy_cache: MriAnatomyVolume | None = None
+        self._mri_anatomy_cache_dir: Path | None = None
+        self._mri_anatomy_error: str | None = None
+        self._mri_slice_indices_cache: tuple[int, int, int] | None = None
+        self._mri_slice_indices_cache_key: tuple[object, ...] | None = None
         self.status_banner: StatusBanner | None = None
         self._mesh_thread: QThread | None = None
         self._mesh_worker: FsaverageLoadWorker | None = None
         self._source_export_thread: QThread | None = None
         self._source_export_worker: ProjectSourceMapExportWorker | None = None
-        self._selected_condition_id = default_condition().condition_id
+        self._selected_condition_id = ""
+        self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
+        self._source_activation_payload: SourcePayload | None = None
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
+        self._manifest_method_groups: dict[str, _ManifestMethodGroup] = {}
+        self._manifest_condition_groups: dict[str, _ManifestConditionGroup] = {}
+        self._selected_source_method_id = SOURCE_METHOD_L2_MNE_SURFACE
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
-        self._zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
+        self._use_cluster_mask = True
+        self._activation_visible = True
+        self._transparent_spin_enabled = False
         self._display_mode = DEFAULT_DISPLAY_MODE
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(8, 2, 8, 8)
         root.setSpacing(8)
 
-        header = SubsectionHeaderLabel("LORETA Visualizer", self)
-        root.addWidget(header, 0)
         self.mesh_status = StatusBanner(
             "Preparing fsaverage brain mesh...",
             self,
@@ -853,84 +1310,115 @@ class LoretaVisualizerWindow(QWidget):
 
     def _build_controls(self) -> SectionCard:
         controls = SectionCard("Source Map", self, object_name="loreta_view_controls")
-        controls.setFixedWidth(240)
+        controls.setFixedWidth(260)
+        controls.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        controls.header.setVisible(False)
+        controls.shell_layout.setSpacing(0)
+        controls.content_layout.setSpacing(8)
 
-        def add_group_header(text: str) -> None:
-            header = SubsectionHeaderLabel(text, controls)
-            header.setObjectName(f"loreta_{_object_name_slug(text)}_group_header")
-            controls.content_layout.addSpacing(4)
-            controls.content_layout.addWidget(header)
+        def add_control_section(text: str, *, accent: bool = False) -> tuple[QWidget, QVBoxLayout]:
+            _ = (text, accent)
+            if controls.content_layout.count() > 0:
+                controls.content_layout.addSpacing(10)
+            return controls, controls.content_layout
 
-        condition_label = QLabel("Condition", controls)
-        condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(condition_label)
+        def make_field_label(text: str, parent: QWidget) -> QLabel:
+            label = QLabel(text, parent)
+            label.setProperty("caption", True)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            return label
 
-        self.condition_combo = QComboBox(controls)
+        def add_label_value_row(target_layout: QVBoxLayout, label: QLabel, value_label: QLabel) -> None:
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            row.addWidget(label, 1)
+            row.addWidget(value_label, 0)
+            target_layout.addLayout(row)
+
+        selection_section, selection_layout = add_control_section("Selection", accent=True)
+
+        source_method_label = make_field_label("Method", selection_section)
+        selection_layout.addWidget(source_method_label)
+
+        self.source_method_combo = QComboBox(selection_section)
+        self.source_method_combo.setObjectName("loreta_source_method_combo")
+        self.source_method_combo.currentIndexChanged.connect(self._on_source_method_changed)
+        selection_layout.addWidget(self.source_method_combo)
+
+        condition_label = make_field_label("Condition", selection_section)
+        selection_layout.addWidget(condition_label)
+
+        self.condition_combo = QComboBox(selection_section)
         self.condition_combo.setObjectName("loreta_condition_combo")
-        for condition in DEMO_LORETA_CONDITIONS:
-            self.condition_combo.addItem(condition.label, condition.condition_id)
+        self.condition_combo.setPlaceholderText("No source maps loaded")
         self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
-        controls.content_layout.addWidget(self.condition_combo)
+        selection_layout.addWidget(self.condition_combo)
 
-        display_mode_label = QLabel("Display", controls)
-        display_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(display_mode_label)
+        summary_label = make_field_label("Summary", selection_section)
+        selection_layout.addWidget(summary_label)
 
-        self.display_mode_combo = QComboBox(controls)
+        self.summary_combo = QComboBox(selection_section)
+        self.summary_combo.setObjectName("loreta_source_summary_combo")
+        self.summary_combo.currentIndexChanged.connect(self._on_summary_changed)
+        selection_layout.addWidget(self.summary_combo)
+
+        display_mode_label = make_field_label("Display", selection_section)
+        selection_layout.addWidget(display_mode_label)
+
+        self.display_mode_combo = QComboBox(selection_section)
         self.display_mode_combo.setObjectName("loreta_display_mode_combo")
         for label, mode in DISPLAY_MODE_OPTIONS:
             self.display_mode_combo.addItem(label, mode)
         self.display_mode_combo.currentIndexChanged.connect(self._on_display_mode_changed)
-        controls.content_layout.addWidget(self.display_mode_combo)
+        selection_layout.addWidget(self.display_mode_combo)
         self._set_display_mode_combo_data(self._display_mode)
 
-        add_group_header("Color")
+        color_section, color_layout = add_control_section("Color")
 
-        self.activation_auto_scale_check = QCheckBox("Auto color scale", controls)
+        self.activation_auto_scale_check = QCheckBox("Auto color scale", color_section)
         self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
         self.activation_auto_scale_check.setChecked(True)
         self.activation_auto_scale_check.toggled.connect(self._on_activation_auto_scale_changed)
-        controls.content_layout.addWidget(self.activation_auto_scale_check)
+        color_layout.addWidget(self.activation_auto_scale_check)
 
-        self.activation_scale_mode_label = QLabel("Auto color scale", controls)
+        self.activation_scale_mode_label = make_field_label("Auto color scale", color_section)
         self.activation_scale_mode_label.setObjectName("loreta_activation_scale_mode_label")
-        self.activation_scale_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.activation_scale_mode_label)
+        color_layout.addWidget(self.activation_scale_mode_label)
 
         scale_row = QHBoxLayout()
         scale_row.setContentsMargins(0, 0, 0, 0)
         scale_row.setSpacing(6)
-        self.activation_scale_min_label = QLabel("", controls)
+        self.activation_scale_min_label = QLabel("", color_section)
         self.activation_scale_min_label.setObjectName("loreta_activation_scale_min_label")
         self.activation_scale_min_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.activation_color_ramp = QLabel("", controls)
+        self.activation_color_ramp = QLabel("", color_section)
         self.activation_color_ramp.setObjectName("loreta_activation_color_ramp")
         self.activation_color_ramp.setFixedHeight(12)
         self.activation_color_ramp.setMinimumWidth(72)
         self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
-        self.activation_scale_max_label = QLabel("", controls)
+        self.activation_scale_max_label = QLabel("", color_section)
         self.activation_scale_max_label.setObjectName("loreta_activation_scale_max_label")
         self.activation_scale_max_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         scale_row.addWidget(self.activation_scale_min_label, 0)
         scale_row.addWidget(self.activation_color_ramp, 1)
         scale_row.addWidget(self.activation_scale_max_label, 0)
-        controls.content_layout.addLayout(scale_row)
+        color_layout.addLayout(scale_row)
 
-        range_label = QLabel("Color range", controls)
-        range_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(range_label)
+        range_label = make_field_label("Color range", color_section)
+        color_layout.addWidget(range_label)
 
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         range_row.setSpacing(6)
-        self.activation_min_spin = QDoubleSpinBox(controls)
+        self.activation_min_spin = QDoubleSpinBox(color_section)
         self.activation_min_spin.setObjectName("loreta_activation_min_spin")
         self.activation_min_spin.setDecimals(2)
         self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.activation_min_spin.setSingleStep(0.05)
         self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
         self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
-        self.activation_max_spin = QDoubleSpinBox(controls)
+        self.activation_max_spin = QDoubleSpinBox(color_section)
         self.activation_max_spin.setObjectName("loreta_activation_max_spin")
         self.activation_max_spin.setDecimals(2)
         self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
@@ -938,55 +1426,42 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
         self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
         range_row.addWidget(self.activation_min_spin)
-        range_row.addWidget(QLabel("to", controls), 0)
+        range_row.addWidget(make_field_label("to", color_section), 0)
         range_row.addWidget(self.activation_max_spin)
-        controls.content_layout.addLayout(range_row)
+        color_layout.addLayout(range_row)
 
-        add_group_header("Layers")
+        view_section, view_layout = add_control_section("View")
 
-        self.activation_visible_check = QCheckBox("Source map", controls)
-        self.activation_visible_check.setObjectName("loreta_activation_visible_check")
-        self.activation_visible_check.setChecked(True)
-        self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
-        controls.content_layout.addWidget(self.activation_visible_check)
+        self.opacity_label = make_field_label("Brain opacity", view_section)
 
-        add_group_header("View")
-
-        self.opacity_label = QLabel("Brain opacity", controls)
-        self.opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.opacity_label)
-
-        self.transparency_value_label = QLabel("", controls)
+        self.transparency_value_label = make_field_label("", view_section)
         self.transparency_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        add_label_value_row(view_layout, self.opacity_label, self.transparency_value_label)
 
-        self.transparency_slider = QSlider(Qt.Horizontal, controls)
+        self.transparency_slider = QSlider(Qt.Horizontal, view_section)
         self.transparency_slider.setObjectName("loreta_transparency_slider")
         self.transparency_slider.setRange(5, 100)
         self.transparency_slider.setValue(DEFAULT_OPACITY_PERCENT)
         self.transparency_slider.valueChanged.connect(self._on_transparency_changed)
-        controls.content_layout.addWidget(self.transparency_slider)
-        controls.content_layout.addWidget(self.transparency_value_label)
+        view_layout.addWidget(self.transparency_slider)
 
-        self.activation_opacity_label = QLabel("Source opacity", controls)
-        self.activation_opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.activation_opacity_label)
+        self.activation_opacity_label = make_field_label("Source opacity", view_section)
 
-        self.activation_opacity_value_label = QLabel("", controls)
+        self.activation_opacity_value_label = make_field_label("", view_section)
         self.activation_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        add_label_value_row(view_layout, self.activation_opacity_label, self.activation_opacity_value_label)
 
-        self.activation_opacity_slider = QSlider(Qt.Horizontal, controls)
+        self.activation_opacity_slider = QSlider(Qt.Horizontal, view_section)
         self.activation_opacity_slider.setObjectName("loreta_activation_opacity_slider")
         self.activation_opacity_slider.setRange(0, 100)
         self.activation_opacity_slider.setValue(DEFAULT_ACTIVATION_OPACITY_PERCENT)
         self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
-        controls.content_layout.addWidget(self.activation_opacity_slider)
-        controls.content_layout.addWidget(self.activation_opacity_value_label)
+        view_layout.addWidget(self.activation_opacity_slider)
 
-        self.split_rotation_label = QLabel("Hemisphere rotation", controls)
-        self.split_rotation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(self.split_rotation_label)
+        self.split_rotation_label = make_field_label("Hemisphere rotation", view_section)
+        view_layout.addWidget(self.split_rotation_label)
 
-        self.left_split_rotation_row = QWidget(controls)
+        self.left_split_rotation_row = QWidget(view_section)
         left_split_rotation_layout = QHBoxLayout(self.left_split_rotation_row)
         left_split_rotation_layout.setContentsMargins(0, 0, 0, 0)
         left_split_rotation_layout.setSpacing(6)
@@ -1005,9 +1480,9 @@ class LoretaVisualizerWindow(QWidget):
         )
         left_split_rotation_layout.addWidget(self.left_split_rotate_minus_btn, 0)
         left_split_rotation_layout.addWidget(self.left_split_rotate_plus_btn, 0)
-        controls.content_layout.addWidget(self.left_split_rotation_row)
+        view_layout.addWidget(self.left_split_rotation_row)
 
-        self.right_split_rotation_row = QWidget(controls)
+        self.right_split_rotation_row = QWidget(view_section)
         right_split_rotation_layout = QHBoxLayout(self.right_split_rotation_row)
         right_split_rotation_layout.setContentsMargins(0, 0, 0, 0)
         right_split_rotation_layout.setSpacing(6)
@@ -1026,27 +1501,32 @@ class LoretaVisualizerWindow(QWidget):
         )
         right_split_rotation_layout.addWidget(self.right_split_rotate_minus_btn, 0)
         right_split_rotation_layout.addWidget(self.right_split_rotate_plus_btn, 0)
-        controls.content_layout.addWidget(self.right_split_rotation_row)
+        view_layout.addWidget(self.right_split_rotation_row)
 
-        self.reset_camera_btn = make_action_button("Reset view", compact=True, parent=controls)
+        self.reset_camera_btn = make_action_button("Reset view", compact=True, parent=view_section)
         self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
         self.reset_camera_btn.setToolTip("Reset view")
         self.reset_camera_btn.clicked.connect(self._reset_camera)
-        controls.content_layout.addWidget(self.reset_camera_btn)
+        view_layout.addWidget(self.reset_camera_btn)
 
-        add_group_header("Actions")
+        actions_section, actions_layout = add_control_section("Actions")
 
-        self.export_figures_btn = make_action_button("Export Figures...", compact=True, parent=controls)
+        self.export_figures_btn = make_action_button(
+            "Export Figures...",
+            variant="primary",
+            compact=True,
+            parent=actions_section,
+        )
         self.export_figures_btn.setObjectName("loreta_export_figures_btn")
         self.export_figures_btn.setToolTip("Open figure export actions.")
         self.export_figures_btn.clicked.connect(self._open_export_figures)
-        controls.content_layout.addWidget(self.export_figures_btn)
+        actions_layout.addWidget(self.export_figures_btn)
 
-        self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=controls)
+        self.source_options_btn = make_action_button("Options...", compact=True, parent=actions_section)
         self.source_options_btn.setObjectName("loreta_source_options_btn")
-        self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
+        self.source_options_btn.setToolTip("Open display, source-map rebuild, import, and participant QC options.")
         self.source_options_btn.clicked.connect(self._open_source_map_options)
-        controls.content_layout.addWidget(self.source_options_btn)
+        actions_layout.addWidget(self.source_options_btn)
         controls.content_layout.addStretch(1)
 
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
@@ -1075,9 +1555,24 @@ class LoretaVisualizerWindow(QWidget):
             return
 
         self.viewport_layout.addWidget(self.renderer, 1)
+        self.mri_slice_view = MriSliceImageLabel(self.viewport)
+        self.mri_slice_view.setVisible(False)
+        self.viewport_layout.addWidget(self.mri_slice_view, 1)
         self.renderer.set_display_mode(self._display_mode)
+        self.renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
+        self.renderer.set_transparent_spin_enabled(self._transparent_spin_enabled)
+        self._sync_viewport_display_widget()
         self._set_controls_enabled(True)
-        self._refresh_dummy_activation()
+        self._clear_activation_payload()
+
+    def _sync_viewport_display_widget(self) -> None:
+        renderer = self.renderer
+        mri_view = self.mri_slice_view
+        mri_mode = self._display_mode == DISPLAY_MODE_MRI_SLICES
+        if renderer is not None:
+            renderer.setVisible(not mri_mode)
+        if mri_view is not None:
+            mri_view.setVisible(mri_mode)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         opacity_enabled = enabled and not self._activation_uses_opaque_cortical_mode()
@@ -1085,9 +1580,8 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_opacity_slider.setEnabled(opacity_enabled)
         self.activation_auto_scale_check.setEnabled(enabled)
         self._sync_activation_range_enabled()
-        self.condition_combo.setEnabled(enabled)
+        self._sync_source_map_selectors_enabled()
         self.display_mode_combo.setEnabled(enabled)
-        self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.export_figures_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
@@ -1102,7 +1596,22 @@ class LoretaVisualizerWindow(QWidget):
                     "A source-map rebuild is running. Options remain available, but rebuild actions are paused."
                 )
             else:
-                self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
+                self.source_options_btn.setToolTip("Open display, source-map rebuild, import, and participant QC options.")
+
+    def _sync_source_map_selectors_enabled(self) -> None:
+        if (
+            not hasattr(self, "source_method_combo")
+            or not hasattr(self, "condition_combo")
+            or not hasattr(self, "summary_combo")
+        ):
+            return
+        has_conditions = bool(self._manifest_condition_groups)
+        renderer_available = self.renderer is not None
+        self.source_method_combo.setEnabled(
+            renderer_available and bool(self._manifest_method_groups) and self.source_method_combo.count() > 1
+        )
+        self.condition_combo.setEnabled(renderer_available and has_conditions)
+        self.summary_combo.setEnabled(renderer_available and has_conditions and self.summary_combo.count() > 1)
 
     def _on_transparency_changed(self, value: int) -> None:
         self._update_transparency_label(value)
@@ -1151,7 +1660,8 @@ class LoretaVisualizerWindow(QWidget):
             return
         opaque_cortical_mode = self._activation_uses_opaque_cortical_mode()
         split_mode_active = opaque_cortical_mode and self._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE
-        opacity_enabled = self.renderer is not None and not opaque_cortical_mode
+        mri_mode_active = self._display_mode == DISPLAY_MODE_MRI_SLICES
+        opacity_enabled = self.renderer is not None and not opaque_cortical_mode and not mri_mode_active
         self.transparency_slider.setEnabled(opacity_enabled)
         self.activation_opacity_slider.setEnabled(opacity_enabled)
         for widget in (
@@ -1162,7 +1672,7 @@ class LoretaVisualizerWindow(QWidget):
             self.activation_opacity_slider,
             self.activation_opacity_value_label,
         ):
-            widget.setVisible(not opaque_cortical_mode)
+            widget.setVisible(not opaque_cortical_mode and not mri_mode_active)
         for widget in (
             self.split_rotation_label,
             self.left_split_rotation_row,
@@ -1188,34 +1698,71 @@ class LoretaVisualizerWindow(QWidget):
         mode = self.display_mode_combo.currentData()
         if not isinstance(mode, str):
             return
+        payload = self._source_activation_payload
+        if payload is not None and not _display_mode_allowed_for_payload(payload, mode):
+            self._display_mode = _preferred_display_mode_for_payload(payload)
+            self._set_display_mode_combo_data(self._display_mode)
+            self._set_source_export_status(
+                "This source map uses its compatible display modes.",
+                variant="info",
+            )
+            return
         self._display_mode = mode
         renderer = self.renderer
         if renderer is not None:
-            renderer.set_display_mode(mode)
-            renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
-            renderer.set_activation_visible(self.activation_visible_check.isChecked())
-        self._sync_activation_render_mode_controls()
-        self._apply_activation_scalar_range()
+            if self._source_activation_payload is not None:
+                self._set_activation_payload(self._source_activation_payload)
+            else:
+                renderer.set_display_mode(mode)
+                renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
+                renderer.set_activation_visible(self._activation_visible)
+                self._sync_viewport_display_widget()
+                self._sync_activation_render_mode_controls()
+                self._apply_activation_scalar_range()
+
+    def _on_source_method_changed(self, _index: int) -> None:
+        method_id = self.source_method_combo.currentData()
+        if not isinstance(method_id, str):
+            return
+        if method_id == self._selected_source_method_id and self._manifest_condition_groups:
+            return
+        self._selected_source_method_id = method_id
+        self._display_mode = SOURCE_METHOD_DEFAULT_DISPLAY_MODE.get(method_id, DEFAULT_DISPLAY_MODE)
+        self._set_display_mode_combo_data(self._display_mode)
+        self._populate_condition_combo_for_selected_method(preferred_condition=self._selected_condition_id)
+        self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
+        self._refresh_current_activation()
 
     def _rotate_split_hemisphere(self, side: str, degrees: float) -> None:
         renderer = self.renderer
         if renderer is not None:
             renderer.rotate_split_hemisphere(side, degrees)
 
-    def _on_activation_visibility_changed(self, checked: bool) -> None:
+    def _set_activation_visibility_enabled(self, checked: bool) -> None:
+        self._activation_visible = bool(checked)
         renderer = self.renderer
         if renderer is not None:
-            renderer.set_activation_visible(checked)
+            renderer.set_activation_visible(self._activation_visible)
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES and self._current_activation_payload is not None:
+            vmin, vmax = self._resolve_activation_scalar_range(self._current_activation_payload)
+            self._render_mri_slice_payload(self._current_activation_payload, scalar_range=(vmin, vmax))
 
     def _on_condition_changed(self, _index: int) -> None:
         condition_id = self.condition_combo.currentData()
         if isinstance(condition_id, str):
             self._selected_condition_id = condition_id
+            self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
         self._update_condition_status()
-        self._refresh_dummy_activation()
+        self._refresh_current_activation()
+
+    def _on_summary_changed(self, _index: int) -> None:
+        summary_id = self.summary_combo.currentData()
+        if isinstance(summary_id, str):
+            self._selected_summary_id = summary_id
+        self._refresh_current_activation()
 
     def _update_condition_status(self) -> None:
-        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        manifest_entry = self._selected_manifest_entry()
         if manifest_entry is not None:
             return
 
@@ -1238,11 +1785,16 @@ class LoretaVisualizerWindow(QWidget):
             and renderer.display_mode() == DISPLAY_MODE_SPLIT_HEMISPHERE
             and renderer.can_export_split_hemisphere_figure()
         )
-        can_export_stacked_split_figures = len(self._condition_options()) >= 2
+        can_export_stacked_split_figures = (
+            self._selected_source_method_id == SOURCE_METHOD_L2_MNE_SURFACE
+            and len(self._condition_options()) >= 2
+        )
+        can_export_mri_slice_figures = self._can_export_mri_slice_figure()
         dialog = ExportFiguresDialog(
             self,
             can_export_split_figures=can_export_split_figures,
             can_export_stacked_split_figures=can_export_stacked_split_figures,
+            can_export_mri_slice_figures=can_export_mri_slice_figures,
         )
         if not dialog.exec():
             return
@@ -1250,6 +1802,8 @@ class LoretaVisualizerWindow(QWidget):
             self._export_split_hemisphere_figures()
         elif dialog.selected_action == EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES:
             self._export_stacked_split_hemisphere_figures()
+        elif dialog.selected_action == EXPORT_FIGURES_ACTION_MRI_SLICES:
+            self._export_mri_slice_figure()
 
     def _export_split_hemisphere_figures(self) -> None:
         renderer = self.renderer
@@ -1257,7 +1811,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         if renderer.display_mode() != DISPLAY_MODE_SPLIT_HEMISPHERE or not renderer.can_export_split_hemisphere_figure():
             self._set_source_export_status(
-                "Switch to Publication split hemispheres with a loaded source map before exporting figures.",
+                "Switch to Split Hemispheres with a loaded source map before exporting figures.",
                 variant="warning",
             )
             return
@@ -1316,12 +1870,12 @@ class LoretaVisualizerWindow(QWidget):
             panels = (
                 renderer.split_hemisphere_figure_panel_for_payload(
                     top_payload,
-                    label=split_figure_condition_code(top_label),
+                    label=split_figure_condition_display_label(top_label),
                     scalar_range=scalar_range,
                 ),
                 renderer.split_hemisphere_figure_panel_for_payload(
                     bottom_payload,
-                    label=split_figure_condition_code(bottom_label),
+                    label=split_figure_condition_display_label(bottom_label),
                     scalar_range=scalar_range,
                 ),
             )
@@ -1357,24 +1911,218 @@ class LoretaVisualizerWindow(QWidget):
         self._last_import_dir = pdf_path.parent
         self._set_source_export_status(f"Exported stacked split figures: {pdf_path}; {png_path}", variant="success")
 
+    def _can_export_mri_slice_figure(self) -> bool:
+        renderer = self.renderer
+        payload = self._source_activation_payload
+        return (
+            renderer is not None
+            and renderer.mesh_display_transform() is not None
+            and self._fsaverage_dir is not None
+            and payload is not None
+            and payload.kind == SOURCE_KIND_VOLUME_POINTS
+        )
+
+    def _mri_slice_payload_for_current_source(self) -> SourcePayload:
+        payload = self._source_activation_payload
+        if payload is None:
+            raise RuntimeError("No source map is loaded.")
+        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+            raise RuntimeError("MRI slice figures require an eLORETA volume source map.")
+        return _activation_display_payload(
+            payload,
+            transparent_mesh_display=True,
+            use_cluster_mask=self._use_cluster_mask,
+        )
+
+    def _load_cached_mri_anatomy(self) -> MriAnatomyVolume:
+        fsaverage_dir = self._fsaverage_dir
+        if fsaverage_dir is None:
+            raise RuntimeError("Cached fsaverage MRI anatomy is not available.")
+        if self._mri_anatomy_error:
+            raise RuntimeError(f"MRI slice anatomy unavailable: {self._mri_anatomy_error}")
+        if self._mri_anatomy_cache is not None and self._mri_anatomy_cache_dir == fsaverage_dir:
+            return self._mri_anatomy_cache
+        anatomy = load_fsaverage_mri_volume(fsaverage_dir)
+        self._mri_anatomy_cache = anatomy
+        self._mri_anatomy_cache_dir = fsaverage_dir
+        self._mri_anatomy_error = None
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
+        return anatomy
+
+    def _mri_slice_reference_cache_key(self) -> tuple[object, ...]:
+        entries: list[tuple[str, str, int]] = []
+        for condition_id, _label in self._condition_options():
+            entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+            if entry is None:
+                continue
+            try:
+                modified_ns = entry.payload_path.stat().st_mtime_ns
+            except OSError:
+                modified_ns = 0
+            entries.append((condition_id, str(entry.payload_path), int(modified_ns)))
+        return (
+            str(self._fsaverage_dir) if self._fsaverage_dir is not None else "",
+            self._selected_source_method_id,
+            self._selected_summary_id,
+            bool(self._use_cluster_mask),
+            tuple(entries),
+        )
+
+    def _mri_slice_indices_for_current_method(
+        self,
+        *,
+        anatomy: MriAnatomyVolume,
+    ) -> tuple[int, int, int]:
+        renderer = self.renderer
+        if renderer is None:
+            raise RuntimeError("3D renderer is not available.")
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            raise RuntimeError("No mesh transform is available.")
+
+        cache_key = self._mri_slice_reference_cache_key()
+        if self._mri_slice_indices_cache_key == cache_key and self._mri_slice_indices_cache is not None:
+            return self._mri_slice_indices_cache
+
+        reference_payload = self._mri_slice_reference_payload(display_transform)
+        slice_indices = mri_slice_indices_for_payload(
+            reference_payload,
+            display_transform=display_transform,
+            anatomy=anatomy,
+        )
+
+        self._mri_slice_indices_cache = slice_indices
+        self._mri_slice_indices_cache_key = cache_key
+        return slice_indices
+
+    def _mri_slice_reference_payload(self, display_transform) -> SourcePayload:
+        point_chunks: list[np.ndarray] = []
+        value_chunks: list[np.ndarray] = []
+        source_model = "eloreta_volume"
+        value_label = "source-space z-score"
+
+        for condition_id, _label in self._condition_options():
+            entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+            if entry is None:
+                continue
+            payload = load_prepared_source_payload_json(entry.payload_path, display_transform=display_transform)
+            if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+                continue
+            display_payload = _activation_display_payload(
+                payload,
+                transparent_mesh_display=True,
+                use_cluster_mask=self._use_cluster_mask,
+            )
+            if len(display_payload.points) == 0:
+                continue
+            point_chunks.append(np.asarray(display_payload.points, dtype=float))
+            value_chunks.append(np.asarray(display_payload.values, dtype=float).reshape(-1))
+            source_model = display_payload.source_model
+            value_label = display_payload.value_label
+
+        if point_chunks and value_chunks:
+            return make_source_payload(
+                points=np.vstack(point_chunks),
+                values=np.concatenate(value_chunks),
+                label="Standard eLORETA MRI slice reference",
+                kind=SOURCE_KIND_VOLUME_POINTS,
+                source_model=source_model,
+                value_label=value_label,
+                metadata={"slice_reference": "all_loaded_conditions"},
+                normalize_values=False,
+            )
+
+        raise RuntimeError(
+            "MRI slice rendering requires at least one loaded eLORETA volume condition "
+            "to define standard slice planes."
+        )
+
+    def _export_mri_slice_figure(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None or self._fsaverage_dir is None:
+            self._set_source_export_status(
+                "MRI slice export requires cached fsaverage MRI anatomy.",
+                variant="warning",
+            )
+            return
+        try:
+            payload = self._mri_slice_payload_for_current_source()
+            scalar_range = self._resolve_activation_scalar_range(payload)
+            anatomy = self._load_cached_mri_anatomy()
+            slice_indices = self._mri_slice_indices_for_current_method(
+                anatomy=anatomy,
+            )
+        except (OSError, RuntimeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            self._set_source_export_status(f"MRI slice figure export failed: {exc}", variant="warning")
+            return
+
+        project_root = self._refresh_project_root()
+        default_path = default_mri_slice_figure_export_path(
+            project_root=project_root,
+            last_import_dir=self._last_import_dir,
+            condition_label=self._selected_condition_label(),
+        )
+        file_name, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export MRI slice figure",
+            default_path,
+            "PDF files (*.pdf)",
+        )
+        if not file_name:
+            return
+        output_path = Path(file_name)
+        if output_path.suffix.lower() != ".pdf":
+            output_path = output_path.with_suffix(".pdf")
+        try:
+            pdf_path, png_path = write_mri_orthogonal_slice_figures(
+                output_path,
+                payload=payload,
+                display_transform=display_transform,
+                fsaverage_dir=self._fsaverage_dir,
+                scalar_range=scalar_range,
+                label=self._selected_condition_label(),
+                activation_visible=self._activation_visible,
+                anatomy=anatomy,
+                slice_indices=slice_indices,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("loreta_mri_slice_figure_export_failed", extra={"path": str(output_path), "error": str(exc)})
+            self._set_source_export_status(f"MRI slice figure export failed: {exc}", variant="warning")
+            return
+        self._last_import_dir = pdf_path.parent
+        self._set_source_export_status(f"Exported MRI slice figures: {pdf_path}; {png_path}", variant="success")
+
     def _selected_condition_label(self) -> str:
-        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
-        if manifest_entry is not None:
-            return manifest_entry.label
-        return condition_by_id(self._selected_condition_id).label
+        group = self._manifest_condition_groups.get(self._selected_condition_id)
+        if group is not None:
+            return group.label
+        return "source map"
+
+    def _selected_manifest_entry(self) -> PreparedSourceManifestEntry | None:
+        return self._manifest_entry_for(self._selected_condition_id, self._selected_summary_id)
+
+    def _manifest_entry_for(
+        self,
+        condition_id: str,
+        summary_id: str | None = None,
+    ) -> PreparedSourceManifestEntry | None:
+        group = self._manifest_condition_groups.get(condition_id)
+        if group is None:
+            return None
+        requested_summary = summary_id or self._selected_summary_id
+        entry = group.entries_by_summary.get(requested_summary)
+        if entry is not None:
+            return entry
+        for fallback_summary in _ordered_source_summary_ids(group):
+            return group.entries_by_summary[fallback_summary]
+        return None
 
     def _condition_options(self) -> tuple[tuple[str, str], ...]:
-        options: list[tuple[str, str]] = []
-        for index in range(self.condition_combo.count()):
-            condition_id = self.condition_combo.itemData(index)
-            if not isinstance(condition_id, str):
-                continue
-            manifest_entry = self._manifest_conditions.get(condition_id)
-            if manifest_entry is not None:
-                options.append((condition_id, manifest_entry.label))
-            else:
-                options.append((condition_id, condition_by_id(condition_id).label))
-        return tuple(options)
+        return tuple((group.condition_id, group.label) for group in self._manifest_condition_groups.values())
 
     def _condition_payload_for_export(self, condition_id: str) -> SourcePayload:
         renderer = self.renderer
@@ -1383,30 +2131,21 @@ class LoretaVisualizerWindow(QWidget):
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
             raise RuntimeError("No mesh transform is available.")
-        manifest_entry = self._manifest_conditions.get(condition_id)
-        if manifest_entry is not None:
-            payload = load_prepared_source_payload_json(
-                manifest_entry.payload_path,
-                display_transform=display_transform,
-            )
-            payload.metadata.update(
-                {
-                    "manifest_condition_id": manifest_entry.condition_id,
-                    "manifest_condition_label": manifest_entry.label,
-                    "manifest_metadata": manifest_entry.metadata,
-                }
-            )
-            return _activation_display_payload(payload)
-        mesh_points = renderer.mesh_points()
-        if mesh_points is None:
-            raise RuntimeError("No display mesh is available.")
-        payload = make_demo_condition_activation(
-            mesh_points,
-            mesh_faces=renderer.mesh_faces(),
-            condition=condition_by_id(condition_id),
+        manifest_entry = self._manifest_entry_for(condition_id, self._selected_summary_id)
+        if manifest_entry is None:
+            raise RuntimeError("No prepared source-map payload is available for the selected condition.")
+        payload = load_prepared_source_payload_json(
+            manifest_entry.payload_path,
             display_transform=display_transform,
         )
-        return _activation_display_payload(payload)
+        payload.metadata.update(
+            {
+                "manifest_condition_id": manifest_entry.condition_id,
+                "manifest_condition_label": manifest_entry.label,
+                "manifest_metadata": manifest_entry.metadata,
+            }
+        )
+        return _activation_display_payload(payload, use_cluster_mask=self._use_cluster_mask)
 
     def _stacked_split_scalar_range(self, payloads: tuple[SourcePayload, SourcePayload]) -> tuple[float, float]:
         scale_chunks = [
@@ -1414,6 +2153,7 @@ class LoretaVisualizerWindow(QWidget):
                 payload,
                 zscore_display_threshold=self._zscore_display_threshold,
                 cortical_threshold_display=uses_cortical_surface_paint(payload),
+                use_cluster_mask=self._use_cluster_mask,
             )
             for payload in payloads
         ]
@@ -1424,7 +2164,9 @@ class LoretaVisualizerWindow(QWidget):
             for payload in payloads
         )
         if all_cortical_zscore:
-            has_cluster_mask = any(payload_has_cluster_mask(payload) for payload in payloads)
+            if self.activation_auto_scale_check.isChecked():
+                return DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE
+            has_cluster_mask = self._use_cluster_mask and any(payload_has_cluster_mask(payload) for payload in payloads)
             if has_cluster_mask:
                 return resolve_scalar_limits(
                     scale_values,
@@ -1462,19 +2204,21 @@ class LoretaVisualizerWindow(QWidget):
         dialog = SourceMapOptionsDialog(
             self,
             include_flagged_subjects=self._include_flagged_subjects,
-            zscore_model=self._zscore_model,
             zscore_display_threshold=self._zscore_display_threshold,
+            use_cluster_mask=self._use_cluster_mask,
+            source_map_visible=self._activation_visible,
+            transparent_spin_enabled=self._transparent_spin_enabled,
             project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
-        self._zscore_model = str(dialog.zscore_model_combo.currentData() or PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST)
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
+        self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
+        self._set_activation_visibility_enabled(dialog.source_map_visible_check.isChecked())
+        self._set_transparent_spin_enabled(dialog.transparent_spin_check.isChecked())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
-        elif dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE:
-            self._build_project_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD:
             self._load_prepared_source_payload()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_MANIFEST:
@@ -1506,6 +2250,21 @@ class LoretaVisualizerWindow(QWidget):
             renderer.set_cortical_paint_z_threshold(self._zscore_display_threshold)
         self._apply_activation_scalar_range()
 
+    def _set_cluster_mask_enabled(self, enabled: bool) -> None:
+        self._use_cluster_mask = bool(enabled)
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
+            if self._source_activation_payload is not None:
+                self._set_activation_payload(self._source_activation_payload)
+        self._apply_activation_scalar_range()
+
+    def _set_transparent_spin_enabled(self, enabled: bool) -> None:
+        self._transparent_spin_enabled = bool(enabled)
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_transparent_spin_enabled(self._transparent_spin_enabled)
+
     def _load_prepared_source_manifest(self) -> None:
         renderer = self.renderer
         if renderer is None:
@@ -1525,29 +2284,33 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._import_prepared_source_manifest(Path(file_name))
 
-    def _build_project_source_maps(self) -> None:
-        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_AMPLITUDE)
-
     def _build_project_zscore_source_maps(self) -> None:
-        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE)
+        self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES)
 
     def _ensure_default_project_zscore_maps(self) -> None:
         project_root = self._refresh_project_root()
         if self._auto_project_zscore_attempted or project_root is None or self.renderer is None:
             return
         self._auto_project_zscore_attempted = True
-        manifest_path = default_project_zscore_manifest_path(project_root)
-        if manifest_path is not None:
+        manifest_paths = default_project_source_manifest_paths(project_root)
+        if manifest_paths:
             self._set_source_export_status("Loading project source-space z-score maps...", variant="info")
-            self._last_import_dir = manifest_path.parent
-            self._import_prepared_source_manifest(manifest_path)
+            self._last_import_dir = manifest_paths[0].parent
+            self._import_prepared_source_manifests(manifest_paths)
             return
-        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE, automatic=True)
+        self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES, automatic=True)
 
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
+        self._build_project_source_maps_for_modes((export_mode,), automatic=automatic)
+
+    def _build_project_source_maps_for_modes(self, export_modes: tuple[str, ...], *, automatic: bool = False) -> None:
         project_root = self._refresh_project_root()
         if project_root is None:
             self._set_source_export_status("Open a project before building beta source JSON.", variant="warning")
+            return
+        modes = tuple(dict.fromkeys(export_modes))
+        if not modes:
+            self._set_source_export_status("No source-map exporters are available.", variant="warning")
             return
         if self._source_export_thread is not None:
             self._set_source_export_status(
@@ -1556,9 +2319,9 @@ class LoretaVisualizerWindow(QWidget):
             )
             return
         include_flagged_subjects = self._include_flagged_subjects
-        zscore_model = self._zscore_model
+        zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         status_text = _source_export_status_text(
-            export_mode,
+            PROJECT_SOURCE_EXPORT_ALL_ZSCORE if len(modes) > 1 else modes[0],
             automatic=automatic,
             include_flagged_subjects=include_flagged_subjects,
             zscore_model=zscore_model,
@@ -1569,7 +2332,7 @@ class LoretaVisualizerWindow(QWidget):
             "loreta_project_source_maps_export_started",
             extra={
                 "project_root": str(project_root),
-                "export_mode": export_mode,
+                "export_mode": ",".join(modes),
                 "include_flagged_subjects": include_flagged_subjects,
                 "zscore_model": zscore_model,
             },
@@ -1578,7 +2341,7 @@ class LoretaVisualizerWindow(QWidget):
         thread = QThread(self)
         worker = ProjectSourceMapExportWorker(
             project_root=project_root,
-            export_mode=export_mode,
+            export_modes=modes,
             include_flagged_subjects=include_flagged_subjects,
             zscore_model=zscore_model,
         )
@@ -1602,40 +2365,80 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
-        output_dir = getattr(result, "output_dir", None)
-        manifest_path = getattr(result, "manifest_path", None)
-        producer_result = getattr(result, "producer_result", None)
-        payloads = getattr(producer_result, "payloads", ())
-        if not isinstance(output_dir, Path) or not isinstance(manifest_path, Path):
+        export_results = result.results if isinstance(result, ProjectSourceMapExportBatchResult) else (result,)
+        failures = result.failures if isinstance(result, ProjectSourceMapExportBatchResult) else ()
+        valid_manifest_paths: list[Path] = []
+        total_payload_count = 0
+        last_output_dir: Path | None = None
+        method_ids: list[str] = []
+        for export_result in export_results:
+            output_dir = getattr(export_result, "output_dir", None)
+            manifest_path = getattr(export_result, "manifest_path", None)
+            producer_result = getattr(export_result, "producer_result", None)
+            payloads = tuple(getattr(producer_result, "payloads", ()) or ())
+            if not isinstance(output_dir, Path) or not isinstance(manifest_path, Path):
+                continue
+            valid_manifest_paths.append(manifest_path)
+            total_payload_count += len(payloads)
+            last_output_dir = output_dir
+            method_id = str(getattr(producer_result, "method_id", ""))
+            if method_id:
+                method_ids.append(method_id)
+            project_inputs = getattr(export_result, "project_inputs", None)
+            export_model = str(getattr(export_result, "export_model", PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST))
+            flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
+            excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
+            logger.info(
+                "loreta_project_source_maps_export_complete",
+                extra={
+                    "manifest_path": str(manifest_path),
+                    "method_id": method_id,
+                    "condition_count": len(payloads),
+                    "include_flagged_subjects": self._include_flagged_subjects,
+                    "zscore_model": export_model,
+                    "flagged_subject_count": len(flagged_subjects),
+                    "excluded_subject_count": len(excluded_subjects),
+                },
+            )
+        if not valid_manifest_paths or last_output_dir is None:
             self._set_source_export_status(
                 "Project source export failed: unexpected export result.",
                 variant="warning",
             )
             return
-        self._last_import_dir = output_dir
-        method_id = str(getattr(producer_result, "method_id", ""))
-        source_label = "source-space z-score maps" if "zscore" in method_id or "z_score" in method_id else "source maps"
-        project_inputs = getattr(result, "project_inputs", None)
-        export_model = str(getattr(result, "export_model", self._zscore_model))
-        flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
-        excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
-        logger.info(
-            "loreta_project_source_maps_export_complete",
-            extra={
-                "manifest_path": str(manifest_path),
-                "method_id": method_id,
-                "condition_count": len(payloads),
-                "include_flagged_subjects": self._include_flagged_subjects,
-                "zscore_model": export_model,
-                "flagged_subject_count": len(flagged_subjects),
-                "excluded_subject_count": len(excluded_subjects),
-            },
-        )
-        self._set_source_export_status(
-            f"Prepared project {source_label} for {len(payloads)} conditions. Loaded regenerated maps.",
-            variant="success",
-        )
-        self._import_prepared_source_manifest(manifest_path)
+        self._last_import_dir = last_output_dir
+        if failures:
+            failure_labels = ", ".join(_source_export_mode_label(failure.export_mode) for failure in failures)
+            status_variant = "warning"
+            status_text = (
+                f"Prepared {total_payload_count} source-map condition summaries, but {failure_labels} failed. "
+                "Loaded available regenerated maps."
+            )
+        else:
+            status_variant = "success"
+            status_text = (
+                f"Prepared L2-MNE surface and eLORETA volume source-space z-score maps "
+                f"for {total_payload_count} condition summaries. Loaded regenerated maps."
+            )
+        self._set_source_export_status(status_text, variant=status_variant)
+        joined_methods = " ".join(method_ids).lower()
+        joined_manifests = " ".join(str(path).lower() for path in valid_manifest_paths)
+        preferred_method = self._selected_source_method_id
+        if preferred_method not in {SOURCE_METHOD_L2_MNE_SURFACE, SOURCE_METHOD_ELORETA_VOLUME}:
+            preferred_method = SOURCE_METHOD_L2_MNE_SURFACE
+        if len(valid_manifest_paths) == 1:
+            preferred_method = (
+                SOURCE_METHOD_ELORETA_VOLUME
+                if "eloreta" in joined_methods or "eloreta" in joined_manifests
+                else SOURCE_METHOD_L2_MNE_SURFACE
+            )
+        self._selected_source_method_id = preferred_method
+        project_root = self._refresh_project_root()
+        default_paths = default_project_source_manifest_paths(project_root) if project_root is not None else ()
+        if any(path in default_paths for path in valid_manifest_paths):
+            self._import_prepared_source_manifests(default_paths, preferred_source_method_id=preferred_method)
+        else:
+            self._import_prepared_source_manifests(tuple(valid_manifest_paths), preferred_source_method_id=preferred_method)
 
     @Slot(str)
     def _on_project_source_maps_failed(self, message: str) -> None:
@@ -1644,7 +2447,7 @@ class LoretaVisualizerWindow(QWidget):
             extra={
                 "error": message,
                 "include_flagged_subjects": self._include_flagged_subjects,
-                "zscore_model": self._zscore_model,
+                "zscore_model": PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
             },
         )
         self._set_source_export_status(_project_source_export_failure_text(message), variant="warning")
@@ -1678,6 +2481,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = path.parent
         self._set_activation_payload(payload)
+        self._set_payload_display_status(payload)
 
     def _import_prepared_source_manifest(self, path: Path) -> None:
         try:
@@ -1688,29 +2492,158 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = path.parent
         self._replace_manifest_conditions(entries)
-        first_entry = entries[0]
-        self._selected_condition_id = first_entry.condition_id
-        self._set_condition_combo_data(first_entry.condition_id)
-        self._refresh_dummy_activation()
+        self._select_first_condition_if_needed()
+        self._refresh_current_activation()
+
+    def _import_prepared_source_manifests(
+        self,
+        paths: tuple[Path, ...],
+        *,
+        preferred_source_method_id: str | None = None,
+    ) -> None:
+        entries: list[PreparedSourceManifestEntry] = []
+        loaded_paths: list[Path] = []
+        for path in paths:
+            try:
+                manifest_entries = load_prepared_source_manifest_json(path)
+            except PreparedSourcePayloadImportError as exc:
+                logger.warning(
+                    "loreta_prepared_source_manifest_import_failed",
+                    extra={"path": str(path), "error": str(exc)},
+                )
+                self._set_source_export_status(f"Prepared source manifest import failed: {exc}", variant="warning")
+                continue
+            entries.extend(manifest_entries)
+            loaded_paths.append(path)
+        if not entries:
+            self._clear_activation_payload()
+            return
+        self._last_import_dir = loaded_paths[-1].parent
+        if preferred_source_method_id:
+            self._selected_source_method_id = preferred_source_method_id
+        self._replace_manifest_conditions(tuple(entries))
+        self._select_first_condition_if_needed()
+        self._refresh_current_activation()
 
     def _replace_manifest_conditions(self, entries: tuple[PreparedSourceManifestEntry, ...]) -> None:
+        previous_method_block_state = self.source_method_combo.blockSignals(True)
         previous_block_state = self.condition_combo.blockSignals(True)
+        previous_summary_block_state = self.summary_combo.blockSignals(True)
         try:
-            for index in range(self.condition_combo.count() - 1, -1, -1):
-                item_data = self.condition_combo.itemData(index)
-                if isinstance(item_data, str) and item_data in self._manifest_conditions:
-                    self.condition_combo.removeItem(index)
+            self.source_method_combo.clear()
+            self.condition_combo.clear()
+            self.summary_combo.clear()
             self._manifest_conditions = {entry.condition_id: entry for entry in entries}
-            for entry in entries:
-                self.condition_combo.addItem(f"Imported: {entry.label}", entry.condition_id)
+            self._manifest_method_groups = _group_manifest_methods(entries)
+            self._populate_method_combo_blocked()
+            self._set_selected_source_method_from_loaded_groups()
+            self._manifest_condition_groups = dict(
+                self._manifest_method_groups.get(
+                    self._selected_source_method_id,
+                    _ManifestMethodGroup(
+                        method_id=self._selected_source_method_id,
+                        label=_source_method_label(self._selected_source_method_id),
+                        condition_groups={},
+                    ),
+                ).condition_groups
+            )
+            for group in self._manifest_condition_groups.values():
+                self.condition_combo.addItem(group.label, group.condition_id)
+        finally:
+            self.source_method_combo.blockSignals(previous_method_block_state)
+            self.condition_combo.blockSignals(previous_block_state)
+            self.summary_combo.blockSignals(previous_summary_block_state)
+        self._sync_source_map_selectors_enabled()
+
+    def _populate_method_combo_blocked(self) -> None:
+        ordered_methods = [
+            method_id
+            for _label, method_id in SOURCE_METHOD_OPTIONS
+            if method_id in self._manifest_method_groups
+        ]
+        ordered_methods.extend(
+            method_id
+            for method_id in self._manifest_method_groups
+            if method_id not in ordered_methods
+        )
+        for method_id in ordered_methods:
+            group = self._manifest_method_groups[method_id]
+            self.source_method_combo.addItem(group.label, method_id)
+
+    def _set_selected_source_method_from_loaded_groups(self) -> None:
+        if self._selected_source_method_id not in self._manifest_method_groups:
+            self._selected_source_method_id = next(iter(self._manifest_method_groups), SOURCE_METHOD_L2_MNE_SURFACE)
+        for index in range(self.source_method_combo.count()):
+            if self.source_method_combo.itemData(index) == self._selected_source_method_id:
+                self.source_method_combo.setCurrentIndex(index)
+                break
+
+    def _populate_condition_combo_for_selected_method(self, *, preferred_condition: str | None = None) -> None:
+        previous_block_state = self.condition_combo.blockSignals(True)
+        previous_summary_block_state = self.summary_combo.blockSignals(True)
+        try:
+            self.condition_combo.clear()
+            self.summary_combo.clear()
+            method_group = self._manifest_method_groups.get(self._selected_source_method_id)
+            self._manifest_condition_groups = dict(method_group.condition_groups) if method_group is not None else {}
+            for group in self._manifest_condition_groups.values():
+                self.condition_combo.addItem(group.label, group.condition_id)
         finally:
             self.condition_combo.blockSignals(previous_block_state)
+            self.summary_combo.blockSignals(previous_summary_block_state)
+        selected_condition = (
+            preferred_condition if preferred_condition in self._manifest_condition_groups else None
+        )
+        if selected_condition is None:
+            first_group = next(iter(self._manifest_condition_groups.values()), None)
+            selected_condition = first_group.condition_id if first_group is not None else ""
+        self._selected_condition_id = selected_condition or ""
+        if selected_condition:
+            self._set_condition_combo_data(selected_condition)
+        self._sync_source_map_selectors_enabled()
+
+    def _select_first_condition_if_needed(self) -> None:
+        first_group = next(iter(self._manifest_condition_groups.values()), None)
+        if first_group is None:
+            self._clear_activation_payload()
+            return
+        if self._selected_condition_id not in self._manifest_condition_groups:
+            self._selected_condition_id = first_group.condition_id
+        self._set_condition_combo_data(self._selected_condition_id)
+        self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
 
     def _set_condition_combo_data(self, condition_id: str) -> None:
         for index in range(self.condition_combo.count()):
             if self.condition_combo.itemData(index) == condition_id:
                 self.condition_combo.setCurrentIndex(index)
                 return
+
+    def _sync_summary_combo_for_selected_condition(self, *, preferred_summary: str | None = None) -> None:
+        previous_block_state = self.summary_combo.blockSignals(True)
+        try:
+            self.summary_combo.clear()
+            group = self._manifest_condition_groups.get(self._selected_condition_id)
+            if group is None:
+                self.summary_combo.addItem("No source maps loaded", SOURCE_SUMMARY_DIRECT)
+                self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
+            else:
+                summary_ids = _ordered_source_summary_ids(group)
+                for summary_id in summary_ids:
+                    self.summary_combo.addItem(_source_summary_label(summary_id), summary_id)
+                selected_summary = preferred_summary if preferred_summary in summary_ids else None
+                if selected_summary is None and SOURCE_SUMMARY_RAW_MEAN in summary_ids:
+                    selected_summary = SOURCE_SUMMARY_RAW_MEAN
+                if selected_summary is None and summary_ids:
+                    selected_summary = summary_ids[0]
+                if selected_summary is not None:
+                    self._selected_summary_id = selected_summary
+                    for index in range(self.summary_combo.count()):
+                        if self.summary_combo.itemData(index) == selected_summary:
+                            self.summary_combo.setCurrentIndex(index)
+                            break
+        finally:
+            self.summary_combo.blockSignals(previous_block_state)
+        self._sync_source_map_selectors_enabled()
 
     def _start_fsaverage_load(self, *, allow_fetch: bool) -> None:
         if self._mesh_thread is not None:
@@ -1721,6 +2654,7 @@ class LoretaVisualizerWindow(QWidget):
             if allow_fetch
             else "Checking configured/root-local fsaverage cache..."
         )
+        self._mri_anatomy_error = None
 
         thread = QThread(self)
         worker = FsaverageLoadWorker(allow_fetch=allow_fetch)
@@ -1728,6 +2662,7 @@ class LoretaVisualizerWindow(QWidget):
         thread.started.connect(worker.run)
         worker.loaded.connect(self._on_fsaverage_loaded)
         worker.failed.connect(self._on_fsaverage_failed)
+        worker.mri_template_failed.connect(self._on_mri_template_failed)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
@@ -1741,8 +2676,13 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None or not isinstance(result, FsaverageMeshResult):
             return
+        self._fsaverage_dir = result.fsaverage_dir
+        self._mri_anatomy_cache = None
+        self._mri_anatomy_cache_dir = None
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
         renderer.replace_brain_mesh(result.mesh, reset_camera=True)
-        self._refresh_dummy_activation()
+        self._refresh_current_activation()
         self.mesh_status.set_variant("success")
         split_note = (
             f" Split view uses fsaverage {result.split_surface} hemispheres."
@@ -1762,8 +2702,26 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_fsaverage_failed(self, message: str) -> None:
+        self._fsaverage_dir = None
+        self._mri_anatomy_cache = None
+        self._mri_anatomy_cache_dir = None
+        self._mri_anatomy_error = message
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
         self.mesh_status.set_variant("warning")
         self.mesh_status.set_text(f"Using synthetic fallback mesh. {message}")
+
+    @Slot(str)
+    def _on_mri_template_failed(self, message: str) -> None:
+        self._mri_anatomy_cache = None
+        self._mri_anatomy_cache_dir = None
+        self._mri_anatomy_error = message
+        self._mri_slice_indices_cache = None
+        self._mri_slice_indices_cache_key = None
+        logger.warning("loreta_mri_slice_anatomy_unavailable", extra={"error": message})
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES and self.mri_slice_view is not None:
+            self.mri_slice_view.clear_slice_image(f"MRI slice anatomy unavailable: {message}")
+        self._set_source_export_status(f"MRI slice anatomy unavailable: {message}", variant="warning")
 
     @Slot()
     def _mesh_load_finished(self) -> None:
@@ -1771,29 +2729,18 @@ class LoretaVisualizerWindow(QWidget):
         self._mesh_worker = None
         self._sync_project_source_button()
 
-    def _refresh_dummy_activation(self) -> None:
+    def _refresh_current_activation(self) -> None:
         renderer = self.renderer
         if renderer is None:
             return
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
             return
-        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        manifest_entry = self._selected_manifest_entry()
         if manifest_entry is not None:
             self._render_manifest_condition(manifest_entry)
             return
-        mesh_points = renderer.mesh_points()
-        if mesh_points is None:
-            return
-        mesh_faces = renderer.mesh_faces()
-        condition = condition_by_id(self._selected_condition_id)
-        payload = make_demo_condition_activation(
-            mesh_points,
-            mesh_faces=mesh_faces,
-            condition=condition,
-            display_transform=display_transform,
-        )
-        self._set_activation_payload(payload)
+        self._clear_activation_payload()
 
     def _render_manifest_condition(self, entry: PreparedSourceManifestEntry) -> None:
         renderer = self.renderer
@@ -1823,50 +2770,165 @@ class LoretaVisualizerWindow(QWidget):
             }
         )
         self._set_activation_payload(payload)
-        if (
-            uses_cortical_surface_paint(payload)
-            and _source_payload_uses_zscores(payload)
-            and not payload_has_cluster_mask(payload)
-        ):
+        self._set_payload_display_status(payload)
+
+    def _set_payload_display_status(self, payload: SourcePayload) -> None:
+        underpowered_text = _underpowered_cluster_mask_status_text(payload)
+        if underpowered_text is not None:
+            self._set_source_export_status(underpowered_text, variant="warning")
+            return
+        if _source_payload_uses_zscores(payload):
+            source_kind_text = "vertices" if uses_cortical_surface_paint(payload) else "source locations"
+            if not getattr(self, "_use_cluster_mask", True) and payload_has_cluster_mask(payload):
+                exploratory_text = (
+                    f"z >= {format_scalar_value(self._zscore_display_threshold)}"
+                    if uses_cortical_surface_paint(payload)
+                    else "z > 0"
+                )
+                self._set_source_export_status(
+                    (
+                        "Cluster mask display is disabled. Showing exploratory "
+                        f"{exploratory_text} instead."
+                    ),
+                    variant="info",
+                )
+                return
+            if payload_cluster_mask_is_empty(payload):
+                self._set_source_export_status(
+                    f"No {source_kind_text} survived the Hauk et al. (2025) cluster-permutation mask.",
+                    variant="warning",
+                )
+                return
+            if payload_has_cluster_mask(payload):
+                self._set_source_export_status(
+                    "Loaded Hauk et al. (2025) source-estimation cluster mask.",
+                    variant="info",
+                )
+                return
+        if _source_payload_uses_zscores(payload) and not payload_has_cluster_mask(payload):
             self._set_source_export_status(
                 "Loaded unmasked source map. Rebuild z-score maps to add cluster masks.",
                 variant="warning",
             )
 
+    def _clear_activation_payload(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        self._source_activation_payload = None
+        self._current_activation_payload = None
+        if self.mri_slice_view is not None:
+            self.mri_slice_view.clear_slice_image("MRI slices will appear after an eLORETA volume source map is loaded.")
+        self._sync_activation_render_mode_controls()
+        self._sync_viewport_display_widget()
+        renderer.set_activation_payload(empty_source_payload("No source map loaded"))
+        self.activation_scale_min_label.setText("")
+        self.activation_scale_max_label.setText("")
+
     def _set_activation_payload(self, payload: SourcePayload) -> None:
         renderer = self.renderer
         if renderer is None:
             return
-        display_payload = _activation_display_payload(payload)
+        self._source_activation_payload = payload
+        if not _display_mode_allowed_for_payload(payload, self._display_mode):
+            self._display_mode = _preferred_display_mode_for_payload(payload)
+            self._set_display_mode_combo_data(self._display_mode)
+        display_payload = _activation_display_payload(
+            payload,
+            transparent_mesh_display=self._display_mode in {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES},
+            use_cluster_mask=self._use_cluster_mask,
+        )
+        if self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH:
+            display_payload = renderer.display_payload_for_current_mesh(display_payload)
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
-        renderer.set_display_mode(self._display_mode)
-        renderer.set_activation_payload(display_payload)
-        self._apply_activation_scalar_range()
-        renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
-        renderer.set_activation_visible(self.activation_visible_check.isChecked())
-
-    def _apply_activation_scalar_range(self) -> None:
-        renderer = self.renderer
-        payload = self._current_activation_payload
-        if renderer is None or payload is None:
+        renderer.set_display_mode(self._display_mode, refresh=False)
+        self._sync_viewport_display_widget()
+        renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
+        vmin, vmax = self._resolve_activation_scalar_range(display_payload)
+        renderer.set_activation_scalar_range(vmin, vmax, refresh=False)
+        self._update_activation_scale_readout(vmin, vmax)
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._render_mri_slice_payload(display_payload, scalar_range=(vmin, vmax))
             return
+        renderer.set_activation_payload(display_payload)
+        renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
+        renderer.set_activation_visible(self._activation_visible)
+
+    def _render_mri_slice_payload(
+        self,
+        payload: SourcePayload,
+        *,
+        scalar_range: tuple[float, float],
+    ) -> None:
+        renderer = self.renderer
+        mri_view = self.mri_slice_view
+        if renderer is None or mri_view is None:
+            return
+        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+            mri_view.clear_slice_image("MRI slices are available for eLORETA volume source maps.")
+            return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            mri_view.clear_slice_image("MRI slices require a loaded fsaverage display transform.")
+            return
+        if self._fsaverage_dir is None:
+            mri_view.clear_slice_image("MRI slices require cached fsaverage MRI anatomy.")
+            return
+        try:
+            anatomy = self._load_cached_mri_anatomy()
+            slice_indices = self._mri_slice_indices_for_current_method(
+                anatomy=anatomy,
+            )
+            preview_figsize, preview_dpi = self._mri_slice_preview_figure_settings()
+            result = render_mri_orthogonal_slice_image(
+                payload,
+                display_transform=display_transform,
+                fsaverage_dir=self._fsaverage_dir,
+                scalar_range=scalar_range,
+                label=self._selected_condition_label(),
+                activation_visible=self._activation_visible,
+                anatomy=anatomy,
+                slice_indices=slice_indices,
+                figsize=preview_figsize,
+                dpi=preview_dpi,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            logger.warning("loreta_mri_slice_render_failed", extra={"error": str(exc)})
+            mri_view.clear_slice_image(f"MRI slice render failed: {exc}")
+            self._set_source_export_status(f"MRI slice render failed: {exc}", variant="warning")
+            return
+        mri_view.set_slice_image(result.image_rgb)
+
+    def _mri_slice_preview_figure_settings(self) -> tuple[tuple[float, float], int]:
+        mri_view = self.mri_slice_view
+        if mri_view is None:
+            width, height = MRI_SLICE_PREVIEW_MIN_PIXELS
+        else:
+            size = mri_view.contentsRect().size()
+            device_scale = max(float(mri_view.devicePixelRatioF()), 1.0)
+            width = int(round(max(size.width(), 1) * MRI_SLICE_PREVIEW_SCALE * device_scale))
+            height = int(round(max(size.height(), 1) * MRI_SLICE_PREVIEW_SCALE * device_scale))
+        width = int(np.clip(width, MRI_SLICE_PREVIEW_MIN_PIXELS[0], MRI_SLICE_PREVIEW_MAX_PIXELS[0]))
+        height = int(np.clip(height, MRI_SLICE_PREVIEW_MIN_PIXELS[1], MRI_SLICE_PREVIEW_MAX_PIXELS[1]))
+        return (width / MRI_SLICE_PREVIEW_DPI, height / MRI_SLICE_PREVIEW_DPI), MRI_SLICE_PREVIEW_DPI
+
+    def _resolve_activation_scalar_range(self, payload: SourcePayload) -> tuple[float, float]:
         scale_values = _activation_scale_values(
             payload,
             zscore_display_threshold=self._zscore_display_threshold,
             cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
+            use_cluster_mask=self._use_cluster_mask,
         )
         if self._activation_uses_opaque_cortical_mode() and _source_payload_uses_zscores(payload):
-            if payload_has_cluster_mask(payload):
+            if self._use_cluster_mask and payload_has_cluster_mask(payload):
                 vmin, vmax = resolve_scalar_limits(
                     scale_values,
                     auto_scale=self.activation_auto_scale_check.isChecked(),
                     manual_min=self.activation_min_spin.value(),
                     manual_max=self.activation_max_spin.value(),
                 )
-                renderer.set_activation_scalar_range(vmin, vmax)
-                self._update_activation_scale_readout(vmin, vmax)
-                return
+                return vmin, vmax
             lower_bound = self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
@@ -1891,6 +2953,18 @@ class LoretaVisualizerWindow(QWidget):
                 manual_min=self.activation_min_spin.value(),
                 manual_max=self.activation_max_spin.value(),
             )
+        return vmin, vmax
+
+    def _apply_activation_scalar_range(self) -> None:
+        renderer = self.renderer
+        payload = self._current_activation_payload
+        if renderer is None or payload is None:
+            return
+        vmin, vmax = self._resolve_activation_scalar_range(payload)
+        if self._display_mode == DISPLAY_MODE_MRI_SLICES:
+            self._update_activation_scale_readout(vmin, vmax)
+            self._render_mri_slice_payload(payload, scalar_range=(vmin, vmax))
+            return
         renderer.set_activation_scalar_range(vmin, vmax)
         self._update_activation_scale_readout(vmin, vmax)
 

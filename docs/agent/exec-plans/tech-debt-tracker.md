@@ -32,6 +32,10 @@ Use this page for known debt that is not yet an active execution plan.
   data for LORETA Visualizer. Routine cleanup may remove generated artifacts
   such as `site/`, `.codex-tmp/`, test scratch folders, and Python caches, but
   root `.fpvs_cache/` is not a default deletion target.
+- LORETA Visualizer source-map build performance is deferred as a non-essential
+  follow-up after the beta eLORETA volume branch. Future work should add
+  selected-column FullFFT parsing and a project-local inverse-model cache with
+  strict method/source-space signatures; see the deferred Phase 6H-A(6) plan.
 - Retired `Main_App` package names are now guarded by `.agents/scripts/audit/agent_audit.py`;
   future debt should focus on oversized modules and behavior-covered cleanup,
   not resurrecting historical package wrappers.

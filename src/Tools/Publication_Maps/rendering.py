@@ -145,12 +145,17 @@ def render_publication_figures(
     result: PublicationMapResult,
     request: PublicationMapRequest,
 ) -> list[Path]:
-    """Render all grand-average scalp maps in the request."""
+    """Render grand-average scalp maps in the request."""
 
     request.output_root.mkdir(parents=True, exist_ok=True)
     rendered: list[Path] = []
     grand = result.grand_average_values
     if grand.empty:
+        return rendered
+
+    if request.export_paired_figures:
+        rendered.extend(_render_paired_condition_figures(result, request))
+        result.figure_paths = rendered
         return rendered
 
     group_cols = ["condition", "metric", "map_label"]
@@ -192,8 +197,6 @@ def render_publication_figures(
                 dpi=request.png_dpi,
             )
             rendered.append(pdf_path)
-    if request.export_paired_figures:
-        rendered.extend(_render_paired_condition_figures(result, request))
     result.figure_paths = rendered
     return rendered
 
@@ -453,8 +456,8 @@ def _render_paired_topomap(
             bounds=bounds,
             vlim_override=shared_vlim,
         )
-        axes[0].set_title(first_title, pad=8, **figure_text_kwargs("condition_label"))
-        axes[1].set_title(second_title, pad=8, **figure_text_kwargs("condition_label"))
+        axes[0].set_title(first_title, pad=8, **_paired_condition_title_kwargs())
+        axes[1].set_title(second_title, pad=8, **_paired_condition_title_kwargs())
         if first_missing:
             _add_missing_note(axes[0], first_missing)
         if second_missing:
@@ -518,8 +521,16 @@ def _render_combined_paired_topomap(
                 vlim_override=shared_vlim,
             )
             if row_idx == 0:
-                row_axes[0].set_title(first_title, pad=8, **figure_text_kwargs("condition_label"))
-                row_axes[1].set_title(second_title, pad=8, **figure_text_kwargs("condition_label"))
+                row_axes[0].set_title(
+                    first_title,
+                    pad=8,
+                    **_paired_condition_title_kwargs(),
+                )
+                row_axes[1].set_title(
+                    second_title,
+                    pad=8,
+                    **_paired_condition_title_kwargs(),
+                )
             if first_missing:
                 _add_missing_note(row_axes[0], first_missing)
             if second_missing:
@@ -659,11 +670,25 @@ def _style_colorbar(
     metric: PublicationMetric,
     label_position: str = "right",
 ) -> None:
-    label_kwargs = figure_text_kwargs("axis_label")
+    label_kwargs = _colorbar_text_kwargs()
     cbar.ax.set_ylabel(colorbar_label_for_metric(metric), **label_kwargs)
     cbar.ax.yaxis.set_label_position(label_position)
     cbar.ax.yaxis.set_ticks_position("right")
     apply_axis_text_style(cbar.ax)
+
+
+def _paired_condition_title_kwargs() -> dict[str, object]:
+    """Return bold, larger title styling for paired scalp-map column headers."""
+
+    return figure_text_kwargs("panel_label")
+
+
+def _colorbar_text_kwargs() -> dict[str, object]:
+    """Return bold colorbar text styling for scalp-map legends."""
+
+    kwargs = figure_text_kwargs("axis_label")
+    kwargs["fontweight"] = "bold"
+    return kwargs
 
 
 def _save_figure(fig: plt.Figure, output_path: Path, *, dpi: int) -> None:

@@ -368,9 +368,9 @@ class PublicationMapsWindow(QWidget):
         self.export_pdf_check = QCheckBox("PDF (600 DPI)", group)
         self.export_pdf_check.setChecked(True)
         self.export_pdf_check.setEnabled(False)
-        self.paired_figures_check = QCheckBox("Also export paired condition figures", group)
+        self.paired_figures_check = QCheckBox("Export paired condition figure only", group)
         self.paired_figures_check.setToolTip(
-            "When at least two conditions are selected, export side-by-side scalp maps."
+            "When at least two conditions are selected, export only the paired side-by-side scalp-map figure."
         )
         self.paired_figures_check.toggled.connect(
             lambda _checked: self._update_paired_controls_state()
@@ -418,6 +418,7 @@ class PublicationMapsWindow(QWidget):
         group.content_layout.addWidget(formats)
         group.content_layout.addWidget(self.paired_figures_check)
         group.content_layout.addWidget(self.paired_conditions_widget)
+        self.paired_figures_check.setChecked(True)
         self.paired_conditions_widget.setVisible(False)
         return group
 

@@ -23,7 +23,7 @@ The first durable goal is rendering:
   display mode;
 - an external fsaverage-derived anatomical mesh when available;
 - a synthetic fallback mesh when fsaverage is unavailable;
-- synthetic scalar source maps for surface/deep rendering validation;
+- synthetic scalar source maps for tests/developer rendering validation;
 - a payload contract that future real source-localization producers can feed
   without changing renderer internals.
 
@@ -42,6 +42,13 @@ and condition/group workbook subfolders. They require the Stats-ready workbook
 export for selected harmonics; the Hauk-style z-score path also requires
 `FullFFT Amplitude (uV)` target and neighboring-bin columns in included
 participant workbooks.
+
+The beta eLORETA volume method is implemented as a sibling source producer. It
+uses the same project FullFFT participant-first z-score contract as the current
+L2-MNE surface path, but estimates values in an fsaverage/template volume source
+space and renders those prepared `volume_points` payloads through the
+transparent brain mesh mode. It is additive and must not change the L2-MNE
+normalization or aggregation methods.
 
 ## Non-Goals
 
@@ -83,7 +90,7 @@ prepared_payload_validator.py
         | validated coordinates, scalar values, source metadata
         v
 Tool-local bridge helpers
-source_payloads.py + transforms.py + scalar_fields.py
+source_payloads.py + transforms.py + scalar_fields.py + cortical_paint.py + volume_overlay.py + volume_slices.py
         |
         | SourcePayload in renderer display space
         v
@@ -145,6 +152,28 @@ Later LORETA/eLORETA volume methods should become sibling producers that emit
 `volume_points`, `volume_mesh`, or ROI mesh payloads. They should not require
 renderer, importer, or bridge-helper rewrites.
 
+The first beta eLORETA volume path follows that sibling-producer rule. It adds
+`source_space_statistics.py` for method-neutral source-space cluster
+permutation helpers, `eloreta_volume.py` for participant-first eLORETA volume
+payloads, and `project_eloreta_volume_export.py` for project-local export under
+`6 - Source Localization/eLORETA Volume Beta/`. Volume masks are recomputed
+with volume adjacency and stored as `cluster_mask_source_indices` rather than
+surface vertex indices.
+
+The renderer displays prepared eLORETA `volume_points` through a smoothed,
+display-space grid/contour overlay in transparent mesh mode. This smoothing is
+for visualization only: it is applied after source-mask/exploratory filtering
+and does not modify saved source values, source-space statistics, or payload
+metadata. The transparent mesh view additionally clips volume overlays to the
+currently displayed brain surface so outside-shell volume activity is not
+painted against a cortical mesh that does not anatomically contain it.
+The GUI also exposes an orthogonal MRI slice display for eLORETA volume
+payloads. That view uses the same prepared payload values and display
+filtering, maps display points back into the fsaverage MRI voxel frame, chooses
+a shared slice triplet from the loaded condition set for the selected
+method/summary/mask state, and interpolates values onto axial, coronal, and
+sagittal slices for visualization and publication figure export only.
+
 Phase 6C adds `project_l2_mne_export.py` as calculation-side orchestration. It
 is allowed to read existing project workbooks through `project_inputs.py`, use
 MNE to build an fsaverage/BioSemi64 template forward model, and write generated
@@ -174,19 +203,23 @@ compact rebuild summaries, but source-estimation math still belongs only to
   user-triggered renderer updates. Source-map rebuild/import controls live in
   the Source Map Options modal. Figure export actions live behind the compact
   Export Figures modal so future display-specific exports can be added without
-  crowding the side panel.
+  crowding the side panel. The method selector groups loaded manifests by
+  source method, keeps condition/summary selection method-local, and restricts
+  non-cortical volume payloads to Transparent brain mesh and MRI slices
+  displays.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
   disables VTK depth peeling and relies on normal alpha blending so
   transparent brain meshes remain visible across supported Windows graphics
   stacks. It must not calculate source estimates.
-- `fsaverage_cache.py`: shared fsaverage cache path policy. The default durable
-  install location is `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS
-  Toolbox root; `src/`, `docs/`, quarantine, and package-data paths are
-  rejected. Stale generic MNE config candidates under `src/` or `docs/` are
-  ignored; explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths
-  fail fast.
+- `fsaverage_cache.py`: shared fsaverage cache path policy. Automatic fetches
+  install fsaverage and keep transient ZIP archives under
+  `.fpvs_cache/mne/MNE-fsaverage-data/` in the FPVS Toolbox root. `src/`,
+  `docs/`, quarantine, package-data paths, temp directories, and common
+  admin-protected system folders are rejected. Stale generic MNE config
+  candidates under forbidden paths are ignored; explicit
+  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths fail fast.
 - `fsaverage_mesh.py`: fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It also preserves
   display-only left/right hemisphere meshes for publication layout. The
@@ -197,8 +230,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   It must not calculate source estimates.
 - `synthetic_brain.py`: deterministic fallback brain mesh and `BrainMesh`
   dataclass.
-- `conditions.py`: synthetic demo condition metadata.
-- `dummy_activation.py`: deterministic demo-only scalar source maps.
+- `conditions.py`: synthetic demo condition metadata retained for validation.
+- `dummy_activation.py`: deterministic demo-only scalar source maps retained for
+  tests/developer validation, not normal live selector options.
 - `prepared_source_fixture.py`: in-memory fixture that is shaped like a
   prepared source-map handoff from a future real calculation path. It validates
   and adapts coordinates/scalars but does not calculate source estimates.
@@ -215,6 +249,25 @@ compact rebuild summaries, but source-estimation math still belongs only to
   surface payload onto the higher-resolution pial display mesh. It may
   interpolate already-computed values for visualization, but it must not compute
   source estimates or change payload values.
+- `volume_overlay.py`: display-only smoothing from prepared volume source
+  points onto a regular PyVista grid for transparent mesh contour overlays.
+  The transparent mesh view may clip this overlay to the displayed cortical
+  surface, but it must not mutate saved source values or source-space masks.
+- `volume_slices.py`: display/export-only orthogonal MRI slice rendering for
+  prepared volume point payloads. It requires `fsaverage/mri/brain.mgz`, builds
+  a visualizer-only 0.5 mm display template in the untracked root
+  `.fpvs_cache/loreta_visualizer/mri_templates/` cache, and loads that higher
+  sampling underlay for embedded and exported MRI slices. The cache preserves
+  the fsaverage RAS frame and must not replace or mutate the fsaverage cache
+  used by source producers, mesh loading, or other toolbox modules. It surfaces
+  a visible error when the source anatomy, display-template generation, or the
+  all-condition slice reference is unavailable, converts display points back to
+  native voxel space, reuses a standard slice triplet across conditions,
+  interpolates already computed source values onto slice planes with the same
+  Gaussian-neighbor policy family as the transparent mesh overlay, crops each
+  panel to the anatomy bounds for high-detail embedded viewing, and writes
+  matched 600-DPI PDF/PNG figures. It must not compute inverse estimates,
+  z-scores, cluster masks, or condition effects.
 - `source_producers/`: swappable source-localization calculation methods that
   read explicit source-ready inputs and write validated prepared
   payload/manifest JSON. Phase 6A includes method-neutral producer result
@@ -236,7 +289,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
   computes participant source-space z-score maps, and the export writes group
   raw mean, median, and 20% trimmed-mean prepared payloads plus a participant
   sidecar for future individual viewing. The deprecated group-first z-score
-  model is retained only as an advanced comparison fallback. Phase 6H-A(3)
+  model is retained only as an advanced comparison fallback and is not exposed
+  in the normal Source Map Options GUI. Phase 6H-A(3)
   computes participant-first source-space cluster-permutation masks and stores
   the significant source vertices in payload metadata for publication-style
   display. Phase 6H-A(4) writes a descriptive source-space lateralization
@@ -248,7 +302,12 @@ compact rebuild summaries, but source-estimation math still belongs only to
   from already-generated manifest, payload, participant-sidecar, and
   lateralization files. It is a reporting helper only: it must not estimate
   sources, run statistics, inspect renderer state, or mutate project inputs.
-  Later producers may use LORETA/eLORETA volume or mixed source-space models.
+  The beta eLORETA volume producer set uses the same participant-first
+  FullFFT/z-score input contract, writes `volume_points` payloads and a
+  participant sidecar, and emits method-neutral source-index cluster-mask
+  metadata. It intentionally does not emit surface lateralization rows.
+  Later producers may use other LORETA/eLORETA volume or mixed source-space
+  models.
 - `source_rois.py`: producer-side anatomical ROI helpers that map named
   fsaverage label definitions onto already-computed source spaces using stable
   source vertex IDs and hemisphere labels. It must not estimate sources, render
@@ -275,8 +334,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
 - `scalar_fields.py`: visual scalar color stops and auto/manual color-limit
   resolution.
 
-When the current mesh exposes a non-identity native/display transform, the GUI
-demo payloads intentionally round-trip through native coordinates and
+When validation code exercises a non-identity native/display transform, demo
+payloads intentionally round-trip through native coordinates and
 `source_payload_to_display(...)`. This exercises the same bridge that future
 real source payloads should use, while keeping the values synthetic.
 
@@ -291,6 +350,9 @@ Allowed bridge behavior:
 - preserve faces, labels, source model metadata, and value labels;
 - reject mismatched coordinate-space labels;
 - convert native anatomical/source coordinates into renderer display space;
+- treat `fsaverage_surface` and `fsaverage_volume` as compatible
+  FreeSurfer/fsaverage millimeter spaces for display normalization while
+  preserving their distinct payload labels;
 - normalize or bound values for visual color mapping;
 - adapt future real data into `SourcePayload`.
 
@@ -321,7 +383,9 @@ payload with:
   For participant-first L2-MNE z-score payloads, metadata may include
   `cluster_mask=source_space_cluster_permutation` and
   `cluster_mask_vertex_indices` so the renderer can display only
-  producer-computed significant source vertices.
+  producer-computed significant source vertices. For volume or other
+  non-surface payloads, metadata may include `cluster_mask_source_indices` for
+  the same display-only mask behavior without implying cortical vertices.
 
 If a future method changes from LORETA to another inverse model, the renderer
 should stay unchanged. The adapter/bridge should map the method output into this
@@ -361,7 +425,10 @@ same prepared-manifest importer as every other source payload. Its displayed
 values are source-space z-scores, not arbitrary L2-MNE amplitude. It reads
 `FullFFT Amplitude (uV)` only and refuses BCA-only or compact-summary-only
 workbooks with a user-facing prerequisite message instead of fabricating
-source-space z-scores. The generated payloads preserve the signed z-score field
+source-space z-scores. FullFFT ingestion uses the shared selected-column XLSX
+XML reader so project source-map generation streams only `Electrode` plus the
+target/noise-bin columns required by the current bin plan. The generated
+payloads preserve the signed z-score field
 for QC. The default L2-MNE cortical
 surface view paints those values onto an opaque split-hemisphere display using
 fsaverage inflated hemispheres when available and pial split hemispheres as a
@@ -372,11 +439,32 @@ combined pial mesh. For participant-first maps with producer-computed
 cluster-permutation metadata, source vertices outside the significant cluster
 mask are shown as shaded cortex and retained positive z-scores use the same
 heatmap ramp as the transparent overlay view. Older unmasked payloads fall
-back to the manual display cutoff, whose default is `z >= 1.64`. The
+back to the manual display cutoff, whose default is `z >= 1.64`. Empty masks
+also fall back to that exploratory cutoff: underpowered exact small-sample masks
+warn that the mask cannot be resolved, and adequately powered empty Hauk masks
+warn that no vertices survived the cluster mask. The viewer can also disable a
+saved cluster mask for exploratory z-threshold display and figure export. These
+display fallbacks and toggles do not change the saved source values or compute
+statistics in the renderer. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space
 noise mean and population SD.
+
+The project eLORETA volume exporter writes generated files under
+`6 - Source Localization/eLORETA Volume Beta/` by default. Its manifest can be
+loaded alongside the L2-MNE Hauk z-score manifest; the GUI Method selector
+switches between the L2-MNE surface and eLORETA volume condition groups. The
+volume view uses the same saved cluster-mask toggle semantics: when enabled,
+saved source-index cluster masks filter displayed source locations; when
+disabled or unavailable, transparent volume z-score overlays use positive-only
+exploratory display filtering. Neither path changes saved payload values.
+On first open, if no default project source-map manifests exist, the GUI starts
+one background rebuild that writes both default method outputs. Manual rebuilds
+from the Options dialog use the same batch behavior, so users do not need to
+choose a calculation method before generating source maps. The Method selector
+remains a display selector over already-loaded manifests, not a rebuild-method
+decision.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in

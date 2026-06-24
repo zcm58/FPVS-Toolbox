@@ -31,6 +31,7 @@ from Tools.Publication_Report.models import (
     default_report_rois,
 )
 from Tools.Publication_Report.narrative import build_markdown, write_docx, write_markdown
+from Tools.Publication_Report.qc import render_qc_figures
 from Tools.Publication_Report.workbook import build_initial_frames, write_audit_json, write_report_workbook
 
 ProgressCallback = Callable[[int, str], None]
@@ -94,6 +95,22 @@ def generate_publication_report(
         selected_conditions=selected_conditions,
         warnings=warnings,
     )
+    generated: list[Path] = []
+    if effective.output_options.qc_figures:
+        emit(50, "Rendering QC distribution figures...")
+        qc_files, qc_manifest_df = render_qc_figures(
+            qc_frames=analysis_frames,
+            output_root=output_root,
+            z_thresholds=effective.z_thresholds,
+            warnings=warnings,
+        )
+        generated.extend(qc_files)
+        if not qc_manifest_df.empty:
+            figure_manifest_df = pd.concat(
+                [figure_manifest_df, qc_manifest_df],
+                ignore_index=True,
+                sort=False,
+            )
     warnings_df = pd.DataFrame({"warning": warnings})
     run_summary_df = _run_summary_frame(
         effective,
@@ -113,7 +130,6 @@ def generate_publication_report(
     )
     frames.update(analysis_frames)
 
-    generated: list[Path] = []
     workbook_path = None
     if effective.output_options.workbook:
         emit(60, "Writing source workbook...")
@@ -251,18 +267,27 @@ def _figure_manifest_frame(request: PublicationReportRequest) -> pd.DataFrame:
         ("spectra", request.output_options.spectra),
         ("scalp_maps", request.output_options.scalp_maps),
         ("individual_detectability", request.output_options.individual_figures),
+        ("qc_distributions", request.output_options.qc_figures),
     ]
     return pd.DataFrame(
         [
             {
                 "figure_family": family,
                 "requested": bool(requested),
-                "status": "planned_next_slice" if requested else "disabled",
+                "status": _figure_family_status(family, bool(requested)),
                 "path": "",
             }
             for family, requested in rows
         ]
     )
+
+
+def _figure_family_status(family: str, requested: bool) -> str:
+    if not requested:
+        return "disabled"
+    if family == "qc_distributions":
+        return "generated_when_qc_data_available"
+    return "planned_next_slice"
 
 
 def _run_summary_frame(

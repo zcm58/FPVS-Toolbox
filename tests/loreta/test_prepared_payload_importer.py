@@ -20,6 +20,7 @@ from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_MESH
 from Tools.LORETA_Visualizer.transforms import (
     COORDINATE_SPACE_DISPLAY,
     COORDINATE_SPACE_FSAVERAGE,
+    COORDINATE_SPACE_FSAVERAGE_VOLUME,
     MeshDisplayTransform,
 )
 
@@ -84,6 +85,46 @@ def test_prepared_source_payload_imports_fsaverage_like_native_coordinates() -> 
     assert np.allclose(transform.from_display_points(payload.points), np.asarray(raw_payload["points"], dtype=float))
     assert payload.metadata["condition"] == "fixture-condition"
     assert payload.metadata["source_space"] == COORDINATE_SPACE_FSAVERAGE
+
+
+def test_prepared_source_payload_imports_fsaverage_volume_with_surface_transform() -> None:
+    surface_points = np.asarray(
+        [
+            [-60.0, -80.0, -35.0],
+            [-55.0, 45.0, 55.0],
+            [58.0, -78.0, -32.0],
+            [56.0, 48.0, 52.0],
+        ],
+        dtype=float,
+    )
+    transform = MeshDisplayTransform.from_native_points(
+        surface_points,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+    raw_payload = {
+        "format": PREPARED_SOURCE_PAYLOAD_FORMAT,
+        "label": "eLORETA volume payload",
+        "kind": "volume_points",
+        "coordinate_space": COORDINATE_SPACE_FSAVERAGE_VOLUME,
+        "source_model": "eloreta_volume_participant_zscore_mean",
+        "value_label": "source-space z-score",
+        "points": [[-20.0, -62.0, 8.0], [0.0, -70.0, 12.0], [22.0, -61.0, 7.0]],
+        "values": [0.25, 0.75, 1.0],
+        "metadata": {"source_method": "eloreta_volume"},
+    }
+
+    payload = prepared_source_payload_from_mapping(raw_payload, display_transform=transform)
+
+    assert payload.coordinate_space == COORDINATE_SPACE_DISPLAY
+    assert np.allclose(
+        payload.points,
+        transform.to_display_points(
+            np.asarray(raw_payload["points"], dtype=float),
+            coordinate_space=COORDINATE_SPACE_FSAVERAGE_VOLUME,
+        ),
+    )
+    assert payload.metadata["source_space"] == COORDINATE_SPACE_FSAVERAGE_VOLUME
+    assert payload.metadata["source_method"] == "eloreta_volume"
 
 
 def test_prepared_source_payload_import_rejects_missing_format() -> None:

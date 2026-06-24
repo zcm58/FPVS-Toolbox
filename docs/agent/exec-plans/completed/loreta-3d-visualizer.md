@@ -36,9 +36,10 @@ normalization, and `lambda2 = 1 / 9`. Phase 6H-A(2) changes the default
 Hauk-style project z-score export to participant-first source-space z-scores,
 then group raw mean, median, and 20% trimmed-mean summaries, while keeping the
 older group-first model as a deprecated advanced fallback. Phase 6H-A(3)
-computes a one-sample two-tailed sign-flip source-space cluster-permutation
-mask from participant z-score maps and stores the significant source vertices
-in prepared payload metadata for publication-style L2-MNE display. Phase
+computes a Hauk et al. 2025-aligned one-sample positive-tail sign-flip
+source-space cluster-permutation mask from participant z-score maps and stores
+the significant source vertices in prepared payload metadata for
+publication-style L2-MNE display. Phase
 6H-A(4) writes producer-side descriptive source-space
 lateralization CSV/JSON sidecars for participant and group-summary maps.
 Phase 6H-A(5) preserves fsaverage source-space vertex IDs and hemisphere
@@ -59,6 +60,13 @@ Future LORETA, eLORETA, sLORETA, beamformer, or other source-estimation methods
 should become sibling producers that target the prepared JSON/payload bridge
 and stay separate from the renderer, display fsaverage loader, and project I/O
 unless a new plan explicitly scopes integration.
+
+The current project workflow treats L2-MNE surface and eLORETA volume as the
+default source-map set. If no default project source-map manifests exist on
+first open, the GUI starts one background rebuild that writes both method
+outputs. The Options dialog exposes one manual rebuild action for both default
+methods; the visible Method selector is for choosing among already-loaded maps,
+not for deciding which maps to generate.
 
 The prepared payload contract stage is complete, Phase 6A established the first
 swappable source method, Phase 6B established a read-only project-input
@@ -84,13 +92,15 @@ summaries so source maps can be compared against known sensor-space BCA
   coverage, source lateralization highlights, beta limitations, and recommended
   manual checks. The next recommended development slice is manual scientific
   validation of masked maps against scalp maps, unmasked maps, source-space
-  lateralization summaries, and the deprecated group-first output before
-  expanding cluster controls or adding another source method.
+  lateralization summaries, and the deprecated group-first output. Source-map
+  build performance work, including selected-column FullFFT parsing and a
+  project-local inverse-model cache, is deferred as a later non-essential fix
+  before expanding cluster controls or adding another source method.
 
 ## Date
 
 Created: 2026-06-05
-Updated: 2026-06-09
+Updated: 2026-06-19
 
 ## Goal
 
@@ -128,7 +138,7 @@ producing the same validated prepared payload/manifest contract.
   - `src/Main_App/gui/icons.py` for sidebar icons.
   - `src/Main_App/gui/project_workflows.py` for retiring project-bound embedded page instances after project changes.
 - `requirements.txt` already includes `pyvista`, `pyvistaqt`, `vtk`, and `nibabel`; PyVista/VTK should be the first 3D backend unless implementation testing shows it cannot embed reliably.
-- The local MNE dependency exposes `mne.datasets.fetch_fsaverage(subjects_dir=None)` and `mne.read_surface(...)`, which can support an fsaverage mesh loader without bundling MRI/template data into source.
+- The local MNE dependency exposes fsaverage manifests and `mne.read_surface(...)`, which support an fsaverage mesh loader without bundling MRI/template data into source.
 - Automatic fsaverage fetches target `.fpvs_cache/mne/MNE-fsaverage-data/`
   under the FPVS Toolbox repository root. Generic stale MNE subjects-dir config
   under `src/` or `docs/` is ignored; explicit
@@ -171,7 +181,8 @@ New tool implementation:
   - `fsaverage_cache.py`: root-local/configured fsaverage cache policy.
   - `fsaverage_mesh.py`: lazy fsaverage fetch/load/decimation helpers for Slice 2.
   - `dummy_activation.py`: deterministic synthetic LORETA-like condition data for Slice 3, Slice 4, and source-model-agnostic 5A demos.
-  - `conditions.py`: condition list/model helpers for Slice 4.
+- `conditions.py`: synthetic condition list/model helpers retained for
+  tests/developer validation.
   - `source_payloads.py`: renderer-facing payload contract for cortical surface points, cortical/deep meshes, volume/deep source representations, and future ROI meshes.
   - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
@@ -206,10 +217,10 @@ Avoid:
 - Bundling `fsaverage` MRI/template data in `src/`, `docs/`,
   `src/quarantine/`, or package data. Automatic fetches should install into the
   untracked FPVS Toolbox root cache at
-  `.fpvs_cache/mne/MNE-fsaverage-data/`. Explicit
-  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides may point elsewhere only if they do
-  not target source or docs paths; stale generic MNE config candidates that do
-  target those forbidden paths are ignored.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`, including transient ZIP archives.
+  Configured fsaverage paths must not target source, docs, temp directories, or
+  common admin-protected system folders; stale generic MNE config candidates
+  that do target forbidden paths are ignored.
 - Re-enabling VTK depth peeling for transparent mesh modes without visible
   Windows/VTK driver testing. The current renderer deliberately uses plain
   alpha blending so opacity values below 100% still show the brain mesh.
@@ -253,19 +264,18 @@ Done means:
 ## Phase 2: Real Anatomical Brain Mesh
 
 Status: Implemented. The visualizer starts with the synthetic fallback and
-loads/fetches fsaverage through MNE into the untracked FPVS Toolbox root cache
-in a worker when the tool opens. A visible `Fetch/load fsaverage` button is no
-longer part of the primary UI.
+loads/fetches fsaverage through the root-local FPVS cache in a worker when the
+tool opens. A visible `Fetch/load fsaverage` button is no longer part of the
+primary UI.
 
 Objective:
 
 - Replace the Phase 1 placeholder mesh with an actual anatomical brain surface.
-- Prefer fsaverage as the first target, loaded through MNE rather than bundled into the repo.
+- Prefer fsaverage as the first target, loaded through MNE readers rather than bundled into the repo.
 - Use a lazy mesh loader that can:
   - locate an existing fsaverage subject directory if configured;
-  - fetch fsaverage through `mne.datasets.fetch_fsaverage(...)` into
-    `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS Toolbox root when
-    missing;
+  - fetch fsaverage into `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS
+    Toolbox root when missing, including transient ZIP archives;
   - read an appropriate surface with `mne.read_surface(...)`;
   - convert vertices/faces into PyVista `PolyData`;
   - optionally decimate or use a lower-density surface for responsive interaction.
@@ -395,7 +405,8 @@ Implementation notes:
 
 Done means:
 
-- The condition selector offers occipital, frontal, and deep medial-temporal synthetic demos.
+- Historical synthetic demos remain available to tests/developer validation,
+  but the live condition selector no longer exposes them.
 - Switching to the deep demo updates the heatmap layer immediately and places smooth internal mesh blobs inside the transparent brain volume.
 - The renderer accepts a general source payload without knowing how values were calculated.
 - Existing opacity, visibility, zoom, rotate, and reset behavior still works.
@@ -456,7 +467,10 @@ Done means:
 
 ### Phase 5D: Prepared Source Payload Fixture
 
-Status: Implemented. The condition selector includes a `Prepared source-map fixture` demo condition that routes prepared coordinates/scalars through the same adapter bridge future real source outputs should use.
+Status: Implemented and later removed from the normal live selector. The
+prepared source-map fixture still routes prepared coordinates/scalars through
+the same adapter bridge future real source outputs should use in validation
+contexts.
 
 Objective:
 
@@ -512,8 +526,10 @@ Objective:
 - Load multiple prepared source payloads as a named condition set.
 - Keep the manifest format separate from real LORETA calculation and project-output discovery.
 - Resolve manifest payload paths relative to the manifest file and reject paths that escape the manifest folder.
-- Let the condition selector switch among imported prepared source maps using the same renderer path as single-file imports.
-- Preserve existing synthetic demo conditions and the single-payload JSON import.
+- Let the condition selector switch among imported prepared source-map
+  conditions using the same renderer path as single-file imports.
+- Preserve the single-payload JSON import while keeping synthetic demo
+  conditions out of the normal live selector.
 
 Implementation notes:
 
@@ -829,8 +845,9 @@ Implementation notes:
 - The `Load source JSON` and `Load manifest` dialogs now prefer the last import
   folder, then the active project's 6D z-score output folder, then the 6C
   diagnostic amplitude output folder, then the active project root.
-- The diagnostic amplitude exporter remains available from Source Map Options.
-  When run, its project-local manifest path is
+- The diagnostic amplitude exporter is no longer exposed from Source Map
+  Options. Manual/developer producer runs still write the project-local
+  manifest path
   `6 - Source Localization/L2-MNE Cortical Surface Beta/project_l2_mne_cortical_surface_beta_manifest.json`.
   The current default project path is the Phase 6D Hauk-style z-score export;
   a diagnostic amplitude manifest is not required for the viewer to display the
@@ -1046,11 +1063,11 @@ Implementation notes completed:
   - a short method summary;
   - `Include Stats QC flagged participants in source-map calculations`;
   - `Rebuild z-score maps`;
-  - `Build diagnostic amplitude maps`;
   - `Load source JSON`;
   - `Load manifest`.
-- `ProjectSourceMapExportWorker` now carries `include_flagged_subjects` to both
-  the Hauk-style z-score producer and the diagnostic amplitude producer.
+- `ProjectSourceMapExportWorker` now carries `include_flagged_subjects` to the
+  Hauk-style z-score producer. The diagnostic amplitude producer is no longer a
+  normal GUI rebuild path.
 - The GUI logs one compact start line and one compact completion/failure line
   for project source-map rebuilds, including method/export mode, manifest path
   when available, condition count, and flagged/excluded participant counts.
@@ -1271,9 +1288,9 @@ Implemented scope:
 - `project_l2_mne_hauk_zscore_export.py` defaults real-project z-score exports
   to the participant-first model and retains the old group-first export as
   `deprecated_group_first`.
-- The Source Map Options dialog exposes the participant-first default and the
-  deprecated group-first model selector without moving calculation logic into
-  the GUI.
+- The Source Map Options dialog uses the participant-first default and no longer
+  exposes the deprecated group-first model selector. The fallback producer path
+  remains outside the normal GUI.
 - User and agent docs describe the participant-first calculation order,
   summary outputs, deprecated fallback, Stats-QC inclusion rule, and
   pre-cluster-mask limitation addressed by Phase 6H-A(3).
@@ -1335,8 +1352,8 @@ Done means:
   individual viewing.
 - Existing viewer condition selection can load the new group-summary payloads
   without renderer changes.
-- Advanced settings can still opt into the deprecated group-first model, with
-  clear labeling and low-noise status/log messages.
+- Manual/developer producer runs can still opt into the deprecated group-first
+  model with explicit metadata and low-noise status/log messages.
 - JSON metadata distinguishes participant-first summaries from deprecated
   group-first exports and records the aggregation method, participant inclusion
   rule, harmonic list, neighboring-bin policy, and inverse settings.
@@ -1363,14 +1380,14 @@ Objective:
 
 Implemented scope:
 
-- `l2_mne_hauk_zscore.py` computes one-sample, two-tailed sign-flip
+- `l2_mne_hauk_zscore.py` computes one-sample, positive-tail sign-flip
   source-space cluster-permutation masks from participant z-score maps.
 - Candidate clusters are formed from source vertices whose one-sample t
-  statistic against zero passes the two-tailed cluster-forming threshold.
-  Positive and negative clusters are formed separately, and mesh adjacency comes
-  from the fsaverage/source-space surface faces.
+  statistic against zero passes the Hauk et al. 2025 publication-code
+  positive-tail cluster-forming threshold. Mesh adjacency comes from the
+  fsaverage/source-space surface faces.
 - Cluster-level correction uses the maximum sign-corrected cluster mass from
-  sign-flipped participant maps. Defaults are cluster-forming `p = .05`,
+  sign-flipped participant maps. Defaults are cluster-forming `p = .00001`,
   corrected cluster `alpha = .05`, deterministic seed `20260609`, and up to
   `10000` permutations, with exact sign flips when the participant count is
   small enough.
@@ -1380,22 +1397,25 @@ Implemented scope:
   summaries in metadata. Payload `values` remain unchanged.
 - The participant sidecar records condition-level cluster-mask summaries for
   future individual/QC tooling.
-- `cortical_paint.py` treats a producer-provided cluster mask as primary for
-  L2-MNE cortical paint. Older unmasked payloads fall back to the manual
-  z-score display cutoff.
-- `gui.py` labels masked maps as source-space cluster masked and uses the
-  retained signed source z-score range for cluster-masked cortical displays.
+- `cortical_paint.py` treats a non-empty producer-provided cluster mask as
+  primary for L2-MNE cortical paint. Older unmasked payloads and empty Hauk
+  masks fall back to the manual exploratory z-score display cutoff.
+- `gui.py` labels masked maps as Hauk et al. (2025) cluster masked, warns when
+  no vertices survive the cluster mask, and uses retained signed source z-score
+  ranges for non-empty cluster-masked cortical displays.
 
 Locked decisions:
 
 - Cluster masking is enabled by default only for participant-first Hauk-style
   L2-MNE source-space z-score exports. The deprecated group-first model cannot
   produce this inferential mask.
-- The cluster test is two-tailed against zero so publication-style displays can
-  retain significant positive and negative source-space clusters.
+- The cluster test is positive-tail against zero to match the Hauk et al. 2025
+  source-space publication code. Negative source-space clusters are not part of
+  the default Hauk mask.
 - The manual z-score display cutoff remains available in Source Map Options
-  for exploratory/unmasked payloads and future display modes, but it is not
-  the primary publication mask when a cluster mask is present.
+  for exploratory/unmasked payloads, underpowered masks, empty Hauk masks, and
+  future display modes, but it is not the primary publication mask when a
+  non-empty cluster mask is present.
 - Cluster masks are source-space statistical results, not renderer filters.
   Future LORETA/eLORETA volume methods must add their own method-appropriate
   statistical masks rather than reusing cortical surface assumptions blindly.
@@ -1530,6 +1550,108 @@ Done means:
   protected-edit/source-localization audits, and a documented visible/manual
   smoke path pass. Do not run offscreen Qt tests locally.
 
+#### Phase 6H-A(6): Source-Map Build Performance
+
+Status: Deferred. Saved as a later non-essential performance fix, not required
+for beta eLORETA volume branch closeout.
+
+Objective:
+
+- Speed up first-time and manual real-project source-map builds without
+  changing source-localization math, project input formats, or renderer
+  behavior.
+- Preserve the calculation/rendering boundary. Excel parsing, inverse-model
+  cache management, source estimation, and performance logging belong in
+  `source_producers/` and project export orchestration; the renderer and
+  importer continue to consume prepared payloads only.
+- Prefer project-local source-model caches over a global inverse cache so future
+  projects can vary by acquisition format, montage, channel set, BIDS metadata,
+  covariance policy, source method, or head/source model without silently
+  reusing the wrong inverse model.
+
+Planned scope:
+
+- Replace the Hauk z-score FullFFT `openpyxl.load_workbook(..., read_only=True)`
+  hot path in `project_fullfft_inputs.py` with an exact selected-column `.xlsx`
+  XML reader, reusing `Tools.Stats.io.xlsx_selected_reader` where practical.
+  The reader must load only `Electrode` plus the target and neighboring-bin
+  columns required by `ProjectFullFftBinPlan`.
+- Keep the existing FullFFT validation unchanged: exact selected harmonic
+  columns, target/noise-bin plan consistency, BioSemi64 electrode count/order,
+  finite numeric source topography values, flagged/excluded participant policy,
+  and flat or condition/group workbook layouts.
+- Add structured timing for source-map builds so logs separate FullFFT workbook
+  parsing, input assembly, fsaverage/inverse-model preparation, participant
+  source estimation, cluster-mask computation, payload writing, manifest
+  validation, and validation-report generation.
+- Add a project-local inverse-model cache under the source-localization output
+  area, for example
+  `6 - Source Localization/.inverse_cache/<method_signature>/`, with cache
+  metadata that records the exact scientific/model inputs used to build it.
+- Cache entries must be keyed by a strict model signature, not by project name
+  alone. The signature should include method ID, MNE version, source spacing,
+  channel names and order, montage/sensor-coordinate source, reference and
+  projection policy, covariance policy or covariance hash, inverse settings
+  (`method`, `lambda2`, `loose`, `depth`, `fixed`), fsaverage/template identity
+  or path/hash, and any future project-specific acquisition/source-model inputs
+  such as BIDS metadata, subject/head model identifiers, bad-channel policy, or
+  source method.
+- A cache hit may reuse only the inverse/model components. It must still read
+  current project FullFFT inputs and regenerate z-score payloads, masks,
+  lateralization summaries, manifests, and validation reports from the current
+  project data and user options.
+- A cache miss, missing/corrupt cache file, MNE version/signature mismatch, or
+  method-setting mismatch must rebuild the inverse model and overwrite or
+  create a new signature-specific project-local cache entry. It must not fall
+  back to a stale global cache silently.
+- The initial implementation may support only the current fsaverage BioSemi64
+  `ico3` Hauk-style L2-MNE path. It should be structured so future BioSemi,
+  BIDS, montage-varying, subject-specific, or alternate inverse-method projects
+  can add their own signature fields and cache builders.
+- Keep disk usage transparent in metadata and logs. Current `ico3` expectations
+  are about 30-50 MiB per project cache entry; higher source spacings may be
+  substantially larger and should remain opt-in.
+- Consider a second optimization that batches all participant target/noise
+  topographies for a condition through the estimator in one call, then splits
+  results back into participant z-score maps. This must be guarded by focused
+  equivalence tests because it changes execution shape while preserving
+  numerical results.
+
+Locked decisions:
+
+- The root `.fpvs_cache/mne/MNE-fsaverage-data/` remains the shared fsaverage
+  template data cache and is not duplicated per project.
+- The inverse-model cache is project-local by default. A future global
+  deduplication layer may be added only if it is signature-safe and never
+  obscures which inverse model a project used.
+- Cached inverse models are reusable model/preparation artifacts, not cached
+  source-map results. They must not cache participant z-score values,
+  condition maps, cluster masks, lateralization rows, validation reports, or
+  renderer payloads as substitutes for rebuilding from current project inputs.
+- Cache invalidation is scientific and structural: if any signature field
+  changes, rebuild the inverse model rather than adapting the old cache.
+- Manual rebuild and first-time automatic build must use the same optimized
+  input reader and cache validation path.
+
+Done means:
+
+- First-time source-map builds and manual rebuilds use the selected-column
+  FullFFT reader and continue to pass existing focused LORETA input and export
+  tests.
+- Rebuilding the same project with an unchanged inverse-model signature uses
+  the project-local inverse cache and logs a clear cache hit. Changing spacing,
+  channel order, inverse settings, MNE version, covariance policy, or other
+  signature inputs causes a clear cache miss and rebuild.
+- Cache metadata is written beside the project-local cache and includes enough
+  information to audit the model used for generated source maps.
+- Focused tests prove reader equivalence to the previous FullFFT adapter,
+  missing-sheet/column diagnostics, cache hit/miss behavior, signature
+  invalidation, corrupt-cache fallback, and optional batched-estimator numerical
+  equivalence if batching is implemented.
+- Compile, ruff, focused `tests/loreta`, protected-edit/source-localization
+  audits, project-path audit, and a documented visible/manual smoke path pass.
+  Do not run offscreen Qt tests locally.
+
 ## Integration Safety
 
 - Preserve preprocessing order, project I/O formats, diagnostics, loading, analytics, Stats behavior, and export formats.
@@ -1591,6 +1713,11 @@ Additional visible smoke path for current and future slices:
 7. Phase 6G: confirm publication split view, single cortical surface view, and
    transparent mesh view all render the same selected condition without
    rebuilding source JSON.
+8. eLORETA volume: switch from Transparent brain mesh to MRI slices, confirm
+   the axial/coronal/sagittal slice view renders from the same selected
+   condition, change conditions and confirm the slice planes remain fixed,
+   then export the MRI slice figure and confirm matched PDF/PNG files are
+   written.
 
 ## Open Decisions
 
@@ -1599,6 +1726,7 @@ Additional visible smoke path for current and future slices:
   topographies are summed across selected harmonics, matching-offset
   neighboring-bin topographies are summed across selected harmonics, and the
   source-space z-score is computed from those target/noise source estimates.
-- Future method target after beta L2-MNE: LORETA/eLORETA volume, mixed
-  cortical-volume source space, subject-specific forward models, or another
-  explicitly scoped model.
+- Future method target after beta L2-MNE and beta eLORETA volume: mixed
+  cortical-volume source space, subject-specific forward models, another source
+  method, or additional scientific-validation controls should each be
+  explicitly scoped before implementation.

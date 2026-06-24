@@ -46,6 +46,9 @@ INDIVIDUAL_ELECTRODE_FDR_SHEET = "Individual_Electrode_FDR"
 OLD_VS_NEW_DETECTABILITY_COMPARISON_SHEET = "Old_vs_New_Detectability_Comparison"
 Z_SCORE_REPORT_SHEET = "Z_Score_Report"
 BASE_RATE_SUMMARY_SHEET = "Base_Rate_Summary"
+QC_OUTLIER_VALUES_SHEET = "QC_Outlier_Values"
+QC_OUTLIER_SUMMARY_SHEET = "QC_Outlier_Summary"
+QC_NORMALITY_CHECKS_SHEET = "QC_Normality_Checks"
 
 DEFAULT_REPORT_LABEL = "Semantic categories"
 DEFAULT_TARGET_RESPONSE_LABEL = "semantic categorization response"
@@ -111,6 +114,7 @@ class ReportOutputOptions:
     spectra: bool = True
     scalp_maps: bool = True
     individual_figures: bool = True
+    qc_figures: bool = True
 
 
 @dataclass(frozen=True)

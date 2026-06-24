@@ -8,7 +8,6 @@ from typing import Callable, Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.io.excel_io import safe_read_excel
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
     FIXED_PREDEFINED_POLICY_ID,
@@ -16,6 +15,11 @@ from Tools.Stats.analysis.dv_policy_settings import (
     LOCKED_ODDBALL_FREQUENCY_HZ,
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
+from Tools.Stats.io.xlsx_selected_reader import (
+    MissingXlsxColumnsError,
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+)
 
 
 @dataclass(frozen=True)
@@ -357,22 +361,20 @@ def _prepare_fixed_predefined_bca_data(
         for cond_name in conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
             all_subject_data[pid].setdefault(cond_name, {})
+            roi_values = {roi_name: np.nan for roi_name in rois_map.keys()}
+            roi_provenance: dict[str, dict[str, object]] = {}
+            if file_path and Path(file_path).exists():
+                roi_values, roi_provenance = _aggregate_bca_sum_harmonics_for_all_rois(
+                    file_path=file_path,
+                    rois=rois_map,
+                    log_func=log_func,
+                    harmonic_freqs=list(selection.included_frequencies_hz),
+                    provenance_enabled=provenance_map is not None,
+                )
+            else:
+                log_func(f"Missing file for {pid} {cond_name}: {file_path}")
             for roi_name in rois_map.keys():
-                sum_val = np.nan
-                diag_meta: Optional[dict[str, object]] = None
-                if provenance_map is not None:
-                    diag_meta = {}
-                if file_path and Path(file_path).exists():
-                    sum_val = _aggregate_bca_sum_harmonics(
-                        file_path,
-                        roi_name,
-                        log_func,
-                        list(selection.included_frequencies_hz),
-                        rois=rois_map,
-                        diag_meta=diag_meta,
-                    )
-                else:
-                    log_func(f"Missing file for {pid} {cond_name}: {file_path}")
+                sum_val = roi_values.get(roi_name, np.nan)
                 all_subject_data[pid][cond_name][roi_name] = sum_val
                 if provenance_map is not None:
                     provenance = {
@@ -383,8 +385,8 @@ def _prepare_fixed_predefined_bca_data(
                         "raw_cell": None,
                         "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
                     }
-                    if diag_meta:
-                        provenance.update(diag_meta)
+                    if roi_name in roi_provenance:
+                        provenance.update(roi_provenance[roi_name])
                     provenance["col_label"] = list(selection.included_columns)
                     provenance_map[(pid, cond_name, roi_name)] = provenance
 
@@ -427,10 +429,11 @@ def _find_first_bca_columns(
             if not file_path:
                 continue
             try:
-                df_bca = safe_read_excel(
-                    file_path, sheet_name="BCA (uV)", index_col="Electrode"
+                header = read_xlsx_sheet_header(
+                    file_path,
+                    sheet_name="BCA (uV)",
                 )
-                return df_bca.columns
+                return pd.Index(column for column in header if column != "Electrode")
             except Exception as exc:  # noqa: BLE001
                 log_func(f"Failed to read BCA columns from {file_path}: {exc}")
     return None
@@ -452,46 +455,110 @@ def _aggregate_bca_sum_harmonics(
             diag_meta.setdefault("col_label", None)
             diag_meta.setdefault("raw_cell", None)
 
-        df_bca = safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
-        df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
-
         roi_map = rois if rois is not None else _current_rois_map()
-        roi_channels = [str(ch).strip().upper() for ch in roi_map.get(roi_name, [])]
-        if not roi_channels:
-            log_func(f"ROI {roi_name} not defined.")
-            return np.nan
+        values, provenance = _aggregate_bca_sum_harmonics_for_all_rois(
+            file_path=file_path,
+            rois={roi_name: list(roi_map.get(roi_name, []))},
+            log_func=log_func,
+            harmonic_freqs=harmonic_freqs,
+            provenance_enabled=diag_meta is not None,
+        )
+        if diag_meta is not None and roi_name in provenance:
+            diag_meta.update(provenance[roi_name])
+        return values.get(roi_name, np.nan)
 
-        roi_chans = [ch for ch in roi_channels if ch in df_bca.index]
-        if not roi_chans:
-            log_func(f"No overlapping BCA data for ROI {roi_name} in {file_path}.")
-            return np.nan
-        if diag_meta is not None:
-            diag_meta["row_label"] = roi_chans
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, RuntimeError):
+            raise
+        log_func(f"Error aggregating fixed predefined BCA for {file_path}, ROI {roi_name}: {exc}")
+        return np.nan
 
-        df_bca_roi = df_bca.loc[roi_chans].dropna(how="all")
-        if df_bca_roi.empty:
-            log_func(f"No data for ROI {roi_name} in {file_path}.")
-            return np.nan
 
-        cols_to_sum = [f"{float(freq_val):.4f}_Hz" for freq_val in harmonic_freqs]
-        missing_columns = [column for column in cols_to_sum if column not in df_bca_roi.columns]
+def _aggregate_bca_sum_harmonics_for_all_rois(
+    *,
+    file_path: str,
+    rois: Dict[str, List[str]],
+    log_func: Callable[[str], None],
+    harmonic_freqs: List[float],
+    provenance_enabled: bool,
+) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
+    values = {roi_name: np.nan for roi_name in rois.keys()}
+    provenance: dict[str, dict[str, object]] = {}
+    cols_to_sum = [f"{float(freq_val):.4f}_Hz" for freq_val in harmonic_freqs]
+    try:
+        df_bca = read_xlsx_sheet_selected_columns(
+            file_path,
+            sheet_name="BCA (uV)",
+            required_columns=["Electrode", *cols_to_sum],
+        )
+    except MissingXlsxColumnsError as exc:
+        missing_columns = [column for column in cols_to_sum if column in exc.missing_columns]
         if missing_columns:
             raise RuntimeError(
                 "Fixed predefined harmonic summation requires exact BCA harmonic "
                 f"columns in every included workbook. Missing columns in {file_path}: "
                 f"{missing_columns[:8]}"
-            )
+            ) from exc
+        log_func(f"Error reading BCA sheet for {file_path}: {exc}")
+        return values, provenance
+    except Exception as exc:  # noqa: BLE001
+        log_func(f"Error reading BCA sheet for {file_path}: {exc}")
+        return values, provenance
 
-        if diag_meta is not None:
-            diag_meta["col_label"] = cols_to_sum
-            diag_meta["raw_cell"] = df_bca_roi[cols_to_sum].to_dict(orient="index")
+    if "Electrode" not in df_bca.columns:
+        log_func(f"Error reading BCA sheet for {file_path}: missing Electrode column")
+        return values, provenance
 
-        bca_block = (
-            df_bca_roi[cols_to_sum]
-            .apply(pd.to_numeric, errors="coerce")
-            .replace([np.inf, -np.inf], np.nan)
+    df_bca = df_bca.set_index("Electrode")
+    df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
+    missing_columns = [column for column in cols_to_sum if column not in df_bca.columns]
+    if missing_columns:
+        raise RuntimeError(
+            "Fixed predefined harmonic summation requires exact BCA harmonic "
+            f"columns in every included workbook. Missing columns in {file_path}: "
+            f"{missing_columns[:8]}"
         )
-        bca_vals = bca_block.sum(axis=1, min_count=1)
+
+    numeric_bca = (
+        df_bca[cols_to_sum]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    for roi_name, roi_channels in rois.items():
+        roi_channel_names = [
+            str(ch).strip().upper()
+            for ch in (roi_channels or [])
+        ]
+        if not roi_channel_names:
+            log_func(f"ROI {roi_name} not defined.")
+            continue
+
+        roi_chans = [ch for ch in roi_channel_names if ch in numeric_bca.index]
+        if not roi_chans:
+            log_func(f"No overlapping BCA data for ROI {roi_name} in {file_path}.")
+            continue
+        df_bca_roi = numeric_bca.loc[roi_chans].dropna(how="all")
+        if df_bca_roi.empty:
+            log_func(f"No data for ROI {roi_name} in {file_path}.")
+            if provenance_enabled:
+                provenance[roi_name] = _empty_fixed_provenance(
+                    file_path,
+                    row_label=roi_chans,
+                    col_label=cols_to_sum,
+                )
+            continue
+
+        if provenance_enabled:
+            provenance[roi_name] = {
+                "source_file": file_path,
+                "sheet": "BCA (uV)",
+                "row_label": roi_chans,
+                "col_label": cols_to_sum,
+                "raw_cell": df_bca_roi[cols_to_sum].to_dict(orient="index"),
+                "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
+            }
+
+        bca_vals = df_bca_roi.sum(axis=1, min_count=1)
         bca_vals = pd.to_numeric(bca_vals, errors="coerce").replace(
             [np.inf, -np.inf], np.nan
         )
@@ -500,16 +567,27 @@ def _aggregate_bca_sum_harmonics(
                 f"Warning: All-NaN BCA values after summation for ROI {roi_name} "
                 f"({file_path})."
             )
-            return np.nan
+            continue
 
         out = float(bca_vals.mean(skipna=True))
-        return out if np.isfinite(out) else np.nan
+        values[roi_name] = out if np.isfinite(out) else np.nan
+    return values, provenance
 
-    except Exception as exc:  # noqa: BLE001
-        if isinstance(exc, RuntimeError):
-            raise
-        log_func(f"Error aggregating fixed predefined BCA for {file_path}, ROI {roi_name}: {exc}")
-        return np.nan
+
+def _empty_fixed_provenance(
+    file_path: str | None,
+    *,
+    row_label: list[str],
+    col_label: list[str],
+) -> dict[str, object]:
+    return {
+        "source_file": file_path,
+        "sheet": "BCA (uV)",
+        "row_label": row_label,
+        "col_label": col_label,
+        "raw_cell": None,
+        "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
+    }
 
 
 def _parse_bca_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str, int]]:

@@ -25,6 +25,12 @@ Implemented in `codex/publication-report-workflow` initial slice:
   manuscript-facing Z-score inventories, semantic/color ratio summaries,
   planned ROI test diagnostics, Holm-corrected manuscript comparison decisions,
   lateralization contrasts, and base-rate summaries.
+- Built-in descriptive QC distribution outputs: participant-level IQR outlier
+  tables, Shapiro-Wilk/Q-Q normality diagnostics, and manual-inspection
+  boxplot/histogram/Q-Q figures under the publication report figure folder.
+- The separate Publication Workflow stepper has been removed; Publication
+  Report remains a manually-run embedded tool, with automated downstream figure
+  orchestration deferred.
 - Focused headless tests for generated Markdown, DOCX, workbook, audit JSON,
   missing selected conditions, and single-group enforcement.
 
@@ -186,8 +192,11 @@ Expected files:
 - `Publication_Report_Data.xlsx`: source workbook for all reported numbers.
 - `Publication_Report_Audit.json`: machine-readable settings and provenance.
 - `Figure_Manifest` workbook sheet and warning entries for requested spectra,
-  scalp-map, and optional individual-detectability figure families. Automated
-  figure file export is deferred.
+  scalp-map, optional individual-detectability, and QC figure families.
+  Automated non-QC figure file export is deferred where figure-family support
+  is not yet wired.
+- `figures/`: spectra, scalp maps, and optional individual-detectability figures.
+  - `figures/qc/`: descriptive QC distribution figures for manual inspection.
 - `logs/`: readable run log and warnings.
 
 ## Report Sections
@@ -288,7 +297,18 @@ Initial workbook sheets:
   from harmonic selection, ROI harmonic summaries, and base-rate summaries.
 - `Base_Rate_Summary`: 6 Hz and harmonic summaries by condition and base-rate
   ROI.
-- `Figure_Manifest`: requested figure families, status, and source parameters.
+- `QC_Outlier_Values`: participant-level manual-review rows for report-derived
+  distribution metrics, including IQR fences and participant IDs flagged as
+  high/low IQR outliers.
+- `QC_Outlier_Summary`: condition x ROI x metric IQR summaries with outlier
+  counts and Shapiro-Wilk/Q-Q fields merged for review.
+- `QC_Normality_Checks`: Shapiro-Wilk, skewness, kurtosis, and Q-Q correlation
+  diagnostics for report-derived condition x ROI distributions.
+- `Sensitivity_Summary`: full-sample versus included-participant comparison
+  rows for key manuscript-facing outputs after manual participant-level
+  exclusions.
+- `Figure_Manifest`: requested/generated figure families, status, and source
+  parameters.
 - `Warnings`: missing sheets, missing electrodes, skipped files, and
   non-fatal assumptions.
 
@@ -394,6 +414,42 @@ Use the David/Rossion-compatible summed-harmonic Z logic:
 Add table exports so the figures are not the only source of individual-level
 results.
 
+### QC Distribution Diagnostics
+
+Add descriptive manual-review diagnostics to every report bundle when QC figures
+are enabled:
+
+- compute IQR fences separately for each condition x ROI x metric distribution;
+- flag participant-level values outside 1.5xIQR fences without excluding them;
+- export participant IDs, values, fences, and high/low direction in source-data
+  workbook sheets;
+- run Shapiro-Wilk and Q-Q correlation diagnostics where enough finite
+  observations are available;
+- render boxplots with participant points and labeled IQR outliers, histograms
+  with median and IQR-fence markers, and Q-Q plots for manual inspection;
+- keep QC diagnostics descriptive only. They must not alter participant
+  inclusion, harmonic selection, statistical tests, or manuscript counts unless
+  the user explicitly changes the report exclusion inputs and reruns the report.
+
+### Exclusion Sensitivity Summary
+
+When manual participant-level exclusions are present, add an interpretable
+sensitivity summary to the report bundle:
+
+- rerun key publication-facing summaries on the full valid sample and on the
+  frozen included-participant sample;
+- compare summed-BCA condition x ROI estimates, manuscript-facing condition
+  comparisons, and participant-level detectability counts in v1;
+- report full-sample N, included N, excluded participant IDs, estimates,
+  p-values or decisions, and absolute/percent change;
+- label each conclusion as unchanged, weaker but same conclusion, stronger but
+  same conclusion, or changed conclusion;
+- present the plain-language conclusion before detailed p-value changes so
+  non-expert users can interpret the result without reading every statistical
+  column;
+- treat sensitivity as an audit/interpretation output only, not as an automatic
+  rule for adding or removing exclusions.
+
 ### Base-Rate Response
 
 Add a base-rate summary that is separate from the oddball response:
@@ -471,6 +527,7 @@ is stable. Candidate fields:
 - `generate_spectra`
 - `generate_scalp_maps`
 - `generate_individual_figures`
+- `generate_qc_figures`
 - `output_markdown`
 - `output_docx`
 

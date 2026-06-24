@@ -1,0 +1,4 @@
+interface:
+  display_name: "Publication Table Export"
+  short_description: "Create publication-ready FPVS table assets"
+  default_prompt: "Use $publication-table-export to create a table-only SVG and 600-DPI PNG under a project root's 9 - Tables folder."

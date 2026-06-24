@@ -58,6 +58,7 @@ Repo-local skills live in `.agents/skills/`.
 - `project-path-audit`: file dialogs, manifests, exports, imports, generated files, and project-root path discipline.
 - `pytest-qt-smoke`: maintain pytest-qt smoke coverage definitions, but do not run pytest-qt/offscreen GUI tests locally unless the user explicitly approves a safe visible test environment.
 - `cleanup-generated-files`: generated build, cache, temp, and stale local data cleanup.
+- `publication-table-export`: publication-ready table assets using shared toolbox typography, SVG plus 600-DPI PNG, saved under a project root in `9 - Tables`.
 
 Run skill-local scripts before manual inspection when they apply:
 

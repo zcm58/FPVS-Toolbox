@@ -74,8 +74,9 @@ each participant independently, compute participant source-space z-score maps,
 and only then aggregate those z-score maps into group raw mean, median, and 20%
 trimmed-mean payloads. The participant sidecar is for future individual viewing;
 the renderer still loads the group prepared payloads. The older group-first
-model is a deprecated advanced fallback only and must not be treated as the
-default design precedent.
+model is a deprecated advanced fallback only, must not be treated as the
+default design precedent, and should stay out of the normal Source Map Options
+GUI.
 
 Phase 6H-A(3) adds source-space cluster-permutation masks for participant-first
 Hauk-style L2-MNE z-score maps. The mask is computed only in
@@ -113,6 +114,27 @@ manifest, payload, participant-sidecar, and lateralization files. It is a
 review artifact only and must not compute inverse estimates, cluster masks,
 lateralization statistics, or renderer-derived facts.
 
+The eLORETA volume branch adds a beta sibling method under `source_producers/`.
+It reuses the project FullFFT participant-first z-score contract but estimates
+values in an fsaverage/template volume source space with MNE eLORETA. It writes
+`volume_points` payloads under `6 - Source Localization/eLORETA Volume Beta/`.
+Its cluster masks are recomputed in volume source space using method-neutral
+`cluster_mask_source_indices`; do not reuse or modify the L2 cortical-surface
+mask. When no project source-map manifests exist, the GUI should automatically
+generate both default source-map methods in one background rebuild action:
+L2-MNE surface and eLORETA volume. The Options dialog should expose one rebuild
+button that regenerates both default methods rather than asking the user to pick
+a numerical source method. The GUI may switch between loaded L2-MNE surface and
+eLORETA volume manifests for visualization, but numerical method selection and
+source estimation stay in `source_producers/`.
+eLORETA volume payloads may be viewed as a transparent 3D contour overlay or
+as orthogonal fsaverage MRI slices. The MRI slice view/export is a display
+adapter only: it maps prepared payload points back into MRI voxel space and
+interpolates existing values for visualization without changing source
+statistics, masks, or saved payloads. The slice planes are standardized from
+the loaded condition set for the current method/summary/mask state so changing
+conditions reuses the same anatomy planes.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -141,6 +163,10 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   - `scalar_fields.py` owns visual color limits and color stops.
   - `cortical_paint.py` owns display-only projection from prepared L2-MNE
     cortical source meshes onto the pial display mesh.
+  - `volume_overlay.py` owns display-only smoothing from prepared volume
+    source points onto a regular renderer grid for transparent volume overlays.
+  - `volume_slices.py` owns display/export-only orthogonal MRI slice rendering
+    for prepared volume point payloads.
   - `fsaverage_mesh.py` owns anatomical mesh loading and display transforms.
 - Helper modules may adapt, validate, normalize for display, and transform
   already-computed values. They must not compute inverse solutions, frequency
@@ -172,11 +198,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   display, and mesh display. It explicitly disables depth peeling so
   transparent meshes remain visible across supported Windows/VTK driver stacks.
   No LORETA math.
-- `fsaverage_cache.py`: shared root-local/configured fsaverage cache path
-  helpers. Automatic fetches use `.fpvs_cache/mne/MNE-fsaverage-data/`;
-  explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides are rejected if they point
-  under `src/` or `docs/`, while stale generic MNE config candidates there are
-  ignored so the root-local cache can still be used.
+- `fsaverage_cache.py`: shared fsaverage cache path helpers. Automatic fetches
+  always use `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS Toolbox root,
+  including transient ZIP archives. Configured candidates are rejected if they
+  point under `src/`, `docs/`, temp directories, or common admin-protected
+  system folders; stale generic MNE config candidates there are ignored so the
+  root-local cache can still be used.
 - `fsaverage_mesh.py`: MNE fsaverage discovery/fetch/read/decimation and
   anatomical display transform construction, including display-only
   topology-matched hemisphere meshes for publication layout. The combined mesh
@@ -185,7 +212,8 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   display canvas. No source estimates.
 - `synthetic_brain.py`: fallback/demo mesh model.
 - `conditions.py` and `dummy_activation.py`: deterministic synthetic conditions
-  and demo-only source maps.
+  and demo-only source maps retained for tests/developer validation, not normal
+  live selector options.
 - `prepared_source_fixture.py`: in-memory source-map fixture shaped like a
   future real-data handoff, with coordinates/scalars/faces/metadata adapted
   through the payload bridge and no inverse-solution math.
@@ -200,14 +228,42 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   prepared source-map contract. Keep examples small, deterministic, and clearly
   marked as not computed from EEG. Keep JSON Schema files here aligned with the
   Python validator and checked-in examples.
-- `source_payloads.py`, `transforms.py`, `scalar_fields.py`, and
-  `cortical_paint.py`: bridge helpers that adapt prepared source payloads to
-  the renderer. Z-score payloads should keep signed values in JSON. L2-MNE
-  cortical-surface z-score payloads render as opaque cortical paint with
+- `source_payloads.py`, `transforms.py`, `scalar_fields.py`,
+  `cortical_paint.py`, and `volume_overlay.py`: bridge helpers that adapt
+  prepared source payloads to the renderer. Z-score payloads should keep signed
+  values in JSON. L2-MNE cortical-surface z-score payloads render as opaque cortical paint with
   producer-provided cluster masks shown as activation and unmasked vertices
   shown as gray cortex. If no producer mask is present, the manual z-score
-  display cutoff remains the fallback behavior. Non-surface z-score payloads
-  may still use positive-only display filtering.
+  display cutoff remains the fallback behavior. Users may disable a saved
+  cluster mask for exploratory viewing; that toggle must only affect display
+  and figure export, not payload metadata, source statistics, or sidecars.
+  Empty masks also use the exploratory manual cutoff as a display fallback:
+  underpowered exact small-sample masks warn that the mask cannot be resolved,
+  while adequately powered empty Hauk masks warn that no vertices survived the
+  cluster mask. In both cases, saved source values remain unchanged and the
+  renderer does not compute statistics. Non-surface z-score payloads may use
+  saved `cluster_mask_source_indices` when the cluster mask is enabled, and
+  positive-only display filtering when the mask is disabled or unavailable.
+  Volume point payloads render through a display-only smoothed grid/contour
+  overlay in transparent mesh mode rather than as source-point sphere glyphs.
+  The transparent mesh view clips volume overlays to the current brain surface
+  so values outside the displayed anatomical context are hidden without
+  changing saved payload values or source-space statistics.
+  The MRI slice view/export uses cached fsaverage MRI anatomy, the current
+  display transform, and prepared `volume_points` values to render axial,
+  coronal, and sagittal slices. It requires cached `fsaverage/mri/brain.mgz`
+  anatomy and builds a visualizer-only 0.5 mm display template under the
+  untracked root `.fpvs_cache/loreta_visualizer/mri_templates/` cache. That
+  display underlay must not replace, mutate, or become a source-estimation
+  dependency for fsaverage, source producers, or other toolbox modules. The
+  MRI slice view/export should surface a visible render/export error if the
+  source anatomy, display template generation, or all-condition slice reference
+  is unavailable. It should keep slice planes stable across conditions, use the
+  same source-mask/exploratory filtering as transparent volume display, crop
+  panels to the anatomy bounds for high-detail embedded viewing, and use a
+  comparable Gaussian-neighbor smoothing policy. It may interpolate values for
+  display and write matched PDF/PNG figures, but it must not compute inverse
+  estimates, z-scores, cluster masks, or condition effects.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer
@@ -236,7 +292,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   perform lateralization statistics, or inspect renderer state.
   `source_validation_report.py` summarizes already-written source output files
   into project-local JSON/Markdown review artifacts; it must not calculate
-  source values, run statistics, or inspect renderer state.
+  source values, run statistics, or inspect renderer state. The eLORETA volume
+  implementation adds `source_space_statistics.py` for source-space-neutral
+  cluster permutation helpers, `eloreta_volume.py` for participant-first
+  eLORETA volume payloads, and `project_eloreta_volume_export.py` for the
+  project-local beta export. These modules are additive siblings to the L2-MNE
+  producers and must not change L2 normalization semantics.
 
 ## Boundary Rules
 
@@ -246,10 +307,11 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not bundle fsaverage MRI/template data in `src/`, `docs/`,
   `src/quarantine/`, or package data. Automatic fetches should install into the
   untracked FPVS Toolbox root cache at
-  `.fpvs_cache/mne/MNE-fsaverage-data/`. Explicit
-  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides may point elsewhere only if they do
-  not target source or docs paths; stale generic MNE config candidates that do
-  target those forbidden paths are ignored.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`, with download archives kept under that
+  same subjects directory instead of `%TEMP%`/`AppData` temp locations.
+  Configured fsaverage paths must not target source, docs, temp directories, or
+  common admin-protected system folders; stale generic MNE config candidates
+  that do target those forbidden paths are ignored.
 - Do not re-enable VTK depth peeling for transparent mesh modes unless the
   target Windows/VTK driver behavior has been visibly retested. The current
   renderer deliberately uses plain alpha blending because depth peeling made

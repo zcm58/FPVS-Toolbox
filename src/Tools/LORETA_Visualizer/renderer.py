@@ -14,6 +14,7 @@ from Main_App.exports.figure_style import (
     figure_text_spec,
     pil_font_candidates,
 )
+from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from Tools.LORETA_Visualizer.cortical_paint import (
@@ -26,6 +27,7 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     DEFAULT_SCALAR_MAX,
     DEFAULT_SCALAR_MIN,
     LORETA_SCALAR_COLORS,
+    LORETA_SMOOTH_SCALAR_COLORS,
 )
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_ROI_MESH,
@@ -37,16 +39,19 @@ from Tools.LORETA_Visualizer.source_payloads import (
 )
 from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh, make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import MeshDisplayTransform
+from Tools.LORETA_Visualizer.volume_overlay import build_smoothed_volume_overlay
 
 logger = logging.getLogger(__name__)
 
 DISPLAY_MODE_SPLIT_HEMISPHERE = "split_hemisphere"
 DISPLAY_MODE_CORTICAL_SURFACE = "cortical_surface"
 DISPLAY_MODE_TRANSPARENT_MESH = "transparent_mesh"
+DISPLAY_MODE_MRI_SLICES = "mri_slices"
 DISPLAY_MODES = (
     DISPLAY_MODE_SPLIT_HEMISPHERE,
     DISPLAY_MODE_CORTICAL_SURFACE,
     DISPLAY_MODE_TRANSPARENT_MESH,
+    DISPLAY_MODE_MRI_SLICES,
 )
 SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES = 12.0
 _LEFT_HEMISPHERE_DEFAULT_YAW = 90.0
@@ -54,15 +59,40 @@ _RIGHT_HEMISPHERE_DEFAULT_YAW = -90.0
 _LEFT_HEMISPHERE_OFFSET = (-1.08, 0.0, 0.0)
 _RIGHT_HEMISPHERE_OFFSET = (1.08, 0.0, 0.0)
 _PUBLICATION_HEMISPHERE_RADIUS = 0.82
+_PUBLICATION_CAMERA_DISTANCE = 8.0
+_PUBLICATION_CAMERA_PARALLEL_SCALE = 2.25
 _PUBLICATION_SHADE_DARK = "#636b6d"
 _PUBLICATION_SHADE_LIGHT = "#d8dcda"
 DEFAULT_SPLIT_FIGURE_WIDTH = 1950
-DEFAULT_SPLIT_FIGURE_WIDTH_IN = 6.5
-DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN = 3.0
-DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN = 6.75
+MM_PER_INCH = 25.4
+ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM = 140.0
+DEFAULT_SPLIT_FIGURE_WIDTH_IN = ELSEVIER_ONE_AND_HALF_COLUMN_WIDTH_MM / MM_PER_INCH
+_SPLIT_FIGURE_ELSEVIER_SCALE = DEFAULT_SPLIT_FIGURE_WIDTH_IN / 6.5
+DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN = 3.0 * _SPLIT_FIGURE_ELSEVIER_SCALE
+DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN = 6.75 * _SPLIT_FIGURE_ELSEVIER_SCALE
 DEFAULT_SPLIT_FIGURE_MAX_FACES_PER_HEMISPHERE: int | None = None
+SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT = 14
+SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT = 14
+SPLIT_FIGURE_CONDITION_TOP_MARGIN = 150.0
+SPLIT_FIGURE_SINGLE_TOP_MARGIN = 130.0
 _SPLIT_FIGURE_UNITS_PER_INCH = DEFAULT_SPLIT_FIGURE_WIDTH / DEFAULT_SPLIT_FIGURE_WIDTH_IN
 SPLIT_FIGURE_EXPORT_DPI = FIGURE_EXPORT_DPI
+TRANSPARENT_SPIN_INTERVAL_MS = 50
+TRANSPARENT_SPIN_RESUME_DELAY_MS = 10_000
+TRANSPARENT_SPIN_DEGREES_PER_TICK = 0.4
+_TRANSPARENT_SPIN_DISTANCE_SCALE = 4.0
+_TRANSPARENT_SPIN_MIN_DISTANCE = 3.0
+_TRANSPARENT_SPIN_INTERACTION_EVENTS = frozenset(
+    {
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.Wheel,
+        QEvent.Type.KeyPress,
+        QEvent.Type.TouchBegin,
+        QEvent.Type.TouchUpdate,
+        QEvent.Type.TabletPress,
+    }
+)
 
 
 class RenderBackendError(RuntimeError):
@@ -122,7 +152,18 @@ class BrainRendererWidget(QWidget):
         self._split_left_rotation_degrees = 0.0
         self._split_right_rotation_degrees = 0.0
         self._cortical_paint_z_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
+        self._cortical_paint_use_cluster_mask = True
         self._last_activation_payload: SourcePayload | None = None
+        self._volume_overlay_active = False
+        self._transparent_spin_enabled = False
+        self._transparent_spin_angle_degrees = 0.0
+        self._transparent_spin_timer = QTimer(self)
+        self._transparent_spin_timer.setInterval(TRANSPARENT_SPIN_INTERVAL_MS)
+        self._transparent_spin_timer.timeout.connect(self._advance_transparent_spin)
+        self._transparent_spin_resume_timer = QTimer(self)
+        self._transparent_spin_resume_timer.setSingleShot(True)
+        self._transparent_spin_resume_timer.setInterval(TRANSPARENT_SPIN_RESUME_DELAY_MS)
+        self._transparent_spin_resume_timer.timeout.connect(self._resume_transparent_spin_after_interaction)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -143,6 +184,7 @@ class BrainRendererWidget(QWidget):
         plotter.set_background("#f7f9fc")
         plotter.enable_trackball_style()
         _configure_transparency_backend(plotter)
+        self._install_transparent_spin_event_filter(plotter)
         layout.addWidget(plotter)
         self._plotter = plotter
 
@@ -252,8 +294,9 @@ class BrainRendererWidget(QWidget):
         actor = plotter.add_mesh(
             surface,
             scalars="activation",
-            cmap=list(LORETA_SCALAR_COLORS),
+            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
             clim=self._activation_scalar_range,
+            interpolate_before_map=True,
             color=CORTICAL_PAINT_BASE_COLOR,
             nan_color=CORTICAL_PAINT_BASE_COLOR,
             nan_opacity=1.0,
@@ -303,6 +346,32 @@ class BrainRendererWidget(QWidget):
             prop.SetSpecularPower(10)
         except (AttributeError, RuntimeError, TypeError):
             logger.debug("loreta_publication_material_failed", exc_info=True)
+
+    def _install_transparent_spin_event_filter(self, plotter: Any) -> None:
+        for candidate in (plotter, getattr(plotter, "interactor", None)):
+            if candidate is None:
+                continue
+            try:
+                candidate.installEventFilter(self)
+            except (AttributeError, RuntimeError, TypeError):
+                logger.debug("loreta_transparent_spin_event_filter_unavailable", exc_info=True)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, ANN001
+        if self._transparent_spin_event_is_user_interaction(event):
+            self._pause_transparent_spin_for_interaction()
+        return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _transparent_spin_event_is_user_interaction(event: QEvent) -> bool:
+        event_type = event.type()
+        if event_type in _TRANSPARENT_SPIN_INTERACTION_EVENTS:
+            return True
+        if event_type == QEvent.Type.MouseMove:
+            try:
+                return bool(event.buttons() != Qt.MouseButton.NoButton)
+            except (AttributeError, RuntimeError, TypeError):
+                return False
+        return False
 
     def set_brain_opacity(self, opacity: float) -> None:
         opacity = max(0.05, min(1.0, float(opacity)))
@@ -365,6 +434,7 @@ class BrainRendererWidget(QWidget):
         if reset_camera:
             plotter.reset_camera()
         plotter.render()
+        self._sync_transparent_spin_state(reset_orientation=reset_camera)
 
     def set_activation_payload(self, payload: SourcePayload) -> None:
         plotter = self._plotter
@@ -383,6 +453,7 @@ class BrainRendererWidget(QWidget):
         if len(payload.points) == 0:
             self._restore_base_brain_actor(render=False)
             plotter.render()
+            self._sync_transparent_spin_state()
             return
         if uses_cortical_surface_paint(payload):
             if (
@@ -390,17 +461,23 @@ class BrainRendererWidget(QWidget):
                 and self._set_split_hemisphere_payload(payload, reset_camera=not preserve_split_view)
             ):
                 plotter.render()
+                self._sync_transparent_spin_state()
                 return
             if self._display_mode == DISPLAY_MODE_CORTICAL_SURFACE and self._set_cortical_paint_payload(payload):
                 plotter.render()
+                self._sync_transparent_spin_state()
                 return
         self._restore_base_brain_actor(render=False)
         self._add_activation_overlay(pv, payload)
         plotter.render()
+        self._sync_transparent_spin_state()
 
     def _add_activation_overlay(self, pv: Any, payload: SourcePayload) -> None:
         plotter = self._plotter
         if plotter is None:
+            return
+        self._volume_overlay_active = False
+        if payload.kind == SOURCE_KIND_VOLUME_POINTS and self._add_smoothed_volume_overlay(pv, payload):
             return
         mesh_kinds = {SOURCE_KIND_ROI_MESH, SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH}
         has_faces = payload.faces is not None and len(payload.faces) > 0
@@ -413,15 +490,16 @@ class BrainRendererWidget(QWidget):
             cloud = pv.PolyData(payload.points)
             is_volume_points = payload.kind == SOURCE_KIND_VOLUME_POINTS
             is_surface_points = payload.kind == SOURCE_KIND_SURFACE_POINTS
-            render_points_as_spheres = is_volume_points
-            point_size = 14 if is_volume_points else 22
-            style = "points_gaussian" if is_surface_points else "points"
+            render_points_as_spheres = False
+            point_size = 18 if is_volume_points else 22
+            style = "points_gaussian" if (is_surface_points or is_volume_points) else "points"
         cloud["activation"] = payload.values
         self._activation_actor = plotter.add_mesh(
             cloud,
             scalars="activation",
-            cmap=list(LORETA_SCALAR_COLORS),
+            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
             clim=self._activation_scalar_range,
+            interpolate_before_map=True,
             opacity=self._activation_opacity,
             render_points_as_spheres=render_points_as_spheres,
             point_size=point_size,
@@ -435,6 +513,157 @@ class BrainRendererWidget(QWidget):
         )
         self._activation_actor.SetVisibility(self._activation_visible)
 
+    def display_payload_for_current_mesh(self, payload: SourcePayload) -> SourcePayload:
+        """Return the renderer-facing payload after display-only mesh clipping."""
+        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
+            return payload
+        try:
+            import pyvista as pv
+        except (ImportError, ModuleNotFoundError):
+            return payload
+        clipped_payload = self._volume_payload_inside_brain_surface(pv, payload)
+        if clipped_payload is None:
+            return _empty_clipped_volume_payload(payload)
+        return clipped_payload
+
+    def _add_smoothed_volume_overlay(self, pv: Any, payload: SourcePayload) -> bool:
+        plotter = self._plotter
+        if plotter is None:
+            return False
+        payload = self.display_payload_for_current_mesh(payload)
+        if len(payload.points) == 0:
+            self._volume_overlay_active = True
+            return True
+        try:
+            overlay = build_smoothed_volume_overlay(
+                payload.points,
+                payload.values,
+                display_bounds=self._volume_display_bounds(),
+                min_visible_value=self._volume_min_visible_value(),
+            )
+        except (ImportError, ValueError) as exc:
+            logger.debug("loreta_volume_overlay_smoothing_failed", extra={"error": str(exc)})
+            return False
+        if overlay is None:
+            return False
+
+        try:
+            grid = pv.ImageData(
+                dimensions=overlay.dimensions,
+                spacing=overlay.spacing,
+                origin=overlay.origin,
+            )
+            grid.point_data["activation"] = overlay.values.ravel(order="F")
+            self._clip_volume_grid_to_brain_surface(pv, grid)
+            if not np.any(np.asarray(grid.point_data["activation"], dtype=float) >= min(overlay.contour_values)):
+                self._volume_overlay_active = True
+                return True
+            surface = grid.contour(
+                isosurfaces=list(overlay.contour_values),
+                scalars="activation",
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            logger.debug("loreta_volume_overlay_contour_failed", extra={"error": str(exc)})
+            return False
+        if getattr(surface, "n_points", 0) <= 0 or getattr(surface, "n_cells", 0) <= 0:
+            return False
+
+        self._activation_actor = plotter.add_mesh(
+            surface,
+            scalars="activation",
+            cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+            clim=self._activation_scalar_range,
+            interpolate_before_map=True,
+            opacity=self._activation_opacity,
+            lighting=False,
+            ambient=1.0,
+            diffuse=0.0,
+            specular=0.0,
+            smooth_shading=True,
+            show_scalar_bar=False,
+        )
+        self._activation_actor.SetVisibility(self._activation_visible)
+        self._volume_overlay_active = True
+        return True
+
+    def _volume_payload_inside_brain_surface(self, pv: Any, payload: SourcePayload) -> SourcePayload | None:
+        mask = self._volume_enclosed_point_mask(pv, payload.points)
+        if mask is None:
+            return payload
+        if not np.any(mask):
+            return None
+        if np.all(mask):
+            return payload
+        metadata = dict(payload.metadata)
+        metadata.update(
+            {
+                "display_surface_clip": "current_brain_mesh_enclosed_points",
+                "display_surface_clip_original_point_count": int(len(payload.points)),
+                "display_surface_clip_rendered_point_count": int(np.count_nonzero(mask)),
+            }
+        )
+        return SourcePayload(
+            points=np.asarray(payload.points, dtype=float)[mask],
+            values=np.asarray(payload.values, dtype=float).reshape(-1)[mask],
+            label=payload.label,
+            kind=payload.kind,
+            coordinate_space=payload.coordinate_space,
+            source_model=payload.source_model,
+            value_label=payload.value_label,
+            faces=None,
+            metadata=metadata,
+        )
+
+    def _clip_volume_grid_to_brain_surface(self, pv: Any, grid: Any) -> None:
+        points = getattr(grid, "points", None)
+        if points is None:
+            return
+        mask = self._volume_enclosed_point_mask(pv, np.asarray(points, dtype=float))
+        if mask is None:
+            return
+        try:
+            activation = np.asarray(grid.point_data["activation"], dtype=float).reshape(-1).copy()
+        except (KeyError, TypeError, ValueError):
+            return
+        if len(mask) != len(activation):
+            return
+        activation[~mask] = 0.0
+        grid.point_data["activation"] = activation
+
+    def _volume_enclosed_point_mask(self, pv: Any, points: np.ndarray) -> np.ndarray | None:
+        surface = getattr(self, "_surface", None)
+        if surface is None or getattr(surface, "n_points", 0) <= 0 or getattr(surface, "n_cells", 0) <= 0:
+            return None
+        source_points = np.asarray(points, dtype=float)
+        if source_points.ndim != 2 or source_points.shape[1] != 3 or len(source_points) == 0:
+            return None
+        try:
+            cloud = pv.PolyData(source_points)
+            enclosed = cloud.select_enclosed_points(surface, tolerance=0.0, check_surface=False)
+            mask = np.asarray(enclosed.point_data["SelectedPoints"], dtype=bool).reshape(-1)
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_volume_surface_clip_failed", exc_info=True)
+            return None
+        if len(mask) != len(source_points):
+            return None
+        return mask
+
+    def _volume_display_bounds(self) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+        mesh = self._current_mesh
+        if mesh is None or len(mesh.points) == 0:
+            return None
+        points = np.asarray(mesh.points, dtype=float)
+        return (
+            tuple(float(value) for value in np.min(points, axis=0)),
+            tuple(float(value) for value in np.max(points, axis=0)),
+        )
+
+    def _volume_min_visible_value(self) -> float | None:
+        vmin = float(self._activation_scalar_range[0])
+        if not np.isfinite(vmin) or vmin < 0.0:
+            return None
+        return vmin
+
     def _set_cortical_paint_payload(self, payload: SourcePayload) -> bool:
         mesh = self._current_mesh
         surface = self._surface
@@ -445,6 +674,7 @@ class BrainRendererWidget(QWidget):
                 mesh.points,
                 payload,
                 z_threshold=self._cortical_paint_z_threshold,
+                use_cluster_mask=self._use_cortical_paint_cluster_mask(),
             )
             paint_surface = surface.copy(deep=True)
             paint_surface["activation"] = _cortical_paint_display_values(
@@ -502,6 +732,7 @@ class BrainRendererWidget(QWidget):
             projection_points,
             payload,
             z_threshold=self._cortical_paint_z_threshold,
+            use_cluster_mask=self._use_cortical_paint_cluster_mask(),
         )
         return _SplitHemisphereState(
             points=display_points.copy(),
@@ -549,21 +780,140 @@ class BrainRendererWidget(QWidget):
         )
         return surface
 
-    def set_display_mode(self, display_mode: str) -> None:
+    def set_display_mode(self, display_mode: str, *, refresh: bool = True) -> None:
         mode = display_mode if display_mode in DISPLAY_MODES else DISPLAY_MODE_SPLIT_HEMISPHERE
         if mode == self._display_mode:
+            self._sync_transparent_spin_state()
             return
         self._display_mode = mode
         if mode == DISPLAY_MODE_SPLIT_HEMISPHERE:
             self._reset_split_rotations()
         payload = self._last_activation_payload
-        if payload is not None:
+        if refresh and payload is not None:
             self.set_activation_payload(payload)
             return
-        self._restore_base_brain_actor(render=True)
+        self._restore_base_brain_actor(render=refresh)
+        self._sync_transparent_spin_state(reset_orientation=mode == DISPLAY_MODE_TRANSPARENT_MESH)
 
     def display_mode(self) -> str:
         return self._display_mode
+
+    def set_transparent_spin_enabled(self, enabled: bool) -> None:
+        self._transparent_spin_enabled = bool(enabled)
+        self._sync_transparent_spin_state(reset_orientation=True)
+
+    def transparent_spin_enabled(self) -> bool:
+        return bool(getattr(self, "_transparent_spin_enabled", False))
+
+    def _sync_transparent_spin_state(self, *, reset_orientation: bool = False) -> None:
+        if self._transparent_spin_should_run():
+            self._start_transparent_spin(reset_orientation=reset_orientation)
+            return
+        self._stop_transparent_spin()
+
+    def _transparent_spin_should_run(self) -> bool:
+        return (
+            bool(getattr(self, "_transparent_spin_enabled", False))
+            and self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH
+            and self._plotter is not None
+        )
+
+    def _start_transparent_spin(self, *, reset_orientation: bool) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        self._transparent_spin_resume_timer.stop()
+        if reset_orientation:
+            self._reset_transparent_spin_camera()
+        if not self._transparent_spin_timer.isActive():
+            self._transparent_spin_timer.start()
+
+    def _stop_transparent_spin(self) -> None:
+        for timer_name in ("_transparent_spin_timer", "_transparent_spin_resume_timer"):
+            timer = getattr(self, timer_name, None)
+            if timer is not None:
+                timer.stop()
+
+    def _pause_transparent_spin_for_interaction(self) -> None:
+        if not self._transparent_spin_should_run():
+            return
+        self._transparent_spin_timer.stop()
+        self._transparent_spin_resume_timer.start(TRANSPARENT_SPIN_RESUME_DELAY_MS)
+
+    def _resume_transparent_spin_after_interaction(self) -> None:
+        if self._transparent_spin_should_run():
+            self._start_transparent_spin(reset_orientation=True)
+
+    def _advance_transparent_spin(self) -> None:
+        if not self._transparent_spin_should_run():
+            self._stop_transparent_spin()
+            return
+        angle = (
+            float(getattr(self, "_transparent_spin_angle_degrees", 0.0)) + TRANSPARENT_SPIN_DEGREES_PER_TICK
+        ) % 360.0
+        self._transparent_spin_angle_degrees = angle
+        self._set_transparent_spin_camera(angle_degrees=angle, render=True)
+
+    def _reset_transparent_spin_camera(self) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        self._transparent_spin_angle_degrees = 0.0
+        try:
+            plotter.reset_camera()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_transparent_spin_reset_camera_failed", exc_info=True)
+        self._set_transparent_spin_camera(angle_degrees=0.0, render=True)
+
+    def _set_transparent_spin_camera(self, *, angle_degrees: float, render: bool) -> None:
+        plotter = self._plotter
+        if plotter is None:
+            return
+        focal = self._transparent_spin_focal_point()
+        distance = self._transparent_spin_camera_distance(focal)
+        radians = np.deg2rad(float(angle_degrees))
+        position = focal + np.asarray(
+            [np.cos(radians) * distance, np.sin(radians) * distance, 0.0],
+            dtype=float,
+        )
+        try:
+            camera = plotter.camera
+            camera.SetFocalPoint(*_xyz_tuple(focal))
+            camera.SetPosition(*_xyz_tuple(position))
+            camera.SetViewUp(0.0, 0.0, 1.0)
+            try:
+                camera.OrthogonalizeViewUp()
+            except AttributeError:
+                pass
+            plotter.reset_camera_clipping_range()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_transparent_spin_camera_failed", exc_info=True)
+            return
+        if render:
+            plotter.render()
+
+    def _transparent_spin_focal_point(self) -> np.ndarray:
+        mesh = self._current_mesh
+        if mesh is None or len(mesh.points) == 0:
+            return np.zeros(3, dtype=float)
+        points = np.asarray(mesh.points, dtype=float)
+        finite_points = points[np.all(np.isfinite(points), axis=1)]
+        if len(finite_points) == 0:
+            return np.zeros(3, dtype=float)
+        return np.mean(finite_points, axis=0).astype(float)
+
+    def _transparent_spin_camera_distance(self, focal: np.ndarray) -> float:
+        mesh = self._current_mesh
+        if mesh is None or len(mesh.points) == 0:
+            return _TRANSPARENT_SPIN_MIN_DISTANCE
+        points = np.asarray(mesh.points, dtype=float)
+        finite_points = points[np.all(np.isfinite(points), axis=1)]
+        if len(finite_points) == 0:
+            return _TRANSPARENT_SPIN_MIN_DISTANCE
+        radius = float(np.max(np.linalg.norm(finite_points - focal, axis=1)))
+        if not np.isfinite(radius) or radius <= 1e-9:
+            return _TRANSPARENT_SPIN_MIN_DISTANCE
+        return max(radius * _TRANSPARENT_SPIN_DISTANCE_SCALE, _TRANSPARENT_SPIN_MIN_DISTANCE)
 
     def rotate_split_hemisphere(self, side: str, degrees: float) -> None:
         if side == "left":
@@ -585,9 +935,14 @@ class BrainRendererWidget(QWidget):
             return
         try:
             plotter.reset_camera()
-            plotter.camera.SetPosition(0.0, -5.0, 0.25)
+            plotter.camera.SetPosition(0.0, -_PUBLICATION_CAMERA_DISTANCE, 0.25)
             plotter.camera.SetFocalPoint(0.0, 0.0, 0.0)
             plotter.camera.SetViewUp(0.0, 0.0, 1.0)
+            try:
+                plotter.camera.ParallelProjectionOn()
+            except AttributeError:
+                plotter.camera.SetParallelProjection(True)
+            plotter.camera.SetParallelScale(_PUBLICATION_CAMERA_PARALLEL_SCALE)
             plotter.reset_camera_clipping_range()
         except (AttributeError, RuntimeError, TypeError, ValueError):
             logger.debug("loreta_publication_camera_failed", exc_info=True)
@@ -599,6 +954,15 @@ class BrainRendererWidget(QWidget):
         payload = self._last_activation_payload
         if self._cortical_paint_active and payload is not None:
             self.set_activation_payload(payload)
+
+    def set_cortical_paint_cluster_mask_enabled(self, enabled: bool) -> None:
+        self._cortical_paint_use_cluster_mask = bool(enabled)
+        payload = self._last_activation_payload
+        if self._cortical_paint_active and payload is not None:
+            self.set_activation_payload(payload)
+
+    def _use_cortical_paint_cluster_mask(self) -> bool:
+        return bool(getattr(self, "_cortical_paint_use_cluster_mask", True))
 
     def _restore_base_brain_actor(self, *, render: bool) -> None:
         if not self._cortical_paint_active:
@@ -615,14 +979,21 @@ class BrainRendererWidget(QWidget):
         if render:
             plotter.render()
 
-    def set_activation_scalar_range(self, vmin: float, vmax: float) -> None:
+    def set_activation_scalar_range(self, vmin: float, vmax: float, *, refresh: bool = True) -> None:
         if vmax <= vmin:
             vmax = vmin + 1.0
         self._activation_scalar_range = (float(vmin), float(vmax))
+        if not refresh:
+            return
         if self._split_hemisphere_active:
             self._render_split_hemispheres(render=True)
             return
         if self._cortical_paint_active:
+            payload = self._last_activation_payload
+            if payload is not None:
+                self.set_activation_payload(payload)
+            return
+        if getattr(self, "_volume_overlay_active", False):
             payload = self._last_activation_payload
             if payload is not None:
                 self.set_activation_payload(payload)
@@ -717,6 +1088,7 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         actor = self._activation_actor
         self._activation_actor = None
+        self._volume_overlay_active = False
         if plotter is None or actor is None:
             return
         try:
@@ -756,6 +1128,9 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         if plotter is None:
             return
+        if self._transparent_spin_should_run():
+            self._start_transparent_spin(reset_orientation=True)
+            return
         if self._split_hemisphere_active:
             self._reset_split_rotations()
             self._render_split_hemispheres(render=False)
@@ -792,7 +1167,7 @@ class BrainRendererWidget(QWidget):
 
     def write_split_hemisphere_figures(self, output_path: str | Path) -> tuple[Path, Path]:
         if not self.can_export_split_hemisphere_figure():
-            raise RuntimeError("Publication split hemispheres must be visible before exporting figures.")
+            raise RuntimeError("Split Hemispheres must be visible before exporting figures.")
         return write_publication_split_hemisphere_figures(
             output_path,
             left_state=self._split_left_state,
@@ -812,6 +1187,7 @@ class BrainRendererWidget(QWidget):
         return write_publication_split_hemisphere_stack_figures(output_path, panels=panels)
 
     def shutdown(self) -> None:
+        self._stop_transparent_spin()
         plotter = self._plotter
         self._plotter = None
         self._brain_actor = None
@@ -838,6 +1214,11 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
     if len(value) != 6:
         return (0.79, 0.80, 0.82)
     return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _xyz_tuple(values: np.ndarray) -> tuple[float, float, float]:
+    vector = np.asarray(values, dtype=float).reshape(3)
+    return (float(vector[0]), float(vector[1]), float(vector[2]))
 
 
 def _configure_transparency_backend(plotter: Any) -> None:
@@ -1031,7 +1412,9 @@ def _draw_split_figure_panel(
     max_xy = np.max(all_points, axis=0)
     span = np.maximum(max_xy - min_xy, 1e-9)
     side_margin = 110.0 * scale_factor
-    top_margin = (120.0 if show_condition_label else 105.0) * scale_factor
+    top_margin = (
+        SPLIT_FIGURE_CONDITION_TOP_MARGIN if show_condition_label else SPLIT_FIGURE_SINGLE_TOP_MARGIN
+    ) * scale_factor
     bottom_margin = 35.0 * scale_factor
     draw_width = max(float(width) - 2.0 * side_margin, 1.0)
     draw_height = max(float(panel_height) - top_margin - bottom_margin, 1.0)
@@ -1069,13 +1452,33 @@ def _draw_split_figure_panel(
             float(width) / 2.0,
             panel_top + 54.0 * scale_factor,
             panel.label.strip(),
-            role="condition_label",
+            role="panel_label",
+            point_size=SPLIT_FIGURE_CONDITION_LABEL_SIZE_PT,
+            bold=True,
             scale_factor=scale_factor,
         )
     if show_hemisphere_labels:
         label_y = panel_top + (88.0 if show_condition_label else 70.0) * scale_factor
-        _draw_centered_text(draw, left_center, label_y, "Left", role="axis_label", scale_factor=scale_factor)
-        _draw_centered_text(draw, right_center, label_y, "Right", role="axis_label", scale_factor=scale_factor)
+        _draw_centered_text(
+            draw,
+            left_center,
+            label_y,
+            "Left",
+            role="axis_label",
+            point_size=SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
+            bold=True,
+            scale_factor=scale_factor,
+        )
+        _draw_centered_text(
+            draw,
+            right_center,
+            label_y,
+            "Right",
+            role="axis_label",
+            point_size=SPLIT_FIGURE_HEMISPHERE_LABEL_SIZE_PT,
+            bold=True,
+            scale_factor=scale_factor,
+        )
 
 
 def _draw_split_figure_legend(
@@ -1169,18 +1572,27 @@ def _draw_centered_text(
     *,
     role: str,
     scale_factor: float,
+    point_size: int | None = None,
+    bold: bool | None = None,
 ) -> None:
-    font = _pil_font(role, scale_factor=scale_factor)
+    font = _pil_font(role, scale_factor=scale_factor, point_size=point_size, bold=bold)
     draw.text((float(x), float(y)), str(text), fill="#111111", font=font, anchor="mm")
 
 
-def _pil_font(role: str, *, scale_factor: float):
+def _pil_font(
+    role: str,
+    *,
+    scale_factor: float,
+    point_size: int | None = None,
+    bold: bool | None = None,
+):
     from PIL import ImageFont
 
     spec = figure_text_spec(role)
-    size = max(8, int(round(spec.point_size * _SPLIT_FIGURE_UNITS_PER_INCH * scale_factor / 72.0)))
-    bold = str(spec.weight).lower() == "bold"
-    for candidate in pil_font_candidates(bold=bold):
+    requested_point_size = spec.point_size if point_size is None else int(point_size)
+    size = max(8, int(round(requested_point_size * _SPLIT_FIGURE_UNITS_PER_INCH * scale_factor / 72.0)))
+    requested_bold = str(spec.weight).lower() == "bold" if bold is None else bool(bold)
+    for candidate in pil_font_candidates(bold=requested_bold):
         try:
             return ImageFont.truetype(candidate, size=size)
         except OSError:
@@ -1327,6 +1739,28 @@ def _cortical_paint_display_values(values: np.ndarray, *, scalar_range: tuple[fl
     scalar_values = np.asarray(values, dtype=float).reshape(-1)
     vmin = float(scalar_range[0])
     return np.where(np.isfinite(scalar_values) & (scalar_values >= vmin), scalar_values, np.nan)
+
+
+def _empty_clipped_volume_payload(payload: SourcePayload) -> SourcePayload:
+    metadata = dict(payload.metadata)
+    metadata.update(
+        {
+            "display_surface_clip": "current_brain_mesh_enclosed_points",
+            "display_surface_clip_original_point_count": int(len(payload.points)),
+            "display_surface_clip_rendered_point_count": 0,
+        }
+    )
+    return SourcePayload(
+        points=np.empty((0, 3), dtype=float),
+        values=np.empty((0,), dtype=float),
+        label=payload.label,
+        kind=payload.kind,
+        coordinate_space=payload.coordinate_space,
+        source_model=payload.source_model,
+        value_label=payload.value_label,
+        faces=None,
+        metadata=metadata,
+    )
 
 
 def _publication_base_rgb(count: int, shade_values: np.ndarray | None) -> np.ndarray:

@@ -78,7 +78,7 @@ nav:
       - SNR Plot Generator: tools/snr-plot-generator.md
       - Scalp Maps: tools/scalp-maps.md
       - LORETA Visualizer: tools/loreta-visualizer.md
-      - Source Localization Method: tools/source-localization-method.md
+      - Source Estimation: tools/source-localization-method.md
       - Ratio Calculator: tools/ratio-calculator.md
       - Sequence Figure: tools/sequence-figure.md
       - Image Resizer: tools/image-resizer.md

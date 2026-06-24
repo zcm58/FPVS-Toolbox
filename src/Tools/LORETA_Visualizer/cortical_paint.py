@@ -49,7 +49,9 @@ def uses_cortical_surface_paint(payload: SourcePayload) -> bool:
 
 
 def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
-    """Return a source-space cluster mask from payload metadata when present."""
+    """Return a usable source-space cluster mask from payload metadata."""
+    if payload_cluster_mask_is_underpowered(payload):
+        return None
     metadata = payload.metadata
     mask_label = str(metadata.get("cluster_mask", "")).strip().lower()
     if mask_label in {"", "none", "disabled"}:
@@ -60,7 +62,9 @@ def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
         mask = np.asarray(raw_mask, dtype=bool).reshape(-1)
         if len(mask) == source_count:
             return mask
-    raw_indices = metadata.get("cluster_mask_vertex_indices")
+    raw_indices = metadata.get("cluster_mask_source_indices")
+    if raw_indices is None:
+        raw_indices = metadata.get("cluster_mask_vertex_indices")
     if raw_indices is None:
         return None
     indices = np.asarray(raw_indices, dtype=np.int64).reshape(-1)
@@ -78,6 +82,42 @@ def payload_has_cluster_mask(payload: SourcePayload) -> bool:
     return payload_cluster_mask(payload) is not None
 
 
+def payload_cluster_mask_is_empty(payload: SourcePayload) -> bool:
+    """Return whether a declared cluster mask retained no source vertices."""
+    if not _payload_declares_cluster_mask(payload.metadata):
+        return False
+    return _cluster_mask_retained_count(payload) == 0
+
+
+def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
+    """Return whether a saved empty cluster mask is resolution-limited.
+
+    Small participant counts use exact sign flips. With the producer's plus-one
+    p-value correction, some exact tests cannot reach the selected alpha even
+    when the source z-score field is large. In that case, cortical paint should
+    use the exploratory display threshold instead of treating an empty mask as a
+    meaningful group-level null result.
+    """
+    metadata = payload.metadata
+    if not _payload_declares_cluster_mask(metadata):
+        return False
+    if _cluster_mask_retained_count(payload) != 0:
+        return False
+    alpha = _optional_float(metadata.get("cluster_alpha"))
+    permutation_count = _optional_int(metadata.get("cluster_permutation_count"))
+    if alpha is None or permutation_count is None or permutation_count < 1:
+        return False
+    return payload_cluster_mask_minimum_p(payload) > alpha
+
+
+def payload_cluster_mask_minimum_p(payload: SourcePayload) -> float:
+    """Return the smallest possible cluster p-value from payload metadata."""
+    permutation_count = _optional_int(payload.metadata.get("cluster_permutation_count"))
+    if permutation_count is None or permutation_count < 1:
+        return float("nan")
+    return 1.0 / float(permutation_count + 1)
+
+
 def project_cortical_surface_payload(
     display_points: np.ndarray,
     payload: SourcePayload,
@@ -85,6 +125,7 @@ def project_cortical_surface_payload(
     neighbors: int = DEFAULT_CORTICAL_PAINT_NEIGHBORS,
     power: float = DEFAULT_CORTICAL_PAINT_POWER,
     z_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    use_cluster_mask: bool = True,
 ) -> CorticalPaintProjection:
     """Project an L2-MNE cortical source mesh onto the display brain mesh.
 
@@ -103,9 +144,10 @@ def project_cortical_surface_payload(
     original_max = float(np.max(source_values))
     projection_values = source_values.copy()
     is_zscore_payload = source_payload_uses_zscores(payload)
-    source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload else None
+    source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload and use_cluster_mask else None
+    cluster_mask_has_vertices = source_cluster_mask is not None and bool(np.any(source_cluster_mask))
     if is_zscore_payload:
-        if source_cluster_mask is not None:
+        if cluster_mask_has_vertices:
             projection_values = np.where(source_cluster_mask, projection_values, 0.0)
         else:
             threshold = _valid_z_threshold(z_threshold)
@@ -118,7 +160,7 @@ def project_cortical_surface_payload(
         neighbors=neighbors,
         power=power,
     )
-    if is_zscore_payload and source_cluster_mask is not None:
+    if is_zscore_payload and cluster_mask_has_vertices:
         display_cluster_mask = _nearest_mask_values(target_points, source_points, source_cluster_mask)
         interpolated = np.where(display_cluster_mask & np.isfinite(interpolated), interpolated, np.nan)
     elif is_zscore_payload:
@@ -135,6 +177,59 @@ def _valid_z_threshold(z_threshold: float) -> float:
     if not np.isfinite(threshold) or threshold < 0.0:
         return DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
     return threshold
+
+
+def _payload_declares_cluster_mask(metadata: dict[str, object]) -> bool:
+    mask_label = str(metadata.get("cluster_mask", "")).strip().lower()
+    return mask_label not in {"", "none", "disabled"}
+
+
+def _cluster_mask_retained_count(payload: SourcePayload) -> int | None:
+    metadata = payload.metadata
+    count = _optional_int(metadata.get("cluster_mask_source_index_count"))
+    if count is None:
+        count = _optional_int(metadata.get("cluster_mask_vertex_count"))
+    if count is not None:
+        return count
+    raw_mask = metadata.get("cluster_mask_values")
+    if raw_mask is not None:
+        try:
+            mask = np.asarray(raw_mask, dtype=bool).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        return int(np.count_nonzero(mask))
+    raw_indices = metadata.get("cluster_mask_source_indices")
+    if raw_indices is None:
+        raw_indices = metadata.get("cluster_mask_vertex_indices")
+    if raw_indices is not None:
+        try:
+            indices = np.asarray(raw_indices, dtype=np.int64).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        return int(len(indices))
+    return None
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
 
 
 def _validate_projection_inputs(

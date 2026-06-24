@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -9,17 +10,38 @@ import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
+    DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
+    PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
+    PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+    PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    ProjectSourceMapExportBatchResult,
+    ProjectSourceMapExportWorker,
+    SOURCE_METHOD_ELORETA_VOLUME,
+    SOURCE_METHOD_L2_MNE_SURFACE,
+    SOURCE_SUMMARY_MEDIAN,
+    SOURCE_SUMMARY_RAW_MEAN,
+    SOURCE_SUMMARY_TRIMMED_MEAN,
+    _activation_display_payload,
     _coerce_existing_project_root,
+    _display_mode_allowed_for_payload,
+    _group_manifest_conditions,
+    _group_manifest_methods,
+    _ordered_source_summary_ids,
     _project_root_from_object,
     _project_source_export_failure_text,
+    _source_summary_label,
     _source_export_status_text,
+    default_mri_slice_figure_export_path,
     default_stacked_split_figure_export_path,
     default_split_figure_export_path,
+    default_project_source_manifest_paths,
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
     split_figure_condition_code,
+    split_figure_condition_display_label,
 )
 from Tools.LORETA_Visualizer.fsaverage_cache import (
     DEFAULT_FSAVERAGE_SUBJECTS_DIR,
@@ -30,7 +52,23 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     fpvs_toolbox_root,
 )
 from Tools.LORETA_Visualizer import fsaverage_mesh
+from Tools.LORETA_Visualizer.renderer import (
+    DISPLAY_MODE_CORTICAL_SURFACE,
+    DISPLAY_MODE_MRI_SLICES,
+    DISPLAY_MODE_SPLIT_HEMISPHERE,
+    DISPLAY_MODE_TRANSPARENT_MESH,
+)
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
+from Tools.LORETA_Visualizer.prepared_payload_importer import PreparedSourceManifestEntry
+from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_SURFACE_MESH,
+    SOURCE_KIND_VOLUME_POINTS,
+    make_source_payload,
+)
+from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
+    DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME,
+    default_project_eloreta_volume_output_dir,
+)
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
     DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
@@ -102,6 +140,13 @@ def test_default_fsaverage_cache_is_root_local(monkeypatch) -> None:
     assert candidate_fsaverage_subjects_dirs(FakeMneConfig())[0] == expected
 
 
+def test_fetch_fsaverage_cache_target_stays_root_local_with_env_override(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("FPVS_FSAVERAGE_SUBJECTS_DIR", str(tmp_path / "external-fsaverage-cache"))
+    monkeypatch.delenv("SUBJECTS_DIR", raising=False)
+
+    assert fetch_fsaverage_subjects_dir() == fpvs_toolbox_root() / DEFAULT_FSAVERAGE_SUBJECTS_DIR
+
+
 def test_fsaverage_cache_ignores_stale_mne_config_under_src(monkeypatch) -> None:
     monkeypatch.delenv("FPVS_FSAVERAGE_SUBJECTS_DIR", raising=False)
     monkeypatch.delenv("SUBJECTS_DIR", raising=False)
@@ -122,25 +167,28 @@ def test_fsaverage_cache_ignores_stale_mne_config_under_src(monkeypatch) -> None
 def test_fsaverage_cache_rejects_source_and_docs_paths() -> None:
     root = fpvs_toolbox_root()
 
-    with pytest.raises(ValueError, match="src/ or docs"):
+    with pytest.raises(ValueError, match="fsaverage cache data cannot live"):
         ensure_allowed_fsaverage_subjects_dir(root / "src" / "fsaverage-cache")
-    with pytest.raises(ValueError, match="src/ or docs"):
+    with pytest.raises(ValueError, match="fsaverage cache data cannot live"):
         ensure_allowed_fsaverage_subjects_dir(root / "docs" / "fsaverage-cache")
 
 
-def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
-    import mne.datasets
+def test_fsaverage_cache_rejects_temp_paths(monkeypatch, tmp_path) -> None:
+    temp_root = tmp_path / "Temp"
+    monkeypatch.setenv("TEMP", str(temp_root))
 
+    with pytest.raises(ValueError, match="temp directories"):
+        ensure_allowed_fsaverage_subjects_dir(temp_root / "fpvs-cache")
+
+
+def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
     target_subjects_dir = tmp_path / "repo-cache" / "mne" / "MNE-fsaverage-data"
     (target_subjects_dir / "fsaverage").mkdir(parents=True)
     calls: list[Path] = []
 
-    def fake_fetch_fsaverage(*, subjects_dir: Path | None = None, verbose: bool | None = None) -> Path:
-        del verbose
-        assert subjects_dir is not None
-        subjects_path = Path(subjects_dir)
-        calls.append(subjects_path)
-        fsaverage_dir = subjects_path / "fsaverage"
+    def fake_fetch_fsaverage(subjects_dir: Path) -> Path:
+        calls.append(subjects_dir)
+        fsaverage_dir = subjects_dir / "fsaverage"
         fsaverage_dir.mkdir(parents=True, exist_ok=True)
         return fsaverage_dir
 
@@ -157,31 +205,29 @@ def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch
         "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export.fetch_fsaverage_subjects_dir",
         lambda: target_subjects_dir,
     )
-    monkeypatch.setattr(mne.datasets, "fetch_fsaverage", fake_fetch_fsaverage)
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export.fetch_fsaverage_into_subjects_dir",
+        fake_fetch_fsaverage,
+    )
 
     assert _resolve_fsaverage_subjects_dir(FakeMneConfig(), allow_fetch=True) == target_subjects_dir
     assert calls == [target_subjects_dir]
 
 
 def test_mesh_loader_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
-    import mne.datasets
-
     target_subjects_dir = tmp_path / "repo-cache" / "mne" / "MNE-fsaverage-data"
     (target_subjects_dir / "fsaverage").mkdir(parents=True)
     calls: list[Path] = []
 
-    def fake_fetch_fsaverage(*, subjects_dir: Path | None = None, verbose: bool | None = None) -> Path:
-        del verbose
-        assert subjects_dir is not None
-        subjects_path = Path(subjects_dir)
-        calls.append(subjects_path)
-        fsaverage_dir = subjects_path / "fsaverage"
+    def fake_fetch_fsaverage(subjects_dir: Path) -> Path:
+        calls.append(subjects_dir)
+        fsaverage_dir = subjects_dir / "fsaverage"
         fsaverage_dir.mkdir(parents=True, exist_ok=True)
         return fsaverage_dir
 
     monkeypatch.setattr(fsaverage_mesh, "preferred_fsaverage_dirs", lambda: [target_subjects_dir / "fsaverage"])
     monkeypatch.setattr(fsaverage_mesh, "fetch_fsaverage_subjects_dir", lambda: target_subjects_dir)
-    monkeypatch.setattr(mne.datasets, "fetch_fsaverage", fake_fetch_fsaverage)
+    monkeypatch.setattr(fsaverage_mesh, "fetch_fsaverage_into_subjects_dir", fake_fetch_fsaverage)
 
     assert fsaverage_mesh._resolve_fsaverage_dir(allow_fetch=True) == target_subjects_dir / "fsaverage"
     assert calls == [target_subjects_dir]
@@ -238,10 +284,159 @@ def test_loreta_stacked_split_figure_export_path_uses_cr_sr_codes(tmp_path) -> N
     assert path == str(zscore_dir / "loreta_split_hemispheres_CR_SR.pdf")
 
 
+def test_loreta_mri_slice_figure_export_path_prefers_project_source_dir(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
+    zscore_dir.mkdir(parents=True)
+
+    path = default_mri_slice_figure_export_path(
+        project_root=project_root,
+        last_import_dir=None,
+        condition_label="Color Response eLORETA volume",
+    )
+
+    assert path == str(zscore_dir / "loreta_mri_slices_Color_Response_eLORETA_volume.pdf")
+
+
 def test_loreta_split_figure_condition_code_labels_color_and_semantic_responses() -> None:
     assert split_figure_condition_code("Color Response") == "CR"
     assert split_figure_condition_code("Semantic Response 2") == "SR"
     assert split_figure_condition_code("Oddball Baseline") == "OB"
+
+
+def test_loreta_split_figure_display_labels_write_out_color_and_semantic_responses() -> None:
+    assert split_figure_condition_display_label("Color Response 2") == "Color Response"
+    assert split_figure_condition_display_label("Semantic Response Raw mean z-score") == "Semantic Response"
+    assert split_figure_condition_display_label("Oddball Baseline") == "Oddball Baseline"
+    assert DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE == (0.0, 3.5)
+
+
+def test_loreta_display_modes_keep_mri_slices_volume_only() -> None:
+    volume_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [0.1, 0.1, 0.1], [0.2, 0.2, 0.2]], dtype=float),
+        values=np.asarray([1.0, 2.0, 3.0], dtype=float),
+        label="eLORETA volume",
+        kind=SOURCE_KIND_VOLUME_POINTS,
+        normalize_values=False,
+    )
+    surface_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]], dtype=float),
+        values=np.asarray([1.0, 2.0, 3.0], dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        label="L2-MNE surface",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        normalize_values=False,
+    )
+
+    assert _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_TRANSPARENT_MESH)
+    assert _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_MRI_SLICES)
+    assert not _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_SPLIT_HEMISPHERE)
+    assert _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_SPLIT_HEMISPHERE)
+    assert _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_CORTICAL_SURFACE)
+    assert not _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_MRI_SLICES)
+
+
+def test_loreta_manifest_conditions_group_participant_summary_entries(tmp_path) -> None:
+    entries = (
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
+            label="Color Response Raw mean z-score",
+            payload_path=tmp_path / "color_mean.json",
+            metadata={"participant_zscore_aggregation": "mean"},
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:2:color_response_median",
+            label="Color Response Median z-score",
+            payload_path=tmp_path / "color_median.json",
+            metadata={"participant_zscore_aggregation": "median"},
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:3:color_response_trimmed_mean",
+            label="Color Response 20% trimmed mean z-score",
+            payload_path=tmp_path / "color_trimmed.json",
+            metadata={"participant_zscore_aggregation": "trimmed_mean"},
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:4:semantic_response_raw_mean",
+            label="Semantic Response Raw mean z-score",
+            payload_path=tmp_path / "semantic_mean.json",
+            metadata={"participant_zscore_aggregation": "mean"},
+        ),
+    )
+
+    groups = _group_manifest_conditions(entries)
+
+    assert list(groups) == ["color_response", "semantic_response"]
+    assert groups["color_response"].label == "Color Response"
+    assert _ordered_source_summary_ids(groups["color_response"]) == (
+        SOURCE_SUMMARY_RAW_MEAN,
+        SOURCE_SUMMARY_MEDIAN,
+        SOURCE_SUMMARY_TRIMMED_MEAN,
+    )
+    assert (
+        groups["color_response"].entries_by_summary[SOURCE_SUMMARY_RAW_MEAN].condition_id
+        == "manifest:1:color_response_mean"
+    )
+    assert groups["semantic_response"].entries_by_summary[SOURCE_SUMMARY_RAW_MEAN].condition_id == (
+        "manifest:4:semantic_response_raw_mean"
+    )
+    assert _source_summary_label(SOURCE_SUMMARY_TRIMMED_MEAN) == "20% trimmed mean z-score"
+
+
+def test_loreta_manifest_methods_group_l2_and_eloreta_entries_separately(tmp_path) -> None:
+    entries = (
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
+            label="Color Response Raw mean z-score",
+            payload_path=tmp_path / "color_l2_mean.json",
+            metadata={
+                "producer_method": "l2_mne_fsaverage_participant_zscore_mean",
+                "participant_zscore_aggregation": "mean",
+            },
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
+            label="Color Response eLORETA volume Raw mean z-score",
+            payload_path=tmp_path / "color_eloreta_mean.json",
+            metadata={
+                "source_method": "eloreta_volume",
+                "producer_method": "eloreta_volume_participant_zscore_mean",
+                "participant_zscore_aggregation": "mean",
+            },
+        ),
+    )
+
+    groups = _group_manifest_methods(entries)
+
+    assert set(groups) == {SOURCE_METHOD_L2_MNE_SURFACE, SOURCE_METHOD_ELORETA_VOLUME}
+    assert list(groups[SOURCE_METHOD_L2_MNE_SURFACE].condition_groups) == ["color_response"]
+    assert list(groups[SOURCE_METHOD_ELORETA_VOLUME].condition_groups) == ["color_response"]
+
+
+def test_volume_display_payload_uses_source_cluster_mask_then_positive_exploratory_values() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([-1.0, 0.5, 3.0], dtype=float),
+        label="eLORETA volume",
+        kind="volume_points",
+        source_model="eloreta_volume_participant_zscore_mean",
+        value_label="source-space z-score",
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_source_indices": [0, 2],
+        },
+        normalize_values=False,
+    )
+
+    masked = _activation_display_payload(payload, transparent_mesh_display=True, use_cluster_mask=True)
+    exploratory = _activation_display_payload(payload, transparent_mesh_display=True, use_cluster_mask=False)
+
+    assert masked.values.tolist() == [-1.0, 3.0]
+    assert masked.metadata["display_value_filter"] == "cluster_mask"
+    assert exploratory.values.tolist() == [0.5, 3.0]
+    assert exploratory.metadata["display_value_filter_threshold"] == 0.0
 
 
 def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_path) -> None:
@@ -254,6 +449,21 @@ def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_pat
 
     manifest_path.write_text("{}", encoding="utf-8")
     assert default_project_zscore_manifest_path(project_root) == manifest_path
+
+
+def test_default_project_source_manifest_paths_returns_l2_then_eloreta(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
+    eloreta_dir = default_project_eloreta_volume_output_dir(project_root)
+    zscore_dir.mkdir(parents=True)
+    eloreta_dir.mkdir(parents=True)
+    zscore_manifest = zscore_dir / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
+    eloreta_manifest = eloreta_dir / DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME
+
+    zscore_manifest.write_text("{}", encoding="utf-8")
+    eloreta_manifest.write_text("{}", encoding="utf-8")
+
+    assert default_project_source_manifest_paths(project_root) == (zscore_manifest, eloreta_manifest)
 
 
 def test_loreta_project_root_resolver_reads_current_project(tmp_path) -> None:
@@ -277,6 +487,18 @@ def test_loreta_project_root_resolver_ignores_empty_string() -> None:
 
 def test_source_export_status_text_reports_flagged_participant_choice() -> None:
     assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
+        automatic=True,
+        include_flagged_subjects=False,
+    ) == "Preparing L2-MNE surface and eLORETA volume source-space z-score maps (excluding flagged participants)..."
+
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
+        automatic=False,
+        include_flagged_subjects=True,
+    ) == "Building L2-MNE surface and eLORETA volume source-space z-score maps (including flagged participants)..."
+
+    assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=False,
         include_flagged_subjects=True,
@@ -294,6 +516,111 @@ def test_source_export_status_text_reports_flagged_participant_choice() -> None:
         include_flagged_subjects=False,
         zscore_model=PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
     ) == "Building deprecated group-first source-space z-score JSON from the active project (excluding flagged participants)..."
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+        automatic=False,
+        include_flagged_subjects=False,
+    ) == "Building beta eLORETA volume source-space z-score JSON from the active project (excluding flagged participants)..."
+
+
+def _fake_source_export_result(output_dir: Path, *, method_id: str, payload_count: int = 1) -> SimpleNamespace:
+    return SimpleNamespace(
+        output_dir=output_dir,
+        manifest_path=output_dir / "manifest.json",
+        producer_result=SimpleNamespace(
+            method_id=method_id,
+            payloads=tuple(SimpleNamespace() for _index in range(payload_count)),
+        ),
+        project_inputs=SimpleNamespace(flagged_subjects=(), excluded_subjects=()),
+        export_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    )
+
+
+def test_project_source_export_worker_rebuilds_l2_and_eloreta_batch(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer.source_producers import project_eloreta_volume_export
+    from Tools.LORETA_Visualizer.source_producers import project_l2_mne_hauk_zscore_export
+
+    calls: list[tuple[str, bool, str | None]] = []
+
+    def fake_l2_export(**kwargs):
+        calls.append(("l2", kwargs["include_flagged_subjects"], kwargs["zscore_model"]))
+        kwargs["progress_callback"]("l2 done")
+        return _fake_source_export_result(tmp_path / "l2", method_id="l2_mne_fsaverage_participant_zscore", payload_count=2)
+
+    def fake_eloreta_export(**kwargs):
+        calls.append(("eloreta", kwargs["include_flagged_subjects"], kwargs.get("zscore_model")))
+        kwargs["progress_callback"]("eloreta done")
+        return _fake_source_export_result(
+            tmp_path / "eloreta",
+            method_id="eloreta_volume_participant_zscore",
+            payload_count=3,
+        )
+
+    monkeypatch.setattr(project_l2_mne_hauk_zscore_export, "write_project_l2_mne_hauk_zscore_payloads", fake_l2_export)
+    monkeypatch.setattr(project_eloreta_volume_export, "write_project_eloreta_volume_hauk_zscore_payloads", fake_eloreta_export)
+    worker = ProjectSourceMapExportWorker(
+        project_root=tmp_path,
+        export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+        include_flagged_subjects=True,
+        zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    )
+    progress_messages: list[str] = []
+    exported: list[object] = []
+    failed: list[str] = []
+    worker.progress.connect(progress_messages.append)
+    worker.exported.connect(exported.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert failed == []
+    assert calls == [
+        ("l2", True, PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST),
+        ("eloreta", True, None),
+    ]
+    assert len(exported) == 1
+    result = exported[0]
+    assert isinstance(result, ProjectSourceMapExportBatchResult)
+    assert result.requested_modes == PROJECT_SOURCE_EXPORT_DEFAULT_MODES
+    assert len(result.results) == 2
+    assert result.failures == ()
+    assert "Building L2-MNE surface source maps (1/2)" in progress_messages[0]
+    assert any("Building eLORETA volume source maps (2/2)" in message for message in progress_messages)
+
+
+def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer.source_producers import project_eloreta_volume_export
+    from Tools.LORETA_Visualizer.source_producers import project_l2_mne_hauk_zscore_export
+
+    def fake_l2_export(**kwargs):
+        return _fake_source_export_result(tmp_path / "l2", method_id="l2_mne_fsaverage_participant_zscore")
+
+    def fake_eloreta_export(**_kwargs):
+        raise RuntimeError("missing volume model")
+
+    monkeypatch.setattr(project_l2_mne_hauk_zscore_export, "write_project_l2_mne_hauk_zscore_payloads", fake_l2_export)
+    monkeypatch.setattr(project_eloreta_volume_export, "write_project_eloreta_volume_hauk_zscore_payloads", fake_eloreta_export)
+    worker = ProjectSourceMapExportWorker(
+        project_root=tmp_path,
+        export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+        include_flagged_subjects=False,
+        zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    )
+    exported: list[object] = []
+    failed: list[str] = []
+    worker.exported.connect(exported.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert failed == []
+    assert len(exported) == 1
+    result = exported[0]
+    assert isinstance(result, ProjectSourceMapExportBatchResult)
+    assert len(result.results) == 1
+    assert len(result.failures) == 1
+    assert result.failures[0].export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME
+    assert result.failures[0].message == "missing volume model"
 
 
 def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -> None:

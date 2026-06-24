@@ -24,6 +24,7 @@ from Tools.Publication_Maps.models import (
     WorkbookEntry,
 )
 from Tools.Publication_Maps.scalp_io import biosemi64_names_upper, normalize_electrode_name
+from Tools.Publication_Maps.xlsx_metric_reader import read_metric_sheet_selected_columns
 
 LONG_COLUMNS = [
     "condition",
@@ -167,9 +168,15 @@ def _collect_metric_rows(
     montage_names = biosemi64_names_upper()
     rows: list[dict[str, object]] = []
     source_sheet = metric.source_sheet
+    selected_columns = [f"{float(freq):.4f}_Hz" for freq in harmonics_hz]
+    required_columns = [ELECTRODE_COLUMN, *selected_columns]
     for workbook in workbooks:
         try:
-            df_metric = pd.read_excel(workbook.path, sheet_name=source_sheet)
+            df_metric = read_metric_sheet_selected_columns(
+                workbook.path,
+                sheet_name=source_sheet,
+                required_columns=required_columns,
+            )
         except Exception as exc:
             diagnostics.append(
                 Diagnostic(
@@ -191,11 +198,7 @@ def _collect_metric_rows(
                 )
             )
             continue
-        missing_columns = [
-            f"{float(freq):.4f}_Hz"
-            for freq in harmonics_hz
-            if f"{float(freq):.4f}_Hz" not in df_metric.columns
-        ]
+        missing_columns = [column for column in selected_columns if column not in df_metric.columns]
         if missing_columns:
             diagnostics.append(
                 Diagnostic(

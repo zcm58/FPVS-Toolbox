@@ -23,6 +23,7 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     FSAVERAGE_SUBJECT,
     candidate_fsaverage_subjects_dirs,
     ensure_allowed_fsaverage_subjects_dir,
+    fetch_fsaverage_into_subjects_dir,
     fetch_fsaverage_subjects_dir,
     preferred_fsaverage_subjects_dirs,
 )
@@ -311,7 +312,7 @@ def _resolve_fsaverage_subjects_dir(mne_module, *, allow_fetch: bool) -> Path:  
         raise ProjectL2MNEExportError(str(exc)) from exc
     for candidate in candidates:
         fsaverage_dir = candidate / FSAVERAGE_SUBJECT
-        if fsaverage_dir.is_dir() and (not allow_fetch or _has_required_forward_model_files(candidate)):
+        if fsaverage_dir.is_dir() and _has_required_forward_model_files(candidate):
             try:
                 return ensure_allowed_fsaverage_subjects_dir(candidate)
             except ValueError as exc:
@@ -324,11 +325,9 @@ def _resolve_fsaverage_subjects_dir(mne_module, *, allow_fetch: bool) -> Path:  
     except ValueError as exc:
         raise ProjectL2MNEExportError(str(exc)) from exc
     try:
-        from mne.datasets import fetch_fsaverage
-
-        fsaverage_dir = Path(fetch_fsaverage(subjects_dir=subjects_dir, verbose=False))
+        fsaverage_dir = fetch_fsaverage_into_subjects_dir(subjects_dir)
     except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, URLError, ssl.SSLError, TimeoutError) as exc:
-        raise ProjectL2MNEExportError(f"Unable to fetch fsaverage through MNE: {exc}") from exc
+        raise ProjectL2MNEExportError(f"Unable to fetch fsaverage into the FPVS root-local cache: {exc}") from exc
     try:
         return ensure_allowed_fsaverage_subjects_dir(fsaverage_dir.parent)
     except ValueError as exc:
@@ -552,7 +551,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fetch-fsaverage",
         action="store_true",
-        help="Allow MNE to fetch fsaverage into the external user cache if missing.",
+        help="Allow FPVS Toolbox to fetch fsaverage into the root-local cache if missing.",
     )
     parser.add_argument(
         "--harmonic-strategy",

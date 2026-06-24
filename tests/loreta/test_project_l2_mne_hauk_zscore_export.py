@@ -10,6 +10,7 @@ import pytest
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
+from Tools.LORETA_Visualizer.source_producers import project_fullfft_inputs
 from Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs import (
     ProjectFullFftInputError,
     build_l2_mne_hauk_participant_zscore_conditions_from_project,
@@ -45,6 +46,49 @@ def test_project_fullfft_assembler_reads_neighboring_bins(tmp_path) -> None:
     assert np.allclose(harmonic.target_topography, expected_target)
     expected_noise = _expected_fullfft_values(condition_base=10.0, frequency_hz=2.2, subject_mean=0.5)
     assert np.allclose(harmonic.noise_topographies_by_offset[-2], expected_noise)
+
+
+def test_project_fullfft_assembler_streams_required_columns_with_xml_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    header_calls: list[Path] = []
+    selected_calls: list[tuple[Path, tuple[str, ...]]] = []
+    original_header_reader = project_fullfft_inputs.read_xlsx_sheet_header
+    original_selected_reader = project_fullfft_inputs.read_xlsx_sheet_selected_columns
+
+    def spy_header_reader(excel_path, *, sheet_name):  # noqa: ANN001, ANN202
+        header_calls.append(Path(excel_path))
+        return original_header_reader(excel_path, sheet_name=sheet_name)
+
+    def spy_selected_reader(excel_path, *, sheet_name, required_columns, **kwargs):  # noqa: ANN001, ANN202
+        selected_calls.append((Path(excel_path), tuple(required_columns)))
+        return original_selected_reader(
+            excel_path,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(project_fullfft_inputs, "read_xlsx_sheet_header", spy_header_reader)
+    monkeypatch.setattr(project_fullfft_inputs, "read_xlsx_sheet_selected_columns", spy_selected_reader)
+
+    build_l2_mne_hauk_participant_zscore_conditions_from_project(
+        project_root,
+        conditions=["Condition A"],
+        noise_window_bins=3,
+        min_noise_bins=4,
+    )
+
+    assert len(header_calls) == 1
+    assert len(selected_calls) == 2
+    for _workbook_path, columns in selected_calls:
+        assert columns[0] == "Electrode"
+        assert "2.4000_Hz" in columns
+        assert "2.2000_Hz" in columns
+        assert "4.8000_Hz" in columns
+        assert "5.0000_Hz" in columns
 
 
 def test_project_fullfft_participant_assembler_preserves_subject_maps(tmp_path) -> None:
@@ -119,8 +163,9 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert metadata["config_project_integration"] == "phase_6h_a2_project_l2_mne_participant_first_hauk_zscore"
     assert metadata["condition_project_input_assembly"] == "phase_6h_a2_fullfft_participant_neighbor_bins_read_only"
     assert metadata["cluster_mask"] == "source_space_cluster_permutation"
-    assert metadata["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass_two_tailed"
-    assert metadata["cluster_forming_tail"] == "two-sided"
+    assert metadata["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass_positive_tail"
+    assert metadata["cluster_forming_tail"] == "positive"
+    assert metadata["cluster_forming_p_value"] == pytest.approx(0.00001)
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["conditions"][0]["participant_count"] == 2
     lateralization = json.loads(result.lateralization_summary_path.read_text(encoding="utf-8"))

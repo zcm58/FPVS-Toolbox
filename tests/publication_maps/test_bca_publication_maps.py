@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ from Main_App.exports.figure_style import (
     FIGURE_TEXT_SIZE_PT,
     figure_text_kwargs,
 )
+from Tools.Publication_Maps import metrics as publication_map_metrics
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
 from Tools.Publication_Maps.excel_inputs import discover_conditions
@@ -32,8 +34,11 @@ from Tools.Publication_Maps.rendering import (
     COMBINED_PAIRED_MAP_FIGSIZE,
     COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE,
     JOURNAL_TEXT_WIDTH_IN,
+    _colorbar_text_kwargs,
     _combined_paired_layout_rects,
     _metric_limits,
+    _paired_condition_title_kwargs,
+    _style_colorbar,
     colorbar_label_for_metric,
     colormap_for_metric,
     export_source_workbook,
@@ -296,6 +301,142 @@ def test_source_workbook_includes_z_score_threshold_when_selected(tmp_path: Path
     assert params_by_key["z_score_range_min"] == pytest.approx(DEFAULT_Z_SCORE_THRESHOLD)
 
 
+def test_fast_metric_reader_preserves_publication_map_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(
+        tmp_path,
+        subjects=("S1", "S2"),
+        conditions=("Faces", "Objects"),
+    )
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces", "Objects"),
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        project_root=project_root,
+        metrics=(
+            PublicationMetric.BCA,
+            PublicationMetric.SNR,
+            PublicationMetric.Z_SCORE,
+        ),
+        color_bounds={
+            PublicationMetric.Z_SCORE: ColorBounds(vmin=DEFAULT_Z_SCORE_THRESHOLD),
+        },
+    )
+
+    fast = build_publication_map_result(request)
+
+    def pandas_reference_reader(
+        excel_path: Path,
+        *,
+        sheet_name: str,
+        required_columns: list[str],
+    ) -> pd.DataFrame:
+        return pd.read_excel(
+            excel_path,
+            sheet_name=sheet_name,
+            usecols=list(required_columns),
+        )
+
+    monkeypatch.setattr(
+        publication_map_metrics,
+        "read_metric_sheet_selected_columns",
+        pandas_reference_reader,
+    )
+    reference = build_publication_map_result(request)
+
+    pd.testing.assert_frame_equal(
+        fast.long_values,
+        reference.long_values,
+        check_dtype=False,
+    )
+    pd.testing.assert_frame_equal(
+        fast.grand_average_values,
+        reference.grand_average_values,
+        check_dtype=False,
+    )
+
+
+def test_metric_collection_reads_only_selected_harmonic_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        project_root=project_root,
+        metrics=(
+            PublicationMetric.BCA,
+            PublicationMetric.SNR,
+            PublicationMetric.Z_SCORE,
+        ),
+    )
+    real_reader = publication_map_metrics.read_metric_sheet_selected_columns
+    seen_columns: list[tuple[str, ...]] = []
+
+    def tracking_reader(
+        excel_path: Path,
+        *,
+        sheet_name: str,
+        required_columns: list[str],
+    ) -> pd.DataFrame:
+        _ = sheet_name
+        seen_columns.append(tuple(required_columns))
+        return real_reader(
+            excel_path,
+            sheet_name=sheet_name,
+            required_columns=required_columns,
+        )
+
+    monkeypatch.setattr(
+        publication_map_metrics,
+        "read_metric_sheet_selected_columns",
+        tracking_reader,
+    )
+
+    result = build_publication_map_result(request)
+
+    assert not any(diag.level == "error" for diag in result.diagnostics)
+    assert seen_columns == [
+        ("Electrode", "1.2000_Hz", "3.6000_Hz", "7.2000_Hz"),
+        ("Electrode", "1.2000_Hz", "3.6000_Hz", "7.2000_Hz"),
+        ("Electrode", "1.2000_Hz", "3.6000_Hz", "7.2000_Hz"),
+    ]
+
+
+def test_metric_collection_does_not_use_pandas_excel_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        project_root=project_root,
+        metrics=(PublicationMetric.BCA,),
+    )
+
+    def fail_read_excel(*_args, **_kwargs):
+        raise AssertionError("Publication Maps metric collection should use the XML reader")
+
+    monkeypatch.setattr(pd, "read_excel", fail_read_excel)
+
+    result = build_publication_map_result(request)
+
+    assert result.long_values["metric"].unique().tolist() == [PublicationMetric.BCA.value]
+    assert not any(diag.level == "error" for diag in result.diagnostics)
+
+
 def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
     tmp_path: Path,
 ) -> None:
@@ -321,6 +462,8 @@ def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
     figures = render_publication_figures(result, request)
 
     paired = [path for path in figures if "_and_" in path.stem]
+    assert len(figures) == 2
+    assert figures == paired
     assert {path.suffix for path in paired} == {".png", ".pdf"}
     assert {path.stem for path in paired} == {"Objects_and_Faces_bca_snr_paired"}
     paired_png = next(path for path in paired if path.suffix == ".png")
@@ -361,6 +504,8 @@ def test_exports_combined_paired_condition_figure_with_z_score_third_row(
     figures = render_publication_figures(result, request)
 
     paired = [path for path in figures if "_and_" in path.stem]
+    assert len(figures) == 2
+    assert figures == paired
     assert {path.suffix for path in paired} == {".png", ".pdf"}
     assert {path.stem for path in paired} == {
         "Objects_and_Faces_bca_snr_z_score_paired"
@@ -509,6 +654,34 @@ def test_bca_colorbar_label_and_fonts_use_shared_figure_typography() -> None:
     assert condition_font["fontsize"] == FIGURE_TEXT_SIZE_PT
     assert panel_font["fontsize"] == FIGURE_PANEL_LABEL_SIZE_PT
     assert panel_font["fontweight"] == "bold"
+
+
+def test_paired_headers_and_colorbar_label_are_bold_but_ticks_are_not() -> None:
+    header_font = _paired_condition_title_kwargs()
+    legend_font = _colorbar_text_kwargs()
+
+    assert header_font["fontfamily"] == FIGURE_FONT_FAMILY
+    assert header_font["fontsize"] == FIGURE_PANEL_LABEL_SIZE_PT
+    assert header_font["fontweight"] == "bold"
+    assert legend_font["fontfamily"] == FIGURE_FONT_FAMILY
+    assert legend_font["fontsize"] == FIGURE_TEXT_SIZE_PT
+    assert legend_font["fontweight"] == "bold"
+
+    fig, ax = plt.subplots()
+    try:
+        image = ax.imshow(np.asarray([[0.0, 1.0], [1.0, 0.0]]))
+        cbar = fig.colorbar(image, ax=ax)
+
+        _style_colorbar(cbar, metric=PublicationMetric.SNR)
+
+        assert cbar.ax.yaxis.label.get_fontweight() == "bold"
+        assert all(
+            tick_label.get_fontweight() == "normal"
+            for tick_label in cbar.ax.get_yticklabels()
+            if tick_label.get_text()
+        )
+    finally:
+        plt.close(fig)
 
 
 def test_worker_emits_progress_messages_and_finished_without_widgets(

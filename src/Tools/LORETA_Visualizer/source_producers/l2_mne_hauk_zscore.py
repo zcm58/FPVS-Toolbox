@@ -78,20 +78,20 @@ PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT = "fpvs_loreta_participant_source_maps_v1"
 DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS = 10
 DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS = 4
 DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS = (-1, 0, 1)
-DEFAULT_CLUSTER_MASK_ENABLED = True
-DEFAULT_CLUSTER_FORMING_P_VALUE = 0.05
-DEFAULT_CLUSTER_ALPHA = 0.05
-DEFAULT_CLUSTER_PERMUTATION_COUNT = 10000
-DEFAULT_CLUSTER_PERMUTATION_SEED = 20260609
-CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE = "one_sample_sign_flip_max_cluster_mass_positive_tail"
-CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_TWO_TAILED = "one_sample_sign_flip_max_cluster_mass_two_tailed"
-CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP = CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_TWO_TAILED
-CLUSTER_MASK_STATUS_COMPUTED = "computed"
-CLUSTER_MASK_STATUS_NO_CANDIDATES = "no_candidate_clusters"
-CLUSTER_MASK_STATUS_DISABLED = "disabled"
 CLUSTER_TAIL_POSITIVE = "positive"
 CLUSTER_TAIL_NEGATIVE = "negative"
 CLUSTER_TAIL_TWO_SIDED = "two-sided"
+DEFAULT_CLUSTER_MASK_ENABLED = True
+DEFAULT_CLUSTER_FORMING_P_VALUE = 0.00001
+DEFAULT_CLUSTER_ALPHA = 0.05
+DEFAULT_CLUSTER_PERMUTATION_COUNT = 10000
+DEFAULT_CLUSTER_PERMUTATION_SEED = 20260609
+DEFAULT_CLUSTER_TAIL = CLUSTER_TAIL_POSITIVE
+CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE = "one_sample_sign_flip_max_cluster_mass_positive_tail"
+CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP = CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE
+CLUSTER_MASK_STATUS_COMPUTED = "computed"
+CLUSTER_MASK_STATUS_NO_CANDIDATES = "no_candidate_clusters"
+CLUSTER_MASK_STATUS_DISABLED = "disabled"
 
 
 @dataclass(frozen=True)
@@ -112,7 +112,7 @@ class L2MNEHaukZScoreConfig:
     cluster_alpha: float = DEFAULT_CLUSTER_ALPHA
     cluster_permutation_count: int = DEFAULT_CLUSTER_PERMUTATION_COUNT
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED
-    cluster_tail: str = CLUSTER_TAIL_TWO_SIDED
+    cluster_tail: str = DEFAULT_CLUSTER_TAIL
     montage_name: str = "BioSemi ActiveTwo 64-channel 10-10"
     harmonic_policy_id: str = "stats_group_significant_oddball_harmonics"
     template_subject: str = "fsaverage"
@@ -144,8 +144,8 @@ class L2MNEHaukZScoreConfig:
         if cluster_permutation_count < 1:
             raise ValueError("Cluster permutation count must be at least 1.")
         cluster_tail = str(self.cluster_tail).strip().lower()
-        if cluster_tail not in {CLUSTER_TAIL_POSITIVE, CLUSTER_TAIL_TWO_SIDED}:
-            raise ValueError("Cluster tail must be 'two-sided' or 'positive'.")
+        if cluster_tail != CLUSTER_TAIL_POSITIVE:
+            raise ValueError("Hauk 2025 source-space cluster masking uses positive-tail testing only.")
         object.__setattr__(self, "selected_harmonics_hz", selected)
         object.__setattr__(self, "lambda2", lambda2)
         object.__setattr__(self, "noise_window_bins", noise_window_bins)
@@ -518,9 +518,10 @@ def compute_l2_mne_hauk_source_cluster_mask(
 ) -> L2MNEHaukClusterPermutationResult:
     """Compute a Hauk-style source-space cluster mask across participants.
 
-    This is a one-sample sign-flip permutation test against zero over
-    participant source-space z-score maps. The default two-sided mode matches
-    the Hauk-style source-space mask; it produces an inferential display mask
+    This is a positive-tail one-sample sign-flip permutation test against zero
+    over participant source-space z-score maps. Its defaults mirror Hauk et al.
+    2025's publication code: cluster-forming p = 1e-5, corrected cluster alpha
+    = .05, and up to 10000 sign flips. It produces an inferential display mask
     and does not alter source values or run the inverse solution.
     """
     matrix = _participant_zscore_matrix(participant_values)
@@ -1117,8 +1118,8 @@ def _cluster_forming_t_threshold(*, participant_count: int, p_value: float, tail
         from scipy import stats
 
         threshold = float(stats.t.ppf(1.0 - tail_probability, df=participant_count - 1))
-    except (ImportError, AttributeError, TypeError, ValueError):
-        threshold = 1.959963984540054 if cluster_tail == CLUSTER_TAIL_TWO_SIDED else 1.6448536269514722
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError("SciPy is required for Hauk 2025 source-space cluster-forming thresholds.") from exc
     if not np.isfinite(threshold):
         raise ValueError("Cluster-forming threshold was not finite.")
     return threshold
@@ -1263,9 +1264,9 @@ def _validate_cluster_tail(tail: str) -> str:
 
 def _cluster_mask_method_label(tail: str) -> str:
     cluster_tail = _validate_cluster_tail(tail)
-    if cluster_tail == CLUSTER_TAIL_POSITIVE:
-        return CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE
-    return CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_TWO_TAILED
+    if cluster_tail != CLUSTER_TAIL_POSITIVE:
+        raise ValueError("Hauk 2025 source-space cluster masking uses positive-tail testing only.")
+    return CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE
 
 
 def _validate_probability(value: float, label: str) -> float:
@@ -1416,6 +1417,7 @@ def _cluster_payload_metadata(
         "cluster_mask_status": cluster_result.status,
         "cluster_mask_primary_display": True,
         "cluster_mask_method": _cluster_mask_method_label(cluster_result.tail),
+        "cluster_mask_publication_alignment": "Hauk et al. 2025 FPVS_WORDS source-space cluster mask",
         "cluster_mask_note": (
             "Renderer uses this producer-computed source-space mask as the primary "
             "publication-style L2-MNE display mask; source values remain unchanged."

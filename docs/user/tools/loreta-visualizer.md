@@ -7,26 +7,26 @@ The LORETA Visualizer opens from the main app sidebar as **LORETA Visualizer**.
 The first time you open it in an app session, FPVS Toolbox shows a beta warning
 that must be acknowledged before the workspace switches to the visualizer. Its
 current implementation is an experimental visualization and beta source-map
-viewer: it renders a brain mesh, synthetic source maps, prepared JSON payloads,
-and early real-project cortical L2-MNE maps.
+viewer: it renders a brain mesh, prepared JSON payloads, beta real-project
+L2-MNE cortical-surface maps, and beta real-project eLORETA volume maps.
 
 ## Current status
 
-The embedded visualizer can now display real project data through beta
-Hauk-style L2-MNE cortical-surface source-space z-score maps. This is an early
-method-validation path, not a final validated LORETA, eLORETA, sLORETA,
+The embedded visualizer can now display real project data through two beta
+source-map families: Hauk-style L2-MNE cortical-surface source-space z-score
+maps and eLORETA volume source-space z-score maps. This is an early
+method-validation path, not a final validated source-localization,
 deep-source, or subject-MRI workflow.
 
-For details about the current source-localization method, assumptions,
+For details about the current source-estimation method, assumptions,
 citations, z-score calculation, and participant QC behavior, see
-[Source Localization Method](source-localization-method.md).
+[Source Estimation](source-localization-method.md).
 
-The visible occipital, frontal, and deep medial temporal demo activations are
-still synthetic. The real-project path is separate: it reads existing project
-workbooks, uses the oddball harmonic list exported by the Stats tool, builds a
-template BioSemi64/fsaverage cortical forward model through MNE, writes
-prepared z-score source JSON files when needed, and loads them through the same
-manifest importer used by the demo fixtures.
+The real-project path reads existing project workbooks, uses the oddball
+harmonic list exported by the Stats tool, builds template BioSemi64/fsaverage
+source models through MNE, writes prepared z-score source JSON files when
+needed, and loads them through the same manifest importer used by prepared
+source payloads.
 
 Use the current version to verify rendering behavior, camera controls, color
 scaling, and whether source maps can be drawn in the intended mode. Current
@@ -35,8 +35,8 @@ split-hemisphere cortical paint view. The split view uses fsaverage inflated
 hemispheres when available so the cortical map is flatter and easier to read.
 It also uses FreeSurfer curvature/sulcal gray-white shading when available to
 make folds and surface depth easier to interpret.
-Volume, ROI, and deep-style maps keep the transparent anatomical shell
-behavior.
+eLORETA volume maps default to the transparent anatomical shell behavior and
+can also be reviewed as orthogonal MRI slices.
 
 ## What you can do now
 
@@ -49,37 +49,55 @@ behavior.
 - Reset the camera, and in publication split view reset both hemispheres to the
   intended publication layout.
 - Adjust brain transparency for transparent-shell volume/deep views.
+- Switch between loaded source-map methods, currently L2-MNE surface and
+  eLORETA volume when both default project manifests are available.
 - Use an fsaverage mesh loaded through MNE from the toolbox cache or a
   configured subjects directory, with synthetic fallback when the mesh is
   unavailable.
 - Show or hide the source map independently from the brain mesh.
 - Adjust source-map opacity for transparent overlay views.
-- Switch among project source-map conditions when available, or synthetic
-  demonstration conditions otherwise.
+- Switch among project source-map conditions, then choose whether to display
+  the raw mean, median, or 20% trimmed mean source-space z-score summary.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
   bounds.
 - Read the source color scale from the control-panel color ramp and min/max
   labels.
 - Open **Export Figures** to export the current publication split-hemisphere
-  view or a two-condition stack as 600 DPI PDF and PNG files. Future figure
-  exports for other displays will live in the same dialog.
-- Open **Source Map Options** to rebuild project maps with Stats/QC-flagged
-  participants excluded by default or explicitly included for comparison, load a
-  prepared source payload JSON file, load a prepared source manifest, or choose
-  the deprecated group-first z-score model for comparison.
+  view, a two-condition stack, or the current eLORETA MRI-slice view as 600 DPI
+  PDF and PNG files.
+- Open **Source Map Options** to rebuild participant-first project source-space
+  z-score maps with Stats/QC-flagged participants excluded by default or
+  explicitly included for comparison. The default rebuild prepares both
+  L2-MNE surface and eLORETA volume maps. Source Map Options can also load a
+  prepared source payload JSON file or a prepared source manifest. The Display
+  tab lets you turn off the saved cluster mask for exploratory z-threshold
+  viewing.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
-Higher synthetic values are mapped toward red. Lower values appear lighter or
-less intense depending on the current color range.
+Higher source values are mapped toward red. Lower values appear lighter or less
+intense depending on the current color range.
 
 For beta L2-MNE project maps, the color scale shows the actual scalar range
 used for the current source map. When auto-scale is on, the min/max labels
 update from the loaded payload values after cortical paint masking. For
 regenerated participant-first maps, the primary mask is the producer-computed
 source-space cluster-permutation mask. Older unmasked maps fall back to the
-selected display cutoff. Hidden vertices are shown as the neutral gray cortex
-color.
+selected display cutoff. In **Source Map Options > Display**, uncheck **Use
+cluster mask when available** to temporarily ignore a saved mask and view the
+same source values with the selected exploratory z-score cutoff. Hidden
+vertices are shown as the neutral gray cortex color. If an exact small-sample
+permutation mask cannot reach the selected cluster alpha, the visualizer warns
+that the cortical render is underpowered and falls back to the selected
+exploratory z-score display cutoff instead of showing an empty group-level
+mask.
+
+For beta eLORETA volume project maps, the color scale is also in source-space
+z-score units. The transparent mesh view uses a smoothed volume overlay; the
+MRI-slice view uses the same selected source map over axial, coronal, and
+sagittal fsaverage anatomy panels. The eLORETA display is useful for beta
+method review, but it should not be interpreted as precise subject-specific
+deep-source localization.
 
 ## Inputs
 
@@ -112,9 +130,11 @@ selected harmonics from
 per-participant Excel outputs under `1 - Excel Data Files`. Workbooks may be
 directly inside each condition folder or inside condition/group subfolders.
 
-The default Hauk-style z-score exporter requires each included participant
-workbook to contain a `FullFFT Amplitude (uV)` sheet with the exact selected
-harmonic columns and neighboring frequency bins. Its project-local output is:
+The default source-map rebuild requires each included participant workbook to
+contain a `FullFFT Amplitude (uV)` sheet with the exact selected harmonic
+columns and neighboring frequency bins. It writes both default beta methods.
+
+The L2-MNE surface project-local output is:
 
 `6 - Source Localization/L2-MNE Hauk Z-Score Beta/`
 
@@ -122,10 +142,12 @@ The main file loaded by default is:
 
 `project_l2_mne_hauk_zscore_beta_manifest.json`
 
-That manifest contains participant-first source-space z-score group summaries:
-raw mean, median, and 20% trimmed mean entries for each condition. The same
-folder also stores `participant_l2_mne_hauk_zscore_maps.json`, a participant
-sidecar reserved for future individual-viewer support.
+That manifest contains participant-first source-space z-score group summaries.
+The condition selector shows each source-map condition once, and the adjacent
+summary selector chooses the raw mean, median, or 20% trimmed mean entry for
+that condition. The same folder also stores
+`participant_l2_mne_hauk_zscore_maps.json`, a participant sidecar reserved for
+future individual-viewer support.
 
 Each project rebuild also writes `source_validation_report.md` and
 `source_validation_report.json` in the same folder. Use the Markdown report as
@@ -133,8 +155,26 @@ the quick review artifact for payload validation status, cluster-mask coverage,
 source lateralization highlights, beta limitations, and the manual comparison
 checks that should be completed before treating maps as validated.
 
-The older 6C diagnostic amplitude exporter remains available in Source Map
-Options and writes project-local output under:
+The eLORETA volume project-local output is:
+
+`6 - Source Localization/eLORETA Volume Beta/`
+
+The main file loaded by the eLORETA method selector group is:
+
+`project_eloreta_volume_hauk_zscore_beta_manifest.json`
+
+That manifest contains participant-first eLORETA volume source-space z-score
+group summaries. The folder also stores
+`participant_eloreta_volume_hauk_zscore_maps.json`, a participant sidecar
+reserved for future individual-viewer support, plus a source-validation report
+that records method settings, source-grid details, cluster-mask coverage,
+generated files, beta limitations, and recommended manual checks. eLORETA
+volume maps do not yet write source-space ROI/lateralization sidecars.
+
+The older 6C diagnostic amplitude exporter is no longer exposed as a normal
+Source Map Options rebuild action. It remains available in the
+`source_producers` package for developer/method-review runs and writes
+project-local output under:
 
 `6 - Source Localization/L2-MNE Cortical Surface Beta/`
 
@@ -142,31 +182,30 @@ The main file to load manually is:
 
 `project_l2_mne_cortical_surface_beta_manifest.json`
 
+Existing diagnostic manifests can still be loaded manually from **Source Map
+Options** when method review requires them.
+
 The source JSON and manifest load actions live in **Source Map Options**. Their
 dialogs start in the last import folder when possible. Otherwise, they open to
 the active project's source-map output folder when it exists, then the active
 project root.
 
-## Interpreting the demo maps
+## Interpreting source maps
 
-Treat synthetic demo activations as rendering tests only. Beta project source
-maps are estimated from project EEG-derived topographies, but they are still
-exploratory and should not be used as final reportable source-localization
-results until the method is validated for your study.
+Beta project source maps are estimated from project EEG-derived topographies,
+but they are still exploratory and should not be used as final reportable
+source-localization results until the method is validated for your study.
 
-The deep medial temporal demo shows that the renderer can display a smooth
-internal 3D source blob inside the transparent brain. It is not a hippocampal
-source-localization result.
-
-The prepared source-map fixture is shaped like a future real-data handoff with
-coordinates, scalar values, faces, source-model metadata, and coordinate-space
-conversion. It is still synthetic and should be used only to inspect rendering.
+The checked-in source-map examples are shaped like future real-data handoffs
+with coordinates, scalar values, faces, source-model metadata, and
+coordinate-space conversion. They remain synthetic validation fixtures and are
+not shown as live demo conditions in the normal selector.
 
 When the tool opens inside a project, it automatically prepares fsaverage and
-then prefers the project-local Hauk-style source-space z-score manifest. If the
-manifest is missing and the required `FullFFT Amplitude (uV)` target/noise-bin
-data are present, the tool builds the z-score source maps in the background and
-loads the generated manifest.
+then prefers the project-local default source-map manifests. If the manifests
+are missing and the required `FullFFT Amplitude (uV)` target/noise-bin data are
+present, the tool builds the L2-MNE surface and eLORETA volume source maps in
+the background and loads the generated manifests.
 
 If the project has not been reprocessed or the Stats-ready workbook has not
 been exported, the visualizer cannot build project source maps. Re-run
@@ -231,20 +270,20 @@ helper layer will then adapt that prepared payload into the 3D renderer.
 This separation lets the visualization support different future source methods
 without hard-coding one calculation pipeline into the display layer.
 
-The first calculation direction is a beta L2-MNE cortical-surface method for
-FPVS oddball-response maps. That method is intended for fsaverage cortical
-surface source maps, not deep volume localization. It produces the same
-prepared JSON payload shape as the current examples, so a later LORETA,
-eLORETA, or mixed volume method can be added as a different calculation method
-without changing how the 3D renderer works.
+The first calculation direction was a beta L2-MNE cortical-surface method for
+FPVS oddball-response maps. The current branch adds a beta eLORETA volume
+method as a sibling producer that emits the same prepared JSON payload shape.
+This keeps source estimation separate from rendering while letting the viewer
+switch between cortical-surface and template-volume source maps.
 
-The current real-data path is cortical-surface only and uses a template
-fsaverage model. Hauk-style L2-MNE source-space z-score maps are the default
-project view. This mode reads raw `FullFFT Amplitude (uV)` target and
-neighboring frequency bins for each included participant, sends each
-participant's target and noise topographies through the same inverse model,
-computes participant source-space z-score maps, and then displays group raw
-mean, median, or 20% trimmed mean z-score summaries.
+The current real-data path uses template fsaverage source spaces. Hauk-style
+L2-MNE source-space z-score maps are the default cortical project view, and
+eLORETA volume source-space z-score maps are the default volume project view.
+Both modes read raw `FullFFT Amplitude (uV)` target and neighboring frequency
+bins for each included participant, send each participant's target and noise
+topographies through the selected method's inverse model, compute participant
+source-space z-score maps, and then display group raw mean, median, or 20%
+trimmed mean z-score summaries.
 
 By default, z-score maps use an opaque cortical paint view in the
 publication-style split-hemisphere layout. That split layout uses inflated
@@ -254,17 +293,18 @@ FreeSurfer `curv` shading when available, `sulc` as a fallback, and a simple
 geometry-derived underlay if neither file is available. The same payload can
 also be shown on a single fsaverage pial surface or in the transparent mesh
 view. The signed z-score payload is still preserved in the generated JSON for
-QC. Regenerated participant-first payloads include a source-space
-two-tailed cluster-permutation mask, and opaque cortical paint mode uses that
-mask as the primary publication-style display. Source vertices outside
-significant clusters show the gray-white shaded cortex rather than activation
-colors. Significant positive and negative retained source z-scores can both be
-painted. Older unmasked payloads fall back to the selected display threshold.
-The default threshold is `z >= 1.64`. Source Map Options > Display provides
-preset cutoffs for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
-`z >= 3.89`. Values retained by either the cluster mask or fallback cutoff are
-painted on top with the same heatmap color ramp used by the transparent
-visualizer.
+QC. Regenerated participant-first payloads include a source-space positive-tail
+cluster-permutation mask, and opaque cortical paint mode uses that mask as the
+primary publication-style display. Source vertices outside significant clusters
+show the gray-white shaded cortex rather than activation colors. Older unmasked
+payloads fall back to the selected display threshold.
+If an exact small-sample permutation mask cannot reach the selected cluster
+alpha, the visualizer warns that the render is underpowered, not group-masked,
+and exploratory, then uses the selected display threshold. The default
+threshold is `z >= 1.64`. Source Map Options > Display provides preset cutoffs
+for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`.
+Values retained by either the cluster mask or fallback cutoff are painted on
+top with the same heatmap color ramp used by the transparent visualizer.
 
 The threshold is a display mask only. The cluster-permutation mask is the
 statistical mask for current participant-first Hauk-style L2-MNE maps, and it
@@ -276,8 +316,9 @@ publication view, the resulting display values are drawn on the inflated
 hemisphere canvas when available. This does not improve or change the
 underlying source-estimation precision.
 
-The older arbitrary-amplitude L2-MNE cortical-surface export remains available
-in Source Map Options as a diagnostic action. Those values are
+The older arbitrary-amplitude L2-MNE cortical-surface export remains a
+manual/developer diagnostic producer outside the normal GUI rebuild controls.
+When those prepared diagnostic manifests are loaded manually, the values are
 arbitrary/template-scaled source amplitudes proportional to the sensor
 topographies used as input
 (`summed BCA uV` by default). They are not calibrated current density, dipole
@@ -287,3 +328,8 @@ The z-score mode is better aligned with FPVS source-localization publications,
 but it is still a beta template-based workflow. It is EEG-only, uses fsaverage
 instead of individual MRIs, and is intended for method review before treating
 the maps as analysis-ready.
+
+eLORETA volume maps are expected to be spatially smooth and diffuse. The
+template volume grid and MRI-slice display can help review whether the source
+pattern is plausible, but the current workflow does not provide
+subject-specific anatomical localization.
