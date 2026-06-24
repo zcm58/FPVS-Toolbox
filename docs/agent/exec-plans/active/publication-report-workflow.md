@@ -28,10 +28,9 @@ Implemented in `codex/publication-report-workflow` initial slice:
 - Built-in descriptive QC distribution outputs: participant-level IQR outlier
   tables, Shapiro-Wilk/Q-Q normality diagnostics, and manual-inspection
   boxplot/histogram/Q-Q figures under the publication report figure folder.
-- Companion active plan `publication-workflow-stepper.md` now owns the
-  higher-level guided post-processing stepper: QC review, manual outlier
-  decisions, frozen participant exclusions, report generation, and downstream
-  figure handoff.
+- The separate Publication Workflow stepper has been removed; Publication
+  Report remains a manually-run embedded tool, with automated downstream figure
+  orchestration deferred.
 - Focused headless tests for generated Markdown, DOCX, workbook, audit JSON,
   missing selected conditions, and single-group enforcement.
 
