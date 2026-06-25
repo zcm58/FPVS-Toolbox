@@ -31,8 +31,8 @@ The sidebar shows the default tools first: Statistics, SNR Plot Generator,
 Publication Maps / Scalp Maps, LORETA Visualizer, and Sequence Figure.
 
 Publication Report, Ratio Calculator, Individual-Level Detectability, and Epoch
-Averaging are beta tools. To show them in the sidebar, open Settings, enable
-Beta Tools, then close and reopen FPVS Toolbox.
+Averaging are beta tools. To show them in the sidebar, open Settings >
+Advanced, enable Beta Tools, then close and reopen FPVS Toolbox.
 
 See the following sections for more information regarding each tool provided in FPVS Toolbox.
 

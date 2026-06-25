@@ -3,7 +3,7 @@
 This section gives each FPVS Toolbox tool its own page. Keep each page short: what the tool does, when to use it, basic inputs and outputs, and references.
 
 The sidebar shows default tools first. Beta tools are appended to the sidebar
-only after you enable Beta Tools in Settings and reopen FPVS Toolbox.
+only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
 
 | Tool | Sidebar status | Basic purpose                                                                                     |
 | --- | --- |---------------------------------------------------------------------------------------------------|

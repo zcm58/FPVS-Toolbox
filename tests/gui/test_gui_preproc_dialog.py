@@ -149,8 +149,9 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
-    assert "Diagnostics" in cards
-    assert "Tool Visibility" in cards
+    assert "Application Options" in cards
+    assert "Diagnostics" not in cards
+    assert "Tool Visibility" not in cards
     assert "Analysis Defaults" in cards
     assert "Quick Add" in cards
     assert "Regions of Interest" in cards
@@ -158,12 +159,13 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         "Preprocessing",
         "Stats",
         "ROIs",
+        "Advanced",
     ]
     assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
-    assert cards["Diagnostics"].isAncestorOf(dlg.debug_check)
-    assert cards["Tool Visibility"].isAncestorOf(dlg.beta_tools_check)
+    assert cards["Application Options"].isAncestorOf(dlg.debug_check)
+    assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
     assert dlg.beta_tools_check.text() == "Enable Beta Tools"
     assert dlg.beta_tools_check.isChecked() is False
     assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)
@@ -188,8 +190,14 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     rois_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "ROIs"
     )
+    advanced_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Advanced"
+    )
     stats_tab = dlg.tabs.widget(stats_tab_index)
     rois_tab = dlg.tabs.widget(rois_tab_index)
+    advanced_tab = dlg.tabs.widget(advanced_tab_index)
+    assert not preproc_tab.isAncestorOf(cards["Application Options"])
+    assert advanced_tab.isAncestorOf(cards["Application Options"])
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])
     assert rois_tab.isAncestorOf(cards["Quick Add"])
     assert not stats_tab.isAncestorOf(cards["Regions of Interest"])
@@ -198,9 +206,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
     assert stats_tab.findChild(ActionRow, "settings_stats_footer_actions") is not None
     assert rois_tab.findChild(ActionRow, "settings_rois_footer_actions") is not None
+    assert advanced_tab.findChild(ActionRow, "settings_advanced_footer_actions") is not None
     assert preproc_tab.findChild(QWidget, "settings_preproc_footer") is not None
     assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
     assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
+    assert advanced_tab.findChild(QWidget, "settings_advanced_footer") is not None
     assert rois_tab.findChild(ActionRow, "settings_rois_actions") is not None
     assert rois_tab.findChild(ActionRow, "settings_rois_quick_add_actions") is not None
     assert dlg.roi_montage_combo.count() == 1

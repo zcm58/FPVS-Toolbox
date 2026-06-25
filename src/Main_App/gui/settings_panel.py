@@ -128,6 +128,7 @@ class SettingsDialog(QDialog):
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
         self._init_stats_tab(self.tabs)
         self._init_rois_tab(self.tabs)
+        self._init_advanced_tab(self.tabs)
         self._last_tab_index = self.tabs.currentIndex()
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -219,32 +220,6 @@ class SettingsDialog(QDialog):
                 edit.setText(self.manager.get(sec, opt, fallback))
 
         layout.addWidget(self.group_preproc)
-
-        diagnostics_group = SectionCard(
-            "Diagnostics",
-            tab,
-            object_name="settings_preproc_diagnostics_card",
-        )
-        diagnostics_form = make_form_layout()
-        debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
-        self.debug_check = QCheckBox("Enable Debug", diagnostics_group)
-        self.debug_check.setChecked(debug_default)
-        diagnostics_form.addRow(QLabel("Debug Mode", diagnostics_group), self.debug_check)
-        diagnostics_group.content_layout.addLayout(diagnostics_form)
-        layout.addWidget(diagnostics_group)
-
-        tool_visibility_group = SectionCard(
-            "Tool Visibility",
-            tab,
-            object_name="settings_preproc_tool_visibility_card",
-        )
-        tool_visibility_form = make_form_layout()
-        self.beta_tools_check = QCheckBox("Enable Beta Tools", tool_visibility_group)
-        self.beta_tools_check.setObjectName("settings_enable_beta_tools")
-        self.beta_tools_check.setChecked(self.manager.beta_tools_enabled())
-        tool_visibility_form.addRow(QLabel("Beta Tools", tool_visibility_group), self.beta_tools_check)
-        tool_visibility_group.content_layout.addLayout(tool_visibility_form)
-        layout.addWidget(tool_visibility_group)
 
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_preproc_footer")
@@ -398,6 +373,38 @@ class SettingsDialog(QDialog):
         self._refresh_roi_preset_combo()
 
         tabs.addTab(tab, "ROIs")
+
+    # ------------------------------------------------------------------
+    def _init_advanced_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        advanced_group = SectionCard(
+            "Application Options",
+            tab,
+            object_name="settings_advanced_application_card",
+        )
+        advanced_form = make_form_layout()
+
+        debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
+        self.debug_check = QCheckBox("Enable Debug", advanced_group)
+        self.debug_check.setObjectName("settings_enable_debug")
+        self.debug_check.setChecked(debug_default)
+        advanced_form.addRow(QLabel("Debug Mode", advanced_group), self.debug_check)
+
+        self.beta_tools_check = QCheckBox("Enable Beta Tools", advanced_group)
+        self.beta_tools_check.setObjectName("settings_enable_beta_tools")
+        self.beta_tools_check.setChecked(self.manager.beta_tools_enabled())
+        advanced_form.addRow(QLabel("Beta Tools", advanced_group), self.beta_tools_check)
+
+        advanced_group.content_layout.addLayout(advanced_form)
+        layout.addWidget(advanced_group)
+        layout.addStretch(1)
+        self._add_settings_footer(tab, layout, "settings_advanced_footer")
+
+        tabs.addTab(tab, "Advanced")
 
     def _current_roi_montage(self) -> str:
         return validate_roi_montage(str(self.roi_montage_combo.currentData()))
