@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import sys
 from pathlib import Path
 
 from PySide6.QtCore import QThread
@@ -19,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import show_error, show_info, show_warning
+from Main_App.gui.open_paths import open_path_in_file_manager
 
 from .worker import RatioCalculatorWorker
 
@@ -38,13 +37,7 @@ class RatioRunWorkflowMixin:
             show_warning(self, "Folder not found", f"Folder does not exist:\n{path}")
             return
         try:
-            if sys.platform.startswith("win"):
-                os.startfile(str(path))
-            else:
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+            open_path_in_file_manager(path)
         except Exception as exc:
             show_warning(self, "Open failed", f"Failed to open folder:\n{exc}")
 
@@ -176,13 +169,7 @@ class RatioRunWorkflowMixin:
         msg.setIcon(QMessageBox.Information)
         if msg.exec() == QMessageBox.Yes:
             try:
-                if sys.platform.startswith("win"):
-                    os.startfile(str(self._output_dir))
-                else:
-                    from PySide6.QtGui import QDesktopServices
-                    from PySide6.QtCore import QUrl
-
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_dir)))
+                open_path_in_file_manager(self._output_dir)
             except Exception as exc:
                 self._append_log(f"Failed to open output folder: {exc}")
 
@@ -190,13 +177,7 @@ class RatioRunWorkflowMixin:
         if self._output_dir is None:
             return
         try:
-            if sys.platform.startswith("win"):
-                os.startfile(str(self._output_dir))
-            else:
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_dir)))
+            open_path_in_file_manager(self._output_dir)
         except Exception as exc:
             self._append_log(f"Failed to open output folder: {exc}")
 

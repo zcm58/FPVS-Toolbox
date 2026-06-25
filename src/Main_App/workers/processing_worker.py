@@ -1,10 +1,14 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Callable
-from PySide6.QtCore import QObject, Signal, Slot
-from types import SimpleNamespace
+
+import logging
 from pathlib import Path
 import time
-import logging
+from typing import Any, Dict, List, Optional, Callable
+from types import SimpleNamespace
+
+from PySide6.QtCore import QObject, Signal, Slot
+
+from Main_App.Shared.file_filters import is_excel_output_file
 from Main_App.exports.post_export_adapter import LegacyCtx, run_post_export
 
 
@@ -67,6 +71,8 @@ class PostProcessWorker(QObject):
                     return {}
                 snapshot: dict[str, tuple[int, int]] = {}
                 for path in output_root.rglob("*.xls*"):
+                    if not is_excel_output_file(path):
+                        continue
                     try:
                         stat_result = path.stat()
                     except OSError:

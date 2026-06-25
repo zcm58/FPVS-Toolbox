@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
+from Main_App.Shared.file_filters import is_bdf_file
 from Main_App.gui.participant_review import review_participants_for_processing
 from Main_App.processing.processing_controller import (
     participant_review_rows,
@@ -88,7 +89,7 @@ def validate_inputs(host: Any) -> bool:
         if not input_dir.is_dir():
             QMessageBox.critical(host, "Input Folder Missing", str(input_dir))
             return False
-        bdf_files = sorted(str(p) for p in input_dir.glob("*.bdf"))
+        bdf_files = sorted(str(p) for p in input_dir.glob("*.bdf") if is_bdf_file(p))
         if not bdf_files:
             QMessageBox.warning(
                 host,

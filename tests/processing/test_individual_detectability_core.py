@@ -42,12 +42,14 @@ def test_discover_conditions_with_subfolders(tmp_path: Path) -> None:
     cond_a.mkdir()
     cond_b.mkdir()
     (cond_a / "a.xlsx").write_text("data")
+    (cond_a / "._sidecar.xlsx").write_text("AppleDouble metadata")
     (cond_b / "b.xlsx").write_text("data")
 
     conditions = discover_conditions(tmp_path)
     names = [c.name for c in conditions]
     assert names == ["CondA", "CondB"]
     assert all(c.files for c in conditions)
+    assert [file.name for file in conditions[0].files] == ["a.xlsx"]
 
 
 def test_discover_conditions_single_root(tmp_path: Path) -> None:

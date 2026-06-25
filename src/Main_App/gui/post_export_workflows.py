@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QThread
 
+from Main_App.Shared.file_filters import is_excel_output_file
 from Main_App.workers.processing_worker import PostProcessWorker
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ def excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
     root = Path(output_root)
     if not root.is_dir():
         return []
-    return sorted(p.resolve() for p in root.rglob("*.xls*"))
+    return sorted(p.resolve() for p in root.rglob("*.xls*") if is_excel_output_file(p))
 
 
 def excel_snapshot(output_root: Path | str | None) -> dict[str, tuple[int, int]]:
@@ -32,6 +33,8 @@ def excel_snapshot(output_root: Path | str | None) -> dict[str, tuple[int, int]]
         return {}
     snapshot: dict[str, tuple[int, int]] = {}
     for path in root.rglob("*.xls*"):
+        if not is_excel_output_file(path):
+            continue
         try:
             stat_result = path.stat()
         except OSError:

@@ -8,9 +8,9 @@ from typing import Iterable
 
 import pandas as pd
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Tools.Plot_Generator.excel_inputs import _infer_subject_id_from_path
 from Tools.Publication_Maps.models import ConditionInfo, FrequencyColumn, WorkbookEntry
-from Tools.Ratio_Calculator.utils import is_excel_temp_lock_file
 
 BCA_SHEET = "BCA (uV)"
 SNR_SHEET = "SNR"
@@ -70,7 +70,7 @@ def _iter_excel_files(folder: Path) -> list[Path]:
     files = [
         path
         for path in folder.rglob("*.xlsx")
-        if path.is_file() and not is_excel_temp_lock_file(path.name)
+        if path.is_file() and is_excel_workbook_file(path)
     ]
     return sorted(files, key=lambda path: str(path).lower())
 

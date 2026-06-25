@@ -8,6 +8,7 @@ import re
 import traceback
 from typing import Callable, Sequence, TYPE_CHECKING
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Main_App.exports.figure_style import (
     FIGURE_EXPORT_DPI,
     FIGURE_FONT_FAMILY,
@@ -190,12 +191,16 @@ def discover_conditions(root: Path) -> list[ConditionInfo]:
     subfolders = sorted([p for p in root.iterdir() if p.is_dir()])
     conditions: list[ConditionInfo] = []
     for sub in subfolders:
-        files = sorted([p for p in sub.glob("*.xlsx") if p.is_file()])
+        files = sorted(
+            [p for p in sub.glob("*.xlsx") if p.is_file() and is_excel_workbook_file(p)]
+        )
         if files:
             conditions.append(ConditionInfo(name=sub.name, path=sub, files=files))
     if conditions:
         return conditions
-    files = sorted([p for p in root.glob("*.xlsx") if p.is_file()])
+    files = sorted(
+        [p for p in root.glob("*.xlsx") if p.is_file() and is_excel_workbook_file(p)]
+    )
     if files:
         return [ConditionInfo(name=root.name, path=root, files=files)]
     return []

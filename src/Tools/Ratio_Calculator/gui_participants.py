@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Main_App.gui.components import confirm, show_info
 
 from .utils import parse_participant_id
@@ -87,7 +88,7 @@ class RatioParticipantsMixin:
             raise ValueError(f"Folder not found: {folder}")
         mapping: dict[str, Path] = {}
         for file_path in sorted(folder.glob("*.xlsx")):
-            if file_path.name.startswith("~$"):
+            if not is_excel_workbook_file(file_path):
                 continue
             pid, _ = parse_participant_id(file_path.name)
             mapping[pid] = file_path
@@ -197,4 +198,3 @@ class RatioParticipantsMixin:
         self._update_exclusion_status()
         if status_message:
             self._set_status_message(status_message)
-

@@ -9,23 +9,13 @@ from typing import Dict, Iterable, List, Sequence
 import numpy as np
 import pandas as pd
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Tools.Plot_Generator.excel_inputs import (
     _infer_subject_id_from_path,
 )
 from Tools.Plot_Generator.full_snr_reader import (
     _read_full_snr_sheet_read_only,
 )
-
-_EXCEL_WORKBOOK_SUFFIX = ".xlsx"
-_IGNORED_EXCEL_PREFIXES = ("._", "~$")
-
-
-def _is_excel_workbook_file(name: str) -> bool:
-    """Return True when a filename is a user workbook, not metadata/temp output."""
-    return (
-        name.lower().endswith(_EXCEL_WORKBOOK_SUFFIX)
-        and not name.startswith(_IGNORED_EXCEL_PREFIXES)
-    )
 
 
 class PlotDataCollectionMixin:
@@ -44,7 +34,7 @@ class PlotDataCollectionMixin:
             Path(root) / name
             for root, _, names in os.walk(cond_folder)
             for name in names
-            if _is_excel_workbook_file(name)
+            if is_excel_workbook_file(name)
         ]
         files.sort()
         return files

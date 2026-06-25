@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Main_App.projects.project import EXCEL_SUBFOLDER_NAME
 from Tools.Publication_Report.models import (
     PUBLICATION_REPORT_OUTPUT_FOLDER,
@@ -14,7 +15,6 @@ from Tools.Publication_Report.models import (
     PublicationReportRequest,
     WorkbookEntry,
 )
-from Tools.Ratio_Calculator.utils import is_excel_temp_lock_file
 
 _PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
 
@@ -131,7 +131,7 @@ def _iter_excel_files(folder: Path) -> list[Path]:
     files = [
         path
         for path in Path(folder).rglob("*.xlsx")
-        if path.is_file() and not is_excel_temp_lock_file(path.name)
+        if path.is_file() and is_excel_workbook_file(path)
     ]
     return sorted(files, key=lambda path: str(path).lower())
 

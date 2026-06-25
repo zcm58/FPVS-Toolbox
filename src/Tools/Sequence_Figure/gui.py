@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread
@@ -19,6 +16,7 @@ from Main_App.gui.components import (
     show_error,
     show_info,
 )
+from Main_App.gui.open_paths import open_path_in_file_manager
 
 from .renderer import DEFAULT_IMAGE_COUNT, SequenceFigureResult, SequenceFigureSpec
 from .worker import SequenceFigureWorker
@@ -205,12 +203,7 @@ class SequenceFigureWindow(QWidget):
     def _open_output_folder(self) -> None:
         if not self._output_folder:
             return
-        if sys.platform.startswith("win"):
-            os.startfile(self._output_folder)
-        elif sys.platform == "darwin":
-            subprocess.call(["open", self._output_folder])
-        else:
-            subprocess.call(["xdg-open", self._output_folder])
+        open_path_in_file_manager(self._output_folder)
 
 
 def _image_placeholder(slot: int) -> str:

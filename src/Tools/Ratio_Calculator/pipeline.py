@@ -6,6 +6,8 @@ from typing import Callable, Iterable
 
 import pandas as pd
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
+
 from .compute import (
     compute_ratio_rows_from_sums,
     group_summary_ratios,
@@ -15,7 +17,7 @@ from .compute import (
 from .constants import RatioCalculatorSettings, ROI_DEFS_DEFAULT
 from .excel_utils import apply_excel_qol
 from .plots import PlotPanel, compute_stable_ylim, make_raincloud_figure, make_raincloud_figure_roi_x
-from .utils import expected_oddball_harmonics, fmt_hz_list, is_excel_temp_lock_file, parse_participant_id
+from .utils import expected_oddball_harmonics, fmt_hz_list, parse_participant_id
 
 
 class RatioCalculatorResult:
@@ -82,7 +84,7 @@ def run_ratio_calculator(
 
     def index_folder(path: str, label: str) -> tuple[list[Path], dict[str, Path]]:
         all_files = sorted(Path(path).expanduser().glob("*.xlsx"))
-        xlsx_files = [p for p in all_files if not is_excel_temp_lock_file(p.name)]
+        xlsx_files = [p for p in all_files if is_excel_workbook_file(p)]
         _log(f"[{label}] Found {len(xlsx_files)} .xlsx files.")
         pid_to_path: dict[str, Path] = {}
         for file_path in xlsx_files:

@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import logging
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QMessageBox
 
+from Main_App.gui.open_paths import open_path_in_file_manager
 from Tools.Plot_Generator.selection_state import ALL_CONDITIONS_OPTION
 
 
@@ -380,12 +379,7 @@ class PlotGeneratorWorkflowMixin:
         folder = self.out_edit.text()
         if not folder:
             return
-        if sys.platform.startswith("win"):
-            os.startfile(folder)
-        elif sys.platform == "darwin":
-            subprocess.call(["open", folder])
-        else:
-            subprocess.call(["xdg-open", folder])
+        open_path_in_file_manager(folder)
 
     def _generation_finished(self) -> None:
         self._thread = None

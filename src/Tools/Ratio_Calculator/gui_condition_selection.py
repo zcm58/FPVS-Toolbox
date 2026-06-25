@@ -9,6 +9,8 @@ from typing import Optional
 from PySide6.QtCore import QSignalBlocker
 from PySide6.QtWidgets import QFileDialog, QComboBox, QLineEdit
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
+
 CUSTOM_CONDITION_OPTION = "Custom path"
 
 
@@ -59,7 +61,7 @@ class RatioConditionSelectionMixin:
             if not child.is_dir():
                 continue
             if any(
-                fp.suffix.lower() == ".xlsx" and not fp.name.startswith("~$")
+                is_excel_workbook_file(fp)
                 for fp in child.glob("*.xlsx")
             ):
                 folders.append(child)

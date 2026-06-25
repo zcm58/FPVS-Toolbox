@@ -6,6 +6,8 @@ from typing import Iterable
 
 import numpy as np
 
+from Main_App.Shared.file_filters import is_excel_metadata_or_temp_file
+
 from .constants import EPS
 
 PID_RE = re.compile(r"(P)(\d+)", re.IGNORECASE)
@@ -94,4 +96,4 @@ def build_hz_to_col_map(harmonic_cols: Iterable[str]) -> dict[float, str]:
 
 
 def is_excel_temp_lock_file(path_name: str) -> bool:
-    return path_name.startswith("~$")
+    return is_excel_metadata_or_temp_file(path_name)

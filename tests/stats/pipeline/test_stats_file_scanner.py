@@ -34,6 +34,8 @@ def test_scan_folder_ignores_default_dirs(tmp_path):
     for folder in [cond1, cond2, ignore1, ignore2]:
         with open(folder / "P01_data.xlsx", "w") as f:
             f.write("test")
+    (cond1 / "._P02_data.xlsx").write_text("AppleDouble metadata", encoding="utf-8")
+    (cond1 / "~$P03_data.xlsx").write_text("Office lock", encoding="utf-8")
 
     subjects, conditions, subject_data = scan_folder_simple(str(tmp_path))
 

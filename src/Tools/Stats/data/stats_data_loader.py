@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
 
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Tools.Stats.data.stats_subjects import canonical_subject_id
 
 # Folders to ignore during scanning (case-insensitive)
@@ -316,7 +317,7 @@ def check_for_open_excel_files(folder_path: str) -> list[str]:
 
     open_files: list[str] = []
     for name in os.listdir(folder_path):
-        if name.lower().endswith((".xlsx", ".xls")):
+        if is_excel_workbook_file(name, suffixes=(".xlsx", ".xls")):
             fpath = os.path.join(folder_path, name)
             try:
                 os.rename(fpath, fpath)
@@ -474,7 +475,7 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
         group_aliases = _group_folder_aliases(manifest)
 
         for filepath in sorted(parent_path.rglob("*.xlsx")):
-            if filepath.name.startswith("~$"):
+            if not is_excel_workbook_file(filepath):
                 continue
             if any(part.lower() in IGNORED_FOLDERS for part in filepath.parts):
                 continue
@@ -537,4 +538,3 @@ def load_project_scan(folder: str) -> ProjectScanResult:
         project_root=project_root,
         project_is_multi_group=is_multi_group_project_config(manifest),
     )
-

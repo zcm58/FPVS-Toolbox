@@ -53,6 +53,7 @@ def test_discovers_condition_workbooks_and_skips_excel_lock_files(tmp_path: Path
     cond.mkdir(parents=True)
     (cond / "P01_Faces_Results.xlsx").touch()
     (cond / "~$P02_Faces_Results.xlsx").touch()
+    (cond / "._P03_Faces_Results.xlsx").touch()
 
     conditions = discover_conditions(root)
 

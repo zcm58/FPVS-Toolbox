@@ -18,6 +18,7 @@ import openpyxl
 import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.Shared.file_filters import is_excel_workbook_file
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNEFPVSCondition
 
 SOURCE_TOPOGRAPHY_METRIC_BCA = "bca"
@@ -182,7 +183,7 @@ def _condition_workbook_paths(condition_dir: Path) -> tuple[Path, ...]:
         path
         for pattern in ("*.xlsx", "*/*.xlsx")
         for path in condition_dir.glob(pattern)
-        if path.is_file() and not path.name.startswith("~$")
+        if path.is_file() and is_excel_workbook_file(path)
     ]
     return tuple(sorted(paths))
 

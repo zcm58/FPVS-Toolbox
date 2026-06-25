@@ -61,7 +61,7 @@ from Tools.Publication_Report.models import (
 from Tools.Publication_Report.narrative import build_markdown
 from Tools.Publication_Report.qc import build_qc_frames, render_qc_figures
 from Tools.Publication_Report.runner import generate_publication_report
-from Tools.Publication_Report.discovery import WorkbookEntry
+from Tools.Publication_Report.discovery import WorkbookEntry, discover_conditions
 
 
 def _write_result_workbook(path: Path) -> None:
@@ -92,6 +92,20 @@ def _build_project(tmp_path: Path) -> Path:
     _write_result_workbook(excel_root / "CondB" / "P01_CondB_Results.xlsx")
     _write_result_workbook(excel_root / "CondB" / "P03_CondB_Results.xlsx")
     return root
+
+
+def test_publication_report_discovery_ignores_metadata_workbooks(tmp_path: Path) -> None:
+    excel_root = tmp_path / "1 - Excel Data Files"
+    cond = excel_root / "CondA"
+    cond.mkdir(parents=True)
+    (cond / "P01_CondA_Results.xlsx").write_text("data", encoding="utf-8")
+    (cond / "._P02_CondA_Results.xlsx").write_text("AppleDouble metadata", encoding="utf-8")
+    (cond / "~$P03_CondA_Results.xlsx").write_text("Office lock", encoding="utf-8")
+
+    conditions = discover_conditions(excel_root)
+
+    assert [condition.name for condition in conditions] == ["CondA"]
+    assert [file.name for file in conditions[0].files] == ["P01_CondA_Results.xlsx"]
 
 
 def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 """User action handlers and general StatsWindow view helpers."""
 from __future__ import annotations
 
+from Main_App.gui.open_paths import open_path_in_file_manager
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ class StatsWindowActionsMixin:
             logger.error("stats_export_open_missing", extra={"path": path})
             return
         try:
-            os.startfile(path)  # noqa: S606
+            open_path_in_file_manager(path)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "stats_export_open_failed",

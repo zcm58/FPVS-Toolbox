@@ -101,6 +101,31 @@ def test_discover_raw_files_rejects_duplicate_subjects_across_groups(tmp_path) -
         discover_raw_files(project)
 
 
+def test_discover_raw_files_ignores_appledouble_bdf_sidecars(tmp_path) -> None:
+    control_dir = tmp_path / "raw" / "Control"
+    control_dir.mkdir(parents=True)
+    p01 = control_dir / "P01.bdf"
+    p02 = control_dir / "SC_P02.bdf"
+    sidecar = control_dir / "._P03.bdf"
+    p01.write_bytes(b"")
+    p02.write_bytes(b"")
+    sidecar.write_bytes(b"")
+    project = _build_group_project(
+        tmp_path,
+        {
+            "control": {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": control_dir,
+            },
+        },
+    )
+
+    files = discover_raw_files(project)
+
+    assert [info.path for info in files] == [p01.resolve(), p02.resolve()]
+
+
 def test_discover_raw_files_rejects_locked_group_assignment_drift(tmp_path) -> None:
     control_dir = tmp_path / "raw" / "Control"
     treatment_dir = tmp_path / "raw" / "Treatment"

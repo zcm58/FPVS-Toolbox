@@ -14,12 +14,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 import os
 
-# --- Ported Mixin Imports ---
-# (Assuming they are in the same directory or Python path)
-from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
-from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
-from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
-from .advanced_analysis_post import AdvancedAnalysisPostMixin
+from Main_App.Shared.file_filters import is_bdf_file
 from Main_App.gui.components import (
     ActionRow,
     SectionCard,
@@ -27,6 +22,13 @@ from Main_App.gui.components import (
     configure_window_surface,
     make_action_button,
 )
+
+# --- Ported Mixin Imports ---
+# (Assuming they are in the same directory or Python path)
+from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
+from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
+from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
+from .advanced_analysis_post import AdvancedAnalysisPostMixin
 
 
 class AdvancedAveragingWindow(
@@ -244,7 +246,7 @@ class AdvancedAveragingWindow(
 
         bdfs = sorted(
             f for f in os.listdir(folder)
-            if f.lower().endswith(".bdf")
+            if is_bdf_file(f)
         )
         full_paths = [os.path.join(folder, f) for f in bdfs]
         self.source_eeg_files = full_paths

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from Main_App.Shared.file_filters import is_bdf_file
 from Main_App.io.load_utils import load_eeg_file
 from Main_App.processing.preprocess import (
     perform_preprocessing,
@@ -267,6 +268,8 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
             )
             continue
         for candidate in sorted(folder_path.glob("*.bdf")):
+            if not is_bdf_file(candidate):
+                continue
             file_path = candidate.resolve()
             info = RawFileInfo(
                 path=file_path,
