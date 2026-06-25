@@ -8,17 +8,26 @@ set_blas_threads_single_process()
 
 import multiprocessing as mp
 import sys
-from ctypes import windll
 
 from PySide6.QtCore import QCoreApplication
 
 from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui.theme import apply_light_palette
 
-try:
-    windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
-except Exception:
-    pass
+
+def _configure_windows_dpi_awareness() -> None:
+    if sys.platform != "win32":
+        return
+
+    try:
+        from ctypes import windll
+
+        windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        pass
+
+
+_configure_windows_dpi_awareness()
 
 QCoreApplication.setOrganizationName("MississippiStateUniversity")
 QCoreApplication.setOrganizationDomain("msstate.edu")

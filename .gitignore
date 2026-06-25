@@ -79,6 +79,9 @@ venv/
 # JetBrains
 .idea/
 
+# macOS Finder metadata
+.DS_Store
+
 # Static site output (MkDocs build artifact)
 site/
 
