@@ -115,12 +115,20 @@ def _sidebar_tool_buttons(win: main_window_module.MainWindow) -> list[SidebarBut
     return buttons
 
 
+def _assert_utilities_anchored_at_bottom(win: main_window_module.MainWindow) -> None:
+    lower_layout = win.sidebar_utilities_group.parentWidget().layout()
+
+    assert lower_layout.itemAt(0).spacerItem() is not None
+    assert lower_layout.itemAt(lower_layout.count() - 1).widget() is win.sidebar_utilities_group
+
+
 def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     buttons = _sidebar_tool_buttons(win)
 
     assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES
     assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS
+    _assert_utilities_anchored_at_bottom(win)
 
 
 def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -129,6 +137,7 @@ def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
 
     assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES + BETA_TOOL_ROLES
     assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS + BETA_TOOL_LABELS
+    _assert_utilities_anchored_at_bottom(win)
 
 
 def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypatch) -> None:

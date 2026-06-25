@@ -298,7 +298,7 @@ def init_sidebar(self) -> None:
     lower_layout = QVBoxLayout(lower_region)
     lower_layout.setContentsMargins(0, 0, 0, 0)
     lower_layout.setSpacing(0)
-    lower_layout.addStretch(2)
+    lower_layout.addStretch(1)
 
     utilities_group = QWidget(lower_region)
     utilities_group.setObjectName("sidebar_utilities_group")
@@ -334,7 +334,6 @@ def init_sidebar(self) -> None:
 
     self.sidebar_utilities_group = utilities_group
     lower_layout.addWidget(utilities_group)
-    lower_layout.addStretch(1)
     lay.addWidget(lower_region, 1)
 
     home_btn.set_selected(True)
