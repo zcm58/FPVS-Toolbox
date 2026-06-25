@@ -29,7 +29,6 @@ from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
-from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
@@ -308,40 +307,6 @@ def test_processing_activity_tracks_completed_files(
 
     win._update_processing_progress(50)
     assert win.processing_summary_label.text() == "1 of 2 files complete (50%)"
-
-
-def test_sidebar_image_resizer_embeds_in_main_workspace(
-    tmp_path: Path,
-    qtbot,
-    monkeypatch,
-) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
-    win.stacked.setCurrentIndex(1)
-    qtbot.wait(20)
-
-    qtbot.mouseClick(_sidebar_button(win, "btn_image"), Qt.LeftButton)
-    qtbot.wait(20)
-
-    assert win.stacked.currentIndex() == 1
-    assert isinstance(win.workspace_stack.currentWidget(), FPVSImageResizerQt)
-    assert win.workspace_stack.currentWidget().objectName() == "embedded_image_resizer_page"
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_image"]
-
-    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
-    qtbot.wait(20)
-
-    assert win.workspace_stack.currentWidget() is win.homeWidget
-    selected_roles = [
-        widget.property("role")
-        for widget in win.sidebar.findChildren(QWidget)
-        if widget.property("selected") is True
-    ]
-    assert selected_roles == ["btn_home"]
 
 
 def test_sidebar_settings_embeds_in_main_workspace(

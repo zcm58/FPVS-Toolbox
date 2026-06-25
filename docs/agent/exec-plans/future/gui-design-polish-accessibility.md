@@ -42,7 +42,6 @@ Primary embedded and tool surfaces:
 - `src/Tools/Publication_Maps/`
 - `src/Tools/Publication_Report/`
 - `src/Tools/Individual_Detectability/`
-- `src/Tools/Image_Resizer/`
 - `src/Tools/Average_Preprocessing/New_PySide6/`
 - `src/Tools/LORETA_Visualizer/`
 
@@ -125,7 +124,6 @@ Candidate surfaces:
 - Plot Generator required-folder and axis-limit validation
 - Stats missing-folder/ROI/settings validation
 - Ratio Calculator required-field and output-folder validation
-- Image Resizer required-folder and dimension validation
 - Publication Maps/Report selection validation
 - Individual Detectability required-field validation
 

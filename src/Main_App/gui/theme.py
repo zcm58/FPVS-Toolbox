@@ -415,8 +415,8 @@ def apply_light_palette(
 ) -> None:
     """Apply the configured application-wide FPVS light theme.
 
-    This is the function used by all entry points (main app, Image Resizer,
-    Plot Generator). Existing callers that just do `apply_light_palette(app)`
+    This is the function used by all entry points, including the main app and
+    Plot Generator. Existing callers that just do `apply_light_palette(app)`
     will continue to get the Fusion light palette.
 
     Parameters

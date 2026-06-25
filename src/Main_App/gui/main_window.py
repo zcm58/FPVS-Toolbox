@@ -49,7 +49,6 @@ from Main_App.workers.mp_env import (
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
-from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
@@ -520,21 +519,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_stats_page())
         self._set_sidebar_selection("btn_data")
-
-    def _ensure_image_resizer_page(self) -> FPVSImageResizerQt:
-        page = getattr(self, "_image_resizer_page", None)
-        if page is None:
-            page = FPVSImageResizerQt(self.workspace_stack)
-            page.setObjectName("embedded_image_resizer_page")
-            self.workspace_stack.addWidget(page)
-            self._image_resizer_page = page
-        return page
-
-    def open_image_resizer(self) -> None:
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_image_resizer_page())
-        self._set_sidebar_selection("btn_image")
 
     def _ensure_ratio_calculator_page(self) -> RatioCalculatorWindow:
         page = getattr(self, "_ratio_calculator_page", None)

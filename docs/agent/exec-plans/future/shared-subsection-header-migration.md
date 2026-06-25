@@ -31,7 +31,6 @@ Primary GUI surfaces:
 - `src/Tools/Plot_Generator/`
 - `src/Tools/Ratio_Calculator/`
 - `src/Tools/Individual_Detectability/`
-- `src/Tools/Image_Resizer/`
 - `src/Tools/Average_Preprocessing/New_PySide6/`
 
 ## Summary
@@ -253,7 +252,6 @@ Use one surface group per small change set:
    - `src/Tools/Ratio_Calculator/`
 5. Remaining embedded tools:
    - `src/Tools/Individual_Detectability/`
-   - `src/Tools/Image_Resizer/`
    - `src/Tools/Average_Preprocessing/New_PySide6/`
 
 Stop after each group and report exactly which visible strings were migrated.

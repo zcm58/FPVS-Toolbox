@@ -43,7 +43,6 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
         _settings_dialog=settings_dialog,
         _settings_page=settings_page,
         _stats_page=stats_page,
-        _image_resizer_page=_FakeWidget(),
         _ratio_calculator_page=ratio_page,
         _individual_detectability_page=_FakeWidget(),
         _plot_generator_page=_FakeWidget(),
@@ -59,7 +58,6 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     assert host._settings_dialog is None
     assert host._settings_page is None
     assert host._stats_page is None
-    assert host._image_resizer_page is None
     assert host._ratio_calculator_page is None
     assert host._individual_detectability_page is None
     assert host._plot_generator_page is None

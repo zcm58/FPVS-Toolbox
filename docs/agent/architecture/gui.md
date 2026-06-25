@@ -58,7 +58,7 @@ application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
 Settings page, Statistical Analysis, SNR Plot Generator, Individual
-Detectability, Image Resizer, Ratio Calculator, and Epoch Averaging are
+Detectability, Ratio Calculator, and Epoch Averaging are
 embedded in this workspace stack.
 
 When the active project changes through create/open/import/path workflows, the
@@ -135,14 +135,14 @@ keep imports side-effect free, and record the decision in the active component
 layer plan.
 
 `ActionRow` is now used by the main shell, Settings, Plot Generator, Ratio
-Calculator, Stats, Image Resizer, Average Preprocessing, and focused dialogs.
+Calculator, Stats, Average Preprocessing, and focused dialogs.
 When migrating more action rows, preserve button labels, order, variants,
 enabled states, signal connections, and object names, then add focused smoke
 coverage for the touched surface.
 
-`PathPickerRow` is used by Plot Generator, Image Resizer, and Individual
-Detectability. `StatusBanner` is used by Stats, Ratio Calculator, Image Resizer,
-and Individual Detectability. Keep path defaults, filters, settings keys,
+`PathPickerRow` is used by Plot Generator and Individual Detectability.
+`StatusBanner` is used by Stats, Ratio Calculator, and Individual Detectability.
+Keep path defaults, filters, settings keys,
 project-root behavior, and file-dialog Cancel no-op behavior owned by the
 surface workflow; the shared widgets are presentation contracts, not I/O
 policy owners.

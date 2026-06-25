@@ -33,11 +33,6 @@ from Main_App import (  # noqa: E402
 
 
 def _maybe_run_cli_tool() -> bool:
-    if "--run-image-resizer" in sys.argv:
-        from Tools.Image_Resizer import pyside_resizer
-
-        pyside_resizer.main()
-        return True
     if "--run-plot-generator" in sys.argv:
         from Tools.Plot_Generator import plot_generator
 

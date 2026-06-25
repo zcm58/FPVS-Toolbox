@@ -127,7 +127,6 @@ def reset_project_context_workspace(host: Any) -> None:
     for attr_name in (
         "_settings_page",
         "_stats_page",
-        "_image_resizer_page",
         "_ratio_calculator_page",
         "_individual_detectability_page",
         "_plot_generator_page",

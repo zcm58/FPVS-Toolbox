@@ -75,7 +75,6 @@ Current `Legacy_App` runtime couplings:
   calculation belongs outside renderer/fsaverage/GUI code.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
-- `src/Tools/Image_Resizer/`: image resizing utility.
 - `.agents/scripts/audit/agent_audit.py` and `.agents/skills/*/scripts/`: repo-evaluation and agent harness checks, not runtime toolbox diagnostics.
 - `scripts/manual_diagnostics/`: developer-run project/data investigation utilities, not runtime toolbox APIs.
 - `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Agents

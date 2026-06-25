@@ -30,16 +30,6 @@ def check_for_updates(host: Any, update_manager_module: Any) -> None:
     )
 
 
-def open_image_resizer(source_root: Path) -> None:
-    cmd = [sys.executable]
-    if getattr(sys, "frozen", False):
-        cmd.append("--run-image-resizer")
-    else:
-        script = source_root / "src" / "Tools" / "Image_Resizer" / "pyside_resizer.py"
-        cmd.append(str(script))
-    subprocess.Popen(cmd, close_fds=True)
-
-
 def open_plot_generator(host: Any, source_root: Path) -> None:
     cmd = [sys.executable]
     if getattr(sys, "frozen", False):
