@@ -39,7 +39,11 @@ project data can be viewed without changing renderer internals.
 
 Current project source-map readers support both flat condition workbook folders
 and condition/group workbook subfolders. They require the Stats-ready workbook
-export for selected harmonics; the Hauk-style z-score path also requires
+for selected harmonics. The GUI may generate that workbook in a worker by
+reusing the existing Stats export service when the user opens LORETA before
+running the Stats-ready export manually; the workbook is still written to the
+standard Stats results folder expected by the project source-map producers.
+The Hauk-style z-score path also requires
 `FullFFT Amplitude (uV)` target and neighboring-bin columns in included
 participant workbooks.
 

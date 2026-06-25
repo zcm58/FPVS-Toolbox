@@ -32,6 +32,7 @@ from Main_App.gui.components import (
     StatusBanner,
     SurfaceSize,
     configure_window_surface,
+    confirm,
     make_action_button,
 )
 from Tools.LORETA_Visualizer.cortical_paint import (
@@ -74,6 +75,10 @@ from Tools.LORETA_Visualizer.source_payloads import (
     filter_source_payload_by_mask,
     filter_source_payload_values_above,
     make_source_payload,
+)
+from Tools.LORETA_Visualizer.stats_ready_workbook import (
+    stats_ready_workbook_exists,
+    write_loreta_stats_ready_workbook,
 )
 from Tools.LORETA_Visualizer.volume_slices import (
     MriAnatomyVolume,
@@ -369,6 +374,33 @@ class ProjectSourceMapExportWorker(QObject):
                 progress_callback=self.progress.emit,
             )
         raise ValueError(f"Unsupported project source export mode: {export_mode}")
+
+
+class ProjectStatsReadyExportWorker(QObject):
+    """Write the LORETA prerequisite Stats-ready workbook without touching widgets."""
+
+    progress = Signal(str)
+    exported = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, *, project_root: Path) -> None:
+        super().__init__()
+        self._project_root = project_root
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = write_loreta_stats_ready_workbook(
+                self._project_root,
+                log_callback=self.progress.emit,
+            )
+        except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.exported.emit(result)
+        finally:
+            self.finished.emit()
 
 
 def resolve_loreta_import_start_dir(
@@ -863,8 +895,8 @@ def _project_source_export_failure_text(message: str) -> str:
         or "fullfft source z-score" in lowered
     ):
         return (
-            "Project source maps are not ready yet. Re-run preprocessing for this project, then open Stats and run "
-            "Export Stats-Ready Workbook before returning to LORETA Visualizer."
+            "Project source maps are not ready yet. Generate the Stats-ready summary report, then rebuild "
+            "source maps."
             f" Details: {detail}"
         )
     return f"Project source export failed: {detail}"
@@ -1233,6 +1265,9 @@ class LoretaVisualizerWindow(QWidget):
         self._mesh_worker: FsaverageLoadWorker | None = None
         self._source_export_thread: QThread | None = None
         self._source_export_worker: ProjectSourceMapExportWorker | None = None
+        self._stats_ready_export_thread: QThread | None = None
+        self._stats_ready_export_worker: ProjectStatsReadyExportWorker | None = None
+        self._pending_source_map_rebuild: tuple[tuple[str, ...], bool] | None = None
         self._selected_condition_id = ""
         self._selected_summary_id = SOURCE_SUMMARY_RAW_MEAN
         self._source_activation_payload: SourcePayload | None = None
@@ -1591,7 +1626,11 @@ class LoretaVisualizerWindow(QWidget):
     def _sync_project_source_button(self) -> None:
         if hasattr(self, "source_options_btn"):
             self.source_options_btn.setEnabled(self.renderer is not None)
-            if self._source_export_thread is not None:
+            if self._stats_ready_export_thread is not None:
+                self.source_options_btn.setToolTip(
+                    "The LORETA summary report is being generated. Rebuild actions are paused."
+                )
+            elif self._source_export_thread is not None:
                 self.source_options_btn.setToolTip(
                     "A source-map rebuild is running. Options remain available, but rebuild actions are paused."
                 )
@@ -2209,7 +2248,7 @@ class LoretaVisualizerWindow(QWidget):
             source_map_visible=self._activation_visible,
             transparent_spin_enabled=self._transparent_spin_enabled,
             project_available=project_root is not None,
-            export_busy=self._source_export_thread is not None,
+            export_busy=self._source_export_thread is not None or self._stats_ready_export_thread is not None,
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
@@ -2303,7 +2342,13 @@ class LoretaVisualizerWindow(QWidget):
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
         self._build_project_source_maps_for_modes((export_mode,), automatic=automatic)
 
-    def _build_project_source_maps_for_modes(self, export_modes: tuple[str, ...], *, automatic: bool = False) -> None:
+    def _build_project_source_maps_for_modes(
+        self,
+        export_modes: tuple[str, ...],
+        *,
+        automatic: bool = False,
+        skip_stats_ready_check: bool = False,
+    ) -> None:
         project_root = self._refresh_project_root()
         if project_root is None:
             self._set_source_export_status("Open a project before building beta source JSON.", variant="warning")
@@ -2316,6 +2361,19 @@ class LoretaVisualizerWindow(QWidget):
             self._set_source_export_status(
                 "Source-map rebuild is already running. You can keep using the viewer while it finishes.",
                 variant="info",
+            )
+            return
+        if self._stats_ready_export_thread is not None and not skip_stats_ready_check:
+            self._set_source_export_status(
+                "The LORETA summary report is already being generated. Source maps will build when it finishes.",
+                variant="info",
+            )
+            return
+        if not skip_stats_ready_check and not stats_ready_workbook_exists(project_root):
+            self._prompt_generate_stats_ready_workbook_then_rebuild(
+                project_root,
+                modes,
+                automatic=automatic,
             )
             return
         include_flagged_subjects = self._include_flagged_subjects
@@ -2358,6 +2416,109 @@ class LoretaVisualizerWindow(QWidget):
         self._source_export_worker = worker
         self._sync_project_source_button()
         thread.start()
+
+    def _prompt_generate_stats_ready_workbook_then_rebuild(
+        self,
+        project_root: Path,
+        modes: tuple[str, ...],
+        *,
+        automatic: bool,
+    ) -> None:
+        wants_export = confirm(
+            self,
+            "Generate Summary Report?",
+            "You have processed your data, but the LORETA tool requires a summary report to be generated "
+            "before visualization is possible.\n\n"
+            "Would you like to generate this now?",
+        )
+        if not wants_export:
+            self._pending_source_map_rebuild = None
+            self._set_source_export_status(
+                "LORETA source maps require a Stats-ready summary report before visualization.",
+                variant="warning",
+            )
+            return
+        self._pending_source_map_rebuild = (modes, automatic)
+        self._start_stats_ready_workbook_export(project_root)
+
+    def _start_stats_ready_workbook_export(self, project_root: Path) -> None:
+        if self._stats_ready_export_thread is not None:
+            self._set_source_export_status(
+                "The LORETA summary report is already being generated.",
+                variant="info",
+            )
+            return
+        self._set_source_export_status("Generating the LORETA summary report...", variant="info")
+        self._sync_project_source_button()
+        logger.info(
+            "loreta_stats_ready_workbook_export_started",
+            extra={"project_root": str(project_root)},
+        )
+
+        thread = QThread(self)
+        worker = ProjectStatsReadyExportWorker(project_root=project_root)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_stats_ready_workbook_progress)
+        worker.exported.connect(self._on_stats_ready_workbook_exported)
+        worker.failed.connect(self._on_stats_ready_workbook_export_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._stats_ready_workbook_export_finished)
+        self._stats_ready_export_thread = thread
+        self._stats_ready_export_worker = worker
+        self._sync_project_source_button()
+        thread.start()
+
+    @Slot(str)
+    def _on_stats_ready_workbook_progress(self, message: str) -> None:
+        self._set_source_export_status(str(message), variant="info")
+
+    @Slot(object)
+    def _on_stats_ready_workbook_exported(self, result: object) -> None:
+        workbook_path = getattr(result, "workbook_path", None)
+        row_count = getattr(result, "row_count", None)
+        logger.info(
+            "loreta_stats_ready_workbook_export_complete",
+            extra={
+                "workbook_path": str(workbook_path) if workbook_path is not None else "",
+                "row_count": row_count,
+            },
+        )
+        pending = self._pending_source_map_rebuild
+        self._pending_source_map_rebuild = None
+        if pending is None:
+            self._set_source_export_status(
+                "Generated the LORETA summary report.",
+                variant="success",
+            )
+            return
+        modes, automatic = pending
+        self._set_source_export_status(
+            "Generated the LORETA summary report. Building source maps...",
+            variant="success",
+        )
+        self._build_project_source_maps_for_modes(
+            modes,
+            automatic=automatic,
+            skip_stats_ready_check=True,
+        )
+
+    @Slot(str)
+    def _on_stats_ready_workbook_export_failed(self, message: str) -> None:
+        self._pending_source_map_rebuild = None
+        logger.warning("loreta_stats_ready_workbook_export_failed", extra={"error": message})
+        self._set_source_export_status(
+            f"Could not generate the LORETA summary report: {message}",
+            variant="warning",
+        )
+
+    @Slot()
+    def _stats_ready_workbook_export_finished(self) -> None:
+        self._stats_ready_export_thread = None
+        self._stats_ready_export_worker = None
+        self._sync_project_source_button()
 
     @Slot(str)
     def _on_project_source_maps_progress(self, message: str) -> None:

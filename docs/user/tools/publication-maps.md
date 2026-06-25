@@ -1,4 +1,4 @@
-# Publication Maps / Scalp Maps
+# Scalp Maps
 
 Publication Maps, shown in the app as Scalp Maps, exports condition-level scalp-map figures from processed FPVS Toolbox outputs.
 

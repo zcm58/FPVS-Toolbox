@@ -2,17 +2,18 @@
 
 This section gives each FPVS Toolbox tool its own page. Keep each page short: what the tool does, when to use it, basic inputs and outputs, and references.
 
-| Tool | Basic purpose |
-| --- | --- |
-| [Epoch Averaging](epoch-averaging.md) | Combine preprocessed epochs before post-processing. |
-| [SNR Plot Generator](snr-plot-generator.md) | Build frequency-domain plots from processed FPVS Excel outputs. |
-| [Publication Maps / Scalp Maps](publication-maps.md) | Export condition-level scalp maps and source-data tables. |
-| [Statistics](statistics.md) | Run supported statistical summaries and export stats-ready workbooks. |
-| [Ratio Calculator](ratio-calculator.md) | Calculate ratios between processed condition outputs. |
-| [Sequence Figure](sequence-figure.md) | Build a simple FPVS stimulus-sequence figure. |
-| [Image Resizer](image-resizer.md) | Resize and convert stimulus image sets. |
-| [Individual-Level Detectability](individual-level-detectability.md) | Create participant-level detectability figures. |
-| [Publication Report](publication-report.md) | Generate a single-group report bundle from processed outputs. |
-| [LORETA Visualizer](loreta-visualizer.md) | Inspect prepared source-map visualization payloads. |
+| Tool | Basic purpose                                                                                     |
+| --- |---------------------------------------------------------------------------------------------------|
+| [Epoch Averaging](epoch-averaging.md) | Average two similar conditions together prior to preprocessing.                                   |
+| [SNR Plot Generator](snr-plot-generator.md) | Create SNR plots for each of your conditions.                                                     |
+| [Publication Maps / Scalp Maps](publication-maps.md) | Create top down scalp topography plots of BCA, SNR, and z-scores.                                 |
+| [Statistics](statistics.md) | Run basic statistical tests quickly from inside FPVS Toolbox.                                     |
+| [Ratio Calculator](ratio-calculator.md) | Calculate ratios between BCA values of processed conditions.                                      |
+| [Sequence Figure](sequence-figure.md) | Create a basic figure illustrating your FPVS conditions and images.                               |
+| [Image Resizer](image-resizer.md) | Quickly resize your desired images to prepare for FPVS.                                           |
+| [Individual-Level Detectability](individual-level-detectability.md) | Create participant-level detectability figures.                                                   |
+| [Publication Report](publication-report.md) | Generate a quick report of publication relevant information.                                      |
+| [LORETA Visualizer](loreta-visualizer.md) | Investigate the source of your oddball responses on the cortical surface and in three dimensions. |
 
-When a new active tool is added to FPVS Toolbox, add a new page here and include a `References` section before adding it to the navigation.
+When a new active tool is added to FPVS Toolbox, add a new page here and include a `References` section before adding
+it to the navigation.

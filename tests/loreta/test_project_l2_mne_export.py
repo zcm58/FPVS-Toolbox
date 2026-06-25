@@ -19,6 +19,7 @@ from Tools.LORETA_Visualizer.gui import (
     PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
     ProjectSourceMapExportBatchResult,
     ProjectSourceMapExportWorker,
+    ProjectStatsReadyExportWorker,
     SOURCE_METHOD_ELORETA_VOLUME,
     SOURCE_METHOD_L2_MNE_SURFACE,
     SOURCE_SUMMARY_MEDIAN,
@@ -42,6 +43,12 @@ from Tools.LORETA_Visualizer.gui import (
     resolve_loreta_import_start_dir,
     split_figure_condition_code,
     split_figure_condition_display_label,
+)
+from Tools.LORETA_Visualizer.stats_ready_workbook import (
+    LoretaStatsReadyExportResult,
+    default_loreta_stats_ready_workbook_path,
+    stats_ready_workbook_exists,
+    write_loreta_stats_ready_workbook,
 )
 from Tools.LORETA_Visualizer.fsaverage_cache import (
     DEFAULT_FSAVERAGE_SUBJECTS_DIR,
@@ -623,6 +630,127 @@ def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, mo
     assert result.failures[0].message == "missing volume model"
 
 
+def test_loreta_stats_ready_workbook_path_uses_source_map_prerequisite_location(tmp_path) -> None:
+    workbook_path = default_loreta_stats_ready_workbook_path(tmp_path)
+
+    assert workbook_path == tmp_path / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
+    assert not stats_ready_workbook_exists(tmp_path)
+
+    workbook_path.parent.mkdir()
+    workbook_path.write_bytes(b"placeholder")
+
+    assert stats_ready_workbook_exists(tmp_path)
+
+
+def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer import stats_ready_workbook as workbook_mod
+
+    class FakeSettings:
+        def get(self, _section, option, fallback=""):
+            return {
+                "base_freq": "6.0",
+                "bca_upper_limit": "16.8",
+            }.get(option, fallback)
+
+    captured: dict[str, object] = {}
+
+    def fake_prepare_stats_ready_export(**kwargs):
+        captured.update(kwargs)
+
+        class FakeExport:
+            workbook_path = kwargs["save_path"]
+            row_count = 18
+            frames = {"Long_Format": object(), "Harmonic_Selection": object()}
+
+        return FakeExport()
+
+    monkeypatch.setattr(workbook_mod, "SettingsManager", FakeSettings)
+    monkeypatch.setattr(
+        workbook_mod,
+        "scan_folder_simple",
+        lambda folder: (["P1", "P2"], ["Color", "Semantic"], {"P1": {"Color": "p1.xlsx"}}),
+    )
+    monkeypatch.setattr(workbook_mod, "load_rois_from_settings", lambda _manager: {"LOT": ["P7", "PO7"]})
+    monkeypatch.setattr(workbook_mod, "prepare_stats_ready_export", fake_prepare_stats_ready_export)
+    logs: list[str] = []
+
+    result = write_loreta_stats_ready_workbook(tmp_path, log_callback=logs.append)
+
+    expected_path = tmp_path.resolve() / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
+    assert result.workbook_path == expected_path
+    assert result.row_count == 18
+    assert result.sheet_names == ("Long_Format", "Harmonic_Selection")
+    assert result.subject_count == 2
+    assert result.condition_count == 2
+    assert captured["subjects"] == ["P1", "P2"]
+    assert captured["conditions"] == ["Color", "Semantic"]
+    assert captured["base_freq"] == 6.0
+    assert captured["max_freq"] == 16.8
+    assert captured["rois"] == {"LOT": ["P7", "PO7"]}
+    assert captured["selection_conditions"] == ["Color", "Semantic"]
+    assert captured["save_path"] == expected_path
+    assert captured["project_root"] == str(tmp_path.resolve())
+    assert captured["dv_policy"]["name"].startswith("Group-level significant harmonics")
+    assert logs == ["Scanning processed project workbooks for the LORETA summary report..."]
+
+
+def test_project_stats_ready_export_worker_reports_success(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer import gui as loreta_gui
+
+    result = LoretaStatsReadyExportResult(
+        workbook_path=tmp_path / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx",
+        row_count=24,
+        sheet_names=("Long_Format", "Harmonic_Selection"),
+        subject_count=3,
+        condition_count=2,
+    )
+    calls: list[Path] = []
+
+    def fake_write(project_root, *, log_callback):
+        calls.append(Path(project_root))
+        log_callback("scan done")
+        return result
+
+    monkeypatch.setattr(loreta_gui, "write_loreta_stats_ready_workbook", fake_write)
+    worker = ProjectStatsReadyExportWorker(project_root=tmp_path)
+    progress_messages: list[str] = []
+    exported: list[object] = []
+    failed: list[str] = []
+    worker.progress.connect(progress_messages.append)
+    worker.exported.connect(exported.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert calls == [tmp_path]
+    assert progress_messages == ["scan done"]
+    assert exported == [result]
+    assert failed == []
+
+
+def test_project_stats_ready_export_worker_reports_failure(tmp_path, monkeypatch) -> None:
+    from Tools.LORETA_Visualizer import gui as loreta_gui
+
+    def fake_write(_project_root, *, log_callback):
+        log_callback("scan started")
+        raise RuntimeError("No processed participant workbooks were found.")
+
+    monkeypatch.setattr(loreta_gui, "write_loreta_stats_ready_workbook", fake_write)
+    worker = ProjectStatsReadyExportWorker(project_root=tmp_path)
+    progress_messages: list[str] = []
+    exported: list[object] = []
+    failed: list[str] = []
+    worker.progress.connect(progress_messages.append)
+    worker.exported.connect(exported.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert progress_messages == ["scan started"]
+    assert exported == []
+    assert failed == ["No processed participant workbooks were found."]
+
+
 def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -> None:
     message = (
         "Stats-ready workbook is required for selected harmonics: "
@@ -632,8 +760,7 @@ def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -
     text = _project_source_export_failure_text(message)
 
     assert text.startswith("Project source maps are not ready yet.")
-    assert "Re-run preprocessing for this project" in text
-    assert "Export Stats-Ready Workbook" in text
+    assert "Generate the Stats-ready summary report" in text
     assert "Details: Stats-ready workbook is required" in text
 
 
@@ -646,8 +773,7 @@ def test_project_source_export_failure_text_guides_fullfft_prerequisites() -> No
     text = _project_source_export_failure_text(message)
 
     assert text.startswith("Project source maps are not ready yet.")
-    assert "Re-run preprocessing for this project" in text
-    assert "Export Stats-Ready Workbook" in text
+    assert "Generate the Stats-ready summary report" in text
     assert "FullFFT Amplitude (uV)" in text
 
 
@@ -657,8 +783,7 @@ def test_project_source_export_failure_text_guides_missing_fullfft_workbooks() -
     text = _project_source_export_failure_text(message)
 
     assert text.startswith("Project source maps are not ready yet.")
-    assert "Re-run preprocessing for this project" in text
-    assert "Export Stats-Ready Workbook" in text
+    assert "Generate the Stats-ready summary report" in text
     assert message in text
 
 

@@ -1,6 +1,7 @@
 # Sequence Figure
 
-The Sequence Figure tool creates a simple FPVS stimulus-sequence illustration from selected images.
+Use this tool to quickly generate a basic figure illustrating one sequence of your FPVS images. This tool outputs
+in 600dpi .png and .pdf formats.
 
 ## What It Does
 

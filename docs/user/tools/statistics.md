@@ -8,7 +8,8 @@ Use this page to document the supported statistical workflows and the basic outp
 
 ## When To Use It
 
-Use the Statistics tool after FPVS Toolbox has generated processed Excel outputs for the conditions included in the analysis.
+Use the Statistics tool after FPVS Toolbox has generated processed Excel outputs for the conditions included in
+the analysis.
 
 ## Basic Inputs
 
