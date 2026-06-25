@@ -31,6 +31,8 @@ For example, if your project has five conditions and four ROIs, the tool can gen
 
 The tool reads the processed Excel files created by FPVS Toolbox. These files are organized by condition inside your project output folders.
 
+Each workbook must include the `FullSNR` sheet created during processing. The SNR Plot Generator does not recompute SNR from FFT amplitude sheets.
+
 The tool also uses the ROI definitions saved in your Toolbox settings, so you do not need to manually select electrodes for each plot.
 
 ## Plot Options

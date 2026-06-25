@@ -9,18 +9,6 @@ import pandas as pd
 from tests import repo_root
 
 
-def _import_snr_utils():
-    path = repo_root() / "src" / "Tools" / "Plot_Generator" / "snr_utils.py"
-    spec = importlib.util.spec_from_file_location("snr_utils", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-snr_utils = _import_snr_utils()
-calc_snr_matlab = snr_utils.calc_snr_matlab
-
-
 def _import_module():
     path = repo_root() / "src" / "Tools" / "Plot_Generator" / "plot_generator.py"
     spec = importlib.util.spec_from_file_location("plot_generator", path)
@@ -29,7 +17,7 @@ def _import_module():
     return module
 
 
-def test_snr_calculated_from_fft(tmp_path, monkeypatch):
+def test_fft_amplitude_workbook_does_not_fallback(tmp_path, monkeypatch):
     module = _import_module()
 
     cond_dir = tmp_path / "Cond"
@@ -59,11 +47,8 @@ def test_snr_calculated_from_fft(tmp_path, monkeypatch):
     with pd.ExcelWriter(cond_dir / "sub2.xlsx") as writer:
         df2.to_excel(writer, sheet_name="FFT Amplitude (uV)", index=False)
 
-    captured = {}
-
     def dummy_plot(self, freqs, roi_data):
-        captured["freqs"] = freqs
-        captured["roi_data"] = roi_data
+        raise AssertionError("FFT-only workbooks must not produce SNR plots")
 
     monkeypatch.setattr(module._Worker, "_plot", dummy_plot)
     monkeypatch.setattr(module._Worker, "_emit", lambda *a, **k: None)
@@ -83,13 +68,5 @@ def test_snr_calculated_from_fft(tmp_path, monkeypatch):
         out_dir=str(tmp_path),
     )
 
-    worker._run()
-
-    exp1 = [calc_snr_matlab(row) for row in df1[cols].values.tolist()]
-    mean1 = [sum(vals) / len(vals) for vals in zip(*exp1)]
-    exp2 = [calc_snr_matlab(row) for row in df2[cols].values.tolist()]
-    mean2 = [sum(vals) / len(vals) for vals in zip(*exp2)]
-    expected = [sum(vals) / 2 for vals in zip(mean1, mean2)]
-
-    assert captured["freqs"] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-    assert captured["roi_data"] == {"All": expected}
+    with pytest.raises(RuntimeError, match="FullSNR sheet is required"):
+        worker._run()

@@ -37,10 +37,6 @@ def _add_timing_detail(
     )
 
 
-def _is_missing_full_snr_sheet(exc: ValueError) -> bool:
-    return _MISSING_FULLSNR_MESSAGE in str(exc)
-
-
 def _xlsx_member_path(source_member: str, target: str) -> str:
     if target.startswith("/"):
         return posixpath.normpath(target.lstrip("/"))

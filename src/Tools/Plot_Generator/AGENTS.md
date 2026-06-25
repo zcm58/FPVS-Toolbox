@@ -21,8 +21,8 @@ Current ownership map:
 - `full_snr_reader.py`: direct `.xlsx` XML reader for the FullSNR fast path,
   including selected-frequency parsing, selected-ROI electrode
   filtering, and FullSNR load subtimings.
-- `data_collection.py`: Excel discovery/loading, FullSNR preference, FFT
-  Amplitude SNR fallback, and source data collection.
+- `data_collection.py`: Excel discovery/loading, FullSNR-only source data
+  collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
   unknown-subject warnings.
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
@@ -102,5 +102,4 @@ The app should read all of these Excel files for each condition and generate an 
 across all the participants, then plot that data. To further clarify, if you have 30 participants and 5 conditions,
 You should generate one plot per condition per ROI. If the user defines 4 ROIs like "frontal, central, parietal,
 occipital", then you have 4 ROIs * 5 conditions = 20 plots.
-
 
