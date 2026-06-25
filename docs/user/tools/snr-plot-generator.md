@@ -1,36 +1,32 @@
 # SNR Plot Generator
 
-Use this page when you want figures from processed FPVS Toolbox Excel outputs.
+The SNR Plot Generator creates frequency-domain figures from processed FPVS Toolbox Excel outputs.
 
-The SNR Plot Generator opens from the main app sidebar as **SNR Plots** and
-from the Tools menu as **Generate SNR Plots**. It reads Excel workbooks created
-by the processing pipeline and saves plot files to the project plot-output
-folder.
+## What It Does
 
-## When to use it
+Use this page to document the basic plotting workflow for SNR, BCA, or other supported frequency-domain outputs.
 
-Use this tool after processing has created condition folders under
-`1 - Excel Data Files`.
+## When To Use It
 
-It is useful when you need:
+Use this tool after FPVS Toolbox has processed the project and created condition-level Excel outputs.
 
-- ROI-level SNR or BCA figures;
-- one plot per condition and ROI;
-- publication-oriented axis labels, titles, colors, or scale settings;
-- optional scalp-map output when configured.
+## Basic Inputs
 
-## Inputs
+- Processed FPVS Toolbox Excel folders.
+- Condition labels and plotting settings.
+- ROI or electrode selections, when applicable.
 
-- Processed Excel result folders from FPVS Toolbox.
-- ROI definitions from the app settings.
-- Plot labels, axis bounds, and output folder choices from the tool window.
+## Basic Outputs
 
-The tool can use the current project to prefill the input folder and the default
-`2 - SNR Plots` output folder.
+- Plot image files saved under the selected project output folder.
 
-## Output
+## Notes To Fill In
 
-The output folder contains generated figure files. Review the plots before using
-them in a report, thesis, or manuscript so axis limits, labels, and condition
-names match the analysis you intend to describe.
+- Describe which plotted metrics are currently supported.
+- Describe the expected folder layout for input workbooks.
+- Add examples of common plot settings.
 
+## References
+
+- Method references: Add during the manual content pass.
+- Toolbox implementation reference: [src/Tools/Plot_Generator](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Plot_Generator).

@@ -1,36 +1,32 @@
 # Ratio Calculator
 
-Use this page when you need a ratio between two processed FPVS conditions.
+The Ratio Calculator compares processed FPVS Toolbox condition outputs and calculates ratio-based summaries.
 
-The Ratio Calculator opens from the main app sidebar or the Tools menu. It reads
-processed condition folders, pairs participants across the two selected
-conditions, and writes ratio outputs to a selected folder.
+## What It Does
 
-## When to use it
+Use this page to document which condition ratios the tool supports and how users should interpret the resulting tables or plots.
 
-Use this tool after processing has created Excel outputs for both conditions you
-want to compare.
+## When To Use It
 
-Typical uses:
+Use this tool after the relevant conditions have been processed and the ratio is part of the planned analysis.
 
-- compare a response in condition A against condition B;
-- inspect participant pairing before running the calculation;
-- generate ratio tables and plots for a focused condition comparison.
+## Basic Inputs
 
-## Inputs
+- Two processed condition folders or workbooks.
+- Ratio settings selected in the tool.
 
-- Condition A folder.
-- Condition B folder.
-- Output folder.
-- ROI selection from the current app ROI settings.
-- Run label and optional advanced settings.
+## Basic Outputs
 
-The tool can use the current project to discover condition folders. You can also
-browse to folders manually when needed.
+- Ratio tables.
+- Ratio plots, when enabled.
 
-## Output
+## Notes To Fill In
 
-The output folder contains the ratio results and any generated plots. Check the
-participant pairing table before relying on the result; unmatched participants
-should be resolved or documented before reporting.
+- Define each ratio option in plain language.
+- Add examples of common numerator and denominator choices.
+- Add cautions for interpreting ratio values.
 
+## References
+
+- Method references: Add during the manual content pass.
+- Toolbox implementation reference: [src/Tools/Ratio_Calculator](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Ratio_Calculator).

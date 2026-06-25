@@ -1,5 +1,5 @@
 site_name: FPVS Toolbox
-site_description: Documentation for processing FPVS EEG data and running publication-oriented analyses with FPVS Toolbox.
+site_description: Basic FPVS Toolbox documentation, tool pages, and reference links.
 site_url: https://zcm58.github.io/FPVS-Toolbox-Repo/
 repo_url: https://github.com/zcm58/FPVS-Toolbox-Repo
 repo_name: zcm58/FPVS-Toolbox-Repo
@@ -48,43 +48,17 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Start Here:
-      - Getting Started: start/getting-started.md
-      - FPVS Concepts for Non-Experts: start/fpvs-concepts.md
-      - First End-to-End Walkthrough: start/tutorial.md
-      - FAQ: start/faq.md
-  - Run a Study:
-      - Overview: study/run-a-study.md
-      - Project Setup: study/project-setup.md
-      - Processing Pipeline: study/processing-pipeline.md
-      - Output Files: study/outputs-reference.md
-      - Troubleshooting: study/troubleshooting.md
-  - Understand Results:
-      - Overview: results/understand-results.md
-      - FFT and Frequency-Domain Quantification (FPVS): results/fft-frequency-domain-quantification.md
-      - Statistical Analysis Overview: results/statistical-analysis.md
-      - Which Statistical Test Should I Use?: statistics/which-test.md
-      - Outliers and QC: statistics/outliers-and-qc.md
-  - Statistics Reference:
-      - Overview: statistics/index.md
-      - Harmonic Selection: statistics/rossion-harmonic-selection.md
-      - RM-ANOVA: statistics/rm-anova.md
-      - Post-hoc Tests: statistics/posthoc-tests.md
-      - Mixed Model: statistics/mixed-model.md
-      - External Statistics Software: statistics/external-statistics-software.md
-      - Baseline vs Zero Tests: statistics/baseline-vs-zero.md
   - Tools:
-      - Feature Tour: tools/feature-tour.md
+      - Overview: tools/index.md
+      - Epoch Averaging: tools/epoch-averaging.md
       - SNR Plot Generator: tools/snr-plot-generator.md
-      - Scalp Maps: tools/scalp-maps.md
-      - LORETA Visualizer: tools/loreta-visualizer.md
-      - Source Estimation: tools/source-localization-method.md
+      - Publication Maps / Scalp Maps: tools/publication-maps.md
+      - Statistics: tools/statistics.md
       - Ratio Calculator: tools/ratio-calculator.md
       - Sequence Figure: tools/sequence-figure.md
       - Image Resizer: tools/image-resizer.md
-      - Epoch Averaging: tools/epoch-averaging.md
       - Individual-level Detectability: tools/individual-level-detectability.md
+      - Publication Report: tools/publication-report.md
+      - LORETA Visualizer: tools/loreta-visualizer.md
   - Reference:
-      - Methods Reporting Checklist: reference/methods-reporting-checklist.md
-      - FPVS Studio Config Import: reference/fpvs-studio-config-import.md
-      - Glossary: reference/glossary.md
+      - Reference Links: reference/index.md

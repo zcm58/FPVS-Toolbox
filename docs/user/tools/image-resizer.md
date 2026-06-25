@@ -1,28 +1,32 @@
 # Image Resizer
 
-Use this page when you need to standardize stimulus image size or format before
-an FPVS experiment.
+The Image Resizer prepares stimulus image sets by resizing or converting images.
 
-The Image Resizer opens from the main app sidebar or the Tools menu. It processes
-all images in an input folder and writes resized copies to a separate output
-folder.
+## What It Does
 
-## When to use it
+Use this page to document the basic batch-resizing workflow and the image settings users should confirm before exporting.
 
-Use this tool before running a stimulus presentation task when images need a
-consistent pixel size or file format.
+## When To Use It
 
-## Inputs
+Use this tool before running an FPVS experiment when stimulus images need consistent dimensions or file formats.
 
-- Input folder containing source images.
-- Output folder that is different from the input folder.
-- Width and height in pixels.
-- Output format: `jpg`, `png`, or `bmp`.
-- Optional overwrite setting for existing output files.
+## Basic Inputs
 
-## Output
+- Source image folder.
+- Target dimensions.
+- Output format settings.
 
-The output folder contains resized image files. The progress panel lists skipped
-or failed files so you can correct unsupported inputs before using the images in
-an experiment.
+## Basic Outputs
 
+- A resized or converted stimulus image folder.
+
+## Notes To Fill In
+
+- Document supported input and output formats.
+- Add recommended image-size settings for FPVS Studio or PsychoPy workflows.
+- Add any cautions about aspect ratio or overwriting files.
+
+## References
+
+- Method references: Add during the manual content pass.
+- Toolbox implementation reference: [src/Tools/Image_Resizer](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Image_Resizer).

@@ -1,39 +1,31 @@
 # Sequence Figure
 
-Use this tool when you need a publication-oriented illustration of an FPVS
-stimulus sequence for a thesis, presentation, poster, or manuscript.
+The Sequence Figure tool creates a simple FPVS stimulus-sequence illustration from selected images.
 
-The Sequence Figure tool builds a fixed five-slot sequence illustration from
-manually selected stimulus images. It draws the timing scaffold and labels for
-the presentation frequency (`F`) and oddball frequency (`f`), then exports the
-figure as high-resolution PNG plus editable/vector PDF and SVG files.
+## What It Does
 
-## Inputs
+Use this page to document how users choose images, arrange the sequence, and export a methods-style figure.
 
-- Five stimulus images, selected in display order.
-- Presentation rate label, default `F = 6 Hz`.
-- Oddball rate label, default `f = 1.2 Hz`.
-- Output folder and output basename.
+## When To Use It
 
-The fifth slot is outlined to mark the oddball item in the sequence. Select the
-specific images you want shown; this tool does not sample images from condition
-folders.
+Use this tool when preparing a visual explanation of the stimulus sequence for a manuscript, poster, thesis, slide deck, or study material.
 
-## Outputs
+## Basic Inputs
 
-The output folder receives:
+- Stimulus images selected by the user.
+- Figure labels or display settings.
 
-- `*.png` at 600 DPI for direct use in documents or slides;
-- `*.pdf` for vector publication workflows;
-- `*.svg` for additional editing in tools such as PowerPoint, Illustrator,
-  Inkscape, or Affinity Designer.
+## Basic Outputs
 
-If a selected source image is too small for the requested export size, the tool
-still exports the figure but reports a warning in the completion dialog. Use
-larger source images when possible for final manuscripts.
+- Exported sequence figure files.
 
-## Notes
+## Notes To Fill In
 
-This tool is separate from the SNR Plot Generator. Use Sequence Figure for
-stimulus-sequence illustrations, and use SNR Plot Generator for frequency-domain
-response plots from FPVS Toolbox Excel outputs.
+- Document the number of image slots and expected figure layout.
+- Add export-format and resolution notes.
+- Add example wording for a methods figure caption.
+
+## References
+
+- Method references: Add during the manual content pass.
+- Toolbox implementation reference: [src/Tools/Sequence_Figure](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Sequence_Figure).

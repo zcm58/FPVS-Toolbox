@@ -1,28 +1,31 @@
 # Epoch Averaging
 
-Use this page when you need to combine preprocessed epochs before
-post-processing.
+Epoch Averaging is the FPVS Toolbox tool for combining preprocessed epochs before post-processing.
 
-Epoch Averaging opens from the main app sidebar as **Epoch Averaging** and from
-the Tools menu as **Average Epochs in Pre-Processing Phase**. It is intended for
-workflows where multiple preprocessed files should contribute to one averaged
-response before the regular post-processing outputs are generated.
+## What It Does
 
-## When to use it
+Use this page to document how the tool combines epochs from multiple preprocessed files and how the selected averaging option affects the result.
 
-Use this tool only after preprocessing has produced files that are ready to be
-combined.
+## When To Use It
 
-The tool supports two averaging ideas:
+Use Epoch Averaging after preprocessing and before downstream post-processing when multiple preprocessed files should contribute to a single averaged response.
 
-- **Pooled Average:** combines all epochs into one pool before averaging. This
-  gives equal weight to each epoch.
-- **Average of Averages:** averages each file first, then averages those file
-  averages together. This gives equal weight to each file.
+## Basic Inputs
 
-## Output
+- Preprocessed epoch files from an FPVS Toolbox workflow.
+- The intended averaging method.
 
-The output can be used as the averaged input for downstream FPVS processing
-steps. Record which averaging method you used because the weighting differs
-between the two modes.
+## Basic Outputs
 
+- Averaged data files for downstream FPVS Toolbox processing.
+
+## Notes To Fill In
+
+- Explain the difference between pooled averaging and average-of-averages.
+- Note which method is preferred for the intended workflow.
+- Add any reporting language you want users to copy into methods sections.
+
+## References
+
+- Method references: Add during the manual content pass.
+- Toolbox implementation reference: [src/Tools/Average_Preprocessing](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Average_Preprocessing).
