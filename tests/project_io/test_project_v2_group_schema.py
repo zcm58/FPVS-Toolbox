@@ -231,3 +231,103 @@ def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monk
             "raw_input_folder": str(treatment_dir),
         },
     }
+
+
+def test_new_project_from_fpvs_config_creates_project_directly(tmp_path, monkeypatch) -> None:
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    raw_dir = tmp_path / "raw_bdf"
+    raw_dir.mkdir()
+    config_path = tmp_path / "studio.fpvsconfig"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "project": {"name": "Semantic Categories"},
+                "conditions": [
+                    {"name": "Fruit vs Vegetable", "trigger_code": 1},
+                    {"name": "Veg vs Fruit", "trigger_code": 2},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded: list[Project] = []
+    host = SimpleNamespace(
+        projectsRoot=projects_root,
+        loadProject=lambda project: loaded.append(project),
+    )
+
+    monkeypatch.setattr(project_manager, "ensure_projects_root", lambda parent: projects_root)
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(config_path), "FPVS Studio Config (*.fpvsconfig)"),
+    )
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: str(raw_dir),
+    )
+    monkeypatch.setattr(project_manager.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(project_manager.QMessageBox, "critical", lambda *a, **k: None)
+
+    project = project_manager.new_project_from_fpvs_config(host)
+
+    assert project is not None
+    assert loaded == [project]
+    assert project.project_root == (projects_root / "Semantic Categories").resolve()
+    assert project.name == "Semantic Categories"
+    assert project.event_map == {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2}
+    assert project.input_folder == raw_dir.resolve()
+    manifest = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
+    assert manifest["event_map"] == {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2}
+    assert manifest["input_folder"] == str(raw_dir)
+
+
+def test_new_project_workflow_routes_to_fpvs_config_choice(monkeypatch) -> None:
+    from Main_App.gui import project_workflows
+
+    host = SimpleNamespace()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        project_workflows,
+        "_choose_new_project_source",
+        lambda _host: project_workflows.NEW_PROJECT_FPVS_CONFIG,
+    )
+    monkeypatch.setattr(project_workflows, "_new_project", lambda _host: calls.append("manual"))
+    monkeypatch.setattr(
+        project_workflows,
+        "_new_project_from_fpvs_config",
+        lambda _host, _parent: object(),
+    )
+    monkeypatch.setattr(project_workflows, "notify_project_ready", lambda _host: calls.append("ready"))
+
+    project_workflows.new_project(host)
+
+    assert calls == ["ready"]
+
+
+def test_new_project_workflow_routes_to_manual_choice(monkeypatch) -> None:
+    from Main_App.gui import project_workflows
+
+    host = SimpleNamespace()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        project_workflows,
+        "_choose_new_project_source",
+        lambda _host: project_workflows.NEW_PROJECT_MANUAL,
+    )
+    monkeypatch.setattr(project_workflows, "_new_project", lambda _host: calls.append("manual"))
+    monkeypatch.setattr(
+        project_workflows,
+        "_new_project_from_fpvs_config",
+        lambda _host, _parent: calls.append("config"),
+    )
+    monkeypatch.setattr(project_workflows, "notify_project_ready", lambda _host: calls.append("ready"))
+
+    project_workflows.new_project(host)
+
+    assert calls == ["manual", "ready"]

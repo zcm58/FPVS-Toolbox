@@ -173,7 +173,8 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert win.btn_open_project.text() == "Open Project"
     assert win.btn_create_project.width() >= 260
     assert win.btn_create_project.height() >= 66
-    assert win.actionImportFpvsConfigProject.text() == "Import FPVS Studio Config..."
+    assert win.actionImportFpvsConfigProject is win.actionCreateNewProject
+    assert not hasattr(win, "btn_create_from_config")
     assert win.menuBar().isHidden()
     assert win.btn_create_project.isVisibleTo(win)
     assert win.btn_open_project.isVisibleTo(win)

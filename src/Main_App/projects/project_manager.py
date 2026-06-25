@@ -257,7 +257,7 @@ def new_project(self) -> None:
     self.loadProject(project)
 
 
-def import_fpvs_config_project(self, parent: QWidget | None = None) -> Project | None:
+def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project | None:
     if parent is None:
         parent = getattr(self, "window", lambda: None)() or getattr(self, "parent", lambda: None)() or None
 
@@ -285,7 +285,7 @@ def import_fpvs_config_project(self, parent: QWidget | None = None) -> Project |
             path,
             exc,
             exc_info=exc,
-            extra={"op": "import_fpvs_config", "path": path},
+            extra={"op": "new_project_from_fpvs_config", "path": path},
         )
         return None
 
@@ -301,17 +301,22 @@ def import_fpvs_config_project(self, parent: QWidget | None = None) -> Project |
     self.currentProject = project
     self.loadProject(project)
     logger.info(
-        "Imported FPVS config %s into project %s.",
-        path,
+        "Created project %s from FPVS config %s.",
         project.project_root,
-        extra={"op": "import_fpvs_config", "path": path},
+        path,
+        extra={"op": "new_project_from_fpvs_config", "path": path},
     )
     QMessageBox.information(
         parent,
-        "FPVS Config Imported",
+        "Project Created",
         f"Created project '{project.name}' with {len(project.event_map)} condition(s).",
     )
     return project
+
+
+def import_fpvs_config_project(self, parent: QWidget | None = None) -> Project | None:
+    """Compatibility wrapper for the former File menu import action."""
+    return new_project_from_fpvs_config(self, parent)
 
 
 def open_existing_project(self, parent: QWidget | None = None) -> None:

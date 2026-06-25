@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import Main_App.projects.project_manager as project_manager  # noqa: E402
 import Main_App.projects.projects_root as projects_root  # noqa: E402
+import Main_App.gui.project_workflows as project_workflows  # noqa: E402
 import Main_App.gui.update_manager as update_manager  # noqa: E402
 from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
 
@@ -184,8 +185,13 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
         "getExistingDirectory",
         lambda *args, **kwargs: str(input_dir),
     )
+    monkeypatch.setattr(
+        project_workflows,
+        "_choose_new_project_source",
+        lambda _host: project_workflows.NEW_PROJECT_FPVS_CONFIG,
+    )
 
-    main_window.actionImportFpvsConfigProject.trigger()
+    main_window.actionCreateNewProject.trigger()
 
     assert main_window.currentProject.name == "Semantic Categories"
     assert main_window.currentProject.event_map == {
