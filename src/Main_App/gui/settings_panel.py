@@ -233,6 +233,19 @@ class SettingsDialog(QDialog):
         diagnostics_group.content_layout.addLayout(diagnostics_form)
         layout.addWidget(diagnostics_group)
 
+        tool_visibility_group = SectionCard(
+            "Tool Visibility",
+            tab,
+            object_name="settings_preproc_tool_visibility_card",
+        )
+        tool_visibility_form = make_form_layout()
+        self.beta_tools_check = QCheckBox("Enable Beta Tools", tool_visibility_group)
+        self.beta_tools_check.setObjectName("settings_enable_beta_tools")
+        self.beta_tools_check.setChecked(self.manager.beta_tools_enabled())
+        tool_visibility_form.addRow(QLabel("Beta Tools", tool_visibility_group), self.beta_tools_check)
+        tool_visibility_group.content_layout.addLayout(tool_visibility_form)
+        layout.addWidget(tool_visibility_group)
+
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_preproc_footer")
         tabs.addTab(tab, "Preprocessing")
@@ -610,7 +623,9 @@ class SettingsDialog(QDialog):
                 QMessageBox.critical(self, "Save Error", str(exc))
                 return
         prev_debug = self.manager.debug_enabled()
+        prev_beta_tools = self.manager.beta_tools_enabled()
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
+        self.manager.set_beta_tools_enabled(self.beta_tools_check.isChecked())
         self.manager.save()
 
         if not prev_debug and self.manager.debug_enabled():
@@ -618,6 +633,12 @@ class SettingsDialog(QDialog):
                 self,
                 "Debug Mode Enabled",
                 "Debug mode enabled. Please close and reopen FPVS Toolbox for changes to take effect.",
+            )
+        if prev_beta_tools != self.manager.beta_tools_enabled():
+            QMessageBox.information(
+                self,
+                "Tool Visibility Updated",
+                "Please close and reopen FPVS Toolbox for your changes to take effect.",
             )
 
         try:

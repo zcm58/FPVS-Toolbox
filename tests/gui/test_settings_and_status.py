@@ -20,6 +20,21 @@ def test_settings_manager_uses_central_ini(qtbot) -> None:
     qtbot.addWidget(dummy)
 
 
+def test_settings_manager_beta_tools_default_and_persistence(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path))
+
+    settings = SettingsManager()
+    assert settings.beta_tools_enabled() is False
+
+    settings.set_beta_tools_enabled(True)
+    settings.save()
+    assert SettingsManager().beta_tools_enabled() is True
+
+    settings.set_beta_tools_enabled(False)
+    settings.save()
+    assert SettingsManager().beta_tools_enabled() is False
+
+
 def test_update_check_debounce(monkeypatch, qtbot) -> None:
     QApplication.instance() or QApplication([])
     settings = SettingsManager()

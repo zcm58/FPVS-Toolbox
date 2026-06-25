@@ -92,7 +92,48 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["save_preprocessed_fif"] is False
 
 
-def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
+def test_settings_dialog_beta_tools_save_prompts_for_restart(tmp_path, qtbot, monkeypatch):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    win.settings.set_beta_tools_enabled(False)
+    win.settings.save()
+
+    info_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, message, *_args, **_kwargs: info_calls.append((title, message)),
+    )
+
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    assert dlg.beta_tools_check.isChecked() is False
+
+    dlg.beta_tools_check.setChecked(True)
+    dlg._save()
+
+    expected_message = "Please close and reopen FPVS Toolbox for your changes to take effect."
+    assert ("Tool Visibility Updated", expected_message) in info_calls
+    assert win.settings.beta_tools_enabled() is True
+
+    dlg2 = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg2)
+    assert dlg2.beta_tools_check.isChecked() is True
+
+    dlg2.beta_tools_check.setChecked(False)
+    dlg2._save()
+
+    assert info_calls.count(("Tool Visibility Updated", expected_message)) == 2
+    assert win.settings.beta_tools_enabled() is False
+
+
+def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatch):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
 
@@ -109,6 +150,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     }
     assert "Preprocessing Parameters" in cards
     assert "Diagnostics" in cards
+    assert "Tool Visibility" in cards
     assert "Analysis Defaults" in cards
     assert "Quick Add" in cards
     assert "Regions of Interest" in cards
@@ -121,6 +163,9 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
     assert cards["Diagnostics"].isAncestorOf(dlg.debug_check)
+    assert cards["Tool Visibility"].isAncestorOf(dlg.beta_tools_check)
+    assert dlg.beta_tools_check.text() == "Enable Beta Tools"
+    assert dlg.beta_tools_check.isChecked() is False
     assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)
     assert dlg.oddball_freq_edit.text() == "1.2"
     assert dlg.oddball_freq_edit.isReadOnly()

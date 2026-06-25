@@ -1,5 +1,4 @@
 import importlib.util
-
 import pytest
 
 
@@ -10,25 +9,37 @@ def _module_available(name: str) -> bool:
         return False
 
 
-def test_ratio_calculator_present_in_ui(qtbot):
+def test_ratio_calculator_present_in_ui_when_beta_tools_are_enabled(qtbot, tmp_path, monkeypatch):
     if not _module_available("PySide6") or not _module_available("pytestqt"):
         pytest.skip("PySide6 or pytest-qt not available")
 
     from PySide6.QtWidgets import QApplication
 
+    from Main_App.Shared.settings_manager import SettingsManager
     from Main_App.gui.main_window import MainWindow
     from Main_App.gui.sidebar import SidebarButton
 
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
     QApplication.instance() or QApplication([])
-    window = MainWindow()
-    qtbot.addWidget(window)
 
-    sidebar_labels = [btn.text_lbl.text() for btn in window.sidebar.findChildren(SidebarButton)]
+    settings = SettingsManager()
+    settings.set_beta_tools_enabled(False)
+    settings.save()
+    default_window = MainWindow()
+    qtbot.addWidget(default_window)
+    sidebar_labels = [btn.text_lbl.text() for btn in default_window.sidebar.findChildren(SidebarButton)]
+    assert "Ratio Calculator" not in sidebar_labels
+
+    settings.set_beta_tools_enabled(True)
+    settings.save()
+    beta_window = MainWindow()
+    qtbot.addWidget(beta_window)
+    sidebar_labels = [btn.text_lbl.text() for btn in beta_window.sidebar.findChildren(SidebarButton)]
     assert "Ratio Calculator" in sidebar_labels
 
     menu_titles = [
         action.menu().title()
-        for action in window.menuBar().actions()
+        for action in beta_window.menuBar().actions()
         if action.menu() is not None
     ]
     assert "Tools" not in menu_titles

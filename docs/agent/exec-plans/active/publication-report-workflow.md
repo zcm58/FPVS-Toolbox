@@ -10,7 +10,8 @@ Implemented in `codex/publication-report-workflow` initial slice:
   project/workbook discovery, a GUI-agnostic report runner, source workbook and
   audit writers, Markdown and dependency-free DOCX narrative writers, a Qt
   worker, and an embedded PySide6 page.
-- Main sidebar entry: `Publication Report`, manually run after processing.
+- Beta sidebar entry: `Publication Report`, manually run after processing when
+  beta tools are enabled in Settings and the app has been restarted.
 - Multiple selected condition folders, editable report/target labels, editable
   LOT/ROT/Central/base-rate ROI electrode lists, Markdown/Excel/DOCX outputs, and
   default figure-family options recorded in the manifest.
@@ -82,7 +83,8 @@ Initial scope decisions captured from user discussion:
 - v1 includes Markdown, Excel, and Word `.docx` outputs.
 - Publication Report is an embedded manually-run tool after processing is
   complete, not an automatic post-processing step.
-- The embedded Publication Report tool lives in the main sidebar.
+- The embedded Publication Report tool lives in the main sidebar only when beta
+  tools are enabled in Settings and the app has been restarted.
 
 ## Goal
 
@@ -488,7 +490,7 @@ Initial embedded tool surface:
 
 Possible placement:
 
-- Main app sidebar.
+- Main app sidebar as a beta tool.
 
 Current v1 direction: make this an embedded tool/page with options and a manual
 Run action. It should not auto-run after processing completes.
@@ -739,7 +741,8 @@ Add new focused tests under:
 19. Where should the one-click button live: main sidebar, Tools menu, Stats
     window, or a dedicated Publication Report page?
 
-    Decision: embedded manually-run tool/page in the main sidebar.
+    Decision: embedded manually-run tool/page in the main sidebar when beta
+    tools are enabled.
 
 20. Should report generation automatically run after processing completes, or
     remain a separate explicit user action?
@@ -791,7 +794,8 @@ Add new focused tests under:
 - Decision: LOT, ROT, and Central are first-class separate presets; LOT+Central is
   not built in for v1.
 - GUI entry point.
-- Decision: manually-run embedded tool/page in the main sidebar.
+- Decision: manually-run embedded tool/page in the main sidebar when beta tools
+  are enabled.
 - Decision: include baseline-vs-zero tests by default.
 - Decision: include supported within-subject condition comparisons when Stats
   can run them.

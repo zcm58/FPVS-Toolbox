@@ -21,10 +21,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
+from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 import Main_App.gui.update_manager as update_manager
@@ -37,8 +39,43 @@ from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow
 
 
-def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.MainWindow:
-    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+DEFAULT_TOOL_ROLES = [
+    "btn_data",
+    "btn_graphs",
+    "btn_publication_maps",
+    "btn_loreta_visualizer",
+    "btn_sequence_figure",
+]
+DEFAULT_TOOL_LABELS = [
+    "Statistical Analysis",
+    "SNR Plots",
+    "Scalp Maps",
+    "LORETA Visualizer",
+    "Sequence Figure",
+]
+BETA_TOOL_ROLES = [
+    "btn_publication_report",
+    "btn_ratio",
+    "btn_individual_detectability",
+    "btn_epoch",
+]
+BETA_TOOL_LABELS = [
+    "Publication Report",
+    "Ratio Calculator",
+    "Individual Detectability",
+    "Epoch Averaging",
+]
+
+
+def _build_window(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+    *,
+    enable_beta_tools: bool = False,
+) -> main_window_module.MainWindow:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setattr(update_manager, "cleanup_old_executable", lambda: None)
     monkeypatch.setattr(update_manager, "check_for_updates_on_launch", lambda *_args, **_kwargs: None)
@@ -47,6 +84,9 @@ def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.Main
         "select_projects_root",
         lambda self: setattr(self, "projectsRoot", tmp_path),
     )
+    settings = SettingsManager()
+    settings.set_beta_tools_enabled(enable_beta_tools)
+    settings.save()
 
     win = main_window_module.MainWindow()
     qtbot.addWidget(win)
@@ -63,6 +103,32 @@ def _sidebar_button(win: main_window_module.MainWindow, role: str) -> QWidget:
     ]
     assert len(matches) == 1
     return matches[0]
+
+
+def _sidebar_tool_buttons(win: main_window_module.MainWindow) -> list[SidebarButton]:
+    layout = win.sidebar_tools_group.layout()
+    buttons: list[SidebarButton] = []
+    for index in range(layout.count()):
+        widget = layout.itemAt(index).widget()
+        if isinstance(widget, SidebarButton):
+            buttons.append(widget)
+    return buttons
+
+
+def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    buttons = _sidebar_tool_buttons(win)
+
+    assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES
+    assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS
+
+
+def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    buttons = _sidebar_tool_buttons(win)
+
+    assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES + BETA_TOOL_ROLES
+    assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS + BETA_TOOL_LABELS
 
 
 def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -348,7 +414,7 @@ def test_sidebar_ratio_calculator_embeds_in_main_workspace(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     project_root = tmp_path / "project"
     project_root.mkdir()
     win.currentProject = SimpleNamespace(
@@ -677,7 +743,7 @@ def test_sidebar_publication_report_embeds_in_main_workspace(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     project_root = tmp_path / "project"
     excel_dir = project_root / "1 - Excel Data Files"
     excel_dir.mkdir(parents=True)
@@ -827,7 +893,7 @@ def test_sidebar_individual_detectability_embeds_in_main_workspace(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     project_root = tmp_path / "project"
     excel_dir = project_root / "1 - Excel Data Files"
     excel_dir.mkdir(parents=True)
@@ -880,7 +946,7 @@ def test_sidebar_epoch_averaging_embeds_in_main_workspace(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     project_root = tmp_path / "project"
     data_dir = project_root / "data"
     excel_dir = project_root / "excel"

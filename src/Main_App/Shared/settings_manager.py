@@ -67,6 +67,9 @@ DEFAULTS = {
     },
     'debug': {
         'enabled': 'False'
+    },
+    'tools': {
+        'enable_beta_tools': 'False'
     }
 }
 
@@ -408,3 +411,9 @@ class SettingsManager:
 
     def debug_enabled(self) -> bool:
         return self.get('debug', 'enabled', 'False').lower() == 'true'
+
+    def beta_tools_enabled(self) -> bool:
+        return self.get('tools', 'enable_beta_tools', 'False').lower() == 'true'
+
+    def set_beta_tools_enabled(self, enabled: bool) -> None:
+        self.set('tools', 'enable_beta_tools', str(bool(enabled)))

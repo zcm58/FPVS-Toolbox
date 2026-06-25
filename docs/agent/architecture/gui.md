@@ -58,8 +58,15 @@ application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
 Settings page, Statistical Analysis, SNR Plot Generator, Individual
-Detectability, Ratio Calculator, and Epoch Averaging are
-embedded in this workspace stack.
+Detectability, Ratio Calculator, and Epoch Averaging are embedded in this
+workspace stack.
+
+The sidebar's default tool list is Statistical Analysis, SNR Plots, Scalp Maps,
+LORETA Visualizer, and Sequence Figure, in that order. Publication Report,
+Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools:
+they remain embedded workspace pages, but the sidebar appends them only when
+the global Settings option `tools.enable_beta_tools` is enabled and the app has
+been restarted.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.

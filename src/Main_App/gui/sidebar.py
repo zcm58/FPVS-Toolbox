@@ -37,6 +37,21 @@ CENTERED_TEXT_TRAILING_SPACER_PX = (
 
 DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
 
+DEFAULT_TOOL_SPECS = (
+    ("btn_data", "Statistical Analysis", "stats", "open_stats_analyzer"),
+    ("btn_graphs", "SNR Plots", "chart", "open_plot_generator"),
+    ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),
+    ("btn_loreta_visualizer", "LORETA Visualizer", "loreta", "open_loreta_visualizer"),
+    ("btn_sequence_figure", "Sequence Figure", "sequence", "open_sequence_figure"),
+)
+
+BETA_TOOL_SPECS = (
+    ("btn_publication_report", "Publication Report", "report", "open_publication_report"),
+    ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
+    ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
+    ("btn_epoch", "Epoch Averaging", "epoch", "open_epoch_averaging"),
+)
+
 
 def tinted_icon(source: QIcon | str | Path, color: QColor) -> QIcon:
     """Return a tinted icon from a file path, theme name, or QIcon."""
@@ -186,6 +201,24 @@ def make_section_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
+def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
+    tool_specs = list(DEFAULT_TOOL_SPECS)
+    if host.settings.beta_tools_enabled():
+        tool_specs.extend(BETA_TOOL_SPECS)
+
+    host.sidebar_epoch_button = None
+    for role, text, icon_kind, slot_name in tool_specs:
+        button = make_button(
+            layout,
+            role,
+            text,
+            sidebar_icon(icon_kind, ICON_PX),
+            getattr(host, slot_name),
+        )
+        if role == "btn_epoch":
+            host.sidebar_epoch_button = button
+
+
 def init_sidebar(self) -> None:
     """
     Populate the permanent left sidebar created in ui_main.py.
@@ -254,65 +287,7 @@ def init_sidebar(self) -> None:
     tools_layout.setContentsMargins(0, 0, 0, 0)
     tools_layout.setSpacing(4)
 
-    make_button(
-        tools_layout,
-        "btn_data",
-        "Statistical Analysis",
-        sidebar_icon("stats", ICON_PX),
-        self.open_stats_analyzer,
-    )
-
-    make_button(tools_layout, "btn_graphs", "SNR Plots", sidebar_icon("chart", ICON_PX), self.open_plot_generator)
-    make_button(
-        tools_layout,
-        "btn_publication_maps",
-        "Scalp Maps",
-        sidebar_icon("scalp", ICON_PX),
-        self.open_publication_maps,
-    )
-    make_button(
-        tools_layout,
-        "btn_loreta_visualizer",
-        "LORETA Visualizer",
-        sidebar_icon("loreta", ICON_PX),
-        self.open_loreta_visualizer,
-    )
-    make_button(
-        tools_layout,
-        "btn_publication_report",
-        "Publication Report",
-        sidebar_icon("report", ICON_PX),
-        self.open_publication_report,
-    )
-    make_button(
-        tools_layout,
-        "btn_ratio",
-        "Ratio Calculator",
-        sidebar_icon("ratio", ICON_PX),
-        self.open_ratio_calculator,
-    )
-    make_button(
-        tools_layout,
-        "btn_individual_detectability",
-        "Individual Detectability",
-        sidebar_icon("detectability", ICON_PX),
-        self.open_individual_detectability,
-    )
-    make_button(
-        tools_layout,
-        "btn_sequence_figure",
-        "Sequence Figure",
-        sidebar_icon("sequence", ICON_PX),
-        self.open_sequence_figure,
-    )
-    epoch_btn = make_button(
-        tools_layout,
-        "btn_epoch",
-        "Epoch Averaging",
-        sidebar_icon("epoch", ICON_PX),
-        self.open_epoch_averaging,
-    )
-    self.sidebar_epoch_button = epoch_btn
+    _add_tool_buttons(tools_layout, self)
 
     primary_layout.addWidget(tools_group)
     self.sidebar_tools_group = tools_group
