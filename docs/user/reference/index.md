@@ -1,6 +1,6 @@
 # Reference Links
 
-Use this page as the lightweight reference shelf for FPVS Toolbox. Keep detailed FPVS theory and long methods explanations on the separate FPVS concepts site.
+Here are links to all references used to build FPVS Toolbox.
 
 ## Toolbox Links
 
