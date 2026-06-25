@@ -98,6 +98,46 @@ def test_mp_runner_bridge_error_and_finished(app, qtbot):
     assert any(p > 0 for p in progresses)
 
 
+def test_mp_runner_bridge_excluded_result_is_not_error(app, qtbot):
+    bridge = MpRunnerBridge()
+    errors = []
+    file_statuses = []
+    finished_payloads = []
+
+    bridge.error.connect(errors.append)
+    bridge.file_status.connect(file_statuses.append)
+    bridge.finished.connect(lambda payload: finished_payloads.append(payload))
+
+    q = _FakeQueue()
+    bridge._q = q  # type: ignore[assignment]
+    bridge._total = 1
+
+    q.put(
+        {
+            "type": "progress",
+            "completed": 1,
+            "total": 1,
+            "result": {
+                "status": "excluded",
+                "file": r"C:\Projects\FPVS\MCCTR\p16.bdf",
+                "stage": "preflight",
+                "reason": "recording_not_started",
+                "message": "File p16.bdf was created, but the user did not click Record in BioSemi.",
+            },
+        }
+    )
+    q.put({"type": "done", "count": 1})
+
+    bridge._poll()
+
+    assert errors == []
+    assert file_statuses[0]["status"] == "excluded"
+    assert len(finished_payloads) == 1
+    payload = finished_payloads[0]
+    assert payload["results"] == []
+    assert payload["excluded"][0]["file"].endswith("p16.bdf")
+
+
 def test_mp_runner_bridge_logs_single_settings_snapshot(app, caplog, monkeypatch):
     bridge = MpRunnerBridge()
 

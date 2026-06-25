@@ -14,6 +14,10 @@ from PySide6.QtWidgets import QMessageBox
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
 from Main_App.gui.post_export_workflows import excel_snapshot
+from Main_App.io.load_utils import (
+    BDF_RECORDING_NOT_STARTED_REASON,
+    format_bdf_recording_not_started_message,
+)
 from Main_App.processing.processing_ledger import (
     ProcessingPlan,
     classify_processing_inputs,
@@ -474,10 +478,12 @@ def _reset_failed_start(host: Any) -> None:
 
 def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     results: list[dict] = []
+    excluded_results: list[dict] = []
     cancelled = False
     interrupted_files: list[str] = []
     if isinstance(payload, dict):
         results = payload.get("results") or []
+        excluded_results = payload.get("excluded") or []
         cancelled = bool(payload.get("cancelled", False))
         interrupted_files = [str(file_path) for file_path in payload.get("interrupted_files") or []]
 
@@ -533,13 +539,32 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
             f"{avg_rejected:.2f} (n={files_with_reject_info}, total={total_rejected})"
         )
 
+    if excluded_results:
+        excluded_names = [
+            Path(str(result.get("file") or "")).name
+            for result in excluded_results
+            if result.get("file")
+        ]
+        reasons = {str(result.get("reason") or "") for result in excluded_results}
+        if reasons == {BDF_RECORDING_NOT_STARTED_REASON}:
+            host.log(
+                format_bdf_recording_not_started_message(excluded_names),
+                level=logging.WARNING,
+            )
+        else:
+            host.log(
+                f"{len(excluded_results)} file(s) were excluded from processing and analysis. "
+                "Check the processing log for details.",
+                level=logging.WARNING,
+            )
+
     plan = getattr(host, "_processing_plan", None)
     if plan is not None:
         try:
             record_processing_results(
                 host.currentProject,
                 plan,
-                results,
+                [*results, *excluded_results],
                 run_mode=str(getattr(host, "_processing_run_mode", "Batch")),
                 user_choice=str(getattr(host, "_processing_user_choice", "incremental")),
                 cancelled=cancelled,

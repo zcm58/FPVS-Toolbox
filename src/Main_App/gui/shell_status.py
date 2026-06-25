@@ -112,8 +112,11 @@ def _processing_file_keys(file_path: Any) -> tuple[str, str]:
 def _set_processing_summary(host: Any, pct: int | None = None) -> None:
     total = int(getattr(host, "_processing_file_total", 0) or 0)
     completed = len(getattr(host, "_processing_completed_file_keys", set()))
+    excluded = len(getattr(host, "_processing_excluded_file_keys", set()))
     pct_text = f" ({pct}%)" if pct is not None else ""
     summary = f"{completed} of {total} files complete{pct_text}"
+    if excluded:
+        summary += f"; {excluded} excluded"
     label = getattr(host, "processing_summary_label", None)
     if label is not None:
         label.setText(summary)
@@ -126,6 +129,7 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
 
     host._processing_file_total = len(files)
     host._processing_completed_file_keys = set()
+    host._processing_excluded_file_keys = set()
     host._processing_file_rows = {}
     host._processing_row_keys = {}
 
@@ -184,6 +188,13 @@ def update_processing_file_status(host: Any, result: dict[str, object]) -> None:
         completed.add(row_key)
         host._processing_completed_file_keys = completed
         latest = f"Latest file: Completed {_processing_file_label(file_value)}"
+    elif status == "excluded":
+        status_text = "Excluded"
+        excluded = getattr(host, "_processing_excluded_file_keys", set())
+        row_key = getattr(host, "_processing_row_keys", {}).get(row, raw_key)
+        excluded.add(row_key)
+        host._processing_excluded_file_keys = excluded
+        latest = f"Latest file: Excluded {_processing_file_label(file_value)}"
     elif status == "error":
         stage = str(result.get("stage") or "unknown")
         status_text = "Failed"

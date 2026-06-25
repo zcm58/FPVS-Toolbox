@@ -139,6 +139,43 @@ def _make_error_result(
     return payload
 
 
+def _make_excluded_result(
+    file_path: Path,
+    *,
+    reason: str,
+    message: str,
+    start_time: Optional[float] = None,
+    preflight_info: Optional[Any] = None,
+) -> Dict[str, object]:
+    elapsed_ms: Optional[int] = None
+    if start_time is not None:
+        try:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        except (OverflowError, TypeError, ValueError):
+            elapsed_ms = None
+
+    payload: Dict[str, object] = {
+        "status": "excluded",
+        "file": str(file_path),
+        "stage": "preflight",
+        "reason": reason,
+        "message": message,
+        "post_export_ok": False,
+    }
+    if elapsed_ms is not None:
+        payload["elapsed_ms"] = elapsed_ms
+    if preflight_info is not None:
+        payload["bdf_preflight"] = {
+            "file_size": getattr(preflight_info, "file_size", None),
+            "header_bytes": getattr(preflight_info, "header_bytes", None),
+            "data_records": getattr(preflight_info, "data_records", None),
+            "record_duration": getattr(preflight_info, "record_duration", None),
+            "channel_count": getattr(preflight_info, "channel_count", None),
+            "data_bytes": getattr(preflight_info, "data_bytes", None),
+        }
+    return payload
+
+
 def _build_fft_crop_file_logger(project_root: Path, file_path: Path) -> logging.Logger:
     """Create a per-file crop logger so child-process diagnostics are always persisted."""
     logs_dir = project_root / "logs"
@@ -428,7 +465,7 @@ def _run_full_pipeline_for_file(
             elapsed_ms,
         )
 
-    stage = "load"
+    stage = "preflight"
     crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
     try:
         logger.info(
@@ -440,7 +477,12 @@ def _run_full_pipeline_for_file(
 
         # Lazy imports (inside worker only)
         logger.info("[PIPELINE STAGE] file=%s stage=worker_imports_start", file_path.name)
-        from Main_App.io.load_utils import load_eeg_file  # type: ignore
+        from Main_App.io.load_utils import (  # type: ignore
+            BDF_RECORDING_NOT_STARTED_REASON,
+            format_bdf_recording_not_started_message,
+            inspect_bdf_header,
+            load_eeg_file,
+        )
         from Main_App.exports.post_export_adapter import (  # type: ignore
             LegacyCtx,
             run_post_export,
@@ -462,6 +504,33 @@ def _run_full_pipeline_for_file(
         except Exception:
             # If MNE changes its API, fail silently; core behavior is unaffected.
             pass
+
+        preflight_info = inspect_bdf_header(file_path)
+        if preflight_info and preflight_info.recording_not_started:
+            message = format_bdf_recording_not_started_message([file_path.name])
+            logger.warning(
+                "bdf_recording_excluded file=%s reason=%s size=%s header_bytes=%s data_records=%s",
+                file_path,
+                BDF_RECORDING_NOT_STARTED_REASON,
+                preflight_info.file_size,
+                preflight_info.header_bytes,
+                preflight_info.data_records,
+            )
+            crop_logger.warning(
+                "file=%s stage=preflight excluded=true reason=%s size=%s header_bytes=%s data_records=%s",
+                file_path.name,
+                BDF_RECORDING_NOT_STARTED_REASON,
+                preflight_info.file_size,
+                preflight_info.header_bytes,
+                preflight_info.data_records,
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason=BDF_RECORDING_NOT_STARTED_REASON,
+                message=message,
+                start_time=t0,
+                preflight_info=preflight_info,
+            )
 
         # Minimal logger-compatible stub for loader
         class _App:
@@ -1133,6 +1202,7 @@ def run_project_parallel(
     # Batch-level stats for n_rejected (number of channels interpolated per file)
     total_rejected = 0
     files_with_audit = 0
+    excluded_results: List[Dict[str, object]] = []
 
     cancelled = False
     shutdown_wait = True
@@ -1270,6 +1340,14 @@ def run_project_parallel(
                         if isinstance(n_rejected, (int, float)):
                             total_rejected += int(n_rejected)
                             files_with_audit += 1
+                elif isinstance(res, dict) and res.get("status") == "excluded":
+                    excluded_results.append(res)
+                    logger.warning(
+                        "mp_run_file_excluded file=%s reason=%s message=%s",
+                        res.get("file"),
+                        res.get("reason"),
+                        res.get("message"),
+                    )
 
                 completed += 1
                 if progress_queue:
@@ -1325,6 +1403,12 @@ def run_project_parallel(
             files_with_audit,
             total_rejected,
         )
+    if excluded_results:
+        logger.warning(
+            "batch_summary excluded_files=%d files=%s",
+            len(excluded_results),
+            [Path(str(result.get("file", ""))).name for result in excluded_results],
+        )
 
     if progress_queue:
         done_msg: Dict[str, object] = {
@@ -1346,4 +1430,7 @@ def run_project_parallel(
             )
         if interrupted_files:
             done_msg["interrupted_files"] = interrupted_files
+        if excluded_results:
+            done_msg["excluded"] = list(excluded_results)
+            done_msg["excluded_count"] = len(excluded_results)
         progress_queue.put(done_msg)

@@ -10,6 +10,50 @@ from Main_App.Shared.fft_crop_utils import CropResult
 from Main_App.workers import process_runner
 
 
+def _write_bdf_header(path: Path, *, header_bytes: int = 512, data_records: int = 0, channels: int = 1) -> None:
+    header = bytearray(b" " * 256)
+
+    def _put(start: int, stop: int, value: object) -> None:
+        header[start:stop] = str(value).ljust(stop - start).encode("ascii")
+
+    _put(184, 192, header_bytes)
+    _put(236, 244, data_records)
+    _put(244, 252, 1)
+    _put(252, 256, channels)
+    path.write_bytes(bytes(header) + (b" " * max(0, header_bytes - 256)))
+
+
+def test_run_full_pipeline_excludes_header_only_bdf_before_loader(monkeypatch, tmp_path: Path) -> None:
+    fake_bdf = tmp_path / "p16.bdf"
+    _write_bdf_header(fake_bdf, header_bytes=512, data_records=0, channels=1)
+
+    def _unexpected_loader(*_args, **_kwargs):
+        raise AssertionError("header-only BDF should be excluded before load_eeg_file")
+
+    monkeypatch.setattr("Main_App.io.load_utils.load_eeg_file", _unexpected_loader)
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "excluded"
+    assert result["stage"] == "preflight"
+    assert result["reason"] == "recording_not_started"
+    assert "did not click Record in BioSemi" in str(result["message"])
+    assert result["bdf_preflight"]["file_size"] == 512
+    assert result["bdf_preflight"]["header_bytes"] == 512
+    assert result["bdf_preflight"]["data_records"] == 0
+
+
 def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp_path: Path) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=8.0, ch_types=["eeg", "eeg", "stim"])
     raw = mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)

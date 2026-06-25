@@ -40,6 +40,51 @@ def _app(logs: list[str]):
     )
 
 
+def _write_bdf_header(path, *, header_bytes: int = 512, data_records: int = 0, channels: int = 1) -> None:
+    header = bytearray(b" " * 256)
+
+    def _put(start: int, stop: int, value: object) -> None:
+        header[start:stop] = str(value).ljust(stop - start).encode("ascii")
+
+    _put(184, 192, header_bytes)
+    _put(236, 244, data_records)
+    _put(244, 252, 1)
+    _put(252, 256, channels)
+    path.write_bytes(bytes(header) + (b" " * max(0, header_bytes - 256)))
+
+
+def test_shared_bdf_preflight_identifies_header_only_recording_not_started(tmp_path):
+    path = tmp_path / "p16.bdf"
+    _write_bdf_header(path, header_bytes=512, data_records=0, channels=1)
+
+    info = load_utils.inspect_bdf_header(path)
+
+    assert info is not None
+    assert info.file_size == 512
+    assert info.header_bytes == 512
+    assert info.data_records == 0
+    assert info.channel_count == 1
+    assert info.recording_not_started is True
+    assert load_utils.is_bdf_recording_not_started(path) is True
+
+
+def test_shared_load_eeg_file_excludes_header_only_bdf_without_mne(monkeypatch, tmp_path):
+    path = tmp_path / "p16.bdf"
+    _write_bdf_header(path, header_bytes=512, data_records=0, channels=1)
+
+    def _unexpected_read_raw_bdf(*_args, **_kwargs):
+        raise AssertionError("header-only BDF should be excluded before MNE reads it")
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _unexpected_read_raw_bdf)
+
+    logs: list[str] = []
+    raw = load_utils.load_eeg_file(_app(logs), str(path))
+
+    assert raw is None
+    assert any("did not click Record in BioSemi" in message for message in logs)
+    assert any("[LOADER EXCLUDED]" in message for message in logs)
+
+
 def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeypatch, tmp_path):
     fake_raw = _FakeRaw()
     captured = {}

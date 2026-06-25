@@ -46,6 +46,7 @@ class MpRunnerBridge(QObject):
         self._total: int = 0
         self._running: bool = False
         self._results: List[Dict[str, object]] = []
+        self._excluded_results: List[Dict[str, object]] = []
         self._cancel_event: Optional[Event] = None
         self._worker_thread: Optional[Thread] = None
         self.validated_fingerprint: Optional[str] = None
@@ -81,7 +82,8 @@ class MpRunnerBridge(QObject):
             )
             self._total = 0
             self._results = []
-            self.finished.emit({"files": 0, "results": [], "cancelled": False})
+            self._excluded_results = []
+            self.finished.emit({"files": 0, "results": [], "excluded": [], "cancelled": False})
             return
 
         self._running = True
@@ -89,6 +91,7 @@ class MpRunnerBridge(QObject):
         self._q = get_context("spawn").Queue()
         self._total = len(data_files)
         self._results = []
+        self._excluded_results = []
 
         bridge_fingerprint = _build_preproc_fingerprint(settings)
         logger.debug("PREPROC_FINGERPRINT_BRIDGE %s", bridge_fingerprint)
@@ -231,6 +234,14 @@ class MpRunnerBridge(QObject):
                                 result.get("file"),
                                 len(self._results),
                             )
+                        elif status == "excluded":
+                            self._excluded_results.append(result)
+                            self.file_status.emit(result)
+                            logger.warning(
+                                "MpRunnerBridge recorded excluded file=%r reason=%r",
+                                result.get("file"),
+                                result.get("reason"),
+                            )
                         else:
                             logger.debug(
                                 "MpRunnerBridge received progress result with unknown "
@@ -253,6 +264,7 @@ class MpRunnerBridge(QObject):
                     payload: Dict[str, object] = {
                         "files": self._total,
                         "results": list(self._results),
+                        "excluded": list(self._excluded_results),
                         "cancelled": cancelled,
                     }
 

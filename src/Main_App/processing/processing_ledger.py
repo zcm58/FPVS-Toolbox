@@ -32,7 +32,7 @@ class ProcessingInputState:
 
     @property
     def should_run_incremental(self) -> bool:
-        return self.status != "completed"
+        return self.status not in {"completed", "excluded"}
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,10 @@ class ProcessingPlan:
     @property
     def new_count(self) -> int:
         return sum(1 for state in self.states if state.status == "new")
+
+    @property
+    def excluded_count(self) -> int:
+        return sum(1 for state in self.states if state.status == "excluded")
 
 
 def processing_state_dir(project_root: Path) -> Path:
@@ -238,14 +242,46 @@ def classify_processing_inputs(
             )
             continue
 
-        if entry.get("status") != "completed":
-            status = str(entry.get("status") or "incomplete")
+        entry_status = str(entry.get("status") or "incomplete")
+        if entry_status == "excluded":
+            if (
+                entry.get("raw_file") != raw_meta["raw_file"]
+                or entry.get("raw_size") != raw_meta["raw_size"]
+                or entry.get("raw_mtime_ns") != raw_meta["raw_mtime_ns"]
+            ):
+                states.append(
+                    ProcessingInputState(
+                        info=info,
+                        participant_id=participant_id,
+                        status="changed_raw",
+                        reason="Previously excluded raw file changed.",
+                        expected_outputs=expected_outputs,
+                    )
+                )
+                continue
+
+            states.append(
+                ProcessingInputState(
+                    info=info,
+                    participant_id=participant_id,
+                    status="excluded",
+                    reason=str(
+                        entry.get("exclusion_message")
+                        or entry.get("exclusion_reason")
+                        or "Raw file was excluded from processing."
+                    ),
+                    expected_outputs=expected_outputs,
+                )
+            )
+            continue
+
+        if entry_status != "completed":
             states.append(
                 ProcessingInputState(
                     info=info,
                     participant_id=participant_id,
                     status="missing_outputs",
-                    reason=f"Ledger entry is {status}, not completed.",
+                    reason=f"Ledger entry is {entry_status}, not completed.",
                     expected_outputs=expected_outputs,
                 )
             )
@@ -416,7 +452,13 @@ def record_processing_results(
 
     states_by_path = _info_by_resolved_path(plan)
     successful_paths: set[Path] = set()
+    excluded_by_path: dict[Path, Mapping[str, Any]] = {}
     for result in results:
+        if result.get("status") == "excluded":
+            raw_path_value = result.get("file")
+            if raw_path_value:
+                excluded_by_path[Path(str(raw_path_value)).resolve()] = result
+            continue
         if result.get("status") != "ok":
             continue
         raw_path_value = result.get("file")
@@ -443,9 +485,29 @@ def record_processing_results(
         }
 
     run_files = {path.resolve() for path in plan.run_files}
+    excluded_paths = set(excluded_by_path) & run_files
     for raw_path in sorted(run_files - successful_paths):
         state = states_by_path.get(raw_path)
         if state is None:
+            continue
+        excluded_result = excluded_by_path.get(raw_path)
+        if excluded_result is not None:
+            entries[state.participant_id] = {
+                "participant_id": state.participant_id,
+                "group_id": state.info.group,
+                **raw_file_metadata(state.info.path),
+                "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+                "processing_fingerprint": plan.fingerprint,
+                "expected_outputs": [str(path) for path in state.expected_outputs],
+                "status": "excluded",
+                "completed_at": None,
+                "run_mode": run_mode,
+                "exclusion_reason": str(excluded_result.get("reason") or "excluded"),
+                "exclusion_message": str(
+                    excluded_result.get("message") or "Raw file was excluded from processing."
+                ),
+                "excluded_at": _now_iso(),
+            }
             continue
         entries[state.participant_id] = {
             "participant_id": state.participant_id,
@@ -478,7 +540,8 @@ def record_processing_results(
             "new_files": plan.new_count,
             "stale_files": plan.stale_count,
             "successful_files": len(successful_paths),
-            "failed_files": max(0, len(run_files - successful_paths)),
+            "excluded_files": len(excluded_paths),
+            "failed_files": max(0, len(run_files - successful_paths - excluded_paths)),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
         },

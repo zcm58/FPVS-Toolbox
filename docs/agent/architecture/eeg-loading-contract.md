@@ -30,6 +30,11 @@ implementation module and must not duplicate logic elsewhere.
 
 - Supported extension is `.bdf`.
 - Unsupported extensions show a user warning and return `None`.
+- Before MNE opens a BDF, the loader reads the fixed BDF header. A BioSemi
+  file with `num_records == 0` whose file size is only the declared header
+  length is treated as a recording-not-started placeholder: the loader logs an
+  exclusion warning and returns `None`, while the process runner reports the
+  file as `status="excluded"` instead of a processing error.
 - BDF files load through `mne.io.read_raw_bdf(...)`.
 - `.set`/EEGLAB loading is intentionally unsupported in the active toolbox.
 - Disk-backed preload files are created under
@@ -77,7 +82,9 @@ implementation module and must not duplicate logic elsewhere.
   referencing and are dropped before downstream interpolation/average reference.
 - Montage errors are logged as warnings and do not make loading fail.
 - Load failures log `!!! Load Error <filename>: <error>`, try to show a user
-  error, and return `None`.
+  error, and return `None`. Recording-not-started placeholders are not treated
+  as load failures; they log `[LOADER EXCLUDED]` and are excluded from
+  processing and analysis.
 
 ## Preservation Rules
 

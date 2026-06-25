@@ -13,19 +13,128 @@ import ast
 import re
 import tempfile
 import warnings
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Optional, Sequence, Set, Tuple
 
 import mne
 
 from Main_App.Shared import user_messages
 
 logger = logging.getLogger(__name__)
+BDF_RECORDING_NOT_STARTED_REASON = "recording_not_started"
 _MONTAGE_MISSING_RE = re.compile(
     r"The channels missing from the montage are:\s*\n\n(?P<channels>\[[^\]]*\])",
     re.MULTILINE,
 )
+
+
+@dataclass(frozen=True)
+class BdfPreflightInfo:
+    """Header-level BDF metadata used before MNE opens large recordings."""
+
+    file_size: int
+    header_bytes: Optional[int]
+    data_records: Optional[int]
+    record_duration: Optional[float]
+    channel_count: Optional[int]
+
+    @property
+    def data_bytes(self) -> Optional[int]:
+        if self.header_bytes is None:
+            return None
+        return max(0, int(self.file_size) - int(self.header_bytes))
+
+    @property
+    def recording_not_started(self) -> bool:
+        return (
+            self.header_bytes is not None
+            and self.data_records == 0
+            and int(self.file_size) <= int(self.header_bytes)
+        )
+
+
+def _parse_bdf_int(raw: bytes) -> Optional[int]:
+    text = raw.decode("ascii", errors="ignore").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _parse_bdf_float(raw: bytes) -> Optional[float]:
+    text = raw.decode("ascii", errors="ignore").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def inspect_bdf_header(filepath: str | Path) -> Optional[BdfPreflightInfo]:
+    """
+    Read only the fixed BDF header.
+
+    A BioSemi file created without clicking Record is a valid-looking BDF header
+    with zero data records and no bytes after the declared header length.
+    """
+    path = Path(filepath)
+    try:
+        file_size = path.stat().st_size
+        with path.open("rb") as stream:
+            fixed_header = stream.read(256)
+    except OSError:
+        return None
+
+    if len(fixed_header) < 256:
+        return BdfPreflightInfo(
+            file_size=int(file_size),
+            header_bytes=None,
+            data_records=None,
+            record_duration=None,
+            channel_count=None,
+        )
+
+    return BdfPreflightInfo(
+        file_size=int(file_size),
+        header_bytes=_parse_bdf_int(fixed_header[184:192]),
+        data_records=_parse_bdf_int(fixed_header[236:244]),
+        record_duration=_parse_bdf_float(fixed_header[244:252]),
+        channel_count=_parse_bdf_int(fixed_header[252:256]),
+    )
+
+
+def is_bdf_recording_not_started(filepath: str | Path) -> bool:
+    info = inspect_bdf_header(filepath)
+    return bool(info and info.recording_not_started)
+
+
+def _format_file_list(file_names: Sequence[str]) -> str:
+    names = [Path(str(name)).name for name in file_names if str(name).strip()]
+    if not names:
+        return "the selected BDF file"
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+
+def format_bdf_recording_not_started_message(file_names: Sequence[str]) -> str:
+    files = _format_file_list(file_names)
+    if len([name for name in file_names if str(name).strip()]) == 1:
+        return (
+            f"File {files} was created, but the user did not click Record in BioSemi "
+            "before the experiment began, so it was excluded from processing and analysis."
+        )
+    return (
+        f"Files {files} were created, but the user did not click Record in BioSemi "
+        "before the experiment began, so those files were excluded from processing and analysis."
+    )
 
 
 def _memmap_dir_for_pid() -> Path:
@@ -242,6 +351,26 @@ def load_eeg_file(
         )
 
         if ext == ".bdf":
+            preflight = inspect_bdf_header(filepath)
+            if preflight and preflight.recording_not_started:
+                message = format_bdf_recording_not_started_message([base])
+                detailed = (
+                    f"[LOADER EXCLUDED] {base}: {message} "
+                    f"(size={preflight.file_size} bytes, "
+                    f"header_bytes={preflight.header_bytes}, "
+                    f"data_records={preflight.data_records})"
+                )
+                if not _try_warning_log(app, detailed):
+                    app.log(detailed)
+                logger.warning(
+                    "bdf_recording_not_started file=%s size=%d header_bytes=%s data_records=%s",
+                    filepath,
+                    preflight.file_size,
+                    preflight.header_bytes,
+                    preflight.data_records,
+                )
+                return None
+
             include_channels = None
             if first_n_channels:
                 try:

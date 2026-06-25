@@ -384,6 +384,30 @@ def test_processing_activity_tracks_completed_files(
     assert win.processing_summary_label.text() == "1 of 2 files complete (50%)"
 
 
+def test_processing_activity_tracks_excluded_files(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    first_file = tmp_path / "P001.bdf"
+    second_file = tmp_path / "P002.bdf"
+
+    win._prepare_processing_activity([first_file, second_file])
+    win._on_processing_file_status({"status": "ok", "file": str(first_file)})
+    win._on_processing_file_status(
+        {
+            "status": "excluded",
+            "file": str(second_file),
+            "reason": "recording_not_started",
+        }
+    )
+
+    assert win.processing_files_table.item(1, 0).text() == "Excluded"
+    assert win.processing_summary_label.text() == "1 of 2 files complete; 1 excluded"
+    assert win.processing_current_file_label.text() == "Latest file: Excluded P002.bdf"
+
+
 def test_sidebar_settings_embeds_in_main_workspace(
     tmp_path: Path,
     qtbot,

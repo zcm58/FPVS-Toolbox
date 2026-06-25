@@ -245,6 +245,51 @@ def test_record_results_marks_missing_run_file_failed(tmp_path) -> None:
     assert ledger["entries"]["P01"]["status"] == "failed"
 
 
+def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    record_processing_results(
+        project,
+        plan,
+        [
+            {
+                "status": "excluded",
+                "file": str(info.path),
+                "reason": "recording_not_started",
+                "message": "File P01.bdf was excluded from processing and analysis.",
+            }
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    ledger = json.loads(
+        (project.project_root / ".fpvs_processing" / "processing_ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    runs = (project.project_root / ".fpvs_processing" / "processing_runs.jsonl").read_text(
+        encoding="utf-8"
+    )
+
+    entry = ledger["entries"]["P01"]
+    assert entry["status"] == "excluded"
+    assert entry["exclusion_reason"] == "recording_not_started"
+    assert '"excluded_files": 1' in runs
+    assert '"failed_files": 0' in runs
+
+    excluded_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert excluded_plan.excluded_count == 1
+    assert excluded_plan.incremental_files == ()
+    assert excluded_plan.states[0].status == "excluded"
+
+    info.path.write_bytes(b"valid replacement raw bytes")
+    changed_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert changed_plan.states[0].status == "changed_raw"
+    assert changed_plan.incremental_files == (info.path,)
+
+
 def test_record_results_requires_expected_outputs_for_completed_status(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)

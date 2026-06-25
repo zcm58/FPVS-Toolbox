@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from Main_App.Shared.file_filters import is_bdf_file
-from Main_App.io.load_utils import load_eeg_file
+from Main_App.io.load_utils import (
+    format_bdf_recording_not_started_message,
+    inspect_bdf_header,
+    load_eeg_file,
+)
 from Main_App.processing.preprocess import (
     perform_preprocessing,
     begin_preproc_audit,
@@ -605,6 +609,8 @@ def start_processing(self) -> None:
             {k: v for k, v in params.items() if k not in {"reject_thresh"}},
         )
 
+        excluded_recording_files: list[str] = []
+
         for fp in bdf_files:
             try:
                 logger.info(
@@ -622,7 +628,25 @@ def start_processing(self) -> None:
 
             # Load
             self.log(f"Loading EEG file: {fp.name}")
+            preflight = inspect_bdf_header(fp)
+            if preflight and preflight.recording_not_started:
+                excluded_recording_files.append(fp.name)
+                logger.warning(
+                    "start_processing_file_excluded file=%s reason=recording_not_started size=%s header_bytes=%s",
+                    fp,
+                    preflight.file_size,
+                    preflight.header_bytes,
+                )
+                continue
+
             raw = load_eeg_file(self, str(fp))
+            if raw is None:
+                self.log(
+                    f"Skipping file {fp.name} because it could not be loaded.",
+                    level=logging.WARNING,
+                )
+                logger.warning("start_processing_file_load_skipped file=%s", fp)
+                continue
 
             # Ensure reference channels are EEG before referencing
             _promote_refs_to_eeg(self, raw, ref1, ref2, fp.name)
@@ -692,6 +716,11 @@ def start_processing(self) -> None:
                 )
 
         _animate_progress_to(self, 100)
+        if excluded_recording_files:
+            self.log(
+                format_bdf_recording_not_started_message(excluded_recording_files),
+                level=logging.WARNING,
+            )
         self.log("Processing complete")
         try:
             logger.info(
