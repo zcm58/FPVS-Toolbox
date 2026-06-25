@@ -1,21 +1,24 @@
 # Reference Links
 
-Here are links to all references used to build FPVS Toolbox.
+I've attached links to the relevant publications in FPVS that were used to create the feature set and 
+data processing pipeline for FPVS Toolbox. 
 
-## Toolbox Links
 
-- FPVS Toolbox repository: <https://github.com/zcm58/FPVS-Toolbox-Repo>
-- FPVS Toolbox releases: <https://github.com/zcm58/FPVS-Toolbox-Repo/releases>
-- FPVS Toolbox issues: <https://github.com/zcm58/FPVS-Toolbox-Repo/issues>
+## Data Processing Methodology  
 
-## Method References To Add
+FPVS Toolbox applies a fixed processing pipeline that closely follows the implementation found in the 
+following publications: 
 
-- FPVS method references: Add during the manual content pass.
-- BioSemi 64-electrode and 10-10 montage references: Add during the manual content pass.
-- PsychoPy or FPVS Studio setup references: Add during the manual content pass.
-- Statistics and harmonic-selection references: Add during the manual content pass.
-- Tool-specific references belong on each individual tool page.
+1. Retter & Rossion, 2016
+2. Volfart et al. (2021)
+3. David et al (2025)
+4. Hauk et al. (2021)
+5. Hauk et al. (2025)
+6. Vandenheever et al. (2025a,b)
 
-## Citation Notes
+These publications build upon earlier FPVS work and have established a somewhat consistent set of steps
+used to process FPVS Data. 
 
-Add the preferred FPVS Toolbox citation here when it is available.
+Notably, as in our previous work in Vandenheever et al. (2025 a,b), FPVS Toolbox does not apply artifact
+rejection methods such as independent component analysis during the processing pipeline.
+
