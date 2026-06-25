@@ -81,6 +81,65 @@ def test_full_snr_roi_averaging(tmp_path, monkeypatch):
     assert data == [4.0, 5.0, 6.5, 7.5]
 
 
+def test_excel_discovery_ignores_sidecar_and_temp_workbooks(tmp_path, monkeypatch):
+    module = _import_module()
+
+    cond_dir = tmp_path / "Cond"
+    cond_dir.mkdir()
+
+    df = pd.DataFrame(
+        {
+            "Electrode": ["Cz"],
+            "1.0000_Hz": [2.0],
+            "2.0000_Hz": [4.0],
+        }
+    )
+    with pd.ExcelWriter(cond_dir / "SCP10_Cond_Results.xlsx") as writer:
+        df.to_excel(writer, sheet_name="FullSNR", index=False)
+    (cond_dir / "._SCP10_Cond_Results.xlsx").write_text("AppleDouble metadata")
+    (cond_dir / "~$SCP10_Cond_Results.xlsx").write_text("Office temp lock")
+
+    captured = {}
+    messages = []
+
+    def dummy_plot(self, freqs, roi_data):
+        captured["freqs"] = freqs
+        captured["roi_data"] = roi_data
+
+    monkeypatch.setattr(module._Worker, "_plot", dummy_plot)
+    monkeypatch.setattr(
+        module._Worker,
+        "_emit",
+        lambda self, msg, *args: messages.append(msg),
+    )
+
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Central": ["Cz"]},
+        selected_roi="Central",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=2.0,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path),
+    )
+
+    assert [path.name for path in worker._list_excel_files("Cond")] == [
+        "SCP10_Cond_Results.xlsx"
+    ]
+
+    worker._run()
+
+    assert "Found 1 Excel files in " + str(cond_dir) in messages
+    assert captured["freqs"] == [1.0, 2.0]
+    assert captured["roi_data"] == {"Central": [2.0, 4.0]}
+    assert worker.failed_items == []
+
+
 def test_full_snr_all_roi_and_group_aggregation(tmp_path, monkeypatch):
     module = _import_module()
 

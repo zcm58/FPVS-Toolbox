@@ -21,6 +21,17 @@ from Tools.Plot_Generator.full_snr_reader import (
 )
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
+_EXCEL_WORKBOOK_SUFFIX = ".xlsx"
+_IGNORED_EXCEL_PREFIXES = ("._", "~$")
+
+
+def _is_excel_workbook_file(name: str) -> bool:
+    """Return True when a filename is a user workbook, not metadata/temp output."""
+    return (
+        name.lower().endswith(_EXCEL_WORKBOOK_SUFFIX)
+        and not name.startswith(_IGNORED_EXCEL_PREFIXES)
+    )
+
 
 class PlotDataCollectionMixin:
     """Worker-state helpers for Excel discovery, reading, and SNR fallback."""
@@ -38,7 +49,7 @@ class PlotDataCollectionMixin:
             Path(root) / name
             for root, _, names in os.walk(cond_folder)
             for name in names
-            if name.lower().endswith(".xlsx")
+            if _is_excel_workbook_file(name)
         ]
         files.sort()
         return files
