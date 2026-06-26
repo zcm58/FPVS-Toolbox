@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    normalize_manual_removed_electrodes_map,
+    parse_electrode_list,
+)
 from Main_App.projects.project import Project
 
 CONFIG_SUFFIX = ".fpvsconfig"
@@ -32,6 +37,7 @@ class FPVSConfigImport:
 
     project_title: str
     event_map: dict[str, int]
+    manual_removed_electrodes: dict[str, list[str]]
 
 
 def read_fpvs_config(path: Path) -> FPVSConfigImport:
@@ -80,7 +86,13 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
         event_map[name] = code
         used_codes.add(code)
 
-    return FPVSConfigImport(project_title=title, event_map=event_map)
+    manual_removed_electrodes = _manual_removed_electrodes_from_config(payload)
+
+    return FPVSConfigImport(
+        project_title=title,
+        event_map=event_map,
+        manual_removed_electrodes=manual_removed_electrodes,
+    )
 
 
 def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> Project:
@@ -92,8 +104,107 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> P
     project = Project.load(project_root)
     project.name = imported.project_title
     project.event_map = imported.event_map
+    if imported.manual_removed_electrodes:
+        project.update_preprocessing(
+            {
+                **project.preprocessing,
+                "removed_electrode_detection_mode": REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+                "manual_removed_electrodes": imported.manual_removed_electrodes,
+            }
+        )
     project.save()
     return project
+
+
+def _manual_removed_electrodes_from_config(
+    payload: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    """Extract optional Studio PID -> physically removed electrodes metadata."""
+
+    direct = _first_mapping(
+        payload,
+        (
+            "manual_removed_electrodes",
+            "manually_removed_electrodes",
+            "manual_removed_electrode_map",
+            "excluded_electrodes_by_participant",
+            "removed_electrodes_by_participant",
+        ),
+    )
+    if direct:
+        return normalize_manual_removed_electrodes_map(direct)
+
+    participants = payload.get("participants")
+    if isinstance(participants, Mapping):
+        return _manual_removed_electrodes_from_participant_map(participants)
+    if isinstance(participants, list):
+        return _manual_removed_electrodes_from_participant_list(participants)
+    return {}
+
+
+def _first_mapping(
+    source: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> Mapping[str, Any] | None:
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return None
+
+
+def _manual_removed_electrodes_from_participant_map(
+    participants: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    manual_map: dict[str, list[str]] = {}
+    for raw_pid, raw_info in participants.items():
+        pid = str(raw_pid or "").strip()
+        if not pid:
+            continue
+        if isinstance(raw_info, Mapping):
+            has_value, electrodes_value = _participant_removed_electrodes_value(
+                raw_info
+            )
+            if has_value:
+                manual_map[pid] = parse_electrode_list(electrodes_value)
+        else:
+            manual_map[pid] = parse_electrode_list(raw_info)
+    return normalize_manual_removed_electrodes_map(manual_map)
+
+
+def _manual_removed_electrodes_from_participant_list(
+    participants: list[Any],
+) -> dict[str, list[str]]:
+    manual_map: dict[str, list[str]] = {}
+    for raw_info in participants:
+        if not isinstance(raw_info, Mapping):
+            continue
+        pid_value = (
+            raw_info.get("participant_id")
+            or raw_info.get("pid")
+            or raw_info.get("subject_id")
+            or raw_info.get("id")
+        )
+        pid = str(pid_value or "").strip()
+        if not pid:
+            continue
+        has_value, electrodes_value = _participant_removed_electrodes_value(raw_info)
+        if has_value:
+            manual_map[pid] = parse_electrode_list(electrodes_value)
+    return normalize_manual_removed_electrodes_map(manual_map)
+
+
+def _participant_removed_electrodes_value(info: Mapping[str, Any]) -> tuple[bool, Any]:
+    for key in (
+        "manual_removed_electrodes",
+        "manually_removed_electrodes",
+        "removed_electrodes",
+        "excluded_electrodes",
+        "physically_removed_electrodes",
+    ):
+        if key in info:
+            return True, info.get(key)
+    return False, None
 
 
 def _required_text(value: Any, location: str) -> str:
