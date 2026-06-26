@@ -61,6 +61,131 @@ def test_run_full_pipeline_excludes_header_only_bdf_before_loader(monkeypatch, t
     assert result["bdf_preflight"]["data_records"] == 0
 
 
+def test_run_full_pipeline_manual_participant_exclusion_skips_loader(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "p12.bdf"
+    fake_bdf.write_bytes(b"not a real bdf")
+
+    def _unexpected_loader(*_args, **_kwargs):
+        raise AssertionError("manual participant exclusion should skip the loader")
+
+    monkeypatch.setattr("Main_App.io.load_utils.load_eeg_file", _unexpected_loader)
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            "manual_excluded_participants": ["P12"],
+            "_fpvs_participant_id_by_file": {
+                str(fake_bdf.resolve()): "P12",
+            },
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "excluded"
+    assert result["stage"] == "preflight"
+    assert result["reason"] == "manual_participant_exclusion"
+    assert "P12 was manually excluded" in str(result["message"])
+
+
+def test_parallel_runner_skips_manual_participant_exclusions_before_pool(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "p12.bdf"
+    fake_bdf.write_bytes(b"not a real bdf")
+
+    def _unexpected_pool(*_args, **_kwargs):
+        raise AssertionError("all manual exclusions should skip process-pool creation")
+
+    monkeypatch.setattr(process_runner, "ProcessPoolExecutor", _unexpected_pool)
+
+    class _Queue:
+        def __init__(self) -> None:
+            self.messages: list[dict[str, object]] = []
+
+        def put(self, value: dict[str, object]) -> None:
+            self.messages.append(value)
+
+    queue = _Queue()
+    process_runner.run_project_parallel(
+        process_runner.RunParams(
+            project_root=tmp_path / "project",
+            data_files=[fake_bdf],
+            settings={
+                "manual_excluded_participants": ["P12"],
+                "_fpvs_participant_id_by_file": {
+                    str(fake_bdf.resolve()): "P12",
+                },
+            },
+            event_map={"A": 21},
+            save_folder=tmp_path / "out",
+            max_workers=1,
+        ),
+        progress_queue=queue,
+    )
+
+    assert queue.messages[0]["type"] == "progress"
+    result = queue.messages[0]["result"]
+    assert isinstance(result, dict)
+    assert result["reason"] == "manual_participant_exclusion"
+    assert queue.messages[-1]["type"] == "done"
+    assert queue.messages[-1]["excluded_count"] == 1
+
+
+def test_parallel_runner_skips_preflight_header_only_files_before_pool(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "p08.bdf"
+    _write_bdf_header(fake_bdf, header_bytes=512, data_records=0, channels=1)
+
+    def _unexpected_pool(*_args, **_kwargs):
+        raise AssertionError("preflight header-only exclusions should skip pool creation")
+
+    monkeypatch.setattr(process_runner, "ProcessPoolExecutor", _unexpected_pool)
+
+    class _Queue:
+        def __init__(self) -> None:
+            self.messages: list[dict[str, object]] = []
+
+        def put(self, value: dict[str, object]) -> None:
+            self.messages.append(value)
+
+    queue = _Queue()
+    process_runner.run_project_parallel(
+        process_runner.RunParams(
+            project_root=tmp_path / "project",
+            data_files=[fake_bdf],
+            settings={
+                "_fpvs_preflight_recording_not_started_files": [
+                    str(fake_bdf.resolve())
+                ],
+            },
+            event_map={"A": 21},
+            save_folder=tmp_path / "out",
+            max_workers=1,
+        ),
+        progress_queue=queue,
+    )
+
+    assert queue.messages[0]["type"] == "progress"
+    result = queue.messages[0]["result"]
+    assert isinstance(result, dict)
+    assert result["reason"] == "recording_not_started"
+    assert result["bdf_preflight"]["data_records"] == 0
+    assert queue.messages[-1]["type"] == "done"
+    assert queue.messages[-1]["excluded_count"] == 1
+
+
 def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
     monkeypatch,
     tmp_path: Path,

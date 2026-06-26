@@ -9,7 +9,14 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QMessageBox
 
 from Main_App.gui.open_paths import open_path_in_file_manager
+from Main_App.projects.preprocessing_settings import (
+    normalize_manual_excluded_participants,
+)
 from Tools.Plot_Generator.selection_state import ALL_CONDITIONS_OPTION
+from Tools.Plot_Generator.spectral_qc_alerts import (
+    build_spectral_qc_alert_message,
+    whole_participant_exclusion_candidates,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +74,8 @@ class PlotGeneratorWorkflowMixin:
         self._conditions_queue.clear()
         self._total_conditions = 0
         self._current_condition = 0
+        self._spectral_qc_flags.clear()
+        self._spectral_qc_report_paths.clear()
         self.cancel_btn.setEnabled(False)
         self.gen_btn.setEnabled(True)
         self._append_log("Generation cancelled.")
@@ -138,6 +147,7 @@ class PlotGeneratorWorkflowMixin:
             project_root=(
                 str(self._project_root) if self._project_root else None
             ),
+            spectral_qc_enabled=self.spectral_qc_check.isChecked(),
             **group_kwargs,
         )
         self._worker.moveToThread(self._thread)
@@ -152,9 +162,17 @@ class PlotGeneratorWorkflowMixin:
 
     def _on_worker_finished(self, payload: dict) -> None:
         generated = payload.get("generated_paths", [])
+        qc_reports = payload.get("qc_report_paths", [])
+        spectral_qc_flags = payload.get("spectral_qc_flags", [])
         failed = payload.get("failed_items", [])
         generated_paths = [
             str(path) for path in generated if isinstance(path, str) and path
+        ]
+        qc_report_paths = [
+            str(path) for path in qc_reports if isinstance(path, str) and path
+        ]
+        flagged_electrodes = [
+            dict(item) for item in spectral_qc_flags if isinstance(item, dict)
         ]
         failed_items = [
             {"item": str(item.get("item", "")), "error": str(item.get("error", ""))}
@@ -163,6 +181,14 @@ class PlotGeneratorWorkflowMixin:
         ]
         self._generated_paths.extend(generated_paths)
         self._failed_items.extend(failed_items)
+        self._spectral_qc_report_paths.extend(qc_report_paths)
+        self._spectral_qc_flags.extend(flagged_electrodes)
+        for path in qc_report_paths:
+            self._append_log(f"Spectral QC report: {path}")
+        if flagged_electrodes:
+            self._append_log(
+                f"Spectral QC flagged {len(flagged_electrodes)} participant-electrode pair(s)."
+            )
         logger.info(
             "SNR worker finished.",
             extra={
@@ -170,6 +196,8 @@ class PlotGeneratorWorkflowMixin:
                 "project_root": str(self._project_root) if self._project_root else None,
                 "condition": payload.get("condition"),
                 "generated_count": len(generated_paths),
+                "qc_report_count": len(qc_report_paths),
+                "spectral_qc_flag_count": len(flagged_electrodes),
                 "failed_count": len(failed_items),
             },
         )
@@ -183,6 +211,10 @@ class PlotGeneratorWorkflowMixin:
 
         generated_count = len(self._generated_paths)
         failed_count = len(self._failed_items)
+        spectral_qc_message = build_spectral_qc_alert_message(
+            self._spectral_qc_flags,
+            self._spectral_qc_report_paths,
+        )
 
         if generated_count > 0:
             if failed_count > 0:
@@ -197,6 +229,13 @@ class PlotGeneratorWorkflowMixin:
                         "failed_count": failed_count,
                     },
                 )
+            if spectral_qc_message:
+                QMessageBox.warning(
+                    self,
+                    "Spectral QC Flags",
+                    spectral_qc_message,
+                )
+                self._offer_spectral_qc_participant_exclusions()
             resp = QMessageBox.question(
                 self,
                 "Finished",
@@ -218,6 +257,65 @@ class PlotGeneratorWorkflowMixin:
 
         self._generated_paths.clear()
         self._failed_items.clear()
+        self._spectral_qc_flags.clear()
+        self._spectral_qc_report_paths.clear()
+
+    def _offer_spectral_qc_participant_exclusions(self) -> None:
+        candidates = whole_participant_exclusion_candidates(self._spectral_qc_flags)
+        if not candidates or self._project is None:
+            return
+        candidate_pids = [str(item["pid"]) for item in candidates if item.get("pid")]
+        current = normalize_manual_excluded_participants(
+            (self._project.preprocessing or {}).get("manual_excluded_participants", [])
+        )
+        current_lookup = {pid.casefold() for pid in current}
+        new_pids = [
+            pid for pid in candidate_pids if pid.casefold() not in current_lookup
+        ]
+        if not new_pids:
+            return
+        label = ", ".join(new_pids)
+        prompt = (
+            f"Exclude {label} from future processing?\n\n"
+            "This updates the project's manual participant exclusion list. "
+            "Raw BDF files are not altered. Reprocess the dataset for this "
+            "change to affect the processed Excel files and future plots."
+        )
+        response = QMessageBox.question(
+            self,
+            "Exclude Participant From Dataset?",
+            prompt,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if response != QMessageBox.Yes:
+            return
+        updated = normalize_manual_excluded_participants([*current, *new_pids])
+        payload = dict(self._project.preprocessing or {})
+        payload["manual_excluded_participants"] = updated
+        try:
+            self._project.update_preprocessing(payload)
+            self._project.save()
+        except Exception as exc:  # pragma: no cover - disk I/O error path
+            logger.exception("Failed to save spectral QC participant exclusions.")
+            QMessageBox.critical(
+                self,
+                "Project Save Error",
+                f"Could not save participant exclusions: {exc}",
+            )
+            return
+        self._append_log(
+            "Added manual participant exclusion(s): " + ", ".join(new_pids)
+        )
+        QMessageBox.information(
+            self,
+            "Participant Exclusion Saved",
+            (
+                f"Added {label} to manual participant exclusions.\n\n"
+                "Reprocess the dataset before relying on affected figures or analyses. "
+                "The raw BDF files were not altered."
+            ),
+        )
 
     def _generate(self) -> None:
         log_context = {
@@ -281,6 +379,8 @@ class PlotGeneratorWorkflowMixin:
             self.log.clear()
             self._generated_paths.clear()
             self._failed_items.clear()
+            self._spectral_qc_flags.clear()
+            self._spectral_qc_report_paths.clear()
             self._animate_progress_to(0)
             if self.overlay_check.isChecked():
                 cond_a = self.condition_combo.currentText()
@@ -325,6 +425,7 @@ class PlotGeneratorWorkflowMixin:
                     project_root=(
                         str(self._project_root) if self._project_root else None
                     ),
+                    spectral_qc_enabled=self.spectral_qc_check.isChecked(),
                     **group_kwargs,
                 )
                 self._worker.moveToThread(self._thread)

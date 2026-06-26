@@ -28,6 +28,9 @@ class ManualRemovedElectrodesDialog(QDialog):
         participant_ids: Sequence[str],
         manual_removed_electrodes: Mapping[str, Sequence[str]] | None = None,
         parent=None,
+        *,
+        prompt_text: str | None = None,
+        accept_label: str | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Manual Removed Electrodes")
@@ -44,7 +47,8 @@ class ManualRemovedElectrodesDialog(QDialog):
         layout.setSpacing(10)
 
         prompt = QLabel(
-            "Enter electrodes that were physically removed before recording.",
+            prompt_text
+            or "Enter electrodes that were physically removed before recording.",
             self,
         )
         prompt.setWordWrap(True)
@@ -78,6 +82,10 @@ class ManualRemovedElectrodesDialog(QDialog):
         buttons.setObjectName("manual_removed_electrodes_actions")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        if accept_label:
+            accept_button = buttons.button(QDialogButtonBox.Save)
+            if accept_button is not None:
+                accept_button.setText(accept_label)
         layout.addWidget(buttons)
 
     def manual_removed_electrodes(self) -> dict[str, list[str]]:

@@ -8,10 +8,14 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
+from Main_App.gui.manual_participant_exclusions_dialog import (
+    ManualParticipantExclusionsDialog,
+)
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui import processing_inputs
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
@@ -40,6 +44,7 @@ def _prep_project(root):
             "auto_detect_removed_electrodes": True,
             "removed_electrode_detection_mode": "auto",
             "manual_removed_electrodes": {},
+            "manual_excluded_participants": [],
             "max_parallel_workers_override": 0,
             "stim_channel": "Status",
         }
@@ -80,6 +85,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["epoch_end_s"] == 100.0
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
+    assert reloaded.preprocessing["manual_excluded_participants"] == []
     assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
 
@@ -100,6 +106,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["epoch_end"] == 100.0
     assert params["auto_detect_removed_electrodes"] is False
     assert params["removed_electrode_detection_mode"] == "off"
+    assert params["manual_excluded_participants"] == []
     assert params["stim_channel"] == "Status"
     assert params["save_preprocessed_fif"] is False
 
@@ -183,6 +190,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_mode_combo)
     assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_info_button)
     assert cards["Processing QC"].isAncestorOf(dlg.manual_removed_electrodes_button)
+    assert cards["Processing QC"].isAncestorOf(dlg.manual_participant_exclusions_button)
     assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "auto"
     assert dlg.removed_electrode_detection_mode_combo.itemText(0) == "Off"
@@ -322,6 +330,40 @@ def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, mon
         "P01": ["FT7", "P9"],
         "P02": ["Oz"],
     }
+
+
+def test_manual_participant_exclusions_dialog_saves_project_list(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+    project.participants = {
+        "P01": {"raw_file": project.input_folder / "P01.bdf"},
+        "P12": {"raw_file": project.input_folder / "P12.bdf"},
+    }
+    project.save()
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    def _fake_exec(self):
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 0).text() == "P12":
+                self.table.item(row, 1).setCheckState(Qt.Checked)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(ManualParticipantExclusionsDialog, "exec", _fake_exec)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    dlg._edit_manual_participant_exclusions()
+    dlg._save()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["manual_excluded_participants"] == ["P12"]
 
 
 def test_manual_removed_electrodes_prompt_updates_new_bdf_pool_pid(

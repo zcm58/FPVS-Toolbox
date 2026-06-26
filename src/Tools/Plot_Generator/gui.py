@@ -68,6 +68,7 @@ class PlotGeneratorWindow(
         self.plot_mgr = plot_mgr or PlotSettingsManager()
         default_in = self.plot_mgr.get("paths", "input_folder", "")
         default_out = self.plot_mgr.get("paths", "output_folder", "")
+        default_spectral_qc_enabled = True
         self.stem_color = self.plot_mgr.get_stem_color()
         self.stem_color_b = self.plot_mgr.get_second_color()
         self._project_root: Path | None = None
@@ -140,6 +141,12 @@ class PlotGeneratorWindow(
                 default_out = str(project_settings.get("output_folder") or default_out)
                 self.stem_color = str(project_settings.get("stem_color") or self.stem_color)
                 self.stem_color_b = str(project_settings.get("stem_color_b") or self.stem_color_b)
+                default_spectral_qc_enabled = bool(
+                    project_settings.get(
+                        "spectral_qc_enabled",
+                        default_spectral_qc_enabled,
+                    )
+                )
         else:
             main_default = mgr.get("paths", "output_folder", "")
             if not default_in:
@@ -164,6 +171,7 @@ class PlotGeneratorWindow(
             "y_max_snr": "3.0",
             "input_folder": default_in,
             "output_folder": default_out,
+            "spectral_qc_enabled": default_spectral_qc_enabled,
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
@@ -193,6 +201,8 @@ class PlotGeneratorWindow(
         self._worker: object | None = None
         self._generated_paths: list[str] = []
         self._failed_items: list[dict[str, str]] = []
+        self._spectral_qc_flags: list[dict[str, object]] = []
+        self._spectral_qc_report_paths: list[str] = []
         self._gen_params: (
             tuple[
                 str,
@@ -292,6 +302,7 @@ class PlotGeneratorWindow(
         self.ylabel_edit.setText(self._defaults["ylabel_snr"])
         self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
         self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
+        self.spectral_qc_check.setChecked(bool(self._defaults["spectral_qc_enabled"]))
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")

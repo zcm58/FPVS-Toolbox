@@ -840,6 +840,19 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     host._busy_stop()
     success = not cancelled
     host._finalize_processing(success, cancelled=cancelled)
+    if success and not cancelled:
+        try:
+            from Main_App.gui.processing_snr_qc_workflow import (
+                start_automatic_snr_qc_after_processing,
+            )
+
+            start_automatic_snr_qc_after_processing(host)
+        except Exception as exc:
+            logger.exception("Automatic SNR plot/QC launch failed.")
+            host.log(
+                f"Automatic SNR plot/QC could not start: {exc}",
+                level=logging.WARNING,
+            )
     if cancelled:
         host.log("Processing run cancelled by user.", level=logging.INFO)
         if interrupted_files:

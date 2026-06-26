@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
+import zipfile
+from xml.etree import ElementTree
 
 import numpy as np
 import pandas as pd
@@ -15,6 +17,18 @@ from Tools.Plot_Generator.excel_inputs import (
 )
 from Tools.Plot_Generator.full_snr_reader import (
     _read_full_snr_sheet_read_only,
+)
+from Tools.Plot_Generator.spectral_qc import (
+    SpectralQcThresholds,
+    electrode_snr_data,
+    flag_spectral_qc_electrode_outliers,
+    interpolate_fullfft_electrode_data,
+    read_full_fft_sheet_read_only,
+    summarize_spectral_qc_records,
+)
+from Tools.Plot_Generator.spectral_qc_report import (
+    resolve_quality_check_dir,
+    write_spectral_qc_report,
 )
 
 
@@ -43,7 +57,7 @@ class PlotDataCollectionMixin:
         self,
         excel_path: Path,
         *,
-        included_electrodes_upper: set[str],
+        included_electrodes_upper: set[str] | None,
     ) -> tuple[pd.DataFrame, List[float], List[str]]:
         return self._timed_call(
             "excel_load",
@@ -55,6 +69,68 @@ class PlotDataCollectionMixin:
                 included_electrodes_upper=included_electrodes_upper,
             ),
         )
+
+    def _read_full_fft_direct(
+        self,
+        excel_path: Path,
+        *,
+        included_electrodes_upper: set[str] | None,
+    ) -> tuple[pd.DataFrame, List[float], List[str]]:
+        return self._timed_call(
+            "excel_load",
+            lambda: read_full_fft_sheet_read_only(
+                excel_path,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                timing_details=self._timing_details,
+                included_electrodes_upper=included_electrodes_upper,
+            ),
+        )
+
+    def _apply_spectral_qc_to_condition(
+        self,
+        condition: str,
+        freqs: Sequence[float],
+        subject_snr_data: dict[str, dict[str, list[float]]],
+        subject_fft_data: dict[str, dict[str, list[float]]],
+        source_workbooks: dict[str, str],
+    ) -> None:
+        if not self.spectral_qc_enabled or not subject_fft_data:
+            return
+
+        thresholds = SpectralQcThresholds()
+        result = flag_spectral_qc_electrode_outliers(
+            condition=condition,
+            freqs=freqs,
+            subject_snr_data=subject_snr_data,
+            subject_fft_data=subject_fft_data,
+            source_workbooks=source_workbooks,
+            oddball_freq=self._analysis_oddball_freq,
+            base_freq=self._analysis_base_freq,
+            thresholds=thresholds,
+        )
+        quality_check_dir = resolve_quality_check_dir(
+            project_root=self.project_root,
+            input_folder=self.folder,
+            out_dir=str(self.out_dir),
+        )
+        result = write_spectral_qc_report(
+            result=result,
+            condition=condition,
+            quality_check_dir=quality_check_dir,
+            thresholds=thresholds,
+            oddball_freq=self._analysis_oddball_freq,
+            base_freq=self._analysis_base_freq,
+        )
+        if result.report_path is not None:
+            self._record_qc_report_path(result.report_path)
+            self._record_spectral_qc_flags(summarize_spectral_qc_records(result.records))
+            self._emit(
+                f"Spectral QC report saved: {result.report_path} "
+                f"({result.flagged_cells} electrode-frequency rows flagged).",
+                0,
+                0,
+            )
 
     def _collect_data(
         self,
@@ -88,6 +164,9 @@ class PlotDataCollectionMixin:
         roi_names = self._selected_roi_names()
 
         subject_roi_data: Dict[str, Dict[str, List[float]]] = {}
+        subject_snr_data: dict[str, dict[str, list[float]]] = {}
+        subject_fft_data: dict[str, dict[str, list[float]]] = {}
+        source_workbooks: dict[str, str] = {}
         freqs: Iterable[float] | None = None
         self._unknown_subject_files.clear()
         roi_channels_upper = {
@@ -199,6 +278,42 @@ class PlotDataCollectionMixin:
                 ).tolist()
                 subject_roi_data.setdefault(subject_id, {})[roi] = means
 
+            if self.spectral_qc_enabled:
+                try:
+                    full_snr_df, full_snr_freqs, full_snr_cols = self._read_full_snr_direct(
+                        excel_path,
+                        included_electrodes_upper=None,
+                    )
+                    full_fft_df, full_fft_freqs, full_fft_cols = self._read_full_fft_direct(
+                        excel_path,
+                        included_electrodes_upper=None,
+                    )
+                except (
+                    OSError,
+                    KeyError,
+                    ValueError,
+                    zipfile.BadZipFile,
+                    ElementTree.ParseError,
+                ):
+                    full_snr_df = pd.DataFrame()
+                    full_snr_freqs = []
+                    full_snr_cols = []
+                    full_fft_df = pd.DataFrame()
+                    full_fft_freqs = []
+                    full_fft_cols = []
+                if full_snr_cols and full_fft_cols and full_snr_freqs == ordered_freqs:
+                    snr_by_electrode = electrode_snr_data(full_snr_df, full_snr_cols)
+                    fft_by_electrode = interpolate_fullfft_electrode_data(
+                        full_fft_df,
+                        full_fft_freqs,
+                        full_fft_cols,
+                        ordered_freqs,
+                    )
+                    if snr_by_electrode and fft_by_electrode:
+                        subject_snr_data[subject_id] = snr_by_electrode
+                        subject_fft_data[subject_id] = fft_by_electrode
+                        source_workbooks[subject_id] = str(excel_path)
+
             processed_files += 1
             self._emit("", offset + processed_files, overall_total)
 
@@ -214,4 +329,12 @@ class PlotDataCollectionMixin:
             self._emit("No ROI data to plot.")
             return [], {}
 
-        return list(freqs), subject_roi_data
+        freq_list = list(freqs)
+        self._apply_spectral_qc_to_condition(
+            condition,
+            freq_list,
+            subject_snr_data,
+            subject_fft_data,
+            source_workbooks,
+        )
+        return freq_list, subject_roi_data

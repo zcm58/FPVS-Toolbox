@@ -111,6 +111,7 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "Raw QC Warnings": "possible_bad_channel_cluster",
             "Missing Conditions": "None",
             "Included in Final Set": "Included",
+            "Exclusion Reason": "",
         },
         {
             "PID": "P02",
@@ -124,6 +125,7 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "Raw QC Warnings": "None",
             "Missing Conditions": "None",
             "Included in Final Set": "Excluded",
+            "Exclusion Reason": "Header-only BDF.",
         },
     ]
 
@@ -174,6 +176,7 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
     # Simulate a later incremental run where P01 was already completed and skipped.
     rows = build_processing_qc_rows(project, plan, [])
     assert rows[0]["Included in Final Set"] == "Included"
+    assert rows[0]["Exclusion Reason"] == ""
     assert rows[0]["Missing Conditions"] == "None"
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
@@ -228,6 +231,7 @@ def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Pat
 
     assert rows[0]["Missing Conditions"] == "Condition B"
     assert rows[0]["Included in Final Set"] == "Included (partial conditions)"
+    assert rows[0]["Exclusion Reason"] == ""
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
@@ -285,6 +289,7 @@ def test_processing_qc_summary_uses_matching_cache_for_legacy_failed_entry(tmp_p
     rows = build_processing_qc_rows(project, plan, [])
 
     assert rows[0]["Included in Final Set"] == "Excluded"
+    assert rows[0]["Exclusion Reason"] == ""
     assert rows[0]["Missing Conditions"] == "None"
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"

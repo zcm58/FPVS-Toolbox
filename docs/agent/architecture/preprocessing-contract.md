@@ -65,6 +65,20 @@ GUI processing must route through the active process runner. Single-file runs us
 the same runner with `max_workers=1`. Do not add a fallback path that bypasses
 the process runner or calls retired legacy preprocessing.
 
+Before the processing ledger plan is chosen, the GUI may run the embedded
+preflight QC workflow in `src/Main_App/gui/preprocessing_qc_workflow.py`. This
+workflow is review-first: it scans the selected BDF pool for BioSemi
+recording-not-started files, loads eligible raw files in a `QThread` for
+conservative removed-electrode/raw-channel/spectral QC summaries, asks the user
+to confirm the manual removed-electrode table, offers participant-level
+exclusions, and reports remaining suspicious findings. Accepted manual
+removed-electrode and participant-exclusion decisions are saved to project
+preprocessing settings before `classify_processing_inputs()` runs. Confirmed
+recording-not-started files are passed to the process runner through
+`_fpvs_preflight_recording_not_started_files` so they can be recorded as
+`recording_not_started` exclusions without creating child-process work. The raw
+BDF files are never modified.
+
 Epoch building in the process runner must preserve locked FFT crop behavior.
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade
@@ -104,6 +118,17 @@ one obvious adjustment point. Use
 `docs/agent/quality/removed-electrode-detection-calibration.md` before changing
 those defaults.
 
+`src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
+scan without importing Qt. It reuses `raw_channel_qc.py` for removed-electrode,
+hemisphere, bad-fraction, and connected-cluster decisions. It also calls
+`src/Main_App/processing/raw_spectral_qc.py`, a deliberately conservative raw
+off-harmonic spectral screen intended to surface very large participant-level
+artifacts before full preprocessing. Raw spectral preflight flags are review
+signals; accepted participant exclusions are still saved through the manual
+participant exclusion setting. The deeper per-file raw preflight scan may run
+with bounded parallel workers using the same resolved worker limit as the
+processing run; output ordering must remain deterministic for reporting.
+
 The project preprocessing setting `removed_electrode_detection_mode` defaults
 to `auto` and is exposed in Settings > Advanced > Processing QC as Off,
 Conservative auto-detect, or Manual list. The legacy
@@ -130,6 +155,18 @@ fraction, hemisphere failure, and connected bad-channel clusters. When the mode
 is Off, broad low-variance hard-exclusion checks still run, but isolated
 low-variance channels are not auto-marked for interpolation and the local
 cluster warning/exclusion rule is not applied.
+
+The project preprocessing setting `manual_excluded_participants` stores
+participant IDs that should be skipped without removing their raw `.bdf` files
+from the project. These exclusions are edited in Settings > Advanced >
+Processing QC and may also be populated by downstream QC tools such as the SNR
+Plot Generator when a whole-participant spectral failure is detected. The
+process runner resolves the PID through the same participant/file mapping used
+for manual removed-electrode metadata and records an `excluded` preflight result
+with reason `manual_participant_exclusion`. Parent-side parallel processing
+handles these manual exclusions before child-process submission, so excluded
+participants do not pay the BDF load/preprocessing cost and the worker pool can
+move directly to eligible files.
 
 The default `max_bad_chans` is `20`. A raw file is excluded when any of these
 rules trigger on the BioSemi 64 scalp surface:
@@ -174,7 +211,8 @@ auto-detected high-amplitude removed-electrode candidates, auto-detected
 spatial-consistency removed-electrode candidates, kurtosis-rejected electrodes,
 final interpolated electrodes, total rejected/interpolated electrode count,
 raw-QC warning rules, missing condition outputs, and whether that participant is
-included in the final processed dataset.
+included in the final processed dataset. It also includes an exclusion reason
+column for excluded or failed participants.
 This export is generated from the current per-file results plus the processing
 ledger so incremental runs can include participants completed in earlier runs.
 

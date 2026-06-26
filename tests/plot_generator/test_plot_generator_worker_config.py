@@ -38,6 +38,7 @@ def test_worker_config_defaults_match_worker_constructor(tmp_path) -> None:
     assert config.legend_a_peaks is None
     assert config.legend_b_peaks is None
     assert config.project_root is None
+    assert config.spectral_qc_enabled is True
 
 
 def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, monkeypatch) -> None:
@@ -61,6 +62,7 @@ def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, mon
         legend_a_peaks="A peaks",
         legend_b_peaks="B peaks",
         project_root=str(tmp_path),
+        spectral_qc_enabled=False,
     )
 
     assert isinstance(worker.config, PlotWorkerConfig)
@@ -75,3 +77,4 @@ def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, mon
     assert worker.enable_group_overlay is True
     assert worker.multi_group_mode is True
     assert worker.legend_custom_enabled is True
+    assert worker.spectral_qc_enabled is False

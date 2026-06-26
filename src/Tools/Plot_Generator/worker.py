@@ -76,6 +76,7 @@ class _Worker(
         legend_a_peaks: str | None = None,
         legend_b_peaks: str | None = None,
         project_root: str | None = None,
+        spectral_qc_enabled: bool = True,
     ) -> None:
         super().__init__()
         self.config = PlotWorkerConfig(
@@ -107,6 +108,7 @@ class _Worker(
             legend_a_peaks=legend_a_peaks,
             legend_b_peaks=legend_b_peaks,
             project_root=project_root,
+            spectral_qc_enabled=spectral_qc_enabled,
         )
         self.folder = self.config.folder
         self.condition = self.config.condition
@@ -164,7 +166,10 @@ class _Worker(
         self.legend_a_peaks = self.config.legend_a_peaks
         self.legend_b_peaks = self.config.legend_b_peaks
         self.project_root = self.config.project_root
+        self.spectral_qc_enabled = self.config.spectral_qc_enabled
         self.generated_paths: list[str] = []
+        self.qc_report_paths: list[str] = []
+        self.spectral_qc_flags: list[dict[str, object]] = []
         self.failed_items: list[dict[str, str]] = []
         self._timings: dict[str, float] = {
             "excel_load": 0.0,
@@ -200,6 +205,8 @@ class _Worker(
                     "condition": self.condition,
                     "overlay": self.overlay,
                     "generated_paths": list(self.generated_paths),
+                    "qc_report_paths": list(self.qc_report_paths),
+                    "spectral_qc_flags": list(self.spectral_qc_flags),
                     "failed_items": list(self.failed_items),
                 }
             )
@@ -266,6 +273,12 @@ class _Worker(
 
     def _record_generated_path(self, path: Path) -> None:
         self.generated_paths.append(str(path))
+
+    def _record_qc_report_path(self, path: Path) -> None:
+        self.qc_report_paths.append(str(path))
+
+    def _record_spectral_qc_flags(self, flags: list[dict[str, object]]) -> None:
+        self.spectral_qc_flags.extend(flags)
 
     def _record_failure(self, *, item: str, error: str) -> None:
         self.failed_items.append({"item": item, "error": error})

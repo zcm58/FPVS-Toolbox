@@ -40,12 +40,19 @@ from Main_App.gui.components import (
     make_form_layout,
 )
 from Main_App.gui.icons import sidebar_icon
+from Main_App.gui.manual_participant_exclusions_dialog import (
+    ManualParticipantExclusionsDialog,
+)
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
-from Main_App.projects.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
+from Main_App.projects.preprocessing_settings import (
+    PREPROCESSING_DEFAULTS,
+    normalize_manual_excluded_participants,
+    normalize_preprocessing_settings,
+)
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -435,6 +442,9 @@ class SettingsDialog(QDialog):
                     qc_preproc.get("manual_removed_electrodes", {})
                 )
             )
+            self._manual_excluded_participants = normalize_manual_excluded_participants(
+                qc_preproc.get("manual_excluded_participants", [])
+            )
         else:
             auto_detect_default = (
                 self.manager.get(
@@ -459,6 +469,13 @@ class SettingsDialog(QDialog):
                         "manual_removed_electrodes",
                         "{}",
                     )
+                )
+            )
+            self._manual_excluded_participants = normalize_manual_excluded_participants(
+                self.manager.get(
+                    "preprocessing",
+                    "manual_excluded_participants",
+                    "[]",
                 )
             )
         self.removed_electrode_detection_mode_combo = QComboBox(qc_group)
@@ -514,6 +531,20 @@ class SettingsDialog(QDialog):
         self.manual_removed_electrodes_button.clicked.connect(
             self._edit_manual_removed_electrodes
         )
+        self.manual_participant_exclusions_button = make_action_button(
+            "Edit",
+            compact=True,
+            parent=qc_group,
+        )
+        self.manual_participant_exclusions_button.setObjectName(
+            "settings_manual_participant_exclusions_edit"
+        )
+        self.manual_participant_exclusions_button.setToolTip(
+            "Edit participants that should be skipped during processing"
+        )
+        self.manual_participant_exclusions_button.clicked.connect(
+            self._edit_manual_participant_exclusions
+        )
 
         removed_detection_row = QWidget(qc_group)
         removed_detection_row.setObjectName("settings_removed_electrode_detection_row")
@@ -545,6 +576,10 @@ class SettingsDialog(QDialog):
         qc_form.addRow(
             QLabel("Removed-electrode QC mode", qc_group),
             removed_detection_row,
+        )
+        qc_form.addRow(
+            QLabel("Manual participant exclusions", qc_group),
+            self.manual_participant_exclusions_button,
         )
         qc_group.content_layout.addLayout(qc_form)
         layout.addWidget(qc_group)
@@ -629,6 +664,15 @@ class SettingsDialog(QDialog):
         )
         if dialog.exec() == QDialog.Accepted:
             self._manual_removed_electrodes_by_pid = dialog.manual_removed_electrodes()
+
+    def _edit_manual_participant_exclusions(self) -> None:
+        dialog = ManualParticipantExclusionsDialog(
+            self._manual_removed_electrode_participant_ids(),
+            self._manual_excluded_participants,
+            self,
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self._manual_excluded_participants = dialog.excluded_participants()
 
     def _show_removed_electrode_detection_info(self) -> None:
         QMessageBox.information(
@@ -864,6 +908,11 @@ class SettingsDialog(QDialog):
                 "manual_removed_electrodes",
                 json.dumps(validated_preproc.get("manual_removed_electrodes", {})),
             )
+            self.manager.set(
+                "preprocessing",
+                "manual_excluded_participants",
+                json.dumps(validated_preproc.get("manual_excluded_participants", [])),
+            )
         else:
             try:
                 normalized = self.project.update_preprocessing(validated_preproc)
@@ -959,6 +1008,9 @@ class SettingsDialog(QDialog):
             mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         )
         values["manual_removed_electrodes"] = dict(self._manual_removed_electrodes_by_pid)
+        values["manual_excluded_participants"] = list(
+            self._manual_excluded_participants
+        )
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values
 

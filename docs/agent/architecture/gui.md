@@ -30,9 +30,23 @@ Primary paths:
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
   used by `MainWindow` compatibility wrappers.
+- `src/Main_App/gui/preprocessing_qc_workflow.py`: embedded preprocessing
+  preflight QC review phases. It scans for BioSemi recordings that were never
+  started, reviews auto-detected physically removed electrodes in the manual
+  removed-electrode table, offers participant-level hard exclusions, and reports
+  suspicious findings before the processing ledger plan is chosen. These phases
+  render inside the main processing activity page rather than a modal progress
+  dialog so the main window continues repainting/responding during scan
+  handoffs. Review-only findings are saved under the active project's
+  `Quality Check/Preflight_QC_Review_Flags.xlsx` workbook before processing
+  continues.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.
+- `src/Main_App/gui/processing_snr_qc_workflow.py`: post-processing automatic
+  SNR plot generation and final spectral QC launch. It reuses the Plot
+  Generator worker and keeps final spectral QC reports under the active
+  project's `Quality Check` folder.
 - `src/Main_App/gui/tool_workflows.py`: update-check, tool-launcher,
   help/about, and auxiliary-window actions used by `MainWindow` compatibility
   wrappers. Settings editing lives in `settings_panel.py` and is routed through
@@ -65,9 +79,10 @@ The Settings page groups project processing values under Preprocessing,
 analysis defaults under Stats, ROI definitions under ROIs, and app-level
 toggles such as Debug Mode and Beta Tools under Advanced. Advanced also hosts
 the project preprocessing QC toggle for auto-detecting removed electrodes,
-because that control is intentionally more specialized than the primary
-preprocessing fields. Do not put app-level visibility or diagnostics toggles in
-the Preprocessing tab.
+manual removed-electrode metadata, and manual participant-level processing
+exclusions because those controls are intentionally more specialized than the
+primary preprocessing fields. Do not put app-level visibility or diagnostics
+toggles in the Preprocessing tab.
 
 The sidebar's default tool list is Statistical Analysis, SNR Plots, Scalp Maps,
 LORETA Visualizer, and Sequence Figure, in that order. Publication Report,
@@ -246,6 +261,12 @@ Worker and signal boundaries:
 - Long-running EEG, plotting, export, statistics, and resize work must remain
   in `QThread`, `QRunnable`, `QThreadPool`, process-runner code, or the
   existing tool worker owner.
+- Embedded preprocessing preflight QC loads raw BDFs in a `QThread` through
+  `preprocessing_qc_workflow.py`; the review dialogs only consume completed
+  scan summaries and must not perform raw loading on the UI thread.
+- Automatic post-processing SNR plot/QC generation uses the Plot Generator
+  `_Worker` in `QThread` and must not duplicate Excel parsing or rendering code
+  in the Main App GUI.
 - Workers must communicate progress, errors, completion, and reports through
   signals or existing message callbacks. Workers must not read or mutate Qt
   widgets directly.

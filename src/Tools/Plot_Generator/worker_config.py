@@ -38,3 +38,4 @@ class PlotWorkerConfig:
     legend_a_peaks: str | None = None
     legend_b_peaks: str | None = None
     project_root: str | None = None
+    spectral_qc_enabled: bool = True

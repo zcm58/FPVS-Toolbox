@@ -10,6 +10,7 @@ from Main_App.diagnostics import log_router
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QGraphicsOpacityEffect,
     QTableWidgetItem,
     QToolBar,
@@ -127,12 +128,47 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     if table is None:
         return
 
+    title_label = getattr(host, "processing_title_label", None)
+    if title_label is not None:
+        title_label.setText("Processing Data")
+    step_label = getattr(host, "processing_step_label", None)
+    if step_label is not None:
+        step_label.setText("")
+        step_label.setVisible(False)
+    message_label = getattr(host, "processing_message_label", None)
+    if message_label is not None:
+        message_label.setText(
+            "Data processing has begun. Please be patient; your device may become "
+            "temporarily slow or unresponsive during processing."
+        )
+    status_card = getattr(host, "processing_status_card", None)
+    if status_card is not None:
+        status_card.setVisible(True)
+        try:
+            status_card.header.title_label.setText("Run Progress")
+        except RuntimeError:
+            pass
+    files_card = getattr(host, "processing_files_card", None)
+    if files_card is not None:
+        files_card.setVisible(True)
+        try:
+            files_card.header.title_label.setText("File Completion")
+        except RuntimeError:
+            pass
+
     host._processing_file_total = len(files)
     host._processing_completed_file_keys = set()
     host._processing_excluded_file_keys = set()
     host._processing_file_rows = {}
     host._processing_row_keys = {}
 
+    table.setColumnCount(2)
+    table.setHorizontalHeaderLabels(["Status", "File"])
+    table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    table.setSelectionMode(QAbstractItemView.NoSelection)
+    progress_bar = getattr(host, "progress_bar", None)
+    if progress_bar is not None:
+        progress_bar.setVisible(True)
     table.setRowCount(len(files))
     for row, file_path in enumerate(files):
         raw_key, name_key = _processing_file_keys(file_path)

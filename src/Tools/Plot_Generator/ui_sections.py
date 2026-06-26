@@ -379,6 +379,14 @@ class PlotGeneratorUiSectionsMixin:
         advanced_layout.addLayout(advanced_form)
         advanced_layout.addWidget(self.axis_ranges_label)
         advanced_layout.addLayout(ranges_grid)
+        self.spectral_qc_check = QCheckBox("Flag non-harmonic spectral artifacts")
+        self.spectral_qc_check.setChecked(
+            bool(self._defaults.get("spectral_qc_enabled", True))
+        )
+        self.spectral_qc_check.setToolTip(
+            "Write a report of electrode-level off-harmonic raw-FFT outliers. Plot values are not changed."
+        )
+        advanced_layout.addWidget(self.spectral_qc_check)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)

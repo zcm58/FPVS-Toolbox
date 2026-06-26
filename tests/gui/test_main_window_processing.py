@@ -16,6 +16,7 @@ import Main_App.processing.preprocess as backend_preprocess
 import Main_App.projects.project_manager as project_manager
 import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 import Main_App.io.load_utils as load_utils
+import Main_App.gui.processing_inputs as processing_inputs
 import Main_App.processing.processing as processing
 import Main_App.Shared.post_process as post_process
 from Main_App.Shared import user_messages
@@ -35,6 +36,11 @@ def _stub_processing(monkeypatch, projects_root: Path) -> None:
     monkeypatch.setattr(backend_preprocess, "perform_preprocessing", lambda *a, **k: (object(), 0))
     monkeypatch.setattr(processing, "process_data", lambda *a, **k: None)
     monkeypatch.setattr(post_process, "post_process", lambda *a, **k: None)
+    monkeypatch.setattr(
+        processing_inputs,
+        "run_preprocessing_qc_workflow",
+        lambda *_args, **_kwargs: True,
+    )
 
     def fail_compat_start(self):
         raise AssertionError("Compatibility ProcessingMixin.start_processing was called")

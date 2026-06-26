@@ -92,6 +92,8 @@ class PlotGeneratorSettingsMixin:
             "stem_color": self.stem_color,
             "stem_color_b": self.stem_color_b,
         }
+        if hasattr(self, "spectral_qc_check"):
+            payload["spectral_qc_enabled"] = self.spectral_qc_check.isChecked()
         if include_paths:
             if not _project_has_groups(self._project):
                 payload["input_folder"] = self.folder_edit.text()

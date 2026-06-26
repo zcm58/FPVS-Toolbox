@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.gui.main_window import MainWindow
+import Main_App.gui.processing_inputs as processing_inputs
 import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 
 
@@ -66,6 +67,11 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
 
     monkeypatch.setattr(win, "_show_processing_started_notice", _no_processing_notice)
     monkeypatch.setattr(MainWindow, "_on_processing_finished", lambda self, payload=None: None)
+    monkeypatch.setattr(
+        processing_inputs,
+        "run_preprocessing_qc_workflow",
+        lambda *_args, **_kwargs: True,
+    )
 
     def _fail_legacy_start(self):
         raise AssertionError("Legacy start_processing was called unexpectedly.")
@@ -142,6 +148,11 @@ def test_batch_non_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkey
 
     monkeypatch.setattr(win, "_show_processing_started_notice", _no_processing_notice)
     monkeypatch.setattr(MainWindow, "_on_processing_finished", lambda self, payload=None: None)
+    monkeypatch.setattr(
+        processing_inputs,
+        "run_preprocessing_qc_workflow",
+        lambda *_args, **_kwargs: True,
+    )
 
     def _fail_legacy_start(self):
         raise AssertionError("Compatibility start_processing was called unexpectedly.")

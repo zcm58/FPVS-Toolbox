@@ -32,6 +32,7 @@ QC_SUMMARY_HEADERS = (
     "Raw QC Warnings",
     "Missing Conditions",
     "Included in Final Set",
+    "Exclusion Reason",
 )
 
 
@@ -194,6 +195,28 @@ def _has_missing_condition_warning(entry: Mapping[str, Any]) -> bool:
         or str(entry.get("failure_reason") or "") == MISSING_EXPECTED_OUTPUTS_WARNING
         or str(entry.get("condition_completeness") or "").casefold() == "partial"
     )
+
+
+def _exclusion_reason(
+    entry: Mapping[str, Any],
+    result: Mapping[str, Any] | None,
+) -> str:
+    if result and str(result.get("status") or "").casefold() == "excluded":
+        return str(
+            result.get("message")
+            or result.get("reason")
+            or "Raw file was excluded from processing."
+        )
+    status = str(entry.get("status") or "").casefold()
+    if status == "excluded":
+        return str(
+            entry.get("exclusion_message")
+            or entry.get("exclusion_reason")
+            or "Raw file was excluded from processing."
+        )
+    if status == "failed":
+        return str(entry.get("failure_message") or entry.get("failure_reason") or "")
+    return ""
 
 
 def _is_legacy_partial_condition_entry(
@@ -431,6 +454,7 @@ def build_processing_qc_rows(
                 "Raw QC Warnings": _join_channels(raw_qc_warning_rules),
                 "Missing Conditions": _join_channels(missing_condition_labels),
                 "Included in Final Set": included_text,
+                "Exclusion Reason": _exclusion_reason(entry, result),
             }
         )
     return rows

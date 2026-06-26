@@ -12,6 +12,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from Main_App.projects.project import Project
+import Main_App.gui.processing_inputs as processing_inputs
 import Main_App.gui.main_window as main_window_module
 from Main_App.gui.main_window import MainWindow
 from Main_App.workers.mp_runner_bridge import MpRunnerBridge
@@ -64,6 +65,11 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
         QTimer.singleShot(0, lambda: self.finished.emit({"files": len(data_files)}))
 
     monkeypatch.setattr(MpRunnerBridge, "start", fake_start, raising=False)
+    monkeypatch.setattr(
+        processing_inputs,
+        "run_preprocessing_qc_workflow",
+        lambda *_args, **_kwargs: True,
+    )
 
     win.start_processing()
     qtbot.waitUntil(lambda: not getattr(win, "_run_active", False), timeout=2000)
@@ -102,6 +108,11 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
         QTimer.singleShot(0, lambda: self.finished.emit({"files": len(data_files)}))
 
     monkeypatch.setattr(MpRunnerBridge, "start", fake_start, raising=False)
+    monkeypatch.setattr(
+        processing_inputs,
+        "run_preprocessing_qc_workflow",
+        lambda *_args, **_kwargs: True,
+    )
 
     win.start_processing()
     qtbot.waitUntil(lambda: not getattr(win, "_run_active", False), timeout=2000)

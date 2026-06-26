@@ -10,8 +10,21 @@ recording error.
   constants, user-facing method warning text, manual PID/electrode metadata
   normalization, and the low-variance, high-amplitude, and
   spatial-predictability decision rules.
+- `src/Main_App/processing/preflight_qc.py`: non-GUI orchestration for the
+  embedded pre-processing QC scan. It is the place to adjust how raw-channel,
+  recording-not-started, and raw spectral summaries are combined before GUI
+  review.
+- `src/Main_App/processing/raw_spectral_qc.py`: conservative raw off-harmonic
+  spectral artifact screen used only for preflight review and participant-level
+  recommendations.
+- `src/Main_App/gui/preprocessing_qc_workflow.py`: modal embedded workflow that
+  presents recording-not-started files, prepopulated manual removed-electrode
+  metadata, participant hard-exclusion recommendations, and remaining
+  suspicious findings before processing starts.
 - `src/Main_App/gui/manual_removed_electrodes_dialog.py`: modal table for
   project-level manual removed-electrode metadata.
+- `src/Main_App/gui/manual_participant_exclusions_dialog.py`: modal table for
+  project-level manual participant exclusions.
 - `src/Main_App/processing/raw_channel_qc.py`: raw BDF sampling, montage
   neighbor lookup, participant-level hard-exclusion rules, and pipeline result
   payloads.
@@ -25,6 +38,10 @@ recording error.
 Keep future threshold tuning in `removed_electrode_detection.py` unless the
 sampling strategy, montage geometry, or participant exclusion rules themselves
 must change.
+
+Keep raw spectral preflight threshold tuning in `raw_spectral_qc.py`. This
+screen is intentionally conservative and should prioritize participant-level
+review of extreme artifacts over channel-level automatic removal.
 
 ## Calibration Data
 

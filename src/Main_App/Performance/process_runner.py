@@ -32,12 +32,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
+from Main_App.io.load_utils import (
+    BDF_RECORDING_NOT_STARTED_REASON,
+    format_bdf_recording_not_started_message,
+    inspect_bdf_header,
+)
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     manual_removed_electrodes_for_pid,
     normalize_removed_electrode_detection_mode,
 )
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
+from Main_App.projects.preprocessing_settings import (
+    normalize_manual_excluded_participants,
+)
 from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
     compute_onbin_step,
@@ -98,6 +106,49 @@ def _manual_removed_electrodes_for_file(
             participant_id,
         )
     )
+
+
+def _manual_excluded_participants(settings: Dict[str, object]) -> set[str]:
+    return {
+        participant.casefold()
+        for participant in normalize_manual_excluded_participants(
+            settings.get("manual_excluded_participants")
+        )
+    }
+
+
+def _participant_is_manually_excluded(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> tuple[bool, str]:
+    participant_id = _participant_id_for_file(file_path, settings)
+    excluded = _manual_excluded_participants(settings)
+    return participant_id.casefold() in excluded, participant_id
+
+
+def _preflight_recording_exclusion_paths(settings: Dict[str, object]) -> set[str]:
+    paths = _string_list(settings.get("_fpvs_preflight_recording_not_started_files"))
+    resolved: set[str] = set()
+    for raw_path in paths:
+        try:
+            resolved.add(str(Path(raw_path).resolve()).casefold())
+        except (OSError, RuntimeError, TypeError, ValueError):
+            resolved.add(str(raw_path).casefold())
+    return resolved
+
+
+def _file_in_preflight_recording_exclusions(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> bool:
+    exclusions = _preflight_recording_exclusion_paths(settings)
+    if not exclusions:
+        return False
+    try:
+        key = str(file_path.resolve()).casefold()
+    except (OSError, RuntimeError, ValueError):
+        key = str(file_path).casefold()
+    return key in exclusions
 
 
 def _worker_log(message: str) -> None:
@@ -607,6 +658,32 @@ def _run_full_pipeline_for_file(
             stage,
         )
         crop_logger.info("file=%s stage=start", file_path.name)
+
+        manually_excluded, participant_id = _participant_is_manually_excluded(
+            file_path,
+            settings,
+        )
+        if manually_excluded:
+            message = (
+                f"Participant {participant_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            logger.info(
+                "manual_participant_excluded file=%s participant_id=%s",
+                file_path.name,
+                participant_id,
+            )
+            crop_logger.warning(
+                "file=%s stage=preflight excluded=true reason=manual_participant_exclusion participant_id=%s",
+                file_path.name,
+                participant_id,
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason="manual_participant_exclusion",
+                message=message,
+                start_time=t0,
+            )
 
         # Lazy imports (inside worker only)
         logger.debug("[PIPELINE STAGE] file=%s stage=worker_imports_start", file_path.name)
@@ -1437,12 +1514,87 @@ def run_project_parallel(
             progress_queue.put({"type": "done", "count": 0, "cancelled": False})
         return
 
+    total = len(files)
+    completed = 0
+    excluded_results: List[Dict[str, object]] = []
+    active_files: list[Path] = []
+    for file_path in files:
+        if _file_in_preflight_recording_exclusions(file_path, params.settings):
+            preflight_info = inspect_bdf_header(file_path)
+            result = _make_excluded_result(
+                file_path=file_path,
+                reason=BDF_RECORDING_NOT_STARTED_REASON,
+                message=format_bdf_recording_not_started_message([file_path.name]),
+                stage="preflight",
+                preflight_info=preflight_info,
+            )
+            excluded_results.append(result)
+            completed += 1
+            logger.info(
+                "recording_not_started_excluded_pre_submit file=%s",
+                file_path.name,
+            )
+            if progress_queue:
+                progress_queue.put(
+                    {
+                        "type": "progress",
+                        "completed": completed,
+                        "total": total,
+                        "result": result,
+                    }
+                )
+            continue
+
+        manually_excluded, participant_id = _participant_is_manually_excluded(
+            file_path,
+            params.settings,
+        )
+        if not manually_excluded:
+            active_files.append(file_path)
+            continue
+        result = _make_excluded_result(
+            file_path=file_path,
+            reason="manual_participant_exclusion",
+            message=(
+                f"Participant {participant_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            ),
+            stage="preflight",
+        )
+        excluded_results.append(result)
+        completed += 1
+        logger.info(
+            "manual_participant_excluded_pre_submit file=%s participant_id=%s",
+            file_path.name,
+            participant_id,
+        )
+        if progress_queue:
+            progress_queue.put(
+                {
+                    "type": "progress",
+                    "completed": completed,
+                    "total": total,
+                    "result": result,
+                }
+            )
+
+    if not active_files:
+        if progress_queue:
+            progress_queue.put(
+                {
+                    "type": "done",
+                    "count": completed,
+                    "cancelled": False,
+                    "excluded": list(excluded_results),
+                    "excluded_count": len(excluded_results),
+                }
+            )
+        return
+
     maxw = params.max_workers or max(1, (os.cpu_count() or 2) - 1)
     ctx = get_context("spawn")
 
-    completed = 0
-    total = len(files)
-    remaining = list(files)
+    remaining = list(active_files)
     in_flight: Dict[object, Path] = {}
     peak_in_flight = 0
     max_memory_percent = 0.0
@@ -1453,8 +1605,6 @@ def run_project_parallel(
     # Batch-level stats for n_rejected (number of channels interpolated per file)
     total_rejected = 0
     files_with_audit = 0
-    excluded_results: List[Dict[str, object]] = []
-
     cancelled = False
     shutdown_wait = True
     interrupted_files: List[str] = []

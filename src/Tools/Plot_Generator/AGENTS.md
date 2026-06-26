@@ -25,6 +25,12 @@ Current ownership map:
   collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
   unknown-subject warnings.
+- `spectral_qc.py`: post-processing, report-only electrode-level spectral
+  artifact flagging and FullFFT evidence assembly for SNR plots.
+- `spectral_qc_alerts.py`: plain-language GUI alert summaries for SNR spectral
+  QC findings and whole-participant spectral exclusion candidates.
+- `spectral_qc_report.py`: Quality Check workbook export for SNR plot spectral
+  QC reports.
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
   configuration.
 - `snr_utils.py`: shared SNR calculation helpers.

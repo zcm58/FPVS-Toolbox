@@ -329,6 +329,7 @@ def test_validate_inputs_reviews_and_registers_batch_participants(tmp_path) -> N
         log=lambda *args, **kwargs: None,
         _build_validated_params=lambda: {"event_id_map": {"Condition": 1}},
         review_participants_for_processing=review,
+        run_preprocessing_qc_workflow=lambda *_args, **_kwargs: True,
     )
 
     assert validate_inputs(host) is True

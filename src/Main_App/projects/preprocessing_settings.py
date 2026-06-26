@@ -33,6 +33,7 @@ _STR = "str"
 _BOOL = "bool"
 _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
+_MANUAL_EXCLUDED_PARTICIPANTS = "manual_excluded_participants"
 
 
 _FIELDS: tuple[_Field, ...] = (
@@ -85,6 +86,17 @@ _FIELDS: tuple[_Field, ...] = (
         ),
         {},
         _MANUAL_REMOVED_ELECTRODES,
+    ),
+    _Field(
+        "manual_excluded_participants",
+        (
+            "manual_excluded_participants",
+            "manually_excluded_participants",
+            "excluded_participants",
+            "participant_exclusions",
+        ),
+        [],
+        _MANUAL_EXCLUDED_PARTICIPANTS,
     ),
     _Field(
         "max_parallel_workers_override",
@@ -175,6 +187,56 @@ def _coerce_removed_electrode_mode(value: Any, *, default: str) -> str:
     )
 
 
+def _participant_sort_key(value: str) -> tuple[str, int, str]:
+    prefix = "".join(ch for ch in value if not ch.isdigit()).casefold()
+    digits = "".join(ch for ch in value if ch.isdigit())
+    number = int(digits) if digits else -1
+    return prefix, number, value.casefold()
+
+
+def normalize_manual_excluded_participants(value: Any) -> list[str]:
+    """Normalize user-supplied participant IDs excluded from processing."""
+
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            import json
+
+            decoded = json.loads(text)
+        except (TypeError, ValueError):
+            decoded = None
+        if decoded is not None:
+            return normalize_manual_excluded_participants(decoded)
+        raw_items: Iterable[Any] = text.replace(";", ",").split(",")
+    elif isinstance(value, Mapping):
+        raw_items = (
+            key
+            for key, enabled in value.items()
+            if enabled not in (False, None, "", 0)
+        )
+    elif isinstance(value, Iterable):
+        raw_items = value
+    else:
+        raw_items = (value,)
+
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for raw_item in raw_items:
+        pid = str(raw_item or "").strip()
+        if not pid:
+            continue
+        key = pid.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(pid)
+    return sorted(normalized, key=_participant_sort_key)
+
+
 def _validate_bandpass(low_pass: float, high_pass: float) -> None:
     """Ensure low/high cutoffs are sensible and not inverted."""
 
@@ -227,6 +289,8 @@ def normalize_preprocessing_settings(
             )
         elif field.type == _MANUAL_REMOVED_ELECTRODES:
             normalized[field.name] = normalize_manual_removed_electrodes_map(raw_value)
+        elif field.type == _MANUAL_EXCLUDED_PARTICIPANTS:
+            normalized[field.name] = normalize_manual_excluded_participants(raw_value)
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
 
@@ -285,6 +349,7 @@ def normalize_preprocessing_settings(
 
 __all__ = [
     "normalize_preprocessing_settings",
+    "normalize_manual_excluded_participants",
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
 ]

@@ -42,6 +42,10 @@ from Main_App.gui.project_workflows import (
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+# Test seam for callers that need to bypass the embedded QC workflow
+# without importing the heavy raw-QC implementation at module import time.
+run_preprocessing_qc_workflow = None
+
 
 def validate_inputs(host: Any) -> bool:
     """Modern input validation + parameter collection."""
@@ -143,7 +147,16 @@ def validate_inputs(host: Any) -> bool:
             logger.exception("Failed to save participant review updates.")
             QMessageBox.critical(host, "Project Save Error", str(exc))
             return False
-    if not _ensure_manual_removed_electrodes_reviewed(host, raw_file_infos, params):
+    qc_workflow = getattr(host, "run_preprocessing_qc_workflow", None)
+    if not callable(qc_workflow):
+        qc_workflow = globals().get("run_preprocessing_qc_workflow")
+    if not callable(qc_workflow):
+        from Main_App.gui.preprocessing_qc_workflow import (
+            run_preprocessing_qc_workflow as _run_preprocessing_qc_workflow,
+        )
+
+        qc_workflow = _run_preprocessing_qc_workflow
+    if not qc_workflow(host, raw_file_infos, params):
         return False
     host._processing_raw_file_infos = list(raw_file_infos)
 
@@ -167,6 +180,8 @@ def validate_inputs(host: Any) -> bool:
             "auto_detect_removed_electrodes",
             "removed_electrode_detection_mode",
             "manual_removed_electrodes",
+            "manual_excluded_participants",
+            "_fpvs_preflight_recording_not_started_files",
         )
         for opt in preproc_options:
             if host.settings.config.has_option("preprocessing", opt):
@@ -190,6 +205,7 @@ def validate_inputs(host: Any) -> bool:
                 "auto_detect_removed_electrodes",
                 "removed_electrode_detection_mode",
                 "manual_removed_electrodes",
+                "manual_excluded_participants",
             )
             dialog_snapshot = {
                 key: edit.text()
@@ -412,6 +428,9 @@ def build_validated_params(host: Any) -> dict | None:
         ),
         "manual_removed_electrodes": dict(
             normalized.get("manual_removed_electrodes") or {}
+        ),
+        "manual_excluded_participants": list(
+            normalized.get("manual_excluded_participants") or []
         ),
         "epoch_start": epoch_start,
         "epoch_end": epoch_end,

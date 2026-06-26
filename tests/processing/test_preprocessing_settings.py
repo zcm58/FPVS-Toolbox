@@ -12,6 +12,7 @@ def test_defaults_use_expected_bandpass():
     assert normalized["auto_detect_removed_electrodes"] is True
     assert normalized["removed_electrode_detection_mode"] == "auto"
     assert normalized["manual_removed_electrodes"] == {}
+    assert normalized["manual_excluded_participants"] == []
 
 
 def test_inverted_bandpass_raises():
@@ -65,3 +66,19 @@ def test_manual_removed_electrodes_mode_supersedes_auto_boolean():
         "p1": ["FT7", "P9", "Oz"],
         "P2": ["POz", "O2"],
     }
+
+
+def test_manual_excluded_participants_normalize_from_list_and_mapping():
+    normalized = normalize_preprocessing_settings(
+        {
+            "manual_excluded_participants": ["P12", "p12", "P3"],
+        }
+    )
+    assert normalized["manual_excluded_participants"] == ["P3", "P12"]
+
+    normalized = normalize_preprocessing_settings(
+        {
+            "excluded_participants": {"P9": True, "P10": False, "P11": "yes"},
+        }
+    )
+    assert normalized["manual_excluded_participants"] == ["P9", "P11"]
