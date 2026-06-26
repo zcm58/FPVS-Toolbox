@@ -8,12 +8,15 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
+from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
+from Main_App.gui import processing_inputs
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
+from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
 
@@ -35,6 +38,8 @@ def _prep_project(root):
             "max_chan_idx_keep": 32,
             "max_bad_chans": 5,
             "auto_detect_removed_electrodes": True,
+            "removed_electrode_detection_mode": "auto",
+            "manual_removed_electrodes": {},
             "max_parallel_workers_override": 0,
             "stim_channel": "Status",
         }
@@ -65,7 +70,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.preproc_edits[4].setText("3.5")
     dlg.preproc_edits[5].setText("100")
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
-    assert dlg.removed_electrode_detection_mode_combo.currentData() is False
+    assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
 
     dlg._save()
 
@@ -74,6 +79,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["rejection_z"] == 3.5
     assert reloaded.preprocessing["epoch_end_s"] == 100.0
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
+    assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
     assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
 
@@ -93,6 +99,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["reject_thresh"] == 3.5
     assert params["epoch_end"] == 100.0
     assert params["auto_detect_removed_electrodes"] is False
+    assert params["removed_electrode_detection_mode"] == "off"
     assert params["stim_channel"] == "Status"
     assert params["save_preprocessed_fif"] is False
 
@@ -175,13 +182,16 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)
     assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_mode_combo)
     assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_info_button)
+    assert cards["Processing QC"].isAncestorOf(dlg.manual_removed_electrodes_button)
     assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
-    assert dlg.removed_electrode_detection_mode_combo.currentData() is True
+    assert dlg.removed_electrode_detection_mode_combo.currentData() == "auto"
     assert dlg.removed_electrode_detection_mode_combo.itemText(0) == "Off"
     assert (
         dlg.removed_electrode_detection_mode_combo.itemText(1)
         == "Conservative auto-detect"
     )
+    assert dlg.removed_electrode_detection_mode_combo.itemText(2) == "Manual list"
+    assert dlg.manual_removed_electrodes_button.isEnabled() is False
     info_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         QMessageBox,
@@ -271,6 +281,114 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert actions is not None
     assert actions.row_layout.indexOf(panel.ok_btn) >= 0
     assert actions.row_layout.indexOf(panel.cancel_btn) >= 0
+
+
+def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+    project.participants = {
+        "P01": {"raw_file": project.input_folder / "P01.bdf"},
+        "P02": {"raw_file": project.input_folder / "P02.bdf"},
+    }
+    project.save()
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    def _fake_exec(self):
+        self.table.item(0, 1).setText("ft7, P9")
+        self.table.item(1, 1).setText("OZ")
+        return QDialog.Accepted
+
+    monkeypatch.setattr(ManualRemovedElectrodesDialog, "exec", _fake_exec)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    manual_index = dlg.removed_electrode_detection_mode_combo.findData("manual")
+    dlg.removed_electrode_detection_mode_combo.setCurrentIndex(manual_index)
+
+    assert dlg.manual_removed_electrodes_button.isEnabled() is True
+    assert dlg._manual_removed_electrodes_by_pid == {
+        "P01": ["FT7", "P9"],
+        "P02": ["Oz"],
+    }
+
+    dlg._save()
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["removed_electrode_detection_mode"] == "manual"
+    assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
+    assert reloaded.preprocessing["manual_removed_electrodes"] == {
+        "P01": ["FT7", "P9"],
+        "P02": ["Oz"],
+    }
+
+
+def test_manual_removed_electrodes_prompt_updates_new_bdf_pool_pid(
+    tmp_path,
+    monkeypatch,
+):
+    project = _prep_project(tmp_path)
+    project.update_preprocessing(
+        {
+            **project.preprocessing,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"P01": ["P9"]},
+        }
+    )
+    project.save()
+    raw_p01 = project.input_folder / "P01.bdf"
+    raw_p02 = project.input_folder / "P02.bdf"
+    host = SimpleNamespace(
+        currentProject=project,
+        validated_params={},
+        log=lambda message, *args, **kwargs: None,
+    )
+    params = {
+        "removed_electrode_detection_mode": "manual",
+        "manual_removed_electrodes": {"P01": ["P9"]},
+        "auto_detect_removed_electrodes": False,
+    }
+
+    captured: dict[str, object] = {}
+
+    class FakeManualDialog:
+        def __init__(self, participant_ids, manual_removed_electrodes, parent):
+            captured["participant_ids"] = list(participant_ids)
+            captured["manual_removed_electrodes"] = dict(manual_removed_electrodes)
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def manual_removed_electrodes(self):
+            return {"P01": ["P9"], "P02": ["FT7"]}
+
+    monkeypatch.setattr(
+        processing_inputs,
+        "ManualRemovedElectrodesDialog",
+        FakeManualDialog,
+    )
+
+    accepted = processing_inputs._ensure_manual_removed_electrodes_reviewed(
+        host,
+        [
+            RawFileInfo(raw_p01, "P01"),
+            RawFileInfo(raw_p02, "P02"),
+        ],
+        params,
+    )
+
+    assert accepted is True
+    assert captured["participant_ids"] == ["P01", "P02"]
+    assert captured["manual_removed_electrodes"] == {"P01": ["P9"]}
+    assert params["manual_removed_electrodes"] == {
+        "P01": ["P9"],
+        "P02": ["FT7"],
+    }
+    assert project.preprocessing["manual_removed_electrodes"] == {
+        "P01": ["P9"],
+        "P02": ["FT7"],
+    }
 
 
 def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):

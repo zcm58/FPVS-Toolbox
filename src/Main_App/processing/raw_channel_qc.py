@@ -7,7 +7,20 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from Main_App.processing.removed_electrode_detection import (
+    DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION,
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    is_high_amplitude_removed_channel,
+    is_low_variance_removed_channel,
+    normalize_removed_electrode_detection_mode,
+    parse_electrode_list,
+    removed_electrode_threshold_payload,
+    spatial_predictability_outliers,
+)
+
 RAW_CHANNEL_QC_EXCLUSION_REASON = "raw_channel_qc_failure"
+_CALIBRATION = DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION
 
 LEFT_HEMISPHERE_CHANNELS: frozenset[str] = frozenset(
     {
@@ -84,30 +97,38 @@ class RawChannelQCConfig:
     max_hemisphere_bad_fraction: float = 0.50
     min_channels_for_hard_qc: int = 16
     min_hemisphere_channels: int = 8
-    low_std_uv: float = 20.0
-    low_p2p_99_uv: float = 80.0
-    low_std_relative_ratio: float = 0.25
-    low_p2p_99_relative_ratio: float = 0.25
-    relative_low_std_uv_ceiling: float = 60.0
-    relative_low_p2p_99_uv_ceiling: float = 240.0
-    high_std_relative_ratio: float = 7.5
-    high_p2p_99_relative_ratio: float = 10.0
-    high_std_uv_floor: float = 2_000.0
-    high_p2p_99_uv_floor: float = 10_000.0
+    low_std_uv: float = _CALIBRATION.low_std_uv
+    low_p2p_99_uv: float = _CALIBRATION.low_p2p_99_uv
+    low_std_relative_ratio: float = _CALIBRATION.low_std_relative_ratio
+    low_p2p_99_relative_ratio: float = _CALIBRATION.low_p2p_99_relative_ratio
+    relative_low_std_uv_ceiling: float = _CALIBRATION.relative_low_std_uv_ceiling
+    relative_low_p2p_99_uv_ceiling: float = (
+        _CALIBRATION.relative_low_p2p_99_uv_ceiling
+    )
+    high_std_relative_ratio: float = _CALIBRATION.high_std_relative_ratio
+    high_p2p_99_relative_ratio: float = _CALIBRATION.high_p2p_99_relative_ratio
+    high_std_uv_floor: float = _CALIBRATION.high_std_uv_floor
+    high_p2p_99_uv_floor: float = _CALIBRATION.high_p2p_99_uv_floor
     auto_detect_removed_electrodes: bool = True
-    min_bad_cluster_warning_size: int = 4
-    min_bad_cluster_size: int = 6
-    neighbor_distance_factor: float = 1.75
-    spatial_qc_enabled: bool = True
-    spatial_neighbor_count: int = 6
-    spatial_min_neighbors: int = 3
-    spatial_neighbor_distance_factor: float = 2.60
-    spatial_predictability_max_bad_corr: float = 0.12
-    spatial_predictability_relative_ratio: float = 0.55
-    spatial_predictability_mad_z: float = 3.5
-    sample_windows: int = 6
-    sample_window_s: float = 10.0
-    edge_padding_s: float = 10.0
+    min_bad_cluster_warning_size: int = _CALIBRATION.min_bad_cluster_warning_size
+    min_bad_cluster_size: int = _CALIBRATION.min_bad_cluster_size
+    neighbor_distance_factor: float = _CALIBRATION.neighbor_distance_factor
+    spatial_qc_enabled: bool = _CALIBRATION.spatial_qc_enabled
+    spatial_neighbor_count: int = _CALIBRATION.spatial_neighbor_count
+    spatial_min_neighbors: int = _CALIBRATION.spatial_min_neighbors
+    spatial_neighbor_distance_factor: float = _CALIBRATION.spatial_neighbor_distance_factor
+    spatial_predictability_max_bad_corr: float = (
+        _CALIBRATION.spatial_predictability_max_bad_corr
+    )
+    spatial_predictability_relative_ratio: float = (
+        _CALIBRATION.spatial_predictability_relative_ratio
+    )
+    spatial_predictability_mad_z: float = _CALIBRATION.spatial_predictability_mad_z
+    sample_windows: int = _CALIBRATION.sample_windows
+    sample_window_s: float = _CALIBRATION.sample_window_s
+    edge_padding_s: float = _CALIBRATION.edge_padding_s
+    removed_electrode_detection_mode: str = REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+    manual_removed_electrodes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,6 +147,7 @@ class RawChannelQCResult:
     midline_total: int
     bad_channels: tuple[str, ...]
     channels_to_interpolate: tuple[str, ...]
+    manual_removed_channels: tuple[str, ...]
     low_variance_channels: tuple[str, ...]
     high_amplitude_channels: tuple[str, ...]
     spatial_outlier_channels: tuple[str, ...]
@@ -148,6 +170,7 @@ class RawChannelQCResult:
             "midline_total": self.midline_total,
             "bad_channels": list(self.bad_channels),
             "channels_to_interpolate": list(self.channels_to_interpolate),
+            "manual_removed_channels": list(self.manual_removed_channels),
             "low_variance_channels": list(self.low_variance_channels),
             "high_amplitude_channels": list(self.high_amplitude_channels),
             "spatial_outlier_channels": list(self.spatial_outlier_channels),
@@ -202,9 +225,22 @@ def _config_from_settings(settings: Mapping[str, Any]) -> RawChannelQCConfig:
         ),
         RawChannelQCConfig.auto_detect_removed_electrodes,
     )
+    mode = normalize_removed_electrode_detection_mode(
+        settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=auto_detect,
+    )
+    manual_removed = (
+        tuple(parse_electrode_list(settings.get("_fpvs_manual_removed_electrodes")))
+        if mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        else ()
+    )
     return RawChannelQCConfig(
         max_bad_channels=max(0, max_bad),
-        auto_detect_removed_electrodes=auto_detect,
+        auto_detect_removed_electrodes=(
+            mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        ),
+        removed_electrode_detection_mode=mode,
+        manual_removed_electrodes=manual_removed,
     )
 
 
@@ -264,56 +300,6 @@ def _robust_median(values: Sequence[float]) -> float:
     if not finite:
         return 0.0
     return float(np.median(finite))
-
-
-def _scaled_mad(values: Sequence[float]) -> float:
-    finite = np.asarray(
-        [float(value) for value in values if np.isfinite(value)],
-        dtype=float,
-    )
-    if finite.size == 0:
-        return 0.0
-    median = float(np.median(finite))
-    mad = float(np.median(np.abs(finite - median)))
-    return float(1.4826 * mad)
-
-
-def _is_low_variance_removed_channel(
-    *,
-    std_uv: float,
-    p2p_99_uv: float,
-    median_std_uv: float,
-    median_p2p_99_uv: float,
-    config: RawChannelQCConfig,
-) -> bool:
-    absolute_low = std_uv < config.low_std_uv and p2p_99_uv < config.low_p2p_99_uv
-    relative_low = (
-        median_std_uv > config.low_std_uv
-        and median_p2p_99_uv > config.low_p2p_99_uv
-        and std_uv < median_std_uv * config.low_std_relative_ratio
-        and p2p_99_uv < median_p2p_99_uv * config.low_p2p_99_relative_ratio
-        and std_uv < config.relative_low_std_uv_ceiling
-        and p2p_99_uv < config.relative_low_p2p_99_uv_ceiling
-    )
-    return bool(absolute_low or relative_low)
-
-
-def _is_high_amplitude_removed_channel(
-    *,
-    std_uv: float,
-    p2p_99_uv: float,
-    median_std_uv: float,
-    median_p2p_99_uv: float,
-    config: RawChannelQCConfig,
-) -> bool:
-    return bool(
-        median_std_uv > 0.0
-        and median_p2p_99_uv > 0.0
-        and std_uv >= config.high_std_uv_floor
-        and p2p_99_uv >= config.high_p2p_99_uv_floor
-        and std_uv >= median_std_uv * config.high_std_relative_ratio
-        and p2p_99_uv >= median_p2p_99_uv * config.high_p2p_99_relative_ratio
-    )
 
 
 def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarray]:
@@ -500,31 +486,11 @@ def _spatial_outlier_channels(
     excluded_channels: Sequence[str],
     config: RawChannelQCConfig,
 ) -> tuple[str, ...]:
-    excluded = {str(channel) for channel in excluded_channels}
-    reference_scores = [
-        float(score)
-        for channel, score in scores.items()
-        if channel not in excluded and np.isfinite(score)
-    ]
-    if len(reference_scores) < config.min_channels_for_hard_qc:
-        return ()
-
-    median_score = float(np.median(reference_scores))
-    mad_score = _scaled_mad(reference_scores)
-    robust_threshold = median_score - config.spatial_predictability_mad_z * mad_score
-    relative_threshold = median_score * config.spatial_predictability_relative_ratio
-    threshold = min(
-        config.spatial_predictability_max_bad_corr,
-        relative_threshold,
-        robust_threshold,
-    )
-    if not np.isfinite(threshold) or threshold <= 0.0:
-        return ()
-
-    return tuple(
-        channel
-        for channel, score in scores.items()
-        if channel not in excluded and np.isfinite(score) and float(score) < threshold
+    return spatial_predictability_outliers(
+        dict(scores),
+        excluded_channels=tuple(excluded_channels),
+        calibration=config,
+        min_reference_count=config.min_channels_for_hard_qc,
     )
 
 
@@ -549,6 +515,7 @@ def _empty_result(
         midline_total=0,
         bad_channels=(),
         channels_to_interpolate=(),
+        manual_removed_channels=(),
         low_variance_channels=(),
         high_amplitude_channels=(),
         spatial_outlier_channels=(),
@@ -581,26 +548,8 @@ def evaluate_raw_channel_qc(
         "max_bad_fraction": config.max_bad_fraction,
         "max_hemisphere_bad_fraction": config.max_hemisphere_bad_fraction,
         "min_channels_for_hard_qc": config.min_channels_for_hard_qc,
-        "low_std_uv": config.low_std_uv,
-        "low_p2p_99_uv": config.low_p2p_99_uv,
-        "low_std_relative_ratio": config.low_std_relative_ratio,
-        "low_p2p_99_relative_ratio": config.low_p2p_99_relative_ratio,
-        "relative_low_std_uv_ceiling": config.relative_low_std_uv_ceiling,
-        "relative_low_p2p_99_uv_ceiling": config.relative_low_p2p_99_uv_ceiling,
-        "high_std_relative_ratio": config.high_std_relative_ratio,
-        "high_p2p_99_relative_ratio": config.high_p2p_99_relative_ratio,
-        "high_std_uv_floor": config.high_std_uv_floor,
-        "high_p2p_99_uv_floor": config.high_p2p_99_uv_floor,
         "auto_detect_removed_electrodes": config.auto_detect_removed_electrodes,
-        "min_bad_cluster_warning_size": config.min_bad_cluster_warning_size,
-        "min_bad_cluster_size": config.min_bad_cluster_size,
-        "spatial_qc_enabled": config.spatial_qc_enabled,
-        "spatial_neighbor_count": config.spatial_neighbor_count,
-        "spatial_min_neighbors": config.spatial_min_neighbors,
-        "spatial_neighbor_distance_factor": config.spatial_neighbor_distance_factor,
-        "spatial_predictability_max_bad_corr": config.spatial_predictability_max_bad_corr,
-        "spatial_predictability_relative_ratio": config.spatial_predictability_relative_ratio,
-        "spatial_predictability_mad_z": config.spatial_predictability_mad_z,
+        **removed_electrode_threshold_payload(config),
     }
     if n_channels == 0:
         return _empty_result(
@@ -635,6 +584,7 @@ def evaluate_raw_channel_qc(
             midline_total=0,
             bad_channels=tuple(str(raw.ch_names[index]) for index in picks),
             channels_to_interpolate=(),
+            manual_removed_channels=(),
             low_variance_channels=tuple(str(raw.ch_names[index]) for index in picks),
             high_amplitude_channels=(),
             spatial_outlier_channels=(),
@@ -672,20 +622,27 @@ def evaluate_raw_channel_qc(
 
     median_std_uv = _robust_median([row[2] for row in channel_stats])
     median_p2p_99_uv = _robust_median([row[3] for row in channel_stats])
+    raw_channel_names = {row[0] for row in channel_stats}
+    manual_removed_channels = [
+        channel
+        for channel in config.manual_removed_electrodes
+        if channel in raw_channel_names and channel in SCALP_CHANNELS
+    ]
 
     low_variance_channels: list[str] = []
-    for channel, _group, std_uv, p2p_99_uv in channel_stats:
-        is_bad = _is_low_variance_removed_channel(
-            std_uv=std_uv,
-            p2p_99_uv=p2p_99_uv,
-            median_std_uv=median_std_uv,
-            median_p2p_99_uv=median_p2p_99_uv,
-            config=config,
-        )
-        if not is_bad:
-            continue
+    if config.removed_electrode_detection_mode != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
+        for channel, _group, std_uv, p2p_99_uv in channel_stats:
+            is_bad = is_low_variance_removed_channel(
+                std_uv=std_uv,
+                p2p_99_uv=p2p_99_uv,
+                median_std_uv=median_std_uv,
+                median_p2p_99_uv=median_p2p_99_uv,
+                calibration=config,
+            )
+            if not is_bad:
+                continue
 
-        low_variance_channels.append(channel)
+            low_variance_channels.append(channel)
 
     high_amplitude_channels: list[str] = []
     if config.auto_detect_removed_electrodes:
@@ -693,12 +650,12 @@ def evaluate_raw_channel_qc(
         for channel, _group, std_uv, p2p_99_uv in channel_stats:
             if channel in low_lookup:
                 continue
-            is_bad = _is_high_amplitude_removed_channel(
+            is_bad = is_high_amplitude_removed_channel(
                 std_uv=std_uv,
                 p2p_99_uv=p2p_99_uv,
                 median_std_uv=median_std_uv,
                 median_p2p_99_uv=median_p2p_99_uv,
-                config=config,
+                calibration=config,
             )
             if is_bad:
                 high_amplitude_channels.append(channel)
@@ -728,7 +685,12 @@ def evaluate_raw_channel_qc(
 
     candidate_channels = list(
         dict.fromkeys(
-            [*low_variance_channels, *high_amplitude_channels, *spatial_outlier_channels]
+            [
+                *manual_removed_channels,
+                *low_variance_channels,
+                *high_amplitude_channels,
+                *spatial_outlier_channels,
+            ]
         )
     )
     left_bad = right_bad = midline_bad = 0
@@ -745,12 +707,25 @@ def evaluate_raw_channel_qc(
     bad_fraction = n_bad / n_channels if n_channels else 0.0
     left_fraction = left_bad / left_total if left_total else 0.0
     right_fraction = right_bad / right_total if right_total else 0.0
-    channels_to_interpolate = (
-        tuple(low_variance_channels) if config.auto_detect_removed_electrodes else ()
+    channels_to_interpolate = tuple(
+        dict.fromkeys(
+            [
+                *manual_removed_channels,
+                *(
+                    low_variance_channels
+                    if config.auto_detect_removed_electrodes
+                    else []
+                ),
+            ]
+        )
     )
 
     cluster_candidates = set(_raw_bads(raw))
-    if config.auto_detect_removed_electrodes:
+    cluster_rules_enabled = (
+        config.auto_detect_removed_electrodes
+        or config.removed_electrode_detection_mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    )
+    if cluster_rules_enabled:
         cluster_candidates.update(candidate_channels)
     clusters = _bad_channel_clusters(raw, sorted(cluster_candidates), config=config)
     largest_cluster = clusters[0] if clusters else ()
@@ -765,13 +740,13 @@ def evaluate_raw_channel_qc(
     if right_total >= config.min_hemisphere_channels and right_fraction >= config.max_hemisphere_bad_fraction:
         triggered.append("right_hemisphere_failure")
     if (
-        config.auto_detect_removed_electrodes
+        cluster_rules_enabled
         and len(largest_cluster) >= config.min_bad_cluster_size
     ):
         triggered.append("bad_channel_cluster")
     warning_rules: list[str] = []
     if (
-        config.auto_detect_removed_electrodes
+        cluster_rules_enabled
         and len(largest_cluster) >= config.min_bad_cluster_warning_size
         and len(largest_cluster) < config.min_bad_cluster_size
     ):
@@ -824,6 +799,7 @@ def evaluate_raw_channel_qc(
         midline_total=midline_total,
         bad_channels=tuple(candidate_channels),
         channels_to_interpolate=channels_to_interpolate,
+        manual_removed_channels=tuple(manual_removed_channels),
         low_variance_channels=tuple(low_variance_channels),
         high_amplitude_channels=tuple(high_amplitude_channels),
         spatial_outlier_channels=tuple(spatial_outlier_channels),

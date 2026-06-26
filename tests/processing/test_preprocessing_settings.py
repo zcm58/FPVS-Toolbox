@@ -10,6 +10,8 @@ def test_defaults_use_expected_bandpass():
     assert normalized["high_pass"] == 0.1
     assert normalized["low_pass"] == 50.0
     assert normalized["auto_detect_removed_electrodes"] is True
+    assert normalized["removed_electrode_detection_mode"] == "auto"
+    assert normalized["manual_removed_electrodes"] == {}
 
 
 def test_inverted_bandpass_raises():
@@ -40,5 +42,26 @@ def test_negative_max_parallel_workers_override_raises():
 def test_auto_detect_removed_electrodes_boolean_aliases():
     normalized = normalize_preprocessing_settings({"detect_removed_electrodes": "false"})
     assert normalized["auto_detect_removed_electrodes"] is False
+    assert normalized["removed_electrode_detection_mode"] == "off"
     assert normalized["detect_removed_electrodes"] is False
     assert normalized["auto_mark_removed_electrodes"] is False
+
+
+def test_manual_removed_electrodes_mode_supersedes_auto_boolean():
+    normalized = normalize_preprocessing_settings(
+        {
+            "auto_detect_removed_electrodes": True,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {
+                "p1": "ft7, P9, oz",
+                "P2": ["POZ", "O2", "O2"],
+            },
+        }
+    )
+
+    assert normalized["auto_detect_removed_electrodes"] is False
+    assert normalized["removed_electrode_detection_mode"] == "manual"
+    assert normalized["manual_removed_electrodes"] == {
+        "p1": ["FT7", "P9", "Oz"],
+        "P2": ["POz", "O2"],
+    }

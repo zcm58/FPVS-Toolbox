@@ -32,6 +32,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
+from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    manual_removed_electrodes_for_pid,
+    normalize_removed_electrode_detection_mode,
+)
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
 from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
@@ -45,7 +50,7 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v6-spatial-raw-qc"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v7-manual-removed-electrode-qc"
 BDF_FIRST_N_CHANNELS = 64
 
 
@@ -56,6 +61,43 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(item) for item in value if str(item).strip()]
     return []
+
+
+def _participant_id_for_file(file_path: Path, settings: Dict[str, object]) -> str:
+    mapping = settings.get("_fpvs_participant_id_by_file")
+    if isinstance(mapping, dict):
+        direct = mapping.get(str(file_path.resolve()))
+        if direct:
+            return str(direct)
+        for raw_path, participant_id in mapping.items():
+            try:
+                if Path(str(raw_path)).resolve() == file_path.resolve():
+                    return str(participant_id)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+    return file_path.stem
+
+
+def _manual_removed_electrodes_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> list[str]:
+    mode = normalize_removed_electrode_detection_mode(
+        settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=settings.get(
+            "auto_detect_removed_electrodes",
+            True,
+        ),
+    )
+    if mode != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
+        return []
+    participant_id = _participant_id_for_file(file_path, settings)
+    return list(
+        manual_removed_electrodes_for_pid(
+            settings.get("manual_removed_electrodes"),
+            participant_id,
+        )
+    )
 
 
 def _worker_log(message: str) -> None:
@@ -263,6 +305,13 @@ def _preproc_cache_payload(
             "auto_detect_removed_electrodes",
             True,
         ),
+        "removed_electrode_detection_mode": settings.get(
+            "removed_electrode_detection_mode",
+        ),
+        "manual_removed_electrodes_for_file": _manual_removed_electrodes_for_file(
+            file_path,
+            settings,
+        ),
     }
     return {
         "version": PREPROC_CACHE_VERSION,
@@ -393,6 +442,9 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_spatial_outlier_channels"] = _string_list(
             metadata.get("raw_qc_spatial_outlier_channels")
         )
+        settings["_fpvs_raw_qc_manual_removed_channels"] = _string_list(
+            metadata.get("raw_qc_manual_removed_channels")
+        )
         settings["_fpvs_raw_qc_warning_rules"] = _string_list(
             metadata.get("raw_qc_warning_rules")
         )
@@ -454,6 +506,9 @@ def _store_preprocessed_cache(
             ),
             "raw_qc_spatial_outlier_channels": _string_list(
                 settings.get("_fpvs_raw_qc_spatial_outlier_channels")
+            ),
+            "raw_qc_manual_removed_channels": _string_list(
+                settings.get("_fpvs_raw_qc_manual_removed_channels")
             ),
             "raw_qc_warning_rules": _string_list(
                 settings.get("_fpvs_raw_qc_warning_rules")
@@ -671,7 +726,15 @@ def _run_full_pipeline_for_file(
             settings["_fpvs_raw_qc_low_variance_channels"] = []
             settings["_fpvs_raw_qc_high_amplitude_channels"] = []
             settings["_fpvs_raw_qc_spatial_outlier_channels"] = []
+            settings["_fpvs_raw_qc_manual_removed_channels"] = []
             settings["_fpvs_raw_qc_warning_rules"] = []
+            settings["_fpvs_participant_id"] = _participant_id_for_file(
+                file_path,
+                settings,
+            )
+            settings["_fpvs_manual_removed_electrodes"] = (
+                _manual_removed_electrodes_for_file(file_path, settings)
+            )
             raw_qc_result = evaluate_raw_channel_qc(
                 raw,
                 settings,
@@ -733,6 +796,9 @@ def _run_full_pipeline_for_file(
             settings["_fpvs_raw_qc_spatial_outlier_channels"] = list(
                 raw_qc_result.spatial_outlier_channels
             )
+            settings["_fpvs_raw_qc_manual_removed_channels"] = list(
+                raw_qc_result.manual_removed_channels
+            )
             settings["_fpvs_raw_qc_warning_rules"] = list(raw_qc_result.warning_rules)
             if raw_qc_bads:
                 existing_bads = {str(channel) for channel in raw.info.get("bads", [])}
@@ -744,12 +810,12 @@ def _run_full_pipeline_for_file(
                 if new_bads:
                     raw.info["bads"].extend(new_bads)
                 logger.info(
-                    "raw_channel_qc_auto_marked file=%s channels=%s",
+                    "raw_channel_qc_marked file=%s channels=%s",
                     file_path.name,
                     raw_qc_bads,
                 )
                 crop_logger.info(
-                    "file=%s stage=raw_qc auto_marked_channels=%s",
+                    "file=%s stage=raw_qc marked_channels=%s",
                     file_path.name,
                     ",".join(raw_qc_bads),
                 )

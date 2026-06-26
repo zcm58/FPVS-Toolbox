@@ -29,6 +29,7 @@ Activate the repo environment before Python commands:
 | PySide6 GUI, widgets, menus, workers, processing orchestration, status UX | `pyside6-gui-cleanup` | `docs/agent/architecture/gui.md`; `docs/agent/architecture/workers-threading.md` |
 | Main App package layout, ownership, folder naming, retired package boundaries | `legacy-boundary-review` | `docs/agent/architecture/main-app-target-layout.md`; `docs/agent/architecture/legacy-boundaries.md` |
 | EEG preprocessing ownership, entry points, or processing order | `legacy-boundary-review` + `pyside6-gui-cleanup` | `docs/agent/architecture/preprocessing-contract.md` |
+| Removed-electrode auto-detection thresholds, QC calibration, or accuracy testing | `legacy-boundary-review` | `docs/agent/quality/removed-electrode-detection-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
 | BDF loading, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `docs/agent/architecture/eeg-loading-contract.md` |
 | Post-processing, FFT crop, or Excel export behavior | `legacy-boundary-review` | `docs/agent/architecture/post-processing-export-contract.md`; `docs/agent/architecture/fft-crop-method.md` |
 | Project manifests, project roots, file dialogs, exports, imports | `project-path-audit` | `docs/agent/architecture/project-io.md` |
@@ -76,6 +77,7 @@ outside the repo-local skill set; they do not override `AGENTS.md`,
 - Main window or PySide6 layout: update focused pytest-qt coverage when useful,
   but do not run pytest-qt/offscreen locally.
 - Project I/O: `python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q`
+- Removed-electrode QC calibration: `python -m pytest tests/processing/test_removed_electrode_detection.py tests/processing/test_raw_channel_qc.py -q`
 - Plot Generator: run the nearest `tests/plot_generator/test_*` file first;
   use `python -m pytest tests/plot_generator -q` after worker, rendering, or
   output changes.

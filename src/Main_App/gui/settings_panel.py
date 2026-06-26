@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict
 
 import config
@@ -39,23 +40,19 @@ from Main_App.gui.components import (
     make_form_layout,
 )
 from Main_App.gui.icons import sidebar_icon
+from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
-
-
-REMOVED_ELECTRODE_DETECTION_INFO_TEXT = (
-    "In the development of FPVS Toolbox, this automatic detection method was "
-    "designed to identify electrodes that needed to be physically removed prior "
-    "to the start of a recording. In our lab, we were dealing with electrodes "
-    "that would sometimes cause a CMS/DRL error, and I calibrated this detection "
-    "method using real experimental data. This method was over 99% specific in "
-    "removing the correct channels in our training data, but this method is "
-    "intentionally very conservative and prioritizes avoiding false positive "
-    "electrode removals. As a result, this method only detects around 60% of "
-    "electrodes that were actually physically unplugged prior to recording, but "
-    "when it does identify an electrode, it is correct 99.7% of the time."
+from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    REMOVED_ELECTRODE_DETECTION_MODE_OFF,
+    normalize_manual_removed_electrodes_map,
+    normalize_removed_electrode_detection_mode,
 )
 
 
@@ -426,10 +423,16 @@ class SettingsDialog(QDialog):
         qc_form = make_form_layout()
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
-            auto_detect_default = bool(
-                qc_preproc.get(
+            removed_detection_mode = normalize_removed_electrode_detection_mode(
+                qc_preproc.get("removed_electrode_detection_mode"),
+                auto_detect_removed_electrodes=qc_preproc.get(
                     "auto_detect_removed_electrodes",
                     PREPROCESSING_DEFAULTS["auto_detect_removed_electrodes"],
+                ),
+            )
+            self._manual_removed_electrodes_by_pid = (
+                normalize_manual_removed_electrodes_map(
+                    qc_preproc.get("manual_removed_electrodes", {})
                 )
             )
         else:
@@ -441,22 +444,46 @@ class SettingsDialog(QDialog):
                 ).lower()
                 == "true"
             )
+            removed_detection_mode = normalize_removed_electrode_detection_mode(
+                self.manager.get(
+                    "preprocessing",
+                    "removed_electrode_detection_mode",
+                    "",
+                ),
+                auto_detect_removed_electrodes=auto_detect_default,
+            )
+            self._manual_removed_electrodes_by_pid = (
+                normalize_manual_removed_electrodes_map(
+                    self.manager.get(
+                        "preprocessing",
+                        "manual_removed_electrodes",
+                        "{}",
+                    )
+                )
+            )
         self.removed_electrode_detection_mode_combo = QComboBox(qc_group)
         self.removed_electrode_detection_mode_combo.setObjectName(
             "settings_removed_electrode_detection_mode"
         )
-        self.removed_electrode_detection_mode_combo.addItem("Off", False)
+        self.removed_electrode_detection_mode_combo.addItem(
+            "Off",
+            REMOVED_ELECTRODE_DETECTION_MODE_OFF,
+        )
         self.removed_electrode_detection_mode_combo.addItem(
             "Conservative auto-detect",
-            True,
+            REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
         )
-        self.removed_electrode_detection_mode_combo.setCurrentIndex(
-            1 if auto_detect_default else 0
+        self.removed_electrode_detection_mode_combo.addItem(
+            "Manual list",
+            REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
         )
+        mode_index = self.removed_electrode_detection_mode_combo.findData(
+            removed_detection_mode
+        )
+        self.removed_electrode_detection_mode_combo.setCurrentIndex(max(0, mode_index))
         self.removed_electrode_detection_mode_combo.setToolTip(
-            "Choose whether raw-channel QC should automatically mark "
-            "high-confidence removed-electrode candidates. Manual removed-electrode "
-            "metadata will take precedence when that mode is added."
+            "Choose whether raw-channel QC should mark high-confidence automatic "
+            "candidates or use manual participant-level removed-electrode metadata."
         )
 
         self.removed_electrode_detection_info_button = QToolButton(qc_group)
@@ -473,6 +500,20 @@ class SettingsDialog(QDialog):
         self.removed_electrode_detection_info_button.clicked.connect(
             self._show_removed_electrode_detection_info
         )
+        self.manual_removed_electrodes_button = make_action_button(
+            "Edit",
+            compact=True,
+            parent=qc_group,
+        )
+        self.manual_removed_electrodes_button.setObjectName(
+            "settings_manual_removed_electrodes_edit"
+        )
+        self.manual_removed_electrodes_button.setToolTip(
+            "Edit participant-level manually removed electrodes"
+        )
+        self.manual_removed_electrodes_button.clicked.connect(
+            self._edit_manual_removed_electrodes
+        )
 
         removed_detection_row = QWidget(qc_group)
         removed_detection_row.setObjectName("settings_removed_electrode_detection_row")
@@ -480,6 +521,7 @@ class SettingsDialog(QDialog):
         removed_detection_layout.setContentsMargins(0, 0, 0, 0)
         removed_detection_layout.setSpacing(8)
         removed_detection_layout.addWidget(self.removed_electrode_detection_mode_combo, 1)
+        removed_detection_layout.addWidget(self.manual_removed_electrodes_button)
         removed_detection_layout.addWidget(self.removed_electrode_detection_info_button)
 
         # Legacy compatibility for older helpers/tests that read the prior
@@ -488,14 +530,18 @@ class SettingsDialog(QDialog):
         self.auto_detect_removed_electrodes_check.setObjectName(
             "settings_auto_detect_removed_electrodes"
         )
-        self.auto_detect_removed_electrodes_check.setChecked(auto_detect_default)
+        self.auto_detect_removed_electrodes_check.setChecked(
+            removed_detection_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        )
         self.auto_detect_removed_electrodes_check.hide()
         self.auto_detect_removed_electrodes_check.toggled.connect(
             self._set_removed_electrode_detection_enabled
         )
         self.removed_electrode_detection_mode_combo.currentIndexChanged.connect(
-            self._sync_removed_electrode_detection_checkbox
+            self._on_removed_electrode_detection_mode_changed
         )
+        self._sync_removed_electrode_detection_checkbox()
+        self._update_manual_removed_electrodes_button()
         qc_form.addRow(
             QLabel("Removed-electrode QC mode", qc_group),
             removed_detection_row,
@@ -509,10 +555,24 @@ class SettingsDialog(QDialog):
         tabs.addTab(tab, "Advanced")
 
     def _removed_electrode_detection_enabled(self) -> bool:
-        return bool(self.removed_electrode_detection_mode_combo.currentData())
+        return (
+            self._removed_electrode_detection_mode()
+            == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        )
+
+    def _removed_electrode_detection_mode(self) -> str:
+        return normalize_removed_electrode_detection_mode(
+            self.removed_electrode_detection_mode_combo.currentData(),
+            auto_detect_removed_electrodes=True,
+        )
 
     def _set_removed_electrode_detection_enabled(self, enabled: bool) -> None:
-        target_index = self.removed_electrode_detection_mode_combo.findData(bool(enabled))
+        mode = (
+            REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+            if enabled
+            else REMOVED_ELECTRODE_DETECTION_MODE_OFF
+        )
+        target_index = self.removed_electrode_detection_mode_combo.findData(mode)
         if target_index >= 0 and target_index != self.removed_electrode_detection_mode_combo.currentIndex():
             self.removed_electrode_detection_mode_combo.setCurrentIndex(target_index)
 
@@ -525,6 +585,50 @@ class SettingsDialog(QDialog):
             self.auto_detect_removed_electrodes_check.setChecked(enabled)
         finally:
             self.auto_detect_removed_electrodes_check.blockSignals(False)
+
+    def _on_removed_electrode_detection_mode_changed(self) -> None:
+        self._sync_removed_electrode_detection_checkbox()
+        self._update_manual_removed_electrodes_button()
+        if self._removed_electrode_detection_mode() == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
+            self._edit_manual_removed_electrodes()
+
+    def _update_manual_removed_electrodes_button(self) -> None:
+        self.manual_removed_electrodes_button.setEnabled(
+            self._removed_electrode_detection_mode()
+            == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        )
+
+    def _manual_removed_electrode_participant_ids(self) -> list[str]:
+        participant_ids: list[str] = []
+        if self.project is None:
+            return participant_ids
+        participants = getattr(self.project, "participants", {}) or {}
+        if isinstance(participants, dict):
+            participant_ids.extend(str(pid) for pid in participants if str(pid).strip())
+        try:
+            participant_ids.extend(
+                info.subject_id for info in prepare_batch_file_infos(self.project)
+            )
+        except (OSError, RuntimeError, ValueError):
+            pass
+        seen: set[str] = set()
+        unique: list[str] = []
+        for pid in participant_ids:
+            key = pid.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(pid)
+        return unique
+
+    def _edit_manual_removed_electrodes(self) -> None:
+        dialog = ManualRemovedElectrodesDialog(
+            self._manual_removed_electrode_participant_ids(),
+            self._manual_removed_electrodes_by_pid,
+            self,
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self._manual_removed_electrodes_by_pid = dialog.manual_removed_electrodes()
 
     def _show_removed_electrode_detection_info(self) -> None:
         QMessageBox.information(
@@ -750,6 +854,16 @@ class SettingsDialog(QDialog):
                 "auto_detect_removed_electrodes",
                 str(bool(validated_preproc.get("auto_detect_removed_electrodes"))),
             )
+            self.manager.set(
+                "preprocessing",
+                "removed_electrode_detection_mode",
+                str(validated_preproc.get("removed_electrode_detection_mode")),
+            )
+            self.manager.set(
+                "preprocessing",
+                "manual_removed_electrodes",
+                json.dumps(validated_preproc.get("manual_removed_electrodes", {})),
+            )
         else:
             try:
                 normalized = self.project.update_preprocessing(validated_preproc)
@@ -839,7 +953,12 @@ class SettingsDialog(QDialog):
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
-        values["auto_detect_removed_electrodes"] = self._removed_electrode_detection_enabled()
+        mode = self._removed_electrode_detection_mode()
+        values["removed_electrode_detection_mode"] = mode
+        values["auto_detect_removed_electrodes"] = (
+            mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        )
+        values["manual_removed_electrodes"] = dict(self._manual_removed_electrodes_by_pid)
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values
 

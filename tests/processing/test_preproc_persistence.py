@@ -49,6 +49,8 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["max_chan_idx_keep"] == 32
     assert normalized["max_bad_chans"] == 4
     assert normalized["auto_detect_removed_electrodes"] is False
+    assert normalized["removed_electrode_detection_mode"] == "off"
+    assert normalized["manual_removed_electrodes"] == {}
     assert "save_preprocessed_fif" not in normalized
     assert normalized["stim_channel"] == "Status"
 
@@ -65,6 +67,8 @@ def test_normalization_and_roundtrip(tmp_path):
             "max_chan_idx_keep": 64,
             "max_bad_chans": 8,
             "auto_detect_removed_electrodes": True,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"P01": ["P9"]},
             "stim_channel": "Status",
         }
     )
@@ -74,13 +78,16 @@ def test_normalization_and_roundtrip(tmp_path):
     stored_keys = set(saved["preprocessing"].keys())
     assert stored_keys == set(PREPROCESSING_CANONICAL_KEYS)
     assert saved["preprocessing"]["downsample"] == 256
-    assert saved["preprocessing"]["auto_detect_removed_electrodes"] is True
+    assert saved["preprocessing"]["auto_detect_removed_electrodes"] is False
+    assert saved["preprocessing"]["removed_electrode_detection_mode"] == "manual"
+    assert saved["preprocessing"]["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert "downsample_rate" not in saved["preprocessing"]
 
     fresh = Project.load(tmp_path)
     assert fresh.preprocessing["high_pass"] == 0.5
     assert fresh.preprocessing["low_pass"] == 30.0
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
+    assert fresh.preprocessing["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert "save_preprocessed_fif" not in fresh.preprocessing
 
 

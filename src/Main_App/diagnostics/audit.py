@@ -124,6 +124,9 @@ def end_preproc_audit(
     raw_qc_spatial_outlier_channels = _string_list(
         params.get("_fpvs_raw_qc_spatial_outlier_channels")
     )
+    raw_qc_manual_removed_channels = _string_list(
+        params.get("_fpvs_raw_qc_manual_removed_channels")
+    )
     raw_qc_warning_rules = _string_list(params.get("_fpvs_raw_qc_warning_rules"))
     kurtosis_bad_channels = _string_list(params.get("_fpvs_kurtosis_bad_channels"))
     interpolated_channels = _string_list(params.get("_fpvs_interpolated_channels"))
@@ -149,6 +152,7 @@ def end_preproc_audit(
         "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
         "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
         "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+        "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
         "raw_qc_warning_rules": raw_qc_warning_rules,
         "kurtosis_bad_channels": kurtosis_bad_channels,
         "interpolated_channels": interpolated_channels,

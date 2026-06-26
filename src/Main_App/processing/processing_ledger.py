@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v5_spatial_raw_qc"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v6_manual_removed_electrode_qc"
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
@@ -614,6 +614,9 @@ def record_processing_results(
         raw_qc_spatial_outlier_channels = _string_list(
             audit.get("raw_qc_spatial_outlier_channels")
         )
+        raw_qc_manual_removed_channels = _string_list(
+            audit.get("raw_qc_manual_removed_channels")
+        )
         raw_qc_warning_rules = _string_list(audit.get("raw_qc_warning_rules"))
         kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
         interpolated_channels = _string_list(
@@ -634,6 +637,7 @@ def record_processing_results(
             "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
             "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
             "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+            "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
             "raw_qc_warning_rules": raw_qc_warning_rules,
             "kurtosis_bad_channels": kurtosis_bad_channels,
             "interpolated_channels": interpolated_channels,
@@ -671,6 +675,9 @@ def record_processing_results(
             raw_qc_spatial_outlier_channels = _string_list(
                 qc_payload.get("spatial_outlier_channels")
             )
+            raw_qc_manual_removed_channels = _string_list(
+                qc_payload.get("manual_removed_channels")
+            )
             raw_qc_warning_rules = _string_list(qc_payload.get("warning_rules"))
             n_rejected = _int_or_default(
                 qc_payload.get("n_bad_channels"),
@@ -696,6 +703,7 @@ def record_processing_results(
                 "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
                 "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
                 "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+                "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
                 "raw_qc_warning_rules": raw_qc_warning_rules,
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
@@ -719,6 +727,9 @@ def record_processing_results(
             )
             raw_qc_spatial_outlier_channels = _string_list(
                 audit.get("raw_qc_spatial_outlier_channels")
+            )
+            raw_qc_manual_removed_channels = _string_list(
+                audit.get("raw_qc_manual_removed_channels")
             )
             raw_qc_warning_rules = _string_list(audit.get("raw_qc_warning_rules"))
             kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
@@ -758,6 +769,7 @@ def record_processing_results(
                 "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
                 "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
                 "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+                "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
                 "raw_qc_warning_rules": raw_qc_warning_rules,
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
@@ -780,6 +792,7 @@ def record_processing_results(
             "raw_qc_low_variance_channels": [],
             "raw_qc_high_amplitude_channels": [],
             "raw_qc_spatial_outlier_channels": [],
+            "raw_qc_manual_removed_channels": [],
             "raw_qc_warning_rules": [],
             "kurtosis_bad_channels": [],
             "interpolated_channels": [],

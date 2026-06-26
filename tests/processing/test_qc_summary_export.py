@@ -65,14 +65,15 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "status": "ok",
             "file": str(infos[0].path),
             "audit": {
-                "n_rejected": 3,
+                "n_rejected": 4,
                 "raw_qc_bad_channels": ["P9"],
+                "raw_qc_manual_removed_channels": ["FT7"],
                 "raw_qc_low_variance_channels": ["P9"],
                 "raw_qc_high_amplitude_channels": ["FT8"],
                 "raw_qc_spatial_outlier_channels": ["FT7"],
                 "raw_qc_warning_rules": ["possible_bad_channel_cluster"],
                 "kurtosis_bad_channels": ["P1", "P3"],
-                "interpolated_channels": ["P9", "P1", "P3"],
+                "interpolated_channels": ["FT7", "P9", "P1", "P3"],
             },
         },
         {
@@ -100,18 +101,20 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
     assert rows == [
         {
             "PID": "P01",
+            "Manually Removed Electrodes": "FT7",
             "Auto-Detected Removed Electrodes (Low SD)": "P9",
             "Flagged Removed-Electrode Candidates (High Amplitude)": "FT8",
             "Flagged Removed-Electrode Candidates (Spatial Consistency)": "FT7",
             "Kurtosis-Rejected Electrodes": "P1, P3",
-            "Electrodes Interpolated": "P9, P1, P3",
-            "Total Number of Electrodes removed/rejected": 3,
+            "Electrodes Interpolated": "FT7, P9, P1, P3",
+            "Total Number of Electrodes removed/rejected": 4,
             "Raw QC Warnings": "possible_bad_channel_cluster",
             "Missing Conditions": "None",
             "Included in Final Set": "Included",
         },
         {
             "PID": "P02",
+            "Manually Removed Electrodes": "None",
             "Auto-Detected Removed Electrodes (Low SD)": "None",
             "Flagged Removed-Electrode Candidates (High Amplitude)": "None",
             "Flagged Removed-Electrode Candidates (Spatial Consistency)": "None",
@@ -138,7 +141,7 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
         for cell in row:
             assert cell.alignment.horizontal == "center"
             assert cell.alignment.vertical == "center"
-    assert worksheet.column_dimensions["B"].width >= len(
+    assert worksheet.column_dimensions["C"].width >= len(
         "Auto-Detected Removed Electrodes (Low SD)"
     )
 
@@ -155,10 +158,11 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
                 "status": "ok",
                 "file": str(infos[0].path),
                 "audit": {
-                    "n_rejected": 2,
+                    "n_rejected": 3,
                     "raw_qc_bad_channels": ["P9"],
+                    "raw_qc_manual_removed_channels": ["FT7"],
                     "kurtosis_bad_channels": ["Oz"],
-                    "interpolated_channels": ["P9", "Oz"],
+                    "interpolated_channels": ["FT7", "P9", "Oz"],
                 },
             }
         ],
@@ -171,12 +175,13 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
     rows = build_processing_qc_rows(project, plan, [])
     assert rows[0]["Included in Final Set"] == "Included"
     assert rows[0]["Missing Conditions"] == "None"
+    assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
     assert rows[0]["Kurtosis-Rejected Electrodes"] == "Oz"
-    assert rows[0]["Electrodes Interpolated"] == "P9, Oz"
-    assert rows[0]["Total Number of Electrodes removed/rejected"] == 2
+    assert rows[0]["Electrodes Interpolated"] == "FT7, P9, Oz"
+    assert rows[0]["Total Number of Electrodes removed/rejected"] == 3
 
     ledger = json.loads(
         (project.project_root / ".fpvs_processing" / "processing_ledger.json").read_text(
@@ -184,7 +189,8 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
         )
     )
     assert ledger["entries"]["P01"]["raw_qc_bad_channels"] == ["P9"]
-    assert ledger["entries"]["P01"]["interpolated_channels"] == ["P9", "Oz"]
+    assert ledger["entries"]["P01"]["raw_qc_manual_removed_channels"] == ["FT7"]
+    assert ledger["entries"]["P01"]["interpolated_channels"] == ["FT7", "P9", "Oz"]
 
 
 def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Path) -> None:
@@ -200,10 +206,11 @@ def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Pat
             "status": "ok",
             "file": str(infos[0].path),
             "audit": {
-                "n_rejected": 2,
+                "n_rejected": 3,
                 "raw_qc_bad_channels": ["P9"],
+                "raw_qc_manual_removed_channels": ["FT7"],
                 "kurtosis_bad_channels": ["P8"],
-                "interpolated_channels": ["P9", "P8"],
+                "interpolated_channels": ["FT7", "P9", "P8"],
             },
         }
     ]
@@ -221,6 +228,7 @@ def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Pat
 
     assert rows[0]["Missing Conditions"] == "Condition B"
     assert rows[0]["Included in Final Set"] == "Included (partial conditions)"
+    assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
@@ -264,10 +272,11 @@ def test_processing_qc_summary_uses_matching_cache_for_legacy_failed_entry(tmp_p
                     "source_size": raw_stat.st_size,
                     "source_mtime_ns": raw_stat.st_mtime_ns,
                 },
-                "raw_qc_bad_channels": ["P9"],
-                "kurtosis_bad_channels": ["P8"],
-                "interpolated_channels": ["P9", "P8"],
-                "n_rejected": 2,
+                    "raw_qc_bad_channels": ["P9"],
+                    "raw_qc_manual_removed_channels": ["FT7"],
+                    "kurtosis_bad_channels": ["P8"],
+                    "interpolated_channels": ["FT7", "P9", "P8"],
+                    "n_rejected": 3,
             }
         ),
         encoding="utf-8",
@@ -277,12 +286,13 @@ def test_processing_qc_summary_uses_matching_cache_for_legacy_failed_entry(tmp_p
 
     assert rows[0]["Included in Final Set"] == "Excluded"
     assert rows[0]["Missing Conditions"] == "None"
+    assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
     assert rows[0]["Kurtosis-Rejected Electrodes"] == "P8"
-    assert rows[0]["Electrodes Interpolated"] == "P9, P8"
-    assert rows[0]["Total Number of Electrodes removed/rejected"] == 2
+    assert rows[0]["Electrodes Interpolated"] == "FT7, P9, P8"
+    assert rows[0]["Total Number of Electrodes removed/rejected"] == 3
 
 
 def test_processing_qc_summary_treats_legacy_missing_condition_as_included(

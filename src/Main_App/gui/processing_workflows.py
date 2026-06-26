@@ -627,6 +627,11 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         )
         if group_folder_by_file:
             settings["_fpvs_output_group_by_file"] = group_folder_by_file
+        if raw_file_infos:
+            settings["_fpvs_participant_id_by_file"] = {
+                str(info.path.resolve()): info.subject_id
+                for info in raw_file_infos
+            }
 
         host._mp = MpRunnerBridge(host)
         host._mp.validated_fingerprint = getattr(

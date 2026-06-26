@@ -227,6 +227,29 @@ def test_raw_channel_qc_toggle_disables_spatial_outlier_detection() -> None:
     assert result.channels_to_interpolate == ()
 
 
+def test_raw_channel_qc_manual_mode_supersedes_auto_detection() -> None:
+    raw = _raw_with_clustered_removed_channels(["P9"])
+
+    result = evaluate_raw_channel_qc(
+        raw,
+        {
+            "stim_channel": "Status",
+            "max_bad_chans": 20,
+            "auto_detect_removed_electrodes": True,
+            "removed_electrode_detection_mode": "manual",
+            "_fpvs_manual_removed_electrodes": ["FT8"],
+        },
+        filename="p03.bdf",
+    )
+
+    assert result.excluded is False
+    assert result.manual_removed_channels == ("FT8",)
+    assert result.low_variance_channels == ()
+    assert result.bad_channels == ("FT8",)
+    assert result.channels_to_interpolate == ("FT8",)
+    assert result.triggered_rules == ()
+
+
 def test_raw_channel_qc_warns_for_four_channel_bad_cluster() -> None:
     raw = _raw_with_clustered_removed_channels(["F7", "FT7", "FC5", "T7"])
 

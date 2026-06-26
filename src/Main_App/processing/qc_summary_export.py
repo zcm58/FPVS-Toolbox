@@ -22,6 +22,7 @@ QC_SUMMARY_SHEET = "Participant QC"
 QUALITY_CHECK_FOLDER = "Quality Check"
 QC_SUMMARY_HEADERS = (
     "PID",
+    "Manually Removed Electrodes",
     "Auto-Detected Removed Electrodes (Low SD)",
     "Flagged Removed-Electrode Candidates (High Amplitude)",
     "Flagged Removed-Electrode Candidates (Spatial Consistency)",
@@ -92,6 +93,19 @@ def _raw_qc_low_variance_channels_from_result(
     return (
         _string_list(audit.get("raw_qc_low_variance_channels"))
         or _string_list(raw_qc.get("low_variance_channels"))
+    )
+
+
+def _raw_qc_manual_removed_channels_from_result(
+    result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return (
+        _string_list(audit.get("raw_qc_manual_removed_channels"))
+        or _string_list(raw_qc.get("manual_removed_channels"))
     )
 
 
@@ -306,6 +320,13 @@ def build_processing_qc_rows(
         ) or _string_list(
             cache_entry.get("raw_qc_low_variance_channels")
         )
+        raw_qc_manual_removed_channels = _raw_qc_manual_removed_channels_from_result(
+            result
+        ) or _string_list(
+            entry.get("raw_qc_manual_removed_channels")
+        ) or _string_list(
+            cache_entry.get("raw_qc_manual_removed_channels")
+        )
         raw_qc_high_amplitude_channels = _raw_qc_high_amplitude_channels_from_result(
             result
         ) or _string_list(
@@ -332,6 +353,7 @@ def build_processing_qc_rows(
         )
         if not raw_qc_channels:
             raw_qc_channels = _unique_ordered(
+                raw_qc_manual_removed_channels,
                 raw_qc_low_variance_channels,
                 raw_qc_high_amplitude_channels,
                 raw_qc_spatial_outlier_channels,
@@ -342,7 +364,14 @@ def build_processing_qc_rows(
             and not raw_qc_high_amplitude_channels
             and not raw_qc_spatial_outlier_channels
         ):
-            raw_qc_low_variance_channels = list(raw_qc_channels)
+            manual_lookup = {
+                channel.casefold() for channel in raw_qc_manual_removed_channels
+            }
+            raw_qc_low_variance_channels = [
+                channel
+                for channel in raw_qc_channels
+                if channel.casefold() not in manual_lookup
+            ]
         kurtosis_channels = _kurtosis_channels_from_result(result) or _string_list(
             entry.get("kurtosis_bad_channels")
         ) or _string_list(
@@ -363,7 +392,14 @@ def build_processing_qc_rows(
         fallback_count = max(
             _int_or_default(entry.get("n_rejected"), 0),
             _int_or_default(cache_entry.get("n_rejected"), 0),
-            len(_unique_ordered(raw_qc_channels, kurtosis_channels, interpolated_channels)),
+            len(
+                _unique_ordered(
+                    raw_qc_channels,
+                    raw_qc_manual_removed_channels,
+                    kurtosis_channels,
+                    interpolated_channels,
+                )
+            ),
         )
         count = _count_from_result(
             result,
@@ -377,6 +413,9 @@ def build_processing_qc_rows(
         rows.append(
             {
                 "PID": state.participant_id,
+                "Manually Removed Electrodes": _join_channels(
+                    raw_qc_manual_removed_channels
+                ),
                 "Auto-Detected Removed Electrodes (Low SD)": _join_channels(
                     raw_qc_low_variance_channels
                 ),

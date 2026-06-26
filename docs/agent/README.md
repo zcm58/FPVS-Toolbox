@@ -19,6 +19,8 @@ Command examples that use `python` assume that environment is active.
 - `product-specs/`: durable product behavior and workflow specifications.
 - `quality/`: test-selection and verification-gate guidance.
 - `quality/figure-generation.md`: publication figure output, DPI, typography, and renderer-boundary standard.
+- `quality/removed-electrode-detection-calibration.md`: calibration and
+  accuracy-testing guide for conservative removed-electrode auto QC.
 - `references/`: external or copied reference material useful to agents.
 - `reviews/`: pre-ship and review checklists.
 

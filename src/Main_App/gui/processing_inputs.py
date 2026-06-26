@@ -9,6 +9,7 @@ from typing import Any
 
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QDialog,
     QFileDialog,
     QLabel,
     QLineEdit,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 
 import config
 from Main_App.Shared.file_filters import is_bdf_file
+from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.participant_review import review_participants_for_processing
 from Main_App.processing.processing_controller import (
     participant_review_rows,
@@ -27,6 +29,10 @@ from Main_App.processing.processing_controller import (
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
+)
+from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    normalize_manual_removed_electrodes_map,
 )
 from Main_App.gui.project_workflows import (
     WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT,
@@ -137,6 +143,8 @@ def validate_inputs(host: Any) -> bool:
             logger.exception("Failed to save participant review updates.")
             QMessageBox.critical(host, "Project Save Error", str(exc))
             return False
+    if not _ensure_manual_removed_electrodes_reviewed(host, raw_file_infos, params):
+        return False
     host._processing_raw_file_infos = list(raw_file_infos)
 
     debug_enabled = bool(host.settings.debug_enabled()) if hasattr(host, "settings") else False
@@ -157,6 +165,8 @@ def validate_inputs(host: Any) -> bool:
             "max_idx_keep",
             "max_bad_chans",
             "auto_detect_removed_electrodes",
+            "removed_electrode_detection_mode",
+            "manual_removed_electrodes",
         )
         for opt in preproc_options:
             if host.settings.config.has_option("preprocessing", opt):
@@ -178,6 +188,8 @@ def validate_inputs(host: Any) -> bool:
                 "max_idx_keep",
                 "max_bad_chans",
                 "auto_detect_removed_electrodes",
+                "removed_electrode_detection_mode",
+                "manual_removed_electrodes",
             )
             dialog_snapshot = {
                 key: edit.text()
@@ -227,6 +239,78 @@ def validate_inputs(host: Any) -> bool:
         f"Zreject={rz}, ref=({r1},{r2}), epoch=[{ep[0]}, {ep[1]}], stim='{stim}', "
         f"events={len(params.get('event_id_map', {}))}"
     )
+    return True
+
+
+def _ensure_manual_removed_electrodes_reviewed(
+    host: Any,
+    raw_file_infos: list[Any],
+    params: dict[str, Any],
+) -> bool:
+    if params.get("removed_electrode_detection_mode") != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
+        return True
+    if not raw_file_infos:
+        return True
+
+    manual_map = normalize_manual_removed_electrodes_map(
+        params.get("manual_removed_electrodes")
+    )
+    reviewed = {pid.casefold() for pid in manual_map}
+    missing = [
+        str(info.subject_id).strip()
+        for info in raw_file_infos
+        if str(info.subject_id).strip()
+        and str(info.subject_id).strip().casefold() not in reviewed
+    ]
+    if not missing:
+        return True
+
+    logger.info(
+        "manual_removed_electrodes_review_required",
+        extra={
+            "project_root": str(getattr(host.currentProject, "project_root", "")),
+            "missing_participant_ids": list(missing),
+        },
+    )
+    dialog = ManualRemovedElectrodesDialog(
+        [str(info.subject_id) for info in raw_file_infos],
+        manual_map,
+        host,
+    )
+    if dialog.exec() != QDialog.Accepted:
+        host.log("Manual removed-electrode review cancelled.")
+        return False
+
+    updated_map = normalize_manual_removed_electrodes_map(
+        dialog.manual_removed_electrodes()
+    )
+    updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
+    updated_preproc["removed_electrode_detection_mode"] = (
+        REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    )
+    updated_preproc["manual_removed_electrodes"] = updated_map
+    try:
+        normalized = host.currentProject.update_preprocessing(updated_preproc)
+        host.currentProject.save()
+    except ValueError as exc:
+        QMessageBox.warning(host, "Invalid Manual Removed Electrodes", str(exc))
+        return False
+    except OSError as exc:
+        logger.exception("Failed to save manual removed-electrode settings.")
+        QMessageBox.critical(host, "Project Save Error", str(exc))
+        return False
+
+    params["manual_removed_electrodes"] = dict(
+        normalized.get("manual_removed_electrodes") or {}
+    )
+    params["removed_electrode_detection_mode"] = normalized.get(
+        "removed_electrode_detection_mode"
+    )
+    params["auto_detect_removed_electrodes"] = bool(
+        normalized.get("auto_detect_removed_electrodes")
+    )
+    host.validated_params = params
+    host.log("Manual removed-electrode list reviewed for current BDF pool.")
     return True
 
 
@@ -322,6 +406,12 @@ def build_validated_params(host: Any) -> dict | None:
         "max_bad_channels_alert_thresh": int(normalized.get("max_bad_chans")),
         "auto_detect_removed_electrodes": bool(
             normalized.get("auto_detect_removed_electrodes")
+        ),
+        "removed_electrode_detection_mode": normalized.get(
+            "removed_electrode_detection_mode"
+        ),
+        "manual_removed_electrodes": dict(
+            normalized.get("manual_removed_electrodes") or {}
         ),
         "epoch_start": epoch_start,
         "epoch_end": epoch_end,

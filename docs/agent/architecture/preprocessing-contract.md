@@ -80,14 +80,15 @@ export, post-audit, and cleanup when those stages run. The returned per-file
 result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
-The preprocessed Raw cache version is `preprocessed-raw-v6-spatial-raw-qc`.
+The preprocessed Raw cache version is
+`preprocessed-raw-v7-manual-removed-electrode-qc`.
 The project processing-ledger and Stats group-harmonic cache processing
-fingerprints use `processing_fingerprint_v5_spatial_raw_qc`. The raw
-channel-health QC threshold and removed-electrode auto-detection toggle are part
-of the cache payload so changes to those settings invalidate cached
-preprocessed Raw files. The v6 cache metadata also persists raw-QC,
-kurtosis, and interpolated bad-channel names so cache-hit runs can still produce
-participant QC summaries.
+fingerprints use `processing_fingerprint_v6_manual_removed_electrode_qc`. The
+raw channel-health QC threshold, removed-electrode QC mode, and per-file manual
+removed-electrode list are part of the cache payload so changes to those
+settings invalidate cached preprocessed Raw files. The v7 cache metadata also
+persists raw-QC, manual removed-electrode, kurtosis, and interpolated
+bad-channel names so cache-hit runs can still produce participant QC summaries.
 
 ## Raw QC Hard Exclusions
 
@@ -95,9 +96,19 @@ participant QC summaries.
 removed-electrode detection and hard exclusions for raw channel-health failures.
 It runs after a BDF is loaded and before `begin_preproc_audit` so interpolation
 cannot hide a dead or disconnected channel cluster.
+The calibration surface for automatic removed-electrode detection lives in
+`src/Main_App/processing/removed_electrode_detection.py`. Keep threshold
+constants, user-facing method wording, and low-variance, high-amplitude, and
+spatial-predictability decision rules there so future training-data updates have
+one obvious adjustment point. Use
+`docs/agent/quality/removed-electrode-detection-calibration.md` before changing
+those defaults.
 
-The project preprocessing setting `auto_detect_removed_electrodes` defaults to
-`True` and is exposed in Settings > Advanced > Processing QC. When enabled,
+The project preprocessing setting `removed_electrode_detection_mode` defaults
+to `auto` and is exposed in Settings > Advanced > Processing QC as Off,
+Conservative auto-detect, or Manual list. The legacy
+`auto_detect_removed_electrodes` boolean is retained for compatibility and is
+`True` only when the mode is `auto`. When conservative auto-detect is enabled,
 persistently flat/very low-variance scalp channels can be automatically added to
 `raw.info["bads"]` before preprocessing. The second-pass raw-QC detector adds
 flag-only candidate lists for extreme high-amplitude outliers and spatially
@@ -106,9 +117,19 @@ are not automatically added to the interpolation target list. Spatial channels
 are only flagged when local predictability is both low and a robust outlier
 within the participant's own montage. Low-variance raw-QC bad channels are
 excluded from kurtosis donor/pick calculations and are included in the later
-spherical interpolation target list. When disabled, the broad hard-exclusion
-checks still run, but isolated low-variance channels are not auto-marked for
-interpolation and the local cluster warning/exclusion rule is not applied.
+spherical interpolation target list.
+
+Manual list mode stores `manual_removed_electrodes` as a PID-to-electrode map in
+project preprocessing settings. Manual entries supersede automatic detection for
+that participant: only the manually listed valid scalp electrodes are treated as
+removed-electrode raw-QC candidates, added to `raw.info["bads"]`, excluded from
+kurtosis donor/pick calculations, and included in the later spherical
+interpolation target list. Manual entries still participate in the same
+participant-level hard-exclusion checks for bad-channel count, bad-channel
+fraction, hemisphere failure, and connected bad-channel clusters. When the mode
+is Off, broad low-variance hard-exclusion checks still run, but isolated
+low-variance channels are not auto-marked for interpolation and the local
+cluster warning/exclusion rule is not applied.
 
 The default `max_bad_chans` is `20`. A raw file is excluded when any of these
 rules trigger on the BioSemi 64 scalp surface:
@@ -148,14 +169,18 @@ silently include stale workbooks from an earlier run.
 The GUI finish handler also writes
 `Quality Check/Processing_QC_Summary.xlsx` under the active project root. The
 workbook has one row per participant in the processing plan and reports the PID,
-auto-detected low-SD removed-electrode candidates, auto-detected high-amplitude
-removed-electrode candidates, auto-detected spatial-consistency
-removed-electrode candidates, kurtosis-rejected electrodes, final interpolated
-electrodes, total rejected/interpolated electrode count, raw-QC warning rules,
-missing condition outputs, and whether that participant is included in the final
-processed dataset.
+manually removed electrodes, auto-detected low-SD removed-electrode candidates,
+auto-detected high-amplitude removed-electrode candidates, auto-detected
+spatial-consistency removed-electrode candidates, kurtosis-rejected electrodes,
+final interpolated electrodes, total rejected/interpolated electrode count,
+raw-QC warning rules, missing condition outputs, and whether that participant is
+included in the final processed dataset.
 This export is generated from the current per-file results plus the processing
 ledger so incremental runs can include participants completed in earlier runs.
+
+Future calibration changes that can alter which raw files or channels enter the
+processed dataset must update focused tests and bump the preprocessing cache and
+processing-fingerprint labels listed in the calibration guide.
 
 If a worker reports success and at least one, but not all, expected condition
 workbooks exist, the processing ledger records that participant as `completed`
@@ -338,7 +363,8 @@ results.
 Use these checks for preprocessing ownership, routing, or behavior changes:
 
 ```powershell
-python -m py_compile src\Main_App\processing\preprocess.py src\Main_App\Performance\process_runner.py src\Main_App\Shared\processing_mixin.py src\Main_App\gui\main_window.py src\Main_App\__init__.py
+python -m py_compile src\Main_App\processing\preprocess.py src\Main_App\processing\raw_channel_qc.py src\Main_App\processing\removed_electrode_detection.py src\Main_App\Performance\process_runner.py src\Main_App\Shared\processing_mixin.py src\Main_App\gui\main_window.py src\Main_App\__init__.py
+.\.venv1\Scripts\python -m pytest tests\processing\test_removed_electrode_detection.py tests\processing\test_raw_channel_qc.py -q
 .\.venv1\Scripts\python -m pytest tests\processing\test_filter_downsample_order.py tests\processing\test_process_runner_epoch_contract.py -q
 .\.venv1\Scripts\python -m pytest tests\processing\test_single_file_process_mode.py tests\gui\test_main_window_processing.py -q
 .\.venv1\Scripts\python -m pytest tests\processing\test_preproc_audit.py tests\processing\test_fif_flag_audit.py -q

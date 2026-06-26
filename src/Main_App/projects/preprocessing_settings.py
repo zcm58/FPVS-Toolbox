@@ -4,6 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Mapping
 
+from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+    normalize_manual_removed_electrodes_map,
+    normalize_removed_electrode_detection_mode,
+)
+
 try:  # pragma: no cover - fallback for isolated usage
     import config  # type: ignore
 except Exception:  # pragma: no cover - fallback when config unavailable
@@ -25,6 +31,8 @@ _FLOAT = "float"
 _INT = "int"
 _STR = "str"
 _BOOL = "bool"
+_REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
+_MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
 
 
 _FIELDS: tuple[_Field, ...] = (
@@ -57,6 +65,26 @@ _FIELDS: tuple[_Field, ...] = (
         ),
         True,
         _BOOL,
+    ),
+    _Field(
+        "removed_electrode_detection_mode",
+        (
+            "removed_electrode_detection_mode",
+            "removed_electrode_qc_mode",
+            "detect_removed_electrodes_mode",
+        ),
+        REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+        _REMOVED_ELECTRODE_MODE,
+    ),
+    _Field(
+        "manual_removed_electrodes",
+        (
+            "manual_removed_electrodes",
+            "manually_removed_electrodes",
+            "manual_removed_electrode_map",
+        ),
+        {},
+        _MANUAL_REMOVED_ELECTRODES,
     ),
     _Field(
         "max_parallel_workers_override",
@@ -140,6 +168,13 @@ def _coerce_bool(value: Any, *, default: bool, field: str) -> bool:
     raise ValueError(f"Invalid boolean for '{field}': {value!r}")  # pragma: no cover
 
 
+def _coerce_removed_electrode_mode(value: Any, *, default: str) -> str:
+    return normalize_removed_electrode_detection_mode(
+        value,
+        auto_detect_removed_electrodes=(default == REMOVED_ELECTRODE_DETECTION_MODE_AUTO),
+    )
+
+
 def _validate_bandpass(low_pass: float, high_pass: float) -> None:
     """Ensure low/high cutoffs are sensible and not inverted."""
 
@@ -185,8 +220,37 @@ def normalize_preprocessing_settings(
             normalized[field.name] = _coerce_str(raw_value, default=field.default, field=field.name)
         elif field.type == _BOOL:
             normalized[field.name] = _coerce_bool(raw_value, default=field.default, field=field.name)
+        elif field.type == _REMOVED_ELECTRODE_MODE:
+            normalized[field.name] = _coerce_removed_electrode_mode(
+                raw_value,
+                default=str(field.default),
+            )
+        elif field.type == _MANUAL_REMOVED_ELECTRODES:
+            normalized[field.name] = normalize_manual_removed_electrodes_map(raw_value)
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
+
+    mode_raw = _first_value(
+        source,
+        (
+            "removed_electrode_detection_mode",
+            "removed_electrode_qc_mode",
+            "detect_removed_electrodes_mode",
+        ),
+    )
+    if mode_raw in (None, ""):
+        normalized["removed_electrode_detection_mode"] = (
+            normalize_removed_electrode_detection_mode(
+                None,
+                auto_detect_removed_electrodes=normalized[
+                    "auto_detect_removed_electrodes"
+                ],
+            )
+        )
+    normalized["auto_detect_removed_electrodes"] = (
+        normalized["removed_electrode_detection_mode"]
+        == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+    )
 
     low_pass_val = float(normalized.get("low_pass")) if "low_pass" in normalized else None
     high_pass_val = float(normalized.get("high_pass")) if "high_pass" in normalized else None

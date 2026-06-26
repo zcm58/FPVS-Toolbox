@@ -197,6 +197,86 @@ def test_run_full_pipeline_auto_marks_removed_electrode_before_preprocessing(
     assert captured["raw_qc_bad_channels"] == ["P9"]
 
 
+def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    montage = mne.channels.make_standard_montage("biosemi64")
+    names = [*montage.ch_names, "Status"]
+    rng = np.random.default_rng(322)
+    data = rng.normal(scale=500e-6, size=(len(names), 4096))
+    data[names.index("P9")] = rng.normal(scale=2e-6, size=data.shape[1])
+    raw = mne.io.RawArray(
+        data,
+        mne.create_info(
+            names,
+            sfreq=256.0,
+            ch_types=["eeg"] * (len(names) - 1) + ["stim"],
+        ),
+        verbose=False,
+    )
+    raw.set_montage(montage)
+
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.load_eeg_file",
+        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+    )
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "begin_preproc_audit",
+        lambda *_args, **_kwargs: {"file": "p03.bdf"},
+    )
+    captured: dict[str, object] = {}
+
+    def _capture_preprocessing(raw_input, params, *_args, **_kwargs):
+        captured["raw_bads"] = list(raw_input.info["bads"])
+        captured["raw_qc_bad_channels"] = list(params["_fpvs_raw_qc_bad_channels"])
+        captured["manual_channels"] = list(
+            params["_fpvs_raw_qc_manual_removed_channels"]
+        )
+        captured["low_variance_channels"] = list(
+            params["_fpvs_raw_qc_low_variance_channels"]
+        )
+        raise RuntimeError("stop after manual raw QC capture")
+
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "perform_preprocessing",
+        _capture_preprocessing,
+    )
+
+    fake_bdf = tmp_path / "p03.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "epoch_start": 0.0,
+            "epoch_end": 1.0,
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            "max_bad_chans": 20,
+            "auto_detect_removed_electrodes": True,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"P03": ["FT8"]},
+            "_fpvs_participant_id_by_file": {
+                str(fake_bdf.resolve()): "P03",
+            },
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "error"
+    assert captured["raw_bads"] == ["FT8"]
+    assert captured["raw_qc_bad_channels"] == ["FT8"]
+    assert captured["manual_channels"] == ["FT8"]
+    assert captured["low_variance_channels"] == []
+
+
 def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp_path: Path) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=8.0, ch_types=["eeg", "eeg", "stim"])
     raw = mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
@@ -425,6 +505,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "_fpvs_raw_qc_low_variance_channels": ["P9"],
         "_fpvs_raw_qc_high_amplitude_channels": [],
         "_fpvs_raw_qc_spatial_outlier_channels": [],
+        "_fpvs_raw_qc_manual_removed_channels": ["P9"],
         "_fpvs_kurtosis_bad_channels": ["Cz"],
         "_fpvs_interpolated_channels": ["P9", "Cz"],
     }
@@ -433,6 +514,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     load_settings.pop("_fpvs_raw_qc_low_variance_channels")
     load_settings.pop("_fpvs_raw_qc_high_amplitude_channels")
     load_settings.pop("_fpvs_raw_qc_spatial_outlier_channels")
+    load_settings.pop("_fpvs_raw_qc_manual_removed_channels")
     load_settings.pop("_fpvs_kurtosis_bad_channels")
     load_settings.pop("_fpvs_interpolated_channels")
     audit_before = {"file": "fake.bdf", "ch_names": ["Cz", "EXG1", "EXG2", "Status"]}
@@ -459,7 +541,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v6-spatial-raw-qc"
+    assert payload["version"] == "preprocessed-raw-v7-manual-removed-electrode-qc"
     assert status == "hit"
     assert loaded is not None
     assert loaded.get_data().shape == raw.get_data().shape
@@ -469,6 +551,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_raw_qc_low_variance_channels"] == ["P9"]
     assert load_settings["_fpvs_raw_qc_high_amplitude_channels"] == []
     assert load_settings["_fpvs_raw_qc_spatial_outlier_channels"] == []
+    assert load_settings["_fpvs_raw_qc_manual_removed_channels"] == ["P9"]
     assert load_settings["_fpvs_kurtosis_bad_channels"] == ["Cz"]
     assert load_settings["_fpvs_interpolated_channels"] == ["P9", "Cz"]
 

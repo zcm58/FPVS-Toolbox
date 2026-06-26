@@ -80,6 +80,8 @@ pytest-qt/offscreen unless explicitly approved.
 ## Processing Pipeline
 
 - Processing order and cache fingerprint: `tests/processing/test_filter_downsample_order.py`
+- Removed-electrode auto-detection calibration:
+  `python -m pytest tests/processing/test_removed_electrode_detection.py tests/processing/test_raw_channel_qc.py -q`
 - Preprocessing persistence and snapshots: `tests/processing/test_preproc_persistence.py`, `tests/processing/test_preproc_settings_snapshot.py`
 - Pipeline speed and safety: `tests/processing/test_pipeline_speed_safety.py`
 - FFT crop/bin-lock contract: `tests/processing/test_fft_crop_utils.py`
