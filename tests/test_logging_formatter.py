@@ -77,6 +77,19 @@ def test_gui_log_line_uses_shared_format() -> None:
     assert line == "09:01:02.345 [GUI]: hello"
 
 
+def test_noisy_dependency_loggers_are_quieted() -> None:
+    fonttools_subset = logging.getLogger("fontTools.subset")
+    previous_level = fonttools_subset.level
+    try:
+        fonttools_subset.setLevel(logging.NOTSET)
+
+        log_router._quiet_noisy_dependency_loggers()
+
+        assert fonttools_subset.level == logging.WARNING
+    finally:
+        fonttools_subset.setLevel(previous_level)
+
+
 def test_replay_worker_timing_records_routes_export_and_skips_excel(caplog) -> None:
     logger = logging.getLogger("tests.worker_timing_route")
     result = {

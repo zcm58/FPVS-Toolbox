@@ -21,6 +21,7 @@ _STANDARD_LOG_RECORD_KEYS = set(
         exc_info=None,
     ).__dict__
 ) | {"message", "asctime"}
+_NOISY_INFO_LOGGERS = ("fontTools.subset",)
 
 
 class _StructuredExtraFormatter(logging.Formatter):
@@ -55,14 +56,21 @@ def _log_dir() -> Path:
     return app_logs_dir()
 
 
+def _quiet_noisy_dependency_loggers() -> None:
+    for logger_name in _NOISY_INFO_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
 def configure_logging(debug: bool) -> None:
     """Configure root logging for IDE/console and the app log file."""
     level = logging.DEBUG if debug else logging.INFO
     root = logging.getLogger()
     if getattr(root, "_fpvs_configured", False):
         root.setLevel(level)
+        _quiet_noisy_dependency_loggers()
         return
     root.setLevel(level)
+    _quiet_noisy_dependency_loggers()
 
     fmt = _StructuredExtraFormatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
