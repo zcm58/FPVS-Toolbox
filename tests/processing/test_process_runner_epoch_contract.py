@@ -44,6 +44,8 @@ def test_run_full_pipeline_excludes_header_only_bdf_before_loader(monkeypatch, t
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"p16": []},
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -114,6 +116,8 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
             "max_bad_chans": 20,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"p21": []},
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -274,7 +278,7 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
     assert captured["raw_bads"] == ["FT8"]
     assert captured["raw_qc_bad_channels"] == ["FT8"]
     assert captured["manual_channels"] == ["FT8"]
-    assert captured["low_variance_channels"] == []
+    assert captured["low_variance_channels"] == ["P9"]
 
 
 def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp_path: Path) -> None:

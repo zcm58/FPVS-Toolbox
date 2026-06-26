@@ -630,19 +630,18 @@ def evaluate_raw_channel_qc(
     ]
 
     low_variance_channels: list[str] = []
-    if config.removed_electrode_detection_mode != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
-        for channel, _group, std_uv, p2p_99_uv in channel_stats:
-            is_bad = is_low_variance_removed_channel(
-                std_uv=std_uv,
-                p2p_99_uv=p2p_99_uv,
-                median_std_uv=median_std_uv,
-                median_p2p_99_uv=median_p2p_99_uv,
-                calibration=config,
-            )
-            if not is_bad:
-                continue
+    for channel, _group, std_uv, p2p_99_uv in channel_stats:
+        is_bad = is_low_variance_removed_channel(
+            std_uv=std_uv,
+            p2p_99_uv=p2p_99_uv,
+            median_std_uv=median_std_uv,
+            median_p2p_99_uv=median_p2p_99_uv,
+            calibration=config,
+        )
+        if not is_bad:
+            continue
 
-            low_variance_channels.append(channel)
+        low_variance_channels.append(channel)
 
     high_amplitude_channels: list[str] = []
     if config.auto_detect_removed_electrodes:

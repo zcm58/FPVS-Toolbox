@@ -227,7 +227,7 @@ def test_raw_channel_qc_toggle_disables_spatial_outlier_detection() -> None:
     assert result.channels_to_interpolate == ()
 
 
-def test_raw_channel_qc_manual_mode_supersedes_auto_detection() -> None:
+def test_raw_channel_qc_manual_mode_only_interpolates_manual_list() -> None:
     raw = _raw_with_clustered_removed_channels(["P9"])
 
     result = evaluate_raw_channel_qc(
@@ -244,10 +244,29 @@ def test_raw_channel_qc_manual_mode_supersedes_auto_detection() -> None:
 
     assert result.excluded is False
     assert result.manual_removed_channels == ("FT8",)
-    assert result.low_variance_channels == ()
-    assert result.bad_channels == ("FT8",)
+    assert result.low_variance_channels == ("P9",)
+    assert result.bad_channels == ("FT8", "P9")
     assert result.channels_to_interpolate == ("FT8",)
     assert result.triggered_rules == ()
+
+
+def test_raw_channel_qc_manual_mode_still_excludes_hemisphere_failure() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_left_failure(),
+        {
+            "stim_channel": "Status",
+            "max_bad_chans": 64,
+            "removed_electrode_detection_mode": "manual",
+            "_fpvs_manual_removed_electrodes": [],
+        },
+        filename="p21.bdf",
+    )
+
+    assert result.excluded is True
+    assert result.channels_to_interpolate == ()
+    assert set(result.low_variance_channels) == set(LEFT_HEMISPHERE_CHANNELS)
+    assert result.left_bad == result.left_total
+    assert "left_hemisphere_failure" in result.triggered_rules
 
 
 def test_raw_channel_qc_warns_for_four_channel_bad_cluster() -> None:
