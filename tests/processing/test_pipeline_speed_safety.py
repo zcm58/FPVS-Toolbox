@@ -121,6 +121,44 @@ def test_memory_throttle_does_not_block_harvest(monkeypatch, tmp_path):
     assert all(s >= 0.01 for s in sleep_calls)
 
 
+def test_completion_batch_refills_all_available_worker_slots(monkeypatch, tmp_path):
+    files = [tmp_path / f"p{index}.bdf" for index in range(6)]
+    params = process_runner.RunParams(
+        project_root=tmp_path,
+        data_files=files,
+        settings={},
+        event_map={},
+        save_folder=tmp_path,
+        max_workers=4,
+    )
+
+    fake_pool = _FakeExecutor()
+    monkeypatch.setattr(process_runner, "ProcessPoolExecutor", lambda *a, **k: fake_pool)
+    monkeypatch.setattr(process_runner, "_memory_ok", lambda _limit: (True, 40.0))
+
+    wait_calls = {"count": 0}
+    submitted_at_second_wait = []
+
+    def _fake_wait(futures, return_when, timeout):
+        wait_calls["count"] += 1
+        current = list(futures)
+        if wait_calls["count"] == 1:
+            done = set(current[:2])
+        else:
+            submitted_at_second_wait.append(len(fake_pool.submitted))
+            done = set(current)
+        for fut in done:
+            fut._done = True
+        return done, set()
+
+    monkeypatch.setattr(process_runner, "wait", _fake_wait)
+
+    process_runner.run_project_parallel(params)
+
+    assert submitted_at_second_wait[0] == len(files)
+    assert len(fake_pool.submitted) == len(files)
+
+
 def test_cancel_event_terminates_active_workers_without_waiting(monkeypatch, tmp_path):
     files = [tmp_path / "a.bdf", tmp_path / "b.bdf"]
     params = process_runner.RunParams(

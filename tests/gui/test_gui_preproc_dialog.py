@@ -65,6 +65,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.preproc_edits[4].setText("3.5")
     dlg.preproc_edits[5].setText("100")
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
+    assert dlg.removed_electrode_detection_mode_combo.currentData() is False
 
     dlg._save()
 
@@ -172,7 +173,28 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
     assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
     assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)
+    assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_mode_combo)
+    assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_info_button)
     assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
+    assert dlg.removed_electrode_detection_mode_combo.currentData() is True
+    assert dlg.removed_electrode_detection_mode_combo.itemText(0) == "Off"
+    assert (
+        dlg.removed_electrode_detection_mode_combo.itemText(1)
+        == "Conservative auto-detect"
+    )
+    info_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, message, *_args, **_kwargs: info_calls.append((title, message)),
+    )
+    dlg.removed_electrode_detection_info_button.click()
+    assert info_calls == [
+        (
+            "Conservative Removed-Electrode Detection",
+            settings_panel.REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
+        )
+    ]
     assert dlg.beta_tools_check.text() == "Enable Beta Tools"
     assert dlg.beta_tools_check.isChecked() is False
     assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QMessageBox,
     QSizePolicy,
+    QToolButton,
 )
 
 from Main_App.Shared.settings_manager import SettingsManager
@@ -37,10 +38,25 @@ from Main_App.gui.components import (
     make_action_button,
     make_form_layout,
 )
+from Main_App.gui.icons import sidebar_icon
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
+
+
+REMOVED_ELECTRODE_DETECTION_INFO_TEXT = (
+    "In the development of FPVS Toolbox, this automatic detection method was "
+    "designed to identify electrodes that needed to be physically removed prior "
+    "to the start of a recording. In our lab, we were dealing with electrodes "
+    "that would sometimes cause a CMS/DRL error, and I calibrated this detection "
+    "method using real experimental data. This method was over 99% specific in "
+    "removing the correct channels in our training data, but this method is "
+    "intentionally very conservative and prioritizes avoiding false positive "
+    "electrode removals. As a result, this method only detects around 60% of "
+    "electrodes that were actually physically unplugged prior to recording, but "
+    "when it does identify an electrode, it is correct 99.7% of the time."
+)
 
 
 class SettingsPanel(QWidget):
@@ -425,22 +441,64 @@ class SettingsDialog(QDialog):
                 ).lower()
                 == "true"
             )
-        self.auto_detect_removed_electrodes_check = QCheckBox(
-            "Auto-detect removed electrodes",
-            qc_group,
+        self.removed_electrode_detection_mode_combo = QComboBox(qc_group)
+        self.removed_electrode_detection_mode_combo.setObjectName(
+            "settings_removed_electrode_detection_mode"
         )
+        self.removed_electrode_detection_mode_combo.addItem("Off", False)
+        self.removed_electrode_detection_mode_combo.addItem(
+            "Conservative auto-detect",
+            True,
+        )
+        self.removed_electrode_detection_mode_combo.setCurrentIndex(
+            1 if auto_detect_default else 0
+        )
+        self.removed_electrode_detection_mode_combo.setToolTip(
+            "Choose whether raw-channel QC should automatically mark "
+            "high-confidence removed-electrode candidates. Manual removed-electrode "
+            "metadata will take precedence when that mode is added."
+        )
+
+        self.removed_electrode_detection_info_button = QToolButton(qc_group)
+        self.removed_electrode_detection_info_button.setObjectName(
+            "settings_removed_electrode_detection_info"
+        )
+        self.removed_electrode_detection_info_button.setIcon(sidebar_icon("info", 16))
+        self.removed_electrode_detection_info_button.setToolTip(
+            "About conservative removed-electrode detection"
+        )
+        self.removed_electrode_detection_info_button.setCursor(Qt.PointingHandCursor)
+        self.removed_electrode_detection_info_button.setProperty("compact", True)
+        self.removed_electrode_detection_info_button.setProperty("iconButton", True)
+        self.removed_electrode_detection_info_button.clicked.connect(
+            self._show_removed_electrode_detection_info
+        )
+
+        removed_detection_row = QWidget(qc_group)
+        removed_detection_row.setObjectName("settings_removed_electrode_detection_row")
+        removed_detection_layout = QHBoxLayout(removed_detection_row)
+        removed_detection_layout.setContentsMargins(0, 0, 0, 0)
+        removed_detection_layout.setSpacing(8)
+        removed_detection_layout.addWidget(self.removed_electrode_detection_mode_combo, 1)
+        removed_detection_layout.addWidget(self.removed_electrode_detection_info_button)
+
+        # Legacy compatibility for older helpers/tests that read the prior
+        # checkbox attribute while the visible UI now uses a mode selector.
+        self.auto_detect_removed_electrodes_check = QCheckBox(qc_group)
         self.auto_detect_removed_electrodes_check.setObjectName(
             "settings_auto_detect_removed_electrodes"
         )
         self.auto_detect_removed_electrodes_check.setChecked(auto_detect_default)
-        self.auto_detect_removed_electrodes_check.setToolTip(
-            "Mark persistently low-variance scalp channels as bad before interpolation; "
-            "extreme high-amplitude and spatially inconsistent channels are flagged "
-            "for review. Large clustered failures are excluded."
+        self.auto_detect_removed_electrodes_check.hide()
+        self.auto_detect_removed_electrodes_check.toggled.connect(
+            self._set_removed_electrode_detection_enabled
+        )
+        self.removed_electrode_detection_mode_combo.currentIndexChanged.connect(
+            self._sync_removed_electrode_detection_checkbox
         )
         qc_form.addRow(
-            QLabel("Removed-electrode QC", qc_group),
-            self.auto_detect_removed_electrodes_check,
+            QLabel("Removed-electrode QC mode", qc_group),
+            removed_detection_row,
         )
         qc_group.content_layout.addLayout(qc_form)
         layout.addWidget(qc_group)
@@ -449,6 +507,31 @@ class SettingsDialog(QDialog):
         self._add_settings_footer(tab, layout, "settings_advanced_footer")
 
         tabs.addTab(tab, "Advanced")
+
+    def _removed_electrode_detection_enabled(self) -> bool:
+        return bool(self.removed_electrode_detection_mode_combo.currentData())
+
+    def _set_removed_electrode_detection_enabled(self, enabled: bool) -> None:
+        target_index = self.removed_electrode_detection_mode_combo.findData(bool(enabled))
+        if target_index >= 0 and target_index != self.removed_electrode_detection_mode_combo.currentIndex():
+            self.removed_electrode_detection_mode_combo.setCurrentIndex(target_index)
+
+    def _sync_removed_electrode_detection_checkbox(self) -> None:
+        enabled = self._removed_electrode_detection_enabled()
+        if self.auto_detect_removed_electrodes_check.isChecked() == enabled:
+            return
+        self.auto_detect_removed_electrodes_check.blockSignals(True)
+        try:
+            self.auto_detect_removed_electrodes_check.setChecked(enabled)
+        finally:
+            self.auto_detect_removed_electrodes_check.blockSignals(False)
+
+    def _show_removed_electrode_detection_info(self) -> None:
+        QMessageBox.information(
+            self,
+            "Conservative Removed-Electrode Detection",
+            REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
+        )
 
     def _current_roi_montage(self) -> str:
         return validate_roi_montage(str(self.roi_montage_combo.currentData()))
@@ -756,9 +839,7 @@ class SettingsDialog(QDialog):
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
-        values["auto_detect_removed_electrodes"] = (
-            self.auto_detect_removed_electrodes_check.isChecked()
-        )
+        values["auto_detect_removed_electrodes"] = self._removed_electrode_detection_enabled()
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values
 

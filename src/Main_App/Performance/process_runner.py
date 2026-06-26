@@ -1477,10 +1477,17 @@ def run_project_parallel(
                 peak_in_flight = len(in_flight)
             return True
 
+        def _fill_available_slots() -> int:
+            """Submit as many files as capacity and memory limits currently allow."""
+            submitted = 0
+            while len(in_flight) < maxw and remaining:
+                if not _submit_next_available():
+                    break
+                submitted += 1
+            return submitted
+
         # Prime pool
-        while len(in_flight) < maxw and remaining:
-            if not _submit_next_available():
-                break
+        _fill_available_slots()
 
         # Drain
         while in_flight or remaining:
@@ -1488,7 +1495,7 @@ def run_project_parallel(
                 if _cancelled():
                     _cancel_active_pool()
                     break
-                if not _submit_next_available():
+                if not _fill_available_slots():
                     # Nothing could be submitted (likely due to cancellation).
                     if _cancelled() or not remaining:
                         if _cancelled():
@@ -1502,7 +1509,7 @@ def run_project_parallel(
                 if _cancelled():
                     _cancel_active_pool()
                     break
-                _submit_next_available()
+                _fill_available_slots()
                 continue
 
             for fut in done:
@@ -1549,7 +1556,7 @@ def run_project_parallel(
                 _cancel_active_pool()
                 break
 
-            _submit_next_available()
+            _fill_available_slots()
     finally:
         try:
             pool.shutdown(wait=shutdown_wait, cancel_futures=True)
