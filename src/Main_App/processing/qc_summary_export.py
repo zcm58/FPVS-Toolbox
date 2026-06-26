@@ -23,9 +23,12 @@ QUALITY_CHECK_FOLDER = "Quality Check"
 QC_SUMMARY_HEADERS = (
     "PID",
     "Auto-Detected Removed Electrodes (Low SD)",
+    "Flagged Removed-Electrode Candidates (High Amplitude)",
+    "Flagged Removed-Electrode Candidates (Spatial Consistency)",
     "Kurtosis-Rejected Electrodes",
     "Electrodes Interpolated",
     "Total Number of Electrodes removed/rejected",
+    "Raw QC Warnings",
     "Missing Conditions",
     "Included in Final Set",
 )
@@ -76,6 +79,56 @@ def _raw_qc_channels_from_result(result: Mapping[str, Any] | None) -> list[str]:
     return (
         _string_list(audit.get("raw_qc_bad_channels"))
         or _string_list(raw_qc.get("bad_channels"))
+    )
+
+
+def _raw_qc_low_variance_channels_from_result(
+    result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return (
+        _string_list(audit.get("raw_qc_low_variance_channels"))
+        or _string_list(raw_qc.get("low_variance_channels"))
+    )
+
+
+def _raw_qc_spatial_outlier_channels_from_result(
+    result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return (
+        _string_list(audit.get("raw_qc_spatial_outlier_channels"))
+        or _string_list(raw_qc.get("spatial_outlier_channels"))
+    )
+
+
+def _raw_qc_high_amplitude_channels_from_result(
+    result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return (
+        _string_list(audit.get("raw_qc_high_amplitude_channels"))
+        or _string_list(raw_qc.get("high_amplitude_channels"))
+    )
+
+
+def _raw_qc_warning_rules_from_result(result: Mapping[str, Any] | None) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return (
+        _string_list(audit.get("raw_qc_warning_rules"))
+        or _string_list(raw_qc.get("warning_rules"))
     )
 
 
@@ -246,11 +299,50 @@ def build_processing_qc_rows(
         entry = _entry_for_pid(ledger, state.participant_id)
         cache_entry = _cache_qc_for_entry(project, entry) if entry else {}
         result = results_by_path.get(state.info.path.resolve())
+        raw_qc_low_variance_channels = _raw_qc_low_variance_channels_from_result(
+            result
+        ) or _string_list(
+            entry.get("raw_qc_low_variance_channels")
+        ) or _string_list(
+            cache_entry.get("raw_qc_low_variance_channels")
+        )
+        raw_qc_high_amplitude_channels = _raw_qc_high_amplitude_channels_from_result(
+            result
+        ) or _string_list(
+            entry.get("raw_qc_high_amplitude_channels")
+        ) or _string_list(
+            cache_entry.get("raw_qc_high_amplitude_channels")
+        )
+        raw_qc_spatial_outlier_channels = _raw_qc_spatial_outlier_channels_from_result(
+            result
+        ) or _string_list(
+            entry.get("raw_qc_spatial_outlier_channels")
+        ) or _string_list(
+            cache_entry.get("raw_qc_spatial_outlier_channels")
+        )
+        raw_qc_warning_rules = _raw_qc_warning_rules_from_result(result) or _string_list(
+            entry.get("raw_qc_warning_rules")
+        ) or _string_list(
+            cache_entry.get("raw_qc_warning_rules")
+        )
         raw_qc_channels = _raw_qc_channels_from_result(result) or _string_list(
             entry.get("raw_qc_bad_channels")
         ) or _string_list(
             cache_entry.get("raw_qc_bad_channels")
         )
+        if not raw_qc_channels:
+            raw_qc_channels = _unique_ordered(
+                raw_qc_low_variance_channels,
+                raw_qc_high_amplitude_channels,
+                raw_qc_spatial_outlier_channels,
+            )
+        if (
+            raw_qc_channels
+            and not raw_qc_low_variance_channels
+            and not raw_qc_high_amplitude_channels
+            and not raw_qc_spatial_outlier_channels
+        ):
+            raw_qc_low_variance_channels = list(raw_qc_channels)
         kurtosis_channels = _kurtosis_channels_from_result(result) or _string_list(
             entry.get("kurtosis_bad_channels")
         ) or _string_list(
@@ -285,10 +377,19 @@ def build_processing_qc_rows(
         rows.append(
             {
                 "PID": state.participant_id,
-                "Auto-Detected Removed Electrodes (Low SD)": _join_channels(raw_qc_channels),
+                "Auto-Detected Removed Electrodes (Low SD)": _join_channels(
+                    raw_qc_low_variance_channels
+                ),
+                "Flagged Removed-Electrode Candidates (High Amplitude)": _join_channels(
+                    raw_qc_high_amplitude_channels
+                ),
+                "Flagged Removed-Electrode Candidates (Spatial Consistency)": _join_channels(
+                    raw_qc_spatial_outlier_channels
+                ),
                 "Kurtosis-Rejected Electrodes": _join_channels(kurtosis_channels),
                 "Electrodes Interpolated": _join_channels(interpolated_channels),
                 "Total Number of Electrodes removed/rejected": count,
+                "Raw QC Warnings": _join_channels(raw_qc_warning_rules),
                 "Missing Conditions": _join_channels(missing_condition_labels),
                 "Included in Final Set": included_text,
             }

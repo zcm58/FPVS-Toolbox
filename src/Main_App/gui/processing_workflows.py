@@ -106,7 +106,8 @@ def _format_exclusion_reason(result: dict) -> str:
             cluster_text = f" Largest cluster: {cluster_size} ({cluster_channels})."
         return (
             "Raw channel-health QC failed: "
-            f"{n_bad}/{n_channels} scalp EEG channels were flat/very low amplitude "
+            f"{n_bad}/{n_channels} scalp EEG channels were flat, very low amplitude, "
+            "extreme high-amplitude outliers, or spatially inconsistent "
             f"(left {left_bad}/{left_total}, right {right_bad}/{right_total}, "
             f"midline {midline_bad}/{midline_total}).{cluster_text}{rules_text}"
         )

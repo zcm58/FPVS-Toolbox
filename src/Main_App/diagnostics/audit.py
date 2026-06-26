@@ -115,6 +115,16 @@ def end_preproc_audit(
     mne_custom_ref = info.get("custom_ref_applied", None)
 
     raw_qc_bad_channels = _string_list(params.get("_fpvs_raw_qc_bad_channels"))
+    raw_qc_low_variance_channels = _string_list(
+        params.get("_fpvs_raw_qc_low_variance_channels")
+    )
+    raw_qc_high_amplitude_channels = _string_list(
+        params.get("_fpvs_raw_qc_high_amplitude_channels")
+    )
+    raw_qc_spatial_outlier_channels = _string_list(
+        params.get("_fpvs_raw_qc_spatial_outlier_channels")
+    )
+    raw_qc_warning_rules = _string_list(params.get("_fpvs_raw_qc_warning_rules"))
     kurtosis_bad_channels = _string_list(params.get("_fpvs_kurtosis_bad_channels"))
     interpolated_channels = _string_list(params.get("_fpvs_interpolated_channels"))
     total_rejected = len(interpolated_channels) if interpolated_channels else int(n_rejected)
@@ -136,6 +146,10 @@ def end_preproc_audit(
         "n_rejected": total_rejected,
         "n_kurtosis_rejected": int(n_rejected),
         "raw_qc_bad_channels": raw_qc_bad_channels,
+        "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
+        "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
+        "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+        "raw_qc_warning_rules": raw_qc_warning_rules,
         "kurtosis_bad_channels": kurtosis_bad_channels,
         "interpolated_channels": interpolated_channels,
         "stim_channel": stim_channel,

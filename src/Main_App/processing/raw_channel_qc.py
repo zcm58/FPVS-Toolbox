@@ -90,9 +90,21 @@ class RawChannelQCConfig:
     low_p2p_99_relative_ratio: float = 0.25
     relative_low_std_uv_ceiling: float = 60.0
     relative_low_p2p_99_uv_ceiling: float = 240.0
+    high_std_relative_ratio: float = 7.5
+    high_p2p_99_relative_ratio: float = 10.0
+    high_std_uv_floor: float = 2_000.0
+    high_p2p_99_uv_floor: float = 10_000.0
     auto_detect_removed_electrodes: bool = True
-    min_bad_cluster_size: int = 4
+    min_bad_cluster_warning_size: int = 4
+    min_bad_cluster_size: int = 6
     neighbor_distance_factor: float = 1.75
+    spatial_qc_enabled: bool = True
+    spatial_neighbor_count: int = 6
+    spatial_min_neighbors: int = 3
+    spatial_neighbor_distance_factor: float = 2.60
+    spatial_predictability_max_bad_corr: float = 0.12
+    spatial_predictability_relative_ratio: float = 0.55
+    spatial_predictability_mad_z: float = 3.5
     sample_windows: int = 6
     sample_window_s: float = 10.0
     edge_padding_s: float = 10.0
@@ -114,9 +126,13 @@ class RawChannelQCResult:
     midline_total: int
     bad_channels: tuple[str, ...]
     channels_to_interpolate: tuple[str, ...]
+    low_variance_channels: tuple[str, ...]
+    high_amplitude_channels: tuple[str, ...]
+    spatial_outlier_channels: tuple[str, ...]
     largest_bad_cluster_size: int
     largest_bad_cluster_channels: tuple[str, ...]
     triggered_rules: tuple[str, ...]
+    warning_rules: tuple[str, ...]
     thresholds: Mapping[str, float | int | bool]
 
     def to_payload(self) -> dict[str, object]:
@@ -132,9 +148,13 @@ class RawChannelQCResult:
             "midline_total": self.midline_total,
             "bad_channels": list(self.bad_channels),
             "channels_to_interpolate": list(self.channels_to_interpolate),
+            "low_variance_channels": list(self.low_variance_channels),
+            "high_amplitude_channels": list(self.high_amplitude_channels),
+            "spatial_outlier_channels": list(self.spatial_outlier_channels),
             "largest_bad_cluster_size": self.largest_bad_cluster_size,
             "largest_bad_cluster_channels": list(self.largest_bad_cluster_channels),
             "triggered_rules": list(self.triggered_rules),
+            "warning_rules": list(self.warning_rules),
             "thresholds": dict(self.thresholds),
         }
 
@@ -246,6 +266,18 @@ def _robust_median(values: Sequence[float]) -> float:
     return float(np.median(finite))
 
 
+def _scaled_mad(values: Sequence[float]) -> float:
+    finite = np.asarray(
+        [float(value) for value in values if np.isfinite(value)],
+        dtype=float,
+    )
+    if finite.size == 0:
+        return 0.0
+    median = float(np.median(finite))
+    mad = float(np.median(np.abs(finite - median)))
+    return float(1.4826 * mad)
+
+
 def _is_low_variance_removed_channel(
     *,
     std_uv: float,
@@ -264,6 +296,24 @@ def _is_low_variance_removed_channel(
         and p2p_99_uv < config.relative_low_p2p_99_uv_ceiling
     )
     return bool(absolute_low or relative_low)
+
+
+def _is_high_amplitude_removed_channel(
+    *,
+    std_uv: float,
+    p2p_99_uv: float,
+    median_std_uv: float,
+    median_p2p_99_uv: float,
+    config: RawChannelQCConfig,
+) -> bool:
+    return bool(
+        median_std_uv > 0.0
+        and median_p2p_99_uv > 0.0
+        and std_uv >= config.high_std_uv_floor
+        and p2p_99_uv >= config.high_p2p_99_uv_floor
+        and std_uv >= median_std_uv * config.high_std_relative_ratio
+        and p2p_99_uv >= median_p2p_99_uv * config.high_p2p_99_relative_ratio
+    )
 
 
 def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarray]:
@@ -352,6 +402,132 @@ def _bad_channel_clusters(
     return clusters
 
 
+def _spatial_neighbor_map(
+    raw: Any,
+    channels: Sequence[str],
+    *,
+    config: RawChannelQCConfig,
+) -> dict[str, tuple[str, ...]]:
+    positions = _channel_positions(raw, channels)
+    if len(positions) < config.spatial_min_neighbors + 1:
+        return {}
+
+    pos_names = sorted(positions)
+    coords = np.vstack([positions[name] for name in pos_names])
+    distances = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
+    np.fill_diagonal(distances, np.inf)
+    nearest = np.min(distances, axis=1)
+    finite_nearest = nearest[np.isfinite(nearest) & (nearest > 0.0)]
+    if finite_nearest.size == 0:
+        return {}
+    radius = float(np.median(finite_nearest) * config.spatial_neighbor_distance_factor)
+
+    neighbors: dict[str, tuple[str, ...]] = {}
+    max_neighbors = max(config.spatial_min_neighbors, config.spatial_neighbor_count)
+    for row_index, channel in enumerate(pos_names):
+        ordered_indices = [
+            int(index)
+            for index in np.argsort(distances[row_index])
+            if np.isfinite(distances[row_index, index])
+        ]
+        local = [
+            pos_names[index]
+            for index in ordered_indices
+            if float(distances[row_index, index]) <= radius
+        ][:max_neighbors]
+        if len(local) < config.spatial_min_neighbors:
+            local = [pos_names[index] for index in ordered_indices[: config.spatial_min_neighbors]]
+        neighbors[channel] = tuple(local[:max_neighbors])
+    return neighbors
+
+
+def _zscore_rows(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    centered = data - np.nanmedian(data, axis=1, keepdims=True)
+    scale = np.nanstd(centered, axis=1)
+    safe_scale = np.where(scale > 0.0, scale, np.nan)
+    return centered / safe_scale[:, None], scale
+
+
+def _spatial_predictability_scores(
+    raw: Any,
+    data: np.ndarray,
+    channels: Sequence[str],
+    *,
+    donor_exclusions: Sequence[str],
+    config: RawChannelQCConfig,
+) -> dict[str, float]:
+    neighbor_map = _spatial_neighbor_map(raw, channels, config=config)
+    if not neighbor_map:
+        return {}
+
+    channel_lookup = {channel: index for index, channel in enumerate(channels)}
+    excluded = {str(channel) for channel in donor_exclusions}
+    z_data, row_scale = _zscore_rows(data)
+    scores: dict[str, float] = {}
+    for channel in channels:
+        row_index = channel_lookup[channel]
+        if not np.isfinite(row_scale[row_index]) or row_scale[row_index] <= 0.0:
+            continue
+
+        neighbor_indices = [
+            channel_lookup[neighbor]
+            for neighbor in neighbor_map.get(channel, ())
+            if neighbor not in excluded
+            and neighbor in channel_lookup
+            and np.isfinite(row_scale[channel_lookup[neighbor]])
+            and row_scale[channel_lookup[neighbor]] > 0.0
+        ]
+        if len(neighbor_indices) < config.spatial_min_neighbors:
+            continue
+
+        prediction = np.nanmean(z_data[neighbor_indices], axis=0)
+        observed = z_data[row_index]
+        finite = np.isfinite(observed) & np.isfinite(prediction)
+        if int(np.sum(finite)) < config.spatial_min_neighbors:
+            continue
+        obs = observed[finite]
+        pred = prediction[finite]
+        denom = float(np.linalg.norm(obs) * np.linalg.norm(pred))
+        if denom <= 0.0 or not np.isfinite(denom):
+            continue
+        scores[channel] = float(abs(np.dot(obs, pred) / denom))
+    return scores
+
+
+def _spatial_outlier_channels(
+    scores: Mapping[str, float],
+    *,
+    excluded_channels: Sequence[str],
+    config: RawChannelQCConfig,
+) -> tuple[str, ...]:
+    excluded = {str(channel) for channel in excluded_channels}
+    reference_scores = [
+        float(score)
+        for channel, score in scores.items()
+        if channel not in excluded and np.isfinite(score)
+    ]
+    if len(reference_scores) < config.min_channels_for_hard_qc:
+        return ()
+
+    median_score = float(np.median(reference_scores))
+    mad_score = _scaled_mad(reference_scores)
+    robust_threshold = median_score - config.spatial_predictability_mad_z * mad_score
+    relative_threshold = median_score * config.spatial_predictability_relative_ratio
+    threshold = min(
+        config.spatial_predictability_max_bad_corr,
+        relative_threshold,
+        robust_threshold,
+    )
+    if not np.isfinite(threshold) or threshold <= 0.0:
+        return ()
+
+    return tuple(
+        channel
+        for channel, score in scores.items()
+        if channel not in excluded and np.isfinite(score) and float(score) < threshold
+    )
+
+
 def _empty_result(
     *,
     message: str,
@@ -373,9 +549,13 @@ def _empty_result(
         midline_total=0,
         bad_channels=(),
         channels_to_interpolate=(),
+        low_variance_channels=(),
+        high_amplitude_channels=(),
+        spatial_outlier_channels=(),
         largest_bad_cluster_size=0,
         largest_bad_cluster_channels=(),
         triggered_rules=(),
+        warning_rules=(),
         thresholds=thresholds,
     )
 
@@ -407,8 +587,20 @@ def evaluate_raw_channel_qc(
         "low_p2p_99_relative_ratio": config.low_p2p_99_relative_ratio,
         "relative_low_std_uv_ceiling": config.relative_low_std_uv_ceiling,
         "relative_low_p2p_99_uv_ceiling": config.relative_low_p2p_99_uv_ceiling,
+        "high_std_relative_ratio": config.high_std_relative_ratio,
+        "high_p2p_99_relative_ratio": config.high_p2p_99_relative_ratio,
+        "high_std_uv_floor": config.high_std_uv_floor,
+        "high_p2p_99_uv_floor": config.high_p2p_99_uv_floor,
         "auto_detect_removed_electrodes": config.auto_detect_removed_electrodes,
+        "min_bad_cluster_warning_size": config.min_bad_cluster_warning_size,
         "min_bad_cluster_size": config.min_bad_cluster_size,
+        "spatial_qc_enabled": config.spatial_qc_enabled,
+        "spatial_neighbor_count": config.spatial_neighbor_count,
+        "spatial_min_neighbors": config.spatial_min_neighbors,
+        "spatial_neighbor_distance_factor": config.spatial_neighbor_distance_factor,
+        "spatial_predictability_max_bad_corr": config.spatial_predictability_max_bad_corr,
+        "spatial_predictability_relative_ratio": config.spatial_predictability_relative_ratio,
+        "spatial_predictability_mad_z": config.spatial_predictability_mad_z,
     }
     if n_channels == 0:
         return _empty_result(
@@ -443,9 +635,13 @@ def evaluate_raw_channel_qc(
             midline_total=0,
             bad_channels=tuple(str(raw.ch_names[index]) for index in picks),
             channels_to_interpolate=(),
+            low_variance_channels=tuple(str(raw.ch_names[index]) for index in picks),
+            high_amplitude_channels=(),
+            spatial_outlier_channels=(),
             largest_bad_cluster_size=0,
             largest_bad_cluster_channels=(),
             triggered_rules=("no_samples",),
+            warning_rules=(),
             thresholds=thresholds,
         )
 
@@ -477,9 +673,8 @@ def evaluate_raw_channel_qc(
     median_std_uv = _robust_median([row[2] for row in channel_stats])
     median_p2p_99_uv = _robust_median([row[3] for row in channel_stats])
 
-    bad_channels: list[str] = []
-    left_bad = right_bad = midline_bad = 0
-    for channel, group, std_uv, p2p_99_uv in channel_stats:
+    low_variance_channels: list[str] = []
+    for channel, _group, std_uv, p2p_99_uv in channel_stats:
         is_bad = _is_low_variance_removed_channel(
             std_uv=std_uv,
             p2p_99_uv=p2p_99_uv,
@@ -490,7 +685,55 @@ def evaluate_raw_channel_qc(
         if not is_bad:
             continue
 
-        bad_channels.append(channel)
+        low_variance_channels.append(channel)
+
+    high_amplitude_channels: list[str] = []
+    if config.auto_detect_removed_electrodes:
+        low_lookup = set(low_variance_channels)
+        for channel, _group, std_uv, p2p_99_uv in channel_stats:
+            if channel in low_lookup:
+                continue
+            is_bad = _is_high_amplitude_removed_channel(
+                std_uv=std_uv,
+                p2p_99_uv=p2p_99_uv,
+                median_std_uv=median_std_uv,
+                median_p2p_99_uv=median_p2p_99_uv,
+                config=config,
+            )
+            if is_bad:
+                high_amplitude_channels.append(channel)
+
+    spatial_outlier_channels: list[str] = []
+    if config.auto_detect_removed_electrodes and config.spatial_qc_enabled:
+        channel_names = [row[0] for row in channel_stats]
+        donor_exclusions = [
+            *_raw_bads(raw),
+            *low_variance_channels,
+            *high_amplitude_channels,
+        ]
+        scores = _spatial_predictability_scores(
+            raw,
+            data,
+            channel_names,
+            donor_exclusions=donor_exclusions,
+            config=config,
+        )
+        spatial_outlier_channels = list(
+            _spatial_outlier_channels(
+                scores,
+                excluded_channels=donor_exclusions,
+                config=config,
+            )
+        )
+
+    candidate_channels = list(
+        dict.fromkeys(
+            [*low_variance_channels, *high_amplitude_channels, *spatial_outlier_channels]
+        )
+    )
+    left_bad = right_bad = midline_bad = 0
+    for channel in candidate_channels:
+        group = _channel_group(channel)
         if group == "left":
             left_bad += 1
         elif group == "right":
@@ -498,15 +741,17 @@ def evaluate_raw_channel_qc(
         elif group == "midline":
             midline_bad += 1
 
-    n_bad = len(bad_channels)
+    n_bad = len(candidate_channels)
     bad_fraction = n_bad / n_channels if n_channels else 0.0
     left_fraction = left_bad / left_total if left_total else 0.0
     right_fraction = right_bad / right_total if right_total else 0.0
-    channels_to_interpolate = tuple(bad_channels) if config.auto_detect_removed_electrodes else ()
+    channels_to_interpolate = (
+        tuple(low_variance_channels) if config.auto_detect_removed_electrodes else ()
+    )
 
     cluster_candidates = set(_raw_bads(raw))
     if config.auto_detect_removed_electrodes:
-        cluster_candidates.update(channels_to_interpolate)
+        cluster_candidates.update(candidate_channels)
     clusters = _bad_channel_clusters(raw, sorted(cluster_candidates), config=config)
     largest_cluster = clusters[0] if clusters else ()
 
@@ -524,6 +769,13 @@ def evaluate_raw_channel_qc(
         and len(largest_cluster) >= config.min_bad_cluster_size
     ):
         triggered.append("bad_channel_cluster")
+    warning_rules: list[str] = []
+    if (
+        config.auto_detect_removed_electrodes
+        and len(largest_cluster) >= config.min_bad_cluster_warning_size
+        and len(largest_cluster) < config.min_bad_cluster_size
+    ):
+        warning_rules.append("possible_bad_channel_cluster")
 
     excluded = bool(triggered)
     reason = RAW_CHANNEL_QC_EXCLUSION_REASON if excluded else None
@@ -536,21 +788,26 @@ def evaluate_raw_channel_qc(
     if excluded:
         message = (
             f"{filename} excluded by raw channel-health QC: {n_bad}/{n_channels} scalp EEG "
-            f"channels had very low amplitude; left={left_bad}/{left_total}, "
+            "channels were low-amplitude, extreme high-amplitude, or spatially "
+            f"inconsistent; left={left_bad}/{left_total}, "
             f"right={right_bad}/{right_total}, midline={midline_bad}/{midline_total}."
             f"{cluster_text} Triggered rule(s): {', '.join(triggered)}."
         )
     elif channels_to_interpolate:
         message = (
             f"Raw channel QC passed for {filename}: auto-marking "
-            f"{len(channels_to_interpolate)} low-variance channel(s) for interpolation "
+            f"{len(channels_to_interpolate)} low-variance raw-QC channel(s) for interpolation "
             f"({', '.join(channels_to_interpolate)}).{cluster_text}"
         )
+        if warning_rules:
+            message += f" Warning rule(s): {', '.join(warning_rules)}."
     else:
         message = (
             f"Raw channel QC passed for {filename}: {n_bad}/{n_channels} scalp EEG channels "
-            "had very low amplitude."
+            "were low-amplitude, extreme high-amplitude, or spatially inconsistent."
         )
+        if warning_rules:
+            message += f"{cluster_text} Warning rule(s): {', '.join(warning_rules)}."
 
     return RawChannelQCResult(
         excluded=excluded,
@@ -565,11 +822,15 @@ def evaluate_raw_channel_qc(
         right_total=right_total,
         midline_bad=midline_bad,
         midline_total=midline_total,
-        bad_channels=tuple(bad_channels),
+        bad_channels=tuple(candidate_channels),
         channels_to_interpolate=channels_to_interpolate,
+        low_variance_channels=tuple(low_variance_channels),
+        high_amplitude_channels=tuple(high_amplitude_channels),
+        spatial_outlier_channels=tuple(spatial_outlier_channels),
         largest_bad_cluster_size=len(largest_cluster),
         largest_bad_cluster_channels=tuple(largest_cluster),
         triggered_rules=tuple(triggered),
+        warning_rules=tuple(warning_rules),
         thresholds=thresholds,
     )
 

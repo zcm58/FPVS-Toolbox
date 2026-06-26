@@ -422,11 +422,17 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "enable_preprocessed_cache": True,
         "auto_detect_removed_electrodes": True,
         "_fpvs_raw_qc_bad_channels": ["P9"],
+        "_fpvs_raw_qc_low_variance_channels": ["P9"],
+        "_fpvs_raw_qc_high_amplitude_channels": [],
+        "_fpvs_raw_qc_spatial_outlier_channels": [],
         "_fpvs_kurtosis_bad_channels": ["Cz"],
         "_fpvs_interpolated_channels": ["P9", "Cz"],
     }
     load_settings = dict(settings)
     load_settings.pop("_fpvs_raw_qc_bad_channels")
+    load_settings.pop("_fpvs_raw_qc_low_variance_channels")
+    load_settings.pop("_fpvs_raw_qc_high_amplitude_channels")
+    load_settings.pop("_fpvs_raw_qc_spatial_outlier_channels")
     load_settings.pop("_fpvs_kurtosis_bad_channels")
     load_settings.pop("_fpvs_interpolated_channels")
     audit_before = {"file": "fake.bdf", "ch_names": ["Cz", "EXG1", "EXG2", "Status"]}
@@ -453,13 +459,16 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v5-removed-electrode-qc"
+    assert payload["version"] == "preprocessed-raw-v6-spatial-raw-qc"
     assert status == "hit"
     assert loaded is not None
     assert loaded.get_data().shape == raw.get_data().shape
     assert loaded_audit == audit_before
     assert n_rejected == 2
     assert load_settings["_fpvs_raw_qc_bad_channels"] == ["P9"]
+    assert load_settings["_fpvs_raw_qc_low_variance_channels"] == ["P9"]
+    assert load_settings["_fpvs_raw_qc_high_amplitude_channels"] == []
+    assert load_settings["_fpvs_raw_qc_spatial_outlier_channels"] == []
     assert load_settings["_fpvs_kurtosis_bad_channels"] == ["Cz"]
     assert load_settings["_fpvs_interpolated_channels"] == ["P9", "Cz"]
 

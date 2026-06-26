@@ -45,7 +45,7 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v5-removed-electrode-qc"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v6-spatial-raw-qc"
 BDF_FIRST_N_CHANNELS = 64
 
 
@@ -384,6 +384,18 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_bad_channels"] = _string_list(
             metadata.get("raw_qc_bad_channels")
         )
+        settings["_fpvs_raw_qc_low_variance_channels"] = _string_list(
+            metadata.get("raw_qc_low_variance_channels")
+        )
+        settings["_fpvs_raw_qc_high_amplitude_channels"] = _string_list(
+            metadata.get("raw_qc_high_amplitude_channels")
+        )
+        settings["_fpvs_raw_qc_spatial_outlier_channels"] = _string_list(
+            metadata.get("raw_qc_spatial_outlier_channels")
+        )
+        settings["_fpvs_raw_qc_warning_rules"] = _string_list(
+            metadata.get("raw_qc_warning_rules")
+        )
         return raw, audit_before, int(metadata.get("n_rejected", 0)), "hit"
     except Exception as exc:
         logger.warning(
@@ -433,6 +445,18 @@ def _store_preprocessed_cache(
             ),
             "raw_qc_bad_channels": _string_list(
                 settings.get("_fpvs_raw_qc_bad_channels")
+            ),
+            "raw_qc_low_variance_channels": _string_list(
+                settings.get("_fpvs_raw_qc_low_variance_channels")
+            ),
+            "raw_qc_high_amplitude_channels": _string_list(
+                settings.get("_fpvs_raw_qc_high_amplitude_channels")
+            ),
+            "raw_qc_spatial_outlier_channels": _string_list(
+                settings.get("_fpvs_raw_qc_spatial_outlier_channels")
+            ),
+            "raw_qc_warning_rules": _string_list(
+                settings.get("_fpvs_raw_qc_warning_rules")
             ),
         }
         tmp_meta_path.write_text(
@@ -644,6 +668,10 @@ def _run_full_pipeline_for_file(
             )
 
             settings["_fpvs_raw_qc_bad_channels"] = []
+            settings["_fpvs_raw_qc_low_variance_channels"] = []
+            settings["_fpvs_raw_qc_high_amplitude_channels"] = []
+            settings["_fpvs_raw_qc_spatial_outlier_channels"] = []
+            settings["_fpvs_raw_qc_warning_rules"] = []
             raw_qc_result = evaluate_raw_channel_qc(
                 raw,
                 settings,
@@ -696,6 +724,16 @@ def _run_full_pipeline_for_file(
             )
             raw_qc_bads = _string_list(raw_qc_result.channels_to_interpolate)
             settings["_fpvs_raw_qc_bad_channels"] = list(raw_qc_bads)
+            settings["_fpvs_raw_qc_low_variance_channels"] = list(
+                raw_qc_result.low_variance_channels
+            )
+            settings["_fpvs_raw_qc_high_amplitude_channels"] = list(
+                raw_qc_result.high_amplitude_channels
+            )
+            settings["_fpvs_raw_qc_spatial_outlier_channels"] = list(
+                raw_qc_result.spatial_outlier_channels
+            )
+            settings["_fpvs_raw_qc_warning_rules"] = list(raw_qc_result.warning_rules)
             if raw_qc_bads:
                 existing_bads = {str(channel) for channel in raw.info.get("bads", [])}
                 new_bads = [
@@ -714,6 +752,21 @@ def _run_full_pipeline_for_file(
                     "file=%s stage=raw_qc auto_marked_channels=%s",
                     file_path.name,
                     ",".join(raw_qc_bads),
+                )
+            if raw_qc_result.warning_rules:
+                logger.warning(
+                    "raw_channel_qc_warning file=%s rules=%s cluster_size=%d cluster=%s",
+                    file_path.name,
+                    list(raw_qc_result.warning_rules),
+                    raw_qc_result.largest_bad_cluster_size,
+                    list(raw_qc_result.largest_bad_cluster_channels),
+                )
+                crop_logger.warning(
+                    "file=%s stage=raw_qc warning_rules=%s cluster_size=%d cluster=%s",
+                    file_path.name,
+                    ",".join(raw_qc_result.warning_rules),
+                    raw_qc_result.largest_bad_cluster_size,
+                    ",".join(raw_qc_result.largest_bad_cluster_channels),
                 )
 
             # 3) Preproc audit (before)

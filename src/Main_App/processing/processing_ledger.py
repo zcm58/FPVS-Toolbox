@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v4_removed_electrode_qc"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v5_spatial_raw_qc"
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
@@ -605,6 +605,16 @@ def record_processing_results(
         raw_meta = raw_file_metadata(state.info.path)
         audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
         raw_qc_bad_channels = _string_list(audit.get("raw_qc_bad_channels"))
+        raw_qc_low_variance_channels = _string_list(
+            audit.get("raw_qc_low_variance_channels")
+        )
+        raw_qc_high_amplitude_channels = _string_list(
+            audit.get("raw_qc_high_amplitude_channels")
+        )
+        raw_qc_spatial_outlier_channels = _string_list(
+            audit.get("raw_qc_spatial_outlier_channels")
+        )
+        raw_qc_warning_rules = _string_list(audit.get("raw_qc_warning_rules"))
         kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
         interpolated_channels = _string_list(
             audit.get("interpolated_channels")
@@ -621,6 +631,10 @@ def record_processing_results(
             "completed_at": _now_iso(),
             "run_mode": run_mode,
             "raw_qc_bad_channels": raw_qc_bad_channels,
+            "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
+            "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
+            "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+            "raw_qc_warning_rules": raw_qc_warning_rules,
             "kurtosis_bad_channels": kurtosis_bad_channels,
             "interpolated_channels": interpolated_channels,
             "n_rejected": n_rejected,
@@ -648,6 +662,16 @@ def record_processing_results(
                 else {}
             )
             raw_qc_bad_channels = _string_list(qc_payload.get("bad_channels"))
+            raw_qc_low_variance_channels = _string_list(
+                qc_payload.get("low_variance_channels")
+            )
+            raw_qc_high_amplitude_channels = _string_list(
+                qc_payload.get("high_amplitude_channels")
+            )
+            raw_qc_spatial_outlier_channels = _string_list(
+                qc_payload.get("spatial_outlier_channels")
+            )
+            raw_qc_warning_rules = _string_list(qc_payload.get("warning_rules"))
             n_rejected = _int_or_default(
                 qc_payload.get("n_bad_channels"),
                 len(raw_qc_bad_channels),
@@ -669,6 +693,10 @@ def record_processing_results(
                 "excluded_at": _now_iso(),
                 "removed_outputs": removed_outputs,
                 "raw_qc_bad_channels": raw_qc_bad_channels,
+                "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
+                "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
+                "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+                "raw_qc_warning_rules": raw_qc_warning_rules,
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
                 "n_rejected": n_rejected,
@@ -683,6 +711,16 @@ def record_processing_results(
             )
             audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
             raw_qc_bad_channels = _string_list(audit.get("raw_qc_bad_channels"))
+            raw_qc_low_variance_channels = _string_list(
+                audit.get("raw_qc_low_variance_channels")
+            )
+            raw_qc_high_amplitude_channels = _string_list(
+                audit.get("raw_qc_high_amplitude_channels")
+            )
+            raw_qc_spatial_outlier_channels = _string_list(
+                audit.get("raw_qc_spatial_outlier_channels")
+            )
+            raw_qc_warning_rules = _string_list(audit.get("raw_qc_warning_rules"))
             kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
             interpolated_channels = _string_list(
                 audit.get("interpolated_channels")
@@ -717,6 +755,10 @@ def record_processing_results(
                 "missing_condition_labels": missing_condition_labels,
                 "removed_outputs": [],
                 "raw_qc_bad_channels": raw_qc_bad_channels,
+                "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
+                "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
+                "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
+                "raw_qc_warning_rules": raw_qc_warning_rules,
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
                 "n_rejected": n_rejected,
@@ -735,6 +777,10 @@ def record_processing_results(
             "run_mode": run_mode,
             "removed_outputs": removed_outputs,
             "raw_qc_bad_channels": [],
+            "raw_qc_low_variance_channels": [],
+            "raw_qc_high_amplitude_channels": [],
+            "raw_qc_spatial_outlier_channels": [],
+            "raw_qc_warning_rules": [],
             "kurtosis_bad_channels": [],
             "interpolated_channels": [],
             "n_rejected": 0,

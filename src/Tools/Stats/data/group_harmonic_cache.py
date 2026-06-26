@@ -29,7 +29,7 @@ CACHE_MAX_ENTRIES = 8
 CACHE_MANIFEST_PATH = ("tools", "stats", "group_significant_harmonics_cache")
 GROUP_HARMONIC_METHOD_VERSION = "group_significant_harmonics_v1"
 PREPROCESSING_ORDER_VERSION_LABEL = "filter_then_downsample_v1"
-PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v4_removed_electrode_qc"
+PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v5_spatial_raw_qc"
 
 
 @dataclass(frozen=True)

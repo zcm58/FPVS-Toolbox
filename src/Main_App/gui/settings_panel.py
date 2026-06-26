@@ -435,7 +435,8 @@ class SettingsDialog(QDialog):
         self.auto_detect_removed_electrodes_check.setChecked(auto_detect_default)
         self.auto_detect_removed_electrodes_check.setToolTip(
             "Mark persistently low-variance scalp channels as bad before interpolation; "
-            "clustered failures are excluded."
+            "extreme high-amplitude and spatially inconsistent channels are flagged "
+            "for review. Large clustered failures are excluded."
         )
         qc_form.addRow(
             QLabel("Removed-electrode QC", qc_group),

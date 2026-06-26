@@ -80,14 +80,14 @@ export, post-audit, and cleanup when those stages run. The returned per-file
 result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
-The preprocessed Raw cache version is
-`preprocessed-raw-v5-removed-electrode-qc`. The project processing-ledger and Stats
-group-harmonic cache processing fingerprints use
-`processing_fingerprint_v4_removed_electrode_qc`. The raw channel-health QC
-threshold and removed-electrode auto-detection toggle are part of the cache
-payload so changes to those settings invalidate cached preprocessed Raw files.
-The v5 cache metadata also persists raw-QC, kurtosis, and interpolated
-bad-channel names so cache-hit runs can still produce participant QC summaries.
+The preprocessed Raw cache version is `preprocessed-raw-v6-spatial-raw-qc`.
+The project processing-ledger and Stats group-harmonic cache processing
+fingerprints use `processing_fingerprint_v5_spatial_raw_qc`. The raw
+channel-health QC threshold and removed-electrode auto-detection toggle are part
+of the cache payload so changes to those settings invalidate cached
+preprocessed Raw files. The v6 cache metadata also persists raw-QC,
+kurtosis, and interpolated bad-channel names so cache-hit runs can still produce
+participant QC summaries.
 
 ## Raw QC Hard Exclusions
 
@@ -98,21 +98,34 @@ cannot hide a dead or disconnected channel cluster.
 
 The project preprocessing setting `auto_detect_removed_electrodes` defaults to
 `True` and is exposed in Settings > Advanced > Processing QC. When enabled,
-persistently flat or very low-variance scalp channels are automatically added to
-`raw.info["bads"]` before preprocessing. That means they are excluded from
-kurtosis donor/pick calculations and are included in the later spherical
-interpolation target list. When disabled, the broad hard-exclusion checks still
-run, but isolated low-variance channels are not auto-marked for interpolation
-and the local cluster rule is not applied.
+persistently flat/very low-variance scalp channels can be automatically added to
+`raw.info["bads"]` before preprocessing. The second-pass raw-QC detector adds
+flag-only candidate lists for extreme high-amplitude outliers and spatially
+inconsistent channels. Those second-pass candidates are reported for review but
+are not automatically added to the interpolation target list. Spatial channels
+are only flagged when local predictability is both low and a robust outlier
+within the participant's own montage. Low-variance raw-QC bad channels are
+excluded from kurtosis donor/pick calculations and are included in the later
+spherical interpolation target list. When disabled, the broad hard-exclusion
+checks still run, but isolated low-variance channels are not auto-marked for
+interpolation and the local cluster warning/exclusion rule is not applied.
 
 The default `max_bad_chans` is `20`. A raw file is excluded when any of these
 rules trigger on the BioSemi 64 scalp surface:
 
-- More channels than `max_bad_chans` are flat or very low amplitude.
-- More than 50 percent of scalp channels are flat or very low amplitude.
-- At least 50 percent of a hemisphere is flat or very low amplitude.
+- More channels than `max_bad_chans` are flat, very low amplitude, extreme
+  high-amplitude outliers, or spatially inconsistent.
+- More than 50 percent of scalp channels are flat, very low amplitude, extreme
+  high-amplitude outliers, or spatially inconsistent.
+- At least 50 percent of a hemisphere is flat, very low amplitude, extreme
+  high-amplitude outliers, or spatially inconsistent.
 - When removed-electrode auto-detection is enabled, the largest connected
-  bad-channel cluster on the scalp montage has at least four electrodes.
+  bad-channel cluster on the scalp montage has at least six electrodes.
+
+When the largest connected raw-QC candidate cluster has at least four but fewer
+than six electrodes, the participant is not hard-excluded. The run records a
+`possible_bad_channel_cluster` warning so the participant can be reviewed before
+group analysis.
 
 The hemisphere rule is intentionally separate from the global fraction rule so a
 left- or right-side equipment failure is excluded even when the full-scalp
@@ -135,8 +148,10 @@ silently include stale workbooks from an earlier run.
 The GUI finish handler also writes
 `Quality Check/Processing_QC_Summary.xlsx` under the active project root. The
 workbook has one row per participant in the processing plan and reports the PID,
-auto-detected low-SD removed-electrode candidates, kurtosis-rejected electrodes,
-final interpolated electrodes, total rejected/interpolated electrode count,
+auto-detected low-SD removed-electrode candidates, auto-detected high-amplitude
+removed-electrode candidates, auto-detected spatial-consistency
+removed-electrode candidates, kurtosis-rejected electrodes, final interpolated
+electrodes, total rejected/interpolated electrode count, raw-QC warning rules,
 missing condition outputs, and whether that participant is included in the final
 processed dataset.
 This export is generated from the current per-file results plus the processing
