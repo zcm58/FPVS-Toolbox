@@ -19,15 +19,19 @@ from Main_App.io.load_utils import (
     format_bdf_recording_not_started_message,
 )
 from Main_App.processing.processing_ledger import (
+    MISSING_EXPECTED_OUTPUTS_WARNING,
     ProcessingPlan,
     classify_processing_inputs,
     clean_managed_excel_root,
     clean_participant_outputs,
+    load_ledger,
     output_group_folder_by_file,
     record_processing_results,
     with_processing_choice,
 )
+from Main_App.processing.qc_summary_export import export_processing_qc_summary
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.processing.raw_channel_qc import RAW_CHANNEL_QC_EXCLUSION_REASON
 from Main_App.workers.mp_env import (
     compute_effective_max_workers,
     get_ram_tier_recommendation,
@@ -73,6 +77,207 @@ def _format_timing_summary(result: dict) -> str | None:
 
     cache_part = f" cache={cache_status}" if cache_status else ""
     return f"[TIMING] {file_name}{cache_part} " + " ".join(parts)
+
+
+def _format_exclusion_reason(result: dict) -> str:
+    reason = str(result.get("reason") or "excluded")
+    if reason == BDF_RECORDING_NOT_STARTED_REASON:
+        return "Recording was not started in BioSemi; the BDF is header-only/approximately 19 KB."
+
+    qc_payload = result.get("raw_channel_qc")
+    if reason == RAW_CHANNEL_QC_EXCLUSION_REASON and isinstance(qc_payload, dict):
+        n_bad = qc_payload.get("n_bad_channels")
+        n_channels = qc_payload.get("n_channels")
+        left_bad = qc_payload.get("left_bad")
+        left_total = qc_payload.get("left_total")
+        right_bad = qc_payload.get("right_bad")
+        right_total = qc_payload.get("right_total")
+        midline_bad = qc_payload.get("midline_bad")
+        midline_total = qc_payload.get("midline_total")
+        rules = ", ".join(str(rule) for rule in qc_payload.get("triggered_rules", []) or [])
+        rules_text = f" Triggered rule(s): {rules}." if rules else ""
+        cluster_size = qc_payload.get("largest_bad_cluster_size")
+        cluster_channels = ", ".join(
+            str(channel)
+            for channel in qc_payload.get("largest_bad_cluster_channels", []) or []
+        )
+        cluster_text = ""
+        if cluster_size and cluster_channels:
+            cluster_text = f" Largest cluster: {cluster_size} ({cluster_channels})."
+        return (
+            "Raw channel-health QC failed: "
+            f"{n_bad}/{n_channels} scalp EEG channels were flat/very low amplitude "
+            f"(left {left_bad}/{left_total}, right {right_bad}/{right_total}, "
+            f"midline {midline_bad}/{midline_total}).{cluster_text}{rules_text}"
+        )
+
+    message = str(result.get("message") or "").strip()
+    return message or reason.replace("_", " ")
+
+
+def _run_failed_results_from_ledger(host: Any, plan: ProcessingPlan) -> list[dict]:
+    try:
+        ledger = load_ledger(Path(host.currentProject.project_root))
+    except (AttributeError, OSError, TypeError, ValueError):
+        logger.exception("Failed to load processing ledger for failed-run summary.")
+        return []
+    entries = ledger.get("entries")
+    if not isinstance(entries, dict):
+        return []
+
+    failed_results: list[dict] = []
+    run_paths = {path.resolve() for path in plan.run_files}
+    for state in plan.states:
+        if state.info.path.resolve() not in run_paths:
+            continue
+        entry = entries.get(state.participant_id)
+        if not isinstance(entry, dict):
+            continue
+        status = str(entry.get("status") or "").casefold()
+        if status not in {"failed", "incomplete"}:
+            continue
+        reason = str(entry.get("failure_reason") or status)
+        message = str(
+            entry.get("failure_message")
+            or "Processing did not complete for this participant."
+        )
+        missing_outputs = entry.get("missing_outputs")
+        if isinstance(missing_outputs, list) and missing_outputs:
+            message = f"{message} Missing expected output(s): {len(missing_outputs)}."
+        failed_results.append(
+            {
+                "status": status,
+                "file": str(state.info.path),
+                "reason": reason,
+                "message": message,
+            }
+        )
+    return failed_results
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list | tuple):
+        return [str(item) for item in value if str(item).strip()]
+    return []
+
+
+def _run_condition_warning_results_from_ledger(host: Any, plan: ProcessingPlan) -> list[dict]:
+    try:
+        ledger = load_ledger(Path(host.currentProject.project_root))
+    except (AttributeError, OSError, TypeError, ValueError):
+        logger.exception("Failed to load processing ledger for condition-warning summary.")
+        return []
+    entries = ledger.get("entries")
+    if not isinstance(entries, dict):
+        return []
+
+    warning_results: list[dict] = []
+    for state in plan.states:
+        entry = entries.get(state.participant_id)
+        if not isinstance(entry, dict):
+            continue
+        has_warning = (
+            str(entry.get("completion_warning") or "") == MISSING_EXPECTED_OUTPUTS_WARNING
+            or str(entry.get("failure_reason") or "") == MISSING_EXPECTED_OUTPUTS_WARNING
+            or str(entry.get("condition_completeness") or "").casefold() == "partial"
+        )
+        if not has_warning:
+            continue
+        labels = _string_list(entry.get("missing_condition_labels"))
+        missing_outputs = _string_list(entry.get("missing_outputs"))
+        if labels:
+            missing_text = ", ".join(labels)
+        elif missing_outputs:
+            missing_text = f"{len(missing_outputs)} expected condition output(s)"
+        else:
+            missing_text = "one or more expected condition outputs"
+        warning_results.append(
+            {
+                "status": "condition_warning",
+                "file": str(state.info.path),
+                "reason": MISSING_EXPECTED_OUTPUTS_WARNING,
+                "message": (
+                    f"Missing condition output(s): {missing_text}. Available condition "
+                    "outputs remain included in the processed dataset."
+                ),
+            }
+        )
+    return warning_results
+
+
+def _build_condition_warning_popup_text(warning_results: list[dict]) -> tuple[str, str, str]:
+    count = len(warning_results)
+    lead = (
+        f"{count} participant(s) are missing one or more expected condition outputs. "
+        "They remain included for the condition data that were successfully processed. "
+        "The raw BDF files were not altered."
+    )
+    reason_lines: list[str] = []
+    for result in warning_results:
+        file_value = result.get("file") or "unknown"
+        file_name = Path(str(file_value)).name
+        reason_lines.append(f"- {file_name}: {result.get('message')}")
+
+    if len(reason_lines) <= 8:
+        informative = "\n".join(reason_lines)
+        detailed = ""
+    else:
+        informative = "\n".join(reason_lines[:8]) + f"\n...and {len(reason_lines) - 8} more."
+        detailed = "\n".join(reason_lines)
+    return lead, informative, detailed
+
+
+def _show_condition_warning_popup(host: Any, warning_results: list[dict]) -> None:
+    if not warning_results:
+        return
+    lead, informative, detailed = _build_condition_warning_popup_text(warning_results)
+    box = QMessageBox(host)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle("Processing QC Warnings")
+    box.setText(lead)
+    box.setInformativeText(informative)
+    if detailed:
+        box.setDetailedText(detailed)
+    box.exec()
+
+
+def _build_exclusion_popup_text(excluded_results: list[dict]) -> tuple[str, str, str]:
+    count = len(excluded_results)
+    lead = (
+        f"{count} raw file(s) were excluded or left incomplete during processing. "
+        "The final dataset of processed files excludes these files. "
+        "The raw BDF files were not altered."
+    )
+    reason_lines: list[str] = []
+    for result in excluded_results:
+        file_value = result.get("file") or "unknown"
+        file_name = Path(str(file_value)).name
+        reason_lines.append(f"- {file_name}: {_format_exclusion_reason(result)}")
+
+    if len(reason_lines) <= 8:
+        informative = "\n".join(reason_lines)
+        detailed = ""
+    else:
+        informative = "\n".join(reason_lines[:8]) + f"\n...and {len(reason_lines) - 8} more."
+        detailed = "\n".join(reason_lines)
+    return lead, informative, detailed
+
+
+def _show_exclusion_summary_popup(host: Any, excluded_results: list[dict]) -> None:
+    if not excluded_results:
+        return
+    lead, informative, detailed = _build_exclusion_popup_text(excluded_results)
+    box = QMessageBox(host)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle("Processing Exclusions")
+    box.setText(lead)
+    box.setInformativeText(informative)
+    if detailed:
+        box.setDetailedText(detailed)
+    box.exec()
 
 
 def _choose_processing_plan(
@@ -557,8 +762,16 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                 "Check the processing log for details.",
                 level=logging.WARNING,
             )
+        for result in excluded_results:
+            file_value = result.get("file") or "unknown"
+            host.log(
+                f"Excluded {Path(str(file_value)).name}: {_format_exclusion_reason(result)}",
+                level=logging.WARNING,
+            )
 
     plan = getattr(host, "_processing_plan", None)
+    failed_run_results: list[dict] = []
+    condition_warning_results: list[dict] = []
     if plan is not None:
         try:
             record_processing_results(
@@ -572,6 +785,51 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         except Exception as exc:
             logger.exception("Failed to update processing ledger.")
             host.log(f"Processing ledger update failed: {exc}", level=logging.WARNING)
+        else:
+            failed_run_results = _run_failed_results_from_ledger(host, plan)
+            condition_warning_results = _run_condition_warning_results_from_ledger(
+                host,
+                plan,
+            )
+            if failed_run_results:
+                host.log(
+                    f"{len(failed_run_results)} file(s) did not produce a complete final "
+                    "processed dataset and were excluded from downstream analysis.",
+                    level=logging.WARNING,
+                )
+                for result in failed_run_results:
+                    file_value = result.get("file") or "unknown"
+                    host.log(
+                        f"Incomplete {Path(str(file_value)).name}: {_format_exclusion_reason(result)}",
+                        level=logging.WARNING,
+                    )
+            if condition_warning_results:
+                host.log(
+                    f"{len(condition_warning_results)} participant(s) are missing one or "
+                    "more expected condition outputs. Available condition data remain "
+                    "included in the processed dataset.",
+                    level=logging.WARNING,
+                )
+                for result in condition_warning_results:
+                    file_value = result.get("file") or "unknown"
+                    host.log(
+                        f"Condition warning {Path(str(file_value)).name}: "
+                        f"{result.get('message')}",
+                        level=logging.WARNING,
+                    )
+            try:
+                qc_summary_path = export_processing_qc_summary(
+                    host.currentProject,
+                    plan,
+                    [*results, *excluded_results],
+                )
+                host.log(f"Processing QC summary saved: {qc_summary_path}", level=logging.INFO)
+            except Exception as exc:
+                logger.exception("Failed to write processing QC summary workbook.")
+                host.log(f"Processing QC summary export failed: {exc}", level=logging.WARNING)
+
+    _show_exclusion_summary_popup(host, [*excluded_results, *failed_run_results])
+    _show_condition_warning_popup(host, condition_warning_results)
 
     host._busy_stop()
     success = not cancelled

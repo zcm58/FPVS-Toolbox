@@ -48,16 +48,18 @@ Callers should not depend on private helpers or split-stage internals.
 The canonical file-level process runner is
 `src/Main_App/Performance/process_runner.py`. Its single-file worker route is:
 
-1. Check the strict project-root preprocessed Raw cache.
-2. On cache miss, load BDF through `Main_App.io.load_utils.load_eeg_file`.
-3. Capture pre-state with `begin_preproc_audit`.
-4. Run `perform_preprocessing`.
-5. Store a cache entry only after successful preprocessing.
-6. Extract events from the configured stim channel.
-7. Build epochs per event-map label.
-8. Run post-export through `Main_App.exports.post_export_adapter`.
-9. Finalize the preprocessing audit with `finalize_preproc_audit`.
-10. Clean up worker memory and temporary memmap paths.
+1. Exclude header-only BioSemi recordings before load.
+2. Check the strict project-root preprocessed Raw cache.
+3. On cache miss, load BDF through `Main_App.io.load_utils.load_eeg_file`.
+4. Run raw channel-health QC for hard participant exclusions.
+5. Capture pre-state with `begin_preproc_audit`.
+6. Run `perform_preprocessing`.
+7. Store a cache entry only after successful preprocessing.
+8. Extract events from the configured stim channel.
+9. Build epochs per event-map label.
+10. Run post-export through `Main_App.exports.post_export_adapter`.
+11. Finalize the preprocessing audit with `finalize_preproc_audit`.
+12. Clean up worker memory and temporary memmap paths.
 
 GUI processing must route through the active process runner. Single-file runs use
 the same runner with `max_workers=1`. Do not add a fallback path that bypasses
@@ -77,6 +79,79 @@ cache lookup, load, pre-audit, preprocessing, cache store, events, epochs,
 export, post-audit, and cleanup when those stages run. The returned per-file
 result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
+
+The preprocessed Raw cache version is
+`preprocessed-raw-v5-removed-electrode-qc`. The project processing-ledger and Stats
+group-harmonic cache processing fingerprints use
+`processing_fingerprint_v4_removed_electrode_qc`. The raw channel-health QC
+threshold and removed-electrode auto-detection toggle are part of the cache
+payload so changes to those settings invalidate cached preprocessed Raw files.
+The v5 cache metadata also persists raw-QC, kurtosis, and interpolated
+bad-channel names so cache-hit runs can still produce participant QC summaries.
+
+## Raw QC Hard Exclusions
+
+`src/Main_App/processing/raw_channel_qc.py` owns pre-preprocessing
+removed-electrode detection and hard exclusions for raw channel-health failures.
+It runs after a BDF is loaded and before `begin_preproc_audit` so interpolation
+cannot hide a dead or disconnected channel cluster.
+
+The project preprocessing setting `auto_detect_removed_electrodes` defaults to
+`True` and is exposed in Settings > Advanced > Processing QC. When enabled,
+persistently flat or very low-variance scalp channels are automatically added to
+`raw.info["bads"]` before preprocessing. That means they are excluded from
+kurtosis donor/pick calculations and are included in the later spherical
+interpolation target list. When disabled, the broad hard-exclusion checks still
+run, but isolated low-variance channels are not auto-marked for interpolation
+and the local cluster rule is not applied.
+
+The default `max_bad_chans` is `20`. A raw file is excluded when any of these
+rules trigger on the BioSemi 64 scalp surface:
+
+- More channels than `max_bad_chans` are flat or very low amplitude.
+- More than 50 percent of scalp channels are flat or very low amplitude.
+- At least 50 percent of a hemisphere is flat or very low amplitude.
+- When removed-electrode auto-detection is enabled, the largest connected
+  bad-channel cluster on the scalp montage has at least four electrodes.
+
+The hemisphere rule is intentionally separate from the global fraction rule so a
+left- or right-side equipment failure is excluded even when the full-scalp
+fraction is below or equal to 50 percent. The cluster rule uses montage geometry
+to find connected bad-channel components; it is intended to stop local blocks of
+four or more removed/flat electrodes from being interpolated as if they were
+isolated channels. The raw BDF is never modified. The per-file result uses
+status `excluded`, stage `raw_qc`, reason `raw_channel_qc_failure`, and includes
+a `raw_channel_qc` payload with bad channel counts, hemisphere counts, bad
+channel names, interpolation candidates, largest cluster details, triggered
+rules, and thresholds.
+
+At the end of a GUI processing run, excluded files are reported in a modal
+summary alongside header-only BioSemi recordings. The summary must state that
+the final processed dataset excludes those files and that the raw BDF files were
+not altered. The processing ledger records excluded participants and removes
+their expected managed Excel outputs so downstream Excel-based tools do not
+silently include stale workbooks from an earlier run.
+
+The GUI finish handler also writes
+`Quality Check/Processing_QC_Summary.xlsx` under the active project root. The
+workbook has one row per participant in the processing plan and reports the PID,
+auto-detected low-SD removed-electrode candidates, kurtosis-rejected electrodes,
+final interpolated electrodes, total rejected/interpolated electrode count,
+missing condition outputs, and whether that participant is included in the final
+processed dataset.
+This export is generated from the current per-file results plus the processing
+ledger so incremental runs can include participants completed in earlier runs.
+
+If a worker reports success and at least one, but not all, expected condition
+workbooks exist, the processing ledger records that participant as `completed`
+with `condition_completeness` set to `partial` and `completion_warning` set to
+`missing_expected_outputs`. The available condition workbook(s) are preserved and
+remain part of the processed dataset; missing conditions are flagged in the GUI
+run summary and in `Processing_QC_Summary.xlsx`. This is a condition-completeness
+warning, not a hard participant exclusion. If no expected condition workbook is
+created for a successful worker result, the ledger records a failure with reason
+`no_expected_outputs` because there is no usable condition-level export for that
+participant.
 
 ## Pipeline Order
 

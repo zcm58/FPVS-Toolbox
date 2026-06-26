@@ -34,6 +34,7 @@ def _prep_project(root):
             "ref_chan2": "Pz",
             "max_chan_idx_keep": 32,
             "max_bad_chans": 5,
+            "auto_detect_removed_electrodes": True,
             "max_parallel_workers_override": 0,
             "stim_channel": "Status",
         }
@@ -63,6 +64,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[4].setText("3.5")
     dlg.preproc_edits[5].setText("100")
+    dlg.auto_detect_removed_electrodes_check.setChecked(False)
 
     dlg._save()
 
@@ -70,6 +72,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["downsample"] == 256
     assert reloaded.preprocessing["rejection_z"] == 3.5
     assert reloaded.preprocessing["epoch_end_s"] == 100.0
+    assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
 
@@ -88,6 +91,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["downsample"] == 256
     assert params["reject_thresh"] == 3.5
     assert params["epoch_end"] == 100.0
+    assert params["auto_detect_removed_electrodes"] is False
     assert params["stim_channel"] == "Status"
     assert params["save_preprocessed_fif"] is False
 
@@ -150,6 +154,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     }
     assert "Preprocessing Parameters" in cards
     assert "Application Options" in cards
+    assert "Processing QC" in cards
     assert "Diagnostics" not in cards
     assert "Tool Visibility" not in cards
     assert "Analysis Defaults" in cards
@@ -166,6 +171,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
     assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
+    assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)
+    assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
     assert dlg.beta_tools_check.text() == "Enable Beta Tools"
     assert dlg.beta_tools_check.isChecked() is False
     assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)
@@ -198,6 +205,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     advanced_tab = dlg.tabs.widget(advanced_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
     assert advanced_tab.isAncestorOf(cards["Application Options"])
+    assert advanced_tab.isAncestorOf(cards["Processing QC"])
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])
     assert rois_tab.isAncestorOf(cards["Quick Add"])
     assert not stats_tab.isAncestorOf(cards["Regions of Interest"])

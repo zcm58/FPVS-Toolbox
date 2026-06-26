@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v2_filter_then_downsample"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v4_removed_electrode_qc"
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
+MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
+NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,51 @@ def _canonical_json(data: Any) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Sequence):
+        return [str(item) for item in value if str(item).strip()]
+    return []
+
+
+def _int_or_default(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _resolved_path_strings(values: Sequence[Any]) -> set[str]:
+    resolved: set[str] = set()
+    for value in values:
+        try:
+            resolved.add(str(Path(str(value)).resolve()))
+        except (OSError, TypeError, ValueError):
+            continue
+    return resolved
+
+
+def _has_missing_condition_warning(entry: Mapping[str, Any]) -> bool:
+    return (
+        str(entry.get("completion_warning") or "") == MISSING_EXPECTED_OUTPUTS_WARNING
+        or str(entry.get("failure_reason") or "") == MISSING_EXPECTED_OUTPUTS_WARNING
+        or str(entry.get("condition_completeness") or "").casefold() == "partial"
+    )
+
+
+def _missing_outputs_are_recorded_condition_warning(
+    entry: Mapping[str, Any],
+    missing_outputs: Sequence[Any],
+) -> bool:
+    if not _has_missing_condition_warning(entry):
+        return False
+    current_missing = _resolved_path_strings(missing_outputs)
+    recorded_missing = _resolved_path_strings(_string_list(entry.get("missing_outputs")))
+    return not recorded_missing or current_missing.issubset(recorded_missing)
+
+
 def _excel_root(project: Any) -> Path:
     project_root = Path(project.project_root)
     subfolders = getattr(project, "subfolders", {}) or {}
@@ -146,6 +193,23 @@ def _expected_excel_paths(
             output_folder = output_folder / group_folder
         paths.append((output_folder / file_name).resolve())
     return tuple(paths)
+
+
+def _condition_labels_for_missing_outputs(
+    plan: ProcessingPlan,
+    state: ProcessingInputState,
+    missing_outputs: Sequence[Any],
+) -> list[str]:
+    missing = _resolved_path_strings(missing_outputs)
+    labels: list[str] = []
+    for index, output_path in enumerate(state.expected_outputs):
+        if str(output_path.resolve()) not in missing:
+            continue
+        if index < len(plan.condition_labels):
+            labels.append(str(plan.condition_labels[index]))
+        else:
+            labels.append(output_path.parent.name)
+    return labels
 
 
 def raw_file_metadata(file_path: Path) -> dict[str, Any]:
@@ -275,7 +339,18 @@ def classify_processing_inputs(
             )
             continue
 
-        if entry_status != "completed":
+        present_outputs_now = [path for path in expected_outputs if path.exists()]
+        missing_outputs_now = [path for path in expected_outputs if not path.exists()]
+        legacy_partial_condition_entry = (
+            entry_status == "failed"
+            and bool(present_outputs_now)
+            and bool(missing_outputs_now)
+        )
+        if (
+            entry_status != "completed"
+            and not _has_missing_condition_warning(entry)
+            and not legacy_partial_condition_entry
+        ):
             states.append(
                 ProcessingInputState(
                     info=info,
@@ -327,8 +402,25 @@ def classify_processing_inputs(
             )
             continue
 
-        missing_outputs = [path for path in expected_outputs if not path.exists()]
+        missing_outputs = missing_outputs_now
         if missing_outputs:
+            if (
+                _missing_outputs_are_recorded_condition_warning(entry, missing_outputs)
+                or legacy_partial_condition_entry
+            ):
+                states.append(
+                    ProcessingInputState(
+                        info=info,
+                        participant_id=participant_id,
+                        status="completed",
+                        reason=(
+                            "Available condition outputs are completed; missing "
+                            "condition outputs are flagged in QC."
+                        ),
+                        expected_outputs=expected_outputs,
+                    )
+                )
+                continue
             states.append(
                 ProcessingInputState(
                     info=info,
@@ -430,6 +522,25 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
     return deleted
 
 
+def _remove_expected_outputs_for_state(project: Any, state: ProcessingInputState) -> list[str]:
+    root = _excel_root(project).resolve()
+    removed: list[str] = []
+    for expected_output in state.expected_outputs:
+        target = _assert_under_excel_root(root, expected_output)
+        if not target.exists():
+            continue
+        try:
+            target.unlink()
+        except OSError as exc:
+            logger.warning(
+                "excluded_output_cleanup_failed",
+                extra={"path": str(target), "participant_id": state.participant_id, "error": str(exc)},
+            )
+            continue
+        removed.append(str(target))
+    return removed
+
+
 def _info_by_resolved_path(plan: ProcessingPlan) -> dict[Path, ProcessingInputState]:
     return {state.info.path.resolve(): state for state in plan.states}
 
@@ -452,7 +563,9 @@ def record_processing_results(
 
     states_by_path = _info_by_resolved_path(plan)
     successful_paths: set[Path] = set()
+    partial_condition_paths: set[Path] = set()
     excluded_by_path: dict[Path, Mapping[str, Any]] = {}
+    no_output_failures_by_path: dict[Path, dict[str, Any]] = {}
     for result in results:
         if result.get("status") == "excluded":
             raw_path_value = result.get("file")
@@ -468,10 +581,35 @@ def record_processing_results(
         state = states_by_path.get(raw_path)
         if state is None:
             continue
-        if any(not path.exists() for path in state.expected_outputs):
+        missing_outputs = [
+            str(path) for path in state.expected_outputs if not path.exists()
+        ]
+        present_outputs = [
+            str(path) for path in state.expected_outputs if path.exists()
+        ]
+        missing_condition_labels = _condition_labels_for_missing_outputs(
+            plan,
+            state,
+            missing_outputs,
+        )
+        if missing_outputs and not present_outputs:
+            no_output_failures_by_path[raw_path] = {
+                "result": result,
+                "missing_outputs": missing_outputs,
+                "missing_condition_labels": missing_condition_labels,
+            }
             continue
+        if missing_outputs:
+            partial_condition_paths.add(raw_path)
         successful_paths.add(raw_path)
         raw_meta = raw_file_metadata(state.info.path)
+        audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+        raw_qc_bad_channels = _string_list(audit.get("raw_qc_bad_channels"))
+        kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
+        interpolated_channels = _string_list(
+            audit.get("interpolated_channels")
+        ) or list(kurtosis_bad_channels)
+        n_rejected = _int_or_default(audit.get("n_rejected"), len(kurtosis_bad_channels))
         entries[state.participant_id] = {
             "participant_id": state.participant_id,
             "group_id": state.info.group,
@@ -482,6 +620,17 @@ def record_processing_results(
             "status": "completed",
             "completed_at": _now_iso(),
             "run_mode": run_mode,
+            "raw_qc_bad_channels": raw_qc_bad_channels,
+            "kurtosis_bad_channels": kurtosis_bad_channels,
+            "interpolated_channels": interpolated_channels,
+            "n_rejected": n_rejected,
+            "condition_completeness": "partial" if missing_outputs else "complete",
+            "completion_warning": (
+                MISSING_EXPECTED_OUTPUTS_WARNING if missing_outputs else None
+            ),
+            "missing_outputs": missing_outputs,
+            "missing_condition_labels": missing_condition_labels,
+            "present_outputs": present_outputs,
         }
 
     run_files = {path.resolve() for path in plan.run_files}
@@ -492,6 +641,17 @@ def record_processing_results(
             continue
         excluded_result = excluded_by_path.get(raw_path)
         if excluded_result is not None:
+            removed_outputs = _remove_expected_outputs_for_state(project, state)
+            qc_payload = (
+                excluded_result.get("raw_channel_qc")
+                if isinstance(excluded_result.get("raw_channel_qc"), Mapping)
+                else {}
+            )
+            raw_qc_bad_channels = _string_list(qc_payload.get("bad_channels"))
+            n_rejected = _int_or_default(
+                qc_payload.get("n_bad_channels"),
+                len(raw_qc_bad_channels),
+            )
             entries[state.participant_id] = {
                 "participant_id": state.participant_id,
                 "group_id": state.info.group,
@@ -507,8 +667,62 @@ def record_processing_results(
                     excluded_result.get("message") or "Raw file was excluded from processing."
                 ),
                 "excluded_at": _now_iso(),
+                "removed_outputs": removed_outputs,
+                "raw_qc_bad_channels": raw_qc_bad_channels,
+                "kurtosis_bad_channels": [],
+                "interpolated_channels": [],
+                "n_rejected": n_rejected,
             }
             continue
+        no_output_failure = no_output_failures_by_path.get(raw_path)
+        if no_output_failure is not None:
+            result = (
+                no_output_failure.get("result")
+                if isinstance(no_output_failure.get("result"), Mapping)
+                else {}
+            )
+            audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+            raw_qc_bad_channels = _string_list(audit.get("raw_qc_bad_channels"))
+            kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
+            interpolated_channels = _string_list(
+                audit.get("interpolated_channels")
+            ) or list(kurtosis_bad_channels)
+            n_rejected = _int_or_default(
+                audit.get("n_rejected"),
+                len(interpolated_channels) or len(kurtosis_bad_channels),
+            )
+            missing_outputs = [
+                str(path) for path in no_output_failure.get("missing_outputs", [])
+            ]
+            missing_condition_labels = [
+                str(label)
+                for label in no_output_failure.get("missing_condition_labels", [])
+            ]
+            entries[state.participant_id] = {
+                "participant_id": state.participant_id,
+                "group_id": state.info.group,
+                **raw_file_metadata(state.info.path),
+                "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+                "processing_fingerprint": plan.fingerprint,
+                "expected_outputs": [str(path) for path in state.expected_outputs],
+                "status": "failed",
+                "completed_at": None,
+                "run_mode": run_mode,
+                "failure_reason": NO_EXPECTED_OUTPUTS_FAILURE,
+                "failure_message": (
+                    "Processing did not produce any expected Excel condition outputs; "
+                    "no condition-level workbooks are available for this participant."
+                ),
+                "missing_outputs": missing_outputs,
+                "missing_condition_labels": missing_condition_labels,
+                "removed_outputs": [],
+                "raw_qc_bad_channels": raw_qc_bad_channels,
+                "kurtosis_bad_channels": kurtosis_bad_channels,
+                "interpolated_channels": interpolated_channels,
+                "n_rejected": n_rejected,
+            }
+            continue
+        removed_outputs = _remove_expected_outputs_for_state(project, state)
         entries[state.participant_id] = {
             "participant_id": state.participant_id,
             "group_id": state.info.group,
@@ -519,6 +733,11 @@ def record_processing_results(
             "status": "incomplete" if cancelled else "failed",
             "completed_at": None,
             "run_mode": run_mode,
+            "removed_outputs": removed_outputs,
+            "raw_qc_bad_channels": [],
+            "kurtosis_bad_channels": [],
+            "interpolated_channels": [],
+            "n_rejected": 0,
         }
 
     save_ledger(project_root, ledger)
@@ -542,6 +761,7 @@ def record_processing_results(
             "successful_files": len(successful_paths),
             "excluded_files": len(excluded_paths),
             "failed_files": max(0, len(run_files - successful_paths - excluded_paths)),
+            "condition_warning_files": len(partial_condition_paths),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
         },

@@ -401,6 +401,49 @@ class SettingsDialog(QDialog):
 
         advanced_group.content_layout.addLayout(advanced_form)
         layout.addWidget(advanced_group)
+
+        qc_group = SectionCard(
+            "Processing QC",
+            tab,
+            object_name="settings_advanced_processing_qc_card",
+        )
+        qc_form = make_form_layout()
+        if self.project is not None:
+            qc_preproc = self._project_preprocessing()
+            auto_detect_default = bool(
+                qc_preproc.get(
+                    "auto_detect_removed_electrodes",
+                    PREPROCESSING_DEFAULTS["auto_detect_removed_electrodes"],
+                )
+            )
+        else:
+            auto_detect_default = (
+                self.manager.get(
+                    "preprocessing",
+                    "auto_detect_removed_electrodes",
+                    str(PREPROCESSING_DEFAULTS["auto_detect_removed_electrodes"]),
+                ).lower()
+                == "true"
+            )
+        self.auto_detect_removed_electrodes_check = QCheckBox(
+            "Auto-detect removed electrodes",
+            qc_group,
+        )
+        self.auto_detect_removed_electrodes_check.setObjectName(
+            "settings_auto_detect_removed_electrodes"
+        )
+        self.auto_detect_removed_electrodes_check.setChecked(auto_detect_default)
+        self.auto_detect_removed_electrodes_check.setToolTip(
+            "Mark persistently low-variance scalp channels as bad before interpolation; "
+            "clustered failures are excluded."
+        )
+        qc_form.addRow(
+            QLabel("Removed-electrode QC", qc_group),
+            self.auto_detect_removed_electrodes_check,
+        )
+        qc_group.content_layout.addLayout(qc_form)
+        layout.addWidget(qc_group)
+
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_advanced_footer")
 
@@ -618,6 +661,11 @@ class SettingsDialog(QDialog):
             for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
                 value = validated_preproc.get(canonical, "")
                 self.manager.set(sec, opt, str(value))
+            self.manager.set(
+                "preprocessing",
+                "auto_detect_removed_electrodes",
+                str(bool(validated_preproc.get("auto_detect_removed_electrodes"))),
+            )
         else:
             try:
                 normalized = self.project.update_preprocessing(validated_preproc)
@@ -707,6 +755,9 @@ class SettingsDialog(QDialog):
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
+        values["auto_detect_removed_electrodes"] = (
+            self.auto_detect_removed_electrodes_check.isChecked()
+        )
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values
 

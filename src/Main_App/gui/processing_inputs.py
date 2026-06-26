@@ -156,6 +156,7 @@ def validate_inputs(host: Any) -> bool:
             "ref_chan2",
             "max_idx_keep",
             "max_bad_chans",
+            "auto_detect_removed_electrodes",
         )
         for opt in preproc_options:
             if host.settings.config.has_option("preprocessing", opt):
@@ -176,6 +177,7 @@ def validate_inputs(host: Any) -> bool:
                 "ref_chan2",
                 "max_idx_keep",
                 "max_bad_chans",
+                "auto_detect_removed_electrodes",
             )
             dialog_snapshot = {
                 key: edit.text()
@@ -318,6 +320,9 @@ def build_validated_params(host: Any) -> dict | None:
         "ref_channel2": (normalized.get("ref_chan2") or None),
         "max_idx_keep": int(normalized.get("max_chan_idx_keep")),
         "max_bad_channels_alert_thresh": int(normalized.get("max_bad_chans")),
+        "auto_detect_removed_electrodes": bool(
+            normalized.get("auto_detect_removed_electrodes")
+        ),
         "epoch_start": epoch_start,
         "epoch_end": epoch_end,
         "stim_channel": stim_channel,

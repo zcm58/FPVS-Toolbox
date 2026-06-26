@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
+from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
 from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
     compute_onbin_step,
@@ -44,8 +45,17 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v2-filter-then-downsample"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v5-removed-electrode-qc"
 BDF_FIRST_N_CHANNELS = 64
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item).strip()]
+    return []
 
 
 def _worker_log(message: str) -> None:
@@ -158,8 +168,10 @@ def _make_excluded_result(
     *,
     reason: str,
     message: str,
+    stage: str = "preflight",
     start_time: Optional[float] = None,
     preflight_info: Optional[Any] = None,
+    qc_info: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
     elapsed_ms: Optional[int] = None
     if start_time is not None:
@@ -171,7 +183,7 @@ def _make_excluded_result(
     payload: Dict[str, object] = {
         "status": "excluded",
         "file": str(file_path),
-        "stage": "preflight",
+        "stage": stage,
         "reason": reason,
         "message": message,
         "post_export_ok": False,
@@ -187,6 +199,8 @@ def _make_excluded_result(
             "channel_count": getattr(preflight_info, "channel_count", None),
             "data_bytes": getattr(preflight_info, "data_bytes", None),
         }
+    if qc_info is not None:
+        payload["raw_channel_qc"] = qc_info
     return payload
 
 
@@ -241,6 +255,14 @@ def _preproc_cache_payload(
         "ref_channel2": settings.get("ref_channel2", settings.get("ref_ch2")),
         "stim_channel": settings.get("stim_channel"),
         "max_idx_keep": settings.get("max_idx_keep"),
+        "max_bad_chans": settings.get(
+            "max_bad_chans",
+            settings.get("max_bad_channels_alert_thresh"),
+        ),
+        "auto_detect_removed_electrodes": settings.get(
+            "auto_detect_removed_electrodes",
+            True,
+        ),
     }
     return {
         "version": PREPROC_CACHE_VERSION,
@@ -353,6 +375,15 @@ def _load_preprocessed_cache(
         audit_before = metadata.get("audit_before")
         if not isinstance(audit_before, dict):
             return None, None, 0, "miss_missing_audit"
+        settings["_fpvs_kurtosis_bad_channels"] = _string_list(
+            metadata.get("kurtosis_bad_channels")
+        )
+        settings["_fpvs_interpolated_channels"] = _string_list(
+            metadata.get("interpolated_channels")
+        )
+        settings["_fpvs_raw_qc_bad_channels"] = _string_list(
+            metadata.get("raw_qc_bad_channels")
+        )
         return raw, audit_before, int(metadata.get("n_rejected", 0)), "hit"
     except Exception as exc:
         logger.warning(
@@ -394,6 +425,15 @@ def _store_preprocessed_cache(
             "payload": payload,
             "audit_before": audit_before,
             "n_rejected": int(n_rejected),
+            "kurtosis_bad_channels": _string_list(
+                settings.get("_fpvs_kurtosis_bad_channels")
+            ),
+            "interpolated_channels": _string_list(
+                settings.get("_fpvs_interpolated_channels")
+            ),
+            "raw_qc_bad_channels": _string_list(
+                settings.get("_fpvs_raw_qc_bad_channels")
+            ),
         }
         tmp_meta_path.write_text(
             json.dumps(metadata, sort_keys=True, default=str),
@@ -603,6 +643,79 @@ def _run_full_pipeline_for_file(
                 n_ch,
             )
 
+            settings["_fpvs_raw_qc_bad_channels"] = []
+            raw_qc_result = evaluate_raw_channel_qc(
+                raw,
+                settings,
+                filename=file_path.name,
+            )
+            if raw_qc_result.excluded:
+                logger.warning(
+                    "raw_channel_qc_excluded file=%s reason=%s n_bad=%d n_channels=%d "
+                    "left=%d/%d right=%d/%d midline=%d/%d rules=%s",
+                    file_path.name,
+                    raw_qc_result.reason,
+                    raw_qc_result.n_bad_channels,
+                    raw_qc_result.n_channels,
+                    raw_qc_result.left_bad,
+                    raw_qc_result.left_total,
+                    raw_qc_result.right_bad,
+                    raw_qc_result.right_total,
+                    raw_qc_result.midline_bad,
+                    raw_qc_result.midline_total,
+                    list(raw_qc_result.triggered_rules),
+                )
+                crop_logger.warning(
+                    "file=%s stage=raw_qc excluded=true reason=%s n_bad=%d n_channels=%d "
+                    "left=%d/%d right=%d/%d midline=%d/%d rules=%s",
+                    file_path.name,
+                    raw_qc_result.reason,
+                    raw_qc_result.n_bad_channels,
+                    raw_qc_result.n_channels,
+                    raw_qc_result.left_bad,
+                    raw_qc_result.left_total,
+                    raw_qc_result.right_bad,
+                    raw_qc_result.right_total,
+                    raw_qc_result.midline_bad,
+                    raw_qc_result.midline_total,
+                    ",".join(raw_qc_result.triggered_rules),
+                )
+                return _make_excluded_result(
+                    file_path=file_path,
+                    reason=raw_qc_result.reason or "raw_channel_qc_failure",
+                    message=raw_qc_result.message,
+                    stage="raw_qc",
+                    start_time=t0,
+                    qc_info=raw_qc_result.to_payload(),
+                )
+            logger.debug(
+                "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",
+                file_path.name,
+                raw_qc_result.n_bad_channels,
+                raw_qc_result.n_channels,
+            )
+            raw_qc_bads = _string_list(raw_qc_result.channels_to_interpolate)
+            settings["_fpvs_raw_qc_bad_channels"] = list(raw_qc_bads)
+            if raw_qc_bads:
+                existing_bads = {str(channel) for channel in raw.info.get("bads", [])}
+                new_bads = [
+                    channel
+                    for channel in raw_qc_bads
+                    if channel in raw.ch_names and channel not in existing_bads
+                ]
+                if new_bads:
+                    raw.info["bads"].extend(new_bads)
+                logger.info(
+                    "raw_channel_qc_auto_marked file=%s channels=%s",
+                    file_path.name,
+                    raw_qc_bads,
+                )
+                crop_logger.info(
+                    "file=%s stage=raw_qc auto_marked_channels=%s",
+                    file_path.name,
+                    ",".join(raw_qc_bads),
+                )
+
             # 3) Preproc audit (before)
             stage = "preprocess"
             section_started = time.perf_counter()
@@ -663,6 +776,11 @@ def _run_full_pipeline_for_file(
             _record_timing("preprocessing", section_started)
             if raw_proc is None:
                 raise RuntimeError("perform_preprocessing returned None")
+            interpolated_count = len(
+                _string_list(settings.get("_fpvs_interpolated_channels"))
+            )
+            if interpolated_count:
+                n_rejected = max(int(n_rejected), interpolated_count)
 
             sfreq_proc = float(raw_proc.info.get("sfreq", -1.0))
             n_ch_proc = len(raw_proc.ch_names)

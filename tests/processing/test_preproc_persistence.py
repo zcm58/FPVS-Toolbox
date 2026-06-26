@@ -27,6 +27,7 @@ def test_normalization_and_roundtrip(tmp_path):
                     "ref_chan2": "Pz",
                     "max_idx_keep": "32",
                     "max_bad_chans": "4",
+                    "auto_detect_removed_electrodes": "false",
                     "save_preprocessed_fif": "true",
                     "stim_channel": "Status",
                 }
@@ -47,6 +48,7 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["ref_chan2"] == "Pz"
     assert normalized["max_chan_idx_keep"] == 32
     assert normalized["max_bad_chans"] == 4
+    assert normalized["auto_detect_removed_electrodes"] is False
     assert "save_preprocessed_fif" not in normalized
     assert normalized["stim_channel"] == "Status"
 
@@ -62,6 +64,7 @@ def test_normalization_and_roundtrip(tmp_path):
             "ref_chan2": "EXG2",
             "max_chan_idx_keep": 64,
             "max_bad_chans": 8,
+            "auto_detect_removed_electrodes": True,
             "stim_channel": "Status",
         }
     )
@@ -71,6 +74,7 @@ def test_normalization_and_roundtrip(tmp_path):
     stored_keys = set(saved["preprocessing"].keys())
     assert stored_keys == set(PREPROCESSING_CANONICAL_KEYS)
     assert saved["preprocessing"]["downsample"] == 256
+    assert saved["preprocessing"]["auto_detect_removed_electrodes"] is True
     assert "downsample_rate" not in saved["preprocessing"]
 
     fresh = Project.load(tmp_path)

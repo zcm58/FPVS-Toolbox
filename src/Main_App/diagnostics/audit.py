@@ -25,6 +25,15 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Sequence):
+        return [str(item) for item in value if str(item).strip()]
+    return []
+
+
 def start_preproc_audit(raw: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
     """Capture the initial Raw metadata before preprocessing mutates it."""
     info = getattr(raw, "info", {})
@@ -105,6 +114,11 @@ def end_preproc_audit(
     fpvs_flag = info.get("fpvs_initial_custom_ref", False)
     mne_custom_ref = info.get("custom_ref_applied", None)
 
+    raw_qc_bad_channels = _string_list(params.get("_fpvs_raw_qc_bad_channels"))
+    kurtosis_bad_channels = _string_list(params.get("_fpvs_kurtosis_bad_channels"))
+    interpolated_channels = _string_list(params.get("_fpvs_interpolated_channels"))
+    total_rejected = len(interpolated_channels) if interpolated_channels else int(n_rejected)
+
     audit = {
         "file": filename,
         "sfreq": float(_to_float(info.get("sfreq")) or 0.0),
@@ -119,7 +133,11 @@ def end_preproc_audit(
         "n_channels": int(len(getattr(raw, "ch_names", []))),
         "ch_names": list(getattr(raw, "ch_names", [])),
         "n_events": n_events,
-        "n_rejected": int(n_rejected),
+        "n_rejected": total_rejected,
+        "n_kurtosis_rejected": int(n_rejected),
+        "raw_qc_bad_channels": raw_qc_bad_channels,
+        "kurtosis_bad_channels": kurtosis_bad_channels,
+        "interpolated_channels": interpolated_channels,
         "stim_channel": stim_channel,
         "fif_written": int(fif_written),
         "sha256_head": fingerprint(raw),

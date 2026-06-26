@@ -63,8 +63,11 @@ workspace stack.
 
 The Settings page groups project processing values under Preprocessing,
 analysis defaults under Stats, ROI definitions under ROIs, and app-level
-toggles such as Debug Mode and Beta Tools under Advanced. Do not put app-level
-visibility or diagnostics toggles in the Preprocessing tab.
+toggles such as Debug Mode and Beta Tools under Advanced. Advanced also hosts
+the project preprocessing QC toggle for auto-detecting removed electrodes,
+because that control is intentionally more specialized than the primary
+preprocessing fields. Do not put app-level visibility or diagnostics toggles in
+the Preprocessing tab.
 
 The sidebar's default tool list is Statistical Analysis, SNR Plots, Scalp Maps,
 LORETA Visualizer, and Sequence Figure, in that order. Publication Report,

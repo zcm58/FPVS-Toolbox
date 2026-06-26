@@ -45,8 +45,18 @@ _FIELDS: tuple[_Field, ...] = (
     _Field(
         "max_bad_chans",
         ("max_bad_chans", "max_bad_channels", "max_bad_channels_alert_thresh"),
-        10,
+        20,
         _INT,
+    ),
+    _Field(
+        "auto_detect_removed_electrodes",
+        (
+            "auto_detect_removed_electrodes",
+            "detect_removed_electrodes",
+            "auto_mark_removed_electrodes",
+        ),
+        True,
+        _BOOL,
     ),
     _Field(
         "max_parallel_workers_override",
@@ -68,6 +78,10 @@ _ALIASES_FOR_OUTPUT: dict[str, Iterable[str]] = {
     "epoch_end_s": ("epoch_end",),
     "max_chan_idx_keep": ("max_idx_keep",),
     "max_bad_chans": ("max_bad_channels_alert_thresh",),
+    "auto_detect_removed_electrodes": (
+        "detect_removed_electrodes",
+        "auto_mark_removed_electrodes",
+    ),
     "max_parallel_workers_override": ("max_parallel_workers", "max_workers"),
 }
 

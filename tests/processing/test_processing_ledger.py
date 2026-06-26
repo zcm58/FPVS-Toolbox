@@ -245,9 +245,107 @@ def test_record_results_marks_missing_run_file_failed(tmp_path) -> None:
     assert ledger["entries"]["P01"]["status"] == "failed"
 
 
+def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {"Condition A": 1, "Condition B": 2}
+    project.save()
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    partial_output = plan.states[0].expected_outputs[0]
+    missing_output = plan.states[0].expected_outputs[1]
+    partial_output.parent.mkdir(parents=True, exist_ok=True)
+    partial_output.write_text("partial", encoding="utf-8")
+
+    record_processing_results(
+        project,
+        plan,
+        [
+            {
+                "status": "ok",
+                "file": str(info.path),
+                "audit": {
+                    "n_rejected": 2,
+                    "raw_qc_bad_channels": ["P9"],
+                    "kurtosis_bad_channels": ["P8"],
+                    "interpolated_channels": ["P9", "P8"],
+                },
+            }
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    ledger = json.loads(
+        (project.project_root / ".fpvs_processing" / "processing_ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    entry = ledger["entries"]["P01"]
+    assert entry["status"] == "completed"
+    assert entry["condition_completeness"] == "partial"
+    assert entry["completion_warning"] == "missing_expected_outputs"
+    assert entry["missing_outputs"] == [str(missing_output)]
+    assert entry["missing_condition_labels"] == ["Condition B"]
+    assert entry["present_outputs"] == [str(partial_output)]
+    assert entry["raw_qc_bad_channels"] == ["P9"]
+    assert entry["interpolated_channels"] == ["P9", "P8"]
+    assert entry["n_rejected"] == 2
+    assert partial_output.exists()
+
+    follow_up_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert follow_up_plan.completed_count == 1
+    assert follow_up_plan.incremental_files == ()
+    assert follow_up_plan.states[0].status == "completed"
+
+    runs = (project.project_root / ".fpvs_processing" / "processing_runs.jsonl").read_text(
+        encoding="utf-8"
+    )
+    assert '"successful_files": 1' in runs
+    assert '"failed_files": 0' in runs
+    assert '"condition_warning_files": 1' in runs
+
+
+def test_classify_legacy_missing_condition_failure_as_completed_partial(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {"Condition A": 1, "Condition B": 2}
+    project.save()
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    partial_output = plan.states[0].expected_outputs[0]
+    partial_output.parent.mkdir(parents=True, exist_ok=True)
+    partial_output.write_text("partial", encoding="utf-8")
+    missing_output = plan.states[0].expected_outputs[1]
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    ledger_path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    entry = ledger["entries"]["P01"]
+    entry["status"] = "failed"
+    entry.pop("failure_reason", None)
+    entry.pop("completion_warning", None)
+    entry.pop("condition_completeness", None)
+    entry["missing_outputs"] = [str(missing_output)]
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    follow_up_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert follow_up_plan.completed_count == 1
+    assert follow_up_plan.incremental_files == ()
+    assert follow_up_plan.states[0].status == "completed"
+
+
 def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+    expected_outputs = tuple(plan.states[0].expected_outputs)
+    assert expected_outputs
+    assert all(path.exists() for path in expected_outputs)
 
     record_processing_results(
         project,
@@ -276,6 +374,8 @@ def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path
     entry = ledger["entries"]["P01"]
     assert entry["status"] == "excluded"
     assert entry["exclusion_reason"] == "recording_not_started"
+    assert entry["removed_outputs"] == [str(path.resolve()) for path in expected_outputs]
+    assert all(not path.exists() for path in expected_outputs)
     assert '"excluded_files": 1' in runs
     assert '"failed_files": 0' in runs
 
@@ -290,7 +390,7 @@ def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path
     assert changed_plan.incremental_files == (info.path,)
 
 
-def test_record_results_requires_expected_outputs_for_completed_status(tmp_path) -> None:
+def test_record_results_requires_at_least_one_expected_output_for_completed_status(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
 
@@ -308,7 +408,10 @@ def test_record_results_requires_expected_outputs_for_completed_status(tmp_path)
         )
     )
 
-    assert ledger["entries"]["P01"]["status"] == "failed"
+    entry = ledger["entries"]["P01"]
+    assert entry["status"] == "failed"
+    assert entry["failure_reason"] == "no_expected_outputs"
+    assert entry["missing_condition_labels"] == ["Condition A"]
 
 
 def test_clean_managed_excel_root_removes_workbooks_and_preserves_folders(tmp_path) -> None:

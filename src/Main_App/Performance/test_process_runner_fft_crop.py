@@ -80,6 +80,11 @@ class _Capture:
 
 def _install_worker_stubs(monkeypatch, raw, capture):
     fake_loader = types.ModuleType("Main_App.io.load_utils")
+    fake_loader.BDF_RECORDING_NOT_STARTED_REASON = "recording_not_started"
+    fake_loader.format_bdf_recording_not_started_message = (
+        lambda file_names: f"{len(file_names)} file(s) were header-only."
+    )
+    fake_loader.inspect_bdf_header = lambda _path: None
     fake_loader.load_eeg_file = lambda _app, _path, ref_pair=None, first_n_channels=None: raw
     monkeypatch.setitem(sys.modules, "Main_App.io.load_utils", fake_loader)
 

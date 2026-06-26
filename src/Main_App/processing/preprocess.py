@@ -109,6 +109,8 @@ def begin_preproc_audit(
     # Ensure per-run audit keys do not leak across files when params is reused
     params.pop("_fpvs_initial_ref_ok", None)
     params.pop("_fpvs_initial_ref_pair", None)
+    params.pop("_fpvs_kurtosis_bad_channels", None)
+    params.pop("_fpvs_interpolated_channels", None)
 
     try:
         logger.debug(
@@ -722,12 +724,14 @@ def perform_preprocessing(
             )
 
         # 6) Kurtosis rejection & interpolation
+        params["_fpvs_kurtosis_bad_channels"] = []
+        params["_fpvs_interpolated_channels"] = []
+        bad_k_auto: List[str] = []
         if reject_thresh:
             log_func(
                 f"Kurtosis rejection for {filename_for_log} "
                 f"(Z > {reject_thresh})..."
             )
-            bad_k_auto: List[str] = []
             eeg_picks = mne.pick_types(
                 raw.info,
                 eeg=True,
@@ -781,6 +785,7 @@ def perform_preprocessing(
                     )
                 num_kurtosis_bads_identified = len(bad_k_auto)
                 if bad_k_auto:
+                    params["_fpvs_kurtosis_bad_channels"] = list(bad_k_auto)
                     log_func(
                         f"Bad by Kurtosis for {filename_for_log}: "
                         f"{bad_k_auto} "
@@ -818,6 +823,7 @@ def perform_preprocessing(
             if raw.info["bads"] and raw.get_montage():
                 try:
                     interp_targets = list(raw.info["bads"])
+                    params["_fpvs_interpolated_channels"] = list(interp_targets)
                     log_func(
                         f"Interpolating bads in {filename_for_log}: "
                         f"{interp_targets}"
@@ -862,6 +868,47 @@ def perform_preprocessing(
             )
             if debug_enabled:
                 print(f"[KURTOSIS] {filename_for_log}: skip (no threshold)")
+            if raw.info["bads"] and raw.get_montage():
+                try:
+                    interp_targets = list(raw.info["bads"])
+                    params["_fpvs_interpolated_channels"] = list(interp_targets)
+                    log_func(
+                        f"Interpolating pre-marked bads in {filename_for_log}: "
+                        f"{interp_targets}"
+                    )
+                    if debug_enabled:
+                        logger.debug(
+                            "[INTERP] %s: interpolated_chs=%s",
+                            filename_for_log,
+                            interp_targets,
+                        )
+                    raw.interpolate_bads(
+                        reset_bads=True,
+                        mode="accurate",
+                        verbose=False,
+                    )
+                    log_func(f"Interpolation OK for {filename_for_log}.")
+                except Exception as e:
+                    log_func(
+                        f"Warn: Interpolation failed for {filename_for_log}: {e}"
+                    )
+                    if debug_enabled:
+                        logger.debug(
+                            "[INTERP] %s: FAILED bads=%s",
+                            filename_for_log,
+                            raw.info.get("bads", []),
+                        )
+            elif raw.info["bads"]:
+                log_func(
+                    f"Warn: No montage for {filename_for_log}, "
+                    f"cannot interpolate. Bads remain: {raw.info['bads']}"
+                )
+                if debug_enabled:
+                    logger.debug(
+                        "[INTERP] %s: no montage; bads=%s",
+                        filename_for_log,
+                        raw.info["bads"],
+                    )
         try:
             logger.debug(
                 "preprocess_stage_after_kurtosis",
