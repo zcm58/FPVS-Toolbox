@@ -150,7 +150,7 @@ def log_worker_timing_record(
     if record.get("source") == "excel":
         return
 
-    log.info(
+    log.debug(
         "[EXPORT TIMING] file=%s stage=%s elapsed_ms=%s pid=%r condition=%r "
         "object_index=%s path=%r extra=%r",
         file_name,

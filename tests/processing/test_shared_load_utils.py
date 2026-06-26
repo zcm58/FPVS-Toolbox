@@ -139,7 +139,7 @@ def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
     logs: list[str] = []
     path = tmp_path / "sample.bdf"
 
-    with caplog.at_level(logging.INFO, logger=shared_load_utils.__name__):
+    with caplog.at_level(logging.DEBUG, logger=shared_load_utils.__name__):
         raw = load_utils.load_eeg_file(
             _app(logs),
             str(path),

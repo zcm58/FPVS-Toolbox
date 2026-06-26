@@ -63,7 +63,7 @@ def test_post_process_logs_export_timing_when_no_data(tmp_path, caplog) -> None:
         export_timing_records=[],
     )
 
-    caplog.set_level(logging.INFO, logger="Main_App.Shared.post_process")
+    caplog.set_level(logging.DEBUG, logger="Main_App.Shared.post_process")
     post_process(app, ["CondA"])
 
     assert "[EXPORT TIMING]" in caplog.text

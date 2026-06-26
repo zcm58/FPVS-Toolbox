@@ -57,7 +57,7 @@ def _log_export_timing(
     timing_sink = _EXPORT_TIMING_SINK.get()
     if timing_sink is not None:
         timing_sink.append(record)
-    logger.info(
+    logger.debug(
         "[EXPORT TIMING] stage=%s elapsed_ms=%d pid=%r condition=%r object_index=%s path=%r extra=%r",
         stage,
         elapsed_ms,
@@ -232,7 +232,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     )
     app.log("--- Post-processing: Calculating Metrics & Saving Excel ---")
     parent_folder = app.save_folder_path.get()
-    logger.info(
+    logger.debug(
         "[EXPORT STAGE] post_process_start conditions=%d parent_folder=%r",
         len(condition_labels_present),
         parent_folder,
@@ -304,7 +304,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         app.log(
             f"\nPost-processing '{cond_label_from_keys}' (PID: {pid}, {len(data_list)} data object(s))..."
         )
-        logger.info(
+        logger.debug(
             "[EXPORT STAGE] condition_start pid=%r condition=%r objects=%d",
             pid,
             cond_label_from_keys,

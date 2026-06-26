@@ -237,7 +237,7 @@ class MpRunnerBridge(QObject):
                         elif status == "excluded":
                             self._excluded_results.append(result)
                             self.file_status.emit(result)
-                            logger.warning(
+                            logger.debug(
                                 "MpRunnerBridge recorded excluded file=%r reason=%r",
                                 result.get("file"),
                                 result.get("reason"),

@@ -217,7 +217,7 @@ def _resolve_channel_subset(
         return None
 
     base = os.path.basename(filepath)
-    logger.info(
+    logger.debug(
         "[LOADER STAGE] file=%s stage=header_read_start first_n_channels=%s",
         base,
         first_n_channels,
@@ -245,7 +245,7 @@ def _resolve_channel_subset(
         actual = present.get(str(candidate).upper())
         if actual and actual not in keep_names:
             keep_names.append(actual)
-    logger.info(
+    logger.debug(
         "[LOADER STAGE] file=%s stage=header_read_done total_channels=%d selected_channels=%d",
         base,
         len(names),
@@ -393,7 +393,7 @@ def load_eeg_file(
             with warnings.catch_warnings(record=True) as caught_read_warnings:
                 warnings.simplefilter("always")
                 with mne.utils.use_log_level("WARNING"):
-                    logger.info(
+                    logger.debug(
                         "[LOADER STAGE] file=%s stage=read_raw_bdf_start selected_channels=%s memmap_path=%s",
                         base,
                         len(include_channels) if include_channels else "all",
@@ -406,15 +406,15 @@ def load_eeg_file(
                         include=include_channels,
                         verbose=False,
                     )
-                    logger.info(
+                    logger.debug(
                         "[LOADER STAGE] file=%s stage=read_raw_bdf_done channels=%d",
                         base,
                         len(raw.ch_names),
                     )
             _emit_reader_warnings(app, filepath, caught_read_warnings)
-            logger.info("[LOADER STAGE] file=%s stage=load_data_start", base)
+            logger.debug("[LOADER STAGE] file=%s stage=load_data_start", base)
             raw.load_data()
-            logger.info("[LOADER STAGE] file=%s stage=load_data_done", base)
+            logger.debug("[LOADER STAGE] file=%s stage=load_data_done", base)
             app.log("BDF loaded successfully.")
 
         else:
@@ -430,7 +430,7 @@ def load_eeg_file(
         app.log(f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz.")
 
         try:
-            logger.info("[LOADER STAGE] file=%s stage=channel_typing_start", base)
+            logger.debug("[LOADER STAGE] file=%s stage=channel_typing_start", base)
             ref_keep = _canon_present(raw.ch_names, ref_pair or ())
             exg_labels = [f"EXG{i}" for i in range(1, 9)]
             exg_present = _canon_present(raw.ch_names, exg_labels)
@@ -459,7 +459,7 @@ def load_eeg_file(
             kept = sorted(ref_keep)
             demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
             app.log(f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}")
-            logger.info(
+            logger.debug(
                 "[LOADER STAGE] file=%s stage=channel_typing_done ref_keep=%s demoted=%s",
                 base,
                 kept,
@@ -470,13 +470,13 @@ def load_eeg_file(
 
         app.log("Applying standard_1005 montage for 10-10 coverage...")
         try:
-            logger.info("[LOADER STAGE] file=%s stage=montage_apply_start", base)
+            logger.debug("[LOADER STAGE] file=%s stage=montage_apply_start", base)
             _apply_montage_suppressing_expected_ref_warnings(
                 raw,
                 _cached_1010(),
                 expected_missing_refs=ref_keep,
             )
-            logger.info("[LOADER STAGE] file=%s stage=montage_apply_done", base)
+            logger.debug("[LOADER STAGE] file=%s stage=montage_apply_done", base)
             app.log("Montage applied.")
         except Exception as e:
             app.log(f"Warning: Montage error: {e}")

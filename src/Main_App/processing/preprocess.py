@@ -188,7 +188,7 @@ def finalize_preproc_audit(
             extra={"file": filename, "problems": problems, "audit": after},
         )
     else:
-        logger.info("preproc_audit", extra={"file": filename, "audit": after})
+        logger.debug("preproc_audit", extra={"file": filename, "audit": after})
     return after, problems
 
 
@@ -264,7 +264,7 @@ def perform_preprocessing(
     fingerprint_in = _build_preproc_fingerprint(params)
     fingerprint_message = f"PREPROC_FINGERPRINT_PREPROCESS_IN {fingerprint_in}"
     log_func(fingerprint_message)
-    logger.info(fingerprint_message)
+    logger.debug(fingerprint_message)
 
     # Runtime parameters (defaults are managed by Settings UI; fall back only if absent)
     downsample_rate = params.get("downsample_rate")
@@ -293,7 +293,7 @@ def perform_preprocessing(
     try:
         # Module-level logger entry for high-level preprocessing start
         try:
-            logger.info(
+            logger.debug(
                 "preprocess_start",
                 extra={
                     "file": filename_for_log,
@@ -512,7 +512,7 @@ def perform_preprocessing(
                 )
                 snapshot_message = f"FILTER_SNAPSHOT {snapshot_payload}"
                 log_func(snapshot_message)
-                logger.info(snapshot_message)
+                logger.debug(snapshot_message)
                 if debug_enabled:
                     print(f"[FILTER_SNAPSHOT] {snapshot_payload}")
                 if h_freq is not None and h_freq > sf_current / 2.0:
@@ -580,7 +580,7 @@ def perform_preprocessing(
                 )
                 applied_message = f"FILTER_APPLIED {applied_payload}"
                 log_func(applied_message)
-                logger.info(applied_message)
+                logger.debug(applied_message)
                 if debug_enabled:
                     print(f"[FILTER_APPLIED] {applied_payload}")
                 expected_highpass = l_freq if l_freq is not None else 0.0
@@ -938,7 +938,7 @@ def perform_preprocessing(
             )
 
         try:
-            logger.info(
+            logger.debug(
                 "preprocess_ok",
                 extra={
                     "file": filename_for_log,

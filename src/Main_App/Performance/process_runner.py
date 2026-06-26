@@ -48,6 +48,20 @@ PREPROC_CACHE_VERSION = "preprocessed-raw-v2-filter-then-downsample"
 BDF_FIRST_N_CHANNELS = 64
 
 
+def _worker_log(message: str) -> None:
+    """Keep worker chatter out of INFO while preserving actionable warnings."""
+    text = str(message)
+    normalized = text.lstrip().upper()
+    if normalized.startswith(("!!!", "ERROR", "[ERROR")):
+        logger.error(text)
+    elif normalized.startswith(
+        ("WARN", "WARNING", "[WARNING", "[LOADER WARNING", "[AUDIT WARNING")
+    ):
+        logger.warning(text)
+    else:
+        logger.debug(text)
+
+
 @dataclass(frozen=True)
 class RunParams:
     project_root: Path
@@ -64,7 +78,7 @@ class RunParams:
 
 def _worker_init() -> None:
     """Configure per-process environment."""
-    logger.info("[MP STAGE] worker_init_start pid=%d", os.getpid())
+    logger.debug("[MP STAGE] worker_init_start pid=%d", os.getpid())
     set_blas_threads_multiprocess()
 
     # --- Memmap cleanup on worker exit ---
@@ -80,7 +94,7 @@ def _worker_init() -> None:
             pass
 
     atexit.register(_cleanup_pid_dir)
-    logger.info("[MP STAGE] worker_init_done pid=%d memmap_dir=%s", os.getpid(), pid_dir)
+    logger.debug("[MP STAGE] worker_init_done pid=%d memmap_dir=%s", os.getpid(), pid_dir)
 
 
 def _memmap_path_for_file(file_path: Path) -> Path:
@@ -392,7 +406,7 @@ def _store_preprocessed_cache(
             keep_meta_path=meta_path,
         )
         if pruned:
-            logger.info(
+            logger.debug(
                 "preproc_cache_pruned file=%s count=%d",
                 file_path.name,
                 pruned,
@@ -458,7 +472,7 @@ def _run_full_pipeline_for_file(
     def _record_timing(section: str, started_at: float) -> None:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         timings_ms[section] = elapsed_ms
-        logger.info(
+        logger.debug(
             "[TIMING] file=%s section=%s elapsed_ms=%d",
             file_path.name,
             section,
@@ -468,7 +482,7 @@ def _run_full_pipeline_for_file(
     stage = "preflight"
     crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
     try:
-        logger.info(
+        logger.debug(
             "[PIPELINE START] file=%s stage=%s",
             file_path.name,
             stage,
@@ -476,7 +490,7 @@ def _run_full_pipeline_for_file(
         crop_logger.info("file=%s stage=start", file_path.name)
 
         # Lazy imports (inside worker only)
-        logger.info("[PIPELINE STAGE] file=%s stage=worker_imports_start", file_path.name)
+        logger.debug("[PIPELINE STAGE] file=%s stage=worker_imports_start", file_path.name)
         from Main_App.io.load_utils import (  # type: ignore
             BDF_RECORDING_NOT_STARTED_REASON,
             format_bdf_recording_not_started_message,
@@ -489,7 +503,7 @@ def _run_full_pipeline_for_file(
         )
         import gc
         import mne  # type: ignore
-        logger.info("[PIPELINE STAGE] file=%s stage=worker_imports_done", file_path.name)
+        logger.debug("[PIPELINE STAGE] file=%s stage=worker_imports_done", file_path.name)
 
         # Quiet noisy MNE INFO logs in worker processes (e.g., repeated
         # "Using data from preloaded Raw..." lines) while preserving
@@ -508,7 +522,7 @@ def _run_full_pipeline_for_file(
         preflight_info = inspect_bdf_header(file_path)
         if preflight_info and preflight_info.recording_not_started:
             message = format_bdf_recording_not_started_message([file_path.name])
-            logger.warning(
+            logger.debug(
                 "bdf_recording_excluded file=%s reason=%s size=%s header_bytes=%s data_records=%s",
                 file_path,
                 BDF_RECORDING_NOT_STARTED_REASON,
@@ -535,7 +549,7 @@ def _run_full_pipeline_for_file(
         # Minimal logger-compatible stub for loader
         class _App:
             def log(self, msg: str) -> None:  # pragma: no cover - informational
-                logger.info(msg)
+                _worker_log(msg)
 
         # Resolve reference pair for loader so EXG policy keeps the right pair as EEG
         ref_ch1 = settings.get("ref_channel1") or settings.get("ref_ch1") or "EXG1"
@@ -544,7 +558,7 @@ def _run_full_pipeline_for_file(
 
         # 1) Cache lookup, then load/preprocess only on misses.
         stage = "cache_lookup"
-        logger.info("[PIPELINE STAGE] file=%s stage=cache_lookup_start", file_path.name)
+        logger.debug("[PIPELINE STAGE] file=%s stage=cache_lookup_start", file_path.name)
         section_started = time.perf_counter()
         raw_proc, audit_before, n_rejected, cache_status = _load_preprocessed_cache(
             file_path=file_path,
@@ -553,12 +567,12 @@ def _run_full_pipeline_for_file(
             mne_module=mne,
         )
         _record_timing("cache_lookup", section_started)
-        logger.info(
+        logger.debug(
             "[PIPELINE] %s: preproc cache status=%s",
             file_path.name,
             cache_status,
         )
-        logger.info(
+        logger.debug(
             "[PIPELINE STAGE] file=%s stage=cache_lookup_done status=%s",
             file_path.name,
             cache_status,
@@ -567,7 +581,7 @@ def _run_full_pipeline_for_file(
         if raw_proc is None:
             # 2) Load only the first 64 channels plus selected ref pair and stim.
             stage = "load"
-            logger.info("[PIPELINE STAGE] file=%s stage=load_start", file_path.name)
+            logger.debug("[PIPELINE STAGE] file=%s stage=load_start", file_path.name)
             section_started = time.perf_counter()
             raw = load_eeg_file(
                 _App(),
@@ -578,11 +592,11 @@ def _run_full_pipeline_for_file(
             _record_timing("load", section_started)
             if raw is None:
                 raise RuntimeError("load_eeg_file returned None")
-            logger.info("[PIPELINE STAGE] file=%s stage=load_done", file_path.name)
+            logger.debug("[PIPELINE STAGE] file=%s stage=load_done", file_path.name)
 
             sfreq = float(raw.info.get("sfreq", -1.0))
             n_ch = len(raw.ch_names)
-            logger.info(
+            logger.debug(
                 "[PIPELINE] %s: load complete sfreq=%.3f n_channels=%d",
                 file_path.name,
                 sfreq,
@@ -598,7 +612,7 @@ def _run_full_pipeline_for_file(
                 file_path.name,
             )
             _record_timing("preproc_audit_before", section_started)
-            logger.info(
+            logger.debug(
                 "[PIPELINE] %s: preproc audit_before complete",
                 file_path.name,
             )
@@ -606,7 +620,7 @@ def _run_full_pipeline_for_file(
             # 4) Preprocessing via PySide6 backend (handles:
             #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
             #    filter -> downsample -> kurtosis/interp -> final avg ref)
-            logger.info(
+            logger.debug(
                 "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
                 "reject_thresh=%r ref=(%r,%r) stim=%r",
                 Path(file_path).name if file_path else "UNKNOWN",
@@ -630,7 +644,7 @@ def _run_full_pipeline_for_file(
                     "stim_channel": settings.get("stim_channel"),
                 },
             )
-            logger.info(
+            logger.debug(
                 "RUNNER_PREPROC_PARAMS file=%s high_pass=%r low_pass=%r downsample_rate=%r "
                 "reject_thresh=%r",
                 Path(file_path).name,
@@ -643,7 +657,7 @@ def _run_full_pipeline_for_file(
             raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
                 raw_input=raw,
                 params=settings,
-                log_func=logger.info,
+                log_func=_worker_log,
                 filename_for_log=file_path.name,
             )
             _record_timing("preprocessing", section_started)
@@ -652,7 +666,7 @@ def _run_full_pipeline_for_file(
 
             sfreq_proc = float(raw_proc.info.get("sfreq", -1.0))
             n_ch_proc = len(raw_proc.ch_names)
-            logger.info(
+            logger.debug(
                 "[PIPELINE] %s: preprocess complete n_rejected=%d sfreq=%.3f n_channels=%d",
                 file_path.name,
                 int(n_rejected),
@@ -671,7 +685,7 @@ def _run_full_pipeline_for_file(
                 n_rejected=int(n_rejected),
             )
             _record_timing("cache_store", section_started)
-            logger.info(
+            logger.debug(
                 "[PIPELINE] %s: preproc cache store status=%s",
                 file_path.name,
                 cache_status,
@@ -715,7 +729,7 @@ def _run_full_pipeline_for_file(
             "n_events": int(len(events)),
             "source": events_source,
         }
-        logger.info(
+        logger.debug(
             "[PIPELINE] %s: events complete source=%s stim=%s n_events=%d",
             file_path.name,
             events_source,
@@ -909,7 +923,7 @@ def _run_full_pipeline_for_file(
                 )
 
             n_ep = len(rep_spans)
-            logger.info(
+            logger.debug(
                 "[AUDIT DEBUG] %s: label='%s' code=%s events_for_code=%d epochs_after_crop=%d",
                 file_path.name,
                 label,
@@ -951,7 +965,7 @@ def _run_full_pipeline_for_file(
                 f"Check event_map, epoch window (tmin={tmin}, tmax={tmax}), and triggers."
             )
 
-        logger.info(
+        logger.debug(
             "[PIPELINE] %s: epochs complete total_epochs=%d",
             file_path.name,
             total_epochs,
@@ -967,11 +981,11 @@ def _run_full_pipeline_for_file(
             save_folder_path=SimpleNamespace(get=lambda: str(save_folder)),
             data_paths=[str(file_path)],
             settings=settings,
-            log=logger.info,
+            log=_worker_log,
             export_timing_records=export_timing_records,
         )
         fif_written = run_post_export(ctx, list(event_map.keys()))
-        logger.info(
+        logger.debug(
             "[PIPELINE] %s: export complete",
             file_path.name,
         )
@@ -990,7 +1004,7 @@ def _run_full_pipeline_for_file(
             n_rejected=n_rejected,
         )
 
-        logger.info(
+        logger.debug(
             "[PIPELINE] %s: audit complete n_rejected=%s problems=%s",
             file_path.name,
             audit_after.get("n_rejected"),
@@ -1033,7 +1047,7 @@ def _run_full_pipeline_for_file(
             if problems:
                 parts.append(f"problems={problems}")
 
-            logger.info("[AUDIT DEBUG] %s", " ".join(parts))
+            logger.debug("[AUDIT DEBUG] %s", " ".join(parts))
 
         # Done with Raw/Epochs
         section_started = time.perf_counter()
@@ -1055,7 +1069,7 @@ def _run_full_pipeline_for_file(
         _record_timing("cleanup", section_started)
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        logger.info(
+        logger.debug(
             "[PIPELINE END] file=%s elapsed_ms=%d",
             file_path.name,
             elapsed_ms,
@@ -1214,7 +1228,7 @@ def run_project_parallel(
             cancelled = True
         return cancelled
 
-    logger.info(
+    logger.debug(
         "[MP STAGE] pool_create_start max_workers=%d files=%d",
         maxw,
         total,
@@ -1224,7 +1238,7 @@ def run_project_parallel(
         mp_context=ctx,
         initializer=_worker_init,
     )
-    logger.info("[MP STAGE] pool_created max_workers=%d", maxw)
+    logger.debug("[MP STAGE] pool_created max_workers=%d", maxw)
 
     try:
 
@@ -1267,7 +1281,7 @@ def run_project_parallel(
                 return False
 
             f = remaining.pop(0)
-            logger.info(
+            logger.debug(
                 "[MP STAGE] submit_file_start file=%s in_flight=%d remaining=%d",
                 f.name,
                 len(in_flight),
@@ -1282,7 +1296,7 @@ def run_project_parallel(
                 params.project_root,
             )
             in_flight[fut] = f
-            logger.info(
+            logger.debug(
                 "[MP STAGE] submit_file_done file=%s in_flight=%d remaining=%d",
                 f.name,
                 len(in_flight),
@@ -1342,7 +1356,7 @@ def run_project_parallel(
                             files_with_audit += 1
                 elif isinstance(res, dict) and res.get("status") == "excluded":
                     excluded_results.append(res)
-                    logger.warning(
+                    logger.debug(
                         "mp_run_file_excluded file=%s reason=%s message=%s",
                         res.get("file"),
                         res.get("reason"),

@@ -107,7 +107,7 @@ def test_replay_worker_timing_records_routes_export_and_skips_excel(caplog) -> N
         ],
     }
 
-    with caplog.at_level(logging.INFO, logger="tests.worker_timing_route"):
+    with caplog.at_level(logging.DEBUG, logger="tests.worker_timing_route"):
         log_router.replay_worker_timing_records(logger, result=result)
 
     assert "[EXPORT TIMING] file=demo.bdf stage=workbook_write" in caplog.text
