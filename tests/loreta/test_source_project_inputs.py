@@ -10,6 +10,7 @@ from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     SOURCE_TOPOGRAPHY_METRIC_BCA,
     SOURCE_TOPOGRAPHY_METRIC_FFT_AMPLITUDE,
+    _read_selected_harmonics,
     build_l2_mne_conditions_from_project,
 )
 
@@ -82,6 +83,20 @@ def test_project_input_assembler_rejects_missing_selected_column(tmp_path) -> No
 
     with pytest.raises(ValueError, match="missing columns"):
         build_l2_mne_conditions_from_project(project_root)
+
+
+def test_selected_harmonic_reader_accepts_current_stats_ready_schema(tmp_path) -> None:
+    stats_ready = tmp_path / "Stats_Ready_Summed_BCA.xlsx"
+    with pd.ExcelWriter(stats_ready) as writer:
+        pd.DataFrame(
+            {
+                "requested_harmonic_hz": [1.2, 2.4, 3.6, 4.8],
+                "selected": [False, True, False, True],
+                "included_in_summation": [False, True, True, True],
+            }
+        ).to_excel(writer, sheet_name="Harmonic_Selection", index=False)
+
+    assert _read_selected_harmonics(stats_ready) == (2.4, 3.6, 4.8)
 
 
 def _build_project_fixture(

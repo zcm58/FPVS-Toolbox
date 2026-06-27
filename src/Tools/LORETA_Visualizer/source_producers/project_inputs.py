@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from numbers import Number
 from pathlib import Path
 from typing import Sequence
 
@@ -188,14 +189,46 @@ def _condition_workbook_paths(condition_dir: Path) -> tuple[Path, ...]:
     return tuple(sorted(paths))
 
 
+def _column_by_name(frame: pd.DataFrame, name: str) -> str | None:
+    lookup = {str(column).strip(): column for column in frame.columns}
+    column = lookup.get(name)
+    return str(column) if column is not None else None
+
+
+def _truthy_cell(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None or pd.isna(value):
+        return False
+    if isinstance(value, Number):
+        return float(value) != 0.0
+    text = str(value).strip().casefold()
+    return text in {"1", "true", "yes", "y", "include", "included", "selected"}
+
+
 def _read_selected_harmonics(stats_ready_path: Path) -> tuple[float, ...]:
     if not stats_ready_path.is_file():
         raise FileNotFoundError(f"Stats-ready workbook is required for selected harmonics: {stats_ready_path}")
     harmonic_df = pd.read_excel(stats_ready_path, sheet_name="Harmonic_Selection")
-    if "selected" not in harmonic_df.columns or "harmonic_hz" not in harmonic_df.columns:
-        raise ValueError("Stats-ready Harmonic_Selection sheet must include 'selected' and 'harmonic_hz'.")
-    selected = harmonic_df.loc[harmonic_df["selected"] == True, "harmonic_hz"].dropna()  # noqa: E712
-    harmonics = tuple(round(float(value), 4) for value in selected)
+    frequency_column = _column_by_name(harmonic_df, "requested_harmonic_hz") or _column_by_name(
+        harmonic_df,
+        "harmonic_hz",
+    )
+    selection_column = _column_by_name(harmonic_df, "included_in_summation") or _column_by_name(
+        harmonic_df,
+        "selected",
+    )
+    if frequency_column is None or selection_column is None:
+        raise ValueError(
+            "Stats-ready Harmonic_Selection sheet must include a harmonic frequency "
+            "column ('requested_harmonic_hz' or legacy 'harmonic_hz') and a selection "
+            "column ('included_in_summation' or legacy 'selected')."
+        )
+    selected = harmonic_df.loc[
+        harmonic_df[selection_column].map(_truthy_cell),
+        frequency_column,
+    ].dropna()
+    harmonics = tuple(dict.fromkeys(round(float(value), 4) for value in selected))
     if not harmonics:
         raise ValueError("Stats-ready workbook has no selected harmonics.")
     return harmonics
