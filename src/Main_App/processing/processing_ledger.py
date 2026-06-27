@@ -22,6 +22,22 @@ PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v6_manual_removed_elect
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
+REPROCESS_ALL_DOWNSTREAM_FOLDER_DEFAULTS = {
+    "snr": "2 - SNR Plots",
+    "stats": "3 - Statistical Analysis Results",
+    "scalp_maps": "4 - Scalp Maps",
+    "publication_report": "5 - Publication Report",
+    "source_localization": "6 - Source Localization",
+    "tables": "9 - Tables",
+}
+REPROCESS_ALL_QUALITY_CHECK_DELETE_PATTERNS = (
+    "Processing_QC_Summary.xlsx",
+    "Harmonic_Selection_Summary.xlsx",
+    "SNR_Spectral_QC*.xlsx",
+)
+REPROCESS_ALL_QUALITY_CHECK_PRESERVE = {
+    "Data_Quality_Check_Review_Flags.xlsx",
+}
 
 
 @dataclass(frozen=True)
@@ -154,6 +170,14 @@ def _excel_root(project: Any) -> Path:
         root = Path(excel_subfolder)
         return root if root.is_absolute() else project_root / root
     return project_root / "1 - Excel Data Files"
+
+
+def _project_subfolder(project: Any, key: str, default_name: str) -> Path:
+    project_root = Path(project.project_root)
+    subfolders = getattr(project, "subfolders", {}) or {}
+    configured = subfolders.get(key) if isinstance(subfolders, Mapping) else None
+    path = Path(configured) if configured else project_root / default_name
+    return path if path.is_absolute() else project_root / path
 
 
 def _condition_folder_name(label: str) -> str:
@@ -473,6 +497,14 @@ def _assert_under_excel_root(excel_root: Path, path: Path) -> Path:
     raise ValueError(f"Refusing to delete unmanaged Excel output path: {target}")
 
 
+def _assert_under_project_root(project_root: Path, path: Path, label: str) -> Path:
+    root = project_root.resolve()
+    target = path.resolve()
+    if target == root or root in target.parents:
+        return target
+    raise ValueError(f"Refusing to delete unmanaged {label} output path: {target}")
+
+
 def clean_managed_excel_root(project: Any) -> Path:
     root = _excel_root(project).resolve()
     project_root = Path(project.project_root).resolve()
@@ -505,6 +537,62 @@ def clean_managed_excel_root(project: Any) -> Path:
                 ) from exc
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _delete_generated_file(path: Path, label: str) -> Path:
+    try:
+        path.unlink()
+    except PermissionError as exc:
+        raise RuntimeError(
+            "Unable to remove an existing generated output file. Close it in Excel "
+            f"or the program currently using it, then retry: {path}"
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to remove existing {label} output file: {path}. "
+            f"Original error: {exc}"
+        ) from exc
+    return path
+
+
+def clean_downstream_outputs_for_reprocess_all(project: Any) -> list[Path]:
+    """Remove derived outputs that become stale when every BDF is reprocessed."""
+
+    project_root = Path(project.project_root).resolve()
+    deleted: list[Path] = []
+    seen_folders: set[Path] = set()
+    for key, default_name in REPROCESS_ALL_DOWNSTREAM_FOLDER_DEFAULTS.items():
+        folder = _assert_under_project_root(
+            project_root,
+            _project_subfolder(project, key, default_name),
+            key,
+        )
+        if folder == project_root or folder in seen_folders or not folder.exists():
+            continue
+        seen_folders.add(folder)
+        try:
+            files = [path for path in folder.rglob("*") if path.is_file()]
+        except OSError as exc:
+            raise RuntimeError(
+                "Unable to scan a managed downstream output folder for cleanup. "
+                f"Check OneDrive sync/permissions for: {folder}. Original error: {exc}"
+            ) from exc
+        for path in files:
+            deleted.append(_delete_generated_file(path, key))
+
+    quality_root = _assert_under_project_root(
+        project_root,
+        project_root / "Quality Check",
+        "quality check",
+    )
+    if not quality_root.exists():
+        return deleted
+    for pattern in REPROCESS_ALL_QUALITY_CHECK_DELETE_PATTERNS:
+        for path in quality_root.glob(pattern):
+            if not path.is_file() or path.name in REPROCESS_ALL_QUALITY_CHECK_PRESERVE:
+                continue
+            deleted.append(_delete_generated_file(path, "quality check"))
+    return deleted
 
 
 def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:

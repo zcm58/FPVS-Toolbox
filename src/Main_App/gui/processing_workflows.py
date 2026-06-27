@@ -22,6 +22,7 @@ from Main_App.processing.processing_ledger import (
     MISSING_EXPECTED_OUTPUTS_WARNING,
     ProcessingPlan,
     classify_processing_inputs,
+    clean_downstream_outputs_for_reprocess_all,
     clean_managed_excel_root,
     clean_participant_outputs,
     load_ledger,
@@ -475,7 +476,10 @@ def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
             "Reprocess All Files",
             "Reprocess All will delete and recreate generated Excel outputs inside:\n\n"
             f"{excel_root}\n\n"
-            "Raw data and files outside this managed Excel folder will not be touched.",
+            "It will also delete stale downstream outputs in the project, including "
+            "SNR plots, statistical-analysis exports, scalp maps, publication reports, "
+            "source-localization outputs, and processed-data QC reports.\n\n"
+            "Raw data, project settings, logs, and preflight review metadata will not be touched.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -483,6 +487,12 @@ def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
             return False
         clean_managed_excel_root(host.currentProject)
         host.log(f"Cleared managed Excel output folder: {excel_root}")
+        deleted_downstream = clean_downstream_outputs_for_reprocess_all(host.currentProject)
+        if deleted_downstream:
+            host.log(
+                "Cleared "
+                f"{len(deleted_downstream)} downstream generated output file(s) for reprocess all."
+            )
         return True
 
     deleted = clean_participant_outputs(host.currentProject, plan)

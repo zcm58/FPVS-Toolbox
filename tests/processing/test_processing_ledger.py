@@ -7,6 +7,7 @@ from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
     classify_processing_inputs,
+    clean_downstream_outputs_for_reprocess_all,
     clean_managed_excel_root,
     clean_participant_outputs,
     output_group_folder_by_file,
@@ -485,6 +486,74 @@ def test_clean_participant_outputs_deletes_only_planned_participant(tmp_path) ->
     assert deleted == [output_p01]
     assert not output_p01.exists()
     assert output_p02.exists()
+
+
+def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_files(
+    tmp_path,
+) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    stats_ready = (
+        project.project_root
+        / "3 - Statistical Analysis Results"
+        / "Stats_Ready_Summed_BCA.xlsx"
+    )
+    snr_plot = project.subfolders["snr"] / "Condition - Central.png"
+    scalp_source = project.project_root / "4 - Scalp Maps" / "Publication_Scalp_Maps_Source_Data.xlsx"
+    report_file = project.project_root / "5 - Publication Report" / "report.html"
+    source_file = project.project_root / "6 - Source Localization" / "stale.npz"
+    table_file = project.project_root / "9 - Tables" / "Table 1.xlsx"
+    stale_qc = project.project_root / "Quality Check" / "SNR_Spectral_QC_Condition.xlsx"
+    qc_summary = project.project_root / "Quality Check" / "Processing_QC_Summary.xlsx"
+    preflight_review = (
+        project.project_root / "Quality Check" / "Data_Quality_Check_Review_Flags.xlsx"
+    )
+    raw_file = Path(project.input_folder) / "P01.bdf"
+
+    for path in (
+        stats_ready,
+        snr_plot,
+        scalp_source,
+        report_file,
+        source_file,
+        table_file,
+        stale_qc,
+        qc_summary,
+        preflight_review,
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("stale", encoding="utf-8")
+
+    deleted = clean_downstream_outputs_for_reprocess_all(project)
+
+    assert stats_ready in deleted
+    assert stale_qc in deleted
+    assert qc_summary in deleted
+    assert not stats_ready.exists()
+    assert not snr_plot.exists()
+    assert not scalp_source.exists()
+    assert not report_file.exists()
+    assert not source_file.exists()
+    assert not table_file.exists()
+    assert not stale_qc.exists()
+    assert not qc_summary.exists()
+    assert preflight_review.exists()
+    assert raw_file.exists()
+
+
+def test_clean_downstream_outputs_for_reprocess_all_refuses_external_folder(
+    tmp_path,
+) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    external = tmp_path / "outside"
+    external.mkdir()
+    project.subfolders["stats"] = external
+
+    try:
+        clean_downstream_outputs_for_reprocess_all(project)
+    except ValueError as exc:
+        assert "Refusing to delete unmanaged stats output path" in str(exc)
+    else:
+        raise AssertionError("Expected external downstream folder cleanup to fail")
 
 
 def test_reprocess_all_choice_runs_completed_files(tmp_path) -> None:
