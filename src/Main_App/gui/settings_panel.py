@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict
+from pathlib import Path
 
 import config
 import psutil
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -46,6 +47,7 @@ from Main_App.gui.manual_participant_exclusions_dialog import (
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
+from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import (
@@ -71,6 +73,8 @@ from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
     normalize_dv_policy,
 )
+from Tools.Stats.analysis.dv_policy_group_significant import clear_group_significant_selection_cache
+from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_selections
 
 
 class SettingsPanel(QWidget):
@@ -329,8 +333,9 @@ class SettingsDialog(QDialog):
         layout: QVBoxLayout,
         project_pp: Dict[str, Any] | None,
     ) -> None:
-        settings = normalize_dv_policy(
-            self._harmonic_policy_payload_from_preprocessing(project_pp)
+        settings = normalize_dv_policy(self._harmonic_policy_payload_from_preprocessing(project_pp))
+        self._initial_harmonic_settings_signature = (
+            self._harmonic_settings_signature_from_settings(settings)
         )
         harmonic_group = SectionCard(
             "Harmonic Selection",
@@ -421,6 +426,33 @@ class SettingsDialog(QDialog):
         harmonic_form.addRow("", self.fixed_harmonic_exclude_base_check)
 
         harmonic_group.content_layout.addLayout(harmonic_form)
+        harmonic_actions = ActionRow(harmonic_group, alignment=Qt.AlignLeft)
+        harmonic_actions.setObjectName("settings_harmonic_selection_actions")
+        self.recalculate_harmonics_button = make_action_button(
+            "Recalculate Harmonics",
+            compact=True,
+            parent=harmonic_group,
+        )
+        self.recalculate_harmonics_button.setObjectName(
+            "settings_recalculate_harmonics_button"
+        )
+        self.recalculate_harmonics_button.setToolTip(
+            "Rebuild the project's statistically significant harmonic list from the processed Excel outputs."
+        )
+        self.recalculate_harmonics_button.setEnabled(self.project is not None)
+        self.recalculate_harmonics_button.clicked.connect(
+            self._on_recalculate_harmonics_clicked
+        )
+        harmonic_actions.add_button(self.recalculate_harmonics_button)
+        harmonic_group.content_layout.addWidget(harmonic_actions)
+
+        self.harmonic_recalculation_status = StatusBanner("", harmonic_group, variant="info")
+        self.harmonic_recalculation_status.setObjectName(
+            "settings_harmonic_recalculation_status"
+        )
+        self.harmonic_recalculation_status.setVisible(False)
+        harmonic_group.content_layout.addWidget(self.harmonic_recalculation_status)
+
         layout.addWidget(harmonic_group)
         self.harmonic_summation_method_combo.currentIndexChanged.connect(
             self._update_harmonic_selection_controls
@@ -758,6 +790,79 @@ class SettingsDialog(QDialog):
             == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         )
 
+    def _harmonic_settings_signature_from_settings(self, settings: Any) -> tuple[object, ...]:
+        if settings.name == FIXED_PREDEFINED_POLICY_NAME:
+            return (
+                settings.name,
+                str(settings.fixed_harmonic_frequencies_hz).strip(),
+                bool(settings.fixed_harmonic_auto_exclude_base),
+            )
+        return (
+            settings.name,
+            str(settings.group_significant_electrode_scope),
+            str(settings.group_significant_summation_method),
+        )
+
+    def _harmonic_settings_signature_from_preprocessing(
+        self,
+        preprocessing: Dict[str, Any],
+    ) -> tuple[object, ...]:
+        settings = normalize_dv_policy(
+            self._harmonic_policy_payload_from_preprocessing(preprocessing)
+        )
+        return self._harmonic_settings_signature_from_settings(settings)
+
+    def _project_has_processed_outputs(self) -> bool:
+        if self.project is None:
+            return False
+        project_root = Path(self.project.project_root)
+        ledger = load_ledger(project_root)
+        entries = ledger.get("entries")
+        if isinstance(entries, dict):
+            for entry in entries.values():
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("status") or "").casefold() == "completed":
+                    return True
+        subfolders = getattr(self.project, "subfolders", {}) or {}
+        excel_root = Path(subfolders.get("excel") or (project_root / "1 - Excel Data Files"))
+        try:
+            return excel_root.exists() and any(excel_root.rglob("*_Results.xlsx"))
+        except OSError:
+            return False
+
+    def _harmonic_settings_changed_after_processing(
+        self,
+        validated_preproc: Dict[str, Any],
+    ) -> bool:
+        if self.project is None or not self._project_has_processed_outputs():
+            return False
+        initial = getattr(self, "_initial_harmonic_settings_signature", None)
+        current = self._harmonic_settings_signature_from_preprocessing(validated_preproc)
+        return initial is not None and current != initial
+
+    def _ask_recalculate_harmonics_after_settings_change(self) -> bool:
+        choice = QMessageBox.question(
+            self,
+            "Recalculate Harmonics?",
+            (
+                "This project already has processed data, and the harmonic selection "
+                "settings were changed. Recalculate the statistically significant "
+                "harmonic list now so downstream tools use the updated method?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        return choice == QMessageBox.Yes
+
+    def _set_harmonic_recalculation_status(self, text: str, variant: str = "info") -> None:
+        banner = getattr(self, "harmonic_recalculation_status", None)
+        if banner is None:
+            return
+        banner.set_variant(variant)
+        banner.set_text(text)
+        banner.setVisible(bool(text))
+
     def _fixed_harmonic_list_selected(self) -> bool:
         return self.harmonic_summation_method_combo.currentData() == "fixed_predefined"
 
@@ -766,6 +871,128 @@ class SettingsDialog(QDialog):
         self.harmonic_electrode_scope_combo.setEnabled(not fixed_selected)
         self.fixed_harmonic_freqs_edit.setEnabled(fixed_selected)
         self.fixed_harmonic_exclude_base_check.setEnabled(fixed_selected)
+
+    def _save_project_preprocessing_for_harmonic_recalculation(
+        self,
+        validated_preproc: Dict[str, Any],
+    ) -> bool:
+        if self.project is None:
+            QMessageBox.information(
+                self,
+                "No Project Loaded",
+                "Load a project before recalculating harmonic selection.",
+            )
+            return False
+        try:
+            normalized = self.project.update_preprocessing(validated_preproc)
+            self._project_cache = normalized
+            self.project.save()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Settings", str(exc))
+            return False
+        except Exception as exc:  # pragma: no cover - disk I/O error path
+            QMessageBox.critical(self, "Save Error", str(exc))
+            return False
+        return True
+
+    def _on_recalculate_harmonics_clicked(self) -> None:
+        validated_preproc = self._validated_preproc_payload()
+        if validated_preproc is None:
+            return
+        if not self._save_project_preprocessing_for_harmonic_recalculation(validated_preproc):
+            return
+        if not self._project_has_processed_outputs():
+            QMessageBox.information(
+                self,
+                "No Processed Data",
+                "Process this project before recalculating harmonic selection.",
+            )
+            return
+        self._start_harmonic_recalculation()
+
+    def _start_harmonic_recalculation(self, *, accept_on_success: bool = False) -> bool:
+        if self.project is None:
+            return False
+        owner = getattr(self, "host", None) or self
+        if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
+            QMessageBox.information(
+                self,
+                "Recalculation Already Running",
+                "FPVS Toolbox is already recalculating harmonic selection for this project.",
+            )
+            return False
+        try:
+            from Main_App.workers.harmonic_selection_worker import (
+                ProcessingHarmonicSelectionWorker,
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "Recalculation Unavailable",
+                f"Harmonic recalculation could not start: {exc}",
+            )
+            return False
+
+        clear_group_significant_selection_cache()
+        try:
+            clear_cached_group_harmonic_selections(self.project.project_root)
+        except OSError:
+            pass
+
+        self._set_harmonic_recalculation_status(
+            "Recalculating harmonic selection from processed Excel outputs...",
+            "info",
+        )
+        self.recalculate_harmonics_button.setEnabled(False)
+        thread = QThread(owner)
+        worker = ProcessingHarmonicSelectionWorker(self.project)
+        worker.moveToThread(thread)
+        owner._settings_harmonic_recalc_thread = thread
+        owner._settings_harmonic_recalc_worker = worker
+
+        def _handle_finished(result: dict) -> None:
+            try:
+                if result.get("ok"):
+                    workbook_path = result.get("workbook_path", "")
+                    self._initial_harmonic_settings_signature = (
+                        self._harmonic_settings_signature_from_preprocessing(
+                            self._project_preprocessing()
+                        )
+                    )
+                    self._set_harmonic_recalculation_status(
+                        f"Harmonic selection recalculated: {workbook_path}",
+                        "success",
+                    )
+                    QMessageBox.information(
+                        self,
+                        "Harmonics Recalculated",
+                        f"Harmonic selection was recalculated and saved to:\n{workbook_path}",
+                    )
+                    if accept_on_success:
+                        self.accept()
+                else:
+                    message = str(result.get("error") or "Unknown error")
+                    self._set_harmonic_recalculation_status(
+                        f"Harmonic recalculation failed: {message}",
+                        "warning",
+                    )
+                    QMessageBox.warning(
+                        self,
+                        "Harmonic Recalculation Failed",
+                        message,
+                    )
+            finally:
+                owner._settings_harmonic_recalc_thread = None
+                owner._settings_harmonic_recalc_worker = None
+                self.recalculate_harmonics_button.setEnabled(self.project is not None)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(_handle_finished)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+        return True
 
     def _removed_electrode_detection_mode(self) -> str:
         return normalize_removed_electrode_detection_mode(
@@ -1037,6 +1264,11 @@ class SettingsDialog(QDialog):
             return
         if not self._confirm_parallel_worker_override(validated_preproc):
             return
+        recalculate_harmonics_after_save = False
+        if self._harmonic_settings_changed_after_processing(validated_preproc):
+            recalculate_harmonics_after_save = (
+                self._ask_recalculate_harmonics_after_settings_change()
+            )
 
         if not using_project:
             self.manager.set("stim", "channel", config.DEFAULT_STIM_CHANNEL)
@@ -1154,6 +1386,10 @@ class SettingsDialog(QDialog):
             )
         except Exception:
             pass
+
+        if recalculate_harmonics_after_save:
+            if self._start_harmonic_recalculation(accept_on_success=True):
+                return
 
         self.accept()
 

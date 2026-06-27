@@ -202,6 +202,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_summation_method_combo)
     assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_electrode_scope_combo)
     assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_freqs_edit)
+    assert cards["Harmonic Selection"].isAncestorOf(dlg.recalculate_harmonics_button)
+    assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_recalculation_status)
+    assert dlg.recalculate_harmonics_button.text() == "Recalculate Harmonics"
+    assert dlg.recalculate_harmonics_button.isEnabled() is True
+    assert dlg.findChild(ActionRow, "settings_harmonic_selection_actions") is not None
     assert dlg.harmonic_summation_method_combo.itemText(0) == "All harmonics up to highest significant"
     assert dlg.harmonic_summation_method_combo.itemText(1) == "Significant harmonics only"
     assert dlg.harmonic_summation_method_combo.itemText(2) == "Fixed harmonic list"
@@ -318,6 +323,46 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert actions is not None
     assert actions.row_layout.indexOf(panel.ok_btn) >= 0
     assert actions.row_layout.indexOf(panel.cancel_btn) >= 0
+
+
+def test_harmonic_setting_change_after_processing_prompts_recalculation(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    started: list[bool] = []
+    monkeypatch.setattr(
+        dlg,
+        "_start_harmonic_recalculation",
+        lambda **_kwargs: started.append(True) or True,
+    )
+    questions: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, message, *_args, **_kwargs: (
+            questions.append((title, message)) or QMessageBox.Yes
+        ),
+    )
+
+    significant_only_index = dlg.harmonic_summation_method_combo.findData("significant_only")
+    dlg.harmonic_summation_method_combo.setCurrentIndex(significant_only_index)
+    dlg._save()
+
+    assert questions and questions[0][0] == "Recalculate Harmonics?"
+    assert "already has processed data" in questions[0][1]
+    assert started == [True]
 
 
 def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, monkeypatch):
