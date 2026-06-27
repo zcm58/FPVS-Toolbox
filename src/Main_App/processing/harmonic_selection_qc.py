@@ -10,7 +10,14 @@ from Main_App.processing.processing_ledger import load_ledger
 from Tools.Stats.analysis.dv_policy_group_significant import (
     build_group_significant_harmonic_selection,
 )
-from Tools.Stats.analysis.dv_policy_settings import DVPolicySettings
+from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
+from Tools.Stats.analysis.dv_policy_settings import (
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+    GROUP_SIGNIFICANT_POLICY_NAME,
+    GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+    DVPolicySettings,
+    normalize_dv_policy,
+)
 from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Stats.data.stats_data_loader import scan_folder_simple
 from Tools.Stats.io.harmonic_selection_export import (
@@ -59,18 +66,38 @@ def run_processing_harmonic_selection_qc(
         )
 
     rois = load_rois_from_settings() or {}
-    selection = build_group_significant_harmonic_selection(
-        subjects=subjects,
-        conditions=ordered_conditions,
-        subject_data=subject_data,
-        base_frequency_hz=_analysis_base_frequency_hz(),
-        rois=rois,
-        log_func=_log,
-        settings=DVPolicySettings(),
-        max_freq=_analysis_bca_upper_limit_hz(),
-        project_root=project_root,
-    )
-    metadata = selection.to_metadata()
+    settings = _harmonic_selection_settings(project)
+    if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
+        selection = build_group_significant_harmonic_selection(
+            subjects=subjects,
+            conditions=ordered_conditions,
+            subject_data=subject_data,
+            base_frequency_hz=_analysis_base_frequency_hz(),
+            rois=rois,
+            log_func=_log,
+            settings=settings,
+            max_freq=_analysis_bca_upper_limit_hz(),
+            project_root=project_root,
+        )
+        metadata = selection.to_metadata()
+    else:
+        dv_metadata: dict[str, object] = {}
+        prepare_summed_bca_data(
+            subjects=subjects,
+            conditions=ordered_conditions,
+            subject_data=subject_data,
+            base_freq=_analysis_base_frequency_hz(),
+            rois=rois,
+            log_func=_log,
+            dv_policy=_dv_policy_payload(settings),
+            dv_metadata=dv_metadata,
+            max_freq=_analysis_bca_upper_limit_hz(),
+            project_root=str(project_root),
+        )
+        fixed_metadata = dv_metadata.get("fixed_predefined_harmonics")
+        if not isinstance(fixed_metadata, Mapping):
+            raise RuntimeError("Harmonic selection QC could not build fixed harmonic metadata.")
+        metadata = dict(fixed_metadata)
     qc_folder = project_root / QUALITY_CHECK_FOLDER
     qc_folder.mkdir(parents=True, exist_ok=True)
     workbook_path = write_harmonic_selection_workbook(
@@ -81,6 +108,56 @@ def run_processing_harmonic_selection_qc(
         workbook_path=workbook_path,
         selection_metadata=metadata,
         messages=tuple(messages),
+    )
+
+
+def _dv_policy_payload(settings: DVPolicySettings) -> dict[str, object]:
+    return {
+        "name": settings.name,
+        "fixed_harmonic_frequencies_hz": settings.fixed_harmonic_frequencies_hz,
+        "fixed_harmonic_auto_exclude_base": settings.fixed_harmonic_auto_exclude_base,
+        "fixed_harmonic_base_tolerance_hz": settings.fixed_harmonic_base_tolerance_hz,
+        "fixed_harmonic_matching_tolerance_hz": settings.fixed_harmonic_matching_tolerance_hz,
+        "group_significant_z_threshold": settings.group_significant_z_threshold,
+        "group_significant_electrode_scope": settings.group_significant_electrode_scope,
+        "group_significant_summation_method": settings.group_significant_summation_method,
+        "group_significant_oddball_frequency_hz": settings.group_significant_oddball_frequency_hz,
+    }
+
+
+def _harmonic_selection_settings(project: Any) -> DVPolicySettings:
+    from Main_App.projects.preprocessing_settings import (
+        normalize_preprocessing_settings,
+    )
+
+    raw_preprocessing = getattr(project, "preprocessing", {}) or {}
+    try:
+        preprocessing = normalize_preprocessing_settings(raw_preprocessing)
+    except ValueError:
+        preprocessing = normalize_preprocessing_settings({})
+    return normalize_dv_policy(
+        {
+            "name": preprocessing.get(
+                "harmonic_selection_policy",
+                GROUP_SIGNIFICANT_POLICY_NAME,
+            ),
+            "fixed_harmonic_frequencies_hz": preprocessing.get(
+                "fixed_harmonic_frequencies_hz",
+                "",
+            ),
+            "fixed_harmonic_auto_exclude_base": preprocessing.get(
+                "fixed_harmonic_auto_exclude_base",
+                True,
+            ),
+            "group_significant_electrode_scope": preprocessing.get(
+                "group_significant_electrode_scope",
+                GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+            ),
+            "group_significant_summation_method": preprocessing.get(
+                "group_significant_summation_method",
+                GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+            ),
+        }
     )
 
 

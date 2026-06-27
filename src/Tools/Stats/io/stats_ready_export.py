@@ -34,25 +34,11 @@ SELECTION_SUMMARY_COLUMNS = [
 ]
 HARMONIC_SELECTION_SHEET = "Harmonic_Selection"
 HARMONIC_SELECTION_COLUMNS = [
-    "harmonic_policy",
-    "selection_scope",
-    "base_frequency_hz",
-    "oddball_frequency_hz",
-    "z_threshold",
     "requested_harmonic_hz",
-    "harmonic_hz",
-    "matched_column",
-    "matched_bin_index",
     "z_score",
     "target_amplitude_uv",
     "noise_mean_uv",
     "noise_std_uv",
-    "noise_bin_indices",
-    "noise_frequencies_hz",
-    "noise_amplitudes_uv",
-    "noise_used_bin_indices",
-    "noise_used_frequencies_hz",
-    "noise_used_amplitudes_uv",
     "selected",
     "included_in_summation",
     "excluded_base_rate",
@@ -544,28 +530,13 @@ def _fixed_predefined_selection_rows(fixed_meta: Mapping[str, object]) -> list[d
         if not isinstance(row_data, Mapping):
             continue
         requested = _parse_frequency(row_data.get("requested_frequency_hz"))
-        matched = _parse_frequency(row_data.get("matched_frequency_hz"))
         rows.append(
             {
-                "harmonic_policy": fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
-                "selection_scope": FIXED_PREDEFINED_POLICY_ID,
-                "base_frequency_hz": fixed_meta.get("base_frequency_hz"),
-                "oddball_frequency_hz": fixed_meta.get("oddball_frequency_hz"),
-                "z_threshold": math.nan,
                 "requested_harmonic_hz": requested,
-                "harmonic_hz": matched if matched is not None else requested,
-                "matched_column": row_data.get("matched_column", ""),
-                "matched_bin_index": row_data.get("matched_bin_index"),
                 "z_score": math.nan,
                 "target_amplitude_uv": math.nan,
                 "noise_mean_uv": math.nan,
                 "noise_std_uv": math.nan,
-                "noise_bin_indices": "",
-                "noise_frequencies_hz": "",
-                "noise_amplitudes_uv": "",
-                "noise_used_bin_indices": "",
-                "noise_used_frequencies_hz": "",
-                "noise_used_amplitudes_uv": "",
                 "selected": bool(row_data.get("included")),
                 "included_in_summation": bool(row_data.get("included")),
                 "excluded_base_rate": row_data.get("exclusion_reason") == "base_rate_overlap",
@@ -581,31 +552,13 @@ def _group_significant_selection_rows(group_meta: Mapping[str, object]) -> list[
     for row_data in group_meta.get("selection_rows", []) or []:
         if not isinstance(row_data, Mapping):
             continue
-        matched = _parse_frequency(row_data.get("matched_frequency_hz"))
         rows.append(
             {
-                "harmonic_policy": group_meta.get("harmonic_policy", GROUP_SIGNIFICANT_POLICY_ID),
-                "selection_scope": group_meta.get(
-                    "selection_scope",
-                    GROUP_SIGNIFICANT_POLICY_ID,
-                ),
-                "base_frequency_hz": group_meta.get("base_frequency_hz"),
-                "oddball_frequency_hz": group_meta.get("oddball_frequency_hz"),
-                "z_threshold": group_meta.get("z_threshold"),
                 "requested_harmonic_hz": row_data.get("target_frequency_hz"),
-                "harmonic_hz": matched,
-                "matched_column": row_data.get("matched_column", ""),
-                "matched_bin_index": row_data.get("matched_bin_index"),
                 "z_score": _numeric_or_nan(row_data.get("z_score")),
                 "target_amplitude_uv": _numeric_or_nan(row_data.get("target_amplitude_uv")),
                 "noise_mean_uv": _numeric_or_nan(row_data.get("noise_mean_uv")),
                 "noise_std_uv": _numeric_or_nan(row_data.get("noise_std_uv")),
-                "noise_bin_indices": _sequence_cell(row_data.get("noise_bin_indices")),
-                "noise_frequencies_hz": _sequence_cell(row_data.get("noise_frequencies_hz")),
-                "noise_amplitudes_uv": _sequence_cell(row_data.get("noise_amplitudes_uv")),
-                "noise_used_bin_indices": _sequence_cell(row_data.get("noise_used_bin_indices")),
-                "noise_used_frequencies_hz": _sequence_cell(row_data.get("noise_used_frequencies_hz")),
-                "noise_used_amplitudes_uv": _sequence_cell(row_data.get("noise_used_amplitudes_uv")),
                 "selected": bool(row_data.get("selected")),
                 "included_in_summation": bool(
                     row_data.get("included_in_summation", row_data.get("selected"))
@@ -627,6 +580,7 @@ def _append_selection_rows(
     excluded_harmonics: object,
     sensitivity: bool,
 ) -> None:
+    _ = selection_scope
     selected = {
         float(freq)
         for freq in (selected_harmonics if isinstance(selected_harmonics, (list, tuple, set)) else [])
@@ -644,23 +598,31 @@ def _append_selection_rows(
             seen_harmonics.add(freq)
             rows.append(
                 {
-                    "selection_scope": selection_scope,
-                    "harmonic_hz": freq,
+                    "requested_harmonic_hz": freq,
                     "z_score": _numeric_or_nan(raw_z),
+                    "target_amplitude_uv": math.nan,
+                    "noise_mean_uv": math.nan,
+                    "noise_std_uv": math.nan,
                     "selected": freq in selected,
+                    "included_in_summation": freq in selected,
                     "excluded_base_rate": freq in excluded,
-                    "sensitivity": sensitivity,
+                    "exclusion_reason": "base_rate_overlap" if freq in excluded else "",
+                    "warning": "Sensitivity selection row." if sensitivity else "",
                 }
             )
     for freq in sorted(excluded.difference(seen_harmonics)):
         rows.append(
             {
-                "selection_scope": selection_scope,
-                "harmonic_hz": freq,
+                "requested_harmonic_hz": freq,
                 "z_score": math.nan,
+                "target_amplitude_uv": math.nan,
+                "noise_mean_uv": math.nan,
+                "noise_std_uv": math.nan,
                 "selected": False,
+                "included_in_summation": False,
                 "excluded_base_rate": True,
-                "sensitivity": sensitivity,
+                "exclusion_reason": "base_rate_overlap",
+                "warning": "Sensitivity selection row." if sensitivity else "",
             }
         )
 

@@ -35,6 +35,11 @@ _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
 _MANUAL_EXCLUDED_PARTICIPANTS = "manual_excluded_participants"
 
+_GROUP_SIGNIFICANT_POLICY_NAME = "Group-level significant harmonics (Volfart/Retter/Rossion style)"
+_GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION = "union_roi_electrodes"
+_GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST = "through_highest_significant"
+_FIXED_PREDEFINED_DEFAULT_FREQUENCIES = "1.2, 2.4, 3.6, 4.8, 7.2"
+
 
 _FIELDS: tuple[_Field, ...] = (
     _Field("low_pass", ("low_pass",), 50.0, _FLOAT),
@@ -103,6 +108,36 @@ _FIELDS: tuple[_Field, ...] = (
         ("max_parallel_workers_override", "max_parallel_workers", "max_workers"),
         0,
         _INT,
+    ),
+    _Field(
+        "harmonic_selection_policy",
+        ("harmonic_selection_policy", "dv_policy_name", "bca_harmonic_policy"),
+        _GROUP_SIGNIFICANT_POLICY_NAME,
+        _STR,
+    ),
+    _Field(
+        "group_significant_electrode_scope",
+        ("group_significant_electrode_scope", "harmonic_selection_electrode_scope"),
+        _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+        _STR,
+    ),
+    _Field(
+        "group_significant_summation_method",
+        ("group_significant_summation_method", "harmonic_summation_method"),
+        _GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+        _STR,
+    ),
+    _Field(
+        "fixed_harmonic_frequencies_hz",
+        ("fixed_harmonic_frequencies_hz", "fixed_harmonics_hz"),
+        _FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
+        _STR,
+    ),
+    _Field(
+        "fixed_harmonic_auto_exclude_base",
+        ("fixed_harmonic_auto_exclude_base", "fixed_harmonics_auto_exclude_base"),
+        True,
+        _BOOL,
     ),
     _Field("stim_channel", ("stim_channel", "stim", "stim_channel_name"), config.DEFAULT_STIM_CHANNEL, _STR),
 )

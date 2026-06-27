@@ -61,6 +61,16 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
 )
+from Tools.Stats.analysis.dv_policy_settings import (
+    FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
+    FIXED_PREDEFINED_POLICY_NAME,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+    GROUP_SIGNIFICANT_POLICY_NAME,
+    GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
+    GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+    normalize_dv_policy,
+)
 
 
 class SettingsPanel(QWidget):
@@ -240,6 +250,7 @@ class SettingsDialog(QDialog):
                 edit.setText(self.manager.get(sec, opt, fallback))
 
         layout.addWidget(self.group_preproc)
+        self._add_harmonic_selection_section(tab, layout, project_pp)
 
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_preproc_footer")
@@ -263,6 +274,158 @@ class SettingsDialog(QDialog):
             )
 
         return tab
+
+    def _harmonic_policy_payload_from_preprocessing(
+        self,
+        preprocessing: Dict[str, Any] | None,
+    ) -> dict[str, object]:
+        preprocessing = preprocessing or {}
+        return {
+            "name": preprocessing.get(
+                "harmonic_selection_policy",
+                self.manager.get(
+                    "preprocessing",
+                    "harmonic_selection_policy",
+                    GROUP_SIGNIFICANT_POLICY_NAME,
+                ),
+            ),
+            "group_significant_electrode_scope": preprocessing.get(
+                "group_significant_electrode_scope",
+                self.manager.get(
+                    "preprocessing",
+                    "group_significant_electrode_scope",
+                    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+                ),
+            ),
+            "group_significant_summation_method": preprocessing.get(
+                "group_significant_summation_method",
+                self.manager.get(
+                    "preprocessing",
+                    "group_significant_summation_method",
+                    GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+                ),
+            ),
+            "fixed_harmonic_frequencies_hz": preprocessing.get(
+                "fixed_harmonic_frequencies_hz",
+                self.manager.get(
+                    "preprocessing",
+                    "fixed_harmonic_frequencies_hz",
+                    FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
+                ),
+            ),
+            "fixed_harmonic_auto_exclude_base": preprocessing.get(
+                "fixed_harmonic_auto_exclude_base",
+                self.manager.get(
+                    "preprocessing",
+                    "fixed_harmonic_auto_exclude_base",
+                    "True",
+                ),
+            ),
+        }
+
+    def _add_harmonic_selection_section(
+        self,
+        tab: QWidget,
+        layout: QVBoxLayout,
+        project_pp: Dict[str, Any] | None,
+    ) -> None:
+        settings = normalize_dv_policy(
+            self._harmonic_policy_payload_from_preprocessing(project_pp)
+        )
+        harmonic_group = SectionCard(
+            "Harmonic Selection",
+            tab,
+            object_name="settings_harmonic_selection_card",
+        )
+        harmonic_form = make_form_layout()
+
+        self.harmonic_summation_method_combo = QComboBox(harmonic_group)
+        self.harmonic_summation_method_combo.setObjectName(
+            "settings_harmonic_summation_method"
+        )
+        self.harmonic_summation_method_combo.addItem(
+            "All harmonics up to highest significant",
+            GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+        )
+        self.harmonic_summation_method_combo.addItem(
+            "Significant harmonics only",
+            GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
+        )
+        self.harmonic_summation_method_combo.addItem(
+            "Fixed harmonic list",
+            "fixed_predefined",
+        )
+        selected_method = (
+            "fixed_predefined"
+            if settings.name == FIXED_PREDEFINED_POLICY_NAME
+            else settings.group_significant_summation_method
+        )
+        method_index = self.harmonic_summation_method_combo.findData(selected_method)
+        self.harmonic_summation_method_combo.setCurrentIndex(max(0, method_index))
+        self.harmonic_summation_method_combo.setToolTip(
+            "Choose which oddball harmonics are included in Summed BCA after processing."
+        )
+        harmonic_form.addRow(
+            QLabel("Summation method:", harmonic_group),
+            self.harmonic_summation_method_combo,
+        )
+
+        self.harmonic_electrode_scope_combo = QComboBox(harmonic_group)
+        self.harmonic_electrode_scope_combo.setObjectName(
+            "settings_harmonic_electrode_scope"
+        )
+        self.harmonic_electrode_scope_combo.addItem(
+            "Average within selected ROIs only",
+            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+        )
+        self.harmonic_electrode_scope_combo.addItem(
+            "Grand average across all scalp electrodes",
+            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+        )
+        scope_index = self.harmonic_electrode_scope_combo.findData(
+            settings.group_significant_electrode_scope
+        )
+        self.harmonic_electrode_scope_combo.setCurrentIndex(max(0, scope_index))
+        self.harmonic_electrode_scope_combo.setToolTip(
+            "Choose the electrode set used to build the group-level FFT spectrum for harmonic selection."
+        )
+        harmonic_form.addRow(
+            QLabel("Averaging method:", harmonic_group),
+            self.harmonic_electrode_scope_combo,
+        )
+
+        self.fixed_harmonic_freqs_edit = QLineEdit(
+            str(settings.fixed_harmonic_frequencies_hz),
+            harmonic_group,
+        )
+        self.fixed_harmonic_freqs_edit.setObjectName("settings_fixed_harmonics")
+        self.fixed_harmonic_freqs_edit.setPlaceholderText("1.2, 2.4, 3.6, 4.8, 7.2")
+        self.fixed_harmonic_freqs_edit.setToolTip(
+            "Comma-separated harmonic frequencies in Hz. Used only when Fixed harmonic list is selected."
+        )
+        harmonic_form.addRow(
+            QLabel("Fixed harmonics (Hz):", harmonic_group),
+            self.fixed_harmonic_freqs_edit,
+        )
+
+        self.fixed_harmonic_exclude_base_check = QCheckBox(
+            "Automatically exclude base-rate overlaps",
+            harmonic_group,
+        )
+        self.fixed_harmonic_exclude_base_check.setObjectName(
+            "settings_fixed_harmonics_exclude_base"
+        )
+        self.fixed_harmonic_exclude_base_check.setChecked(
+            bool(settings.fixed_harmonic_auto_exclude_base)
+        )
+        harmonic_form.addRow("", self.fixed_harmonic_exclude_base_check)
+
+        harmonic_group.content_layout.addLayout(harmonic_form)
+        layout.addWidget(harmonic_group)
+        self.harmonic_summation_method_combo.currentIndexChanged.connect(
+            self._update_harmonic_selection_controls
+        )
+        self._update_harmonic_selection_controls()
 
     # ------------------------------------------------------------------
     def _init_stats_tab(self, tabs: QTabWidget) -> None:
@@ -595,6 +758,15 @@ class SettingsDialog(QDialog):
             == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         )
 
+    def _fixed_harmonic_list_selected(self) -> bool:
+        return self.harmonic_summation_method_combo.currentData() == "fixed_predefined"
+
+    def _update_harmonic_selection_controls(self) -> None:
+        fixed_selected = self._fixed_harmonic_list_selected()
+        self.harmonic_electrode_scope_combo.setEnabled(not fixed_selected)
+        self.fixed_harmonic_freqs_edit.setEnabled(fixed_selected)
+        self.fixed_harmonic_exclude_base_check.setEnabled(fixed_selected)
+
     def _removed_electrode_detection_mode(self) -> str:
         return normalize_removed_electrode_detection_mode(
             self.removed_electrode_detection_mode_combo.currentData(),
@@ -913,6 +1085,18 @@ class SettingsDialog(QDialog):
                 "manual_excluded_participants",
                 json.dumps(validated_preproc.get("manual_excluded_participants", [])),
             )
+            for option in (
+                "harmonic_selection_policy",
+                "group_significant_electrode_scope",
+                "group_significant_summation_method",
+                "fixed_harmonic_frequencies_hz",
+                "fixed_harmonic_auto_exclude_base",
+            ):
+                self.manager.set(
+                    "preprocessing",
+                    option,
+                    str(validated_preproc.get(option, PREPROCESSING_DEFAULTS.get(option, ""))),
+                )
         else:
             try:
                 normalized = self.project.update_preprocessing(validated_preproc)
@@ -1010,6 +1194,29 @@ class SettingsDialog(QDialog):
         values["manual_removed_electrodes"] = dict(self._manual_removed_electrodes_by_pid)
         values["manual_excluded_participants"] = list(
             self._manual_excluded_participants
+        )
+        fixed_selected = self._fixed_harmonic_list_selected()
+        values["harmonic_selection_policy"] = (
+            FIXED_PREDEFINED_POLICY_NAME
+            if fixed_selected
+            else GROUP_SIGNIFICANT_POLICY_NAME
+        )
+        values["group_significant_electrode_scope"] = (
+            self.harmonic_electrode_scope_combo.currentData()
+            or GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+        )
+        selected_summation_method = self.harmonic_summation_method_combo.currentData()
+        values["group_significant_summation_method"] = (
+            GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
+            if fixed_selected
+            else (
+                selected_summation_method
+                or GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
+            )
+        )
+        values["fixed_harmonic_frequencies_hz"] = self.fixed_harmonic_freqs_edit.text()
+        values["fixed_harmonic_auto_exclude_base"] = (
+            self.fixed_harmonic_exclude_base_check.isChecked()
         )
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values

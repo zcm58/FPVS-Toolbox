@@ -46,6 +46,11 @@ def _prep_project(root):
             "manual_removed_electrodes": {},
             "manual_excluded_participants": [],
             "max_parallel_workers_override": 0,
+            "harmonic_selection_policy": "Group-level significant harmonics (Volfart/Retter/Rossion style)",
+            "group_significant_electrode_scope": "union_roi_electrodes",
+            "group_significant_summation_method": "through_highest_significant",
+            "fixed_harmonic_frequencies_hz": "1.2, 2.4, 3.6, 4.8, 7.2",
+            "fixed_harmonic_auto_exclude_base": True,
             "stim_channel": "Status",
         }
     )
@@ -74,6 +79,10 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[4].setText("3.5")
     dlg.preproc_edits[5].setText("100")
+    significant_only_index = dlg.harmonic_summation_method_combo.findData("significant_only")
+    dlg.harmonic_summation_method_combo.setCurrentIndex(significant_only_index)
+    all_electrodes_index = dlg.harmonic_electrode_scope_combo.findData("all_scalp_electrodes")
+    dlg.harmonic_electrode_scope_combo.setCurrentIndex(all_electrodes_index)
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
 
@@ -86,6 +95,11 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
     assert reloaded.preprocessing["manual_excluded_participants"] == []
+    assert reloaded.preprocessing["harmonic_selection_policy"] == (
+        "Group-level significant harmonics (Volfart/Retter/Rossion style)"
+    )
+    assert reloaded.preprocessing["group_significant_summation_method"] == "significant_only"
+    assert reloaded.preprocessing["group_significant_electrode_scope"] == "all_scalp_electrodes"
     assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
 
@@ -168,6 +182,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
+    assert "Harmonic Selection" in cards
     assert "Application Options" in cards
     assert "Processing QC" in cards
     assert "Diagnostics" not in cards
@@ -184,6 +199,19 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
+    assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_summation_method_combo)
+    assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_electrode_scope_combo)
+    assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_freqs_edit)
+    assert dlg.harmonic_summation_method_combo.itemText(0) == "All harmonics up to highest significant"
+    assert dlg.harmonic_summation_method_combo.itemText(1) == "Significant harmonics only"
+    assert dlg.harmonic_summation_method_combo.itemText(2) == "Fixed harmonic list"
+    assert dlg.harmonic_summation_method_combo.currentData() == "through_highest_significant"
+    assert dlg.harmonic_electrode_scope_combo.currentData() == "union_roi_electrodes"
+    assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
+    fixed_list_index = dlg.harmonic_summation_method_combo.findData("fixed_predefined")
+    dlg.harmonic_summation_method_combo.setCurrentIndex(fixed_list_index)
+    assert dlg.fixed_harmonic_freqs_edit.isEnabled() is True
+    assert dlg.harmonic_electrode_scope_combo.isEnabled() is False
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
     assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
     assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)
@@ -244,6 +272,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     rois_tab = dlg.tabs.widget(rois_tab_index)
     advanced_tab = dlg.tabs.widget(advanced_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
+    assert preproc_tab.isAncestorOf(cards["Harmonic Selection"])
     assert advanced_tab.isAncestorOf(cards["Application Options"])
     assert advanced_tab.isAncestorOf(cards["Processing QC"])
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])

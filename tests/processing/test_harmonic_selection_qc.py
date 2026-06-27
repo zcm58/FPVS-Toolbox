@@ -9,6 +9,7 @@ import pytest
 from openpyxl import load_workbook
 
 from Main_App.processing import harmonic_selection_qc
+from Tools.Stats.io.stats_ready_export import HARMONIC_SELECTION_COLUMNS
 
 
 def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cache(
@@ -37,6 +38,7 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
         project_root=project_root,
         subfolders={"excel": excel_root},
         event_map={"Faces": 1},
+        preprocessing={},
     )
     monkeypatch.setattr(
         harmonic_selection_qc,
@@ -58,6 +60,10 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
     )
     workbook = load_workbook(report.workbook_path)
     assert workbook.sheetnames == ["Selection_Summary", "Harmonic_Selection"]
+    harmonic_headers = [
+        cell.value for cell in next(workbook["Harmonic_Selection"].iter_rows(max_row=1))
+    ]
+    assert harmonic_headers == HARMONIC_SELECTION_COLUMNS
     summary_values = {
         row[0].value: row[1].value
         for row in workbook["Selection_Summary"].iter_rows(min_row=2, max_col=2)
@@ -67,6 +73,55 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
     manifest = json.loads((project_root / "project.json").read_text(encoding="utf-8"))
     entries = manifest["tools"]["stats"]["group_significant_harmonics_cache"]["entries"]
     assert len(entries) == 1
+
+
+def test_processing_harmonic_selection_qc_uses_project_summation_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    condition_root = excel_root / "Faces"
+    condition_root.mkdir(parents=True)
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1},
+                "preprocessing": {
+                    "group_significant_summation_method": "significant_only",
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _write_group_policy_workbook(condition_root / "S1_Faces_Results.xlsx", scale=1)
+    _write_group_policy_workbook(condition_root / "S2_Faces_Results.xlsx", scale=2)
+    project = SimpleNamespace(
+        project_root=project_root,
+        subfolders={"excel": excel_root},
+        event_map={"Faces": 1},
+        preprocessing={"group_significant_summation_method": "significant_only"},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+    )
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+
+    report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+
+    assert report.selection_metadata["summation_method"] == "significant_only"
+    assert report.selection_metadata["detected_significant_harmonics_hz"] == pytest.approx(
+        [1.2, 3.6, 7.2]
+    )
+    assert report.selection_metadata["selected_harmonics_hz"] == pytest.approx(
+        [1.2, 3.6, 7.2]
+    )
 
 
 def _write_group_policy_workbook(path: Path, *, scale: int) -> None:

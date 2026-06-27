@@ -51,6 +51,13 @@ DEFAULTS = {
         'bca_upper_limit': '16.8',
         'alpha': '0.05'
     },
+    'preprocessing': {
+        'harmonic_selection_policy': 'Group-level significant harmonics (Volfart/Retter/Rossion style)',
+        'group_significant_electrode_scope': 'union_roi_electrodes',
+        'group_significant_summation_method': 'through_highest_significant',
+        'fixed_harmonic_frequencies_hz': '1.2, 2.4, 3.6, 4.8, 7.2',
+        'fixed_harmonic_auto_exclude_base': 'True',
+    },
     'rois': {
         'montage': DEFAULT_ROI_MONTAGE,
         'names': 'LOT;ROT;Central',

@@ -26,6 +26,24 @@ def _summary_map(summary_df: pd.DataFrame) -> dict[str, object]:
     return dict(zip(summary_df["Summary Item"], summary_df["Value"]))
 
 
+def _assert_slim_harmonic_selection_columns(selection_df: pd.DataFrame) -> None:
+    assert list(selection_df.columns) == HARMONIC_SELECTION_COLUMNS
+    assert "harmonic_policy" not in selection_df.columns
+    assert "selection_scope" not in selection_df.columns
+    assert "base_frequency_hz" not in selection_df.columns
+    assert "oddball_frequency_hz" not in selection_df.columns
+    assert "z_threshold" not in selection_df.columns
+    assert "harmonic_hz" not in selection_df.columns
+    assert "matched_column" not in selection_df.columns
+    assert "matched_bin_index" not in selection_df.columns
+    assert "noise_bin_indices" not in selection_df.columns
+    assert "noise_frequencies_hz" not in selection_df.columns
+    assert "noise_amplitudes_uv" not in selection_df.columns
+    assert "noise_used_bin_indices" not in selection_df.columns
+    assert "noise_used_frequencies_hz" not in selection_df.columns
+    assert "noise_used_amplitudes_uv" not in selection_df.columns
+
+
 def _fixture_inputs():
     subjects = ["S1", "S2"]
     conditions = ["Face", "Object"]
@@ -207,12 +225,12 @@ def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
     assert "source_workbook" not in long_df.columns
 
     selection_df = frames[HARMONIC_SELECTION_SHEET]
-    assert list(selection_df.columns) == HARMONIC_SELECTION_COLUMNS
+    _assert_slim_harmonic_selection_columns(selection_df)
     selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
     excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
     assert bool(selected_row["selected"]) is True
-    assert selected_row["base_frequency_hz"] == pytest.approx(6.0)
-    assert selected_row["oddball_frequency_hz"] == pytest.approx(1.2)
+    assert bool(selected_row["included_in_summation"]) is True
+    assert bool(excluded_row["excluded_base_rate"]) is True
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
 
 
@@ -320,16 +338,16 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     assert summary["Significant harmonic indices"] == "1; 3; 6"
 
     selection_df = frames[HARMONIC_SELECTION_SHEET]
+    _assert_slim_harmonic_selection_columns(selection_df)
     selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
     excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
-    assert selected_row["harmonic_policy"] == GROUP_SIGNIFICANT_POLICY_ID
     assert bool(selected_row["selected"]) is True
-    assert selected_row["z_threshold"] == pytest.approx(1.64)
+    assert bool(selected_row["included_in_summation"]) is True
     assert selected_row["target_amplitude_uv"] == pytest.approx(4.2)
     assert selected_row["noise_mean_uv"] == pytest.approx(1.0)
-    assert selected_row["noise_bin_indices"] == "0;4"
-    assert selected_row["noise_frequencies_hz"] == "0.0;2.4"
-    assert selected_row["noise_amplitudes_uv"] == "0.8;1.2"
+    assert selected_row["noise_std_uv"] == pytest.approx(0.627451)
+    assert bool(excluded_row["included_in_summation"]) is False
+    assert bool(excluded_row["excluded_base_rate"]) is True
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
 
 
