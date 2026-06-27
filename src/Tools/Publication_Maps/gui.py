@@ -45,6 +45,7 @@ from Main_App.gui.components import (
     confirm,
     show_error,
 )
+from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Publication_Maps.excel_inputs import discover_conditions
 from Tools.Publication_Maps.models import (
     ColorBounds,
@@ -841,6 +842,7 @@ class PublicationMapsWindow(QWidget):
             conditions=self._selected_conditions(),
             base_frequency_hz=self._analysis_base_frequency_hz(),
             max_frequency_hz=self._analysis_bca_upper_limit_hz(),
+            selection_rois=load_rois_from_settings(self._settings_manager()) or {},
             metrics=metrics,
             color_bounds=color_bounds,
             export_png=True,

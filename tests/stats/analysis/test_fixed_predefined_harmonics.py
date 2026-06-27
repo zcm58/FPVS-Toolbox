@@ -229,12 +229,19 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
         max_freq=8.4,
     )
 
-    assert selection.selected_harmonics_hz == pytest.approx([1.2, 3.6, 7.2])
+    assert selection.detected_significant_harmonics_hz == pytest.approx([1.2, 3.6, 7.2])
+    assert selection.selected_harmonics_hz == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
     assert selection.excluded_base_harmonics_hz == pytest.approx([6.0])
-    assert selection.selection_scope == "group_level_all_scalp_electrodes_all_selected_conditions"
+    assert selection.selection_scope == "group_level_union_roi_electrodes_all_selected_conditions"
+    assert selection.summation_method == "through_highest_significant"
     assert selection.z_by_harmonic[1.2] > settings.group_significant_z_threshold
     assert selection.z_by_harmonic[2.4] < settings.group_significant_z_threshold
+    row_24 = next(row for row in selection.rows if row.target_frequency_hz == pytest.approx(2.4))
+    assert row_24.selected is False
+    assert row_24.included_in_summation is True
     metadata = selection.to_metadata()
+    assert metadata["detected_significant_harmonics_hz"] == pytest.approx([1.2, 3.6, 7.2])
+    assert metadata["included_harmonics_hz"] == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
     assert metadata["highest_significant_harmonic_hz"] == pytest.approx(7.2)
     assert metadata["highest_significant_harmonic_index"] == 6
     first_row = next(row for row in selection.rows if row.target_frequency_hz == pytest.approx(1.2))
@@ -243,6 +250,31 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
     assert first_row.noise_std_uv is not None
     assert first_row.noise_bin_indices
     assert first_row.noise_used_bin_indices
+
+
+def test_group_significant_policy_matches_roi_electrodes_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    path = tmp_path / "mixed_case_roi_settings.xlsx"
+    _write_group_policy_workbook(path, scale=1)
+
+    try:
+        selection = build_group_significant_harmonic_selection(
+            subjects=["S1"],
+            conditions=["C1"],
+            subject_data={"S1": {"C1": str(path)}},
+            base_frequency_hz=6.0,
+            rois={"Posterior": ["o1", "o2"], "Central": ["fz"]},
+            log_func=lambda _message: None,
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+            max_freq=3.6,
+        )
+    finally:
+        group_policy.clear_group_significant_selection_cache()
+
+    assert selection.detected_significant_harmonics_hz == pytest.approx([1.2, 3.6])
+    assert selection.selection_electrode_count == 3
 
 
 def test_group_significant_policy_reports_tested_candidates_when_none_selected(
@@ -336,7 +368,8 @@ def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_pat
 
     assert result is not None
     group_meta = metadata["group_significant_harmonics"]
-    assert group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 3.6, 7.2])
+    assert group_meta["detected_significant_harmonics_hz"] == pytest.approx([1.2, 3.6, 7.2])
+    assert group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
     assert group_meta["highest_significant_harmonic_hz"] == pytest.approx(7.2)
     assert group_meta["highest_significant_harmonic_index"] == 6
     assert group_meta["snr_used_for_statistics"] is False
@@ -350,13 +383,15 @@ def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_pat
             for roi in rois:
                 assert provenance[(subject, condition, roi)]["col_label"] == [
                     "1.2000_Hz",
+                    "2.4000_Hz",
                     "3.6000_Hz",
+                    "4.8000_Hz",
                     "7.2000_Hz",
                 ]
 
-    assert result["S1"]["C1"]["Posterior"] == pytest.approx(3.0)
-    assert result["S1"]["C1"]["Central"] == pytest.approx(0.7)
-    assert result["S2"]["C2"]["Posterior"] == pytest.approx(6.0)
+    assert result["S1"]["C1"]["Posterior"] == pytest.approx(203.0)
+    assert result["S1"]["C1"]["Central"] == pytest.approx(200.7)
+    assert result["S2"]["C2"]["Posterior"] == pytest.approx(206.0)
 
 
 def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_workbook(
@@ -447,7 +482,7 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
 
     assert len(bca_calls) == len(conditions)
     assert all(
-        call["required_columns"] == ["Electrode", "1.2000_Hz", "3.6000_Hz"]
+        call["required_columns"] == ["Electrode", "1.2000_Hz", "2.4000_Hz", "3.6000_Hz"]
         for call in bca_calls
     )
     group_policy.clear_group_significant_selection_cache()
@@ -576,7 +611,7 @@ def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
         subject_data=subject_data,
         base_freq=6.0,
         log_func=messages.append,
-        rois={"Posterior": ["O1", "O2"]},
+        rois=rois,
         provenance_map={},
         dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
         dv_metadata=second_metadata,
@@ -587,7 +622,8 @@ def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
     assert second_result is not None
     second_group_meta = second_metadata["group_significant_harmonics"]
     assert second_group_meta["selection_cache_source"] == "saved_project_metadata"
-    assert second_group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 3.6])
+    assert second_group_meta["detected_significant_harmonics_hz"] == pytest.approx([1.2, 3.6])
+    assert second_group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 2.4, 3.6])
     assert any("Project harmonic cache hit" in message for message in messages)
 
 

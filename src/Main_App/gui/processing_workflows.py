@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import psutil
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QThread, QTimer, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
@@ -39,6 +39,36 @@ from Main_App.workers.mp_env import (
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
+
+
+class _ProcessingHarmonicCompletionBridge(QObject):
+    """Route worker completion back through a main-thread QObject."""
+
+    def __init__(self, callback: Callable[[dict], None], parent: QObject | None) -> None:
+        super().__init__(parent)
+        self._callback = callback
+
+    @Slot(dict)
+    def handle_finished(self, result: dict) -> None:
+        self._callback(result)
+
+
+def _sync_project_tools_metadata_from_disk(project: Any) -> None:
+    manifest = getattr(project, "manifest", None)
+    project_root = getattr(project, "project_root", None)
+    if not isinstance(manifest, dict) or project_root in (None, ""):
+        return
+    manifest_path = Path(project_root) / "project.json"
+    try:
+        import json
+
+        disk_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.debug("processing_project_tools_metadata_sync_skipped", exc_info=True)
+        return
+    tools = disk_manifest.get("tools") if isinstance(disk_manifest, dict) else None
+    if isinstance(tools, dict):
+        manifest["tools"] = tools
 
 
 def _format_timing_summary(result: dict) -> str | None:
@@ -279,6 +309,77 @@ def _show_exclusion_summary_popup(host: Any, excluded_results: list[dict]) -> No
     if detailed:
         box.setDetailedText(detailed)
     box.exec()
+
+
+def _start_harmonic_selection_qc_after_processing(
+    host: Any,
+    *,
+    on_finished: Callable[[], None],
+) -> bool:
+    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        return False
+
+    try:
+        from Main_App.workers.harmonic_selection_worker import (
+            ProcessingHarmonicSelectionWorker,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to import processing harmonic-selection worker.")
+        host.log(
+            f"Harmonic selection QC could not start: {exc}",
+            level=logging.WARNING,
+        )
+        return False
+
+    thread = QThread(host)
+    worker = ProcessingHarmonicSelectionWorker(project)
+    worker.moveToThread(thread)
+    host._processing_harmonic_thread = thread
+    host._processing_harmonic_worker = worker
+
+    def _handle_finished(result: dict) -> None:
+        try:
+            for message in result.get("messages") or []:
+                if isinstance(message, str) and message.strip():
+                    host.log(message, level=logging.INFO)
+            if result.get("ok"):
+                workbook_path = result.get("workbook_path")
+                _sync_project_tools_metadata_from_disk(project)
+                host.log(
+                    f"Harmonic selection QC saved: {workbook_path}",
+                    level=logging.INFO,
+                )
+            else:
+                host.log(
+                    "Harmonic selection QC did not complete automatically: "
+                    f"{result.get('error')}",
+                    level=logging.WARNING,
+                )
+        finally:
+            host._processing_harmonic_thread = None
+            host._processing_harmonic_worker = None
+            bridge = getattr(host, "_processing_harmonic_completion_bridge", None)
+            host._processing_harmonic_completion_bridge = None
+            if bridge is not None:
+                bridge.deleteLater()
+            on_finished()
+
+    bridge = _ProcessingHarmonicCompletionBridge(_handle_finished, host)
+    host._processing_harmonic_completion_bridge = bridge
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    worker.finished.connect(worker.deleteLater)
+    worker.finished.connect(bridge.handle_finished)
+    thread.finished.connect(thread.deleteLater)
+    host.log(
+        "Processing finished; selecting and caching group-level harmonics for downstream tools...",
+        level=logging.INFO,
+    )
+    thread.start()
+    return True
 
 
 def _choose_processing_plan(
@@ -834,34 +935,45 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                 logger.exception("Failed to write processing QC summary workbook.")
                 host.log(f"Processing QC summary export failed: {exc}", level=logging.WARNING)
 
-    _show_exclusion_summary_popup(host, [*excluded_results, *failed_run_results])
-    _show_condition_warning_popup(host, condition_warning_results)
+    def _finish_processing_run() -> None:
+        _show_exclusion_summary_popup(host, [*excluded_results, *failed_run_results])
+        _show_condition_warning_popup(host, condition_warning_results)
 
-    host._busy_stop()
-    success = not cancelled
-    host._finalize_processing(success, cancelled=cancelled)
-    if success and not cancelled:
-        try:
-            from Main_App.gui.processing_snr_qc_workflow import (
-                start_automatic_snr_qc_after_processing,
-            )
+        host._busy_stop()
+        success = not cancelled
+        host._finalize_processing(success, cancelled=cancelled)
+        if success and not cancelled:
+            try:
+                from Main_App.gui.processing_snr_qc_workflow import (
+                    start_automatic_snr_qc_after_processing,
+                )
 
-            start_automatic_snr_qc_after_processing(host)
-        except Exception as exc:
-            logger.exception("Automatic SNR plot/QC launch failed.")
-            host.log(
-                f"Automatic SNR plot/QC could not start: {exc}",
-                level=logging.WARNING,
-            )
-    if cancelled:
-        host.log("Processing run cancelled by user.", level=logging.INFO)
-        if interrupted_files:
-            host.log(
-                "Stopped before "
-                f"{len(interrupted_files)} queued or active file(s) completed; "
-                "rerun those files before using any partial outputs.",
-                level=logging.WARNING,
-            )
+                start_automatic_snr_qc_after_processing(host)
+            except Exception as exc:
+                logger.exception("Automatic SNR plot/QC launch failed.")
+                host.log(
+                    f"Automatic SNR plot/QC could not start: {exc}",
+                    level=logging.WARNING,
+                )
+        if cancelled:
+            host.log("Processing run cancelled by user.", level=logging.INFO)
+            if interrupted_files:
+                host.log(
+                    "Stopped before "
+                    f"{len(interrupted_files)} queued or active file(s) completed; "
+                    "rerun those files before using any partial outputs.",
+                    level=logging.WARNING,
+                )
+
+    if not cancelled:
+        started_harmonic_qc = _start_harmonic_selection_qc_after_processing(
+            host,
+            on_finished=_finish_processing_run,
+        )
+        if started_harmonic_qc:
+            return
+
+    _finish_processing_run()
 
 
 def on_processing_error(host: Any, message: str) -> None:

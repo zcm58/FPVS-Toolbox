@@ -100,15 +100,17 @@ Rules:
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
   BCA DV facade, preserve `subject_id` and group labels, and surface missing
   metadata instead of silently changing values. Group-level significant
-  harmonic summation (Volfart/Retter/Rossion style) is the default and primary
-  DV policy. Fixed/predefined summation remains available as an alternate
-  policy and also requires exact selected `BCA (uV)` harmonic columns; do not
-  use nearest-column matching for requested fixed harmonics. The default
-  group-level significant-harmonics policy selects one common non-base oddball
-  harmonic list from grand-averaged `FullFFT Amplitude (uV)` spectra, then
-  applies that common list uniformly to every participant, selected condition,
-  and ROI. The oddball frequency is locked at 1.2 Hz. The BCA harmonic upper
-  limit is only the stop frequency for candidate generation: build
+  harmonic summation is the default and primary DV policy. Fixed/predefined
+  summation remains available as an alternate policy and also requires exact
+  selected `BCA (uV)` harmonic columns; do not use nearest-column matching for
+  requested fixed harmonics. The default group-level significant-harmonics
+  policy detects significant non-base oddball harmonics from grand-averaged
+  `FullFFT Amplitude (uV)` spectra over the union of predefined ROI electrodes.
+  The default summation method then includes all non-base oddball harmonics up
+  to the highest detected significant harmonic. The resulting included harmonic
+  list is applied uniformly to every participant, selected condition, and ROI.
+  The oddball frequency is locked at 1.2 Hz. The BCA harmonic upper limit is
+  only the stop frequency for candidate generation: build
   `1.2, 2.4, 3.6, ...` up to that ceiling, excluding base-rate overlaps. Never
   derive oddball spacing from the base frequency, the BCA upper limit, a stale
   settings payload, or a requested max frequency. This policy expects exact
@@ -117,11 +119,12 @@ Rules:
   workaround in Stats for off-grid FullFFT workbooks.
 - The group-level significant-harmonics selection math is locked. Build one
   grand-averaged raw amplitude spectrum from `FullFFT Amplitude (uV)` across
-  selected participants and conditions after averaging each workbook across
-  all scalp electrodes. For each non-base candidate oddball harmonic, compute
-  z from that grand-average spectrum as `(target_amplitude - noise_mean) /
-  noise_std`, select only harmonics with `z > 1.64`, and keep the same
-  selected list for every participant, selected condition, and ROI. The
+  selected participants and conditions after averaging each workbook across the
+  union of predefined ROI electrodes. For each non-base candidate oddball
+  harmonic, compute z from that grand-average spectrum as
+  `(target_amplitude - noise_mean) / noise_std`, mark harmonics with
+  `z > 1.64` as detected significant, and keep one included harmonic list for
+  every participant, selected condition, and ROI. The
   neighboring-noise window is also locked: use +/-10 FFT bins around the target
   bin, exclude target-1, target, and target+1, require at least four finite
   noise bins, drop the single minimum and single maximum finite amplitude
@@ -137,7 +140,7 @@ Rules:
   amplitude row loading, and `BCA (uV)` aggregation, so an off-grid FullFFT
   workbook should not trigger expensive downstream sheet reads.
 - After group-level harmonics are selected, the `BCA (uV)` sheet must also
-  contain exact selected harmonic columns such as `1.2000_Hz`. Do not use
+  contain exact included harmonic columns such as `1.2000_Hz`. Do not use
   tolerance matching, nearest-column matching, or policy fallbacks for selected
   group harmonics; missing exact selected columns are hard failures.
 - Stats folder scans may rebind the window to the manifest-owning project root

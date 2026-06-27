@@ -92,6 +92,7 @@ class PublicationMapRequest:
     base_frequency_hz: float = 6.0
     max_frequency_hz: float | None = None
     subject_exclusions: frozenset[str] = frozenset()
+    selection_rois: dict[str, list[str]] = field(default_factory=dict)
     metrics: tuple[PublicationMetric, ...] = (PublicationMetric.BCA,)
     color_bounds: dict[PublicationMetric, ColorBounds] = field(default_factory=dict)
     export_png: bool = True

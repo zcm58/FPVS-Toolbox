@@ -80,6 +80,7 @@ def _build_cache_key(
         float(settings.fixed_harmonic_matching_tolerance_hz),
         float(settings.group_significant_z_threshold),
         settings.group_significant_electrode_scope,
+        settings.group_significant_summation_method,
         float(settings.group_significant_oddball_frequency_hz),
         project_processing_hash,
     )

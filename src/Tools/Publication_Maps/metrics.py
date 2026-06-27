@@ -130,7 +130,7 @@ def _select_stats_significant_harmonics(
         subject_data.setdefault(workbook.subject_id, {})[workbook.condition] = str(workbook.path)
     subjects = sorted(subject_data)
     conditions = list(request.conditions)
-    rois = {"All scalp electrodes": sorted(biosemi64_names_upper())}
+    rois = request.selection_rois or {"All scalp electrodes": sorted(biosemi64_names_upper())}
 
     def log_func(message: str) -> None:
         diagnostics.append(Diagnostic(level="info", message=message))

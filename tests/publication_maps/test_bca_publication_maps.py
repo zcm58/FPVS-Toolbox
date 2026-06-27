@@ -76,18 +76,23 @@ def test_bca_maps_use_stats_group_significant_selection_and_sum_per_electrode(
 
     result = build_publication_map_result(request)
 
-    assert result.selected_harmonics_hz == pytest.approx((1.2, 3.6, 7.2))
+    assert result.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6, 4.8, 7.2))
     assert result.selection_metadata["harmonic_policy"] == "group_level_significant_harmonics"
+    assert result.selection_metadata["detected_significant_harmonics_hz"] == pytest.approx(
+        (1.2, 3.6, 7.2)
+    )
     o1 = result.grand_average_values[
         (result.grand_average_values["condition"] == "Faces")
         & (result.grand_average_values["electrode"] == "O1")
     ].iloc[0]
-    assert o1["aggregate_value"] == pytest.approx(3.0)
+    assert o1["aggregate_value"] == pytest.approx(203.0)
     assert o1["valid_subject_count"] == 2
-    assert o1["render_value"] == pytest.approx(3.0)
+    assert o1["render_value"] == pytest.approx(203.0)
     assert set(result.long_values["source_column"]) == {
         "1.2000_Hz",
+        "2.4000_Hz",
         "3.6000_Hz",
+        "4.8000_Hz",
         "7.2000_Hz",
     }
 
@@ -108,12 +113,14 @@ def test_snr_maps_use_stats_significant_selection_and_mean_per_electrode(
 
     result = build_publication_map_result(request)
 
-    assert result.selected_harmonics_hz == pytest.approx((1.2, 3.6, 7.2))
+    assert result.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6, 4.8, 7.2))
     assert set(result.long_values["metric"]) == {PublicationMetric.SNR.value}
     assert set(result.long_values["source_sheet"]) == {"SNR"}
     assert set(result.long_values["source_column"]) == {
         "1.2000_Hz",
+        "2.4000_Hz",
         "3.6000_Hz",
+        "4.8000_Hz",
         "7.2000_Hz",
     }
     o1 = result.grand_average_values[
@@ -121,8 +128,8 @@ def test_snr_maps_use_stats_significant_selection_and_mean_per_electrode(
         & (result.grand_average_values["electrode"] == "O1")
         & (result.grand_average_values["metric"] == PublicationMetric.SNR.value)
     ].iloc[0]
-    assert o1["aggregate_value"] == pytest.approx(1.35)
-    assert o1["render_value"] == pytest.approx(1.35)
+    assert o1["aggregate_value"] == pytest.approx(4.41)
+    assert o1["render_value"] == pytest.approx(4.41)
     assert o1["valid_subject_count"] == 2
     assert o1["map_label"] == "SNR significant-harmonic mean"
 
@@ -143,7 +150,7 @@ def test_z_score_maps_use_stats_significant_selection_and_combined_z_per_electro
 
     result = build_publication_map_result(request)
 
-    assert result.selected_harmonics_hz == pytest.approx((1.2, 3.6, 7.2))
+    assert result.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6, 4.8, 7.2))
     assert set(result.long_values["metric"]) == {PublicationMetric.Z_SCORE.value}
     assert set(result.long_values["source_sheet"]) == {"Z Score"}
     o1 = result.grand_average_values[
@@ -151,8 +158,8 @@ def test_z_score_maps_use_stats_significant_selection_and_combined_z_per_electro
         & (result.grand_average_values["electrode"] == "O1")
         & (result.grand_average_values["metric"] == PublicationMetric.Z_SCORE.value)
     ].iloc[0]
-    assert o1["aggregate_value"] == pytest.approx(6.5 / np.sqrt(3.0))
-    assert o1["render_value"] == pytest.approx(6.5 / np.sqrt(3.0))
+    assert o1["aggregate_value"] == pytest.approx(24.5 / np.sqrt(5.0))
+    assert o1["render_value"] == pytest.approx(24.5 / np.sqrt(5.0))
     assert o1["valid_subject_count"] == 2
     assert o1["map_label"] == "Z-score significant-harmonic sum"
 
@@ -199,8 +206,8 @@ def test_bca_maps_can_reuse_saved_stats_harmonic_cache(tmp_path: Path) -> None:
     group_policy.clear_group_significant_selection_cache()
     second = build_publication_map_result(request)
 
-    assert first.selected_harmonics_hz == pytest.approx((1.2, 3.6))
-    assert second.selected_harmonics_hz == pytest.approx((1.2, 3.6))
+    assert first.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6))
+    assert second.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6))
     assert second.selection_metadata["selection_cache_source"] == "saved_project_metadata"
 
 
@@ -406,9 +413,9 @@ def test_metric_collection_reads_only_selected_harmonic_columns(
 
     assert not any(diag.level == "error" for diag in result.diagnostics)
     assert seen_columns == [
-        ("Electrode", "1.2000_Hz", "3.6000_Hz", "7.2000_Hz"),
-        ("Electrode", "1.2000_Hz", "3.6000_Hz", "7.2000_Hz"),
-        ("Electrode", "1.2000_Hz", "3.6000_Hz", "7.2000_Hz"),
+        ("Electrode", "1.2000_Hz", "2.4000_Hz", "3.6000_Hz", "4.8000_Hz", "7.2000_Hz"),
+        ("Electrode", "1.2000_Hz", "2.4000_Hz", "3.6000_Hz", "4.8000_Hz", "7.2000_Hz"),
+        ("Electrode", "1.2000_Hz", "2.4000_Hz", "3.6000_Hz", "4.8000_Hz", "7.2000_Hz"),
     ]
 
 

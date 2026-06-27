@@ -1,11 +1,11 @@
 The Publication_Maps directory owns the embedded **Scalp Maps** tool. The
 current implementation renders condition-level grand-average BCA, SNR, and
-z-score scalp maps after selecting significant harmonics through the locked
-Stats group-level significant-harmonics path.
+z-score scalp maps after selecting the Stats included harmonic list through the
+locked group-level harmonic-selection path.
 
 Rules:
 
-- Significant harmonics must come from
+- Included harmonics must come from
   `Tools.Stats.analysis.dv_policy_group_significant.build_group_significant_harmonic_selection`.
   This preserves the Stats calculation and allows in-memory/project cache reuse.
 - BCA summation and SNR averaging must use the exact selected `"{freq:.4f}_Hz"`

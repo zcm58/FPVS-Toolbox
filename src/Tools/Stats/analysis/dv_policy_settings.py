@@ -21,7 +21,12 @@ GROUP_SIGNIFICANT_POLICY_LABEL = (
     "Group-level significant oddball harmonics from a grand-averaged amplitude spectrum"
 )
 GROUP_SIGNIFICANT_Z_THRESHOLD = 1.64
-GROUP_SIGNIFICANT_ELECTRODE_SCOPE = "all_scalp_electrodes"
+GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL = "all_scalp_electrodes"
+GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION = "union_roi_electrodes"
+GROUP_SIGNIFICANT_ELECTRODE_SCOPE = GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY = "significant_only"
+GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST = "through_highest_significant"
+GROUP_SIGNIFICANT_SUMMATION_METHOD = GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
 LOCKED_ODDBALL_FREQUENCY_HZ = 1.2
 
 
@@ -35,6 +40,7 @@ class DVPolicySettings:
     fixed_harmonic_matching_tolerance_hz: float = FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ
     group_significant_z_threshold: float = GROUP_SIGNIFICANT_Z_THRESHOLD
     group_significant_electrode_scope: str = GROUP_SIGNIFICANT_ELECTRODE_SCOPE
+    group_significant_summation_method: str = GROUP_SIGNIFICANT_SUMMATION_METHOD
     group_significant_oddball_frequency_hz: float = LOCKED_ODDBALL_FREQUENCY_HZ
 
     def to_metadata(self, *, base_freq: float, selected_conditions: list[str]) -> dict:
@@ -47,6 +53,9 @@ class DVPolicySettings:
             "fixed_harmonic_matching_tolerance_hz": float(self.fixed_harmonic_matching_tolerance_hz),
             "group_significant_z_threshold": float(self.group_significant_z_threshold),
             "group_significant_electrode_scope": str(self.group_significant_electrode_scope),
+            "group_significant_summation_method": str(
+                self.group_significant_summation_method
+            ),
             "group_significant_oddball_frequency_hz": LOCKED_ODDBALL_FREQUENCY_HZ,
             "base_frequency_hz": float(base_freq),
             "selected_conditions": list(selected_conditions),
@@ -87,8 +96,41 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     group_scope = str(
         settings.get("group_significant_electrode_scope", GROUP_SIGNIFICANT_ELECTRODE_SCOPE)
     )
-    if group_scope != GROUP_SIGNIFICANT_ELECTRODE_SCOPE:
+    scope_aliases = {
+        GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+        GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+        "selected_roi_electrodes",
+        "predefined_roi_union",
+    }
+    if group_scope not in scope_aliases:
         group_scope = GROUP_SIGNIFICANT_ELECTRODE_SCOPE
+    if group_scope in {"selected_roi_electrodes", "predefined_roi_union"}:
+        group_scope = GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+    raw_summation = str(
+        settings.get(
+            "group_significant_summation_method",
+            GROUP_SIGNIFICANT_SUMMATION_METHOD,
+        )
+    )
+    summation_aliases = {
+        GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
+        "significant_harmonics_only",
+        "current",
+        "legacy_significant_only",
+        GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+        "through_highest",
+        "all_through_highest",
+    }
+    if raw_summation not in summation_aliases:
+        raw_summation = GROUP_SIGNIFICANT_SUMMATION_METHOD
+    if raw_summation in {
+        "significant_harmonics_only",
+        "current",
+        "legacy_significant_only",
+    }:
+        raw_summation = GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY
+    if raw_summation in {"through_highest", "all_through_highest"}:
+        raw_summation = GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
     return DVPolicySettings(
         name=name,
         fixed_harmonic_frequencies_hz=fixed_freqs,
@@ -97,6 +139,7 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
         fixed_harmonic_matching_tolerance_hz=fixed_match_tol,
         group_significant_z_threshold=group_z,
         group_significant_electrode_scope=group_scope,
+        group_significant_summation_method=raw_summation,
         group_significant_oddball_frequency_hz=LOCKED_ODDBALL_FREQUENCY_HZ,
     )
 

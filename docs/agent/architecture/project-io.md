@@ -21,9 +21,10 @@ FPVS Toolbox uses a strict hybrid settings model:
   `tools.stats`. The group-significant harmonics cache lives at
   `tools.stats.group_significant_harmonics_cache`, is keyed by selected
   participants/conditions, source workbook fingerprints, Stats harmonic
-  settings, and the current project preprocessing/event-map signature, and must
-  be invalidated when any of those inputs change. Project saves must preserve
-  this namespace when Stats updates it directly from a worker.
+  settings, predefined ROI definitions, and the current project
+  preprocessing/event-map signature, and must be invalidated when any of those
+  inputs change. Project saves must preserve this namespace when Stats or
+  processing-end harmonic QC updates it directly from a worker.
 - v2.1 multi-group projects store canonical group definitions in
   `project.json` under `groups`. Keys are stable readable `group_id` slugs;
   entries carry `label`, `folder_name`, and `raw_input_folder`. Participant
@@ -35,6 +36,11 @@ FPVS Toolbox uses a strict hybrid settings model:
   `.fpvs_processing/processing_ledger.json` and
   `.fpvs_processing/processing_runs.jsonl`. This folder is recoverable state,
   not canonical project configuration.
+- Processing-end harmonic selection writes
+  `Quality Check/Harmonic_Selection_Summary.xlsx` under the active project root
+  and saves the matching harmonic-selection metadata into
+  `tools.stats.group_significant_harmonics_cache`. The raw data and generated
+  condition workbooks are not altered by this QC export.
 - `%APPDATA%\FPVS_Toolbox\*.ini` files and old Qt `QSettings` locations are legacy migration inputs only; do not add new writers there.
 - Do not write settings to the install directory, repo directory, `Program Files`, or the process current working directory.
 - FPVS Studio `.fpvsconfig` import is a project-shell helper under

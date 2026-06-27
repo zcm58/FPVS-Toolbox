@@ -24,10 +24,10 @@ from Tools.Stats.analysis.dv_policy_settings import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 CACHE_MAX_ENTRIES = 8
 CACHE_MANIFEST_PATH = ("tools", "stats", "group_significant_harmonics_cache")
-GROUP_HARMONIC_METHOD_VERSION = "group_significant_harmonics_v1"
+GROUP_HARMONIC_METHOD_VERSION = "group_significant_harmonics_roi_union_through_highest_v2"
 PREPROCESSING_ORDER_VERSION_LABEL = "filter_then_downsample_v1"
 PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v6_manual_removed_electrode_qc"
 
@@ -83,6 +83,7 @@ def build_group_harmonic_cache_request(
     base_frequency_hz: float,
     max_freq_hz: float | None,
     settings: DVPolicySettings,
+    rois: Mapping[str, Sequence[object]] | None = None,
 ) -> GroupHarmonicCacheRequest | None:
     """Build the exact manifest-cache request for the current Stats selection."""
 
@@ -113,6 +114,7 @@ def build_group_harmonic_cache_request(
         "selection_inputs": {
             "subjects": list(subject_key),
             "conditions": list(condition_key),
+            "roi_definitions": _normalize_rois(rois),
         },
         "source_workbooks": workbooks,
         "stats_settings": {
@@ -121,6 +123,7 @@ def build_group_harmonic_cache_request(
             "max_freq_hz": float(max_freq_hz) if max_freq_hz is not None else None,
             "z_threshold": float(settings.group_significant_z_threshold),
             "electrode_scope": str(settings.group_significant_electrode_scope),
+            "summation_method": str(settings.group_significant_summation_method),
         },
         "project_processing_signature": processing_signature,
         "project_processing_signature_hash": processing_signature_hash,
@@ -232,6 +235,10 @@ def save_cached_group_harmonic_selection(
         "project_processing_signature": _json_safe(request.project_processing_signature),
         "project_processing_signature_hash": request.project_processing_signature_hash,
         "selected_harmonics_hz": _json_safe(selection_metadata.get("selected_harmonics_hz", [])),
+        "detected_significant_harmonics_hz": _json_safe(
+            selection_metadata.get("detected_significant_harmonics_hz", [])
+        ),
+        "included_harmonics_hz": _json_safe(selection_metadata.get("included_harmonics_hz", [])),
         "highest_significant_harmonic_hz": _json_safe(
             selection_metadata.get("highest_significant_harmonic_hz")
         ),
@@ -294,6 +301,25 @@ def _workbook_fingerprint(
         int(stat.st_size),
         int(stat.st_mtime_ns),
     )
+
+
+def _normalize_rois(rois: Mapping[str, Sequence[object]] | None) -> list[dict[str, object]]:
+    if not isinstance(rois, Mapping):
+        return []
+    normalized: list[dict[str, object]] = []
+    for raw_name, raw_channels in sorted(rois.items(), key=lambda item: str(item[0])):
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        channels = sorted(
+            {
+                str(channel).strip().upper()
+                for channel in (raw_channels or ())
+                if str(channel).strip()
+            }
+        )
+        normalized.append({"name": name, "channels": channels})
+    return normalized
 
 
 def _manifest_safe_path(project_root: Path, path: Path) -> str:

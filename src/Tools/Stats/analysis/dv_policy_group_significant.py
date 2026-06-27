@@ -13,9 +13,12 @@ import pandas as pd
 
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
     GROUP_SIGNIFICANT_POLICY_ID,
     GROUP_SIGNIFICANT_POLICY_LABEL,
     GROUP_SIGNIFICANT_POLICY_NAME,
+    GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
+    GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
     LOCKED_ODDBALL_FREQUENCY_HZ,
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
@@ -68,6 +71,7 @@ class GroupSignificantHarmonicRow:
     noise_used_bin_indices: tuple[int, ...] = ()
     noise_used_frequencies_hz: tuple[float, ...] = ()
     noise_used_amplitudes_uv: tuple[float, ...] = ()
+    included_in_summation: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,12 +88,16 @@ class GroupSignificantHarmonicSelection:
     selected_harmonics_hz: list[float]
     selected_columns: list[str]
     selected_bin_indices: list[int]
+    detected_significant_harmonics_hz: list[float]
+    detected_significant_columns: list[str]
+    detected_significant_bin_indices: list[int]
     z_by_harmonic: dict[float, float]
     excluded_base_harmonics_hz: list[float]
     oddball_frequency_hz: float
     base_frequency_hz: float
     z_threshold: float
     electrode_scope: str
+    summation_method: str
     selection_scope: str
     selection_conditions: list[str]
     selection_subjects: list[str]
@@ -106,9 +114,14 @@ class GroupSignificantHarmonicSelection:
 
     def to_metadata(self) -> dict[str, object]:
         highest_meta = _highest_selected_harmonic_metadata(
-            self.selected_harmonics_hz,
+            self.detected_significant_harmonics_hz,
             oddball_hz=self.oddball_frequency_hz,
             prefix="highest_significant_harmonic",
+        )
+        highest_included_meta = _highest_selected_harmonic_metadata(
+            self.selected_harmonics_hz,
+            oddball_hz=self.oddball_frequency_hz,
+            prefix="highest_included_harmonic",
         )
         return {
             "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
@@ -122,6 +135,7 @@ class GroupSignificantHarmonicSelection:
             "selection_spectra_count": int(self.selection_spectra_count),
             "selection_electrode_count": int(self.selection_electrode_count),
             "electrode_scope": self.electrode_scope,
+            "summation_method": self.summation_method,
             "z_threshold": float(self.z_threshold),
             "z_score_source": "computed_from_grand_averaged_amplitude_spectrum",
             "noise_window_bins": int(self.noise_window_bins),
@@ -132,9 +146,18 @@ class GroupSignificantHarmonicSelection:
             "matching_tolerance_hz": float(self.matching_tolerance_hz),
             "frequency_resolution_hz": self.frequency_resolution_hz,
             "harmonic_domain_hz": list(self.harmonic_domain_hz),
+            "detected_significant_harmonics_hz": list(
+                self.detected_significant_harmonics_hz
+            ),
+            "detected_significant_columns": list(self.detected_significant_columns),
+            "detected_significant_bin_indices": list(
+                self.detected_significant_bin_indices
+            ),
+            "included_harmonics_hz": list(self.selected_harmonics_hz),
             "common_harmonics_hz": list(self.selected_harmonics_hz),
             "selected_harmonics_hz": list(self.selected_harmonics_hz),
             **highest_meta,
+            **highest_included_meta,
             "selected_columns": list(self.selected_columns),
             "selected_bin_indices": list(self.selected_bin_indices),
             "selection_z_by_harmonic": dict(self.z_by_harmonic),
@@ -166,6 +189,7 @@ class GroupSignificantHarmonicSelection:
                     "noise_used_bin_indices": list(row.noise_used_bin_indices),
                     "noise_used_frequencies_hz": list(row.noise_used_frequencies_hz),
                     "noise_used_amplitudes_uv": list(row.noise_used_amplitudes_uv),
+                    "included_in_summation": bool(row.included_in_summation),
                 }
                 for row in self.rows
             ],
@@ -205,6 +229,7 @@ class GroupSignificantSelectionCacheKey:
     max_freq_hz: float | None
     z_threshold: float
     electrode_scope: str
+    summation_method: str
     project_processing_signature_hash: str | None = None
 
 
@@ -297,6 +322,7 @@ def _group_significant_selection_cache_key(
         max_freq_hz=float(max_freq) if max_freq is not None else None,
         z_threshold=float(settings.group_significant_z_threshold),
         electrode_scope=str(settings.group_significant_electrode_scope),
+        summation_method=str(settings.group_significant_summation_method),
         project_processing_signature_hash=project_processing_signature_hash,
     )
 
@@ -379,9 +405,16 @@ def group_significant_selection_from_metadata(
 
     if not isinstance(metadata, dict):
         raise TypeError("selection metadata must be a dictionary")
-    selected_harmonics = _metadata_float_list(metadata.get("selected_harmonics_hz"))
+    selected_harmonics = _metadata_float_list(
+        metadata.get("selected_harmonics_hz")
+        if metadata.get("selected_harmonics_hz") not in (None, "")
+        else metadata.get("included_harmonics_hz")
+    )
     if not selected_harmonics:
         raise ValueError("saved selection contains no selected harmonics")
+    detected_harmonics = _metadata_float_list(
+        metadata.get("detected_significant_harmonics_hz")
+    ) or list(selected_harmonics)
     oddball = _metadata_float(
         metadata.get("oddball_frequency_hz"),
         default=LOCKED_ODDBALL_FREQUENCY_HZ,
@@ -398,11 +431,21 @@ def group_significant_selection_from_metadata(
     ]
     if not selected_columns:
         selected_columns = [f"{freq:.4f}_Hz" for freq in selected_harmonics]
+    detected_columns = [
+        str(column)
+        for column in _metadata_sequence(metadata.get("detected_significant_columns"))
+        if str(column).strip()
+    ] or [f"{freq:.4f}_Hz" for freq in detected_harmonics]
     return GroupSignificantHarmonicSelection(
         harmonic_domain_hz=_metadata_float_list(metadata.get("harmonic_domain_hz")),
         selected_harmonics_hz=selected_harmonics,
         selected_columns=selected_columns,
         selected_bin_indices=_metadata_int_list(metadata.get("selected_bin_indices")),
+        detected_significant_harmonics_hz=detected_harmonics,
+        detected_significant_columns=detected_columns,
+        detected_significant_bin_indices=_metadata_int_list(
+            metadata.get("detected_significant_bin_indices")
+        ) or _metadata_int_list(metadata.get("selected_bin_indices")),
         z_by_harmonic=_metadata_float_map(metadata.get("selection_z_by_harmonic")),
         excluded_base_harmonics_hz=_metadata_float_list(
             metadata.get("excluded_base_harmonics_hz")
@@ -411,6 +454,10 @@ def group_significant_selection_from_metadata(
         base_frequency_hz=_metadata_float(metadata.get("base_frequency_hz"), default=np.nan),
         z_threshold=_metadata_float(metadata.get("z_threshold"), default=np.nan),
         electrode_scope=str(metadata.get("electrode_scope") or ""),
+        summation_method=str(
+            metadata.get("summation_method")
+            or GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY
+        ),
         selection_scope=str(metadata.get("selection_scope") or ""),
         selection_conditions=[
             str(value) for value in _metadata_sequence(metadata.get("selection_conditions"))
@@ -483,6 +530,9 @@ def _group_significant_row_from_metadata(row_data: dict[str, object]) -> GroupSi
         ),
         noise_used_amplitudes_uv=tuple(
             _metadata_float_list(row_data.get("noise_used_amplitudes_uv"))
+        ),
+        included_in_summation=bool(
+            row_data.get("included_in_summation", row_data.get("selected", False))
         ),
     )
 
@@ -610,6 +660,7 @@ def build_group_significant_harmonic_selection(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
+        rois=rois,
         base_frequency_hz=base_frequency_hz,
         max_freq_hz=max_freq,
         settings=settings,
@@ -742,9 +793,9 @@ def build_group_significant_harmonic_selection(
     }
     rows: list[GroupSignificantHarmonicRow] = []
     harmonic_domain: list[float] = []
-    selected_freqs: list[float] = []
-    selected_columns: list[str] = []
-    selected_indices: list[int] = []
+    detected_freqs: list[float] = []
+    detected_columns: list[str] = []
+    detected_indices: list[int] = []
     z_by_harmonic: dict[float, float] = {}
     excluded_base: list[float] = []
     seen_indices: set[int] = set()
@@ -840,9 +891,9 @@ def build_group_significant_harmonic_selection(
         z_by_harmonic[selected_frequency] = z_value
         selected = bool(np.isfinite(z_value) and z_value > settings.group_significant_z_threshold)
         if selected:
-            selected_freqs.append(selected_frequency)
-            selected_columns.append(f"{selected_frequency:.4f}_Hz")
-            selected_indices.append(matched_idx)
+            detected_freqs.append(selected_frequency)
+            detected_columns.append(f"{selected_frequency:.4f}_Hz")
+            detected_indices.append(matched_idx)
         rows.append(
             GroupSignificantHarmonicRow(
                 harmonic_index=harmonic_index,
@@ -867,7 +918,7 @@ def build_group_significant_harmonic_selection(
             )
         )
 
-    if not selected_freqs:
+    if not detected_freqs:
         candidate_summary = _format_candidate_z_summary(rows)
         log_func(
             "[PERF] Group harmonic selection found no significant harmonics. "
@@ -899,11 +950,17 @@ def build_group_significant_harmonic_selection(
             f"Tested candidates: {candidate_summary}. "
             "Use the fixed/predefined policy or inspect the regenerated full-spectrum workbooks."
         )
+    selected_freqs, selected_columns, selected_indices, rows = _resolve_summation_harmonics(
+        rows=rows,
+        detected_freqs=detected_freqs,
+        summation_method=settings.group_significant_summation_method,
+    )
     elapsed = perf_counter() - started
     log_func(
         "[PERF] Group harmonic selection finished: "
         f"{spectra_count} spectra, {electrode_count} electrodes/spectrum max, "
-        f"{len(selected_freqs)} selected harmonics in {elapsed:.2f}s."
+        f"{len(detected_freqs)} significant harmonics, "
+        f"{len(selected_freqs)} included harmonics in {elapsed:.2f}s."
     )
     logger.info(
         "stats_group_harmonics_selection_done",
@@ -911,6 +968,7 @@ def build_group_significant_harmonic_selection(
             "elapsed_s": elapsed,
             "spectra_count": spectra_count,
             "selected_harmonics": selected_freqs,
+            "detected_significant_harmonics": detected_freqs,
         },
     )
 
@@ -919,13 +977,17 @@ def build_group_significant_harmonic_selection(
         selected_harmonics_hz=selected_freqs,
         selected_columns=selected_columns,
         selected_bin_indices=selected_indices,
+        detected_significant_harmonics_hz=detected_freqs,
+        detected_significant_columns=detected_columns,
+        detected_significant_bin_indices=detected_indices,
         z_by_harmonic=z_by_harmonic,
         excluded_base_harmonics_hz=excluded_base,
         oddball_frequency_hz=float(oddball),
         base_frequency_hz=base,
         z_threshold=float(settings.group_significant_z_threshold),
         electrode_scope=str(settings.group_significant_electrode_scope),
-        selection_scope="group_level_all_scalp_electrodes_all_selected_conditions",
+        summation_method=str(settings.group_significant_summation_method),
+        selection_scope=_selection_scope_label(settings.group_significant_electrode_scope),
         selection_conditions=list(conditions),
         selection_subjects=list(subjects),
         selection_spectra_count=int(spectra_count),
@@ -939,6 +1001,53 @@ def build_group_significant_harmonic_selection(
     selection = _save_project_cached_selection(cache_request, selection, log_func)
     _store_group_significant_selection(cache_key, selection)
     return selection
+
+
+def _selection_scope_label(electrode_scope: str) -> str:
+    if electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION:
+        return "group_level_union_roi_electrodes_all_selected_conditions"
+    return "group_level_all_scalp_electrodes_all_selected_conditions"
+
+
+def _resolve_summation_harmonics(
+    *,
+    rows: list[GroupSignificantHarmonicRow],
+    detected_freqs: list[float],
+    summation_method: str,
+) -> tuple[list[float], list[str], list[int], list[GroupSignificantHarmonicRow]]:
+    """Return the harmonic list included in Summed BCA for the selected policy."""
+    detected_set = {round(float(freq), 10) for freq in detected_freqs}
+    if summation_method == GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY:
+        included_set = set(detected_set)
+    else:
+        highest = max(float(freq) for freq in detected_freqs)
+        included_set = {
+            round(float(row.target_frequency_hz), 10)
+            for row in rows
+            if not row.excluded_base_rate
+            and row.matched_column
+            and row.matched_bin_index is not None
+            and float(row.target_frequency_hz) <= highest + GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ
+        }
+
+    updated_rows = [
+        replace(
+            row,
+            included_in_summation=round(float(row.target_frequency_hz), 10) in included_set,
+        )
+        for row in rows
+    ]
+    included_rows = [
+        row
+        for row in sorted(updated_rows, key=lambda item: (item.harmonic_index, item.target_frequency_hz))
+        if row.included_in_summation
+        and row.matched_column
+        and row.matched_bin_index is not None
+    ]
+    included_freqs = [float(row.target_frequency_hz) for row in included_rows]
+    included_columns = [f"{float(row.target_frequency_hz):.4f}_Hz" for row in included_rows]
+    included_indices = [int(row.matched_bin_index) for row in included_rows]
+    return included_freqs, included_columns, included_indices, updated_rows
 
 
 def _prepare_group_significant_bca_data(
@@ -977,11 +1086,15 @@ def _prepare_group_significant_bca_data(
         project_root=project_root,
     )
     log_func(
-        "Group-level significant harmonics selected: "
+        "Group-level significant harmonics detected: "
+        + ", ".join(f"{freq:g} Hz" for freq in selection.detected_significant_harmonics_hz)
+    )
+    log_func(
+        "Harmonics included in Summed BCA: "
         + ", ".join(f"{freq:g} Hz" for freq in selection.selected_harmonics_hz)
     )
     highest_meta = _highest_selected_harmonic_metadata(
-        selection.selected_harmonics_hz,
+        selection.detected_significant_harmonics_hz,
         oddball_hz=selection.oddball_frequency_hz,
         prefix="highest_significant_harmonic",
     )
@@ -1818,7 +1931,11 @@ def _electrodes_for_scope(
 ) -> list[str]:
     wanted = _wanted_electrodes_for_scope(rois=rois, electrode_scope=electrode_scope)
     if wanted is not None:
-        return [idx for idx in df_fft.index.astype(str) if idx in wanted]
+        return [
+            idx
+            for idx in df_fft.index.astype(str)
+            if str(idx).strip().upper() in wanted
+        ]
     _ = rois
     return list(df_fft.index.astype(str))
 
@@ -1828,14 +1945,15 @@ def _wanted_electrodes_for_scope(
     rois: Dict[str, List[str]],
     electrode_scope: str,
 ) -> set[str] | None:
-    if electrode_scope != "union_roi_electrodes":
+    if electrode_scope != GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION:
         return None
-    return {
+    wanted = {
         str(ch).strip().upper()
         for channels in (rois or {}).values()
         for ch in (channels or [])
         if str(ch).strip()
     }
+    return wanted or None
 
 
 def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str, int]]:
@@ -1963,15 +2081,31 @@ def _is_base_overlap(freq: float, base: float, tolerance_hz: float) -> bool:
 
 
 def _methods_summary(selection: GroupSignificantHarmonicSelection) -> str:
-    harmonics = ", ".join(f"{freq:g}" for freq in selection.selected_harmonics_hz)
+    detected = ", ".join(f"{freq:g}" for freq in selection.detected_significant_harmonics_hz)
+    included = ", ".join(f"{freq:g}" for freq in selection.selected_harmonics_hz)
     excluded = ", ".join(f"{freq:g}" for freq in selection.excluded_base_harmonics_hz)
+    scope = (
+        "the union of predefined ROI electrodes"
+        if selection.electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+        else "all scalp electrodes"
+    )
+    if selection.summation_method == GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST:
+        summation_text = (
+            "All non-base oddball harmonics up to the highest significant "
+            f"harmonic were included in the Summed BCA ({included} Hz)."
+        )
+    else:
+        summation_text = (
+            f"Only z-significant oddball harmonics were included in the Summed BCA ({included} Hz)."
+        )
     return (
-        "Baseline-corrected amplitudes were summed across a common group-level "
-        "set of significant oddball harmonics selected from the grand-averaged "
-        f"raw amplitude spectrum ({harmonics} Hz). Candidate oddball harmonics "
+        "Candidate oddball harmonics were tested from the grand-averaged raw "
+        f"amplitude spectrum over {scope}; z-significant harmonics were "
+        f"{detected} Hz. Candidate oddball harmonics "
         f"were tested against neighboring-bin noise with z>{selection.z_threshold:g}; "
         "base-rate overlaps were excluded"
         + (f" ({excluded} Hz)." if excluded else ".")
+        + f" {summation_text} "
         + " The same selected harmonic list was applied to every participant, "
         "condition, and ROI. SNR values were not used as the primary dependent variable."
     )

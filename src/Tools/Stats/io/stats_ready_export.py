@@ -54,6 +54,7 @@ HARMONIC_SELECTION_COLUMNS = [
     "noise_used_frequencies_hz",
     "noise_used_amplitudes_uv",
     "selected",
+    "included_in_summation",
     "excluded_base_rate",
     "exclusion_reason",
     "warning",
@@ -389,16 +390,23 @@ def _missing_harmonic_indices(selected_indices: list[int], highest_index: object
 
 
 def _group_significant_summary_rows(group_meta: Mapping[str, object]) -> list[dict[str, object]]:
-    selected = group_meta.get("selected_harmonics_hz", [])
+    included = group_meta.get("selected_harmonics_hz", []) or group_meta.get(
+        "included_harmonics_hz",
+        [],
+    )
+    detected = group_meta.get("detected_significant_harmonics_hz", []) or included
     oddball_hz = group_meta.get("oddball_frequency_hz")
     highest_hz = group_meta.get("highest_significant_harmonic_hz")
     if highest_hz in (None, ""):
-        highest_hz = _highest_harmonic_hz(selected)
+        highest_hz = _highest_harmonic_hz(detected)
     highest_index = group_meta.get("highest_significant_harmonic_index")
     if highest_index in (None, ""):
         highest_index = _harmonic_index(highest_hz, oddball_hz)
-    selected_indices = _selected_harmonic_indices(selected, oddball_hz)
-    missing_indices = _missing_harmonic_indices(selected_indices, highest_index)
+    detected_indices = _selected_harmonic_indices(detected, oddball_hz)
+    included_indices = _selected_harmonic_indices(included, oddball_hz)
+    missing_detected_indices = _missing_harmonic_indices(detected_indices, highest_index)
+    missing_included_indices = _missing_harmonic_indices(included_indices, highest_index)
+    included_nonsignificant = sorted(set(included_indices).difference(detected_indices))
     harmonic_one_label = f"Harmonic 1 ({_format_number(oddball_hz)} Hz) significant?"
     rows = [
         _summary_row(
@@ -410,19 +418,35 @@ def _group_significant_summary_rows(group_meta: Mapping[str, object]) -> list[di
         _summary_row("Base frequency (Hz)", _format_number(group_meta.get("base_frequency_hz"))),
         _summary_row("Oddball frequency (Hz)", _format_number(oddball_hz)),
         _summary_row("Z threshold", _format_number(group_meta.get("z_threshold"))),
+        _summary_row("Electrode selection scope", group_meta.get("electrode_scope", "")),
+        _summary_row("Summation method", group_meta.get("summation_method", "")),
         _summary_row("Highest significant harmonic (Hz)", _format_number(highest_hz)),
         _summary_row("Highest significant harmonic index", _format_number(highest_index)),
-        _summary_row(harmonic_one_label, _yes_no(1 in selected_indices)),
+        _summary_row(harmonic_one_label, _yes_no(1 in detected_indices)),
         _summary_row(
             "All harmonics 1 through highest index significant?",
-            _yes_no(not missing_indices and bool(selected_indices)),
+            _yes_no(not missing_detected_indices and bool(detected_indices)),
         ),
         _summary_row(
             "Non-significant harmonic indices within 1..highest",
-            _format_sequence_cell(missing_indices) if missing_indices else "None",
+            _format_sequence_cell(missing_detected_indices)
+            if missing_detected_indices
+            else "None",
         ),
-        _summary_row("Significant harmonic indices", _format_sequence_cell(selected_indices)),
-        _summary_row("Significant harmonic frequencies (Hz)", _format_sequence_cell(selected)),
+        _summary_row(
+            "All non-base harmonics 1 through highest included?",
+            _yes_no(not missing_included_indices and bool(included_indices)),
+        ),
+        _summary_row(
+            "Non-significant harmonic indices included in summation",
+            _format_sequence_cell(included_nonsignificant)
+            if included_nonsignificant
+            else "None",
+        ),
+        _summary_row("Significant harmonic indices", _format_sequence_cell(detected_indices)),
+        _summary_row("Significant harmonic frequencies (Hz)", _format_sequence_cell(detected)),
+        _summary_row("Included harmonic indices", _format_sequence_cell(included_indices)),
+        _summary_row("Included harmonic frequencies (Hz)", _format_sequence_cell(included)),
         _summary_row("Selection source", group_meta.get("selection_cache_source", "")),
         _summary_row("Selection saved at", group_meta.get("selection_cache_saved_at", "")),
     ]
@@ -543,6 +567,7 @@ def _fixed_predefined_selection_rows(fixed_meta: Mapping[str, object]) -> list[d
                 "noise_used_frequencies_hz": "",
                 "noise_used_amplitudes_uv": "",
                 "selected": bool(row_data.get("included")),
+                "included_in_summation": bool(row_data.get("included")),
                 "excluded_base_rate": row_data.get("exclusion_reason") == "base_rate_overlap",
                 "exclusion_reason": row_data.get("exclusion_reason", ""),
                 "warning": row_data.get("warning", ""),
@@ -582,6 +607,9 @@ def _group_significant_selection_rows(group_meta: Mapping[str, object]) -> list[
                 "noise_used_frequencies_hz": _sequence_cell(row_data.get("noise_used_frequencies_hz")),
                 "noise_used_amplitudes_uv": _sequence_cell(row_data.get("noise_used_amplitudes_uv")),
                 "selected": bool(row_data.get("selected")),
+                "included_in_summation": bool(
+                    row_data.get("included_in_summation", row_data.get("selected"))
+                ),
                 "excluded_base_rate": bool(row_data.get("excluded_base_rate")),
                 "exclusion_reason": row_data.get("exclusion_reason", ""),
                 "warning": row_data.get("warning", ""),

@@ -1,9 +1,11 @@
 The stats directory contains scripts related to statistical analysis of FPVS
 EEG BCA values. The active Summed BCA DV defaults to the group-level
-significant-harmonics policy (Volfart/Retter/Rossion style). Fixed/predefined
-harmonic summation remains available as an alternate policy. Preserve the
-locked exact-column, common-harmonic-list, z > 1.64, and neighboring-noise
-rules documented in `docs/agent/architecture/statistics-tools.md`.
+significant-harmonics policy using the predefined-ROI electrode union for
+significance detection and all non-base oddball harmonics through the highest
+significant harmonic for summation. Fixed/predefined harmonic summation remains
+available as an alternate policy. Preserve the locked exact-column,
+common-harmonic-list, z > 1.64, and neighboring-noise rules documented in
+`docs/agent/architecture/statistics-tools.md`.
 
 Before broad manual inspection, run:
 

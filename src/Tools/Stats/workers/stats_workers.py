@@ -175,6 +175,7 @@ def _has_valid_project_group_harmonic_cache(
     subjects: list[str],
     conditions: list[str],
     subject_data: dict,
+    rois: dict | None,
     base_freq: float,
     max_freq: float | None,
     settings,
@@ -184,6 +185,7 @@ def _has_valid_project_group_harmonic_cache(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
+        rois=rois,
         base_frequency_hz=base_freq,
         max_freq_hz=max_freq,
         settings=settings,
@@ -417,6 +419,7 @@ def _prepare_single_group_data(
             subjects=all_subjects,
             conditions=list(conditions) if conditions else [],
             subject_data=subject_data,
+            rois=rois,
             base_freq=base_freq,
             max_freq=resolved_preflight_max,
             settings=settings,
@@ -545,11 +548,16 @@ def _summarize_dv_metadata_for_export(dv_metadata: dict[str, object]) -> dict[st
     group_meta = dv_metadata.get("group_significant_harmonics")
     if isinstance(group_meta, dict):
         included = group_meta.get("selected_harmonics_hz", []) or []
+        detected = group_meta.get("detected_significant_harmonics_hz", []) or included
         summary.update(
             {
                 "harmonic_policy": group_meta.get("harmonic_policy", ""),
                 "harmonic_policy_label": group_meta.get("harmonic_policy_label", ""),
                 "selected_harmonics_hz": ";".join(f"{float(freq):g}" for freq in included),
+                "detected_significant_harmonics_hz": ";".join(
+                    f"{float(freq):g}" for freq in detected
+                ),
+                "summation_method": group_meta.get("summation_method", ""),
                 "highest_significant_harmonic_hz": group_meta.get(
                     "highest_significant_harmonic_hz",
                     "",

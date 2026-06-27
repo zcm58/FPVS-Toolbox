@@ -2,13 +2,10 @@
 
 ## Status
 
-Future plan. Not active implementation work.
-
-This plan records a future statistical-method update for the Stats
-group-level significant-harmonics policy. The current implementation remains
-the all-scalp grand-average selection described in
-`docs/agent/architecture/statistics-tools.md` until this plan is explicitly
-activated.
+Implemented as the default predefined-ROI union selection path. The active
+method is now documented in `docs/agent/architecture/statistics-tools.md`.
+This file remains as historical planning context for the ROI-scoped method
+decision.
 
 ## Rationale
 
@@ -29,10 +26,10 @@ noise-bin math, or baseline-corrected amplitude quantification.
 
 ## Scope Decision
 
-Replace the all-scalp grand-average amplitude spectrum used for harmonic
-selection with spectra computed from predefined ROI electrodes.
+The implemented scope replaces the all-scalp grand-average amplitude spectrum
+used for harmonic selection with the union of predefined ROI electrodes.
 
-The implementation should support a clear policy choice before coding:
+This plan considered:
 
 - **ROI-specific selection:** compute significant harmonics separately for each
   predefined ROI and use each ROI's selected list for that ROI's `BCA (uV)`
@@ -41,11 +38,7 @@ The implementation should support a clear policy choice before coding:
   electrodes in the predefined analysis ROIs, then apply one common harmonic
   list to every ROI. This preserves the current one-list stats-ready export
   symmetry while avoiding all-scalp dilution, but it is less direct parity with
-  ROI-specific paper workflows.
-
-Do not silently choose between these modes during implementation. The active
-execution plan should state the chosen mode, update user-facing wording, and
-record the statistical-method rationale.
+  ROI-specific paper workflows. This is the implemented default.
 
 ## Non-Goals
 
