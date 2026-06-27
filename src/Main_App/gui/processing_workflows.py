@@ -41,22 +41,39 @@ from Main_App.workers.mp_env import (
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-_HARMONIC_SELECTION_STATUS_MESSAGE = (
-    "Data processing is complete. FPVS Toolbox is now creating a list of "
-    "statistically significant harmonics."
+_POST_PROCESSING_STATUS_MESSAGE = (
+    "Data processing is complete. FPVS Toolbox is now preparing downstream "
+    "analysis outputs."
 )
 
 
-class _ProcessingHarmonicCompletionBridge(QObject):
-    """Route worker completion back through a main-thread QObject."""
+class _PostProcessingPipelineBridge(QObject):
+    """Route post-processing worker signals back through a main-thread QObject."""
 
-    def __init__(self, callback: Callable[[dict], None], parent: QObject | None) -> None:
+    def __init__(
+        self,
+        *,
+        progress_callback: Callable[[str], None],
+        log_callback: Callable[[str, int], None],
+        finished_callback: Callable[[dict], None],
+        parent: QObject | None,
+    ) -> None:
         super().__init__(parent)
-        self._callback = callback
+        self._progress_callback = progress_callback
+        self._log_callback = log_callback
+        self._finished_callback = finished_callback
+
+    @Slot(str)
+    def handle_progress(self, message: str) -> None:
+        self._progress_callback(message)
+
+    @Slot(str, int)
+    def handle_log_message(self, message: str, level: int) -> None:
+        self._log_callback(message, level)
 
     @Slot(dict)
     def handle_finished(self, result: dict) -> None:
-        self._callback(result)
+        self._finished_callback(result)
 
 
 def _sync_project_tools_metadata_from_disk(project: Any) -> None:
@@ -317,7 +334,7 @@ def _show_exclusion_summary_popup(host: Any, excluded_results: list[dict]) -> No
     box.exec()
 
 
-def _start_harmonic_selection_qc_after_processing(
+def _start_post_processing_pipeline_after_processing(
     host: Any,
     *,
     on_finished: Callable[[], None],
@@ -329,62 +346,88 @@ def _start_harmonic_selection_qc_after_processing(
         return False
 
     try:
-        from Main_App.workers.harmonic_selection_worker import (
-            ProcessingHarmonicSelectionWorker,
+        from Main_App.workers.post_processing_pipeline_worker import (
+            PostProcessingPipelineWorker,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to import processing harmonic-selection worker.")
+        logger.exception("Failed to import post-processing pipeline worker.")
         host.log(
-            f"Harmonic selection QC could not start: {exc}",
+            f"Post-processing pipeline could not start: {exc}",
             level=logging.WARNING,
         )
         return False
 
     thread = QThread(host)
-    worker = ProcessingHarmonicSelectionWorker(project)
+    worker = PostProcessingPipelineWorker(project)
     worker.moveToThread(thread)
-    host._processing_harmonic_thread = thread
-    host._processing_harmonic_worker = worker
+    host._post_processing_pipeline_thread = thread
+    host._post_processing_pipeline_worker = worker
     message_label = getattr(host, "processing_message_label", None)
     if message_label is not None:
-        message_label.setText(_HARMONIC_SELECTION_STATUS_MESSAGE)
+        message_label.setText(_POST_PROCESSING_STATUS_MESSAGE)
+
+    def _handle_progress(message: str) -> None:
+        if message_label is not None:
+            message_label.setText(str(message))
+
+    def _handle_log_message(message: str, level: int) -> None:
+        try:
+            host.log(str(message), level=int(level))
+        except TypeError:
+            host.log(str(message))
 
     def _handle_finished(result: dict) -> None:
         try:
-            for message in result.get("messages") or []:
-                if isinstance(message, str) and message.strip():
-                    host.log(message, level=logging.INFO)
+            steps = result.get("steps") if isinstance(result, dict) else []
+            if isinstance(steps, list):
+                for step in steps:
+                    if not isinstance(step, dict):
+                        continue
+                    message = str(step.get("message") or "").strip()
+                    path = str(step.get("path") or "").strip()
+                    if not message and not path:
+                        continue
+                    level = logging.INFO if step.get("ok") else logging.WARNING
+                    suffix = f" ({path})" if path else ""
+                    host.log(f"Post-processing: {message}{suffix}", level=level)
             if result.get("ok"):
-                workbook_path = result.get("workbook_path")
                 _sync_project_tools_metadata_from_disk(project)
                 host.log(
-                    f"Harmonic selection QC saved: {workbook_path}",
+                    "Post-processing pipeline finished: harmonics, Stats-ready Summed BCA, "
+                    "and LORETA source-map generation steps completed.",
                     level=logging.INFO,
                 )
             else:
                 host.log(
-                    "Harmonic selection QC did not complete automatically: "
-                    f"{result.get('error')}",
+                    "Post-processing pipeline finished with warnings. Review the log before "
+                    "using Stats-ready or LORETA outputs.",
                     level=logging.WARNING,
                 )
         finally:
-            host._processing_harmonic_thread = None
-            host._processing_harmonic_worker = None
-            bridge = getattr(host, "_processing_harmonic_completion_bridge", None)
-            host._processing_harmonic_completion_bridge = None
+            host._post_processing_pipeline_thread = None
+            host._post_processing_pipeline_worker = None
+            bridge = getattr(host, "_post_processing_pipeline_bridge", None)
+            host._post_processing_pipeline_bridge = None
             if bridge is not None:
                 bridge.deleteLater()
             on_finished()
 
-    bridge = _ProcessingHarmonicCompletionBridge(_handle_finished, host)
-    host._processing_harmonic_completion_bridge = bridge
+    bridge = _PostProcessingPipelineBridge(
+        progress_callback=_handle_progress,
+        log_callback=_handle_log_message,
+        finished_callback=_handle_finished,
+        parent=host,
+    )
+    host._post_processing_pipeline_bridge = bridge
     thread.started.connect(worker.run)
+    worker.progress.connect(bridge.handle_progress)
+    worker.log_message.connect(bridge.handle_log_message)
     worker.finished.connect(thread.quit)
     worker.finished.connect(worker.deleteLater)
     worker.finished.connect(bridge.handle_finished)
     thread.finished.connect(thread.deleteLater)
     host.log(
-        "Processing finished; selecting and caching group-level harmonics for downstream tools...",
+        "Processing finished; preparing harmonics, Stats-ready Summed BCA, and LORETA source maps...",
         level=logging.INFO,
     )
     thread.start()
@@ -960,19 +1003,6 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         host._busy_stop()
         success = not cancelled
         host._finalize_processing(success, cancelled=cancelled)
-        if success and not cancelled:
-            try:
-                from Main_App.gui.processing_snr_qc_workflow import (
-                    start_automatic_snr_qc_after_processing,
-                )
-
-                start_automatic_snr_qc_after_processing(host)
-            except Exception as exc:
-                logger.exception("Automatic SNR plot/QC launch failed.")
-                host.log(
-                    f"Automatic SNR plot/QC could not start: {exc}",
-                    level=logging.WARNING,
-                )
         if cancelled:
             host.log("Processing run cancelled by user.", level=logging.INFO)
             if interrupted_files:
@@ -983,12 +1013,17 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                     level=logging.WARNING,
                 )
 
-    if not cancelled:
-        started_harmonic_qc = _start_harmonic_selection_qc_after_processing(
+    successful_results = [
+        result
+        for result in results
+        if str(result.get("status") or "").casefold() in {"ok", "completed", "success"}
+    ]
+    if not cancelled and successful_results:
+        started_post_processing = _start_post_processing_pipeline_after_processing(
             host,
             on_finished=_finish_processing_run,
         )
-        if started_harmonic_qc:
+        if started_post_processing:
             return
 
     _finish_processing_run()

@@ -24,6 +24,12 @@ Common long-running work:
   Workers receive only the files selected by that plan. Multi-group runs also
   receive a per-file output group-folder map so post-export writes into the
   condition-first/group-second Excel tree.
+- After a successful Main App processing run, `PostProcessingPipelineWorker`
+  orchestrates downstream analysis prep in a background `QThread`: processing
+  harmonic-selection QC, Stats-ready Summed BCA export, and default LORETA
+  source-map generation. This worker is orchestration only; harmonic selection,
+  Summed BCA export, and source-estimation logic remain owned by their existing
+  processing, Stats, and LORETA source-producer modules.
 
 Rules:
 
