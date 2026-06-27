@@ -12,6 +12,7 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGraphicsOpacityEffect,
+    QSizePolicy,
     QTableWidgetItem,
     QToolBar,
     QWidget,
@@ -296,14 +297,28 @@ def _place_start_button(host: Any, target: str) -> None:
         layout = getattr(host, "processing_action_layout", None)
         if slot is not None and layout is not None:
             button.setParent(slot)
-            layout.addWidget(button, 0, Qt.AlignCenter)
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            width = max(176, min(button.sizeHint().width(), 260))
+            button.setMinimumWidth(width)
+            slot.setMinimumWidth(width)
+            slot.setMaximumWidth(width)
+            slot.setVisible(True)
+            layout.addWidget(button, 0, Qt.AlignRight)
             button.show()
         return
+
+    slot = getattr(host, "processing_action_slot", None)
+    if slot is not None and not getattr(host, "_preflight_qc_action_buttons", []):
+        slot.setMinimumWidth(0)
+        slot.setMaximumWidth(16777215)
+        slot.setVisible(False)
 
     run_panel = getattr(host, "run_panel", None)
     layout = getattr(run_panel, "row_layout", None)
     if run_panel is not None and layout is not None:
         button.setParent(run_panel)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        button.setMinimumWidth(180)
         layout.addWidget(button)
         button.show()
 

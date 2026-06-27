@@ -433,6 +433,7 @@ def init_ui(self) -> None:
     processing_header_layout.addWidget(self.processing_spinner, 0, Qt.AlignVCenter)
 
     processing_intro = QWidget(processing_header)
+    processing_intro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     processing_intro_layout = QVBoxLayout(processing_intro)
     processing_intro_layout.setContentsMargins(0, 0, 0, 0)
     processing_intro_layout.setSpacing(8)
@@ -465,10 +466,17 @@ def init_ui(self) -> None:
 
     self.processing_action_slot = QWidget(processing_header)
     self.processing_action_slot.setObjectName("processing_action_slot")
-    self.processing_action_layout = QHBoxLayout(self.processing_action_slot)
+    self.processing_action_slot.setVisible(False)
+    self.processing_action_slot.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+    self.processing_action_layout = QVBoxLayout(self.processing_action_slot)
     self.processing_action_layout.setContentsMargins(0, 0, 0, 0)
     self.processing_action_layout.setSpacing(8)
-    processing_header_layout.addWidget(self.processing_action_slot, 0, Qt.AlignVCenter)
+    self.processing_action_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    processing_header_layout.addWidget(
+        self.processing_action_slot,
+        0,
+        Qt.AlignRight | Qt.AlignVCenter,
+    )
     processing_layout.addWidget(processing_header)
 
     self.processing_status_card = SectionCard(

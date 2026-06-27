@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QMessageBox,
+    QSizePolicy,
     QTableWidgetItem,
 )
 
@@ -277,6 +278,7 @@ def _begin_preflight_page(
 
 def _clear_preflight_actions(host: Any) -> None:
     layout = getattr(host, "processing_action_layout", None)
+    slot = getattr(host, "processing_action_slot", None)
     for button in list(getattr(host, "_preflight_qc_action_buttons", []) or []):
         try:
             if layout is not None and layout.indexOf(button) >= 0:
@@ -285,6 +287,10 @@ def _clear_preflight_actions(host: Any) -> None:
         except RuntimeError:
             continue
     host._preflight_qc_action_buttons = []
+    if slot is not None:
+        slot.setMinimumWidth(0)
+        slot.setMaximumWidth(16777215)
+        slot.setVisible(False)
 
 
 def _install_preflight_actions(
@@ -300,9 +306,18 @@ def _install_preflight_actions(
     buttons = []
     for label, choice, variant in actions:
         button = make_action_button(label, variant=variant, parent=slot)
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         button.clicked.connect(lambda _checked=False, value=choice: callback(value))
-        layout.addWidget(button, 0, Qt.AlignCenter)
+        layout.addWidget(button, 0, Qt.AlignRight)
         buttons.append(button)
+    if buttons:
+        width = max(button.sizeHint().width() for button in buttons)
+        width = max(176, min(width, 260))
+        for button in buttons:
+            button.setMinimumWidth(width)
+        slot.setMinimumWidth(width)
+        slot.setMaximumWidth(width)
+        slot.setVisible(True)
     host._preflight_qc_action_buttons = buttons
 
 
@@ -317,6 +332,7 @@ def _set_preflight_table(
     if table is None:
         return
     table.clearContents()
+    table.setWordWrap(True)
     table.setColumnCount(len(headers))
     table.setHorizontalHeaderLabels(list(headers))
     header = table.horizontalHeader()
