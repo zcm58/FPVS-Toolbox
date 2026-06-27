@@ -31,15 +31,19 @@ Primary paths:
   trigger-detection placeholder behavior, and preprocessing parameter assembly
   used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/preprocessing_qc_workflow.py`: embedded preprocessing
-  preflight QC review phases. It scans for BioSemi recordings that were never
+  data-quality review phases. It scans for BioSemi recordings that were never
   started, reviews auto-detected physically removed electrodes in the manual
   removed-electrode table, offers participant-level hard exclusions, and reports
-  suspicious findings before the processing ledger plan is chosen. These phases
-  render inside the main processing activity page rather than a modal progress
-  dialog so the main window continues repainting/responding during scan
-  handoffs. Review-only findings are saved under the active project's
-  `Quality Check/Preflight_QC_Review_Flags.xlsx` workbook before processing
-  continues.
+  suspicious findings before the processing ledger plan is chosen. Important
+  user-facing instructions are first shown in modal dialogs, then the embedded
+  processing activity page groups the step into "what to do now", "checks in
+  this step", live status, and progress sections so users have a clear visual
+  path through the scan. Editable or reviewable tables are shown only when the
+  current step needs a user decision, and the main window continues
+  repainting/responding during scan handoffs. Review-only findings are saved
+  under the active project's
+  `Quality Check/Data_Quality_Check_Review_Flags.xlsx` workbook before
+  processing continues.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.
@@ -261,7 +265,7 @@ Worker and signal boundaries:
 - Long-running EEG, plotting, export, statistics, and resize work must remain
   in `QThread`, `QRunnable`, `QThreadPool`, process-runner code, or the
   existing tool worker owner.
-- Embedded preprocessing preflight QC loads raw BDFs in a `QThread` through
+- Embedded preprocessing data-quality checks load raw BDFs in a `QThread` through
   `preprocessing_qc_workflow.py`; the review dialogs only consume completed
   scan summaries and must not perform raw loading on the UI thread.
 - Automatic post-processing SNR plot/QC generation uses the Plot Generator

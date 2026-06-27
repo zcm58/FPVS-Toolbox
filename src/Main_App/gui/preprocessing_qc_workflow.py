@@ -39,12 +39,13 @@ from Main_App.projects.preprocessing_settings import (
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-_PREFLIGHT_SCAN_WAIT_MESSAGE = (
-    "FPVS Toolbox is scanning your data to check for anything weird that you "
-    "might want to take a look at before processing. Trust us. We'll report back soon."
+_DATA_QUALITY_CHECK_TITLE = "Data Quality Check"
+_DATA_QUALITY_SCAN_WAIT_MESSAGE = (
+    "FPVS Toolbox is checking your data for empty recordings, removed electrodes, "
+    "and unusual signal patterns before processing. We'll report back soon."
 )
-_PREFLIGHT_REVIEW_FLAGS_FILENAME = "Preflight_QC_Review_Flags.xlsx"
-_PREFLIGHT_STEP_TOTAL = 5
+_DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
+_DATA_QUALITY_STEP_TOTAL = 5
 
 
 class _PreflightQcWorker(QObject):
@@ -137,8 +138,26 @@ def _path_key(path: Path) -> str:
 def _scan_progress_text(message: str | None = None) -> str:
     detail = (message or "").strip()
     if detail:
-        return f"{_PREFLIGHT_SCAN_WAIT_MESSAGE}\n\n{detail}"
-    return _PREFLIGHT_SCAN_WAIT_MESSAGE
+        return f"{_DATA_QUALITY_SCAN_WAIT_MESSAGE}\n\n{detail}"
+    return _DATA_QUALITY_SCAN_WAIT_MESSAGE
+
+
+def _show_data_quality_notice(
+    host: Any,
+    heading: str,
+    message: str,
+    *,
+    details: str = "",
+) -> None:
+    box = QMessageBox(host)
+    box.setIcon(QMessageBox.Information)
+    box.setWindowTitle(_DATA_QUALITY_CHECK_TITLE)
+    box.setText(heading)
+    box.setInformativeText(message)
+    if details:
+        box.setDetailedText(details)
+    box.setStandardButtons(QMessageBox.Ok)
+    box.exec()
 
 
 def _set_label(host: Any, attr_name: str, text: str) -> None:
@@ -190,6 +209,30 @@ def _set_progress_visible(host: Any, visible: bool) -> None:
     bar = getattr(host, "progress_bar", None)
     if bar is not None:
         bar.setVisible(visible)
+    heading = getattr(host, "processing_progress_heading_label", None)
+    if heading is not None:
+        heading.setVisible(visible)
+
+
+def _set_data_quality_sections(
+    host: Any,
+    *,
+    summary_heading: str,
+    live_heading: str,
+    checklist: Sequence[str],
+) -> None:
+    _set_label(host, "processing_summary_heading_label", summary_heading)
+    _set_label(host, "processing_live_heading_label", live_heading)
+    _set_label(host, "processing_progress_heading_label", "Progress")
+    _set_label(host, "processing_checklist_heading_label", "Checks in this step")
+    checklist_panel = getattr(host, "processing_checklist_panel", None)
+    if checklist_panel is not None:
+        checklist_panel.setVisible(bool(checklist))
+    _set_label(
+        host,
+        "processing_checklist_label",
+        "\n".join(f"- {item}" for item in checklist),
+    )
 
 
 def _begin_preflight_page(
@@ -202,18 +245,25 @@ def _begin_preflight_page(
     review_visible: bool,
     review_title: str = "Review",
     progress_visible: bool = True,
+    checklist: Sequence[str] = (),
 ) -> None:
     if hasattr(host, "_busy_start"):
         host._busy_start()
     if hasattr(host, "_set_controls_enabled"):
         host._set_controls_enabled(False)
-    _set_label(host, "processing_title_label", "Preflight QC")
+    _set_label(host, "processing_title_label", _DATA_QUALITY_CHECK_TITLE)
+    _set_data_quality_sections(
+        host,
+        summary_heading="What to do now",
+        live_heading="Live status",
+        checklist=checklist,
+    )
     step_label = getattr(host, "processing_step_label", None)
     if step_label is not None:
-        step_label.setText(f"Step {step} of {_PREFLIGHT_STEP_TOTAL}: {title}")
+        step_label.setText(f"Step {step} of {_DATA_QUALITY_STEP_TOTAL}: {title}")
         step_label.setVisible(True)
     _set_label(host, "processing_message_label", message)
-    _set_label(host, "processing_summary_label", "Preparing preflight QC checks...")
+    _set_label(host, "processing_summary_label", "Preparing data quality checks...")
     _set_label(host, "processing_current_file_label", "Latest file: Not started")
     _set_card_title(host, "processing_status_card", title)
     _set_review_visible(host, review_visible, title=review_title)
@@ -370,7 +420,7 @@ class _PreflightQcEmbeddedBridge(QObject):
     @Slot(str, int, int)
     def on_progress(self, message: str, completed: int, total: int) -> None:
         _set_progress(self._host, completed, total)
-        _set_label(self._host, "processing_summary_label", _PREFLIGHT_SCAN_WAIT_MESSAGE)
+        _set_label(self._host, "processing_summary_label", _DATA_QUALITY_SCAN_WAIT_MESSAGE)
         _set_label(self._host, "processing_current_file_label", message)
         _update_scan_row(self._host, message)
 
@@ -381,7 +431,7 @@ class _PreflightQcEmbeddedBridge(QObject):
         _set_label(
             self._host,
             "processing_current_file_label",
-            "Finalizing preflight QC review...",
+            "Finalizing data quality review...",
         )
         self._thread.quit()
 
@@ -402,6 +452,14 @@ def _confirm_recording_not_started(
     if not flagged:
         return True
     names = [item.path.name for item in flagged]
+    _show_data_quality_notice(
+        host,
+        "Some files do not contain recording data.",
+        'These files look like BioSemi recordings that were created, but no data '
+        'was actually recorded. The most likely reason is that the experiment '
+        'administrator forgot to click "Start Recording".',
+        details="\n".join(names),
+    )
     _begin_preflight_page(
         host,
         step=1,
@@ -411,6 +469,11 @@ def _confirm_recording_not_started(
         review_visible=True,
         review_title="Files to Exclude",
         progress_visible=False,
+        checklist=(
+            "Confirm files that contain no recording samples",
+            "Exclude empty files from processing",
+            "Keep the original raw files unchanged",
+        ),
     )
     _set_label(
         host,
@@ -437,7 +500,7 @@ def _confirm_recording_not_started(
     )
     if choice != "exclude":
         try:
-            host.log("Preflight QC cancelled at recording-not-started review.")
+            host.log("Data quality check cancelled at recording-not-started review.")
         except (AttributeError, TypeError, RuntimeError):
             pass
         return False
@@ -468,9 +531,14 @@ def _run_scan_embedded(
         host,
         step=2,
         title="Scan Signal Health",
-        message=_PREFLIGHT_SCAN_WAIT_MESSAGE,
+        message=_DATA_QUALITY_SCAN_WAIT_MESSAGE,
         busy=True,
         review_visible=False,
+        checklist=(
+            "Look for electrodes that appear physically disconnected",
+            "Check for participant-level signal failures",
+            "Screen for unusual narrowband spectral peaks",
+        ),
     )
     host._preflight_qc_file_rows = {}
     try:
@@ -480,16 +548,16 @@ def _run_scan_embedded(
     worker_count = min(max_workers, len(remaining))
     try:
         host.log(
-            f"Preflight QC scan using {worker_count} parallel worker(s).",
+            f"Data quality scan using {worker_count} parallel worker(s).",
             level=logging.INFO,
         )
     except (AttributeError, TypeError, RuntimeError):
         pass
-    _set_label(host, "processing_summary_label", _PREFLIGHT_SCAN_WAIT_MESSAGE)
+    _set_label(host, "processing_summary_label", _DATA_QUALITY_SCAN_WAIT_MESSAGE)
     _set_label(
         host,
         "processing_current_file_label",
-        f"Starting preflight QC scan with {worker_count} parallel worker(s)...",
+        f"Starting data quality scan with {worker_count} parallel worker(s)...",
     )
     _set_progress(host, 0, len(remaining))
 
@@ -520,7 +588,7 @@ def _run_scan_embedded(
 
     _install_preflight_actions(
         host,
-        (("Cancel QC", "cancel", "secondary"),),
+        (("Cancel Check", "cancel", "secondary"),),
         _request_cancel,
     )
     worker.progress.connect(bridge.on_progress)
@@ -542,7 +610,7 @@ def _run_scan_embedded(
 
     error = result_holder.get("error")
     if error:
-        _set_label(host, "processing_summary_label", "Preflight QC could not complete.")
+        _set_label(host, "processing_summary_label", "Data quality check could not complete.")
         _set_label(host, "processing_current_file_label", str(error))
         _await_preflight_choice(
             host,
@@ -574,6 +642,13 @@ def _review_removed_electrodes(
         "Please review and confirm this list, and add any electrodes that were "
         "removed if they are not present on this list."
     )
+    _show_data_quality_notice(
+        host,
+        "Review electrodes that may have been removed before recording.",
+        "FPVS Toolbox will show a participant-by-participant table next. "
+        "Please confirm the list and add any electrodes that were removed but "
+        "are missing from the table.",
+    )
     _begin_preflight_page(
         host,
         step=3,
@@ -583,6 +658,11 @@ def _review_removed_electrodes(
         review_visible=True,
         review_title="Removed Electrodes",
         progress_visible=False,
+        checklist=(
+            "Review electrodes detected as removed before recording",
+            "Add any missing removed electrodes",
+            "Save the confirmed list into project settings",
+        ),
     )
     _set_label(host, "processing_summary_label", prompt)
     _set_label(
@@ -621,7 +701,7 @@ def _review_removed_electrodes(
     )
     if choice != "save":
         try:
-            host.log("Preflight QC cancelled at removed-electrode review.")
+            host.log("Data quality check cancelled at removed-electrode review.")
         except (AttributeError, TypeError, RuntimeError):
             pass
         return False
@@ -641,7 +721,7 @@ def _review_removed_electrodes(
         QMessageBox.warning(host, "Invalid Manual Removed Electrodes", str(exc))
         return False
     except OSError as exc:
-        logger.exception("Failed to save preflight manual removed-electrode settings.")
+        logger.exception("Failed to save manual removed-electrode settings.")
         QMessageBox.critical(host, "Project Save Error", str(exc))
         return False
 
@@ -656,7 +736,7 @@ def _review_removed_electrodes(
     )
     host.validated_params = params
     try:
-        host.log("Preflight QC saved the reviewed manual removed-electrode list.")
+        host.log("Data quality check saved the reviewed removed-electrode list.")
     except (AttributeError, TypeError, RuntimeError):
         pass
     return True
@@ -680,13 +760,13 @@ def _manual_removed_electrodes_from_table(host: Any) -> dict[str, list[str]]:
 
 def _hard_candidate_reason(result: PreflightQcFileResult) -> str:
     if result.raw_qc_excluded:
-        return result.raw_qc_message or "Raw channel-health QC hard exclusion."
+        return result.raw_qc_message or "Raw channel-health check failed."
     if result.raw_spectral_widespread:
         return (
             result.raw_spectral_message
             or "Widespread raw spectral artifact detected before preprocessing."
         )
-    return "Hard-exclusion QC criterion met."
+    return "Participant-level data quality exclusion criterion met."
 
 
 def _confirm_hard_exclusions(
@@ -697,21 +777,33 @@ def _confirm_hard_exclusions(
     candidates = scan.hard_exclusion_candidates
     if not candidates:
         return set()
+    _show_data_quality_notice(
+        host,
+        "Review participants that may need to be excluded.",
+        "FPVS Toolbox found participant-level data quality problems. The next "
+        "screen lists the candidates and lets you add them to the manual "
+        "participant exclusion list before processing starts.",
+    )
     _begin_preflight_page(
         host,
         step=4,
         title="Confirm Participant Exclusions",
-        message="Review participant-level QC failures before processing begins.",
+        message="Review participant-level data quality failures before processing begins.",
         busy=False,
         review_visible=True,
         review_title="Participant Exclusions",
         progress_visible=False,
+        checklist=(
+            "Review participants with hard data quality failures",
+            "Add confirmed cases to the participant exclusion list",
+            "Leave uncertain cases available if you want to inspect them later",
+        ),
     )
     _set_label(
         host,
         "processing_summary_label",
-        "FPVS Toolbox found participant-level QC failures that should not enter "
-        "the processed dataset.",
+        "FPVS Toolbox found participant-level data quality failures that should "
+        "not enter the processed dataset.",
     )
     _set_label(
         host,
@@ -749,7 +841,7 @@ def _confirm_hard_exclusions(
         normalized = host.currentProject.update_preprocessing(updated_preproc)
         host.currentProject.save()
     except (OSError, ValueError, RuntimeError) as exc:
-        logger.exception("Failed to save preflight participant exclusions.")
+        logger.exception("Failed to save participant exclusions.")
         QMessageBox.critical(
             host,
             "Project Save Error",
@@ -763,7 +855,7 @@ def _confirm_hard_exclusions(
     accepted = {result.participant_id.casefold() for result in candidates}
     try:
         host.log(
-            "Preflight QC added participant exclusion(s): "
+            "Data quality check added participant exclusion(s): "
             + ", ".join(params["manual_excluded_participants"]),
             level=logging.WARNING,
         )
@@ -800,7 +892,7 @@ def _write_preflight_review_flags(
     host: Any,
     rows: Sequence[tuple[str, str, str]],
 ) -> Path:
-    target = _quality_check_dir(host).resolve() / _PREFLIGHT_REVIEW_FLAGS_FILENAME
+    target = _quality_check_dir(host).resolve() / _DATA_QUALITY_REVIEW_FLAGS_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
 
     workbook = Workbook()
@@ -827,7 +919,9 @@ def _show_suspicious_remainder(
         if result.load_error:
             fragments.append(f"could not be scanned ({result.load_error})")
         if result.warning_rules:
-            fragments.append("raw-QC warning rule(s): " + ", ".join(result.warning_rules))
+            fragments.append(
+                "raw data warning rule(s): " + ", ".join(result.warning_rules)
+            )
         if result.high_amplitude_channels:
             fragments.append(
                 "high-amplitude channel(s): "
@@ -858,23 +952,36 @@ def _show_suspicious_remainder(
         except (AttributeError, TypeError, RuntimeError):
             pass
     except OSError as exc:
-        logger.exception("Failed to save preflight review flags workbook.")
+        logger.exception("Failed to save data quality review flags workbook.")
         report_message = f"Could not save review flags workbook: {exc}"
 
+    _show_data_quality_notice(
+        host,
+        "Some items should be reviewed later.",
+        "FPVS Toolbox found data quality items that were not automatically "
+        "removed. These items will not stop processing, but you should review "
+        "them before relying on the affected results.",
+        details=report_message,
+    )
     _begin_preflight_page(
         host,
         step=5,
         title="Review Remaining Flags",
-        message="Preflight QC found items that were flagged for review but were not removed automatically.",
+        message="FPVS Toolbox found items that were flagged for review but were not removed automatically.",
         busy=False,
         review_visible=True,
         review_title="Review Flags",
         progress_visible=False,
+        checklist=(
+            "Review items that were flagged but not removed",
+            "Use the saved workbook as a later review checklist",
+            "Continue processing when you have noted the flagged items",
+        ),
     )
     _set_label(
         host,
         "processing_summary_label",
-        "Preflight QC found items that were flagged for review but were not removed automatically.",
+        "FPVS Toolbox found items that were flagged for review but were not removed automatically.",
     )
     _set_label(
         host,
@@ -902,19 +1009,32 @@ def run_preprocessing_qc_workflow(
     if not raw_file_infos:
         return True
 
+    _show_data_quality_notice(
+        host,
+        "FPVS Toolbox will check your data before processing.",
+        "This guided check looks for empty recording files, electrodes that may "
+        "have been physically removed before recording, and participant-level "
+        "signal problems. You will be asked to confirm anything that could "
+        "change what gets processed.",
+    )
     _begin_preflight_page(
         host,
         step=1,
         title="Check Raw Files",
-        message=_PREFLIGHT_SCAN_WAIT_MESSAGE,
+        message=_DATA_QUALITY_SCAN_WAIT_MESSAGE,
         busy=True,
         review_visible=False,
+        checklist=(
+            "Check whether each BDF contains real recording data",
+            "Find files created when recording was not started",
+            "Prepare the deeper signal-health scan",
+        ),
     )
     _set_label(host, "processing_summary_label", "Checking BDF headers...")
     _set_label(
         host,
         "processing_current_file_label",
-        "Looking for header-only recordings before the deeper QC scan.",
+        "Looking for empty recordings before the deeper data quality scan.",
     )
     header_only = scan_recording_not_started_files(raw_file_infos)
     if header_only and not _confirm_recording_not_started(host, header_only):

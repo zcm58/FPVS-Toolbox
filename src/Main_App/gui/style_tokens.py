@@ -326,6 +326,24 @@ def build_main_page_stylesheet() -> str:
             color: {TEXT_SECONDARY};
         }}
 
+        QWidget[processingSection="true"] {{
+            background: {SURFACE_ALT_BG};
+            border: 1px solid {BORDER_SOFT_COLOR};
+            border-radius: 8px;
+        }}
+
+        #processing_checklist_label,
+        #processing_current_file_label,
+        #processing_summary_label {{
+            color: {TEXT_SECONDARY};
+        }}
+
+        #processing_status_separator {{
+            color: {BORDER_SOFT_COLOR};
+            background: {BORDER_SOFT_COLOR};
+            max-height: 1px;
+        }}
+
         #processing_progress_bar {{
             min-height: 38px;
         }}

@@ -477,13 +477,72 @@ def init_ui(self) -> None:
         object_name="processing_status_card",
     )
     processing_status_layout = self.processing_status_card.content_layout
-    processing_status_layout.setSpacing(12)
+    processing_status_layout.setSpacing(16)
 
-    self.processing_summary_label = QLabel("Waiting for files...", self.processing_status_card)
+    self.processing_overview_row = QWidget(self.processing_status_card)
+    self.processing_overview_row.setObjectName("processing_overview_row")
+    processing_overview_layout = QHBoxLayout(self.processing_overview_row)
+    processing_overview_layout.setContentsMargins(0, 0, 0, 0)
+    processing_overview_layout.setSpacing(16)
+
+    self.processing_instruction_panel = QWidget(self.processing_overview_row)
+    self.processing_instruction_panel.setProperty("processingSection", True)
+    processing_instruction_layout = QVBoxLayout(self.processing_instruction_panel)
+    processing_instruction_layout.setContentsMargins(14, 12, 14, 12)
+    processing_instruction_layout.setSpacing(8)
+
+    self.processing_summary_heading_label = SubsectionHeaderLabel(
+        "Run Status",
+        self.processing_instruction_panel,
+    )
+    self.processing_summary_heading_label.setObjectName("processing_summary_heading")
+    processing_instruction_layout.addWidget(self.processing_summary_heading_label)
+
+    self.processing_summary_label = QLabel(
+        "Waiting for files...",
+        self.processing_instruction_panel,
+    )
     self.processing_summary_label.setObjectName("processing_summary_label")
     self.processing_summary_label.setWordWrap(True)
-    apply_font_role(self.processing_summary_label, "caption")
-    processing_status_layout.addWidget(self.processing_summary_label)
+    apply_font_role(self.processing_summary_label, "body")
+    processing_instruction_layout.addWidget(self.processing_summary_label)
+    processing_instruction_layout.addStretch(1)
+    processing_overview_layout.addWidget(self.processing_instruction_panel, 3)
+
+    self.processing_checklist_panel = QWidget(self.processing_overview_row)
+    self.processing_checklist_panel.setProperty("processingSection", True)
+    processing_checklist_layout = QVBoxLayout(self.processing_checklist_panel)
+    processing_checklist_layout.setContentsMargins(14, 12, 14, 12)
+    processing_checklist_layout.setSpacing(8)
+
+    self.processing_checklist_heading_label = SubsectionHeaderLabel(
+        "Checks In This Step",
+        self.processing_checklist_panel,
+    )
+    self.processing_checklist_heading_label.setObjectName("processing_checklist_heading")
+    processing_checklist_layout.addWidget(self.processing_checklist_heading_label)
+
+    self.processing_checklist_label = QLabel("", self.processing_checklist_panel)
+    self.processing_checklist_label.setObjectName("processing_checklist_label")
+    self.processing_checklist_label.setWordWrap(True)
+    apply_font_role(self.processing_checklist_label, "body")
+    processing_checklist_layout.addWidget(self.processing_checklist_label)
+    processing_checklist_layout.addStretch(1)
+    processing_overview_layout.addWidget(self.processing_checklist_panel, 2)
+    processing_status_layout.addWidget(self.processing_overview_row)
+
+    self.processing_status_separator = QFrame(self.processing_status_card)
+    self.processing_status_separator.setObjectName("processing_status_separator")
+    self.processing_status_separator.setFrameShape(QFrame.HLine)
+    self.processing_status_separator.setFrameShadow(QFrame.Plain)
+    processing_status_layout.addWidget(self.processing_status_separator)
+
+    self.processing_live_heading_label = SubsectionHeaderLabel(
+        "Live Status",
+        self.processing_status_card,
+    )
+    self.processing_live_heading_label.setObjectName("processing_live_heading")
+    processing_status_layout.addWidget(self.processing_live_heading_label)
 
     self.processing_current_file_label = QLabel(
         "Latest file: Not started",
@@ -492,6 +551,13 @@ def init_ui(self) -> None:
     self.processing_current_file_label.setObjectName("processing_current_file_label")
     self.processing_current_file_label.setWordWrap(True)
     processing_status_layout.addWidget(self.processing_current_file_label)
+
+    self.processing_progress_heading_label = SubsectionHeaderLabel(
+        "Progress",
+        self.processing_status_card,
+    )
+    self.processing_progress_heading_label.setObjectName("processing_progress_heading")
+    processing_status_layout.addWidget(self.processing_progress_heading_label)
 
     self.progress_bar = QProgressBar(self.processing_status_card)
     self.progress_bar.setObjectName("processing_progress_bar")
@@ -502,6 +568,7 @@ def init_ui(self) -> None:
     self.progress_bar.setAlignment(Qt.AlignCenter)
     self.progress_bar.setFixedHeight(btn_h)
     processing_status_layout.addWidget(self.progress_bar)
+    processing_status_layout.addStretch(1)
     processing_layout.addWidget(self.processing_status_card)
 
     self.processing_files_card = SectionCard(

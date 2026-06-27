@@ -141,6 +141,22 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
             "Data processing has begun. Please be patient; your device may become "
             "temporarily slow or unresponsive during processing."
         )
+    summary_heading = getattr(host, "processing_summary_heading_label", None)
+    if summary_heading is not None:
+        summary_heading.setText("Run Status")
+    live_heading = getattr(host, "processing_live_heading_label", None)
+    if live_heading is not None:
+        live_heading.setText("Latest File")
+    progress_heading = getattr(host, "processing_progress_heading_label", None)
+    if progress_heading is not None:
+        progress_heading.setText("Overall Progress")
+        progress_heading.setVisible(True)
+    checklist_panel = getattr(host, "processing_checklist_panel", None)
+    if checklist_panel is not None:
+        checklist_panel.setVisible(False)
+    checklist_label = getattr(host, "processing_checklist_label", None)
+    if checklist_label is not None:
+        checklist_label.setText("")
     status_card = getattr(host, "processing_status_card", None)
     if status_card is not None:
         status_card.setVisible(True)
