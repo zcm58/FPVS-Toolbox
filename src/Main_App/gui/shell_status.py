@@ -158,6 +158,20 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     checklist_label = getattr(host, "processing_checklist_label", None)
     if checklist_label is not None:
         checklist_label.setText("")
+    overview_row = getattr(host, "processing_overview_row", None)
+    if overview_row is not None:
+        overview_row.setVisible(False)
+    instruction_panel = getattr(host, "processing_instruction_panel", None)
+    if instruction_panel is not None:
+        instruction_panel.setVisible(False)
+    separator = getattr(host, "processing_status_separator", None)
+    if separator is not None:
+        separator.setVisible(False)
+    if live_heading is not None:
+        live_heading.setVisible(False)
+    current_label = getattr(host, "processing_current_file_label", None)
+    if current_label is not None:
+        current_label.setVisible(False)
     status_card = getattr(host, "processing_status_card", None)
     if status_card is not None:
         status_card.setVisible(True)

@@ -242,6 +242,8 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
     metadata = selection.to_metadata()
     assert metadata["detected_significant_harmonics_hz"] == pytest.approx([1.2, 3.6, 7.2])
     assert metadata["included_harmonics_hz"] == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
+    assert metadata["detected_significant_harmonics_hz"] == [1.2, 3.6, 7.2]
+    assert metadata["included_harmonics_hz"] == [1.2, 2.4, 3.6, 4.8, 7.2]
     assert metadata["highest_significant_harmonic_hz"] == pytest.approx(7.2)
     assert metadata["highest_significant_harmonic_index"] == 6
     first_row = next(row for row in selection.rows if row.target_frequency_hz == pytest.approx(1.2))

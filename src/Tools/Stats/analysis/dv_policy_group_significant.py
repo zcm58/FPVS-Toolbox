@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -43,6 +44,7 @@ GROUP_SIGNIFICANT_NOISE_WINDOW_BINS = 10
 GROUP_SIGNIFICANT_FULLFFT_PROGRESS_INTERVAL = 5
 GROUP_SIGNIFICANT_BCA_PROGRESS_INTERVAL = 10
 GROUP_SIGNIFICANT_SELECTION_CACHE_MAX_ENTRIES = 8
+GROUP_SIGNIFICANT_FREQUENCY_DECIMALS = 10
 _GROUP_SELECTION_CACHE_LOCK = threading.Lock()
 _GROUP_SELECTION_CACHE: dict[
     "GroupSignificantSelectionCacheKey",
@@ -113,13 +115,19 @@ class GroupSignificantHarmonicSelection:
     selection_cache_key: str | None = None
 
     def to_metadata(self) -> dict[str, object]:
+        harmonic_domain = _canonical_harmonic_frequency_list(self.harmonic_domain_hz)
+        detected_harmonics = _canonical_harmonic_frequency_list(
+            self.detected_significant_harmonics_hz
+        )
+        selected_harmonics = _canonical_harmonic_frequency_list(self.selected_harmonics_hz)
+        excluded_base = _canonical_harmonic_frequency_list(self.excluded_base_harmonics_hz)
         highest_meta = _highest_selected_harmonic_metadata(
-            self.detected_significant_harmonics_hz,
+            detected_harmonics,
             oddball_hz=self.oddball_frequency_hz,
             prefix="highest_significant_harmonic",
         )
         highest_included_meta = _highest_selected_harmonic_metadata(
-            self.selected_harmonics_hz,
+            selected_harmonics,
             oddball_hz=self.oddball_frequency_hz,
             prefix="highest_included_harmonic",
         )
@@ -145,23 +153,24 @@ class GroupSignificantHarmonicSelection:
             "base_overlap_tolerance_hz": float(self.base_overlap_tolerance_hz),
             "matching_tolerance_hz": float(self.matching_tolerance_hz),
             "frequency_resolution_hz": self.frequency_resolution_hz,
-            "harmonic_domain_hz": list(self.harmonic_domain_hz),
-            "detected_significant_harmonics_hz": list(
-                self.detected_significant_harmonics_hz
-            ),
+            "harmonic_domain_hz": harmonic_domain,
+            "detected_significant_harmonics_hz": detected_harmonics,
             "detected_significant_columns": list(self.detected_significant_columns),
             "detected_significant_bin_indices": list(
                 self.detected_significant_bin_indices
             ),
-            "included_harmonics_hz": list(self.selected_harmonics_hz),
-            "common_harmonics_hz": list(self.selected_harmonics_hz),
-            "selected_harmonics_hz": list(self.selected_harmonics_hz),
+            "included_harmonics_hz": selected_harmonics,
+            "common_harmonics_hz": selected_harmonics,
+            "selected_harmonics_hz": selected_harmonics,
             **highest_meta,
             **highest_included_meta,
             "selected_columns": list(self.selected_columns),
             "selected_bin_indices": list(self.selected_bin_indices),
-            "selection_z_by_harmonic": dict(self.z_by_harmonic),
-            "excluded_base_harmonics_hz": list(self.excluded_base_harmonics_hz),
+            "selection_z_by_harmonic": {
+                _canonical_harmonic_frequency(freq): value
+                for freq, value in self.z_by_harmonic.items()
+            },
+            "excluded_base_harmonics_hz": excluded_base,
             "applied_uniformly_across_participants": True,
             "applied_uniformly_across_conditions": True,
             "applied_uniformly_across_rois": True,
@@ -171,8 +180,12 @@ class GroupSignificantHarmonicSelection:
             "selection_rows": [
                 {
                     "harmonic_index": row.harmonic_index,
-                    "target_frequency_hz": row.target_frequency_hz,
-                    "matched_frequency_hz": row.matched_frequency_hz,
+                    "target_frequency_hz": _canonical_harmonic_frequency(
+                        row.target_frequency_hz
+                    ),
+                    "matched_frequency_hz": _canonical_optional_frequency(
+                        row.matched_frequency_hz
+                    ),
                     "matched_column": row.matched_column,
                     "matched_bin_index": row.matched_bin_index,
                     "z_score": row.z_score,
@@ -236,6 +249,35 @@ class GroupSignificantSelectionCacheKey:
 def clear_group_significant_selection_cache() -> None:
     with _GROUP_SELECTION_CACHE_LOCK:
         _GROUP_SELECTION_CACHE.clear()
+
+
+def _canonical_harmonic_frequency(value: float) -> float:
+    return round(float(value), GROUP_SIGNIFICANT_FREQUENCY_DECIMALS)
+
+
+def _canonical_optional_frequency(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return _canonical_harmonic_frequency(value)
+
+
+def _canonical_harmonic_frequency_list(values: Iterable[float]) -> list[float]:
+    return [_canonical_harmonic_frequency(value) for value in values]
+
+
+def _canonical_harmonic_frequency_for_index(
+    harmonic_index: int,
+    oddball_hz: float,
+) -> float:
+    return float(Decimal(str(oddball_hz)) * Decimal(int(harmonic_index)))
+
+
+def _format_harmonic_frequency(value: float) -> str:
+    return f"{_canonical_harmonic_frequency(value):g}"
+
+
+def _format_harmonic_frequency_list(values: Iterable[float]) -> str:
+    return "[" + ", ".join(_format_harmonic_frequency(value) for value in values) + "]"
 
 
 def preflight_group_significant_full_fft_columns(
@@ -405,16 +447,21 @@ def group_significant_selection_from_metadata(
 
     if not isinstance(metadata, dict):
         raise TypeError("selection metadata must be a dictionary")
-    selected_harmonics = _metadata_float_list(
-        metadata.get("selected_harmonics_hz")
-        if metadata.get("selected_harmonics_hz") not in (None, "")
-        else metadata.get("included_harmonics_hz")
+    selected_harmonics = _canonical_harmonic_frequency_list(
+        _metadata_float_list(
+            metadata.get("selected_harmonics_hz")
+            if metadata.get("selected_harmonics_hz") not in (None, "")
+            else metadata.get("included_harmonics_hz")
+        )
     )
     if not selected_harmonics:
         raise ValueError("saved selection contains no selected harmonics")
-    detected_harmonics = _metadata_float_list(
-        metadata.get("detected_significant_harmonics_hz")
-    ) or list(selected_harmonics)
+    detected_harmonics = (
+        _canonical_harmonic_frequency_list(
+            _metadata_float_list(metadata.get("detected_significant_harmonics_hz"))
+        )
+        or list(selected_harmonics)
+    )
     oddball = _metadata_float(
         metadata.get("oddball_frequency_hz"),
         default=LOCKED_ODDBALL_FREQUENCY_HZ,
@@ -437,7 +484,9 @@ def group_significant_selection_from_metadata(
         if str(column).strip()
     ] or [f"{freq:.4f}_Hz" for freq in detected_harmonics]
     return GroupSignificantHarmonicSelection(
-        harmonic_domain_hz=_metadata_float_list(metadata.get("harmonic_domain_hz")),
+        harmonic_domain_hz=_canonical_harmonic_frequency_list(
+            _metadata_float_list(metadata.get("harmonic_domain_hz"))
+        ),
         selected_harmonics_hz=selected_harmonics,
         selected_columns=selected_columns,
         selected_bin_indices=_metadata_int_list(metadata.get("selected_bin_indices")),
@@ -446,9 +495,14 @@ def group_significant_selection_from_metadata(
         detected_significant_bin_indices=_metadata_int_list(
             metadata.get("detected_significant_bin_indices")
         ) or _metadata_int_list(metadata.get("selected_bin_indices")),
-        z_by_harmonic=_metadata_float_map(metadata.get("selection_z_by_harmonic")),
-        excluded_base_harmonics_hz=_metadata_float_list(
-            metadata.get("excluded_base_harmonics_hz")
+        z_by_harmonic={
+            _canonical_harmonic_frequency(freq): value
+            for freq, value in _metadata_float_map(
+                metadata.get("selection_z_by_harmonic")
+            ).items()
+        },
+        excluded_base_harmonics_hz=_canonical_harmonic_frequency_list(
+            _metadata_float_list(metadata.get("excluded_base_harmonics_hz"))
         ),
         oddball_frequency_hz=oddball,
         base_frequency_hz=_metadata_float(metadata.get("base_frequency_hz"), default=np.nan),
@@ -503,8 +557,12 @@ def group_significant_selection_from_metadata(
 def _group_significant_row_from_metadata(row_data: dict[str, object]) -> GroupSignificantHarmonicRow:
     return GroupSignificantHarmonicRow(
         harmonic_index=_metadata_int(row_data.get("harmonic_index"), default=0),
-        target_frequency_hz=_metadata_float(row_data.get("target_frequency_hz"), default=np.nan),
-        matched_frequency_hz=_metadata_optional_float(row_data.get("matched_frequency_hz")),
+        target_frequency_hz=_canonical_harmonic_frequency(
+            _metadata_float(row_data.get("target_frequency_hz"), default=np.nan)
+        ),
+        matched_frequency_hz=_canonical_optional_frequency(
+            _metadata_optional_float(row_data.get("matched_frequency_hz"))
+        ),
         matched_column=(
             str(row_data.get("matched_column"))
             if row_data.get("matched_column") not in (None, "")
@@ -695,7 +753,9 @@ def build_group_significant_harmonic_selection(
                 "elapsed_s": elapsed,
                 "subjects": len(subjects),
                 "conditions": len(conditions),
-                "selected_harmonics": cached.selected_harmonics_hz,
+                "selected_harmonics": _format_harmonic_frequency_list(
+                    cached.selected_harmonics_hz
+                ),
             },
         )
         return cached
@@ -714,7 +774,9 @@ def build_group_significant_harmonic_selection(
                 "elapsed_s": elapsed,
                 "subjects": len(subjects),
                 "conditions": len(conditions),
-                "selected_harmonics": project_cached.selected_harmonics_hz,
+                "selected_harmonics": _format_harmonic_frequency_list(
+                    project_cached.selected_harmonics_hz
+                ),
             },
         )
         _store_group_significant_selection(cache_key, project_cached)
@@ -805,14 +867,17 @@ def build_group_significant_harmonic_selection(
         if matched_freq is None:
             continue
         harmonic_index = int(round(matched_freq / oddball))
-        target_freq = float(harmonic_index * oddball)
+        target_freq = _canonical_harmonic_frequency_for_index(
+            harmonic_index,
+            oddball,
+        )
         diff = abs(float(matched_freq) - target_freq)
         if diff > GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ:
             rows.append(
                 GroupSignificantHarmonicRow(
                     harmonic_index=harmonic_index,
-                    target_frequency_hz=target_freq,
-                    matched_frequency_hz=matched_freq,
+                    target_frequency_hz=_canonical_harmonic_frequency(target_freq),
+                    matched_frequency_hz=_canonical_harmonic_frequency(matched_freq),
                     matched_column=None,
                     matched_bin_index=matched_idx,
                     z_score=None,
@@ -836,12 +901,12 @@ def build_group_significant_harmonic_selection(
             GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ,
         )
         if is_base_overlap:
-            excluded_base.append(matched_freq)
+            excluded_base.append(_canonical_harmonic_frequency(matched_freq))
             rows.append(
                 GroupSignificantHarmonicRow(
                     harmonic_index=harmonic_index,
-                    target_frequency_hz=target_freq,
-                    matched_frequency_hz=matched_freq,
+                    target_frequency_hz=_canonical_harmonic_frequency(target_freq),
+                    matched_frequency_hz=_canonical_harmonic_frequency(matched_freq),
                     matched_column=matched_column,
                     matched_bin_index=matched_idx,
                     z_score=None,
@@ -886,7 +951,7 @@ def build_group_significant_harmonic_selection(
             for idx in noise_used_bin_indices
             if idx in amplitude_by_bin
         )
-        selected_frequency = float(target_freq)
+        selected_frequency = _canonical_harmonic_frequency(target_freq)
         harmonic_domain.append(selected_frequency)
         z_by_harmonic[selected_frequency] = z_value
         selected = bool(np.isfinite(z_value) and z_value > settings.group_significant_z_threshold)
@@ -897,8 +962,8 @@ def build_group_significant_harmonic_selection(
         rows.append(
             GroupSignificantHarmonicRow(
                 harmonic_index=harmonic_index,
-                target_frequency_hz=target_freq,
-                matched_frequency_hz=matched_freq,
+                target_frequency_hz=selected_frequency,
+                matched_frequency_hz=_canonical_harmonic_frequency(matched_freq),
                 matched_column=matched_column,
                 matched_bin_index=matched_idx,
                 z_score=z_value if np.isfinite(z_value) else None,
@@ -967,8 +1032,10 @@ def build_group_significant_harmonic_selection(
         extra={
             "elapsed_s": elapsed,
             "spectra_count": spectra_count,
-            "selected_harmonics": selected_freqs,
-            "detected_significant_harmonics": detected_freqs,
+            "selected_harmonics": _format_harmonic_frequency_list(selected_freqs),
+            "detected_significant_harmonics": _format_harmonic_frequency_list(
+                detected_freqs
+            ),
         },
     )
 
@@ -1016,13 +1083,13 @@ def _resolve_summation_harmonics(
     summation_method: str,
 ) -> tuple[list[float], list[str], list[int], list[GroupSignificantHarmonicRow]]:
     """Return the harmonic list included in Summed BCA for the selected policy."""
-    detected_set = {round(float(freq), 10) for freq in detected_freqs}
+    detected_set = {_canonical_harmonic_frequency(freq) for freq in detected_freqs}
     if summation_method == GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY:
         included_set = set(detected_set)
     else:
         highest = max(float(freq) for freq in detected_freqs)
         included_set = {
-            round(float(row.target_frequency_hz), 10)
+            _canonical_harmonic_frequency(row.target_frequency_hz)
             for row in rows
             if not row.excluded_base_rate
             and row.matched_column
@@ -1033,7 +1100,8 @@ def _resolve_summation_harmonics(
     updated_rows = [
         replace(
             row,
-            included_in_summation=round(float(row.target_frequency_hz), 10) in included_set,
+            included_in_summation=_canonical_harmonic_frequency(row.target_frequency_hz)
+            in included_set,
         )
         for row in rows
     ]
@@ -1044,8 +1112,13 @@ def _resolve_summation_harmonics(
         and row.matched_column
         and row.matched_bin_index is not None
     ]
-    included_freqs = [float(row.target_frequency_hz) for row in included_rows]
-    included_columns = [f"{float(row.target_frequency_hz):.4f}_Hz" for row in included_rows]
+    included_freqs = [
+        _canonical_harmonic_frequency(row.target_frequency_hz) for row in included_rows
+    ]
+    included_columns = [
+        f"{_canonical_harmonic_frequency(row.target_frequency_hz):.4f}_Hz"
+        for row in included_rows
+    ]
     included_indices = [int(row.matched_bin_index) for row in included_rows]
     return included_freqs, included_columns, included_indices, updated_rows
 
@@ -1344,7 +1417,10 @@ def _plan_required_full_fft_columns(
     all_indices = {int(idx) for _freq, _column, idx in frequency_columns}
 
     for harmonic_index in range(1, highest_k + 1):
-        target_freq = float(harmonic_index * oddball)
+        target_freq = _canonical_harmonic_frequency_for_index(
+            harmonic_index,
+            oddball,
+        )
         exact_match = _find_exact_frequency_column(frequency_columns, target_freq)
         if exact_match is None:
             continue
@@ -1810,7 +1886,8 @@ def _harmonic_index_for_frequency(frequency_hz: float, oddball_hz: float) -> int
     harmonic_index = int(round(frequency / oddball))
     if harmonic_index <= 0:
         return None
-    if abs(float(harmonic_index * oddball) - frequency) > GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ:
+    canonical_freq = _canonical_harmonic_frequency_for_index(harmonic_index, oddball)
+    if abs(canonical_freq - frequency) > GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ:
         return None
     return harmonic_index
 

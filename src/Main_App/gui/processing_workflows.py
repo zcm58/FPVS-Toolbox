@@ -40,6 +40,11 @@ from Main_App.workers.mp_env import (
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+_HARMONIC_SELECTION_STATUS_MESSAGE = (
+    "Data processing is complete. FPVS Toolbox is now creating a list of "
+    "statistically significant harmonics."
+)
+
 
 class _ProcessingHarmonicCompletionBridge(QObject):
     """Route worker completion back through a main-thread QObject."""
@@ -339,6 +344,9 @@ def _start_harmonic_selection_qc_after_processing(
     worker.moveToThread(thread)
     host._processing_harmonic_thread = thread
     host._processing_harmonic_worker = worker
+    message_label = getattr(host, "processing_message_label", None)
+    if message_label is not None:
+        message_label.setText(_HARMONIC_SELECTION_STATUS_MESSAGE)
 
     def _handle_finished(result: dict) -> None:
         try:

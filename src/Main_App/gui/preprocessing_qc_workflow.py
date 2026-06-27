@@ -1,4 +1,4 @@
-"""Embedded preprocessing QC review workflow."""
+"""This module handles the data quality check that occurs prior to data processing. ."""
 
 from __future__ import annotations
 
@@ -42,8 +42,7 @@ logger.addHandler(logging.NullHandler())
 
 _DATA_QUALITY_CHECK_TITLE = "Data Quality Check"
 _DATA_QUALITY_SCAN_WAIT_MESSAGE = (
-    "FPVS Toolbox is checking your data for empty recordings, removed electrodes, "
-    "and unusual signal patterns before processing. We'll report back soon."
+    "FPVS Toolbox is currently checking your data for anything strange. This will only take a moment."
 )
 _DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
 _DATA_QUALITY_STEP_TOTAL = 5
