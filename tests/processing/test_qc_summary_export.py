@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl import Workbook
 
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
@@ -13,6 +14,7 @@ from Main_App.processing.processing_ledger import (
 from Main_App.processing.qc_summary_export import (
     QC_SUMMARY_FILENAME,
     QC_SUMMARY_HEADERS,
+    DATA_QUALITY_REVIEW_FLAGS_FILENAME,
     QUALITY_CHECK_FOLDER,
     build_processing_qc_rows,
     export_processing_qc_summary,
@@ -194,6 +196,61 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
     assert ledger["entries"]["P01"]["raw_qc_bad_channels"] == ["P9"]
     assert ledger["entries"]["P01"]["raw_qc_manual_removed_channels"] == ["FT7"]
     assert ledger["entries"]["P01"]["interpolated_channels"] == ["FT7", "P9", "Oz"]
+
+
+def test_processing_qc_summary_merges_saved_preflight_review_flags(
+    tmp_path: Path,
+) -> None:
+    project, infos = _project_with_raws(tmp_path)
+    plan = classify_processing_inputs(project, infos[:1], _settings(), project.event_map)
+    _write_expected_output_for_first_participant(plan)
+    record_processing_results(
+        project,
+        plan,
+        [
+            {
+                "status": "ok",
+                "file": str(infos[0].path),
+                "audit": {
+                    "n_rejected": 1,
+                    "kurtosis_bad_channels": ["Oz"],
+                    "interpolated_channels": ["Oz"],
+                },
+            }
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    qc_dir = project.project_root / QUALITY_CHECK_FOLDER
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Review Flags"
+    worksheet.append(("PID", "Source File", "Flagged Item"))
+    worksheet.append(
+        (
+            "P01",
+            "P01.bdf",
+            "high-amplitude channel(s): F8, FC6; spatially inconsistent channel(s): AF7, C6",
+        )
+    )
+    worksheet.append(
+        (
+            "P01",
+            "P01.bdf",
+            "raw data warning rule(s): possible_bad_channel_cluster",
+        )
+    )
+    workbook.save(qc_dir / DATA_QUALITY_REVIEW_FLAGS_FILENAME)
+
+    rows = build_processing_qc_rows(project, plan, [])
+
+    assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "F8, FC6"
+    assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "AF7, C6"
+    assert rows[0]["Raw QC Warnings"] == "possible_bad_channel_cluster"
+    assert rows[0]["Kurtosis-Rejected Electrodes"] == "Oz"
+    assert rows[0]["Electrodes Interpolated"] == "Oz"
 
 
 def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Path) -> None:

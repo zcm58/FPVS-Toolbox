@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
@@ -20,6 +21,7 @@ from Main_App.processing.processing_ledger import (
 QC_SUMMARY_FILENAME = "Processing_QC_Summary.xlsx"
 QC_SUMMARY_SHEET = "Participant QC"
 QUALITY_CHECK_FOLDER = "Quality Check"
+DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
 QC_SUMMARY_HEADERS = (
     "PID",
     "Manually Removed Electrodes",
@@ -34,6 +36,11 @@ QC_SUMMARY_HEADERS = (
     "Included in Final Set",
     "Exclusion Reason",
 )
+_REVIEW_FLAG_PATTERNS = {
+    "high_amplitude": re.compile(r"high-amplitude channel\(s\):\s*([^;]+)", re.IGNORECASE),
+    "spatial_outlier": re.compile(r"spatially inconsistent channel\(s\):\s*([^;]+)", re.IGNORECASE),
+    "warning_rules": re.compile(r"raw data warning rule\(s\):\s*([^;]+)", re.IGNORECASE),
+}
 
 
 def _quality_check_root(project: Any) -> Path:
@@ -158,6 +165,13 @@ def _join_channels(channels: Sequence[str]) -> str:
     return ", ".join(channels) if channels else "None"
 
 
+def _split_review_items(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [item.strip() for item in re.split(r",|;", text) if item.strip()]
+
+
 def _unique_ordered(*groups: Sequence[str]) -> list[str]:
     seen: set[str] = set()
     merged: list[str] = []
@@ -168,6 +182,51 @@ def _unique_ordered(*groups: Sequence[str]) -> list[str]:
             seen.add(channel)
             merged.append(channel)
     return merged
+
+
+def _review_flags_by_pid(project: Any) -> dict[str, dict[str, list[str]]]:
+    report_path = _quality_check_root(project) / DATA_QUALITY_REVIEW_FLAGS_FILENAME
+    if not report_path.exists():
+        return {}
+    try:
+        workbook = load_workbook(report_path, read_only=True, data_only=True)
+    except OSError:
+        return {}
+    try:
+        worksheet = workbook["Review Flags"] if "Review Flags" in workbook.sheetnames else workbook.active
+        rows = worksheet.iter_rows(values_only=True)
+        headers = [str(value or "").strip() for value in next(rows, ())]
+        try:
+            pid_index = headers.index("PID")
+            item_index = headers.index("Flagged Item")
+        except ValueError:
+            return {}
+        by_pid: dict[str, dict[str, list[str]]] = {}
+        for row in rows:
+            if row is None:
+                continue
+            pid = str(row[pid_index] or "").strip()
+            item = str(row[item_index] or "").strip()
+            if not pid or not item:
+                continue
+            bucket = by_pid.setdefault(
+                pid.casefold(),
+                {
+                    "high_amplitude": [],
+                    "spatial_outlier": [],
+                    "warning_rules": [],
+                },
+            )
+            for key, pattern in _REVIEW_FLAG_PATTERNS.items():
+                match = pattern.search(item)
+                if match:
+                    bucket[key] = _unique_ordered(
+                        bucket[key],
+                        _split_review_items(match.group(1)),
+                    )
+        return by_pid
+    finally:
+        workbook.close()
 
 
 def _count_from_result(result: Mapping[str, Any] | None, fallback: int) -> int:
@@ -331,8 +390,10 @@ def build_processing_qc_rows(
 
     ledger = load_ledger(Path(project.project_root))
     results_by_path = _result_by_path(results)
+    review_flags = _review_flags_by_pid(project)
     rows: list[dict[str, object]] = []
     for state in plan.states:
+        review = review_flags.get(state.participant_id.casefold(), {})
         entry = _entry_for_pid(ledger, state.participant_id)
         cache_entry = _cache_qc_for_entry(project, entry) if entry else {}
         result = results_by_path.get(state.info.path.resolve())
@@ -356,6 +417,8 @@ def build_processing_qc_rows(
             entry.get("raw_qc_high_amplitude_channels")
         ) or _string_list(
             cache_entry.get("raw_qc_high_amplitude_channels")
+        ) or _string_list(
+            review.get("high_amplitude")
         )
         raw_qc_spatial_outlier_channels = _raw_qc_spatial_outlier_channels_from_result(
             result
@@ -363,11 +426,15 @@ def build_processing_qc_rows(
             entry.get("raw_qc_spatial_outlier_channels")
         ) or _string_list(
             cache_entry.get("raw_qc_spatial_outlier_channels")
+        ) or _string_list(
+            review.get("spatial_outlier")
         )
         raw_qc_warning_rules = _raw_qc_warning_rules_from_result(result) or _string_list(
             entry.get("raw_qc_warning_rules")
         ) or _string_list(
             cache_entry.get("raw_qc_warning_rules")
+        ) or _string_list(
+            review.get("warning_rules")
         )
         raw_qc_channels = _raw_qc_channels_from_result(result) or _string_list(
             entry.get("raw_qc_bad_channels")
@@ -499,6 +566,7 @@ def export_processing_qc_summary(
 
 
 __all__ = [
+    "DATA_QUALITY_REVIEW_FLAGS_FILENAME",
     "QC_SUMMARY_FILENAME",
     "QC_SUMMARY_HEADERS",
     "QC_SUMMARY_SHEET",
