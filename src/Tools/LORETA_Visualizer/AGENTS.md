@@ -212,7 +212,10 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   topology-matched hemisphere meshes for publication layout. The combined mesh
   remains pial for existing single-surface and transparent views; inflated
   surfaces and optional `curv`/`sulc` underlay values are only a split-view
-  display canvas. No source estimates.
+  display canvas. Prepared renderer-facing meshes may be cached under the
+  untracked root `.fpvs_cache/loreta_visualizer/meshes/` cache, keyed by
+  fsaverage source file fingerprints, surface, decimation setting, and cache
+  schema. No source estimates.
 - `synthetic_brain.py`: fallback/demo mesh model.
 - `conditions.py` and `dummy_activation.py`: deterministic synthetic conditions
   and demo-only source maps retained for tests/developer validation, not normal
@@ -223,7 +226,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - `prepared_payload_importer.py`: controlled JSON importer for already-prepared
   source payloads and source-payload manifests. It validates file content and
   adapts into renderer payloads; it must not discover project outputs or
-  calculate source estimates.
+  calculate source estimates. It may keep a bounded in-memory cache keyed by
+  payload path, file mtime/size, and display-transform signature; cached
+  payloads must not leak caller metadata mutations back into the cache.
 - `prepared_payload_validator.py`: producer-facing payload/manifest validation,
   format constants, schema descriptors, and cross-field rules. It must not
   render, inspect projects, or calculate source estimates.

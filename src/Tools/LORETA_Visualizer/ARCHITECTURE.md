@@ -231,6 +231,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
   fsaverage inflated hemispheres are used only as the split-view display canvas
   when their topology matches the pial/source surface. FreeSurfer `curv` or
   `sulc` morph values may be read as split-view gray-white underlay shading.
+  The prepared renderer-facing mesh is cached under the untracked root
+  `.fpvs_cache/loreta_visualizer/meshes/` cache and invalidated when the
+  fsaverage source files, surface choice, decimation setting, or cache schema
+  changes.
   It must not calculate source estimates.
 - `synthetic_brain.py`: deterministic fallback brain mesh and `BrainMesh`
   dataclass.
@@ -244,7 +248,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   payloads and source-payload manifests. Payload files include coordinates,
   scalar values, faces, coordinate-space labels, and metadata; manifest files map
   condition labels to relative payload JSON files. This is user-selected file
-  input only, not project-output discovery.
+  input only, not project-output discovery. Prepared payload imports may be
+  cached in memory by file mtime, file size, and display-transform signature so
+  repeated condition switching does not re-read unchanged payload files.
 - `prepared_payload_validator.py`: producer-facing validation for prepared
   payload and manifest JSON. It owns format constants, schema descriptors, and
   cross-field checks. It does not render, calculate source estimates, or inspect

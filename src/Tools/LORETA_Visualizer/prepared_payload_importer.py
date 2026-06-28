@@ -6,9 +6,11 @@ source-localization values or choose an inverse method.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from dataclasses import dataclass, replace
 import json
-from dataclasses import dataclass
 from pathlib import Path
+import threading
 from typing import Any
 
 from Tools.LORETA_Visualizer.prepared_payload_validator import (
@@ -25,6 +27,10 @@ from Tools.LORETA_Visualizer.source_payloads import (
     source_payload_to_display,
 )
 from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_DISPLAY, MeshDisplayTransform
+
+PREPARED_PAYLOAD_JSON_CACHE_MAX_ITEMS = 48
+_PREPARED_PAYLOAD_JSON_CACHE: OrderedDict[tuple[object, ...], SourcePayload] = OrderedDict()
+_PREPARED_PAYLOAD_JSON_CACHE_LOCK = threading.RLock()
 
 
 class PreparedSourcePayloadImportError(ValueError):
@@ -51,17 +57,34 @@ def load_prepared_source_payload_json(
     if payload_path.suffix.lower() != ".json":
         raise PreparedSourcePayloadImportError("Prepared source payload files must use the .json extension.")
     try:
+        stat = payload_path.stat()
+    except OSError as exc:
+        raise PreparedSourcePayloadImportError(f"Unable to read prepared source payload: {exc}") from exc
+
+    cache_key = _prepared_payload_cache_key(
+        payload_path,
+        stat_mtime_ns=int(stat.st_mtime_ns),
+        stat_size=int(stat.st_size),
+        display_transform=display_transform,
+    )
+    cached_payload = _get_cached_prepared_payload(cache_key)
+    if cached_payload is not None:
+        return _copy_source_payload_for_caller(cached_payload)
+
+    try:
         with payload_path.open("r", encoding="utf-8") as handle:
             raw_payload = json.load(handle)
     except json.JSONDecodeError as exc:
         raise PreparedSourcePayloadImportError(f"Prepared source payload is not valid JSON: {exc}") from exc
     except OSError as exc:
         raise PreparedSourcePayloadImportError(f"Unable to read prepared source payload: {exc}") from exc
-    return prepared_source_payload_from_mapping(
+    payload = prepared_source_payload_from_mapping(
         raw_payload,
         display_transform=display_transform,
         source_path=payload_path,
     )
+    _remember_cached_prepared_payload(cache_key, payload)
+    return _copy_source_payload_for_caller(payload)
 
 
 def load_prepared_source_manifest_json(path: str | Path) -> tuple[PreparedSourceManifestEntry, ...]:
@@ -147,6 +170,51 @@ def _required_payload_path(payload_path: Path | None) -> Path:
     if payload_path is None:
         raise PreparedSourcePayloadImportError("Prepared source manifest payload path was not resolved.")
     return payload_path
+
+
+def _prepared_payload_cache_key(
+    payload_path: Path,
+    *,
+    stat_mtime_ns: int,
+    stat_size: int,
+    display_transform: MeshDisplayTransform,
+) -> tuple[object, ...]:
+    return (
+        str(payload_path.expanduser().resolve()),
+        int(stat_mtime_ns),
+        int(stat_size),
+        _display_transform_cache_key(display_transform),
+    )
+
+
+def _display_transform_cache_key(display_transform: MeshDisplayTransform) -> tuple[object, ...]:
+    return (
+        tuple(float(value) for value in display_transform.center.reshape(-1)),
+        float(display_transform.radius),
+        display_transform.native_coordinate_space,
+        display_transform.display_coordinate_space,
+    )
+
+
+def _get_cached_prepared_payload(cache_key: tuple[object, ...]) -> SourcePayload | None:
+    with _PREPARED_PAYLOAD_JSON_CACHE_LOCK:
+        payload = _PREPARED_PAYLOAD_JSON_CACHE.get(cache_key)
+        if payload is None:
+            return None
+        _PREPARED_PAYLOAD_JSON_CACHE.move_to_end(cache_key)
+        return payload
+
+
+def _remember_cached_prepared_payload(cache_key: tuple[object, ...], payload: SourcePayload) -> None:
+    with _PREPARED_PAYLOAD_JSON_CACHE_LOCK:
+        _PREPARED_PAYLOAD_JSON_CACHE[cache_key] = payload
+        _PREPARED_PAYLOAD_JSON_CACHE.move_to_end(cache_key)
+        while len(_PREPARED_PAYLOAD_JSON_CACHE) > PREPARED_PAYLOAD_JSON_CACHE_MAX_ITEMS:
+            _PREPARED_PAYLOAD_JSON_CACHE.popitem(last=False)
+
+
+def _copy_source_payload_for_caller(payload: SourcePayload) -> SourcePayload:
+    return replace(payload, metadata=dict(payload.metadata))
 
 
 def prepared_source_payload_example() -> dict[str, Any]:

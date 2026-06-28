@@ -4,6 +4,7 @@ import io
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from Tools.LORETA_Visualizer import fsaverage_mesh
@@ -13,7 +14,9 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     _FsaverageArchiveSpec,
     fetch_fsaverage_into_subjects_dir,
 )
-from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError
+from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult
+from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh
+from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_FSAVERAGE, MeshDisplayTransform
 
 
 def test_mesh_loader_rejects_partial_cache_when_fetch_disabled(monkeypatch, tmp_path: Path) -> None:
@@ -96,6 +99,59 @@ def test_fetch_fsaverage_downloads_archives_inside_subjects_dir(monkeypatch, tmp
     assert (subjects_dir / "fsaverage" / "surf" / "rh.pial").read_bytes() == b"right pial"
     assert (subjects_dir / "fsaverage" / "bem" / "fsaverage-trans.fif").read_bytes() == b"transform"
     assert {path.name for path in download_targets} == {"root.zip.part", "bem.zip.part"}
+
+
+def test_display_mesh_cache_round_trip_preserves_split_mesh(monkeypatch, tmp_path: Path) -> None:
+    cache_dir = tmp_path / "display-mesh-cache"
+    monkeypatch.setattr(fsaverage_mesh, "default_loreta_display_mesh_cache_dir", lambda: cache_dir)
+    with fsaverage_mesh._DISPLAY_MESH_MEMORY_CACHE_LOCK:
+        fsaverage_mesh._DISPLAY_MESH_MEMORY_CACHE.clear()
+
+    display_transform = MeshDisplayTransform(
+        center=np.asarray([1.0, 2.0, 3.0], dtype=float),
+        radius=4.0,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+    left_hemisphere = BrainHemisphereMesh(
+        points=np.asarray([[0.0, 0.0, 0.0], [0.2, 0.0, 0.0], [0.0, 0.2, 0.0]], dtype=float),
+        faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
+        projection_points=np.asarray([[10.0, 0.0, 0.0], [12.0, 0.0, 0.0], [10.0, 2.0, 0.0]], dtype=float),
+        shade_values=np.asarray([0.1, 0.5, 0.9], dtype=float),
+        shade_source="curv",
+        surface="inflated",
+    )
+    mesh = BrainMesh(
+        points=np.asarray([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.0, 0.5, 0.0]], dtype=float),
+        faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
+        display_transform=display_transform,
+        left_hemisphere=left_hemisphere,
+    )
+    result = FsaverageMeshResult(
+        mesh=mesh,
+        fsaverage_dir=tmp_path / "fsaverage",
+        surface="pial",
+        triangle_count=1,
+        source_label="fsaverage pial",
+        split_surface="inflated",
+        split_shading_source="curv",
+    )
+
+    fsaverage_mesh._write_cached_mesh_result("demo-cache-key", result)
+    loaded = fsaverage_mesh._load_cached_mesh_result("demo-cache-key")
+
+    assert loaded is not None
+    assert loaded.surface == "pial"
+    assert loaded.split_surface == "inflated"
+    assert loaded.split_shading_source == "curv"
+    assert np.allclose(loaded.mesh.points, mesh.points)
+    assert np.array_equal(loaded.mesh.faces, mesh.faces)
+    assert np.allclose(loaded.mesh.display_transform.center, display_transform.center)
+    assert loaded.mesh.display_transform.radius == display_transform.radius
+    assert loaded.mesh.left_hemisphere is not None
+    assert loaded.mesh.left_hemisphere.shade_source == "curv"
+    assert loaded.mesh.left_hemisphere.surface == "inflated"
+    assert np.allclose(loaded.mesh.left_hemisphere.shade_values, left_hemisphere.shade_values)
+    assert loaded.mesh.right_hemisphere is None
 
 
 def _zip_bytes(files: dict[str, bytes]) -> bytes:

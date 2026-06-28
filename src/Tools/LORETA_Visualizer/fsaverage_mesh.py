@@ -7,10 +7,16 @@ active source, docs, quarantine paths, or package data.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+import hashlib
+import json
 import logging
+import os
 import ssl
 from dataclasses import dataclass
 from pathlib import Path
+import threading
+import uuid
 from urllib.error import URLError
 
 import numpy as np
@@ -20,6 +26,7 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     ensure_allowed_fsaverage_dir,
     fetch_fsaverage_into_subjects_dir,
     fetch_fsaverage_subjects_dir,
+    fpvs_toolbox_root,
     preferred_fsaverage_dirs,
 )
 from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh
@@ -31,6 +38,11 @@ DEFAULT_SURFACE = "pial"
 DEFAULT_PUBLICATION_SPLIT_SURFACE = "inflated"
 DEFAULT_MAX_TRIANGLES = 120000
 SURFACE_CHOICES = ("pial", "inflated", "white")
+DISPLAY_MESH_CACHE_VERSION = "1"
+DISPLAY_MESH_MEMORY_CACHE_MAX_ITEMS = 4
+LORETA_DISPLAY_MESH_CACHE_RELATIVE_DIR = Path(".fpvs_cache") / "loreta_visualizer" / "meshes"
+_DISPLAY_MESH_MEMORY_CACHE: OrderedDict[str, FsaverageMeshResult] = OrderedDict()
+_DISPLAY_MESH_MEMORY_CACHE_LOCK = threading.RLock()
 
 
 class FsaverageMeshError(RuntimeError):
@@ -65,6 +77,19 @@ def load_fsaverage_brain_mesh(
     missing = [str(path) for path in (left_path, right_path) if not path.is_file()]
     if missing:
         raise FsaverageMeshError(f"fsaverage surface files are missing: {', '.join(missing)}")
+
+    cache_key = _display_mesh_cache_key(
+        fsaverage_dir,
+        surface=surface,
+        max_triangles=max_triangles,
+    )
+    cached_result = _get_memory_cached_mesh_result(cache_key)
+    if cached_result is not None:
+        return cached_result
+    cached_result = _load_cached_mesh_result(cache_key)
+    if cached_result is not None:
+        _remember_memory_cached_mesh_result(cache_key, cached_result)
+        return cached_result
 
     try:
         import mne
@@ -123,7 +148,7 @@ def load_fsaverage_brain_mesh(
         left_hemisphere=left_hemisphere,
         right_hemisphere=right_hemisphere,
     )
-    return FsaverageMeshResult(
+    result = FsaverageMeshResult(
         mesh=mesh,
         fsaverage_dir=fsaverage_dir,
         surface=surface,
@@ -132,6 +157,227 @@ def load_fsaverage_brain_mesh(
         split_surface=split_surface,
         split_shading_source=split_shading_source,
     )
+    _write_cached_mesh_result(cache_key, result)
+    _remember_memory_cached_mesh_result(cache_key, result)
+    return result
+
+
+def default_loreta_display_mesh_cache_dir() -> Path:
+    """Return the root-local, untracked cache for prepared fsaverage display meshes."""
+
+    return fpvs_toolbox_root() / LORETA_DISPLAY_MESH_CACHE_RELATIVE_DIR
+
+
+def _display_mesh_cache_key(
+    fsaverage_dir: Path,
+    *,
+    surface: str,
+    max_triangles: int,
+) -> str:
+    payload = {
+        "version": DISPLAY_MESH_CACHE_VERSION,
+        "fsaverage_dir": str(Path(fsaverage_dir).expanduser().resolve()),
+        "surface": str(surface),
+        "max_triangles": int(max_triangles),
+        "source_files": _display_mesh_source_file_fingerprints(fsaverage_dir, surface=surface),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _display_mesh_source_file_fingerprints(fsaverage_dir: Path, *, surface: str) -> list[dict[str, object]]:
+    surf_dir = Path(fsaverage_dir) / "surf"
+    names = [
+        f"lh.{surface}",
+        f"rh.{surface}",
+        f"lh.{DEFAULT_PUBLICATION_SPLIT_SURFACE}",
+        f"rh.{DEFAULT_PUBLICATION_SPLIT_SURFACE}",
+        "lh.curv",
+        "rh.curv",
+        "lh.sulc",
+        "rh.sulc",
+    ]
+    fingerprints: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        path = surf_dir / name
+        try:
+            stat = path.stat()
+        except OSError:
+            fingerprints.append({"name": name, "exists": False})
+            continue
+        fingerprints.append(
+            {
+                "name": name,
+                "exists": True,
+                "size": int(stat.st_size),
+                "mtime_ns": int(stat.st_mtime_ns),
+            }
+        )
+    return fingerprints
+
+
+def _display_mesh_cache_path(cache_key: str) -> Path:
+    return default_loreta_display_mesh_cache_dir() / f"{cache_key}.npz"
+
+
+def _get_memory_cached_mesh_result(cache_key: str) -> FsaverageMeshResult | None:
+    with _DISPLAY_MESH_MEMORY_CACHE_LOCK:
+        result = _DISPLAY_MESH_MEMORY_CACHE.get(cache_key)
+        if result is None:
+            return None
+        _DISPLAY_MESH_MEMORY_CACHE.move_to_end(cache_key)
+        return result
+
+
+def _remember_memory_cached_mesh_result(cache_key: str, result: FsaverageMeshResult) -> None:
+    with _DISPLAY_MESH_MEMORY_CACHE_LOCK:
+        _DISPLAY_MESH_MEMORY_CACHE[cache_key] = result
+        _DISPLAY_MESH_MEMORY_CACHE.move_to_end(cache_key)
+        while len(_DISPLAY_MESH_MEMORY_CACHE) > DISPLAY_MESH_MEMORY_CACHE_MAX_ITEMS:
+            _DISPLAY_MESH_MEMORY_CACHE.popitem(last=False)
+
+
+def _load_cached_mesh_result(cache_key: str) -> FsaverageMeshResult | None:
+    path = _display_mesh_cache_path(cache_key)
+    if not path.is_file():
+        return None
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            metadata = json.loads(str(data["metadata_json"].item()))
+            if metadata.get("version") != DISPLAY_MESH_CACHE_VERSION:
+                return None
+            display_transform = MeshDisplayTransform(
+                center=np.asarray(data["display_center"], dtype=float),
+                radius=float(metadata["display_radius"]),
+                native_coordinate_space=str(metadata["native_coordinate_space"]),
+                display_coordinate_space=str(metadata["display_coordinate_space"]),
+            )
+            mesh = BrainMesh(
+                points=np.asarray(data["mesh_points"], dtype=float),
+                faces=np.asarray(data["mesh_faces"], dtype=np.int64),
+                display_transform=display_transform,
+                left_hemisphere=_hemisphere_from_cached_arrays("left", data, metadata),
+                right_hemisphere=_hemisphere_from_cached_arrays("right", data, metadata),
+            )
+            return FsaverageMeshResult(
+                mesh=mesh,
+                fsaverage_dir=Path(str(metadata["fsaverage_dir"])),
+                surface=str(metadata["surface"]),
+                triangle_count=int(metadata["triangle_count"]),
+                source_label=str(metadata["source_label"]),
+                split_surface=str(metadata["split_surface"]),
+                split_shading_source=_optional_cached_string(metadata.get("split_shading_source")),
+            )
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        logger.debug("fsaverage_display_mesh_cache_load_failed", extra={"path": str(path), "error": str(exc)})
+        return None
+
+
+def _write_cached_mesh_result(cache_key: str, result: FsaverageMeshResult) -> None:
+    cache_path = _display_mesh_cache_path(cache_key)
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        arrays: dict[str, np.ndarray] = {
+            "mesh_points": np.asarray(result.mesh.points, dtype=float),
+            "mesh_faces": np.asarray(result.mesh.faces, dtype=np.int64),
+            "display_center": np.asarray(result.mesh.display_transform.center, dtype=float),
+        }
+        metadata: dict[str, object] = {
+            "version": DISPLAY_MESH_CACHE_VERSION,
+            "fsaverage_dir": str(result.fsaverage_dir),
+            "surface": result.surface,
+            "triangle_count": int(result.triangle_count),
+            "source_label": result.source_label,
+            "split_surface": result.split_surface,
+            "split_shading_source": result.split_shading_source or "",
+            "display_radius": float(result.mesh.display_transform.radius),
+            "native_coordinate_space": result.mesh.display_transform.native_coordinate_space,
+            "display_coordinate_space": result.mesh.display_transform.display_coordinate_space,
+        }
+        _add_hemisphere_to_cached_arrays("left", result.mesh.left_hemisphere, arrays, metadata)
+        _add_hemisphere_to_cached_arrays("right", result.mesh.right_hemisphere, arrays, metadata)
+        arrays["metadata_json"] = np.asarray(json.dumps(metadata, sort_keys=True))
+
+        temp_path = cache_path.with_name(f"{cache_path.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp.npz")
+        try:
+            np.savez_compressed(temp_path, **arrays)
+            temp_path.replace(cache_path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        logger.debug("fsaverage_display_mesh_cache_write_failed", extra={"path": str(cache_path), "error": str(exc)})
+
+
+def _add_hemisphere_to_cached_arrays(
+    prefix: str,
+    hemisphere: BrainHemisphereMesh | None,
+    arrays: dict[str, np.ndarray],
+    metadata: dict[str, object],
+) -> None:
+    metadata[f"{prefix}_present"] = hemisphere is not None
+    if hemisphere is None:
+        arrays[f"{prefix}_points"] = np.empty((0, 3), dtype=float)
+        arrays[f"{prefix}_faces"] = np.empty((0,), dtype=np.int64)
+        arrays[f"{prefix}_projection_points"] = np.empty((0, 3), dtype=float)
+        arrays[f"{prefix}_shade_values"] = np.empty((0,), dtype=float)
+        metadata[f"{prefix}_projection_present"] = False
+        metadata[f"{prefix}_shade_present"] = False
+        metadata[f"{prefix}_shade_source"] = ""
+        metadata[f"{prefix}_surface"] = DEFAULT_SURFACE
+        return
+    arrays[f"{prefix}_points"] = np.asarray(hemisphere.points, dtype=float)
+    arrays[f"{prefix}_faces"] = np.asarray(hemisphere.faces, dtype=np.int64)
+    arrays[f"{prefix}_projection_points"] = (
+        np.asarray(hemisphere.projection_points, dtype=float)
+        if hemisphere.projection_points is not None
+        else np.empty((0, 3), dtype=float)
+    )
+    arrays[f"{prefix}_shade_values"] = (
+        np.asarray(hemisphere.shade_values, dtype=float)
+        if hemisphere.shade_values is not None
+        else np.empty((0,), dtype=float)
+    )
+    metadata[f"{prefix}_projection_present"] = hemisphere.projection_points is not None
+    metadata[f"{prefix}_shade_present"] = hemisphere.shade_values is not None
+    metadata[f"{prefix}_shade_source"] = hemisphere.shade_source or ""
+    metadata[f"{prefix}_surface"] = hemisphere.surface
+
+
+def _hemisphere_from_cached_arrays(
+    prefix: str,
+    data: object,
+    metadata: dict[str, object],
+) -> BrainHemisphereMesh | None:
+    if not bool(metadata.get(f"{prefix}_present", False)):
+        return None
+    projection_points = (
+        np.asarray(data[f"{prefix}_projection_points"], dtype=float)
+        if bool(metadata.get(f"{prefix}_projection_present", False))
+        else None
+    )
+    shade_values = (
+        np.asarray(data[f"{prefix}_shade_values"], dtype=float)
+        if bool(metadata.get(f"{prefix}_shade_present", False))
+        else None
+    )
+    return BrainHemisphereMesh(
+        points=np.asarray(data[f"{prefix}_points"], dtype=float),
+        faces=np.asarray(data[f"{prefix}_faces"], dtype=np.int64),
+        projection_points=projection_points,
+        shade_values=shade_values,
+        shade_source=_optional_cached_string(metadata.get(f"{prefix}_shade_source")),
+        surface=str(metadata.get(f"{prefix}_surface") or DEFAULT_SURFACE),
+    )
+
+
+def _optional_cached_string(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _validate_surface(surface: str) -> str:

@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pytest
 
+from Tools.LORETA_Visualizer import prepared_payload_importer
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
     PREPARED_SOURCE_MANIFEST_FORMAT,
     PREPARED_SOURCE_PAYLOAD_FORMAT,
@@ -44,6 +45,52 @@ def test_prepared_source_payload_imports_display_space_json(tmp_path) -> None:
     assert np.allclose(payload.points, np.asarray(raw_payload["points"], dtype=float))
     assert np.allclose(payload.values, np.asarray(raw_payload["values"], dtype=float))
     assert np.array_equal(payload.faces, np.asarray([3, 0, 1, 2], dtype=np.int64))
+
+
+def test_prepared_source_payload_json_cache_reuses_unchanged_file(monkeypatch, tmp_path) -> None:
+    payload_path = tmp_path / "prepared-source.json"
+    raw_payload = prepared_source_payload_example()
+    payload_path.write_text(json.dumps(raw_payload), encoding="utf-8")
+    with prepared_payload_importer._PREPARED_PAYLOAD_JSON_CACHE_LOCK:
+        prepared_payload_importer._PREPARED_PAYLOAD_JSON_CACHE.clear()
+
+    original_load = prepared_payload_importer.json.load
+    load_calls = 0
+
+    def counting_load(handle):
+        nonlocal load_calls
+        load_calls += 1
+        return original_load(handle)
+
+    monkeypatch.setattr(prepared_payload_importer.json, "load", counting_load)
+
+    first = load_prepared_source_payload_json(
+        payload_path,
+        display_transform=MeshDisplayTransform.identity(),
+    )
+    first.metadata["caller_mutation"] = True
+    second = load_prepared_source_payload_json(
+        payload_path,
+        display_transform=MeshDisplayTransform.identity(),
+    )
+
+    assert load_calls == 1
+    assert second.label == first.label
+    assert "caller_mutation" not in second.metadata
+
+    updated_payload = dict(raw_payload)
+    updated_payload["label"] = "Updated prepared source payload"
+    updated_payload["metadata"] = {"changed": True}
+    payload_path.write_text(json.dumps(updated_payload) + "\n", encoding="utf-8")
+
+    third = load_prepared_source_payload_json(
+        payload_path,
+        display_transform=MeshDisplayTransform.identity(),
+    )
+
+    assert load_calls == 2
+    assert third.label == "Updated prepared source payload"
+    assert third.metadata["changed"] is True
 
 
 def test_prepared_source_payload_imports_fsaverage_like_native_coordinates() -> None:
