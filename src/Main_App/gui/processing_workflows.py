@@ -45,6 +45,14 @@ _POST_PROCESSING_STATUS_MESSAGE = (
     "Data processing is complete. FPVS Toolbox is now preparing downstream "
     "analysis outputs."
 )
+_POST_PROCESSING_HARMONICS_TITLE = "Identifying Significant Harmonics"
+_POST_PROCESSING_HARMONICS_MESSAGE = "FPVS Toolbox is currently identifying significant harmonics."
+_POST_PROCESSING_OUTPUTS_TITLE = "Preparing Analysis Outputs"
+_POST_PROCESSING_OUTPUTS_MESSAGE = "FPVS Toolbox is preparing analysis files for downstream tools."
+_POST_PROCESSING_SOURCE_MAPS_TITLE = "Generating Source Maps"
+_POST_PROCESSING_SOURCE_MAPS_MESSAGE = (
+    "Generating source-space maps for 3D visualization of oddball responses."
+)
 
 
 class _PostProcessingPipelineBridge(QObject):
@@ -74,6 +82,61 @@ class _PostProcessingPipelineBridge(QObject):
     @Slot(dict)
     def handle_finished(self, result: dict) -> None:
         self._finished_callback(result)
+
+
+def _post_processing_display_state(message: str) -> tuple[str, str]:
+    """Return a user-facing processing title and message for technical worker progress."""
+    text = str(message or "").strip()
+    lowered = text.lower()
+    if _post_processing_message_mentions_source_maps(lowered):
+        return _POST_PROCESSING_SOURCE_MAPS_TITLE, _POST_PROCESSING_SOURCE_MAPS_MESSAGE
+    if _post_processing_message_mentions_harmonic_selection(lowered):
+        return _POST_PROCESSING_HARMONICS_TITLE, _POST_PROCESSING_HARMONICS_MESSAGE
+    if _post_processing_message_mentions_stats_ready(lowered):
+        return _POST_PROCESSING_OUTPUTS_TITLE, _POST_PROCESSING_OUTPUTS_MESSAGE
+    if "data processing is complete" in lowered:
+        return _POST_PROCESSING_OUTPUTS_TITLE, _POST_PROCESSING_STATUS_MESSAGE
+    return _POST_PROCESSING_OUTPUTS_TITLE, _POST_PROCESSING_OUTPUTS_MESSAGE
+
+
+def _post_processing_message_mentions_source_maps(lowered: str) -> bool:
+    source_map_terms = (
+        "source map",
+        "source-map",
+        "loreta",
+        "eloreta",
+        "l2-mne",
+        "inverse model",
+        "cluster mask",
+        "source-space",
+        "source json",
+        "source-validation",
+        "participant source-map",
+        "participant fullfft workbooks",
+    )
+    return any(term in lowered for term in source_map_terms)
+
+
+def _post_processing_message_mentions_harmonic_selection(lowered: str) -> bool:
+    harmonic_terms = (
+        "significant harmonic",
+        "harmonic selection",
+        "group policy bca aggregation",
+        "fullfft grand-average",
+        "group harmonic",
+        "bca aggregation progress",
+    )
+    return any(term in lowered for term in harmonic_terms)
+
+
+def _post_processing_message_mentions_stats_ready(lowered: str) -> bool:
+    stats_terms = (
+        "stats-ready",
+        "summed bca",
+        "analysis workbook",
+        "downstream tools",
+    )
+    return any(term in lowered for term in stats_terms)
 
 
 def _sync_project_tools_metadata_from_disk(project: Any) -> None:
@@ -362,13 +425,19 @@ def _start_post_processing_pipeline_after_processing(
     worker.moveToThread(thread)
     host._post_processing_pipeline_thread = thread
     host._post_processing_pipeline_worker = worker
+    title_label = getattr(host, "processing_title_label", None)
+    if title_label is not None:
+        title_label.setText(_POST_PROCESSING_OUTPUTS_TITLE)
     message_label = getattr(host, "processing_message_label", None)
     if message_label is not None:
         message_label.setText(_POST_PROCESSING_STATUS_MESSAGE)
 
     def _handle_progress(message: str) -> None:
+        title, display_message = _post_processing_display_state(message)
+        if title_label is not None:
+            title_label.setText(title)
         if message_label is not None:
-            message_label.setText(str(message))
+            message_label.setText(display_message)
 
     def _handle_log_message(message: str, level: int) -> None:
         try:

@@ -89,9 +89,7 @@ class PostProcessingPipelineWorker(QObject):
         )
 
     def _run_harmonic_selection(self) -> PostProcessingStepResult:
-        self._emit_progress(
-            "Data processing is complete. FPVS Toolbox is now creating a list of statistically significant harmonics."
-        )
+        self._emit_progress("FPVS Toolbox is currently identifying significant harmonics.")
         try:
             from Main_App.processing.harmonic_selection_qc import (
                 run_processing_harmonic_selection_qc,
@@ -112,7 +110,7 @@ class PostProcessingPipelineWorker(QObject):
         )
 
     def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
-        self._emit_progress("Generating the Stats-ready Summed BCA workbook for downstream tools...")
+        self._emit_progress("FPVS Toolbox is preparing analysis files for downstream tools.")
         try:
             from Tools.LORETA_Visualizer.stats_ready_workbook import (
                 default_loreta_stats_ready_workbook_path,
@@ -139,9 +137,7 @@ class PostProcessingPipelineWorker(QObject):
         )
 
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
-        self._emit_progress(
-            "Generating LORETA source maps. This can take a while; FPVS Toolbox will report back when it is done."
-        )
+        self._emit_progress("Generating source-space maps for 3D visualization of oddball responses.")
         steps: list[PostProcessingStepResult] = []
         for mode in SOURCE_OUTPUT_MODES:
             steps.append(self._run_source_map_mode(project_root, mode))

@@ -110,6 +110,20 @@ PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
 )
+LORETA_SUMMARY_REPORT_STATUS = "FPVS Toolbox is preparing the LORETA summary report."
+LORETA_SOURCE_MAP_BUILD_STATUS = "Generating source-space maps for 3D visualization of oddball responses."
+CLUSTER_MASK_SIGNIFICANT_STATUS_TEMPLATE = (
+    "The {source_points} displayed here were significant across the group after "
+    "the cluster-based permutation test."
+)
+CLUSTER_MASK_EMPTY_WARNING_TEMPLATE = (
+    "Warning: no {source_points} survived the group-level permutation mask. "
+    "The current view is uncorrected."
+)
+CLUSTER_MASK_DISABLED_WARNING_TEMPLATE = (
+    "Warning: disabling the cluster-based permutation mask will likely show "
+    "{source_points} that were not significant at the group level."
+)
 PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST = "participant_first"
 PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST = "deprecated_group_first"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
@@ -839,6 +853,33 @@ def _underpowered_cluster_mask_status_text(payload: SourcePayload) -> str | None
     )
 
 
+def _cluster_mask_display_status_text(
+    payload: SourcePayload,
+    *,
+    use_cluster_mask: bool,
+) -> tuple[str, str] | None:
+    """Return user-facing banner text and variant for the current cluster-mask display state."""
+    if not _source_payload_uses_zscores(payload):
+        return None
+    source_points = "vertices" if uses_cortical_surface_paint(payload) else "source locations"
+    if payload_cluster_mask_is_empty(payload):
+        return (
+            CLUSTER_MASK_EMPTY_WARNING_TEMPLATE.format(source_points=source_points),
+            "warning",
+        )
+    if not use_cluster_mask and payload_has_cluster_mask(payload):
+        return (
+            CLUSTER_MASK_DISABLED_WARNING_TEMPLATE.format(source_points=source_points),
+            "warning",
+        )
+    if payload_has_cluster_mask(payload):
+        return (
+            CLUSTER_MASK_SIGNIFICANT_STATUS_TEMPLATE.format(source_points=source_points),
+            "info",
+        )
+    return None
+
+
 def _display_mode_allowed_for_payload(payload: SourcePayload, display_mode: str) -> bool:
     if uses_cortical_surface_paint(payload):
         return display_mode in {
@@ -864,19 +905,14 @@ def _source_export_status_text(
     include_flagged_subjects: bool,
     zscore_model: str = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
 ) -> str:
-    flag_text = "including flagged participants" if include_flagged_subjects else "excluding flagged participants"
+    _ = automatic, include_flagged_subjects, zscore_model
     if export_mode == PROJECT_SOURCE_EXPORT_ALL_ZSCORE:
-        action = "Preparing" if automatic else "Building"
-        return f"{action} L2-MNE surface and eLORETA volume source-space z-score maps ({flag_text})..."
-    if automatic:
-        return f"Preparing participant-first project source-space z-score maps ({flag_text})..."
+        return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-        if zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
-            return f"Building deprecated group-first source-space z-score JSON from the active project ({flag_text})..."
-        return f"Building participant-first source-space z-score JSON from the active project ({flag_text})..."
+        return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
-        return f"Building beta eLORETA volume source-space z-score JSON from the active project ({flag_text})..."
-    return f"Building beta L2-MNE source JSON from the active project ({flag_text})..."
+        return LORETA_SOURCE_MAP_BUILD_STATUS
+    return LORETA_SOURCE_MAP_BUILD_STATUS
 
 
 def _source_export_mode_label(export_mode: str) -> str:
@@ -1434,6 +1470,15 @@ class LoretaVisualizerWindow(QWidget):
         selection_layout.addWidget(self.display_mode_combo)
         self._set_display_mode_combo_data(self._display_mode)
 
+        self.cluster_mask_check = QCheckBox("Use group-level mask", selection_section)
+        self.cluster_mask_check.setObjectName("loreta_toolbar_use_cluster_mask_check")
+        self.cluster_mask_check.setChecked(self._use_cluster_mask)
+        self.cluster_mask_check.setToolTip(
+            "Show only source points retained by the group-level cluster permutation mask when one is available."
+        )
+        self.cluster_mask_check.toggled.connect(self._set_cluster_mask_enabled)
+        selection_layout.addWidget(self.cluster_mask_check)
+
         color_section, color_layout = add_control_section("Color")
 
         self.activation_auto_scale_check = QCheckBox("Auto color scale", color_section)
@@ -1665,6 +1710,7 @@ class LoretaVisualizerWindow(QWidget):
         self.export_figures_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
         self._sync_activation_render_mode_controls()
+        self._sync_cluster_mask_control()
         self._sync_project_source_button()
 
     def _sync_project_source_button(self) -> None:
@@ -1764,6 +1810,28 @@ class LoretaVisualizerWindow(QWidget):
             widget.setVisible(split_mode_active)
             widget.setEnabled(self.renderer is not None and split_mode_active)
         self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
+        self._sync_cluster_mask_control()
+
+    def _sync_cluster_mask_control(self) -> None:
+        if not hasattr(self, "cluster_mask_check"):
+            return
+        payload = self._source_activation_payload
+        can_toggle_mask = (
+            self.renderer is not None
+            and payload is not None
+            and _source_payload_uses_zscores(payload)
+            and (
+                payload_has_cluster_mask(payload)
+                or payload_cluster_mask_is_empty(payload)
+                or payload_cluster_mask_is_underpowered(payload)
+            )
+        )
+        previous_block_state = self.cluster_mask_check.blockSignals(True)
+        try:
+            self.cluster_mask_check.setChecked(bool(self._use_cluster_mask))
+            self.cluster_mask_check.setEnabled(can_toggle_mask)
+        finally:
+            self.cluster_mask_check.blockSignals(previous_block_state)
 
     def _set_display_mode_combo_data(self, display_mode: str) -> None:
         if not hasattr(self, "display_mode_combo"):
@@ -2335,12 +2403,15 @@ class LoretaVisualizerWindow(QWidget):
 
     def _set_cluster_mask_enabled(self, enabled: bool) -> None:
         self._use_cluster_mask = bool(enabled)
+        self._sync_cluster_mask_control()
         renderer = self.renderer
         if renderer is not None:
             renderer.set_cortical_paint_cluster_mask_enabled(self._use_cluster_mask)
             if self._source_activation_payload is not None:
                 self._set_activation_payload(self._source_activation_payload)
         self._apply_activation_scalar_range()
+        if self._source_activation_payload is not None:
+            self._set_payload_display_status(self._source_activation_payload)
 
     def _set_transparent_spin_enabled(self, enabled: bool) -> None:
         self._transparent_spin_enabled = bool(enabled)
@@ -2492,7 +2563,7 @@ class LoretaVisualizerWindow(QWidget):
                 variant="info",
             )
             return
-        self._set_source_export_status("Generating the LORETA summary report...", variant="info")
+        self._set_source_export_status(LORETA_SUMMARY_REPORT_STATUS, variant="info")
         self._sync_project_source_button()
         logger.info(
             "loreta_stats_ready_workbook_export_started",
@@ -2517,7 +2588,8 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_stats_ready_workbook_progress(self, message: str) -> None:
-        self._set_source_export_status(str(message), variant="info")
+        _ = message
+        self._set_source_export_status(LORETA_SUMMARY_REPORT_STATUS, variant="info")
 
     @Slot(object)
     def _on_stats_ready_workbook_exported(self, result: object) -> None:
@@ -2566,7 +2638,8 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_project_source_maps_progress(self, message: str) -> None:
-        self._set_source_export_status(message, variant="info")
+        _ = message
+        self._set_source_export_status(LORETA_SOURCE_MAP_BUILD_STATUS, variant="info")
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
@@ -2983,32 +3056,13 @@ class LoretaVisualizerWindow(QWidget):
             self._set_source_export_status(underpowered_text, variant="warning")
             return
         if _source_payload_uses_zscores(payload):
-            source_kind_text = "vertices" if uses_cortical_surface_paint(payload) else "source locations"
-            if not getattr(self, "_use_cluster_mask", True) and payload_has_cluster_mask(payload):
-                exploratory_text = (
-                    f"z >= {format_scalar_value(self._zscore_display_threshold)}"
-                    if uses_cortical_surface_paint(payload)
-                    else "z > 0"
-                )
-                self._set_source_export_status(
-                    (
-                        "Cluster mask display is disabled. Showing exploratory "
-                        f"{exploratory_text} instead."
-                    ),
-                    variant="info",
-                )
-                return
-            if payload_cluster_mask_is_empty(payload):
-                self._set_source_export_status(
-                    f"No {source_kind_text} survived the Hauk et al. (2025) cluster-permutation mask.",
-                    variant="warning",
-                )
-                return
-            if payload_has_cluster_mask(payload):
-                self._set_source_export_status(
-                    "Loaded Hauk et al. (2025) source-estimation cluster mask.",
-                    variant="info",
-                )
+            status = _cluster_mask_display_status_text(
+                payload,
+                use_cluster_mask=getattr(self, "_use_cluster_mask", True),
+            )
+            if status is not None:
+                message, variant = status
+                self._set_source_export_status(message, variant=variant)
                 return
         if _source_payload_uses_zscores(payload) and not payload_has_cluster_mask(payload):
             self._set_source_export_status(

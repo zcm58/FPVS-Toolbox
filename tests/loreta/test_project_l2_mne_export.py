@@ -492,42 +492,44 @@ def test_loreta_project_root_resolver_ignores_empty_string() -> None:
     assert _coerce_existing_project_root("") is None
 
 
-def test_source_export_status_text_reports_flagged_participant_choice() -> None:
+def test_source_export_status_text_uses_user_facing_source_map_message() -> None:
+    expected = "Generating source-space maps for 3D visualization of oddball responses."
+
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
         automatic=True,
         include_flagged_subjects=False,
-    ) == "Preparing L2-MNE surface and eLORETA volume source-space z-score maps (excluding flagged participants)..."
+    ) == expected
 
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
         automatic=False,
         include_flagged_subjects=True,
-    ) == "Building L2-MNE surface and eLORETA volume source-space z-score maps (including flagged participants)..."
+    ) == expected
 
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=False,
         include_flagged_subjects=True,
-    ) == "Building participant-first source-space z-score JSON from the active project (including flagged participants)..."
+    ) == expected
 
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=True,
         include_flagged_subjects=False,
-    ) == "Preparing participant-first project source-space z-score maps (excluding flagged participants)..."
+    ) == expected
 
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=False,
         include_flagged_subjects=False,
         zscore_model=PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
-    ) == "Building deprecated group-first source-space z-score JSON from the active project (excluding flagged participants)..."
+    ) == expected
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
         automatic=False,
         include_flagged_subjects=False,
-    ) == "Building beta eLORETA volume source-space z-score JSON from the active project (excluding flagged participants)..."
+    ) == expected
 
 
 def _fake_source_export_result(output_dir: Path, *, method_id: str, payload_count: int = 1) -> SimpleNamespace:
