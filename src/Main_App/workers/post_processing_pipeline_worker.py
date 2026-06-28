@@ -256,7 +256,7 @@ class PostProcessingPipelineWorker(QObject):
         if not text:
             return
         self.progress.emit(text)
-        self.log_message.emit(text, logging.INFO)
+        self.log_message.emit(text, logging.DEBUG)
 
 
 __all__ = ["PostProcessingPipelineWorker", "PostProcessingStepResult"]

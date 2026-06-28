@@ -243,7 +243,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         # PySide6 now enforces a fixed light theme regardless of OS settings.
         self.log("Appearance Mode: Light (PySide6 fixed light theme)")
         # Announce the active preprocessor (visibility only)
-        logger.info(
+        logger.debug(
             "Using Main App preprocessing module: Main_App.processing.preprocess.perform_preprocessing"
         )
 

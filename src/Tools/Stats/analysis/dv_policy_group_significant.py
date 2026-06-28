@@ -747,7 +747,7 @@ def build_group_significant_harmonic_selection(
             f"for {len(subjects) * len(conditions)} planned workbooks "
             f"in {elapsed:.2f}s."
         )
-        logger.info(
+        logger.debug(
             "stats_group_harmonics_selection_cache_hit",
             extra={
                 "elapsed_s": elapsed,
@@ -768,7 +768,7 @@ def build_group_significant_harmonic_selection(
             f"for {len(subjects) * len(conditions)} planned workbooks "
             f"in {elapsed:.2f}s."
         )
-        logger.info(
+        logger.debug(
             "stats_group_harmonics_project_cache_hit",
             extra={
                 "elapsed_s": elapsed,
@@ -785,7 +785,7 @@ def build_group_significant_harmonic_selection(
         "[PERF] Group harmonic selection cache miss: "
         "building selection from FullFFT amplitude spectra."
     )
-    logger.info(
+    logger.debug(
         "stats_group_harmonics_selection_cache_miss",
         extra={"subjects": len(subjects), "conditions": len(conditions)},
     )
@@ -814,7 +814,7 @@ def build_group_significant_harmonic_selection(
         f"from {len(required.frequency_columns)} available columns "
         f"across {planned_workbook_count} workbooks."
     )
-    logger.info(
+    logger.debug(
         "stats_group_harmonics_column_plan",
         extra={
             "needed_frequency_columns": len(required.usecols) - 1,
@@ -1239,7 +1239,7 @@ def _prepare_group_significant_bca_data(
                 f"(participant={pid}, condition={cond_name}, "
                 f"last_read={read_elapsed:.2f}s, elapsed={elapsed:.2f}s)."
             )
-            logger.info(
+            logger.debug(
                 "stats_group_harmonics_bca_progress",
                 extra={
                     "index": task_index,
@@ -1343,7 +1343,7 @@ def _build_grand_average_amplitude(
                 f"spectra={len(spectra)}, last_read={file_read_elapsed:.2f}s, "
                 f"elapsed={elapsed:.2f}s)."
             )
-            logger.info(
+            logger.debug(
                 "stats_group_harmonics_fullfft_progress",
                 extra={
                     "index": task_index,
@@ -1374,7 +1374,7 @@ def _build_grand_average_amplitude(
         f"{len(spectra)} workbooks x up to {max_frequency_columns_read} frequency columns "
         f"in {elapsed:.2f}s (read phase {read_elapsed:.2f}s)."
     )
-    logger.info(
+    logger.debug(
         "stats_group_harmonics_fullfft_read_done",
         extra={
             "elapsed_s": elapsed,
@@ -1848,7 +1848,7 @@ def _aggregate_bca_for_all_rois(
                 "raw_cell": df_roi.to_dict(orient="index"),
                 "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
             }
-    logger.info(
+    logger.debug(
         "stats_group_harmonics_bca_workbook_done",
         extra={
             "elapsed_s": perf_counter() - started,

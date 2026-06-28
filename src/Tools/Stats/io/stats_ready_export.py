@@ -691,7 +691,7 @@ def prepare_stats_ready_export(
         "Stats-ready export: preparing Summed BCA data "
         f"for {len(subjects)} participants x {len(conditions)} selected conditions."
     )
-    logger.info(
+    logger.debug(
         "stats_ready_prepare_summed_bca_start",
         extra={"subjects": len(subjects), "conditions": len(conditions)},
     )
@@ -718,7 +718,7 @@ def prepare_stats_ready_export(
         "Stats-ready export: Summed BCA data prepared "
         f"in {perf_counter() - started_at:.1f}s; building workbook frames."
     )
-    logger.info(
+    logger.debug(
         "stats_ready_prepare_summed_bca_done",
         extra={"elapsed_s": perf_counter() - started_at},
     )
@@ -738,7 +738,7 @@ def prepare_stats_ready_export(
         "Stats-ready export: workbook frames built "
         f"in {perf_counter() - frames_started:.1f}s."
     )
-    logger.info(
+    logger.debug(
         "stats_ready_frames_built",
         extra={"elapsed_s": perf_counter() - frames_started, "sheets": len(frames)},
     )
@@ -746,13 +746,13 @@ def prepare_stats_ready_export(
     if save_path:
         write_started = perf_counter()
         log_func(f"Stats-ready export: writing workbook to {save_path}.")
-        logger.info("stats_ready_workbook_write_start", extra={"path": str(save_path)})
+        logger.debug("stats_ready_workbook_write_start", extra={"path": str(save_path)})
         workbook_path = write_stats_ready_workbook(save_path, frames)
         log_func(
             "Stats-ready export: workbook write finished "
             f"in {perf_counter() - write_started:.1f}s."
         )
-        logger.info(
+        logger.debug(
             "stats_ready_workbook_write_done",
             extra={"elapsed_s": perf_counter() - write_started, "path": str(save_path)},
         )
@@ -760,7 +760,7 @@ def prepare_stats_ready_export(
         "Stats-ready export: finished "
         f"in {perf_counter() - started_at:.1f}s."
     )
-    logger.info("stats_ready_export_done", extra={"elapsed_s": perf_counter() - started_at})
+    logger.debug("stats_ready_export_done", extra={"elapsed_s": perf_counter() - started_at})
     return StatsReadyExport(
         frames=frames,
         workbook_path=workbook_path,

@@ -963,7 +963,7 @@ def _show_suspicious_remainder(
         report_path = _write_preflight_review_flags(host, rows)
         report_message = f"Review flags saved to: {report_path}"
         try:
-            host.log(report_message, level=logging.WARNING)
+            host.log(report_message, level=logging.DEBUG)
         except (AttributeError, TypeError, RuntimeError):
             pass
     except OSError as exc:

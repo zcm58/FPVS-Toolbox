@@ -193,6 +193,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 ## File Responsibilities
 
 - `gui.py`: embedded PySide6 page, controls, worker wiring, and status text.
+- `method_info.py`: editable user-facing explanatory copy for the LORETA
+  information dialog, including method notes and reference links. No
+  calculation logic.
 - `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity where
   relevant, scalar map, cortical paint display, split-hemisphere publication
   display, and mesh display. It explicitly disables depth peeling so

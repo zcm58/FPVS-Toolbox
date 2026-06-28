@@ -125,7 +125,7 @@ class MpRunnerBridge(QObject):
             [file_path.name for file_path in data_files],
         )
 
-        logger.info(
+        logger.debug(
             "MpRunnerBridge starting run_project_parallel: project_root=%s "
             "save_folder=%s n_files=%d max_workers=%s",
             project_root,
@@ -254,7 +254,7 @@ class MpRunnerBridge(QObject):
 
                 elif mtype == "done":
                     cancelled = bool(msg.get("cancelled", False))
-                    logger.info(
+                    logger.debug(
                         "MpRunnerBridge run complete: files=%d successful=%d cancelled=%s",
                         self._total,
                         len(self._results),

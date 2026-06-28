@@ -711,7 +711,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 allow_ram_cap_bypass,
             )
 
-        log.info(
+        log.debug(
             "Resolved max_workers=%s (cpu_count=%s, ram_gib=%.1f, ram_tier=%s, ram_cap=%s, project_override=%s, override_source=%s, ram_cap_bypass=%s)",
             effective_max_workers,
             cpu_count,

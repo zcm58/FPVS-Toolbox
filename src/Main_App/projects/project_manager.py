@@ -381,14 +381,14 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
     def handle_error(message: str) -> None:
         log_thread_context("handle_error")
         if message == CANCEL_SCAN_MESSAGE:
-            logger.info(
+            logger.debug(
                 "Project scan cancelled for %s.",
                 root,
                 extra={"op": "open_existing_project", "path": str(root)},
             )
             finalize_guard()
             return
-        logger.info(
+        logger.debug(
             "Project scan error for %s: %s",
             root,
             message,
@@ -413,7 +413,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             app = QApplication.instance()
             assert app is not None
             assert QThread.currentThread() == app.thread()
-        logger.info(
+        logger.debug(
             "Project scan finished for %s with %s projects.",
             root,
             len(metadata),
@@ -425,7 +425,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
                 "No Projects Found",
                 f"No projects found under {root}.",
             )
-            logger.info(
+            logger.debug(
                 "No projects discovered under %s.",
                 root,
                 extra={"op": "open_existing_project", "path": str(root)},
@@ -458,7 +458,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             editable=False,
         )
         if not ok or choice not in label_to_metadata:
-            logger.info(
+            logger.debug(
                 "Project selection cancelled.",
                 extra={"op": "open_existing_project", "path": str(root)},
             )
@@ -469,7 +469,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         finalize_guard()
 
         _set_open_existing_action_enabled(self, False)
-        logger.info(
+        logger.debug(
             "Project selection confirmed: %s",
             selected.project_root,
             extra={"op": "open_existing_project", "path": str(root)},
@@ -482,7 +482,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
     job = _ProjectScanJob(root)
     job.setAutoDelete(False)
     self._active_scan_job = job
-    logger.info(
+    logger.debug(
         "Starting project scan under %s.",
         root,
         extra={"op": "open_existing_project", "path": str(root)},
@@ -516,13 +516,13 @@ def _open_selected_project(
         assert app is not None
         assert QThread.currentThread() == app.thread()
     if not _open_selected_project_guard.start():
-        logger.info(
+        logger.debug(
             "Open project request skipped because another open is active.",
             extra={"op": "open_existing_project", "path": str(root)},
         )
         _set_open_existing_action_enabled(self, True)
         return
-    logger.info(
+    logger.debug(
         "Opening project from selection: %s",
         selected.project_root,
         extra={"op": "open_existing_project", "path": str(root)},
@@ -537,7 +537,7 @@ def _open_selected_project(
         self.loadProject(project)
         if hasattr(self, "_on_project_ready"):
             self._on_project_ready()
-        logger.info(
+        logger.debug(
             "Project opened successfully: %s",
             selected.project_root,
             extra={"op": "open_existing_project", "path": str(root)},

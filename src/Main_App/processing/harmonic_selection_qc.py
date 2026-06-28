@@ -50,7 +50,11 @@ def run_processing_harmonic_selection_qc(
 
     project_root = Path(project.project_root).resolve()
     subfolders = getattr(project, "subfolders", {}) or {}
-    excel_root = Path(subfolders.get("excel") or (project_root / "1 - Excel Data Files"))
+    excel_root = _project_subfolder_path(
+        project_root,
+        subfolders.get("excel") if isinstance(subfolders, Mapping) else None,
+        "1 - Excel Data Files",
+    )
     subjects, conditions, subject_data = scan_folder_simple(str(excel_root))
     subjects, subject_data = _filter_to_completed_subjects(
         project_root=project_root,
@@ -185,6 +189,17 @@ def _filter_to_completed_subjects(
     return filtered_subjects, {
         subject: dict(subject_data.get(subject, {})) for subject in filtered_subjects
     }
+
+
+def _project_subfolder_path(
+    project_root: Path,
+    configured: object,
+    default_name: str,
+) -> Path:
+    raw_path = Path(str(configured or default_name))
+    if raw_path.is_absolute():
+        return raw_path
+    return project_root / raw_path
 
 
 def _ordered_conditions(project: Any, scanned_conditions: list[str]) -> list[str]:

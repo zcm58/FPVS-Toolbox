@@ -294,7 +294,7 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
             files.append(info)
     if groups_locked:
         _warn_missing_known_raw_files(project)
-    logger.info(
+    logger.debug(
         "discover_raw_files",
         extra={
             "project_root": str(getattr(project, "project_root", "")),
@@ -433,7 +433,7 @@ def prepare_batch_file_infos(project: "Project") -> List[RawFileInfo]:
     infos = discover_raw_files(project)
     groups = getattr(project, "groups", {}) or {}
     if isinstance(groups, dict) and groups:
-        logger.info(
+        logger.debug(
             "prepare_batch_files_multi_group",
             extra={
                 "project_root": str(getattr(project, "project_root", "")),
@@ -441,7 +441,7 @@ def prepare_batch_file_infos(project: "Project") -> List[RawFileInfo]:
             },
         )
     else:
-        logger.info(
+        logger.debug(
             "prepare_batch_files_single_group",
             extra={
                 "project_root": str(getattr(project, "project_root", "")),

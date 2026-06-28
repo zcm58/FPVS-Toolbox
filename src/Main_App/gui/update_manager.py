@@ -98,7 +98,7 @@ class _CheckJob(QRunnable):
     def run(self) -> None:
         start = perf_counter()
         try:
-            _LOG.info("Checking for updates...")
+            _LOG.debug("Checking for updates...")
             result = _check_for_updates_and_record()
             _safe_emit(self.sigs.result, result)
             if result.update_available:

@@ -1783,7 +1783,7 @@ def run_project_parallel(
     _scavenge_stale_memmaps()
 
     elapsed_seconds = time.perf_counter() - run_started_at
-    logger.info(
+    logger.debug(
         (
             "mp_run_summary num_files=%d completed=%d "
             "max_workers_param=%s max_workers_used=%d "
@@ -1804,7 +1804,7 @@ def run_project_parallel(
     avg_rejected: Optional[float] = None
     if files_with_audit:
         avg_rejected = total_rejected / files_with_audit
-        logger.info(
+        logger.debug(
             "batch_summary average_rejected_channels_per_file=%.2f "
             "files_with_audit=%d total_rejected=%d",
             avg_rejected,
