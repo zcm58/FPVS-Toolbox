@@ -22,8 +22,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QTabWidget,
-    QTextBrowser,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -36,8 +34,9 @@ from Main_App.gui.components import (
     configure_window_surface,
     confirm,
     make_action_button,
+    make_info_button,
+    show_tool_info,
 )
-from Main_App.gui.icons import sidebar_icon
 from Tools.LORETA_Visualizer.cortical_paint import (
     DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
     payload_cluster_mask_is_empty,
@@ -49,7 +48,7 @@ from Tools.LORETA_Visualizer.cortical_paint import (
     uses_cortical_surface_paint,
 )
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
-from Tools.LORETA_Visualizer.method_info import LORETA_METHOD_INFO_HTML
+from Tools.LORETA_Visualizer.method_info import LORETA_METHOD_INFO
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
     PreparedSourceManifestEntry,
     PreparedSourcePayloadImportError,
@@ -1145,27 +1144,6 @@ class SourceMapOptionsDialog(AppDialog):
             self._syncing_threshold_controls = False
 
 
-class LoretaMethodInfoDialog(AppDialog):
-    """Read-only user-facing summary of the LORETA source-map display methods."""
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(
-            "About LORETA Source Maps",
-            parent,
-            size=SurfaceSize(width=660, height=640, min_width=520, min_height=460),
-        )
-
-        browser = QTextBrowser(self)
-        browser.setObjectName("loreta_method_info_browser")
-        browser.setOpenExternalLinks(True)
-        browser.setHtml(LORETA_METHOD_INFO_HTML)
-        self.root_layout.addWidget(browser, 1)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
-        buttons.rejected.connect(self.reject)
-        self.root_layout.addWidget(buttons)
-
-
 class ExportFiguresDialog(AppDialog):
     """Compact launcher for available LORETA figure exports."""
 
@@ -1637,13 +1615,11 @@ class LoretaVisualizerWindow(QWidget):
         options_row.setSpacing(6)
         options_row.addWidget(self.source_options_btn, 1)
 
-        self.loreta_method_info_btn = QToolButton(actions_section)
-        self.loreta_method_info_btn.setObjectName("loreta_method_info_btn")
-        self.loreta_method_info_btn.setIcon(sidebar_icon("info", 16))
-        self.loreta_method_info_btn.setToolTip("About LORETA source maps")
-        self.loreta_method_info_btn.setCursor(Qt.PointingHandCursor)
-        self.loreta_method_info_btn.setProperty("compact", True)
-        self.loreta_method_info_btn.setProperty("iconButton", True)
+        self.loreta_method_info_btn = make_info_button(
+            parent=actions_section,
+            tooltip="About LORETA source maps",
+            object_name="loreta_method_info_btn",
+        )
         self.loreta_method_info_btn.clicked.connect(self._open_loreta_method_info)
         options_row.addWidget(self.loreta_method_info_btn, 0)
         actions_layout.addLayout(options_row)
@@ -1658,8 +1634,7 @@ class LoretaVisualizerWindow(QWidget):
         return controls
 
     def _open_loreta_method_info(self) -> None:
-        dialog = LoretaMethodInfoDialog(self)
-        dialog.exec()
+        show_tool_info(self, LORETA_METHOD_INFO)
 
     def _initialize_renderer(self) -> None:
         try:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from Main_App.gui.components import SurfaceSize, ToolInfoContent
+
 LORETA_METHOD_INFO_HTML = """
 <h2>What This Tool Is Showing</h2>
 <p>
@@ -76,5 +78,11 @@ don't rely on this data as your source of truth.
 </ul>
 """
 
+LORETA_METHOD_INFO = ToolInfoContent(
+    key="loreta_method",
+    title="About LORETA Source Maps",
+    html=LORETA_METHOD_INFO_HTML,
+    size=SurfaceSize(width=660, height=640, min_width=520, min_height=460),
+)
 
-__all__ = ["LORETA_METHOD_INFO_HTML"]
+__all__ = ["LORETA_METHOD_INFO", "LORETA_METHOD_INFO_HTML"]
