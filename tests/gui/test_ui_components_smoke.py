@@ -222,8 +222,11 @@ def test_make_info_button_uses_shared_icon_button_contract(qtbot) -> None:
 
     assert button.objectName() == "demo_info"
     assert button.toolTip() == "About demo"
+    assert button.accessibleName() == "About demo"
+    assert button.accessibleDescription() == "Open a short information dialog about this tool."
     assert button.property("compact") is True
     assert button.property("iconButton") is True
+    assert button.iconSize().width() == 20
     assert not button.icon().isNull()
 
 

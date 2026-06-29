@@ -7,6 +7,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap, QPen
 from PySide6.QtWidgets import QApplication
 
+from Main_App.gui.style_tokens import ACCENT_COLOR
 from Main_App.gui.typography import font_for_role
 
 
@@ -146,3 +147,30 @@ def individual_detectability_icon(size: int = 16) -> QIcon:
 @lru_cache(maxsize=4)
 def settings_icon(size: int = 16) -> QIcon:
     return sidebar_icon("settings", size)
+
+
+@lru_cache(maxsize=4)
+def tool_info_icon(size: int = 20) -> QIcon:
+    """Return a high-contrast filled information glyph for icon-only buttons."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(ACCENT_COLOR))
+
+    center = QPointF(size * 0.50, size * 0.50)
+    painter.drawEllipse(center, size * 0.42, size * 0.42)
+
+    painter.setBrush(QColor("white"))
+    _draw_dot(painter, QPointF(size * 0.50, size * 0.33), size * 0.055)
+
+    pen = QPen(QColor("white"))
+    pen.setWidth(max(2, round(size * 0.14)))
+    pen.setCapStyle(Qt.RoundCap)
+    painter.setPen(pen)
+    painter.drawLine(QPointF(size * 0.50, size * 0.47), QPointF(size * 0.50, size * 0.69))
+
+    painter.end()
+    return QIcon(pixmap)

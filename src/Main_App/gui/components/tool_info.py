@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QDialogButtonBox, QTextBrowser, QToolButton, QWidget
 
-from Main_App.gui.icons import sidebar_icon
+from Main_App.gui.icons import tool_info_icon
 
 from .surfaces import AppDialog, SurfaceSize
 
@@ -55,14 +55,17 @@ def make_info_button(
     parent: QWidget | None = None,
     tooltip: str = "About this tool",
     object_name: str | None = None,
-    size: int = 16,
+    size: int = 20,
 ) -> QToolButton:
     """Create the standard compact information icon button."""
     button = QToolButton(parent)
     if object_name:
         button.setObjectName(object_name)
-    button.setIcon(sidebar_icon("info", size))
+    button.setIcon(tool_info_icon(size))
+    button.setIconSize(QSize(size, size))
     button.setToolTip(tooltip)
+    button.setAccessibleName(tooltip)
+    button.setAccessibleDescription("Open a short information dialog about this tool.")
     button.setCursor(Qt.PointingHandCursor)
     button.setProperty("compact", True)
     button.setProperty("iconButton", True)
