@@ -7,25 +7,24 @@ from Main_App.gui.components import ToolInfoContent
 SNR_PLOTS_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The SNR Plots tool creates publication-oriented spectra from processed FPVS
-Excel files. It lets you select conditions and ROIs, compare conditions when
-needed, customize labels and axis ranges, and save repeatable plot defaults.
+The SNR Plot tool lets you quickly generate SNR plots from your data after processing. You can 
+overlay two conditions on the same figure for comparison, and change your x and y axis titles
+and ranges. 
+
+The tool outputs figures in 600dpi .png and .pdf formats, which should be acceptable for most publications. 
+
 </p>
 
 <h3>Typical Workflow</h3>
-<p>
-Choose the folder containing processed condition workbooks, select the output
-folder, pick the condition and ROI, then generate the spectra. Optional
-comparison overlays and legend labels help prepare figures for review or
-publication drafts.
-</p>
+<ol>
+  <li>Choose the conditions you'd like to plot</li>
+  <li>Select colors for each figures</li>
+  <li>Set your axis ranges</li>
+  <li>Set titles for your legend</li>
+  <li>Generate Plots!</li>
+</ol>
 
-<h3>Output Notes</h3>
-<p>
-Plots are generated from existing processed outputs. Changing labels, colors,
-or axis limits affects the figure presentation only; it does not alter the
-source workbook values.
-</p>
+
 """
 
 SNR_PLOTS_TOOL_INFO = ToolInfoContent(
