@@ -8,22 +8,18 @@ SEQUENCE_FIGURE_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
 The Sequence Figure tool creates a simple FPVS stimulus-sequence illustration
-from user-selected image files. It is meant for methods figures, posters, and
-quick visual explanations of base and oddball presentation timing.
+from your FPVS experiments. You can use this tool to create a high resolution figure for posters, 
+reports, publications, etc. This is certainly not the only way to generate a figure like this - powerpoint or Canva
+may be your preference, but this option was built in as a backup. 
+</p>
 </p>
 
 <h3>Typical Workflow</h3>
 <p>
-Choose the base images and oddball image, confirm the presentation-rate labels,
-select an output folder, and export. The generated assets are table-free figure
-files that can be placed into manuscripts or slides.
+Choose four images that represent the base images from one of your FPVS conditions. The fifth image
+will be displayed as the oddball image in the figure. 
 </p>
 
-<h3>Output Notes</h3>
-<p>
-The exported figure uses the image paths and labels shown in the form. It does
-not inspect EEG data or project analysis outputs.
-</p>
 """
 
 SEQUENCE_FIGURE_TOOL_INFO = ToolInfoContent(
