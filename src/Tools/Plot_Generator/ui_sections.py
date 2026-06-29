@@ -68,8 +68,8 @@ class PlotGeneratorUiSectionsMixin:
         file_layout.setSpacing(6)
         file_grid = QGridLayout()
         file_grid.setContentsMargins(0, 0, 0, 0)
-        file_grid.setHorizontalSpacing(10)
-        file_grid.setVerticalSpacing(4)
+        file_grid.setHorizontalSpacing(12)
+        file_grid.setVerticalSpacing(8)
 
         input_picker = PathPickerRow(
             "Browse...",
@@ -79,7 +79,7 @@ class PlotGeneratorUiSectionsMixin:
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
         self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
         self.folder_edit.setMinimumWidth(220)
-        input_picker.setMinimumWidth(360)
+        input_picker.setMinimumWidth(0)
         browse = input_picker.button
         browse.setToolTip(
             "Select the FOLDER that contains your results excel files"
@@ -99,7 +99,7 @@ class PlotGeneratorUiSectionsMixin:
         self.out_edit.setText(self._defaults.get("output_folder", ""))
         self.out_edit.setToolTip("Folder where plots will be saved")
         self.out_edit.setMinimumWidth(220)
-        output_picker.setMinimumWidth(420)
+        output_picker.setMinimumWidth(0)
         browse_out = output_picker.button
         browse_out.setToolTip("Browse for output folder")
         browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
@@ -111,10 +111,9 @@ class PlotGeneratorUiSectionsMixin:
         output_picker.row_layout.addWidget(open_out, 0)
         self.out_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         save_label = QLabel("Save Plots To:")
-        file_grid.addWidget(save_label, 0, 2)
-        file_grid.addWidget(output_picker, 0, 3)
+        file_grid.addWidget(save_label, 1, 0)
+        file_grid.addWidget(output_picker, 1, 1)
         file_grid.setColumnStretch(1, 1)
-        file_grid.setColumnStretch(3, 1)
 
         file_layout.addLayout(file_grid)
 
