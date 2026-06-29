@@ -13,12 +13,15 @@ from Main_App.gui.components import (
     make_action_button,
     make_action_row,
     make_form_layout,
+    make_info_button,
     show_error,
     show_info,
+    show_tool_info,
 )
 from Main_App.gui.open_paths import open_path_in_file_manager
 
 from .renderer import DEFAULT_IMAGE_COUNT, SequenceFigureResult, SequenceFigureSpec
+from .tool_info import SEQUENCE_FIGURE_TOOL_INFO
 from .worker import SequenceFigureWorker
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
@@ -52,6 +55,15 @@ class SequenceFigureWindow(QWidget):
 
     def _build_image_card(self, layout: QVBoxLayout) -> None:
         card = SectionCard("Stimulus Images", self, object_name="sequence_figure_images")
+        self.sequence_figure_info_btn = make_info_button(
+            parent=card,
+            tooltip="About Sequence Figure",
+            object_name="sequence_figure_tool_info_btn",
+        )
+        self.sequence_figure_info_btn.clicked.connect(
+            lambda: show_tool_info(self, SEQUENCE_FIGURE_TOOL_INFO)
+        )
+        card.header.add_action_widget(self.sequence_figure_info_btn)
         form = make_form_layout()
         self.image_rows: list[PathPickerRow] = []
         for index in range(DEFAULT_IMAGE_COUNT):

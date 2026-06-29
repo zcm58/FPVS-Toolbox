@@ -30,11 +30,14 @@ from Main_App.gui.components import (
     fixed_width_font,
     make_action_button,
     make_form_layout,
+    make_info_button,
+    show_tool_info,
 )
 from Tools.Plot_Generator.gui_settings import (
     _LEGEND_DEFAULT_A_PEAKS,
     _LEGEND_DEFAULT_B_PEAKS,
 )
+from Tools.Plot_Generator.tool_info import SNR_PLOTS_TOOL_INFO
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 
 
@@ -51,6 +54,15 @@ class PlotGeneratorUiSectionsMixin:
         root_layout.setContentsMargins(8, 8, 8, 8)
         root_layout.setSpacing(8)
         file_box = SectionCard("File I/O")
+        self.snr_plots_info_btn = make_info_button(
+            parent=file_box,
+            tooltip="About SNR Plots",
+            object_name="snr_plots_tool_info_btn",
+        )
+        self.snr_plots_info_btn.clicked.connect(
+            lambda: show_tool_info(self, SNR_PLOTS_TOOL_INFO)
+        )
+        file_box.header.add_action_widget(self.snr_plots_info_btn)
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         file_layout = file_box.content_layout
         file_layout.setSpacing(6)

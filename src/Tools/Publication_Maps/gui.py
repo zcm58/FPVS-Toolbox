@@ -40,12 +40,13 @@ from Main_App.gui.components import (
     SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
+    confirm,
     make_action_button,
     make_form_layout,
-    confirm,
+    make_info_button,
     show_error,
+    show_tool_info,
 )
-from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Publication_Maps.excel_inputs import discover_conditions
 from Tools.Publication_Maps.models import (
     ColorBounds,
@@ -55,7 +56,9 @@ from Tools.Publication_Maps.models import (
     PublicationMapRequest,
     PublicationMetric,
 )
+from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO
 from Tools.Publication_Maps.worker import PublicationMapsWorker
+from Tools.Stats.data.shared_rois import load_rois_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +144,15 @@ class PublicationMapsWindow(QWidget):
 
     def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="publication_maps_input")
+        self.scalp_maps_info_btn = make_info_button(
+            parent=group,
+            tooltip="About Scalp Maps",
+            object_name="scalp_maps_tool_info_btn",
+        )
+        self.scalp_maps_info_btn.clicked.connect(
+            lambda: show_tool_info(self, SCALP_MAPS_TOOL_INFO)
+        )
+        group.header.add_action_widget(self.scalp_maps_info_btn)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         form = make_form_layout()
 

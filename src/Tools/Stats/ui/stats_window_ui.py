@@ -1,6 +1,9 @@
 """UI assembly for StatsWindow."""
+# ruff: noqa: F405
 from __future__ import annotations
 
+from Main_App.gui.components import make_info_button, show_tool_info
+from Tools.Stats.tool_info import STATS_TOOL_INFO
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
@@ -457,6 +460,15 @@ class StatsWindowUiMixin:
         file_box = SectionCard("File I/O")
         file_box.setObjectName("stats_file_io_section")
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
+        self.stats_tool_info_btn = make_info_button(
+            parent=file_box,
+            tooltip="About Statistical Analysis",
+            object_name="stats_tool_info_btn",
+        )
+        self.stats_tool_info_btn.clicked.connect(
+            lambda: show_tool_info(self, STATS_TOOL_INFO)
+        )
+        file_box.header.add_action_widget(self.stats_tool_info_btn)
         file_layout = file_box.content_layout
         file_layout.setSpacing(6)
         file_grid = QGridLayout()
