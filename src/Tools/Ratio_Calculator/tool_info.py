@@ -7,24 +7,23 @@ from Main_App.gui.components import ToolInfoContent
 RATIO_CALCULATOR_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The Ratio Calculator compares two processed FPVS condition folders and exports
-participant-level and group-level ratio summaries. It is useful when a project
-needs a normalized response measure, such as one condition divided by another.
+The Ratio Calculator tool is an experimental tool designed to allow you to explore the ratio 
+between two of your FPVS conditions. This exploratory measure might be useful in cases where you'd like to conduct
+between participant analysis. By dividing two conditions together, you get a normalized ratio that makes comparison 
+more simple. However, there are some caveats. 
+
+The ratio tool uses BCA values in the numerator and denominator. Numbers very close to zero can significantly inflate
+or deflate this ratio, so use this sparingly. 
 </p>
 
 <h3>Typical Workflow</h3>
 <p>
 Pick condition A and condition B, confirm the paired participant set, review
 optional participant exclusions, and run the calculation. The tool writes
-tables, plots, and logs to the selected output folder.
+tables, plots, and logs to your selected output folder. 
 </p>
 
-<h3>Interpretation Notes</h3>
-<p>
-Ratios can be sensitive to very small denominators and participant-level
-outliers. Review the exported diagnostics before using the summaries for
-manuscript language.
-</p>
+
 """
 
 RATIO_CALCULATOR_TOOL_INFO = ToolInfoContent(
