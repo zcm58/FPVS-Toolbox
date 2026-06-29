@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from typing import Callable, Optional, TYPE_CHECKING
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
-from Main_App.gui.components import SurfaceSize, configure_window_surface
+from Main_App.gui.components import (
+    SurfaceSize,
+    configure_window_surface,
+    make_info_button,
+    show_tool_info,
+)
 
 from .gui_condition_selection import RatioConditionSelectionMixin
 from .gui_participants import RatioParticipantsMixin
@@ -14,6 +19,7 @@ from .gui_run_workflow import RatioRunWorkflowMixin
 from .gui_sections import RatioSectionsMixin
 from .gui_settings import RatioSettingsMixin
 from .roi_provider import load_ratio_rois
+from .tool_info import RATIO_CALCULATOR_TOOL_INFO
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -71,6 +77,15 @@ class RatioCalculatorWindow(
         self.advanced_tab = QWidget()
         self.tabs.addTab(self.basic_tab, "Basic")
         self.tabs.addTab(self.advanced_tab, "Advanced")
+        self.ratio_calculator_info_btn = make_info_button(
+            parent=self.tabs,
+            tooltip="About Ratio Calculator",
+            object_name="ratio_calculator_tool_info_btn",
+        )
+        self.ratio_calculator_info_btn.clicked.connect(
+            lambda: show_tool_info(self, RATIO_CALCULATOR_TOOL_INFO)
+        )
+        self.tabs.setCornerWidget(self.ratio_calculator_info_btn, Qt.TopRightCorner)
 
         self._build_basic_tab()
         self._build_advanced_tab()

@@ -21,6 +21,8 @@ from Main_App.gui.components import (
     SurfaceSize,
     configure_window_surface,
     make_action_button,
+    make_info_button,
+    show_tool_info,
 )
 
 # --- Ported Mixin Imports ---
@@ -29,6 +31,7 @@ from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
 from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
 from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
 from .advanced_analysis_post import AdvancedAnalysisPostMixin
+from .tool_info import EPOCH_AVERAGING_TOOL_INFO
 
 
 class AdvancedAveragingWindow(
@@ -87,6 +90,15 @@ class AdvancedAveragingWindow(
 
         # Row 1: Explanatory Box
         info_box = SectionCard("Advanced Averaging")
+        self.epoch_averaging_info_btn = make_info_button(
+            parent=info_box,
+            tooltip="About Epoch Averaging",
+            object_name="epoch_averaging_tool_info_btn",
+        )
+        self.epoch_averaging_info_btn.clicked.connect(
+            lambda: show_tool_info(self, EPOCH_AVERAGING_TOOL_INFO)
+        )
+        info_box.header.add_action_widget(self.epoch_averaging_info_btn)
         info_layout = info_box.content_layout
         info_label = QLabel(
             "This tool should be used if you have multiple FPVS Conditions "

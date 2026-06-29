@@ -39,7 +39,9 @@ from Main_App.gui.components import (
     confirm,
     make_action_button,
     make_form_layout,
+    make_info_button,
     show_error,
+    show_tool_info,
 )
 from Tools.Publication_Report.discovery import discover_conditions, resolve_project_paths
 from Tools.Publication_Report.models import (
@@ -51,6 +53,7 @@ from Tools.Publication_Report.models import (
     default_report_rois,
     report_rois_from_settings_pairs,
 )
+from Tools.Publication_Report.tool_info import PUBLICATION_REPORT_TOOL_INFO
 from Tools.Publication_Report.worker import PublicationReportWorker
 
 logger = logging.getLogger(__name__)
@@ -136,6 +139,15 @@ class PublicationReportWindow(QWidget):
 
     def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="publication_report_input")
+        self.publication_report_info_btn = make_info_button(
+            parent=group,
+            tooltip="About Publication Report",
+            object_name="publication_report_tool_info_btn",
+        )
+        self.publication_report_info_btn.clicked.connect(
+            lambda: show_tool_info(self, PUBLICATION_REPORT_TOOL_INFO)
+        )
+        group.header.add_action_widget(self.publication_report_info_btn)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         form = make_form_layout()
 

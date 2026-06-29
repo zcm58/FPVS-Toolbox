@@ -43,7 +43,9 @@ from Main_App.gui.components import (
     make_action_button,
     make_form_layout,
     make_section_grid_layout,
+    make_info_button,
     show_error,
+    show_tool_info,
 )
 
 from .core import (
@@ -54,6 +56,7 @@ from .core import (
     sanitize_filename_stem,
 )
 from .worker import IndividualDetectabilityWorker, RunRequest
+from .tool_info import INDIVIDUAL_DETECTABILITY_TOOL_INFO
 
 
 logger = logging.getLogger(__name__)
@@ -141,6 +144,15 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="individual_detectability_input")
+        self.individual_detectability_info_btn = make_info_button(
+            parent=group,
+            tooltip="About Individual Detectability",
+            object_name="individual_detectability_tool_info_btn",
+        )
+        self.individual_detectability_info_btn.clicked.connect(
+            lambda: show_tool_info(self, INDIVIDUAL_DETECTABILITY_TOOL_INFO)
+        )
+        group.header.add_action_widget(self.individual_detectability_info_btn)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         layout = make_form_layout()
 
