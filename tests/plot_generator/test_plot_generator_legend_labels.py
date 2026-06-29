@@ -137,11 +137,11 @@ def test_reset_legend_defaults(qtbot, tmp_path, monkeypatch):
 
     win.legend_reset_btn.click()
 
-    assert win.legend_custom_check.isChecked() is False
-    assert win.legend_condition_a_edit.isEnabled() is False
-    assert win.legend_condition_b_edit.isEnabled() is False
-    assert win.legend_a_peaks_edit.isEnabled() is False
-    assert win.legend_b_peaks_edit.isEnabled() is False
+    assert win.legend_custom_check.isChecked() is True
+    assert win.legend_condition_a_edit.isEnabled() is True
+    assert win.legend_condition_b_edit.isEnabled() is True
+    assert win.legend_a_peaks_edit.isEnabled() is True
+    assert win.legend_b_peaks_edit.isEnabled() is True
     assert win.legend_condition_a_edit.text() == "CondA"
     assert win.legend_condition_b_edit.text() == "CondB"
     assert win.legend_a_peaks_edit.text() == "CondA Peaks"

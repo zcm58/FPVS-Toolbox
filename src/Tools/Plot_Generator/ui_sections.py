@@ -215,6 +215,7 @@ class PlotGeneratorUiSectionsMixin:
         legend_layout = self.legend_group.content_layout
         legend_layout.setSpacing(10)
         self.legend_custom_check = QCheckBox("Custom legend labels")
+        self.legend_custom_check.setChecked(True)
         self.legend_custom_check.toggled.connect(self._toggle_custom_legend_labels)
         legend_header = QHBoxLayout()
         legend_header.setContentsMargins(0, 0, 0, 0)

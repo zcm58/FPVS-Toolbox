@@ -45,6 +45,8 @@ def _project_plot_input_folder(
 class PlotGeneratorSettingsMixin:
     """Project and legend settings helpers for PlotGeneratorWindow."""
 
+    _DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED = True
+
     def _legend_peaks_default(self, condition_label: str, fallback: str) -> str:
         label = condition_label.strip()
         return f"{label} Peaks" if label else fallback
@@ -201,7 +203,7 @@ class PlotGeneratorSettingsMixin:
     def _reset_legend_defaults(self) -> None:
         self._legend_manual_overrides.clear()
         defaults = self._legend_default_values()
-        self.legend_custom_check.setChecked(False)
+        self.legend_custom_check.setChecked(self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED)
         self._syncing_legend_defaults = True
         try:
             self.legend_condition_a_edit.setText(defaults["condition_a_label"])
@@ -211,10 +213,19 @@ class PlotGeneratorSettingsMixin:
         finally:
             self._syncing_legend_defaults = False
         self._legend_auto_values = dict(defaults)
-        self.legend_condition_a_edit.setEnabled(False)
-        self.legend_condition_b_edit.setEnabled(False)
-        self.legend_a_peaks_edit.setEnabled(False)
-        self.legend_b_peaks_edit.setEnabled(False)
+        show_b = self.overlay_check.isChecked() or (
+            hasattr(self, "_group_overlay_enabled") and self._group_overlay_enabled()
+        )
+        self.legend_condition_a_edit.setEnabled(
+            self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED
+        )
+        self.legend_condition_b_edit.setEnabled(
+            self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED and show_b
+        )
+        self.legend_a_peaks_edit.setEnabled(self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED)
+        self.legend_b_peaks_edit.setEnabled(
+            self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED and show_b
+        )
         if not self._ui_initializing:
             self._persist_legend_settings()
 
@@ -269,7 +280,14 @@ class PlotGeneratorSettingsMixin:
                     labels = snr_section.get("legend_labels", {})
         if not isinstance(labels, dict):
             labels = {}
-        self.legend_custom_check.setChecked(bool(labels.get("custom_labels_enabled", False)))
+        self.legend_custom_check.setChecked(
+            bool(
+                labels.get(
+                    "custom_labels_enabled",
+                    self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED,
+                )
+            )
+        )
         loaded = {
             "condition_a_label": str(
                 labels.get("condition_a_label", defaults["condition_a_label"])
