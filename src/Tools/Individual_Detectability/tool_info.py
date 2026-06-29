@@ -7,10 +7,11 @@ from Main_App.gui.components import ToolInfoContent
 INDIVIDUAL_DETECTABILITY_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The Individual Detectability tool estimates whether each participant shows a
-detectable FPVS response for selected conditions. It produces participant-first
-summaries, electrode-level outputs, and optional figures for reviewing
-individual response reliability.
+The Individual Detectability tool mirrors the approach laid out in David et al. (2025) to evaluate
+responses at the level of the individual across your FPVS condition. It produces scalp topography maps for
+each participant and plots z-scores. This also evaluates the number of significant electrodes on a per-participant
+basis. False discovery rate (FDR) correction is built in to this process. 
+
 </p>
 
 <h3>Typical Workflow</h3>
