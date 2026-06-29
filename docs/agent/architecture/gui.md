@@ -174,6 +174,13 @@ When migrating more action rows, preserve button labels, order, variants,
 enabled states, signal connections, and object names, then add focused smoke
 coverage for the touched surface.
 
+`ToolInfoContent`, `ToolInfoDialog`, `make_info_button`, and `show_tool_info`
+provide the shared modal information-dialog path for tool-level explanatory
+copy. Keep the modal shell, browser/link behavior, close-button behavior, icon
+button properties, and theme-facing presentation in `Main_App.gui.components`;
+keep each tool's editable user-facing text in a small tool-local Python content
+module.
+
 `PathPickerRow` is used by Plot Generator and Individual Detectability.
 `StatusBanner` is used by Stats, Ratio Calculator, and Individual Detectability.
 Keep path defaults, filters, settings keys,
