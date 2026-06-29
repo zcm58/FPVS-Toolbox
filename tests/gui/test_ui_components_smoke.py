@@ -28,8 +28,11 @@ from Main_App.gui.components import (
     make_action_button,
     make_action_row,
     make_form_layout,
+    make_info_button,
     make_remove_button,
     show_warning,
+    ToolInfoContent,
+    ToolInfoDialog,
 )
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.theme import apply_fpvs_theme
@@ -45,6 +48,8 @@ EXPECTED_COMPONENT_EXPORTS = (
     "StatusBanner",
     "SubsectionHeaderLabel",
     "SurfaceSize",
+    "ToolInfoContent",
+    "ToolInfoDialog",
     "apply_font_role",
     "confirm",
     "configure_window_surface",
@@ -53,10 +58,13 @@ EXPECTED_COMPONENT_EXPORTS = (
     "make_action_button",
     "make_action_row",
     "make_form_layout",
+    "make_info_button",
     "make_remove_button",
     "make_section_grid_layout",
+    "matplotlib_font_kwargs",
     "show_error",
     "show_info",
+    "show_tool_info",
     "show_warning",
 )
 
@@ -78,6 +86,8 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import StatusBanner as ImportedStatusBanner
     from Main_App.gui.components import SubsectionHeaderLabel as ImportedSubsectionHeaderLabel
     from Main_App.gui.components import SurfaceSize as ImportedSurfaceSize
+    from Main_App.gui.components import ToolInfoContent as ImportedToolInfoContent
+    from Main_App.gui.components import ToolInfoDialog as ImportedToolInfoDialog
     from Main_App.gui.components import apply_font_role as imported_apply_font_role
     from Main_App.gui.components import confirm as imported_confirm
     from Main_App.gui.components import configure_window_surface as imported_configure_window_surface
@@ -86,10 +96,13 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import make_action_button as imported_make_action_button
     from Main_App.gui.components import make_action_row as imported_make_action_row
     from Main_App.gui.components import make_form_layout as imported_make_form_layout
+    from Main_App.gui.components import make_info_button as imported_make_info_button
     from Main_App.gui.components import make_remove_button as imported_make_remove_button
     from Main_App.gui.components import make_section_grid_layout as imported_make_section_grid_layout
+    from Main_App.gui.components import matplotlib_font_kwargs as imported_matplotlib_font_kwargs
     from Main_App.gui.components import show_error as imported_show_error
     from Main_App.gui.components import show_info as imported_show_info
+    from Main_App.gui.components import show_tool_info as imported_show_tool_info
     from Main_App.gui.components import show_warning as imported_show_warning
 
     imported = {
@@ -103,6 +116,8 @@ def test_component_consumer_import_style_remains_available() -> None:
         "StatusBanner": ImportedStatusBanner,
         "SubsectionHeaderLabel": ImportedSubsectionHeaderLabel,
         "SurfaceSize": ImportedSurfaceSize,
+        "ToolInfoContent": ImportedToolInfoContent,
+        "ToolInfoDialog": ImportedToolInfoDialog,
         "apply_font_role": imported_apply_font_role,
         "confirm": imported_confirm,
         "configure_window_surface": imported_configure_window_surface,
@@ -111,10 +126,13 @@ def test_component_consumer_import_style_remains_available() -> None:
         "make_action_button": imported_make_action_button,
         "make_action_row": imported_make_action_row,
         "make_form_layout": imported_make_form_layout,
+        "make_info_button": imported_make_info_button,
         "make_remove_button": imported_make_remove_button,
         "make_section_grid_layout": imported_make_section_grid_layout,
+        "matplotlib_font_kwargs": imported_matplotlib_font_kwargs,
         "show_error": imported_show_error,
         "show_info": imported_show_info,
+        "show_tool_info": imported_show_tool_info,
         "show_warning": imported_show_warning,
     }
 
@@ -196,6 +214,17 @@ def test_make_remove_button_uses_outlined_icon_button_contract(qtbot) -> None:
     assert button.width() == EVENT_REMOVE_BUTTON_SIZE
     assert button.height() == EVENT_REMOVE_BUTTON_SIZE
     assert button.font().bold()
+
+
+def test_make_info_button_uses_shared_icon_button_contract(qtbot) -> None:
+    button = make_info_button(tooltip="About demo", object_name="demo_info")
+    qtbot.addWidget(button)
+
+    assert button.objectName() == "demo_info"
+    assert button.toolTip() == "About demo"
+    assert button.property("compact") is True
+    assert button.property("iconButton") is True
+    assert not button.icon().isNull()
 
 
 def test_section_card_exposes_header_and_content_layout(qtbot) -> None:
@@ -393,6 +422,23 @@ def test_component_surface_helpers_configure_top_level_widgets(qtbot) -> None:
 
     assert dialog.windowTitle() == "Updated"
     assert dialog.minimumHeight() == 300
+
+
+def test_component_tool_info_dialog_uses_shared_shell(qtbot) -> None:
+    content = ToolInfoContent(
+        key="demo_tool",
+        title="About Demo Tool",
+        html="<h2>Demo Tool</h2><p>Short editable copy.</p>",
+    )
+    dialog = ToolInfoDialog(content)
+    qtbot.addWidget(dialog)
+
+    assert dialog.objectName() == "demo_tool_tool_info_dialog"
+    assert dialog.windowTitle() == "About Demo Tool"
+    assert dialog.property("fpvsSurface") is True
+    assert dialog.browser.objectName() == "demo_tool_tool_info_browser"
+    assert dialog.browser.openExternalLinks()
+    assert "Short editable copy." in dialog.browser.toHtml()
 
 
 def test_component_action_row_adds_buttons(qtbot) -> None:
