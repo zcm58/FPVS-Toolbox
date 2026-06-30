@@ -33,7 +33,11 @@ import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
-from Tools.Publication_Maps.gui import PublicationMapsWindow
+from Tools.Publication_Maps.gui import (
+    SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT,
+    SCALP_MAPS_TOP_ROW_MIN_HEIGHT,
+    PublicationMapsWindow,
+)
 from Tools.Publication_Report.gui import PublicationReportWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow
@@ -631,6 +635,14 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert run_card is not None
     assert conditions_card.geometry().top() == settings_card.geometry().top()
     assert output_card.geometry().top() == run_card.geometry().top()
+    assert conditions_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
+    assert settings_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
+    assert output_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
+    assert run_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
+    assert abs(conditions_card.geometry().bottom() - settings_card.geometry().bottom()) <= 1
+    assert abs(output_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
+    assert abs(conditions_card.geometry().width() - settings_card.geometry().width()) <= 1
+    assert abs(output_card.geometry().width() - run_card.geometry().width()) <= 1
     assert not settings_card.header.isVisible()
     assert not hasattr(page, "base_freq_value")
     assert not hasattr(page, "bca_limit_value")

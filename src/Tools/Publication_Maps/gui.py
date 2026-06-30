@@ -63,6 +63,8 @@ from Tools.Stats.data.shared_rois import load_rois_from_settings
 logger = logging.getLogger(__name__)
 
 SCALP_MAPS_OUTPUT_FOLDER = "4 - Scalp Maps"
+SCALP_MAPS_TOP_ROW_MIN_HEIGHT = 340
+SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT = 240
 
 
 class PublicationMapsWindow(QWidget):
@@ -110,15 +112,17 @@ class PublicationMapsWindow(QWidget):
         body.setVerticalSpacing(8)
         layout.addLayout(body, 1)
 
-        body.setColumnStretch(0, 4)
-        body.setColumnStretch(1, 6)
+        body.setColumnStretch(0, 1)
+        body.setColumnStretch(1, 1)
         body.setRowStretch(0, 0)
         body.setRowStretch(1, 0)
         body.setRowStretch(2, 1)
-        body.addWidget(self._build_conditions_group(), 0, 0, Qt.AlignTop)
-        body.addWidget(self._build_settings_group(), 0, 1, Qt.AlignTop)
-        body.addWidget(self._build_output_group(), 1, 0, Qt.AlignTop)
-        body.addWidget(self._build_run_group(), 1, 1, Qt.AlignTop)
+        body.setRowMinimumHeight(0, SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
+        body.setRowMinimumHeight(1, SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
+        body.addWidget(self._build_conditions_group(), 0, 0)
+        body.addWidget(self._build_settings_group(), 0, 1)
+        body.addWidget(self._build_output_group(), 1, 0)
+        body.addWidget(self._build_run_group(), 1, 1)
 
         self._apply_button_icons()
         self._set_default_paths()
@@ -176,11 +180,13 @@ class PublicationMapsWindow(QWidget):
 
     def _build_conditions_group(self) -> SectionCard:
         group = SectionCard("Conditions", object_name="publication_maps_conditions")
-        group.set_compact(330)
+        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.conditions_list = QListWidget(group)
         self.conditions_list.setMinimumHeight(140)
         self.conditions_list.setMaximumHeight(220)
+        self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.conditions_list.itemChanged.connect(lambda _item: self._update_run_state())
         self.conditions_summary = QLabel("Selected conditions: 0 | Total files: 0")
         self.conditions_summary.setProperty("caption", True)
@@ -201,7 +207,8 @@ class PublicationMapsWindow(QWidget):
     def _build_settings_group(self) -> SectionCard:
         group = SectionCard("", object_name="publication_maps_settings")
         group.header.hide()
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         form = make_form_layout()
 
         self.metric_bca_check = QCheckBox("BCA", group)
@@ -357,7 +364,8 @@ class PublicationMapsWindow(QWidget):
 
     def _build_output_group(self) -> SectionCard:
         group = SectionCard("Output", object_name="publication_maps_output")
-        group.set_compact(360)
+        group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         form = make_form_layout()
 
         self.output_root_row = PathPickerRow(
@@ -437,7 +445,8 @@ class PublicationMapsWindow(QWidget):
 
     def _build_run_group(self) -> SectionCard:
         group = SectionCard("Run", object_name="publication_maps_run")
-        group.set_compact(260)
+        group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.progress = QProgressBar(group)
         self.progress.setValue(0)
