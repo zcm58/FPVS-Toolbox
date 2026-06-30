@@ -17,6 +17,12 @@ from Tools.Stats.analysis.dv_policy_settings import (
     normalize_dv_policy,
 )
 from Tools.Stats.data.group_harmonic_cache import project_processing_signature_hash
+from Tools.Stats.analysis.canonical_harmonics import (
+    CANONICAL_HARMONIC_SOURCE,
+    CUSTOM_HARMONIC_SOURCE,
+    SharedHarmonicSelection,
+    select_canonical_group_harmonics,
+)
 
 __all__ = [
     "DVPolicySettings",
@@ -24,8 +30,12 @@ __all__ = [
     "FIXED_PREDEFINED_DEFAULT_FREQUENCIES",
     "GROUP_SIGNIFICANT_POLICY_NAME",
     "LOCKED_ODDBALL_FREQUENCY_HZ",
+    "CANONICAL_HARMONIC_SOURCE",
+    "CUSTOM_HARMONIC_SOURCE",
+    "SharedHarmonicSelection",
     "normalize_dv_policy",
     "prepare_summed_bca_data",
+    "select_canonical_group_harmonics",
 ]
 
 _DV_DATA_CACHE: dict[tuple, tuple[Dict[str, Dict[str, Dict[str, float]]], dict]] = {}

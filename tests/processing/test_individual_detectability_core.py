@@ -19,6 +19,11 @@ from Tools.Individual_Detectability.worker import (
     IndividualDetectabilityWorker,
     RunRequest,
 )
+from Tools.Stats.analysis.canonical_harmonics import (
+    CANONICAL_HARMONIC_SOURCE,
+    CUSTOM_HARMONIC_SOURCE,
+    SharedHarmonicSelection,
+)
 
 
 def test_parse_participant_id_scp_variants() -> None:
@@ -127,10 +132,14 @@ def test_worker_forces_png_export_with_pdf(tmp_path: Path, monkeypatch) -> None:
     request = RunRequest(
         input_root=tmp_path,
         output_root=tmp_path / "out",
+        project_root=None,
         conditions=[condition],
         output_stems={"CondA": "cond_a_grid"},
         excluded_participants=set(),
-        settings=DetectabilitySettings(),
+        settings=DetectabilitySettings(
+            harmonic_source=CUSTOM_HARMONIC_SOURCE,
+            oddball_harmonics_hz=[1.2, 2.4],
+        ),
     )
     seen: dict[str, object] = {}
 
@@ -152,8 +161,83 @@ def test_worker_forces_png_export_with_pdf(tmp_path: Path, monkeypatch) -> None:
     worker._run()
 
     assert seen["export_png"] is True
-    assert (tmp_path / "out" / "CondA" / "cond_a_grid.pdf").exists()
-    assert (tmp_path / "out" / "CondA" / "cond_a_grid.png").exists()
+    assert (tmp_path / "out" / "CondA" / "cond_a_grid_custom_harmonics.pdf").exists()
+    assert (tmp_path / "out" / "CondA" / "cond_a_grid_custom_harmonics.png").exists()
+    assert (tmp_path / "out" / "individual_detectability_custom_harmonics_metadata.json").exists()
+
+
+def test_worker_resolves_canonical_harmonics_before_generating_figures(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from Tools.Individual_Detectability import worker as worker_mod
+
+    cond_dir = tmp_path / "CondA"
+    cond_dir.mkdir()
+    file_p1 = cond_dir / "P1_CondA_Results.xlsx"
+    file_p2 = cond_dir / "P2_CondA_Results.xlsx"
+    file_p1.write_text("placeholder")
+    file_p2.write_text("placeholder")
+    condition = ConditionInfo(name="CondA", path=cond_dir, files=[file_p2, file_p1])
+    request = RunRequest(
+        input_root=tmp_path,
+        output_root=tmp_path / "out",
+        project_root=tmp_path,
+        conditions=[condition],
+        output_stems={"CondA": "cond_a_grid"},
+        excluded_participants={"P2"},
+        settings=DetectabilitySettings(),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_select_canonical_group_harmonics(**kwargs):
+        captured.update(kwargs)
+        return SharedHarmonicSelection(
+            source=CANONICAL_HARMONIC_SOURCE,
+            selected_harmonics_hz=(1.2, 2.4),
+            metadata={},
+            fingerprint={},
+            fingerprint_text="FPVS Toolbox significant harmonics | selected: 1.2, 2.4 Hz",
+            output_label="fpvs_toolbox_significant_harmonics",
+        )
+
+    def fake_generate_condition_figure(**kwargs):
+        settings = kwargs["settings"]
+        seen_settings["source"] = settings.harmonic_source
+        seen_settings["harmonics"] = list(settings.oddball_harmonics_hz)
+        output_dir = kwargs["output_dir"]
+        stem = sanitize_filename_stem(kwargs["output_stem"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / f"{stem}.pdf").write_bytes(b"%PDF-test")
+        (output_dir / f"{stem}.png").write_bytes(b"png-test")
+        return (1, 1)
+
+    seen_settings: dict[str, object] = {}
+    monkeypatch.setattr(
+        worker_mod,
+        "select_canonical_group_harmonics",
+        fake_select_canonical_group_harmonics,
+    )
+    monkeypatch.setattr(worker_mod, "analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(worker_mod, "analysis_bca_upper_limit_hz", lambda: 16.8)
+    monkeypatch.setattr(worker_mod, "load_rois_from_settings", lambda: {"LOT": ["P7"]})
+    monkeypatch.setattr(
+        "Tools.Individual_Detectability.worker.generate_condition_figure",
+        fake_generate_condition_figure,
+    )
+
+    worker = IndividualDetectabilityWorker(request)
+    worker._run()
+
+    assert captured["subjects"] == ["P1"]
+    assert captured["conditions"] == ["CondA"]
+    assert captured["subject_data"] == {"P1": {"CondA": str(file_p1)}}
+    assert captured["rois"] == {"LOT": ["P7"]}
+    assert seen_settings["source"] == CANONICAL_HARMONIC_SOURCE
+    assert seen_settings["harmonics"] == [1.2, 2.4]
+    metadata = tmp_path / "out" / "individual_detectability_metadata.json"
+    assert metadata.exists()
+    assert "FPVS Toolbox significant harmonics" in metadata.read_text(encoding="utf-8")
 
 
 def _amplitude_by_bin(harmonic_bins: tuple[int, ...], target_value: float) -> dict[int, float]:

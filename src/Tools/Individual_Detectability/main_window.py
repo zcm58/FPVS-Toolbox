@@ -48,6 +48,10 @@ from Main_App.gui.components import (
     show_tool_info,
 )
 
+from Tools.Stats.analysis.canonical_harmonics import (
+    CANONICAL_HARMONIC_SOURCE,
+    CUSTOM_HARMONIC_SOURCE,
+)
 from .core import (
     ConditionInfo,
     DetectabilitySettings,
@@ -86,6 +90,9 @@ class IndividualDetectabilityWindow(QWidget):
         self._conditions: list[ConditionInfo] = []
         self._thread: Optional[QThread] = None
         self._worker: Optional[IndividualDetectabilityWorker] = None
+        self._custom_harmonic_list_text = ", ".join(
+            [str(h) for h in DetectabilitySettings().oddball_harmonics_hz]
+        )
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -310,8 +317,29 @@ class IndividualDetectabilityWindow(QWidget):
         )
         harm_layout = make_form_layout()
 
-        self.harmonics_edit = QLineEdit(", ".join([str(h) for h in settings.oddball_harmonics_hz]))
+        self.canonical_harmonics_note = QLabel(
+            "Default: use FPVS Toolbox significant harmonics selected from the current processed dataset."
+        )
+        self.canonical_harmonics_note.setWordWrap(True)
+        self.canonical_harmonics_note.setProperty("caption", True)
+        self.use_custom_harmonics_check = QCheckBox(
+            "Use custom fixed harmonic list (advanced/exploratory)"
+        )
+        self.use_custom_harmonics_check.setChecked(False)
+        self.use_custom_harmonics_check.stateChanged.connect(self._toggle_harmonic_mode)
+        self.custom_harmonics_warning = StatusBanner(
+            "Custom harmonics may not match the statistically significant harmonic "
+            "list selected by FPVS Toolbox. Outputs will be labeled custom/exploratory.",
+            harmonics_group,
+            variant="warning",
+        )
+        self.custom_harmonics_warning.setObjectName(
+            "individual_detectability_custom_harmonics_warning"
+        )
+        self.custom_harmonics_warning.setVisible(False)
+        self.harmonics_edit = QLineEdit(self._custom_harmonic_list_text)
         self.harmonics_edit.textChanged.connect(self._update_summary_text)
+        self.harmonics_edit.textChanged.connect(self._remember_custom_harmonics)
         self.z_threshold_spin = QDoubleSpinBox()
         self.z_threshold_spin.setDecimals(3)
         self.z_threshold_spin.setRange(-99.0, 99.0)
@@ -327,11 +355,14 @@ class IndividualDetectabilityWindow(QWidget):
         self.fdr_alpha_spin.setValue(settings.fdr_alpha)
         self.fdr_alpha_spin.valueChanged.connect(self._update_summary_text)
 
-        harm_layout.addRow("Oddball harmonics (Hz):", self.harmonics_edit)
+        harmonics_group.content_layout.addWidget(self.canonical_harmonics_note)
+        harm_layout.addRow("", self.use_custom_harmonics_check)
+        harm_layout.addRow("Custom harmonics (Hz):", self.harmonics_edit)
         harm_layout.addRow("Z threshold:", self.z_threshold_spin)
         harm_layout.addRow("", self.use_bh_fdr_check)
         harm_layout.addRow("FDR alpha:", self.fdr_alpha_spin)
         harmonics_group.content_layout.addLayout(harm_layout)
+        harmonics_group.content_layout.addWidget(self.custom_harmonics_warning)
 
         snr_group = SectionCard(
             "SNR mini-spectrum",
@@ -402,6 +433,7 @@ class IndividualDetectabilityWindow(QWidget):
         settings_grid.setRowStretch(2, 1)
         layout.addLayout(settings_grid, 1)
         self._toggle_fdr_alpha()
+        self._toggle_harmonic_mode()
         self._update_summary_text()
 
     def _build_bottom_panel(self) -> SectionCard:
@@ -665,10 +697,29 @@ class IndividualDetectabilityWindow(QWidget):
         self.fdr_alpha_spin.setEnabled(enabled)
         self._update_summary_text()
 
+    def _toggle_harmonic_mode(self) -> None:
+        custom = self.use_custom_harmonics_check.isChecked()
+        self.harmonics_edit.setEnabled(custom)
+        self.custom_harmonics_warning.setVisible(custom)
+        if custom:
+            self.harmonics_edit.setText(self._custom_harmonic_list_text)
+        self._update_summary_text()
+
+    def _remember_custom_harmonics(self, text: str) -> None:
+        if self.use_custom_harmonics_check.isChecked():
+            self._custom_harmonic_list_text = text
+
     def _update_summary_text(self) -> None:
         settings = self._collect_settings()
+        if settings.harmonic_source == CUSTOM_HARMONIC_SOURCE:
+            harmonic_text = ", ".join([str(h) for h in settings.oddball_harmonics_hz])
+            source_text = "Custom/exploratory fixed harmonic list"
+        else:
+            harmonic_text = "Resolved from FPVS Toolbox significant harmonics at run time"
+            source_text = "FPVS Toolbox significant harmonics"
         summary = [
-            f"Harmonics: {', '.join([str(h) for h in settings.oddball_harmonics_hz])}",
+            f"Harmonic source: {source_text}",
+            f"Harmonics: {harmonic_text}",
             f"Z threshold: {settings.z_threshold}",
             f"BH-FDR enabled: {settings.use_bh_fdr}",
             f"FDR alpha: {settings.fdr_alpha}",
@@ -681,9 +732,13 @@ class IndividualDetectabilityWindow(QWidget):
         self.summary_box.setText("\n".join(summary))
 
     def _collect_settings(self) -> DetectabilitySettings:
-        harmonics = self._parse_harmonics(self.harmonics_edit.text())
+        use_custom = self.use_custom_harmonics_check.isChecked()
+        harmonics = self._parse_harmonics(self.harmonics_edit.text()) if use_custom else []
         return DetectabilitySettings(
             oddball_harmonics_hz=harmonics,
+            harmonic_source=(
+                CUSTOM_HARMONIC_SOURCE if use_custom else CANONICAL_HARMONIC_SOURCE
+            ),
             z_threshold=float(self.z_threshold_spin.value()),
             use_bh_fdr=self.use_bh_fdr_check.isChecked(),
             fdr_alpha=float(self.fdr_alpha_spin.value()),
@@ -708,8 +763,11 @@ class IndividualDetectabilityWindow(QWidget):
         return values
 
     def _collect_output_stems(self) -> dict[str, str]:
+        suffix = "_custom_harmonics" if self.use_custom_harmonics_check.isChecked() else ""
         return {
-            cond.name: sanitize_filename_stem(f"{cond.name}_individual_detectability_grid")
+            cond.name: sanitize_filename_stem(
+                f"{cond.name}_individual_detectability_grid{suffix}"
+            )
             for cond in self._selected_conditions()
         }
 
@@ -760,13 +818,14 @@ class IndividualDetectabilityWindow(QWidget):
             show_error(self, "Error", "Select at least one condition.")
             return
         settings = self._collect_settings()
-        if not settings.oddball_harmonics_hz:
+        if settings.harmonic_source == CUSTOM_HARMONIC_SOURCE and not settings.oddball_harmonics_hz:
             show_error(self, "Error", "Provide at least one harmonic value.")
             return
 
         request = RunRequest(
             input_root=Path(input_root),
             output_root=Path(output_root),
+            project_root=self._project_root,
             conditions=selected_conditions,
             output_stems=self._collect_output_stems(),
             excluded_participants=self._excluded_participants(),
@@ -785,6 +844,7 @@ class IndividualDetectabilityWindow(QWidget):
         self._worker.status.connect(self.status_label.set_text)
         self._worker.log.connect(self._append_log)
         self._worker.error.connect(self._on_worker_error)
+        self._worker.error.connect(self._thread.quit)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.finished.connect(self._thread.quit)
         self._thread.finished.connect(self._cleanup_worker)

@@ -65,6 +65,10 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     assert window.status_label.objectName() == "individual_detectability_status"
     assert window.status_label.text() == "Ready."
     assert window.status_label.property("statusVariant") == "info"
+    assert window.use_custom_harmonics_check.isChecked() is False
+    assert window.harmonics_edit.isEnabled() is False
+    assert window.custom_harmonics_warning.isVisible() is False
+    assert "FPVS Toolbox significant harmonics" in window.summary_box.toPlainText()
     assert window.run_btn.property("variant") == "primary"
     assert window.toggle_log_btn.property("variant") == "tertiary"
     assert window.log_box.property("logSurface") is True
@@ -123,4 +127,11 @@ def test_individual_detectability_scan_populates_participants_with_missingness(
     assert window._collect_output_stems() == {
         "AngryNeutral": "AngryNeutral_individual_detectability_grid",
         "HappyNeutral": "HappyNeutral_individual_detectability_grid",
+    }
+    window.use_custom_harmonics_check.setChecked(True)
+    assert window.harmonics_edit.isEnabled() is True
+    assert window.custom_harmonics_warning.isVisible() is True
+    assert window._collect_output_stems() == {
+        "AngryNeutral": "AngryNeutral_individual_detectability_grid_custom_harmonics",
+        "HappyNeutral": "HappyNeutral_individual_detectability_grid_custom_harmonics",
     }

@@ -204,6 +204,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_freqs_edit)
     assert cards["Harmonic Selection"].isAncestorOf(dlg.recalculate_harmonics_button)
     assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_recalculation_status)
+    assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_warning)
+    assert dlg.fixed_harmonic_warning.isVisible() is False
     assert dlg.recalculate_harmonics_button.text() == "Recalculate Harmonics"
     assert dlg.recalculate_harmonics_button.isEnabled() is True
     assert dlg.findChild(ActionRow, "settings_harmonic_selection_actions") is not None
@@ -217,6 +219,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg.harmonic_summation_method_combo.setCurrentIndex(fixed_list_index)
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is True
     assert dlg.harmonic_electrode_scope_combo.isEnabled() is False
+    assert dlg.fixed_harmonic_warning.isVisible() is True
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
     assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
     assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)

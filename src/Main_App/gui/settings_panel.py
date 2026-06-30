@@ -426,6 +426,16 @@ class SettingsDialog(QDialog):
         harmonic_form.addRow("", self.fixed_harmonic_exclude_base_check)
 
         harmonic_group.content_layout.addLayout(harmonic_form)
+        self.fixed_harmonic_warning = StatusBanner(
+            "Fixed harmonics may not match the statistically significant harmonic "
+            "list selected by FPVS Toolbox. Use this for exploratory or comparison "
+            "checks; primary summaries use the shared significant-harmonic policy.",
+            harmonic_group,
+            variant="warning",
+        )
+        self.fixed_harmonic_warning.setObjectName("settings_fixed_harmonic_warning")
+        self.fixed_harmonic_warning.setVisible(False)
+        harmonic_group.content_layout.addWidget(self.fixed_harmonic_warning)
         harmonic_actions = ActionRow(harmonic_group, alignment=Qt.AlignLeft)
         harmonic_actions.setObjectName("settings_harmonic_selection_actions")
         self.recalculate_harmonics_button = make_action_button(
@@ -871,6 +881,7 @@ class SettingsDialog(QDialog):
         self.harmonic_electrode_scope_combo.setEnabled(not fixed_selected)
         self.fixed_harmonic_freqs_edit.setEnabled(fixed_selected)
         self.fixed_harmonic_exclude_base_check.setEnabled(fixed_selected)
+        self.fixed_harmonic_warning.setVisible(fixed_selected)
 
     def _save_project_preprocessing_for_harmonic_recalculation(
         self,

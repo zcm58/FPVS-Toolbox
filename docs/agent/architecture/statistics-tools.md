@@ -81,6 +81,11 @@ Stats grouping:
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
 - `data/`: project scans, manifest lookup, project-root context, subject IDs, and missing input detection.
 - `analysis/`: Summed BCA DV policy facade and helpers, statistical engines, and vectorized FullSNR/SNR/noise helpers.
+- `analysis/canonical_harmonics.py`: thin shared API for resolving the
+  canonical FPVS Toolbox significant-harmonic list and readable fingerprint.
+  Stats remains the owner of the locked group-level selection/cache behavior;
+  other tools such as Individual Detectability consume this API instead of
+  maintaining a separate primary harmonic list.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.

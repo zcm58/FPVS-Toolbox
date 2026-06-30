@@ -17,6 +17,9 @@ from Main_App.exports.figure_style import (
     apply_matplotlib_figure_style,
     figure_text_kwargs,
 )
+from Tools.Stats.analysis.canonical_harmonics import (
+    CANONICAL_HARMONIC_SOURCE,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -105,6 +108,8 @@ class DetectabilitySettings:
     oddball_harmonics_hz: list[float] = field(
         default_factory=lambda: [1.2, 2.4, 3.6, 4.8, 7.2]
     )
+    harmonic_source: str = CANONICAL_HARMONIC_SOURCE
+    harmonic_fingerprint: str = ""
     z_threshold: float = 1.64
 
     # Match original behavior: one-tailed positive-direction BH-FDR
@@ -630,7 +635,9 @@ def _settings_fingerprint(settings: DetectabilitySettings) -> str:
     # Stable, explicit token (don’t rely on Python hash randomization)
     parts = [
         _CACHE_VERSION,
+        f"source={settings.harmonic_source}",
         "harm=" + ",".join([f"{float(h):.4f}" for h in settings.oddball_harmonics_hz]),
+        "fp=" + str(settings.harmonic_fingerprint or ""),
         f"zthr={float(settings.z_threshold):.6f}",
         f"bh={int(bool(settings.use_bh_fdr))}",
         f"alpha={float(settings.fdr_alpha):.6f}",
