@@ -7,11 +7,11 @@ from Main_App.gui.components import ToolInfoContent
 SNR_PLOTS_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The SNR Plot tool lets you quickly generate SNR plots from your data after processing. You can 
+The SNR Plot tool lets you quickly generate SNR plots from your data after processing. You can
 overlay two conditions on the same figure for comparison, and change your x and y axis titles
-and ranges. 
+and ranges.
 
-The tool outputs figures in 600dpi .png and .pdf formats, which should be acceptable for most publications. 
+The tool outputs figures in 600dpi .png and .pdf formats, which should be acceptable for most publications.
 
 </p>
 

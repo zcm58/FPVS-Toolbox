@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from Main_App.gui.components import make_info_button, show_tool_info
-from Tools.Stats.tool_info import STATS_TOOL_INFO
+from Tools.Stats.ui.tool_info import STATS_TOOL_INFO
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)

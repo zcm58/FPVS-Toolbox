@@ -10,7 +10,7 @@ INDIVIDUAL_DETECTABILITY_TOOL_INFO_HTML = """
 The Individual Detectability tool mirrors the approach laid out in David et al. (2025) to evaluate
 responses at the level of the individual across your FPVS condition. It produces scalp topography maps for
 each participant and plots z-scores. This also evaluates the number of significant electrodes on a per-participant
-basis. False discovery rate (FDR) correction is built in to this process. 
+basis. False discovery rate (FDR) correction is built in to this process.
 
 </p>
 
