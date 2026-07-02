@@ -110,7 +110,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
         rules_layout.addWidget(self.rules_button)
 
         self.details_button = QToolButton(rules_header)
-        self.details_button.setText("Show audit details")
+        self.details_button.setText("Show all flagged values")
         self.details_button.setCheckable(True)
         self.details_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.details_button.toggled.connect(self._toggle_details)
@@ -140,7 +140,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
         actions.setObjectName("frequency_domain_qc_actions")
         cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
         continue_btn = make_action_button(
-            "Continue with reviewed exclusions",
+            "Apply and Continue",
             variant="primary",
             parent=actions,
         )
@@ -160,6 +160,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
             str(item.get("participant_id") or "")
             for item in _mapping_rows(self._report.get("manual_participant_exclusions"))
         }
+        auto_electrodes_by_participant = _auto_electrodes_by_participant(self._report)
         self.summary_table.setRowCount(len(summaries))
         for row, item in enumerate(summaries):
             participant_id = str(item.get("participant_id") or "")
@@ -167,7 +168,10 @@ class FrequencyDomainQcReviewDialog(QDialog):
             values = [
                 participant_id,
                 _finding_text(item),
-                _automatic_action_text(item),
+                _automatic_action_text(
+                    item,
+                    auto_electrodes_by_participant.get(participant_id, []),
+                ),
             ]
             for column, text in enumerate(values):
                 table_item = QTableWidgetItem(text)
@@ -221,7 +225,9 @@ class FrequencyDomainQcReviewDialog(QDialog):
 
     def _toggle_details(self, checked: bool) -> None:
         self.details_table.setVisible(bool(checked))
-        self.details_button.setText("Hide audit details" if checked else "Show audit details")
+        self.details_button.setText(
+            "Hide all flagged values" if checked else "Show all flagged values"
+        )
 
 
 def _outcome_text(report: Mapping[str, object]) -> str:
@@ -271,16 +277,47 @@ def _finding_text(summary: Mapping[str, object]) -> str:
     return f"{lead}; {', '.join(details)}" if details else lead
 
 
-def _automatic_action_text(summary: Mapping[str, object]) -> str:
+def _automatic_action_text(
+    summary: Mapping[str, object],
+    auto_electrodes: list[str],
+) -> str:
     if bool(summary.get("auto_participant_excluded")):
+        electrodes = _format_electrodes(auto_electrodes)
+        if electrodes:
+            return f"Exclude whole participant automatically; hard electrodes: {electrodes}"
         return "Exclude whole participant automatically"
     hard_count = int(summary.get("hard_excluded_electrode_count") or 0)
     if hard_count:
+        electrodes = _format_electrodes(auto_electrodes)
+        if electrodes:
+            return f"Exclude {electrodes}; keep participant"
         return f"Exclude {_count_phrase(hard_count, 'participant-electrode pair')}; keep participant"
     reasons = [str(reason) for reason in summary.get("pause_reasons", []) or []]
     if reasons:
         return "Review only; no automatic exclusion"
     return "No automatic action"
+
+
+def _auto_electrodes_by_participant(report: Mapping[str, object]) -> dict[str, list[str]]:
+    electrodes_by_participant: dict[str, set[str]] = {}
+    for item in _mapping_rows(report.get("auto_participant_electrode_exclusions")):
+        participant_id = str(item.get("participant_id") or "").strip()
+        electrode = str(item.get("electrode") or "").strip()
+        if not participant_id or not electrode:
+            continue
+        electrodes_by_participant.setdefault(participant_id, set()).add(electrode)
+    return {
+        participant_id: sorted(electrodes)
+        for participant_id, electrodes in electrodes_by_participant.items()
+    }
+
+
+def _format_electrodes(electrodes: list[str]) -> str:
+    if not electrodes:
+        return ""
+    if len(electrodes) <= 4:
+        return ", ".join(electrodes)
+    return f"{', '.join(electrodes[:4])}, +{len(electrodes) - 4} more"
 
 
 def _count_phrase(count: int, singular: str, plural: str | None = None) -> str:
