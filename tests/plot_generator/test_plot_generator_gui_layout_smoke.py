@@ -1,4 +1,5 @@
 from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QLabel
 
 from Main_App.gui.typography import font_for_role
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
@@ -48,7 +49,12 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert 8 <= window.progress_bar.height() <= 12
     assert window.folder_edit.width() >= 220
     assert window.out_edit.width() >= 220
-    assert window.title_edit.width() >= 250
+    assert window.title_edit.objectName() == "plot_generator_internal_figure_name"
+    assert not window.title_edit.isVisible()
+    advanced_labels = [label.text() for label in window.advanced_box.findChildren(QLabel)]
+    assert "Figure name:" not in advanced_labels
+    assert "X-axis label:" in advanced_labels
+    assert "Y-axis label:" in advanced_labels
     assert window.xmin_spin.width() >= 100
     assert window.xmax_spin.width() >= 100
     assert window.ymin_spin.width() >= 100
