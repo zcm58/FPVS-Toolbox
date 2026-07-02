@@ -69,6 +69,25 @@ def test_baseline_vs_zero_correction_scope_outputs() -> None:
     )
 
 
+def test_baseline_vs_zero_output_uses_readable_summary_text() -> None:
+    df = _build_df()
+
+    output_text, _ = run_baseline_vs_zero_tests(
+        df,
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        correction_scope="global",
+    )
+
+    assert "Summary:" in output_text
+    assert "Corrected significant findings:" in output_text
+    assert "corrected p=" in output_text
+    assert "condition=" not in output_text
+    assert "roi=" not in output_text
+
+
 def test_single_pipeline_registers_baseline_vs_zero_step() -> None:
     assert StepId.BASELINE_VS_ZERO in SINGLE_PIPELINE_STEPS
     assert StepId.BASELINE_VS_ZERO in WORKER_FN_BY_STEP

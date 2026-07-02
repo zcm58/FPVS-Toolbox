@@ -389,18 +389,24 @@ class StatsWindowUiMixin:
         last_export_section.content_layout.setSpacing(6)
         last_export_section.content_layout.addLayout(export_row)
 
-        self.lbl_rois = QLabel("")
-        self.lbl_rois.setWordWrap(True)
-        self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.lbl_rois.setToolTip(
+        self.roi_context_text = QTextEdit()
+        self.roi_context_text.setObjectName("stats_roi_context_text")
+        self.roi_context_text.setReadOnly(True)
+        self.roi_context_text.setAcceptRichText(True)
+        self.roi_context_text.setPlaceholderText("ROI context will appear here after Settings are loaded.")
+        self.roi_context_text.setMinimumHeight(128)
+        self.roi_context_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.roi_context_text.document().setDocumentMargin(8)
+        self.roi_context_text.setToolTip(
             "ROIs loaded from Settings. Update ROI definitions in Settings to change this list."
         )
+        self.lbl_rois = self.roi_context_text
 
         roi_context_section = SectionCard("ROI Context")
         roi_context_section.setObjectName("stats_roi_context_section")
         roi_context_section.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         roi_context_section.content_layout.setSpacing(6)
-        roi_context_section.content_layout.addWidget(self.lbl_rois)
+        roi_context_section.content_layout.addWidget(self.roi_context_text, 1)
 
         # output pane
         self.summary_text = QTextEdit()

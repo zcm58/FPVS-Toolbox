@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QScrollArea,
     QSplitter,
     QTabWidget,
+    QTextEdit,
 )
 
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel  # noqa: E402
@@ -106,7 +107,12 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert group_boxes["Last Export"].isAncestorOf(
         window.findChild(QWidget, "stats_export_path_actions")
     )
-    assert group_boxes["ROI Context"].isAncestorOf(window.lbl_rois)
+    assert group_boxes["ROI Context"].isAncestorOf(window.roi_context_text)
+    assert window.lbl_rois is window.roi_context_text
+    assert window.roi_context_text.objectName() == "stats_roi_context_text"
+    assert isinstance(window.roi_context_text, QTextEdit)
+    assert window.roi_context_text.isReadOnly()
+    assert window.roi_context_text.minimumHeight() >= 120
     assert basic_page.isAncestorOf(window.le_folder)
     assert basic_page.isAncestorOf(window.findChild(QWidget, "stats_manual_exclusion_row"))
     assert group_boxes["Included Conditions"].header.title_label.text() == "Included Conditions"
@@ -192,6 +198,19 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.reporting_summary_export_action.isChecked()
     assert window.log_text.property("logSurface") is True
     assert window.summary_text.property("logSurface") is True
+
+    window._set_roi_status(
+        "Using 2 ROIs from Settings: Central, Left Occipito-Temporal"
+    )
+    roi_context = window.roi_context_text.toPlainText()
+    assert "ROI definitions loaded from Settings." in roi_context
+    assert "Central" in roi_context
+    window._set_detected_info(
+        "Baseline vs Zero tests completed.\n"
+        "Corrected significant findings:\n"
+        "1. A in Central: mean=0.4, corrected p=0.01"
+    )
+    assert "Baseline vs Zero tests completed" not in window.roi_context_text.toPlainText()
 
     action_rows = {row.objectName(): row for row in window.findChildren(ActionRow)}
     expected_rows = {

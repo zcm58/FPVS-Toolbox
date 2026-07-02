@@ -1,6 +1,8 @@
 """User action handlers and general StatsWindow view helpers."""
 from __future__ import annotations
 
+from html import escape
+
 from Main_App.gui.open_paths import open_path_in_file_manager
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
@@ -16,8 +18,39 @@ class StatsWindowActionsMixin:
 
     def _set_roi_status(self, txt: str) -> None:
         """Handle the set roi status step for the Stats workflow."""
+        text = str(txt or "").strip()
+        if hasattr(self, "roi_context_text"):
+            self.roi_context_text.setHtml(self._format_roi_context_html(text))
+            self.roi_context_text.setToolTip(text)
+            self.roi_context_text.moveCursor(QTextCursor.Start)
+            return
         if hasattr(self, "lbl_rois"):
-            self.lbl_rois.setText(txt)
+            self.lbl_rois.setText(text)
+
+    def _format_roi_context_html(self, txt: str) -> str:
+        """Format ROI settings text for the compact Advanced-tab context panel."""
+        text = str(txt or "").strip()
+        if not text:
+            return (
+                "<p><b>ROI context unavailable.</b></p>"
+                "<p>Load a project or refresh Settings to show the active ROI definitions.</p>"
+            )
+        if text == "No ROIs defined in Settings.":
+            return (
+                "<p><b>No ROIs are defined in Settings.</b></p>"
+                "<p>Add ROI definitions in Settings before running ROI-based summaries.</p>"
+            )
+        if text.lower().startswith("using ") and "from Settings:" in text:
+            summary, roi_names_text = text.split(":", 1)
+            roi_names = [name.strip() for name in roi_names_text.split(",") if name.strip()]
+            items = "".join(f"<li>{escape(name)}</li>" for name in roi_names)
+            return (
+                "<p><b>ROI definitions loaded from Settings.</b></p>"
+                f"<p>{escape(summary.strip())}.</p>"
+                f"<ul>{items}</ul>"
+            )
+        escaped_lines = "<br>".join(escape(line.strip()) for line in text.splitlines() if line.strip())
+        return f"<p>{escaped_lines}</p>" if escaped_lines else "<p>No ROI context available.</p>"
 
     def _set_data_folder_path(self, path: str) -> None:
         """Handle the set data folder path step for the Stats workflow."""
@@ -174,11 +207,25 @@ class StatsWindowActionsMixin:
 
     def _set_detected_info(self, txt: str) -> None:
         """Route unknown worker messages to proper label."""
-        lower_txt = txt.lower() if isinstance(txt, str) else str(txt).lower()
-        if (" roi" in lower_txt) or lower_txt.startswith("using ") or lower_txt.startswith("rois"):
+        text = str(txt or "")
+        if self._is_roi_context_message(text):
             self._set_roi_status(txt)
         else:
             self._set_status(txt)
+
+    def _is_roi_context_message(self, txt: str) -> bool:
+        """Return True only for messages that describe active ROI settings."""
+        normalized = " ".join(str(txt or "").lower().split())
+        return (
+            normalized.startswith("no rois defined")
+            or normalized.startswith("rois loaded")
+            or normalized.startswith("roi definitions")
+            or (
+                normalized.startswith("using ")
+                and " roi" in normalized
+                and "from settings" in normalized
+            )
+        )
 
     def _clear_conditions_layout(self) -> None:
         """Handle the clear conditions layout step for the Stats workflow."""

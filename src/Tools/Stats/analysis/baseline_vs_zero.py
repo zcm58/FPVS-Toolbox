@@ -161,19 +161,23 @@ def run_baseline_vs_zero_tests(
 
     sig = results_df[results_df["reject"].fillna(False)]
     sig_lines = [
-        f"- condition={row['condition']}, roi={row['roi']}, p_corr={row['p_corr']:.6g}, mean={row['mean']:.6g}"
-        for _, row in sig.iterrows()
+        (
+            f"{idx}. {row['condition']} in {row['roi']}: "
+            f"mean={row['mean']:.6g}, corrected p={row['p_corr']:.6g}"
+        )
+        for idx, (_, row) in enumerate(sig.iterrows(), start=1)
         if pd.notna(row["p_corr"])
     ]
-    sig_text = "\n".join(sig_lines) if sig_lines else "- none"
+    sig_text = "\n".join(sig_lines) if sig_lines else "No condition/ROI cells were significant after correction."
 
     log_text = (
         "Baseline vs Zero tests completed.\n"
-        f"alpha={alpha}; alternative={alternative}; correction={correction}; "
-        f"correction_scope={correction_scope}\n"
-        f"Cells tested={len(results_df)}; valid_p={int(results_df['p_raw'].notna().sum())}; "
-        f"significant={int(results_df['reject'].fillna(False).sum())}\n"
-        "Significant findings:\n"
+        f"Test settings: alpha={alpha}; alternative={alternative}; correction={correction}; "
+        f"scope={correction_scope}.\n"
+        f"Summary: {len(results_df)} condition/ROI cells tested; "
+        f"{int(results_df['p_raw'].notna().sum())} valid p-values; "
+        f"{int(results_df['reject'].fillna(False).sum())} significant after correction.\n"
+        "Corrected significant findings:\n"
         f"{sig_text}"
     )
     return log_text, results_df
