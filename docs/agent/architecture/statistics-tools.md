@@ -139,6 +139,14 @@ Rules:
   nearest-bin matching, inclusive `>= 1.64`, sample SD, or a different
   neighboring-bin rule unless the user explicitly requests a statistical-method
   change.
+- Frequency-domain QC exclusions are applied before final harmonic selection,
+  Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
+  Maps metric collection, and source-map input preparation. Full participant
+  exclusions remove the participant project-wide from downstream
+  frequency-domain outputs. Automatic participant-electrode exclusions remove
+  that electrode for that participant across conditions; source-map preparation
+  conservatively skips participants with automatic electrode-level exclusions
+  because inverse payloads require complete topographies.
 - The group-level significant-harmonics policy must fail fast from workbook
   headers when exact nominal oddball-harmonic columns are missing. Header
   preflight happens in the Stats worker before QC screening, grand-average

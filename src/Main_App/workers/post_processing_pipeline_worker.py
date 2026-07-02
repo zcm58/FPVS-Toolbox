@@ -58,6 +58,41 @@ class PostProcessingPipelineWorker(QObject):
         steps: list[PostProcessingStepResult] = []
         try:
             project_root = Path(self._project.project_root).expanduser().resolve()
+            qc_report = self._run_frequency_domain_qc_review()
+            if qc_report.get("review_required"):
+                steps.append(
+                    PostProcessingStepResult(
+                        "frequency_domain_qc",
+                        False,
+                        "Frequency-domain QC review is required before final harmonic selection.",
+                    )
+                )
+                self.finished.emit(
+                    {
+                        "ok": False,
+                        "requires_frequency_domain_qc_review": True,
+                        "frequency_domain_qc_report": qc_report,
+                        "steps": [step.as_dict() for step in steps],
+                    }
+                )
+                return
+            self._sync_frequency_domain_qc_automatic_state(project_root, qc_report)
+            if qc_report.get("review_reused"):
+                steps.append(
+                    PostProcessingStepResult(
+                        "frequency_domain_qc",
+                        True,
+                        "Frequency-domain QC review was previously accepted for these inputs.",
+                    )
+                )
+            else:
+                steps.append(
+                    PostProcessingStepResult(
+                        "frequency_domain_qc",
+                        True,
+                        "Frequency-domain QC found no review-blocking flags.",
+                    )
+                )
             steps.append(self._run_harmonic_selection())
             stats_step = self._run_stats_ready_export(project_root)
             steps.append(stats_step)
@@ -87,6 +122,26 @@ class PostProcessingPipelineWorker(QObject):
                 "steps": [step.as_dict() for step in steps],
             }
         )
+
+    def _run_frequency_domain_qc_review(self) -> dict[str, object]:
+        self._emit_progress("FPVS Toolbox is reviewing frequency-domain QC before final harmonic selection.")
+        from Main_App.processing.frequency_domain_qc import run_frequency_domain_qc_review
+
+        return run_frequency_domain_qc_review(
+            self._project,
+            log_func=self._emit_progress,
+        )
+
+    def _sync_frequency_domain_qc_automatic_state(
+        self,
+        project_root: Path,
+        qc_report: dict[str, object],
+    ) -> None:
+        from Main_App.processing.frequency_domain_qc import (
+            sync_frequency_domain_qc_automatic_state,
+        )
+
+        sync_frequency_domain_qc_automatic_state(project_root, qc_report)
 
     def _run_harmonic_selection(self) -> PostProcessingStepResult:
         self._emit_progress("FPVS Toolbox is currently identifying significant harmonics.")

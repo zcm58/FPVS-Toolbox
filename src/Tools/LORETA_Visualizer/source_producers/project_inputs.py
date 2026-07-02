@@ -20,6 +20,7 @@ import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNEFPVSCondition
 
 SOURCE_TOPOGRAPHY_METRIC_BCA = "bca"
@@ -80,7 +81,15 @@ def build_l2_mne_conditions_from_project(
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
     excluded_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Excluded Participants.xlsx")
     flagged_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Flagged Participants.xlsx")
+    frequency_exclusions = active_frequency_domain_exclusions(root)
+    source_electrode_excluded_subjects = {
+        participant
+        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
+        if electrodes
+    }
     excluded_lookup = set(excluded_subjects)
+    excluded_lookup.update(frequency_exclusions.excluded_participants)
+    excluded_lookup.update(source_electrode_excluded_subjects)
     if not include_flagged_subjects:
         excluded_lookup.update(flagged_subjects)
 
@@ -159,7 +168,7 @@ def build_l2_mne_conditions_from_project(
         electrode_names=expected_electrodes,
         conditions=tuple(source_conditions),
         summaries=tuple(summaries),
-        excluded_subjects=tuple(excluded_subjects),
+        excluded_subjects=tuple(sorted(excluded_lookup)),
         flagged_subjects=tuple(flagged_subjects),
         diagnostics=tuple(diagnostics),
     )

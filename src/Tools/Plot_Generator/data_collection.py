@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.Plot_Generator.excel_inputs import (
     _infer_subject_id_from_path,
 )
@@ -182,11 +183,51 @@ class PlotDataCollectionMixin:
             for channels in roi_channels_upper.values()
             for channel in channels
         }
+        frequency_exclusions = active_frequency_domain_exclusions(self.project_root)
+        excluded_participants = {
+            str(participant).upper()
+            for participant in frequency_exclusions.excluded_participants
+        }
+        excluded_electrodes_by_subject = (
+            frequency_exclusions.auto_excluded_electrodes_by_participant
+        )
 
         for excel_path in files:
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return [], {}
+            subject_id = _infer_subject_id_from_path(
+                excel_path,
+                self.subject_groups.keys() if self.subject_groups else None,
+            )
+            if not subject_id:
+                self._emit(
+                    f"Skipping {excel_path.name}: unable to determine subject ID.",
+                    offset + processed_files,
+                    overall_total,
+                )
+                self._record_failure(item=excel_path.name, error="Unable to determine subject ID")
+                processed_files += 1
+                continue
+            if subject_id.upper() in excluded_participants:
+                self._emit(
+                    f"Skipping {excel_path.name}: participant is frequency-domain excluded.",
+                    offset + processed_files,
+                    overall_total,
+                )
+                processed_files += 1
+                continue
+            excluded_electrodes = excluded_electrodes_by_subject.get(
+                subject_id.upper(),
+                frozenset(),
+            )
+            read_electrodes = set(included_electrodes_upper)
+            if excluded_electrodes:
+                read_electrodes = {
+                    electrode
+                    for electrode in read_electrodes
+                    if electrode.upper() not in excluded_electrodes
+                }
             self._emit(
                 f"Reading {excel_path.name}",
                 offset + processed_files,
@@ -195,7 +236,7 @@ class PlotDataCollectionMixin:
             try:
                 df, ordered_freqs, ordered_cols = self._read_full_snr_direct(
                     excel_path,
-                    included_electrodes_upper=included_electrodes_upper,
+                    included_electrodes_upper=read_electrodes,
                 )
             except Exception as exc:
                 message = (
@@ -222,19 +263,6 @@ class PlotDataCollectionMixin:
                 overall_total,
             )
 
-            subject_id = _infer_subject_id_from_path(
-                excel_path,
-                self.subject_groups.keys() if self.subject_groups else None,
-            )
-            if not subject_id:
-                self._emit(
-                    f"Skipping {excel_path.name}: unable to determine subject ID.",
-                    offset + processed_files,
-                    overall_total,
-                )
-                self._record_failure(item=excel_path.name, error="Unable to determine subject ID")
-                processed_files += 1
-                continue
             if (
                 self.enable_group_overlay
                 and self.multi_group_mode
@@ -309,6 +337,9 @@ class PlotDataCollectionMixin:
                         full_fft_cols,
                         ordered_freqs,
                     )
+                    for electrode in excluded_electrodes:
+                        snr_by_electrode.pop(str(electrode).upper(), None)
+                        fft_by_electrode.pop(str(electrode).upper(), None)
                     if snr_by_electrode and fft_by_electrode:
                         subject_snr_data[subject_id] = snr_by_electrode
                         subject_fft_data[subject_id] = fft_by_electrode

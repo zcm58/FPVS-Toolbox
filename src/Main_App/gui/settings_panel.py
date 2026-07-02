@@ -48,6 +48,11 @@ from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrode
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.frequency_domain_qc import (
+    active_frequency_domain_exclusions,
+    clear_manual_frequency_domain_participant_exclusions,
+    thresholds_summary_lines,
+)
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import (
@@ -787,12 +792,128 @@ class SettingsDialog(QDialog):
             self.manual_participant_exclusions_button,
         )
         qc_group.content_layout.addLayout(qc_form)
+
+        self._add_frequency_domain_qc_settings(qc_group)
         layout.addWidget(qc_group)
 
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_advanced_footer")
 
         tabs.addTab(tab, "Advanced")
+
+    def _add_frequency_domain_qc_settings(self, parent: QWidget) -> None:
+        header = SubsectionHeaderLabel("Frequency-domain QC", parent)
+        parent.content_layout.addWidget(header)
+
+        self.frequency_domain_qc_thresholds_label = QLabel(
+            "\n".join(thresholds_summary_lines()),
+            parent,
+        )
+        self.frequency_domain_qc_thresholds_label.setObjectName(
+            "settings_frequency_domain_qc_thresholds"
+        )
+        self.frequency_domain_qc_thresholds_label.setWordWrap(True)
+        parent.content_layout.addWidget(self.frequency_domain_qc_thresholds_label)
+
+        self.frequency_domain_qc_exclusions_label = QLabel(parent)
+        self.frequency_domain_qc_exclusions_label.setObjectName(
+            "settings_frequency_domain_qc_exclusions"
+        )
+        self.frequency_domain_qc_exclusions_label.setWordWrap(True)
+
+        self.clear_frequency_domain_manual_exclusions_button = make_action_button(
+            "Clear Manual Frequency Exclusions",
+            compact=True,
+            parent=parent,
+        )
+        self.clear_frequency_domain_manual_exclusions_button.setObjectName(
+            "settings_clear_frequency_domain_manual_exclusions"
+        )
+        self.clear_frequency_domain_manual_exclusions_button.clicked.connect(
+            self._clear_frequency_domain_manual_exclusions
+        )
+
+        exclusion_row = QWidget(parent)
+        exclusion_layout = QHBoxLayout(exclusion_row)
+        exclusion_layout.setContentsMargins(0, 0, 0, 0)
+        exclusion_layout.setSpacing(8)
+        exclusion_layout.addWidget(self.frequency_domain_qc_exclusions_label, 1)
+        exclusion_layout.addWidget(self.clear_frequency_domain_manual_exclusions_button)
+        parent.content_layout.addWidget(exclusion_row)
+        self._refresh_frequency_domain_qc_settings()
+
+    def _refresh_frequency_domain_qc_settings(self) -> None:
+        label = getattr(self, "frequency_domain_qc_exclusions_label", None)
+        button = getattr(self, "clear_frequency_domain_manual_exclusions_button", None)
+        if label is None or button is None:
+            return
+        if self.project is None:
+            label.setText("Load a project to view active frequency-domain exclusions.")
+            button.setEnabled(False)
+            return
+        exclusions = active_frequency_domain_exclusions(self.project.project_root)
+        auto_participants = sorted(exclusions.auto_excluded_participants)
+        manual_participants = sorted(exclusions.manual_excluded_participants)
+        electrode_total = sum(
+            len(electrodes)
+            for electrodes in exclusions.auto_excluded_electrodes_by_participant.values()
+        )
+        parts = [
+            "Automatic participants: "
+            + (", ".join(auto_participants) if auto_participants else "none"),
+            "Manual participants: "
+            + (", ".join(manual_participants) if manual_participants else "none"),
+            f"Automatic participant-electrode exclusions: {electrode_total}",
+        ]
+        if exclusions.downstream_outputs_stale:
+            parts.append("Regeneration required before downstream frequency-domain tools can be used.")
+        label.setText("\n".join(parts))
+        button.setEnabled(bool(manual_participants))
+
+    def _clear_frequency_domain_manual_exclusions(self) -> None:
+        if self.project is None:
+            return
+        exclusions = active_frequency_domain_exclusions(self.project.project_root)
+        manual_participants = sorted(exclusions.manual_excluded_participants)
+        if not manual_participants:
+            self._refresh_frequency_domain_qc_settings()
+            return
+        response = QMessageBox.question(
+            self,
+            "Clear Manual Frequency Exclusions?",
+            (
+                "Clearing manual frequency-domain exclusions requires regenerating "
+                "final harmonics and downstream outputs before using frequency-domain tools."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            return
+        cleared = clear_manual_frequency_domain_participant_exclusions(
+            self.project.project_root,
+            manual_participants,
+        )
+        self._refresh_frequency_domain_qc_settings()
+        if cleared:
+            QMessageBox.information(
+                self,
+                "Regeneration Required",
+                (
+                    "Manual frequency-domain exclusions were cleared. Resume "
+                    "post-processing before using downstream frequency-domain tools."
+                ),
+            )
+            host = getattr(self, "host", None) or self.parent()
+            if host is not None:
+                try:
+                    from Main_App.gui.processing_workflows import (
+                        _set_resume_post_processing_pending,
+                    )
+
+                    _set_resume_post_processing_pending(host, True)
+                except Exception:
+                    pass
 
     def _removed_electrode_detection_enabled(self) -> bool:
         return (

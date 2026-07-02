@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 import psutil
 from PySide6.QtCore import QObject, QThread, QTimer, Slot
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
 from Main_App.gui.post_export_workflows import excel_snapshot
@@ -49,6 +49,10 @@ _POST_PROCESSING_HARMONICS_TITLE = "Identifying Significant Harmonics"
 _POST_PROCESSING_HARMONICS_MESSAGE = "FPVS Toolbox is currently identifying significant harmonics."
 _POST_PROCESSING_OUTPUTS_TITLE = "Preparing Analysis Outputs"
 _POST_PROCESSING_OUTPUTS_MESSAGE = "FPVS Toolbox is preparing analysis files for downstream tools."
+_POST_PROCESSING_QC_TITLE = "Reviewing Frequency-Domain QC"
+_POST_PROCESSING_QC_MESSAGE = (
+    "FPVS Toolbox is checking summed BCA values before final harmonic selection."
+)
 _POST_PROCESSING_SOURCE_MAPS_TITLE = "Generating Source Maps"
 _POST_PROCESSING_SOURCE_MAPS_MESSAGE = (
     "Generating source-space maps for 3D visualization of oddball responses."
@@ -88,6 +92,8 @@ def _post_processing_display_state(message: str) -> tuple[str, str]:
     """Return a user-facing processing title and message for technical worker progress."""
     text = str(message or "").strip()
     lowered = text.lower()
+    if _post_processing_message_mentions_frequency_domain_qc(lowered):
+        return _POST_PROCESSING_QC_TITLE, _POST_PROCESSING_QC_MESSAGE
     if _post_processing_message_mentions_source_maps(lowered):
         return _POST_PROCESSING_SOURCE_MAPS_TITLE, _POST_PROCESSING_SOURCE_MAPS_MESSAGE
     if _post_processing_message_mentions_harmonic_selection(lowered):
@@ -115,6 +121,16 @@ def _post_processing_message_mentions_source_maps(lowered: str) -> bool:
         "participant fullfft workbooks",
     )
     return any(term in lowered for term in source_map_terms)
+
+
+def _post_processing_message_mentions_frequency_domain_qc(lowered: str) -> bool:
+    qc_terms = (
+        "frequency-domain qc",
+        "frequency domain qc",
+        "summed bca values",
+        "reviewing frequency-domain",
+    )
+    return any(term in lowered for term in qc_terms)
 
 
 def _post_processing_message_mentions_harmonic_selection(lowered: str) -> bool:
@@ -446,6 +462,7 @@ def _start_post_processing_pipeline_after_processing(
             host.log(str(message))
 
     def _handle_finished(result: dict) -> None:
+        pending_qc_report: dict | None = None
         try:
             steps = result.get("steps") if isinstance(result, dict) else []
             if isinstance(steps, list):
@@ -459,8 +476,25 @@ def _start_post_processing_pipeline_after_processing(
                     level = logging.INFO if step.get("ok") else logging.WARNING
                     suffix = f" ({path})" if path else ""
                     host.log(f"Post-processing: {message}{suffix}", level=level)
+            if result.get("requires_frequency_domain_qc_review"):
+                report = result.get("frequency_domain_qc_report")
+                pending_qc_report = report if isinstance(report, dict) else {}
+                host.log(
+                    "Post-processing paused for frequency-domain QC review.",
+                    level=logging.WARNING,
+                )
+                return
             if result.get("ok"):
                 _sync_project_tools_metadata_from_disk(project)
+                try:
+                    from Main_App.processing.frequency_domain_qc import (
+                        mark_frequency_domain_outputs_current,
+                    )
+
+                    mark_frequency_domain_outputs_current(project.project_root)
+                    _sync_project_tools_metadata_from_disk(project)
+                except Exception:
+                    logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
                 host.log(
                     "Post-processing pipeline finished: harmonics, Stats-ready Summed BCA, "
                     "and LORETA source-map generation steps completed.",
@@ -479,7 +513,15 @@ def _start_post_processing_pipeline_after_processing(
             host._post_processing_pipeline_bridge = None
             if bridge is not None:
                 bridge.deleteLater()
-            on_finished()
+            if pending_qc_report is not None:
+                _handle_frequency_domain_qc_review(
+                    host,
+                    project,
+                    pending_qc_report,
+                    on_finished=on_finished,
+                )
+            else:
+                on_finished()
 
     bridge = _PostProcessingPipelineBridge(
         progress_callback=_handle_progress,
@@ -501,6 +543,110 @@ def _start_post_processing_pipeline_after_processing(
     )
     thread.start()
     return True
+
+
+def _handle_frequency_domain_qc_review(
+    host: Any,
+    project: Any,
+    report: dict,
+    *,
+    on_finished: Callable[[], None],
+) -> None:
+    from Main_App.gui.frequency_domain_qc_dialog import FrequencyDomainQcReviewDialog
+    from Main_App.processing.frequency_domain_qc import (
+        apply_frequency_domain_qc_decision,
+        mark_frequency_domain_outputs_stale,
+    )
+
+    dialog = FrequencyDomainQcReviewDialog(report, host)
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    if accepted:
+        try:
+            apply_frequency_domain_qc_decision(
+                project.project_root,
+                report,
+                manual_participant_reasons=dialog.manual_participant_reasons(),
+            )
+            _sync_project_tools_metadata_from_disk(project)
+        except Exception as exc:
+            logger.exception("frequency_domain_qc_decision_apply_failed")
+            QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
+            mark_frequency_domain_outputs_stale(
+                project.project_root,
+                reason="Frequency-domain QC review failed before post-processing resumed.",
+            )
+            on_finished()
+            _set_resume_post_processing_pending(host, True)
+            return
+        host.log(
+            "Frequency-domain QC review accepted; resuming final harmonic selection.",
+            level=logging.INFO,
+        )
+        if _start_post_processing_pipeline_after_processing(host, on_finished=on_finished):
+            return
+        on_finished()
+        return
+
+    mark_frequency_domain_outputs_stale(
+        project.project_root,
+        reason="Frequency-domain QC review was canceled before final harmonic selection.",
+    )
+    _sync_project_tools_metadata_from_disk(project)
+    host.log(
+        "Frequency-domain QC review canceled. Downstream frequency-domain outputs "
+        "must be regenerated before use.",
+        level=logging.WARNING,
+    )
+    on_finished()
+    _set_resume_post_processing_pending(host, True)
+
+
+def _set_resume_post_processing_pending(host: Any, pending: bool) -> None:
+    host._frequency_domain_post_processing_resume_pending = bool(pending)
+    button = getattr(host, "btn_start", None)
+    if button is None:
+        return
+    if pending:
+        button.setText("Resume Post-processing")
+        button.setEnabled(True)
+    else:
+        button.setText("Start Processing")
+        try:
+            host._update_start_enabled()
+        except Exception:
+            button.setEnabled(True)
+
+
+def resume_post_processing(host: Any) -> None:
+    if not getattr(host, "currentProject", None):
+        QMessageBox.warning(host, "No Project", "Load a project before resuming post-processing.")
+        return
+    _set_resume_post_processing_pending(host, False)
+    host._set_controls_enabled(False)
+    host._run_active = True
+    host.busy = True
+    if hasattr(host, "_busy_start"):
+        host._busy_start()
+    if hasattr(host, "btn_start"):
+        host.btn_start.setText("Stop Processing")
+        host.btn_start.setEnabled(True)
+
+    def _finish_resume() -> None:
+        host._run_active = False
+        host.busy = False
+        try:
+            host._busy_stop()
+        except Exception:
+            pass
+        try:
+            host._set_controls_enabled(True)
+        except Exception:
+            logger.debug("resume_post_processing_controls_unlock_failed", exc_info=True)
+        _set_resume_post_processing_pending(host, False)
+        host.log("Post-processing resume finished.", level=logging.INFO)
+
+    if not _start_post_processing_pipeline_after_processing(host, on_finished=_finish_resume):
+        _finish_resume()
 
 
 def _choose_processing_plan(
@@ -1242,6 +1388,9 @@ def finalize_processing(
 def on_start_stop_clicked(host: Any) -> None:
     """Handle Start/Stop button clicks with confirmation on stop."""
     if not getattr(host, "_run_active", False):
+        if getattr(host, "_frequency_domain_post_processing_resume_pending", False):
+            resume_post_processing(host)
+            return
         host.start_processing()
         if getattr(host, "_run_active", False) and hasattr(host, "btn_start"):
             try:

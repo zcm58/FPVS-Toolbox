@@ -21,6 +21,7 @@ from Tools.Stats.io.xlsx_selected_reader import (
     read_xlsx_sheet_header,
     read_xlsx_sheet_selected_columns,
 )
+from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS,
     DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
@@ -153,7 +154,15 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
     excluded_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Excluded Participants.xlsx")
     flagged_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Flagged Participants.xlsx")
+    frequency_exclusions = active_frequency_domain_exclusions(root)
+    source_electrode_excluded_subjects = {
+        participant
+        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
+        if electrodes
+    }
     excluded_lookup = set(excluded_subjects)
+    excluded_lookup.update(frequency_exclusions.excluded_participants)
+    excluded_lookup.update(source_electrode_excluded_subjects)
     if not include_flagged_subjects:
         excluded_lookup.update(flagged_subjects)
 
@@ -270,7 +279,7 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
         electrode_names=expected_electrodes,
         conditions=tuple(source_conditions),
         summaries=tuple(summaries),
-        excluded_subjects=tuple(excluded_subjects),
+        excluded_subjects=tuple(sorted(excluded_lookup)),
         flagged_subjects=tuple(flagged_subjects),
         bin_plan=shared_plan,
         diagnostics=tuple(diagnostics),
@@ -295,7 +304,15 @@ def build_l2_mne_hauk_participant_zscore_conditions_from_project(
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
     excluded_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Excluded Participants.xlsx")
     flagged_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Flagged Participants.xlsx")
+    frequency_exclusions = active_frequency_domain_exclusions(root)
+    source_electrode_excluded_subjects = {
+        participant
+        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
+        if electrodes
+    }
     excluded_lookup = set(excluded_subjects)
+    excluded_lookup.update(frequency_exclusions.excluded_participants)
+    excluded_lookup.update(source_electrode_excluded_subjects)
     if not include_flagged_subjects:
         excluded_lookup.update(flagged_subjects)
 
@@ -396,7 +413,7 @@ def build_l2_mne_hauk_participant_zscore_conditions_from_project(
         electrode_names=expected_electrodes,
         conditions=tuple(source_conditions),
         summaries=tuple(summaries),
-        excluded_subjects=tuple(excluded_subjects),
+        excluded_subjects=tuple(sorted(excluded_lookup)),
         flagged_subjects=tuple(flagged_subjects),
         bin_plan=shared_plan,
         diagnostics=tuple(diagnostics),

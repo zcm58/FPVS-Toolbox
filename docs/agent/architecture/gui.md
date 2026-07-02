@@ -26,6 +26,13 @@ Primary paths:
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.
+- `src/Main_App/gui/frequency_domain_qc_dialog.py`: modal review dialog shown
+  after workbook processing and before final harmonic selection when
+  project-wide summed-BCA frequency-domain QC finds automatic hard exclusions,
+  strong warnings, or repeated warning patterns. The dialog presents a
+  participant summary first, optional flagged-cell details second, and lets the
+  user add manual participant-level frequency-domain exclusions before
+  processing resumes.
 - `src/Main_App/gui/processing_inputs.py`: processing input validation,
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
@@ -85,8 +92,11 @@ toggles such as Debug Mode and Beta Tools under Advanced. Advanced also hosts
 the project preprocessing QC toggle for auto-detecting removed electrodes,
 manual removed-electrode metadata, and manual participant-level processing
 exclusions because those controls are intentionally more specialized than the
-primary preprocessing fields. Do not put app-level visibility or diagnostics
-toggles in the Preprocessing tab.
+primary preprocessing fields. Advanced also shows read-only frequency-domain QC
+thresholds and active frequency-domain exclusions; changing manual
+frequency-domain exclusions marks downstream frequency-domain outputs stale and
+requires regeneration. Do not put app-level visibility or diagnostics toggles
+in the Preprocessing tab.
 
 The sidebar's default tool list is Statistical Analysis, SNR Plots, Scalp Maps,
 LORETA Visualizer, and Sequence Figure, in that order. Publication Report,

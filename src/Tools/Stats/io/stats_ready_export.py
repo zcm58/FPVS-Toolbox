@@ -713,6 +713,9 @@ def prepare_stats_ready_export(
     )
     if not summed_bca:
         raise RuntimeError("Stats-ready export could not prepare Summed BCA data.")
+    included_subjects = [str(subject) for subject in subjects if str(subject) in summed_bca]
+    if not included_subjects:
+        included_subjects = [str(subject) for subject in summed_bca.keys()]
 
     log_func(
         "Stats-ready export: Summed BCA data prepared "
@@ -724,7 +727,7 @@ def prepare_stats_ready_export(
     )
     frames_started = perf_counter()
     frames = build_stats_ready_frames(
-        subjects=list(subjects),
+        subjects=included_subjects,
         conditions=list(conditions),
         subject_data=subject_data,
         rois=rois,

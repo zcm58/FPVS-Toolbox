@@ -41,6 +41,15 @@ FPVS Toolbox uses a strict hybrid settings model:
   and saves the matching harmonic-selection metadata into
   `tools.stats.group_significant_harmonics_cache`. The raw data and generated
   condition workbooks are not altered by this QC export.
+- Processing-end frequency-domain QC writes reviewed summed-BCA plausibility
+  decisions into `project.json` under `tools.frequency_domain_qc` and writes
+  `Quality Check/Frequency_Domain_QC_Review.txt` after user acceptance. This
+  namespace stores read-only thresholds, automatic participant-electrode
+  exclusions, automatic participant exclusions, manual participant exclusions,
+  the last accepted review fingerprint, and whether downstream
+  frequency-domain outputs are stale. Automatic exclusions are recalculated
+  from current processed workbooks; manual participant exclusions persist until
+  the user clears them in Settings.
 - `%APPDATA%\FPVS_Toolbox\*.ini` files and old Qt `QSettings` locations are legacy migration inputs only; do not add new writers there.
 - Do not write settings to the install directory, repo directory, `Program Files`, or the process current working directory.
 - FPVS Studio `.fpvsconfig` import is a project-shell helper under

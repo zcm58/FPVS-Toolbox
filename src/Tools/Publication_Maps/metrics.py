@@ -12,6 +12,7 @@ from Tools.Stats.analysis.dv_policy_group_significant import (
     build_group_significant_harmonic_selection,
 )
 from Tools.Stats.analysis.dv_policy_settings import DVPolicySettings
+from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.Publication_Maps.excel_inputs import (
     ELECTRODE_COLUMN,
     discover_workbooks,
@@ -63,10 +64,17 @@ def build_publication_map_result(request: PublicationMapRequest) -> PublicationM
 
     diagnostics: list[Diagnostic] = []
     requested_metrics = _request_metrics(request)
+    frequency_exclusions = active_frequency_domain_exclusions(request.project_root)
+    subject_exclusions = {
+        str(subject).strip().upper()
+        for subject in request.subject_exclusions
+        if str(subject).strip()
+    }
+    subject_exclusions.update(frequency_exclusions.excluded_participants)
     workbooks = discover_workbooks(
         request.input_root,
         request.conditions,
-        excluded_subjects=request.subject_exclusions,
+        excluded_subjects=subject_exclusions,
     )
     if not workbooks:
         diagnostics.append(
@@ -95,6 +103,7 @@ def build_publication_map_result(request: PublicationMapRequest) -> PublicationM
                 workbooks=workbooks,
                 harmonics_hz=selected_harmonics,
                 diagnostics=diagnostics,
+                excluded_electrodes_by_subject=frequency_exclusions.auto_excluded_electrodes_by_participant,
             )
         )
     long_df = pd.DataFrame(long_rows, columns=LONG_COLUMNS)
@@ -164,6 +173,7 @@ def _collect_metric_rows(
     workbooks: list[WorkbookEntry],
     harmonics_hz: tuple[float, ...],
     diagnostics: list[Diagnostic],
+    excluded_electrodes_by_subject: dict[str, frozenset[str]],
 ) -> list[dict[str, object]]:
     montage_names = biosemi64_names_upper()
     rows: list[dict[str, object]] = []
@@ -198,6 +208,15 @@ def _collect_metric_rows(
                 )
             )
             continue
+        excluded_electrodes = excluded_electrodes_by_subject.get(
+            workbook.subject_id.upper(),
+            frozenset(),
+        )
+        if excluded_electrodes:
+            normalized_electrodes = df_metric[ELECTRODE_COLUMN].map(normalize_electrode_name)
+            df_metric = df_metric.loc[
+                ~normalized_electrodes.astype(str).str.upper().isin(excluded_electrodes)
+            ].copy()
         missing_columns = [column for column in selected_columns if column not in df_metric.columns]
         if missing_columns:
             diagnostics.append(

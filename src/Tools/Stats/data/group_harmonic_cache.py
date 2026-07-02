@@ -166,6 +166,30 @@ def build_project_processing_signature(manifest: Mapping[str, object] | None) ->
         "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION_LABEL,
         "preprocessing": canonical_preprocessing,
         "event_map": dict(sorted(event_map.items())),
+        "frequency_domain_qc": _frequency_domain_qc_signature(source),
+    }
+
+
+def _frequency_domain_qc_signature(manifest: Mapping[str, object]) -> dict[str, object]:
+    tools = manifest.get("tools")
+    if not isinstance(tools, Mapping):
+        return {}
+    state = tools.get("frequency_domain_qc")
+    if not isinstance(state, Mapping):
+        return {}
+    return {
+        "method_version": str(state.get("method_version") or ""),
+        "thresholds": _json_safe(state.get("thresholds") or {}),
+        "auto_participant_electrode_exclusions": _json_safe(
+            state.get("auto_participant_electrode_exclusions") or []
+        ),
+        "auto_participant_exclusions": _json_safe(
+            state.get("auto_participant_exclusions") or []
+        ),
+        "manual_participant_exclusions": _json_safe(
+            state.get("manual_participant_exclusions") or []
+        ),
+        "downstream_outputs_stale": bool(state.get("downstream_outputs_stale", False)),
     }
 
 

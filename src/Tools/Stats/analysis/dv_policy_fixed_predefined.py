@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -327,6 +327,7 @@ def _prepare_fixed_predefined_bca_data(
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
     settings: DVPolicySettings,
     dv_metadata: Optional[dict[str, object]] = None,
+    project_root: str | Path | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
@@ -336,6 +337,15 @@ def _prepare_fixed_predefined_bca_data(
     if not rois_map:
         log_func("No ROIs defined or available.")
         return None
+    electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
+    if project_root not in (None, ""):
+        from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
+
+        electrode_exclusions_by_subject = (
+            active_frequency_domain_exclusions(
+                project_root
+            ).auto_excluded_electrodes_by_participant
+        )
 
     columns = _find_first_bca_columns(subjects, conditions, subject_data, base_freq, log_func)
     if columns is None:
@@ -370,6 +380,10 @@ def _prepare_fixed_predefined_bca_data(
                     log_func=log_func,
                     harmonic_freqs=list(selection.included_frequencies_hz),
                     provenance_enabled=provenance_map is not None,
+                    excluded_electrodes_upper=electrode_exclusions_by_subject.get(
+                        str(pid).upper(),
+                        frozenset(),
+                    ),
                 )
             else:
                 log_func(f"Missing file for {pid} {cond_name}: {file_path}")
@@ -481,6 +495,7 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
     log_func: Callable[[str], None],
     harmonic_freqs: List[float],
     provenance_enabled: bool,
+    excluded_electrodes_upper: Iterable[str] = (),
 ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
     values = {roi_name: np.nan for roi_name in rois.keys()}
     provenance: dict[str, dict[str, object]] = {}
@@ -524,6 +539,11 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
         .apply(pd.to_numeric, errors="coerce")
         .replace([np.inf, -np.inf], np.nan)
     )
+    excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
+    if excluded:
+        numeric_bca = numeric_bca.loc[
+            [electrode for electrode in numeric_bca.index if electrode not in excluded]
+        ]
     for roi_name, roi_channels in rois.items():
         roi_channel_names = [
             str(ch).strip().upper()

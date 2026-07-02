@@ -515,6 +515,8 @@ class MainWindow(QMainWindow, ProcessingMixin):
         return page
 
     def open_stats_analyzer(self) -> None:
+        if not self._frequency_domain_outputs_ready_for_tool("Statistical Analysis"):
+            return
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_stats_page())
@@ -557,6 +559,8 @@ class MainWindow(QMainWindow, ProcessingMixin):
         return page
 
     def open_individual_detectability(self) -> None:
+        if not self._frequency_domain_outputs_ready_for_tool("Individual Detectability"):
+            return
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_individual_detectability_page())
@@ -695,12 +699,16 @@ class MainWindow(QMainWindow, ProcessingMixin):
         return page
 
     def open_plot_generator(self) -> None:
+        if not self._frequency_domain_outputs_ready_for_tool("SNR Plots"):
+            return
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_plot_generator_page())
         self._set_sidebar_selection("btn_graphs")
 
     def open_publication_maps(self) -> None:
+        if not self._frequency_domain_outputs_ready_for_tool("Scalp Maps"):
+            return
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_publication_maps_page())
@@ -714,11 +722,43 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._set_sidebar_selection("btn_publication_report")
 
     def open_loreta_visualizer(self) -> None:
+        if not self._frequency_domain_outputs_ready_for_tool("LORETA Visualizer"):
+            return
         self._acknowledge_loreta_beta_warning()
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_loreta_visualizer_page())
         self._set_sidebar_selection("btn_loreta_visualizer")
+
+    def _frequency_domain_outputs_ready_for_tool(self, tool_name: str) -> bool:
+        project = getattr(self, "currentProject", None)
+        if project is None or not hasattr(project, "project_root"):
+            return True
+        try:
+            from Main_App.processing.frequency_domain_qc import (
+                is_frequency_domain_output_stale,
+            )
+
+            stale = is_frequency_domain_output_stale(project.project_root)
+        except Exception:
+            logger.debug("frequency_domain_stale_guard_failed", exc_info=True)
+            return True
+        if not stale:
+            return True
+        QMessageBox.warning(
+            self,
+            "Regenerate Frequency-Domain Outputs",
+            (
+                "Frequency-domain exclusions changed for this project. "
+                "Resume post-processing before using "
+                f"{tool_name}."
+            ),
+        )
+        try:
+            processing_workflows._set_resume_post_processing_pending(self, True)
+        except Exception:
+            logger.debug("frequency_domain_resume_button_set_failed", exc_info=True)
+        return False
 
     def open_epoch_averaging(self) -> None:
         page = self._ensure_epoch_averaging_page()

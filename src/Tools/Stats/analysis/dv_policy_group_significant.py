@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -713,6 +713,28 @@ def build_group_significant_harmonic_selection(
     project_root: str | Path | None = None,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
+    electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
+    if project_root not in (None, ""):
+        from Main_App.processing.frequency_domain_qc import (
+            active_frequency_domain_exclusions,
+            filter_frequency_domain_subjects,
+        )
+
+        subjects, subject_data, frequency_excluded = filter_frequency_domain_subjects(
+            project_root,
+            subjects,
+            subject_data,
+        )
+        if frequency_excluded:
+            log_func(
+                "Frequency-domain participant exclusions applied before group "
+                "harmonic selection: " + ", ".join(frequency_excluded)
+            )
+        electrode_exclusions_by_subject = (
+            active_frequency_domain_exclusions(
+                project_root
+            ).auto_excluded_electrodes_by_participant
+        )
     cache_request = build_group_harmonic_cache_request(
         project_root=project_root,
         subjects=subjects,
@@ -831,6 +853,7 @@ def build_group_significant_harmonic_selection(
         log_func=log_func,
         frequency_columns=required.frequency_columns,
         required_indices=required.required_indices,
+        excluded_electrodes_by_subject=electrode_exclusions_by_subject,
     )
     if grand_average.empty:
         raise RuntimeError("Group-level harmonic selection found no usable amplitude spectra.")
@@ -1140,6 +1163,28 @@ def _prepare_group_significant_bca_data(
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None
+    electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
+    if project_root not in (None, ""):
+        from Main_App.processing.frequency_domain_qc import (
+            active_frequency_domain_exclusions,
+            filter_frequency_domain_subjects,
+        )
+
+        subjects, subject_data, frequency_excluded = filter_frequency_domain_subjects(
+            project_root,
+            subjects,
+            subject_data,
+        )
+        if frequency_excluded:
+            log_func(
+                "Frequency-domain participant exclusions applied before Summed BCA: "
+                + ", ".join(frequency_excluded)
+            )
+        electrode_exclusions_by_subject = (
+            active_frequency_domain_exclusions(
+                project_root
+            ).auto_excluded_electrodes_by_participant
+        )
 
     rois_map = rois if rois is not None else _current_rois_map()
     if not rois_map:
@@ -1209,6 +1254,10 @@ def _prepare_group_significant_bca_data(
             log_func=log_func,
             harmonic_freqs=list(selection.selected_harmonics_hz),
             provenance_enabled=provenance_map is not None,
+            excluded_electrodes_upper=electrode_exclusions_by_subject.get(
+                str(pid).upper(),
+                frozenset(),
+            ),
         )
         read_elapsed = perf_counter() - read_started
         for roi_name in rois_map.keys():
@@ -1286,6 +1335,7 @@ def _build_grand_average_amplitude(
     log_func: Callable[[str], None],
     frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
+    excluded_electrodes_by_subject: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[pd.Series, list[str], list[int], int, int]:
     started = perf_counter()
     spectra: list[pd.Series] = []
@@ -1316,6 +1366,9 @@ def _build_grand_average_amplitude(
             electrode_scope=electrode_scope,
             reference_frequency_columns=frequency_columns,
             required_indices=required_indices,
+            excluded_electrodes_upper=(
+                excluded_electrodes_by_subject or {}
+            ).get(str(pid).upper(), frozenset()),
         )
         file_read_elapsed = perf_counter() - read_started
         read_elapsed += file_read_elapsed
@@ -1614,6 +1667,7 @@ def _load_mean_amplitude_series(
     electrode_scope: str,
     reference_frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
+    excluded_electrodes_upper: Iterable[str] = (),
 ) -> tuple[pd.Series, list[str], int]:
     try:
         header_columns = read_xlsx_sheet_header(
@@ -1695,7 +1749,11 @@ def _load_mean_amplitude_series(
         .str.upper()
         .str.strip()
     )
-    df_fft = df_fft.loc[electrodes != ""].copy()
+    excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
+    include_mask = electrodes != ""
+    if excluded:
+        include_mask = include_mask & ~electrodes.isin(excluded)
+    df_fft = df_fft.loc[include_mask].copy()
     electrode_count = len(df_fft)
 
     values: dict[float, float] = {}
@@ -1769,6 +1827,7 @@ def _aggregate_bca_for_all_rois(
     log_func: Callable[[str], None],
     harmonic_freqs: List[float],
     provenance_enabled: bool,
+    excluded_electrodes_upper: Iterable[str] = (),
 ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
     values = {roi_name: np.nan for roi_name in rois.keys()}
     provenance: dict[str, dict[str, object]] = {}
@@ -1817,6 +1876,11 @@ def _aggregate_bca_for_all_rois(
         .apply(pd.to_numeric, errors="coerce")
         .replace([np.inf, -np.inf], np.nan)
     )
+    excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
+    if excluded:
+        numeric_bca = numeric_bca.loc[
+            [electrode for electrode in numeric_bca.index if electrode not in excluded]
+        ]
     for roi_name, roi_channels in rois.items():
         roi_chans = [
             str(ch).strip().upper()

@@ -114,6 +114,21 @@ def prepare_summed_bca_data(
     """Handle the prepare summed bca data step for the Stats workflow."""
     settings = normalize_dv_policy(dv_policy)
     resolved_max_freq = _resolve_max_freq(max_freq)
+    if project_root not in (None, ""):
+        from Main_App.processing.frequency_domain_qc import (
+            filter_frequency_domain_subjects,
+        )
+
+        subjects, subject_data, excluded = filter_frequency_domain_subjects(
+            project_root,
+            subjects,
+            subject_data,
+        )
+        if excluded:
+            log_func(
+                "Frequency-domain participant exclusions applied: "
+                + ", ".join(excluded)
+            )
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
     if meta_target is not None and resolved_max_freq is not None:
         meta_target["max_frequency_hz"] = float(resolved_max_freq)
@@ -163,6 +178,7 @@ def prepare_summed_bca_data(
             provenance_map=provenance_map,
             settings=settings,
             dv_metadata=meta_target,
+            project_root=project_root,
         )
     if cache_key is not None and data is not None:
         if meta_target is None:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from Main_App.processing.processing_ledger import load_ledger
+from Main_App.processing.frequency_domain_qc import filter_frequency_domain_subjects
 from Tools.Stats.analysis.dv_policy_group_significant import (
     build_group_significant_harmonic_selection,
 )
@@ -64,6 +65,16 @@ def run_processing_harmonic_selection_qc(
     ordered_conditions = _ordered_conditions(project, conditions)
     subject_data = _filter_subject_data(subject_data, ordered_conditions)
     subjects = [subject for subject in subjects if subject_data.get(subject)]
+    subjects, subject_data, frequency_excluded = filter_frequency_domain_subjects(
+        project_root,
+        subjects,
+        subject_data,
+    )
+    if frequency_excluded:
+        _log(
+            "Frequency-domain participant exclusions applied before final harmonic "
+            "selection: " + ", ".join(frequency_excluded)
+        )
     if not subjects or not ordered_conditions:
         raise RuntimeError(
             "Harmonic selection QC could not find completed condition workbooks."
