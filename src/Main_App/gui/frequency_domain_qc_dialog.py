@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -57,60 +58,77 @@ class FrequencyDomainQcReviewDialog(QDialog):
 
         banner = StatusBanner(
             (
-                "Review the flagged participants before FPVS Toolbox recalculates "
-                "the final significant harmonic list. Automatic exclusions are "
-                "required; manual participant exclusions are optional."
+                "FPVS Toolbox found unusual frequency-domain values that need "
+                "review before final harmonics are finalized."
             ),
             self,
             variant="warning",
         )
         layout.addWidget(banner)
 
-        threshold_label = QLabel(_threshold_text(self._report), self)
-        threshold_label.setWordWrap(True)
-        layout.addWidget(threshold_label)
+        outcome_label = QLabel(_outcome_text(self._report), self)
+        outcome_label.setObjectName("frequency_domain_qc_outcome_label")
+        outcome_label.setWordWrap(True)
+        layout.addWidget(outcome_label)
 
-        summary_label = QLabel("Participant Summary", self)
+        summary_label = QLabel("Review Needed", self)
         summary_label.setObjectName("frequency_domain_qc_summary_label")
         layout.addWidget(summary_label)
 
         self.summary_table = QTableWidget(self)
         self.summary_table.setObjectName("frequency_domain_qc_summary_table")
-        self.summary_table.setColumnCount(7)
+        self.summary_table.setColumnCount(5)
         self.summary_table.setHorizontalHeaderLabels(
             [
                 "Participant",
+                "Finding",
+                "Automatic action",
+                "Exclude whole participant",
                 "Reason",
-                "Max abs uV",
-                "Warning cells",
-                "Hard electrodes",
-                "Manual exclude",
-                "Manual reason",
             ]
         )
         self.summary_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.summary_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.summary_table.setSelectionMode(QAbstractItemView.NoSelection)
+        header = self.summary_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         layout.addWidget(self.summary_table, 2)
         self._populate_summary_table()
 
-        details_header = QWidget(self)
-        details_layout = QHBoxLayout(details_header)
-        details_layout.setContentsMargins(0, 0, 0, 0)
-        self.details_button = QToolButton(details_header)
-        self.details_button.setText("Show flagged details")
+        rules_header = QWidget(self)
+        rules_layout = QHBoxLayout(rules_header)
+        rules_layout.setContentsMargins(0, 0, 0, 0)
+        self.rules_button = QToolButton(rules_header)
+        self.rules_button.setText("Show QC rules")
+        self.rules_button.setCheckable(True)
+        self.rules_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.rules_button.toggled.connect(self._toggle_rules)
+        rules_layout.addWidget(self.rules_button)
+
+        self.details_button = QToolButton(rules_header)
+        self.details_button.setText("Show audit details")
         self.details_button.setCheckable(True)
         self.details_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.details_button.toggled.connect(self._toggle_details)
-        details_layout.addWidget(self.details_button)
-        details_layout.addStretch(1)
-        layout.addWidget(details_header)
+        rules_layout.addWidget(self.details_button)
+        rules_layout.addStretch(1)
+        layout.addWidget(rules_header)
+
+        self.rules_label = QLabel(_threshold_text(self._report), self)
+        self.rules_label.setObjectName("frequency_domain_qc_rules_label")
+        self.rules_label.setWordWrap(True)
+        self.rules_label.setVisible(False)
+        layout.addWidget(self.rules_label)
 
         self.details_table = QTableWidget(self)
         self.details_table.setObjectName("frequency_domain_qc_details_table")
-        self.details_table.setColumnCount(6)
+        self.details_table.setColumnCount(5)
         self.details_table.setHorizontalHeaderLabels(
-            ["Participant", "Condition", "Electrode", "Summed BCA", "Severity", "Workbook"]
+            ["Participant", "Condition", "Electrode", "Summed BCA", "Severity"]
         )
         self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.details_table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -146,13 +164,10 @@ class FrequencyDomainQcReviewDialog(QDialog):
         for row, item in enumerate(summaries):
             participant_id = str(item.get("participant_id") or "")
             auto_participant = bool(item.get("auto_participant_excluded"))
-            reasons = ", ".join(str(reason) for reason in item.get("pause_reasons", []) or [])
             values = [
                 participant_id,
-                reasons,
-                f"{float(item.get('max_abs_summed_bca_uv') or 0.0):.3f}",
-                str(int(item.get("warning_cell_count") or 0)),
-                str(int(item.get("hard_excluded_electrode_count") or 0)),
+                _finding_text(item),
+                _automatic_action_text(item),
             ]
             for column, text in enumerate(values):
                 table_item = QTableWidgetItem(text)
@@ -165,16 +180,16 @@ class FrequencyDomainQcReviewDialog(QDialog):
             checkbox.setToolTip(
                 "Automatic participant exclusions cannot be changed here."
                 if auto_participant
-                else "Exclude this participant from project-wide frequency-domain outputs."
+                else "Optionally remove this whole participant from frequency-domain outputs."
             )
-            self.summary_table.setCellWidget(row, 5, _centered_cell_widget(checkbox))
+            self.summary_table.setCellWidget(row, 3, _centered_cell_widget(checkbox))
 
             combo = QComboBox(self.summary_table)
             combo.addItems(list(MANUAL_EXCLUSION_REASONS))
             combo.setCurrentText(WARNING_REASON_UNUSUAL_VALUES)
             combo.setEnabled(checkbox.isEnabled() and checkbox.isChecked())
             checkbox.toggled.connect(combo.setEnabled)
-            self.summary_table.setCellWidget(row, 6, combo)
+            self.summary_table.setCellWidget(row, 4, combo)
             self._manual_controls[participant_id] = (checkbox, combo)
 
         self.summary_table.resizeColumnsToContents()
@@ -190,7 +205,6 @@ class FrequencyDomainQcReviewDialog(QDialog):
                 str(item.get("electrode") or ""),
                 f"{float(item.get('summed_bca_uv') or 0.0):.3f}",
                 str(item.get("severity") or ""),
-                str(item.get("workbook_path") or ""),
             ]
             for column, text in enumerate(values):
                 table_item = QTableWidgetItem(text)
@@ -201,9 +215,78 @@ class FrequencyDomainQcReviewDialog(QDialog):
         self.details_table.resizeColumnsToContents()
         self.details_table.resizeRowsToContents()
 
+    def _toggle_rules(self, checked: bool) -> None:
+        self.rules_label.setVisible(bool(checked))
+        self.rules_button.setText("Hide QC rules" if checked else "Show QC rules")
+
     def _toggle_details(self, checked: bool) -> None:
         self.details_table.setVisible(bool(checked))
-        self.details_button.setText("Hide flagged details" if checked else "Show flagged details")
+        self.details_button.setText("Hide audit details" if checked else "Show audit details")
+
+
+def _outcome_text(report: Mapping[str, object]) -> str:
+    summaries = [
+        item
+        for item in _mapping_rows(report.get("participant_summaries"))
+        if item.get("pause_review")
+    ]
+    auto_electrodes = _mapping_rows(report.get("auto_participant_electrode_exclusions"))
+    auto_participants = _mapping_rows(report.get("auto_participant_exclusions"))
+    need_verb = "needs" if len(summaries) == 1 else "need"
+    parts = [
+        f"{_count_phrase(len(summaries), 'participant')} {need_verb} review.",
+        (
+            f"{_count_phrase(len(auto_electrodes), 'participant-electrode pair')} "
+            "will be excluded automatically."
+        ),
+    ]
+    if auto_participants:
+        parts.append(
+            f"{_count_phrase(len(auto_participants), 'participant')} "
+            "will be removed automatically."
+        )
+    else:
+        parts.append("No participant will be removed unless you choose that below.")
+    parts.append(
+        "Use the checkbox only when you want to remove the whole participant."
+    )
+    return " ".join(parts)
+
+
+def _finding_text(summary: Mapping[str, object]) -> str:
+    electrode = str(summary.get("max_electrode") or "").strip()
+    condition = str(summary.get("max_condition") or "").strip()
+    max_value = float(summary.get("max_abs_summed_bca_uv") or 0.0)
+    warning_count = int(summary.get("warning_cell_count") or 0)
+    hard_count = int(summary.get("hard_excluded_electrode_count") or 0)
+    location = "/".join(part for part in (condition, electrode) if part)
+    lead = f"Max abs summed BCA {max_value:.3f} uV"
+    if location:
+        lead += f" at {location}"
+    details = []
+    if hard_count:
+        details.append(_count_phrase(hard_count, "hard electrode"))
+    if warning_count:
+        details.append(_count_phrase(warning_count, "warning cell"))
+    return f"{lead}; {', '.join(details)}" if details else lead
+
+
+def _automatic_action_text(summary: Mapping[str, object]) -> str:
+    if bool(summary.get("auto_participant_excluded")):
+        return "Exclude whole participant automatically"
+    hard_count = int(summary.get("hard_excluded_electrode_count") or 0)
+    if hard_count:
+        return f"Exclude {_count_phrase(hard_count, 'participant-electrode pair')}; keep participant"
+    reasons = [str(reason) for reason in summary.get("pause_reasons", []) or []]
+    if reasons:
+        return "Review only; no automatic exclusion"
+    return "No automatic action"
+
+
+def _count_phrase(count: int, singular: str, plural: str | None = None) -> str:
+    if count == 1:
+        return f"1 {singular}"
+    return f"{count} {plural or singular + 's'}"
 
 
 def _threshold_text(report: Mapping[str, object]) -> str:
