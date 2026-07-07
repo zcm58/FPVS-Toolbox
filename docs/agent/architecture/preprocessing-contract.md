@@ -164,6 +164,18 @@ is Off, broad low-variance hard-exclusion checks still run, but isolated
 low-variance channels are not auto-marked for interpolation and the local
 cluster warning/exclusion rule is not applied.
 
+During embedded preflight QC, the removed-electrode review keeps provenance
+separate from the final compatibility map. It stores the original FPVS
+Toolbox-flagged set, the subset the user accepts, any auto flags the user
+rejects, manual additions for physically removed electrodes missed by automatic
+review, the final confirmed set, the manual-only auto misses, auto/manual
+overlap, and an agreement status. The final confirmed set is still saved to
+`manual_removed_electrodes` so preprocessing behavior stays compatible. The
+provenance fields are copied into per-file audit, raw-QC exclusion payloads,
+preprocessed-cache metadata, and processing-ledger entries; skipped incremental
+runs can therefore still report the prior auto/manual comparison without
+rescanning already-current files.
+
 The project preprocessing setting `manual_excluded_participants` stores
 participant IDs that should be skipped without removing their raw `.bdf` files
 from the project. These exclusions are edited in Settings > Advanced >
@@ -215,6 +227,7 @@ The GUI finish handler also writes
 `Quality Check/Processing_QC_Summary.xlsx` under the active project root. The
 workbook has one row per participant in the processing plan and reports the PID,
 manually removed electrodes, auto-detected low-SD removed-electrode candidates,
+preflight auto/manual removed-electrode comparison fields,
 auto-detected high-amplitude removed-electrode candidates, auto-detected
 spatial-consistency removed-electrode candidates, kurtosis-rejected electrodes,
 final interpolated electrodes, total rejected/interpolated electrode count,

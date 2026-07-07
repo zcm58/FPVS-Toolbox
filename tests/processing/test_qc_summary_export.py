@@ -74,6 +74,14 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
                 "raw_qc_high_amplitude_channels": ["FT8"],
                 "raw_qc_spatial_outlier_channels": ["FT7"],
                 "raw_qc_warning_rules": ["possible_bad_channel_cluster"],
+                "removed_electrode_original_auto_flagged": ["FT7", "P9"],
+                "removed_electrode_accepted_auto_flagged": ["FT7"],
+                "removed_electrode_rejected_auto_flagged": ["P9"],
+                "removed_electrode_manual_additions": ["P10"],
+                "removed_electrode_final_confirmed_removed": ["FT7", "P10"],
+                "removed_electrode_manual_only_missed_by_auto": ["P10"],
+                "removed_electrode_auto_manual_overlap": ["FT7"],
+                "removed_electrode_agreement_status": "partial",
                 "kurtosis_bad_channels": ["P1", "P3"],
                 "interpolated_channels": ["FT7", "P9", "P1", "P3"],
             },
@@ -105,6 +113,14 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "PID": "P01",
             "Manually Removed Electrodes": "FT7",
             "Auto-Detected Removed Electrodes (Low SD)": "P9",
+            "Preflight Auto-Flagged Removed Electrodes": "FT7, P9",
+            "Accepted FPVS Auto-Flagged Electrodes": "FT7",
+            "Rejected FPVS Auto-Flagged Electrodes": "P9",
+            "Manual Additions": "P10",
+            "Final Confirmed Removed Electrodes": "FT7, P10",
+            "Manually Confirmed Only (Auto Missed)": "P10",
+            "Auto and Manual Removed Electrodes": "FT7",
+            "Auto/Manual Removed-Electrode Agreement": "partial",
             "Flagged Removed-Electrode Candidates (High Amplitude)": "FT8",
             "Flagged Removed-Electrode Candidates (Spatial Consistency)": "FT7",
             "Kurtosis-Rejected Electrodes": "P1, P3",
@@ -119,6 +135,14 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "PID": "P02",
             "Manually Removed Electrodes": "None",
             "Auto-Detected Removed Electrodes (Low SD)": "None",
+            "Preflight Auto-Flagged Removed Electrodes": "None",
+            "Accepted FPVS Auto-Flagged Electrodes": "None",
+            "Rejected FPVS Auto-Flagged Electrodes": "None",
+            "Manual Additions": "None",
+            "Final Confirmed Removed Electrodes": "None",
+            "Manually Confirmed Only (Auto Missed)": "None",
+            "Auto and Manual Removed Electrodes": "None",
+            "Auto/Manual Removed-Electrode Agreement": "None",
             "Flagged Removed-Electrode Candidates (High Amplitude)": "None",
             "Flagged Removed-Electrode Candidates (Spatial Consistency)": "None",
             "Kurtosis-Rejected Electrodes": "None",
@@ -165,6 +189,14 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
                     "n_rejected": 3,
                     "raw_qc_bad_channels": ["P9"],
                     "raw_qc_manual_removed_channels": ["FT7"],
+                    "removed_electrode_original_auto_flagged": ["FT7"],
+                    "removed_electrode_accepted_auto_flagged": ["FT7"],
+                    "removed_electrode_rejected_auto_flagged": [],
+                    "removed_electrode_manual_additions": ["P9"],
+                    "removed_electrode_final_confirmed_removed": ["FT7", "P9"],
+                    "removed_electrode_manual_only_missed_by_auto": ["P9"],
+                    "removed_electrode_auto_manual_overlap": ["FT7"],
+                    "removed_electrode_agreement_status": "partial",
                     "kurtosis_bad_channels": ["Oz"],
                     "interpolated_channels": ["FT7", "P9", "Oz"],
                 },
@@ -182,6 +214,14 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
     assert rows[0]["Missing Conditions"] == "None"
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
+    assert rows[0]["Preflight Auto-Flagged Removed Electrodes"] == "FT7"
+    assert rows[0]["Accepted FPVS Auto-Flagged Electrodes"] == "FT7"
+    assert rows[0]["Rejected FPVS Auto-Flagged Electrodes"] == "None"
+    assert rows[0]["Manual Additions"] == "P9"
+    assert rows[0]["Final Confirmed Removed Electrodes"] == "FT7, P9"
+    assert rows[0]["Manually Confirmed Only (Auto Missed)"] == "P9"
+    assert rows[0]["Auto and Manual Removed Electrodes"] == "FT7"
+    assert rows[0]["Auto/Manual Removed-Electrode Agreement"] == "partial"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
     assert rows[0]["Kurtosis-Rejected Electrodes"] == "Oz"
@@ -195,6 +235,10 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
     )
     assert ledger["entries"]["P01"]["raw_qc_bad_channels"] == ["P9"]
     assert ledger["entries"]["P01"]["raw_qc_manual_removed_channels"] == ["FT7"]
+    assert ledger["entries"]["P01"]["removed_electrode_manual_additions"] == ["P9"]
+    assert (
+        ledger["entries"]["P01"]["removed_electrode_agreement_status"] == "partial"
+    )
     assert ledger["entries"]["P01"]["interpolated_channels"] == ["FT7", "P9", "Oz"]
 
 

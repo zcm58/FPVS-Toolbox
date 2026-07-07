@@ -5,6 +5,7 @@ from Main_App.processing.removed_electrode_detection import (
     DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION,
     REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
     RemovedElectrodeDetectionCalibration,
+    build_removed_electrode_review_record,
     manual_removed_electrodes_for_pid,
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
@@ -170,3 +171,46 @@ def test_removed_electrode_detection_mode_normalization() -> None:
         )
         == "off"
     )
+
+
+def test_removed_electrode_review_record_tracks_auto_miss() -> None:
+    record = build_removed_electrode_review_record(
+        original_auto_flagged=["FT7"],
+        accepted_auto_flagged=["FT7"],
+        manual_additions=["P9"],
+    )
+
+    assert record["original_auto_flagged"] == ["FT7"]
+    assert record["accepted_auto_flagged"] == ["FT7"]
+    assert record["rejected_auto_flagged"] == []
+    assert record["manual_additions"] == ["P9"]
+    assert record["final_confirmed_removed"] == ["FT7", "P9"]
+    assert record["manual_only_missed_by_auto"] == ["P9"]
+    assert record["auto_manual_overlap"] == ["FT7"]
+    assert record["agreement_status"] == "partial"
+
+
+def test_removed_electrode_review_record_tracks_rejected_auto_flag() -> None:
+    record = build_removed_electrode_review_record(
+        original_auto_flagged=["FT7", "P9"],
+        accepted_auto_flagged=["FT7"],
+        manual_additions=[],
+    )
+
+    assert record["accepted_auto_flagged"] == ["FT7"]
+    assert record["rejected_auto_flagged"] == ["P9"]
+    assert record["manual_additions"] == []
+    assert record["final_confirmed_removed"] == ["FT7"]
+    assert record["agreement_status"] == "partial"
+
+
+def test_removed_electrode_review_record_handles_manual_only_case() -> None:
+    record = build_removed_electrode_review_record(
+        original_auto_flagged=[],
+        accepted_auto_flagged=[],
+        manual_additions=["P9"],
+    )
+
+    assert record["manual_additions"] == ["P9"]
+    assert record["manual_only_missed_by_auto"] == ["P9"]
+    assert record["agreement_status"] == "manual_only"

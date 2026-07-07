@@ -127,6 +127,30 @@ def end_preproc_audit(
     raw_qc_manual_removed_channels = _string_list(
         params.get("_fpvs_raw_qc_manual_removed_channels")
     )
+    removed_electrode_original_auto_flagged = _string_list(
+        params.get("_fpvs_removed_electrode_original_auto_flagged")
+    )
+    removed_electrode_accepted_auto_flagged = _string_list(
+        params.get("_fpvs_removed_electrode_accepted_auto_flagged")
+    )
+    removed_electrode_rejected_auto_flagged = _string_list(
+        params.get("_fpvs_removed_electrode_rejected_auto_flagged")
+    )
+    removed_electrode_manual_additions = _string_list(
+        params.get("_fpvs_removed_electrode_manual_additions")
+    )
+    removed_electrode_final_confirmed_removed = _string_list(
+        params.get("_fpvs_removed_electrode_final_confirmed_removed")
+    )
+    removed_electrode_manual_only_missed_by_auto = _string_list(
+        params.get("_fpvs_removed_electrode_manual_only_missed_by_auto")
+    )
+    removed_electrode_auto_manual_overlap = _string_list(
+        params.get("_fpvs_removed_electrode_auto_manual_overlap")
+    )
+    removed_electrode_agreement_status = str(
+        params.get("_fpvs_removed_electrode_agreement_status") or ""
+    )
     raw_qc_warning_rules = _string_list(params.get("_fpvs_raw_qc_warning_rules"))
     kurtosis_bad_channels = _string_list(params.get("_fpvs_kurtosis_bad_channels"))
     interpolated_channels = _string_list(params.get("_fpvs_interpolated_channels"))
@@ -153,6 +177,16 @@ def end_preproc_audit(
         "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
         "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
         "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
+        "removed_electrode_original_auto_flagged": removed_electrode_original_auto_flagged,
+        "removed_electrode_accepted_auto_flagged": removed_electrode_accepted_auto_flagged,
+        "removed_electrode_rejected_auto_flagged": removed_electrode_rejected_auto_flagged,
+        "removed_electrode_manual_additions": removed_electrode_manual_additions,
+        "removed_electrode_final_confirmed_removed": removed_electrode_final_confirmed_removed,
+        "removed_electrode_manual_only_missed_by_auto": (
+            removed_electrode_manual_only_missed_by_auto
+        ),
+        "removed_electrode_auto_manual_overlap": removed_electrode_auto_manual_overlap,
+        "removed_electrode_agreement_status": removed_electrode_agreement_status,
         "raw_qc_warning_rules": raw_qc_warning_rules,
         "kurtosis_bad_channels": kurtosis_bad_channels,
         "interpolated_channels": interpolated_channels,

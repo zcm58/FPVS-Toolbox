@@ -635,6 +635,14 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "_fpvs_raw_qc_high_amplitude_channels": [],
         "_fpvs_raw_qc_spatial_outlier_channels": [],
         "_fpvs_raw_qc_manual_removed_channels": ["P9"],
+        "_fpvs_removed_electrode_original_auto_flagged": ["FT7"],
+        "_fpvs_removed_electrode_accepted_auto_flagged": ["FT7"],
+        "_fpvs_removed_electrode_rejected_auto_flagged": [],
+        "_fpvs_removed_electrode_manual_additions": ["P9"],
+        "_fpvs_removed_electrode_final_confirmed_removed": ["FT7", "P9"],
+        "_fpvs_removed_electrode_manual_only_missed_by_auto": ["P9"],
+        "_fpvs_removed_electrode_auto_manual_overlap": ["FT7"],
+        "_fpvs_removed_electrode_agreement_status": "partial",
         "_fpvs_kurtosis_bad_channels": ["Cz"],
         "_fpvs_interpolated_channels": ["P9", "Cz"],
     }
@@ -644,6 +652,14 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     load_settings.pop("_fpvs_raw_qc_high_amplitude_channels")
     load_settings.pop("_fpvs_raw_qc_spatial_outlier_channels")
     load_settings.pop("_fpvs_raw_qc_manual_removed_channels")
+    load_settings.pop("_fpvs_removed_electrode_original_auto_flagged")
+    load_settings.pop("_fpvs_removed_electrode_accepted_auto_flagged")
+    load_settings.pop("_fpvs_removed_electrode_rejected_auto_flagged")
+    load_settings.pop("_fpvs_removed_electrode_manual_additions")
+    load_settings.pop("_fpvs_removed_electrode_final_confirmed_removed")
+    load_settings.pop("_fpvs_removed_electrode_manual_only_missed_by_auto")
+    load_settings.pop("_fpvs_removed_electrode_auto_manual_overlap")
+    load_settings.pop("_fpvs_removed_electrode_agreement_status")
     load_settings.pop("_fpvs_kurtosis_bad_channels")
     load_settings.pop("_fpvs_interpolated_channels")
     audit_before = {"file": "fake.bdf", "ch_names": ["Cz", "EXG1", "EXG2", "Status"]}
@@ -681,6 +697,19 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_raw_qc_high_amplitude_channels"] == []
     assert load_settings["_fpvs_raw_qc_spatial_outlier_channels"] == []
     assert load_settings["_fpvs_raw_qc_manual_removed_channels"] == ["P9"]
+    assert load_settings["_fpvs_removed_electrode_original_auto_flagged"] == ["FT7"]
+    assert load_settings["_fpvs_removed_electrode_accepted_auto_flagged"] == ["FT7"]
+    assert load_settings["_fpvs_removed_electrode_rejected_auto_flagged"] == []
+    assert load_settings["_fpvs_removed_electrode_manual_additions"] == ["P9"]
+    assert load_settings["_fpvs_removed_electrode_final_confirmed_removed"] == [
+        "FT7",
+        "P9",
+    ]
+    assert load_settings["_fpvs_removed_electrode_manual_only_missed_by_auto"] == [
+        "P9"
+    ]
+    assert load_settings["_fpvs_removed_electrode_auto_manual_overlap"] == ["FT7"]
+    assert load_settings["_fpvs_removed_electrode_agreement_status"] == "partial"
     assert load_settings["_fpvs_kurtosis_bad_channels"] == ["Cz"]
     assert load_settings["_fpvs_interpolated_channels"] == ["P9", "Cz"]
 

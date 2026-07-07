@@ -22,6 +22,16 @@ PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v6_manual_removed_elect
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
+REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
+    "removed_electrode_original_auto_flagged",
+    "removed_electrode_accepted_auto_flagged",
+    "removed_electrode_rejected_auto_flagged",
+    "removed_electrode_manual_additions",
+    "removed_electrode_final_confirmed_removed",
+    "removed_electrode_manual_only_missed_by_auto",
+    "removed_electrode_auto_manual_overlap",
+)
+REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS = ("removed_electrode_agreement_status",)
 REPROCESS_ALL_DOWNSTREAM_FOLDER_DEFAULTS = {
     "snr": "2 - SNR Plots",
     "stats": "3 - Statistical Analysis Results",
@@ -124,6 +134,16 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, Sequence):
         return [str(item) for item in value if str(item).strip()]
     return []
+
+
+def _removed_electrode_review_payload(source: Mapping[str, Any] | None) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    source = source or {}
+    for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+        payload[key] = _string_list(source.get(key))
+    for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+        payload[key] = str(source.get(key) or "")
+    return payload
 
 
 def _int_or_default(value: Any, default: int = 0) -> int:
@@ -865,6 +885,7 @@ def record_processing_results(
             "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
             "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
             "raw_qc_warning_rules": raw_qc_warning_rules,
+            **_removed_electrode_review_payload(audit),
             "kurtosis_bad_channels": kurtosis_bad_channels,
             "interpolated_channels": interpolated_channels,
             "n_rejected": n_rejected,
@@ -931,6 +952,7 @@ def record_processing_results(
                 "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
                 "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
                 "raw_qc_warning_rules": raw_qc_warning_rules,
+                **_removed_electrode_review_payload(qc_payload),
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
                 "n_rejected": n_rejected,
@@ -997,6 +1019,7 @@ def record_processing_results(
                 "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
                 "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
                 "raw_qc_warning_rules": raw_qc_warning_rules,
+                **_removed_electrode_review_payload(audit),
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
                 "n_rejected": n_rejected,
@@ -1020,6 +1043,7 @@ def record_processing_results(
             "raw_qc_spatial_outlier_channels": [],
             "raw_qc_manual_removed_channels": [],
             "raw_qc_warning_rules": [],
+            **_removed_electrode_review_payload({}),
             "kurtosis_bad_channels": [],
             "interpolated_channels": [],
             "n_rejected": 0,

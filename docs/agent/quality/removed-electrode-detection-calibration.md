@@ -62,6 +62,13 @@ Advanced > Processing QC > Manual list. The manual map is stored as
 `manual_removed_electrodes` under project preprocessing settings and is the
 highest-authority input for physically removed channels.
 
+The embedded preflight review stores calibration provenance in addition to that
+compatibility map. `Quality Check/Processing_QC_Summary.xlsx` includes the
+original FPVS Toolbox auto flags, accepted auto flags, rejected auto flags,
+manual additions, final confirmed removed electrodes, manual-only misses,
+auto/manual overlap, and the agreement status. Use those columns to identify
+cases such as a missed `P9` before changing thresholds.
+
 Use the confirmed physically removed electrodes as positives. Treat clean,
 confirmed plugged-in electrodes as the main negative class. Keep "looked funny
 but left in" electrodes and kurtosis-rejected plugged-in electrodes as stress
@@ -155,3 +162,6 @@ labels:
 
 Then reprocess a labeled calibration project and compare
 `Quality Check/Processing_QC_Summary.xlsx` against the manual labels.
+Adding or exporting provenance-only comparison metadata does not require a cache
+or processing-fingerprint bump when the detector thresholds, preprocessing
+order, and final channel inclusion behavior are unchanged.

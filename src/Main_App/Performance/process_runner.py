@@ -60,6 +60,20 @@ logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
 PREPROC_CACHE_VERSION = "preprocessed-raw-v7-manual-removed-electrode-qc"
 BDF_FIRST_N_CHANNELS = 64
+REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
+    "removed_electrode_original_auto_flagged",
+    "removed_electrode_accepted_auto_flagged",
+    "removed_electrode_rejected_auto_flagged",
+    "removed_electrode_manual_additions",
+    "removed_electrode_final_confirmed_removed",
+    "removed_electrode_manual_only_missed_by_auto",
+    "removed_electrode_auto_manual_overlap",
+)
+REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS = ("removed_electrode_agreement_status",)
+REMOVED_ELECTRODE_REVIEW_KEYS = (
+    *REMOVED_ELECTRODE_REVIEW_LIST_KEYS,
+    *REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS,
+)
 
 
 def _string_list(value: Any) -> list[str]:
@@ -115,6 +129,57 @@ def _manual_excluded_participants(settings: Dict[str, object]) -> set[str]:
             settings.get("manual_excluded_participants")
         )
     }
+
+
+def _removed_electrode_review_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> dict[str, object]:
+    participant_id = _participant_id_for_file(file_path, settings)
+    source = settings.get("_fpvs_removed_electrode_review_by_pid")
+    if not isinstance(source, dict):
+        return {}
+    direct = source.get(participant_id)
+    if isinstance(direct, dict):
+        return dict(direct)
+    participant_key = participant_id.casefold()
+    for raw_pid, payload in source.items():
+        if str(raw_pid).casefold() == participant_key and isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _apply_removed_electrode_review_metadata(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> None:
+    review = _removed_electrode_review_for_file(file_path, settings)
+    for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+        short_key = key.removeprefix("removed_electrode_")
+        settings[f"_fpvs_{key}"] = _string_list(
+            review.get(key, review.get(short_key))
+        )
+    for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+        short_key = key.removeprefix("removed_electrode_")
+        settings[f"_fpvs_{key}"] = str(review.get(key, review.get(short_key)) or "")
+
+
+def _review_metadata_from_settings(settings: Dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+        payload[key] = _string_list(settings.get(f"_fpvs_{key}"))
+    for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+        payload[key] = str(settings.get(f"_fpvs_{key}") or "")
+    return payload
+
+
+def _raw_channel_qc_payload_with_review(
+    payload: Dict[str, object],
+    settings: Dict[str, object],
+) -> Dict[str, object]:
+    enriched = dict(payload)
+    enriched.update(_review_metadata_from_settings(settings))
+    return enriched
 
 
 def _participant_is_manually_excluded(
@@ -499,6 +564,10 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_warning_rules"] = _string_list(
             metadata.get("raw_qc_warning_rules")
         )
+        for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
+            settings[f"_fpvs_{key}"] = _string_list(metadata.get(key))
+        for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
+            settings[f"_fpvs_{key}"] = str(metadata.get(key) or "")
         return raw, audit_before, int(metadata.get("n_rejected", 0)), "hit"
     except Exception as exc:
         logger.warning(
@@ -564,6 +633,7 @@ def _store_preprocessed_cache(
             "raw_qc_warning_rules": _string_list(
                 settings.get("_fpvs_raw_qc_warning_rules")
             ),
+            **_review_metadata_from_settings(settings),
         }
         tmp_meta_path.write_text(
             json.dumps(metadata, sort_keys=True, default=str),
@@ -809,6 +879,7 @@ def _run_full_pipeline_for_file(
                 file_path,
                 settings,
             )
+            _apply_removed_electrode_review_metadata(file_path, settings)
             settings["_fpvs_manual_removed_electrodes"] = (
                 _manual_removed_electrodes_for_file(file_path, settings)
             )
@@ -854,7 +925,10 @@ def _run_full_pipeline_for_file(
                     message=raw_qc_result.message,
                     stage="raw_qc",
                     start_time=t0,
-                    qc_info=raw_qc_result.to_payload(),
+                    qc_info=_raw_channel_qc_payload_with_review(
+                        raw_qc_result.to_payload(),
+                        settings,
+                    ),
                 )
             logger.debug(
                 "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",

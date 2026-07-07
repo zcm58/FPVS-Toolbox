@@ -26,6 +26,14 @@ QC_SUMMARY_HEADERS = (
     "PID",
     "Manually Removed Electrodes",
     "Auto-Detected Removed Electrodes (Low SD)",
+    "Preflight Auto-Flagged Removed Electrodes",
+    "Accepted FPVS Auto-Flagged Electrodes",
+    "Rejected FPVS Auto-Flagged Electrodes",
+    "Manual Additions",
+    "Final Confirmed Removed Electrodes",
+    "Manually Confirmed Only (Auto Missed)",
+    "Auto and Manual Removed Electrodes",
+    "Auto/Manual Removed-Electrode Agreement",
     "Flagged Removed-Electrode Candidates (High Amplitude)",
     "Flagged Removed-Electrode Candidates (Spatial Consistency)",
     "Kurtosis-Rejected Electrodes",
@@ -152,6 +160,29 @@ def _raw_qc_warning_rules_from_result(result: Mapping[str, Any] | None) -> list[
         _string_list(audit.get("raw_qc_warning_rules"))
         or _string_list(raw_qc.get("warning_rules"))
     )
+
+
+def _review_list_from_result(
+    result: Mapping[str, Any] | None,
+    key: str,
+) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return _string_list(audit.get(key)) or _string_list(raw_qc.get(key))
+
+
+def _review_scalar_from_result(
+    result: Mapping[str, Any] | None,
+    key: str,
+) -> str:
+    if not result:
+        return ""
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    value = audit.get(key) or raw_qc.get(key)
+    return str(value or "").strip()
 
 
 def _kurtosis_channels_from_result(result: Mapping[str, Any] | None) -> list[str]:
@@ -411,6 +442,70 @@ def build_processing_qc_rows(
         ) or _string_list(
             cache_entry.get("raw_qc_manual_removed_channels")
         )
+        removed_auto_flagged = _review_list_from_result(
+            result,
+            "removed_electrode_original_auto_flagged",
+        ) or _string_list(
+            entry.get("removed_electrode_original_auto_flagged")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_original_auto_flagged")
+        )
+        removed_accepted_auto = _review_list_from_result(
+            result,
+            "removed_electrode_accepted_auto_flagged",
+        ) or _string_list(
+            entry.get("removed_electrode_accepted_auto_flagged")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_accepted_auto_flagged")
+        )
+        removed_rejected_auto = _review_list_from_result(
+            result,
+            "removed_electrode_rejected_auto_flagged",
+        ) or _string_list(
+            entry.get("removed_electrode_rejected_auto_flagged")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_rejected_auto_flagged")
+        )
+        removed_manual_additions = _review_list_from_result(
+            result,
+            "removed_electrode_manual_additions",
+        ) or _string_list(
+            entry.get("removed_electrode_manual_additions")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_manual_additions")
+        )
+        removed_final_confirmed = _review_list_from_result(
+            result,
+            "removed_electrode_final_confirmed_removed",
+        ) or _string_list(
+            entry.get("removed_electrode_final_confirmed_removed")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_final_confirmed_removed")
+        )
+        removed_manual_only = _review_list_from_result(
+            result,
+            "removed_electrode_manual_only_missed_by_auto",
+        ) or _string_list(
+            entry.get("removed_electrode_manual_only_missed_by_auto")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_manual_only_missed_by_auto")
+        )
+        removed_overlap = _review_list_from_result(
+            result,
+            "removed_electrode_auto_manual_overlap",
+        ) or _string_list(
+            entry.get("removed_electrode_auto_manual_overlap")
+        ) or _string_list(
+            cache_entry.get("removed_electrode_auto_manual_overlap")
+        )
+        removed_agreement = _review_scalar_from_result(
+            result,
+            "removed_electrode_agreement_status",
+        ) or str(
+            entry.get("removed_electrode_agreement_status") or ""
+        ).strip() or str(
+            cache_entry.get("removed_electrode_agreement_status") or ""
+        ).strip()
         raw_qc_high_amplitude_channels = _raw_qc_high_amplitude_channels_from_result(
             result
         ) or _string_list(
@@ -508,6 +603,26 @@ def build_processing_qc_rows(
                 ),
                 "Auto-Detected Removed Electrodes (Low SD)": _join_channels(
                     raw_qc_low_variance_channels
+                ),
+                "Preflight Auto-Flagged Removed Electrodes": _join_channels(
+                    removed_auto_flagged
+                ),
+                "Accepted FPVS Auto-Flagged Electrodes": _join_channels(
+                    removed_accepted_auto
+                ),
+                "Rejected FPVS Auto-Flagged Electrodes": _join_channels(
+                    removed_rejected_auto
+                ),
+                "Manual Additions": _join_channels(removed_manual_additions),
+                "Final Confirmed Removed Electrodes": _join_channels(
+                    removed_final_confirmed
+                ),
+                "Manually Confirmed Only (Auto Missed)": _join_channels(
+                    removed_manual_only
+                ),
+                "Auto and Manual Removed Electrodes": _join_channels(removed_overlap),
+                "Auto/Manual Removed-Electrode Agreement": (
+                    removed_agreement or "None"
                 ),
                 "Flagged Removed-Electrode Candidates (High Amplitude)": _join_channels(
                     raw_qc_high_amplitude_channels

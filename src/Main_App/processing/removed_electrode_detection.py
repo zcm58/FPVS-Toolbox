@@ -180,6 +180,96 @@ def manual_removed_electrodes_for_pid(
     return ()
 
 
+def _unique_electrodes(values: Any) -> list[str]:
+    return parse_electrode_list(values)
+
+
+def _canonical_lookup(values: list[str]) -> dict[str, str]:
+    return {value.casefold(): value for value in values}
+
+
+def build_removed_electrode_review_record(
+    *,
+    original_auto_flagged: Any,
+    accepted_auto_flagged: Any,
+    manual_additions: Any,
+) -> dict[str, object]:
+    """Build comparison metadata for automatic and manually confirmed removals."""
+
+    original = _unique_electrodes(original_auto_flagged)
+    accepted_raw = _unique_electrodes(accepted_auto_flagged)
+    manual_raw = _unique_electrodes(manual_additions)
+    original_lookup = _canonical_lookup(original)
+
+    accepted: list[str] = []
+    seen_accepted: set[str] = set()
+    for electrode in accepted_raw:
+        original_label = original_lookup.get(electrode.casefold())
+        if original_label is None:
+            continue
+        if original_label.casefold() in seen_accepted:
+            continue
+        accepted.append(original_label)
+        seen_accepted.add(original_label.casefold())
+
+    manual_only: list[str] = []
+    seen_manual: set[str] = set()
+    for electrode in manual_raw:
+        if electrode.casefold() in original_lookup:
+            original_label = original_lookup[electrode.casefold()]
+            if original_label.casefold() not in seen_accepted:
+                accepted.append(original_label)
+                seen_accepted.add(original_label.casefold())
+            continue
+        if electrode.casefold() in seen_manual:
+            continue
+        manual_only.append(electrode)
+        seen_manual.add(electrode.casefold())
+
+    accepted_lookup = {electrode.casefold() for electrode in accepted}
+    rejected = [
+        electrode for electrode in original if electrode.casefold() not in accepted_lookup
+    ]
+    final_confirmed = parse_electrode_list([*accepted, *manual_only])
+    overlap = list(accepted)
+    agreement = removed_electrode_agreement_status(
+        original_auto_flagged=original,
+        final_confirmed=final_confirmed,
+    )
+    return {
+        "original_auto_flagged": original,
+        "accepted_auto_flagged": accepted,
+        "rejected_auto_flagged": rejected,
+        "manual_additions": manual_only,
+        "final_confirmed_removed": final_confirmed,
+        "manual_only_missed_by_auto": manual_only,
+        "auto_manual_overlap": overlap,
+        "agreement_status": agreement,
+    }
+
+
+def removed_electrode_agreement_status(
+    *,
+    original_auto_flagged: Any,
+    final_confirmed: Any,
+) -> str:
+    """Summarize agreement between preflight auto flags and final confirmations."""
+
+    auto = _unique_electrodes(original_auto_flagged)
+    final = _unique_electrodes(final_confirmed)
+    auto_keys = {electrode.casefold() for electrode in auto}
+    final_keys = {electrode.casefold() for electrode in final}
+    if not auto_keys and not final_keys:
+        return "none"
+    if auto_keys == final_keys:
+        return "exact"
+    if auto_keys & final_keys:
+        return "partial"
+    if final_keys:
+        return "manual_only"
+    return "auto_only"
+
+
 def normalize_removed_electrode_detection_mode(
     value: Any,
     *,
@@ -365,6 +455,7 @@ __all__ = [
     "REMOVED_ELECTRODE_DETECTION_MODE_OFF",
     "REMOVED_ELECTRODE_DETECTION_MODES",
     "RemovedElectrodeDetectionCalibration",
+    "build_removed_electrode_review_record",
     "canonicalize_electrode_name",
     "is_high_amplitude_removed_channel",
     "is_low_variance_removed_channel",
@@ -372,6 +463,7 @@ __all__ = [
     "normalize_manual_removed_electrodes_map",
     "normalize_removed_electrode_detection_mode",
     "parse_electrode_list",
+    "removed_electrode_agreement_status",
     "removed_electrode_threshold_payload",
     "spatial_predictability_outliers",
     "spatial_predictability_threshold",

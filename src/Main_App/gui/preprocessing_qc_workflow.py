@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
@@ -30,6 +30,7 @@ from Main_App.processing.preflight_qc import (
 )
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    build_removed_electrode_review_record,
     normalize_manual_removed_electrodes_map,
     parse_electrode_list,
 )
@@ -45,6 +46,12 @@ _DATA_QUALITY_SCAN_WAIT_MESSAGE = (
     "FPVS Toolbox is currently checking your data for anything strange. This will only take a moment."
 )
 _DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
+_REMOVED_REVIEW_HEADERS = (
+    "PID",
+    "FPVS Toolbox flagged",
+    "Manual additions",
+    "Final confirmed removed electrodes",
+)
 _DATA_QUALITY_STEP_TOTAL = 5
 
 
@@ -138,6 +145,147 @@ def _replace_removed_map_for_participants(
         if pid.casefold() in keys:
             merged[pid] = list(electrodes)
     return dict(sorted(merged.items(), key=lambda item: _participant_sort_key(item[0])))
+
+
+def _unique_channels(*values: Sequence[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for source in values:
+        for channel in parse_electrode_list(source):
+            key = channel.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(channel)
+    return merged
+
+
+def _map_lookup(values: Mapping[str, Sequence[str]], participant_id: str) -> list[str]:
+    if participant_id in values:
+        return list(values[participant_id])
+    key = participant_id.casefold()
+    for candidate, electrodes in values.items():
+        if candidate.casefold() == key:
+            return list(electrodes)
+    return []
+
+
+def _removed_review_row_values(
+    participant_ids: Sequence[str],
+    auto_flagged: Mapping[str, Sequence[str]],
+    existing_manual: Mapping[str, Sequence[str]],
+) -> list[tuple[str, str, str, str]]:
+    rows: list[tuple[str, str, str, str]] = []
+    seen_pids: set[str] = set()
+    all_pids: list[str] = []
+    for source_pid in (
+        *participant_ids,
+        *tuple(auto_flagged),
+        *tuple(existing_manual),
+    ):
+        pid = str(source_pid).strip()
+        if not pid:
+            continue
+        key = pid.casefold()
+        if key in seen_pids:
+            continue
+        seen_pids.add(key)
+        all_pids.append(pid)
+    all_pids.sort(key=_participant_sort_key)
+
+    for pid in all_pids:
+        auto_values = parse_electrode_list(_map_lookup(auto_flagged, pid))
+        existing_values = parse_electrode_list(_map_lookup(existing_manual, pid))
+        auto_lookup = {channel.casefold() for channel in auto_values}
+        manual_additions = [
+            channel
+            for channel in existing_values
+            if channel.casefold() not in auto_lookup
+        ]
+        final_confirmed = _unique_channels(auto_values, manual_additions)
+        rows.append(
+            (
+                pid,
+                ", ".join(auto_values),
+                ", ".join(manual_additions),
+                ", ".join(final_confirmed),
+            )
+        )
+    return rows
+
+
+def _normalize_removed_review_entry(
+    *,
+    original_auto: Sequence[str],
+    accepted_auto_text: str,
+    manual_additions_text: str,
+) -> tuple[dict[str, object], list[str], list[str]]:
+    original = parse_electrode_list(original_auto)
+    original_lookup = {channel.casefold(): channel for channel in original}
+    accepted_raw = parse_electrode_list(accepted_auto_text)
+    manual_raw = parse_electrode_list(manual_additions_text)
+
+    accepted_auto: list[str] = []
+    moved_to_manual: list[str] = []
+    for channel in accepted_raw:
+        original_label = original_lookup.get(channel.casefold())
+        if original_label is None:
+            moved_to_manual.append(channel)
+            continue
+        accepted_auto.append(original_label)
+
+    moved_to_auto: list[str] = []
+    manual_additions: list[str] = []
+    accepted_lookup = {channel.casefold() for channel in accepted_auto}
+    for channel in manual_raw:
+        original_label = original_lookup.get(channel.casefold())
+        if original_label is not None:
+            if original_label.casefold() not in accepted_lookup:
+                accepted_auto.append(original_label)
+                accepted_lookup.add(original_label.casefold())
+            moved_to_auto.append(original_label)
+            continue
+        manual_additions.append(channel)
+
+    manual_additions = _unique_channels(manual_additions, moved_to_manual)
+    record = build_removed_electrode_review_record(
+        original_auto_flagged=original,
+        accepted_auto_flagged=accepted_auto,
+        manual_additions=manual_additions,
+    )
+    return record, moved_to_manual, moved_to_auto
+
+
+def _removed_review_records_from_rows(
+    rows: Sequence[Sequence[str]],
+    auto_flagged: Mapping[str, Sequence[str]],
+) -> tuple[dict[str, dict[str, object]], dict[str, list[str]], list[str]]:
+    records: dict[str, dict[str, object]] = {}
+    final_confirmed: dict[str, list[str]] = {}
+    warnings: list[str] = []
+    for row_values in rows:
+        if len(row_values) < 3:
+            continue
+        pid = str(row_values[0]).strip()
+        if not pid:
+            continue
+        record, moved_to_manual, moved_to_auto = _normalize_removed_review_entry(
+            original_auto=_map_lookup(auto_flagged, pid),
+            accepted_auto_text=str(row_values[1]),
+            manual_additions_text=str(row_values[2]),
+        )
+        records[pid] = record
+        final_confirmed[pid] = list(record["final_confirmed_removed"])  # type: ignore[index]
+        if moved_to_manual:
+            warnings.append(
+                f"{pid}: moved to Manual additions: {', '.join(moved_to_manual)}"
+            )
+        if moved_to_auto:
+            warnings.append(
+                f"{pid}: treated original FPVS flag(s) as accepted: "
+                f"{', '.join(moved_to_auto)}"
+            )
+    return records, final_confirmed, warnings
 
 
 def _casefold_electrode_lookup(
@@ -355,10 +503,14 @@ def _set_preflight_table(
     rows: Sequence[Sequence[str]],
     *,
     editable_last_column: bool = False,
+    editable_columns: Sequence[int] | None = None,
 ) -> None:
     table = getattr(host, "processing_files_table", None)
     if table is None:
         return
+    editable_lookup = set(int(column) for column in (editable_columns or ()))
+    if editable_last_column and headers:
+        editable_lookup.add(len(headers) - 1)
     table.clearContents()
     table.setWordWrap(True)
     table.setColumnCount(len(headers))
@@ -374,18 +526,18 @@ def _set_preflight_table(
     table.setRowCount(len(rows))
     table.setEditTriggers(
         QAbstractItemView.AllEditTriggers
-        if editable_last_column
+        if editable_lookup
         else QAbstractItemView.NoEditTriggers
     )
     table.setSelectionMode(
         QAbstractItemView.SingleSelection
-        if editable_last_column
+        if editable_lookup
         else QAbstractItemView.NoSelection
     )
     for row_index, row_values in enumerate(rows):
         for column_index, value in enumerate(row_values):
             item = QTableWidgetItem(str(value))
-            if not editable_last_column or column_index != len(headers) - 1:
+            if column_index not in editable_lookup:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             if column_index == 0:
                 item.setTextAlignment(Qt.AlignCenter)
@@ -680,15 +832,12 @@ def _review_removed_electrodes(
     )
     participant_ids = [str(info.subject_id) for info in raw_file_infos]
     existing_for_review = _filter_removed_map_for_participants(existing, participant_ids)
-    prepopulated = _merge_removed_maps(
-        existing_for_review,
-        scan.suggested_removed_electrodes,
-    )
+    auto_flagged = scan.suggested_removed_electrodes
     prompt = (
         "FPVS Toolbox detected that the following electrodes were physically "
         "removed from the cap prior to the start of each respective experiment. "
-        "Please review and confirm this list, and add any electrodes that were "
-        "removed if they are not present on this list."
+        "Review FPVS Toolbox's flags, remove any flags that are wrong, and add "
+        "missed removed electrodes in the Manual additions column."
     )
     _show_data_quality_notice(
         host,
@@ -716,30 +865,46 @@ def _review_removed_electrodes(
     _set_label(
         host,
         "processing_current_file_label",
-        "Edit the removed-electrode list directly in the table, then save to continue.",
+        "Use the FPVS Toolbox flagged column only to accept or remove existing "
+        "flags. Put missed electrodes in Manual additions.",
     )
-    seen_pids: set[str] = set()
-    all_pids: list[str] = []
-    for source_pid in (*participant_ids, *tuple(prepopulated)):
-        pid = str(source_pid).strip()
-        if not pid:
-            continue
-        key = pid.casefold()
-        if key in seen_pids:
-            continue
-        seen_pids.add(key)
-        all_pids.append(pid)
-    all_pids.sort(key=_participant_sort_key)
-    rows = [
-        (pid, ", ".join(_casefold_electrode_lookup(prepopulated, pid)))
-        for pid in all_pids
-    ]
+    rows = _removed_review_row_values(
+        participant_ids,
+        auto_flagged,
+        existing_for_review,
+    )
     _set_preflight_table(
         host,
-        ["PID", "Removed electrodes"],
+        _REMOVED_REVIEW_HEADERS,
         rows,
-        editable_last_column=True,
+        editable_columns=(1, 2),
     )
+    table = getattr(host, "processing_files_table", None)
+
+    def _refresh_final_column(row_index: int) -> None:
+        if table is None:
+            return
+        pid_item = table.item(row_index, 0)
+        accepted_item = table.item(row_index, 1)
+        manual_item = table.item(row_index, 2)
+        final_item = table.item(row_index, 3)
+        if pid_item is None or final_item is None:
+            return
+        record, _moved_to_manual, _moved_to_auto = _normalize_removed_review_entry(
+            original_auto=_map_lookup(auto_flagged, pid_item.text().strip()),
+            accepted_auto_text=accepted_item.text() if accepted_item else "",
+            manual_additions_text=manual_item.text() if manual_item else "",
+        )
+        final_item.setText(
+            ", ".join(record["final_confirmed_removed"])  # type: ignore[index]
+        )
+
+    def _on_removed_review_item_changed(item: QTableWidgetItem) -> None:
+        if item.column() in (1, 2):
+            _refresh_final_column(item.row())
+
+    if table is not None:
+        table.itemChanged.connect(_on_removed_review_item_changed)
     choice = _await_preflight_choice(
         host,
         (
@@ -747,6 +912,11 @@ def _review_removed_electrodes(
             ("Cancel Processing", "cancel", "secondary"),
         ),
     )
+    if table is not None:
+        try:
+            table.itemChanged.disconnect(_on_removed_review_item_changed)
+        except (TypeError, RuntimeError):
+            pass
     if choice != "save":
         try:
             host.log("Data quality check cancelled at removed-electrode review.")
@@ -754,9 +924,17 @@ def _review_removed_electrodes(
             pass
         return False
 
-    updated_review_map = normalize_manual_removed_electrodes_map(
-        _manual_removed_electrodes_from_table(host)
+    records, updated_review_map, warnings = _removed_review_records_from_rows(
+        _removed_review_rows_from_table(host),
+        auto_flagged,
     )
+    if warnings:
+        QMessageBox.warning(
+            host,
+            "Removed Electrode Review",
+            "Some entries were moved to preserve source tracking:\n\n"
+            + "\n".join(warnings),
+        )
     updated_map = _replace_removed_map_for_participants(
         existing,
         updated_review_map,
@@ -787,6 +965,7 @@ def _review_removed_electrodes(
     params["auto_detect_removed_electrodes"] = bool(
         normalized.get("auto_detect_removed_electrodes")
     )
+    params["_fpvs_removed_electrode_review_by_pid"] = records
     host.validated_params = params
     try:
         host.log("Data quality check saved the reviewed removed-electrode list.")
@@ -795,20 +974,21 @@ def _review_removed_electrodes(
     return True
 
 
-def _manual_removed_electrodes_from_table(host: Any) -> dict[str, list[str]]:
+def _removed_review_rows_from_table(host: Any) -> list[tuple[str, str, str, str]]:
     table = getattr(host, "processing_files_table", None)
     if table is None:
-        return {}
-    values: dict[str, list[str]] = {}
+        return []
+    rows: list[tuple[str, str, str, str]] = []
     for row in range(table.rowCount()):
-        pid_item = table.item(row, 0)
-        electrodes_item = table.item(row, 1)
-        pid = pid_item.text().strip() if pid_item else ""
-        if not pid:
-            continue
-        electrodes_text = electrodes_item.text() if electrodes_item else ""
-        values[pid] = parse_electrode_list(electrodes_text)
-    return values
+        values = []
+        for column in range(min(table.columnCount(), len(_REMOVED_REVIEW_HEADERS))):
+            item = table.item(row, column)
+            values.append(item.text().strip() if item else "")
+        if values and values[0]:
+            while len(values) < len(_REMOVED_REVIEW_HEADERS):
+                values.append("")
+            rows.append(tuple(values[: len(_REMOVED_REVIEW_HEADERS)]))
+    return rows
 
 
 def _hard_candidate_reason(result: PreflightQcFileResult) -> str:
