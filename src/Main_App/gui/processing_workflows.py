@@ -21,6 +21,7 @@ from Main_App.io.load_utils import (
 from Main_App.processing.processing_ledger import (
     MISSING_EXPECTED_OUTPUTS_WARNING,
     ProcessingPlan,
+    carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
     clean_downstream_outputs_for_reprocess_all,
     clean_managed_excel_root,
@@ -28,6 +29,7 @@ from Main_App.processing.processing_ledger import (
     load_ledger,
     output_group_folder_by_file,
     record_processing_results,
+    refresh_skipped_ledger_fingerprints,
     with_processing_choice,
 )
 from Main_App.processing.qc_summary_export import export_processing_qc_summary
@@ -967,6 +969,11 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             settings,
             event_map,
         )
+        plan = carry_forward_pre_qc_completed_states(
+            host.currentProject,
+            getattr(host, "_processing_pre_qc_plan", None),
+            plan,
+        )
         chosen_plan = _choose_processing_plan(host, plan, is_single_ui=is_single_ui)
         if chosen_plan is None:
             _reset_failed_start(host)
@@ -978,6 +985,16 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         if not _prepare_excel_outputs_for_plan(host, chosen_plan):
             _reset_failed_start(host)
             return
+        refreshed = refresh_skipped_ledger_fingerprints(
+            host.currentProject,
+            chosen_plan,
+        )
+        if refreshed:
+            host.log(
+                "Updated processing ledger fingerprint metadata for "
+                f"{refreshed} skipped file(s).",
+                level=logging.INFO,
+            )
         host._processing_plan = chosen_plan
         host._processing_run_mode = "Single" if is_single_ui else "Batch"
         host._processing_user_choice = chosen_plan.choice

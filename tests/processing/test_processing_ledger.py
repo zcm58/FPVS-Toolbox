@@ -6,12 +6,14 @@ from pathlib import Path
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
+    carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
     clean_downstream_outputs_for_reprocess_all,
     clean_managed_excel_root,
     clean_participant_outputs,
     output_group_folder_by_file,
     record_processing_results,
+    refresh_skipped_ledger_fingerprints,
     with_processing_choice,
 )
 from Main_App.projects.project import Project
@@ -27,6 +29,12 @@ def _project_with_raw(tmp_path):
     project.event_map = {"Condition A": 1}
     project.save()
     return project, RawFileInfo(raw_file.resolve(), "P01")
+
+
+def _add_raw_file(raw_dir: Path, participant_id: str) -> RawFileInfo:
+    raw_file = raw_dir / f"{participant_id}.bdf"
+    raw_file.write_bytes(b"raw")
+    return RawFileInfo(raw_file.resolve(), participant_id)
 
 
 def _settings() -> dict[str, object]:
@@ -145,6 +153,107 @@ def test_classify_settings_change_stales_completed_entry(tmp_path) -> None:
 
     assert plan.states[0].status == "changed_settings"
     assert plan.incremental_files == (info.path,)
+
+
+def test_pre_qc_completed_state_survives_new_participant_qc_metadata(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.update_preprocessing(
+        {
+            **project.preprocessing,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"P01": ["P9"]},
+        }
+    )
+    project.save()
+    initial_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(initial_plan)
+    record_processing_results(
+        project,
+        initial_plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    info_2 = _add_raw_file(Path(project.input_folder), "P02")
+    pre_qc_plan = classify_processing_inputs(
+        project,
+        [info, info_2],
+        _settings(),
+        project.event_map,
+    )
+    assert [state.status for state in pre_qc_plan.states] == ["completed", "new"]
+
+    project.update_preprocessing(
+        {
+            **project.preprocessing,
+            "manual_removed_electrodes": {"P01": ["P9"], "P02": ["Oz"]},
+        }
+    )
+    project.save()
+    current_plan = classify_processing_inputs(
+        project,
+        [info, info_2],
+        _settings(),
+        project.event_map,
+    )
+    assert [state.status for state in current_plan.states] == ["changed_settings", "new"]
+
+    carried = carry_forward_pre_qc_completed_states(project, pre_qc_plan, current_plan)
+    assert [state.status for state in carried.states] == ["completed", "new"]
+    assert carried.incremental_files == (info_2.path,)
+
+    refreshed = refresh_skipped_ledger_fingerprints(project, carried)
+    assert refreshed == 1
+    follow_up = classify_processing_inputs(
+        project,
+        [info, info_2],
+        _settings(),
+        project.event_map,
+    )
+    assert [state.status for state in follow_up.states] == ["completed", "new"]
+    assert follow_up.incremental_files == (info_2.path,)
+
+
+def test_pre_qc_carry_forward_does_not_hide_raw_file_changes(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.update_preprocessing(
+        {
+            **project.preprocessing,
+            "removed_electrode_detection_mode": "manual",
+            "manual_removed_electrodes": {"P01": ["P9"]},
+        }
+    )
+    project.save()
+    initial_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(initial_plan)
+    record_processing_results(
+        project,
+        initial_plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    pre_qc_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert pre_qc_plan.states[0].status == "completed"
+
+    info.path.write_bytes(b"changed raw")
+    project.update_preprocessing(
+        {
+            **project.preprocessing,
+            "manual_removed_electrodes": {"P01": ["P9"], "P02": ["Oz"]},
+        }
+    )
+    project.save()
+    current_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert current_plan.states[0].status == "changed_settings"
+
+    carried = carry_forward_pre_qc_completed_states(project, pre_qc_plan, current_plan)
+
+    assert carried.states[0].status == "changed_settings"
+    assert carried.incremental_files == (info.path,)
 
 
 def test_classify_old_processing_fingerprint_version_is_stale(tmp_path) -> None:

@@ -477,6 +477,144 @@ def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
     )
 
 
+def _state_still_matches_ledger(
+    project: Any,
+    state: ProcessingInputState,
+) -> bool:
+    ledger = load_ledger(Path(project.project_root))
+    entries = ledger.get("entries", {})
+    if not isinstance(entries, Mapping):
+        return False
+    entry = entries.get(state.participant_id)
+    if not isinstance(entry, Mapping):
+        return False
+
+    raw_meta = raw_file_metadata(state.info.path)
+    if (
+        entry.get("raw_file") != raw_meta["raw_file"]
+        or entry.get("raw_size") != raw_meta["raw_size"]
+        or entry.get("raw_mtime_ns") != raw_meta["raw_mtime_ns"]
+    ):
+        return False
+
+    if state.status == "excluded":
+        return str(entry.get("status") or "") == "excluded"
+
+    present_outputs = [path for path in state.expected_outputs if path.exists()]
+    missing_outputs = [path for path in state.expected_outputs if not path.exists()]
+    if not missing_outputs:
+        return bool(present_outputs)
+    return _missing_outputs_are_recorded_condition_warning(entry, missing_outputs)
+
+
+def carry_forward_pre_qc_completed_states(
+    project: Any,
+    pre_qc_plan: ProcessingPlan | None,
+    current_plan: ProcessingPlan,
+) -> ProcessingPlan:
+    """Keep completed pre-QC states when QC metadata updates only new files.
+
+    Preflight QC can add participant-specific manual removed-electrode or
+    exclusion metadata before the final processing plan is built. Those project
+    metadata additions should not force previously completed files back into an
+    incremental run when their pre-QC ledger state was already reusable.
+    """
+
+    if pre_qc_plan is None:
+        return current_plan
+
+    pre_by_path: dict[Path, ProcessingInputState] = {}
+    for state in pre_qc_plan.states:
+        try:
+            pre_by_path[state.info.path.resolve()] = state
+        except (OSError, RuntimeError):
+            pre_by_path[state.info.path] = state
+
+    states: list[ProcessingInputState] = []
+    changed = False
+    for current in current_plan.states:
+        try:
+            key = current.info.path.resolve()
+        except (OSError, RuntimeError):
+            key = current.info.path
+        pre_qc = pre_by_path.get(key)
+        if (
+            pre_qc is not None
+            and pre_qc.status in {"completed", "excluded"}
+            and current.status == "changed_settings"
+            and pre_qc.participant_id == current.participant_id
+            and _state_still_matches_ledger(project, current)
+        ):
+            states.append(
+                ProcessingInputState(
+                    info=current.info,
+                    participant_id=current.participant_id,
+                    status=pre_qc.status,
+                    reason=pre_qc.reason,
+                    expected_outputs=current.expected_outputs,
+                )
+            )
+            changed = True
+            continue
+        states.append(current)
+
+    if not changed:
+        return current_plan
+    return ProcessingPlan(
+        states=tuple(states),
+        fingerprint=current_plan.fingerprint,
+        condition_labels=current_plan.condition_labels,
+        choice=current_plan.choice,
+    )
+
+
+def refresh_skipped_ledger_fingerprints(project: Any, plan: ProcessingPlan) -> int:
+    """Refresh fingerprint metadata for skipped reusable files.
+
+    This keeps durable incremental behavior after preflight QC adds metadata for
+    new participants. The stored QC fields and output paths are left unchanged.
+    """
+
+    project_root = Path(project.project_root)
+    ledger = load_ledger(project_root)
+    entries = ledger.get("entries", {})
+    if not isinstance(entries, dict):
+        return 0
+
+    run_files: set[Path] = set()
+    for path in plan.run_files:
+        try:
+            run_files.add(path.resolve())
+        except (OSError, RuntimeError):
+            run_files.add(path)
+
+    changed = 0
+    for state in plan.states:
+        if state.status not in {"completed", "excluded"}:
+            continue
+        try:
+            state_path = state.info.path.resolve()
+        except (OSError, RuntimeError):
+            state_path = state.info.path
+        if state_path in run_files:
+            continue
+        entry = entries.get(state.participant_id)
+        if not isinstance(entry, dict):
+            continue
+        updates = {
+            "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+            "processing_fingerprint": plan.fingerprint,
+            "expected_outputs": [str(path) for path in state.expected_outputs],
+        }
+        if any(entry.get(key) != value for key, value in updates.items()):
+            entry.update(updates)
+            changed += 1
+
+    if changed:
+        save_ledger(project_root, ledger)
+    return changed
+
+
 def output_group_folder_by_file(
     project: Any,
     files: Sequence[RawFileInfo],

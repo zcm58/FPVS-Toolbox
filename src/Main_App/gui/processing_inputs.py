@@ -26,6 +26,7 @@ from Main_App.processing.processing_controller import (
     raw_file_info_for_path,
     register_participants,
 )
+from Main_App.processing.processing_ledger import classify_processing_inputs
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
@@ -45,6 +46,14 @@ logger.addHandler(logging.NullHandler())
 # Test seam for callers that need to bypass the embedded QC workflow
 # without importing the heavy raw-QC implementation at module import time.
 run_preprocessing_qc_workflow = None
+
+
+def _planning_settings_from_params(
+    params: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, int]]:
+    settings = dict(params)
+    event_map = settings.pop("event_id_map", {}) or {}
+    return settings, event_map
 
 
 def validate_inputs(host: Any) -> bool:
@@ -147,6 +156,30 @@ def validate_inputs(host: Any) -> bool:
             logger.exception("Failed to save participant review updates.")
             QMessageBox.critical(host, "Project Save Error", str(exc))
             return False
+    planning_settings, event_map = _planning_settings_from_params(params)
+    pre_qc_plan = classify_processing_inputs(
+        host.currentProject,
+        raw_file_infos,
+        planning_settings,
+        event_map,
+    )
+    host._processing_pre_qc_plan = pre_qc_plan
+    qc_raw_file_infos = [
+        state.info for state in pre_qc_plan.states if state.should_run_incremental
+    ]
+    skipped_qc_count = len(raw_file_infos) - len(qc_raw_file_infos)
+    if skipped_qc_count:
+        try:
+            host.log(
+                "Data quality check will reuse previous QC decisions for "
+                f"{skipped_qc_count} completed or excluded file(s).",
+                level=logging.INFO,
+            )
+        except (AttributeError, TypeError, RuntimeError):
+            logger.debug(
+                "preprocessing_qc_reusing_previous_decisions",
+                extra={"skipped_count": skipped_qc_count},
+            )
     qc_workflow = getattr(host, "run_preprocessing_qc_workflow", None)
     if not callable(qc_workflow):
         qc_workflow = globals().get("run_preprocessing_qc_workflow")
@@ -156,7 +189,7 @@ def validate_inputs(host: Any) -> bool:
         )
 
         qc_workflow = _run_preprocessing_qc_workflow
-    if not qc_workflow(host, raw_file_infos, params):
+    if qc_raw_file_infos and not qc_workflow(host, qc_raw_file_infos, params):
         return False
     host._processing_raw_file_infos = list(raw_file_infos)
 

@@ -79,6 +79,14 @@ recording-not-started files are passed to the process runner through
 `recording_not_started` exclusions without creating child-process work. The raw
 BDF files are never modified.
 
+Incremental processing runs classify the selected BDF pool before embedded
+preflight QC and only scan files whose ledger state is new, stale, incomplete,
+or missing expected outputs. Files already recorded as completed or excluded
+for the current raw-file metadata and processing fingerprint keep their prior
+QC decisions. If preflight QC adds participant-specific project metadata for
+new files, the GUI carries forward still-valid completed states and refreshes
+only skipped ledger fingerprint metadata so later runs do not rescan old files.
+
 Epoch building in the process runner must preserve locked FFT crop behavior.
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
 must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade

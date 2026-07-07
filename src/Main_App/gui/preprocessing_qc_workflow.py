@@ -111,6 +111,35 @@ def _merge_removed_maps(
     return dict(sorted(merged.items(), key=lambda item: _participant_sort_key(item[0])))
 
 
+def _filter_removed_map_for_participants(
+    values: dict[str, list[str]],
+    participant_ids: Sequence[str],
+) -> dict[str, list[str]]:
+    keys = {participant_id.casefold() for participant_id in participant_ids}
+    return {
+        pid: list(electrodes)
+        for pid, electrodes in values.items()
+        if pid.casefold() in keys
+    }
+
+
+def _replace_removed_map_for_participants(
+    existing: dict[str, list[str]],
+    replacements: dict[str, list[str]],
+    participant_ids: Sequence[str],
+) -> dict[str, list[str]]:
+    keys = {participant_id.casefold() for participant_id in participant_ids}
+    merged = {
+        pid: list(electrodes)
+        for pid, electrodes in existing.items()
+        if pid.casefold() not in keys
+    }
+    for pid, electrodes in replacements.items():
+        if pid.casefold() in keys:
+            merged[pid] = list(electrodes)
+    return dict(sorted(merged.items(), key=lambda item: _participant_sort_key(item[0])))
+
+
 def _casefold_electrode_lookup(
     values: dict[str, list[str]],
     participant_id: str,
@@ -649,8 +678,12 @@ def _review_removed_electrodes(
     existing = normalize_manual_removed_electrodes_map(
         params.get("manual_removed_electrodes")
     )
-    prepopulated = _merge_removed_maps(existing, scan.suggested_removed_electrodes)
     participant_ids = [str(info.subject_id) for info in raw_file_infos]
+    existing_for_review = _filter_removed_map_for_participants(existing, participant_ids)
+    prepopulated = _merge_removed_maps(
+        existing_for_review,
+        scan.suggested_removed_electrodes,
+    )
     prompt = (
         "FPVS Toolbox detected that the following electrodes were physically "
         "removed from the cap prior to the start of each respective experiment. "
@@ -721,8 +754,13 @@ def _review_removed_electrodes(
             pass
         return False
 
-    updated_map = normalize_manual_removed_electrodes_map(
+    updated_review_map = normalize_manual_removed_electrodes_map(
         _manual_removed_electrodes_from_table(host)
+    )
+    updated_map = _replace_removed_map_for_participants(
+        existing,
+        updated_review_map,
+        participant_ids,
     )
     updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
     updated_preproc["removed_electrode_detection_mode"] = (
