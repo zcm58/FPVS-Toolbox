@@ -95,6 +95,9 @@ def test_hard_participant_exclusion_reason_is_condensed_with_details() -> None:
 
     assert workflow._hard_candidate_flag(result) == "Hard raw QC"
     assert workflow._hard_candidate_reason(result) == "Extremely noisy baseline"
+    assert workflow._hard_candidate_row_values([result]) == [
+        ("P34", "Hard raw QC", "Extremely noisy baseline", "")
+    ]
     assert "far outside the expected range" in workflow._hard_candidate_plain_explanation(result)
 
     details = workflow._hard_candidate_detail_text(result)

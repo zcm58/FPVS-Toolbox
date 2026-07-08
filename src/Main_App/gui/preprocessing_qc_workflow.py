@@ -12,10 +12,15 @@ from openpyxl.utils import get_column_letter
 from PySide6.QtCore import QEventLoop, QObject, QThread, Signal, Slot, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QDialog,
     QHeaderView,
+    QHBoxLayout,
+    QLabel,
     QMessageBox,
+    QPlainTextEdit,
     QSizePolicy,
     QTableWidgetItem,
+    QVBoxLayout,
 )
 
 from Main_App.gui.components import make_action_button
@@ -506,6 +511,7 @@ def _set_preflight_table(
     *,
     editable_last_column: bool = False,
     editable_columns: Sequence[int] | None = None,
+    stretch_column: int | None = None,
 ) -> None:
     table = getattr(host, "processing_files_table", None)
     if table is None:
@@ -514,15 +520,23 @@ def _set_preflight_table(
     editable_lookup = set(int(column) for column in (editable_columns or ()))
     if editable_last_column and headers:
         editable_lookup.add(len(headers) - 1)
+    for row_index in range(table.rowCount()):
+        for column_index in range(table.columnCount()):
+            widget = table.cellWidget(row_index, column_index)
+            if widget is None:
+                continue
+            table.removeCellWidget(row_index, column_index)
+            widget.deleteLater()
     table.clearContents()
     table.setWordWrap(True)
     table.setColumnCount(len(headers))
     table.setHorizontalHeaderLabels(list(headers))
     header = table.horizontalHeader()
+    resolved_stretch_column = len(headers) - 1 if stretch_column is None else stretch_column
     for column_index in range(len(headers)):
         mode = (
             QHeaderView.Stretch
-            if column_index == len(headers) - 1
+            if column_index == resolved_stretch_column
             else QHeaderView.ResizeToContents
         )
         header.setSectionResizeMode(column_index, mode)
@@ -1145,6 +1159,66 @@ def _hard_candidate_detail_text(result: PreflightQcFileResult) -> str:
     return "\n".join(lines)
 
 
+def _hard_candidate_row_values(
+    candidates: Sequence[PreflightQcFileResult],
+) -> list[tuple[str, str, str, str]]:
+    return [
+        (
+            result.participant_id,
+            _hard_candidate_flag(result),
+            _hard_candidate_reason(result),
+            "",
+        )
+        for result in candidates
+    ]
+
+
+def _show_hard_exclusion_detail_dialog(
+    host: Any,
+    result: PreflightQcFileResult,
+    details: str,
+) -> None:
+    dialog = QDialog(host)
+    dialog.setObjectName("participant_qc_details_dialog")
+    dialog.setWindowTitle("Participant QC Details")
+    dialog.setModal(True)
+    dialog.setMinimumSize(640, 460)
+    dialog.resize(760, 560)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(18, 18, 18, 18)
+    layout.setSpacing(12)
+
+    title = QLabel(
+        f"{result.participant_id}: {_hard_candidate_reason(result)}",
+        dialog,
+    )
+    title.setObjectName("participant_qc_details_title")
+    title.setWordWrap(True)
+    layout.addWidget(title)
+
+    explanation = QLabel(_hard_candidate_plain_explanation(result), dialog)
+    explanation.setObjectName("participant_qc_details_explanation")
+    explanation.setWordWrap(True)
+    layout.addWidget(explanation)
+
+    details_edit = QPlainTextEdit(dialog)
+    details_edit.setObjectName("participant_qc_details_text")
+    details_edit.setReadOnly(True)
+    details_edit.setPlainText(details)
+    details_edit.setMinimumHeight(300)
+    layout.addWidget(details_edit, 1)
+
+    actions = QHBoxLayout()
+    actions.addStretch(1)
+    close_button = make_action_button("Close", variant="primary", parent=dialog)
+    close_button.clicked.connect(dialog.accept)
+    actions.addWidget(close_button)
+    layout.addLayout(actions)
+
+    dialog.exec()
+
+
 def _install_hard_exclusion_details(
     host: Any,
     candidates: Sequence[PreflightQcFileResult],
@@ -1158,33 +1232,24 @@ def _install_hard_exclusion_details(
         for result in candidates
     }
     setattr(host, _HARD_EXCLUSION_DETAILS_ATTR, details_by_pid)
-    table.setSelectionMode(QAbstractItemView.SingleSelection)
-    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    table.setSelectionMode(QAbstractItemView.NoSelection)
     for row in range(table.rowCount()):
         item = table.item(row, 0)
-        if item is not None:
-            item.setToolTip("Open participant QC details")
-
-    def _show_details(item: QTableWidgetItem) -> None:
-        if item.column() != 0:
-            return
-        pid_item = table.item(item.row(), 0)
-        pid = pid_item.text().strip() if pid_item else ""
+        pid = item.text().strip() if item else ""
         candidate = candidate_by_pid.get(pid.casefold())
         details = details_by_pid.get(pid.casefold())
         if candidate is None or not details:
             return
-        box = QMessageBox(host)
-        box.setIcon(QMessageBox.Information)
-        box.setWindowTitle("Participant QC Details")
-        box.setText(f"{pid}: {_hard_candidate_reason(candidate)}")
-        box.setInformativeText(_hard_candidate_plain_explanation(candidate))
-        box.setDetailedText(details)
-        box.setStandardButtons(QMessageBox.Ok)
-        box.exec()
-
-    table.itemClicked.connect(_show_details)
-    setattr(host, _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR, _show_details)
+        button = make_action_button("More info", variant="secondary", parent=table)
+        button.setToolTip(f"Open QC details for {pid}")
+        button.setMinimumWidth(96)
+        button.clicked.connect(
+            lambda _checked=False, current=candidate, text=details: (
+                _show_hard_exclusion_detail_dialog(host, current, text)
+            )
+        )
+        table.setCellWidget(row, 3, button)
+    table.resizeRowsToContents()
 
 
 def _confirm_hard_exclusions(
@@ -1231,15 +1296,9 @@ def _confirm_hard_exclusions(
     )
     _set_preflight_table(
         host,
-        ["PID", "Flag", "Reason"],
-        [
-            (
-                result.participant_id,
-                _hard_candidate_flag(result),
-                _hard_candidate_reason(result),
-            )
-            for result in candidates
-        ],
+        ["PID", "Flag", "Reason", "More info"],
+        _hard_candidate_row_values(candidates),
+        stretch_column=2,
     )
     _install_hard_exclusion_details(host, candidates)
     choice = _await_preflight_choice(
