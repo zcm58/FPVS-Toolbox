@@ -512,6 +512,7 @@ def _set_preflight_table(
     editable_last_column: bool = False,
     editable_columns: Sequence[int] | None = None,
     stretch_column: int | None = None,
+    center_columns: bool = False,
 ) -> None:
     table = getattr(host, "processing_files_table", None)
     if table is None:
@@ -531,6 +532,11 @@ def _set_preflight_table(
     table.setWordWrap(True)
     table.setColumnCount(len(headers))
     table.setHorizontalHeaderLabels(list(headers))
+    if center_columns:
+        for column_index in range(len(headers)):
+            header_item = table.horizontalHeaderItem(column_index)
+            if header_item is not None:
+                header_item.setTextAlignment(Qt.AlignCenter)
     header = table.horizontalHeader()
     resolved_stretch_column = len(headers) - 1 if stretch_column is None else stretch_column
     for column_index in range(len(headers)):
@@ -556,7 +562,7 @@ def _set_preflight_table(
             item = QTableWidgetItem(str(value))
             if column_index not in editable_lookup:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-            if column_index == 0:
+            if center_columns or column_index == 0:
                 item.setTextAlignment(Qt.AlignCenter)
             table.setItem(row_index, column_index, item)
     table.resizeRowsToContents()
@@ -1299,6 +1305,7 @@ def _confirm_hard_exclusions(
         ["PID", "Flag", "Reason", "More info"],
         _hard_candidate_row_values(candidates),
         stretch_column=2,
+        center_columns=True,
     )
     _install_hard_exclusion_details(host, candidates)
     choice = _await_preflight_choice(
