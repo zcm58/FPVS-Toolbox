@@ -54,9 +54,15 @@ _DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
 _REMOVED_REVIEW_HEADERS = (
     "PID",
     "FPVS Toolbox flagged",
+    "Why flagged",
     "Manual additions",
     "Final confirmed removed electrodes",
 )
+_REMOVED_REVIEW_PID_COLUMN = 0
+_REMOVED_REVIEW_AUTO_COLUMN = 1
+_REMOVED_REVIEW_REASON_COLUMN = 2
+_REMOVED_REVIEW_MANUAL_COLUMN = 3
+_REMOVED_REVIEW_FINAL_COLUMN = 4
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
 _DATA_QUALITY_STEP_TOTAL = 5
@@ -181,8 +187,9 @@ def _removed_review_row_values(
     participant_ids: Sequence[str],
     auto_flagged: Mapping[str, Sequence[str]],
     existing_manual: Mapping[str, Sequence[str]],
-) -> list[tuple[str, str, str, str]]:
-    rows: list[tuple[str, str, str, str]] = []
+    flag_reasons: Mapping[str, str] | None = None,
+) -> list[tuple[str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str]] = []
     seen_pids: set[str] = set()
     all_pids: list[str] = []
     for source_pid in (
@@ -210,15 +217,53 @@ def _removed_review_row_values(
             if channel.casefold() not in auto_lookup
         ]
         final_confirmed = _unique_channels(auto_values, manual_additions)
+        reason = _string_map_lookup(flag_reasons or {}, pid)
+        if not reason and existing_values:
+            reason = "Existing manual list"
         rows.append(
             (
                 pid,
                 ", ".join(auto_values),
+                reason,
                 ", ".join(manual_additions),
                 ", ".join(final_confirmed),
             )
         )
     return rows
+
+
+def _string_map_lookup(values: Mapping[str, str], participant_id: str) -> str:
+    if participant_id in values:
+        return str(values[participant_id]).strip()
+    key = participant_id.casefold()
+    for candidate, value in values.items():
+        if candidate.casefold() == key:
+            return str(value).strip()
+    return ""
+
+
+def _removed_review_reason_map(scan: PreflightQcScan) -> dict[str, str]:
+    reasons: dict[str, str] = {}
+    for result in scan.results:
+        fragments: list[str] = []
+        if result.auto_removed_electrodes:
+            fragments.append(
+                "Low signal / flat candidate(s): "
+                + ", ".join(result.auto_removed_electrodes)
+            )
+        if result.high_amplitude_channels:
+            fragments.append(
+                "High-amplitude candidate(s): "
+                + ", ".join(result.high_amplitude_channels)
+            )
+        if result.rare_burst_channels:
+            fragments.append(
+                "Rare-burst candidate(s): "
+                + ", ".join(result.rare_burst_channels)
+            )
+        if fragments:
+            reasons[result.participant_id] = "; ".join(fragments)
+    return reasons
 
 
 def _normalize_removed_review_entry(
@@ -276,10 +321,11 @@ def _removed_review_records_from_rows(
         pid = str(row_values[0]).strip()
         if not pid:
             continue
+        manual_index = 3 if len(row_values) >= 5 else 2
         record, moved_to_manual, moved_to_auto = _normalize_removed_review_entry(
             original_auto=_map_lookup(auto_flagged, pid),
             accepted_auto_text=str(row_values[1]),
-            manual_additions_text=str(row_values[2]),
+            manual_additions_text=str(row_values[manual_index]),
         )
         records[pid] = record
         final_confirmed[pid] = list(record["final_confirmed_removed"])  # type: ignore[index]
@@ -869,17 +915,18 @@ def _review_removed_electrodes(
     existing_for_review = _filter_removed_map_for_participants(existing, participant_ids)
     auto_flagged = scan.suggested_removed_electrodes
     prompt = (
-        "FPVS Toolbox detected that the following electrodes were physically "
-        "removed from the cap prior to the start of each respective experiment. "
-        "Review FPVS Toolbox's flags, remove any flags that are wrong, and add "
-        "missed removed electrodes in the Manual additions column."
+        "FPVS Toolbox found electrode-level candidates that may need to be "
+        "treated as removed or unusable before preprocessing. Review FPVS "
+        "Toolbox's flags, remove any flags that are wrong, and add missed "
+        "removed electrodes in the Manual additions column."
     )
     _show_data_quality_notice(
         host,
         "Review electrodes that may have been removed before recording.",
-        "FPVS Toolbox will show a participant-by-participant table next. "
-        "Please confirm the list and add any electrodes that were removed but "
-        "are missing from the table.",
+        "FPVS Toolbox will show one participant-by-participant table for "
+        "removed-electrode candidates, high-amplitude candidates, and "
+        "rare-burst candidates. Please confirm the list and add any electrodes "
+        "that were removed but are missing from the table.",
     )
     _begin_preflight_page(
         host,
@@ -891,7 +938,7 @@ def _review_removed_electrodes(
         review_title="Removed Electrodes",
         progress_visible=False,
         checklist=(
-            "Review electrodes detected as removed before recording",
+            "Review all electrode-level removal candidates",
             "Add any missing removed electrodes",
             "Save the confirmed list into project settings",
         ),
@@ -907,22 +954,24 @@ def _review_removed_electrodes(
         participant_ids,
         auto_flagged,
         existing_for_review,
+        _removed_review_reason_map(scan),
     )
     _set_preflight_table(
         host,
         _REMOVED_REVIEW_HEADERS,
         rows,
-        editable_columns=(1, 2),
+        editable_columns=(_REMOVED_REVIEW_AUTO_COLUMN, _REMOVED_REVIEW_MANUAL_COLUMN),
+        stretch_column=_REMOVED_REVIEW_REASON_COLUMN,
     )
     table = getattr(host, "processing_files_table", None)
 
     def _refresh_final_column(row_index: int) -> None:
         if table is None:
             return
-        pid_item = table.item(row_index, 0)
-        accepted_item = table.item(row_index, 1)
-        manual_item = table.item(row_index, 2)
-        final_item = table.item(row_index, 3)
+        pid_item = table.item(row_index, _REMOVED_REVIEW_PID_COLUMN)
+        accepted_item = table.item(row_index, _REMOVED_REVIEW_AUTO_COLUMN)
+        manual_item = table.item(row_index, _REMOVED_REVIEW_MANUAL_COLUMN)
+        final_item = table.item(row_index, _REMOVED_REVIEW_FINAL_COLUMN)
         if pid_item is None or final_item is None:
             return
         record, _moved_to_manual, _moved_to_auto = _normalize_removed_review_entry(
@@ -935,7 +984,7 @@ def _review_removed_electrodes(
         )
 
     def _on_removed_review_item_changed(item: QTableWidgetItem) -> None:
-        if item.column() in (1, 2):
+        if item.column() in (_REMOVED_REVIEW_AUTO_COLUMN, _REMOVED_REVIEW_MANUAL_COLUMN):
             _refresh_final_column(item.row())
 
     if table is not None:
@@ -1016,13 +1065,16 @@ def _removed_review_rows_from_table(host: Any) -> list[tuple[str, str, str, str]
     rows: list[tuple[str, str, str, str]] = []
     for row in range(table.rowCount()):
         values = []
-        for column in range(min(table.columnCount(), len(_REMOVED_REVIEW_HEADERS))):
+        for column in (
+            _REMOVED_REVIEW_PID_COLUMN,
+            _REMOVED_REVIEW_AUTO_COLUMN,
+            _REMOVED_REVIEW_MANUAL_COLUMN,
+            _REMOVED_REVIEW_FINAL_COLUMN,
+        ):
             item = table.item(row, column)
             values.append(item.text().strip() if item else "")
         if values and values[0]:
-            while len(values) < len(_REMOVED_REVIEW_HEADERS):
-                values.append("")
-            rows.append(tuple(values[: len(_REMOVED_REVIEW_HEADERS)]))
+            rows.append(tuple(values))
     return rows
 
 
@@ -1387,7 +1439,7 @@ def _write_preflight_review_flags(
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Review Flags"
-    worksheet.append(("PID", "Source File", "Flagged Item"))
+    worksheet.append(("PID", "Source File", "Review Item"))
     for row in rows:
         worksheet.append(row)
     _style_preflight_review_sheet(worksheet)
@@ -1395,11 +1447,10 @@ def _write_preflight_review_flags(
     return target
 
 
-def _show_suspicious_remainder(
-    host: Any,
+def _remaining_review_rows(
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
-) -> bool:
+) -> list[tuple[str, str, str]]:
     rows: list[tuple[str, str, str]] = []
     for result in scan.suspicious_results:
         if result.participant_id.casefold() in accepted_hard_exclusions:
@@ -1410,16 +1461,6 @@ def _show_suspicious_remainder(
         if result.warning_rules:
             fragments.append(
                 "raw data warning rule(s): " + ", ".join(result.warning_rules)
-            )
-        if result.high_amplitude_channels:
-            fragments.append(
-                "high-amplitude channel(s): "
-                + ", ".join(result.high_amplitude_channels)
-            )
-        if result.rare_burst_channels:
-            fragments.append(
-                "rare-burst channel(s): "
-                + ", ".join(result.rare_burst_channels)
             )
         if result.spatial_outlier_channels:
             fragments.append(
@@ -1433,6 +1474,15 @@ def _show_suspicious_remainder(
             )
         if fragments:
             rows.append((result.participant_id, result.path.name, "; ".join(fragments)))
+    return rows
+
+
+def _show_suspicious_remainder(
+    host: Any,
+    scan: PreflightQcScan,
+    accepted_hard_exclusions: set[str],
+) -> bool:
+    rows = _remaining_review_rows(scan, accepted_hard_exclusions)
     if not rows:
         return True
 
@@ -1452,22 +1502,22 @@ def _show_suspicious_remainder(
     _show_data_quality_notice(
         host,
         "Some items should be reviewed later.",
-        "FPVS Toolbox found data quality items that were not automatically "
-        "removed. These items will not stop processing, but you should review "
-        "them before relying on the affected results.",
+        "FPVS Toolbox found non-electrode-removal review items. These items will "
+        "not stop processing, but you should review them before relying on the "
+        "affected results.",
         details=report_message,
     )
     _begin_preflight_page(
         host,
         step=5,
-        title="Review Remaining Flags",
-        message="FPVS Toolbox found items that were flagged for review but were not removed automatically.",
+        title="Review Other Flags",
+        message="FPVS Toolbox found non-electrode-removal items that should be reviewed later.",
         busy=False,
         review_visible=True,
         review_title="Review Flags",
         progress_visible=False,
         checklist=(
-            "Review items that were flagged but not removed",
+            "Review non-electrode-removal flags",
             "Use the saved workbook as a later review checklist",
             "Continue processing when you have noted the flagged items",
         ),
@@ -1475,14 +1525,14 @@ def _show_suspicious_remainder(
     _set_label(
         host,
         "processing_summary_label",
-        "FPVS Toolbox found items that were flagged for review but were not removed automatically.",
+        "FPVS Toolbox found non-electrode-removal review flags.",
     )
     _set_label(
         host,
         "processing_current_file_label",
         f"Please make note of these and manually investigate them later. {report_message}",
     )
-    _set_preflight_table(host, ["PID", "Source File", "Flagged item"], rows)
+    _set_preflight_table(host, ["PID", "Source File", "Review item"], rows)
     choice = _await_preflight_choice(
         host,
         (
