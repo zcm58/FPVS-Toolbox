@@ -43,6 +43,7 @@ REPROCESS_ALL_DOWNSTREAM_FOLDER_DEFAULTS = {
 REPROCESS_ALL_QUALITY_CHECK_DELETE_PATTERNS = (
     "Processing_QC_Summary.xlsx",
     "Harmonic_Selection_Summary.xlsx",
+    "SNR_Unexpected_Peaks*.xlsx",
     "SNR_Spectral_QC*.xlsx",
 )
 REPROCESS_ALL_QUALITY_CHECK_PRESERVE = {

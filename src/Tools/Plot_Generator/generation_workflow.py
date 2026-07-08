@@ -184,10 +184,11 @@ class PlotGeneratorWorkflowMixin:
         self._spectral_qc_report_paths.extend(qc_report_paths)
         self._spectral_qc_flags.extend(flagged_electrodes)
         for path in qc_report_paths:
-            self._append_log(f"Spectral QC report: {path}")
+            self._append_log(f"Unexpected SNR peak report: {path}")
         if flagged_electrodes:
             self._append_log(
-                f"Spectral QC flagged {len(flagged_electrodes)} participant-electrode pair(s)."
+                "Unexpected SNR peak scan flagged "
+                f"{len(flagged_electrodes)} participant-electrode pair(s)."
             )
         logger.info(
             "SNR worker finished.",
@@ -232,7 +233,7 @@ class PlotGeneratorWorkflowMixin:
             if spectral_qc_message:
                 QMessageBox.warning(
                     self,
-                    "Spectral QC Flags",
+                    "Unexpected SNR Peaks",
                     spectral_qc_message,
                 )
                 self._offer_spectral_qc_participant_exclusions()
@@ -297,7 +298,7 @@ class PlotGeneratorWorkflowMixin:
             self._project.update_preprocessing(payload)
             self._project.save()
         except Exception as exc:  # pragma: no cover - disk I/O error path
-            logger.exception("Failed to save spectral QC participant exclusions.")
+            logger.exception("Failed to save unexpected SNR peak participant exclusions.")
             QMessageBox.critical(
                 self,
                 "Project Save Error",

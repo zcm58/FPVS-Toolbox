@@ -1,4 +1,4 @@
-"""Quality Check workbook export for SNR plot spectral QC."""
+"""Quality Check workbook export for unexpected SNR peak reports."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from openpyxl.styles import Alignment, Font
 from Main_App.processing.qc_summary_export import QUALITY_CHECK_FOLDER
 from Tools.Plot_Generator.spectral_qc import SpectralQcResult, SpectralQcThresholds
 
-SPECTRAL_QC_REPORT_PREFIX = "SNR_Spectral_QC"
+SPECTRAL_QC_REPORT_PREFIX = "SNR_Unexpected_Peaks"
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]+')
 
 
@@ -66,7 +66,7 @@ def write_spectral_qc_report(
     oddball_freq: float,
     base_freq: float,
 ) -> SpectralQcResult:
-    """Write a tidy spectral QC workbook and return the result with path."""
+    """Write a tidy unexpected SNR peak workbook and return the result with path."""
 
     quality_check_dir.mkdir(parents=True, exist_ok=True)
     report_path = quality_check_dir / f"{SPECTRAL_QC_REPORT_PREFIX}_{_safe_fragment(condition)}.xlsx"
@@ -80,7 +80,10 @@ def write_spectral_qc_report(
         ("Flagged electrode-frequency cells", result.flagged_cells),
         ("Data mutation", "None; source Excel workbooks and raw data were not modified."),
         ("Flag behavior", "Report-only; SNR plot aggregation values are not changed."),
-        ("Reason", "Off-harmonic raw FFT amplitude outlier with visible SNR impact."),
+        (
+            "Reason",
+            "Strong SNR/FFT peak at a frequency that is not base, oddball, or a harmonic.",
+        ),
         ("Oddball frequency (Hz)", oddball_freq),
         ("Base frequency (Hz)", base_freq),
         ("SNR threshold", thresholds.snr_threshold),

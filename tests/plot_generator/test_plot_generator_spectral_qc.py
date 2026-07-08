@@ -107,7 +107,7 @@ def test_spectral_qc_flags_off_harmonic_electrodes_without_changing_plot_values(
     assert captured["freqs"] == [1.0, 1.2]
     assert captured["roi_data"]["All"] == pytest.approx([1.0, 2.0])
 
-    report = project_root / "Quality Check" / "SNR_Spectral_QC_Cond.xlsx"
+    report = project_root / "Quality Check" / "SNR_Unexpected_Peaks_Cond.xlsx"
     assert report.exists()
     assert str(report) in worker.qc_report_paths
     assert any("1 electrode-frequency rows flagged" in message for message in messages)
@@ -115,6 +115,10 @@ def test_spectral_qc_flags_off_harmonic_electrodes_without_changing_plot_values(
     wb = openpyxl.load_workbook(report, data_only=True)
     summary = dict(wb["Summary"].iter_rows(min_row=2, max_col=2, values_only=True))
     assert summary["Flag behavior"] == "Report-only; SNR plot aggregation values are not changed."
+    assert (
+        summary["Reason"]
+        == "Strong SNR/FFT peak at a frequency that is not base, oddball, or a harmonic."
+    )
     rows = list(wb["Flagged Electrodes"].iter_rows(values_only=True))
     assert rows[0][:4] == ("Condition", "PID", "Electrode", "Frequency (Hz)")
     assert rows[1][0:4] == ("Cond", "P04", "FT7", 1.0)
@@ -211,16 +215,22 @@ def test_spectral_qc_alert_message_recommends_reprocessing_flagged_electrodes():
     ]
     message = build_spectral_qc_alert_message(
         flags,
-        [r"C:\Project\Quality Check\SNR_Spectral_QC_Erotic.xlsx"],
+        [r"C:\Project\Quality Check\SNR_Unexpected_Peaks_Erotic.xlsx"],
     )
     candidates = whole_participant_exclusion_candidates(flags)
 
+    assert "Unexpected SNR peaks were detected while generating SNR plots" in message
+    assert "not the base frequency, not the oddball frequency" in message
+    assert (
+        "Example: a strong peak was detected at 16.00 Hz at electrode P2 "
+        "in participant P22 during Neutral Angry"
+    ) in message
     assert "Plots and processed data were not changed" in message
     assert "Whole-participant exclusion candidate(s)" in message
     assert "P12: all 64 scalp electrodes were flagged in Erotic" in message
     assert "Recommendation: exclude these participant(s), then reprocess" in message
     assert "Localized electrode candidates: 1 participant-electrode pair" in message
-    assert "SNR_Spectral_QC_Erotic.xlsx" in message
+    assert "SNR_Unexpected_Peaks_Erotic.xlsx" in message
     assert candidates == [
         {
             "pid": "P12",

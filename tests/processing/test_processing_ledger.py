@@ -612,6 +612,9 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
     source_file = project.project_root / "6 - Source Localization" / "stale.npz"
     table_file = project.project_root / "9 - Tables" / "Table 1.xlsx"
     stale_qc = project.project_root / "Quality Check" / "SNR_Spectral_QC_Condition.xlsx"
+    unexpected_peaks_qc = (
+        project.project_root / "Quality Check" / "SNR_Unexpected_Peaks_Condition.xlsx"
+    )
     qc_summary = project.project_root / "Quality Check" / "Processing_QC_Summary.xlsx"
     preflight_review = (
         project.project_root / "Quality Check" / "Data_Quality_Check_Review_Flags.xlsx"
@@ -626,6 +629,7 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
         source_file,
         table_file,
         stale_qc,
+        unexpected_peaks_qc,
         qc_summary,
         preflight_review,
     ):
@@ -636,6 +640,7 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
 
     assert stats_ready in deleted
     assert stale_qc in deleted
+    assert unexpected_peaks_qc in deleted
     assert qc_summary in deleted
     assert not stats_ready.exists()
     assert not snr_plot.exists()
@@ -644,6 +649,7 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
     assert not source_file.exists()
     assert not table_file.exists()
     assert not stale_qc.exists()
+    assert not unexpected_peaks_qc.exists()
     assert not qc_summary.exists()
     assert preflight_review.exists()
     assert raw_file.exists()

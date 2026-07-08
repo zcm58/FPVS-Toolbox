@@ -127,7 +127,7 @@ class PlotDataCollectionMixin:
             self._record_qc_report_path(result.report_path)
             self._record_spectral_qc_flags(summarize_spectral_qc_records(result.records))
             self._emit(
-                f"Spectral QC report saved: {result.report_path} "
+                f"Unexpected SNR peak report saved: {result.report_path} "
                 f"({result.flagged_cells} electrode-frequency rows flagged).",
                 0,
                 0,

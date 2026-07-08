@@ -165,7 +165,7 @@ def start_automatic_snr_qc_after_processing(host: Any) -> bool:
     host._automatic_snr_qc_state = state
     _append_log(
         host,
-        "Starting automatic SNR plot generation and final spectral QC.",
+        "Starting automatic SNR plot generation and unexpected SNR peak scan.",
     )
 
     def _finish() -> None:
@@ -173,7 +173,7 @@ def start_automatic_snr_qc_after_processing(host: Any) -> bool:
         report_paths = [str(path) for path in state.reports]
         message = build_spectral_qc_alert_message(state.flags, report_paths)
         if message:
-            QMessageBox.warning(host, "Final SNR Spectral QC", message)
+            QMessageBox.warning(host, "Unexpected SNR Peaks", message)
             _save_whole_participant_candidates(host, state.flags)
         if state.failed:
             _append_log(
@@ -184,7 +184,7 @@ def start_automatic_snr_qc_after_processing(host: Any) -> bool:
             )
         _append_log(
             host,
-            f"Automatic SNR plot/QC finished: {generated_count} plot file(s), "
+            f"Automatic SNR plot generation finished: {generated_count} plot file(s), "
             f"{len(report_paths)} QC report(s).",
         )
         state.thread = None

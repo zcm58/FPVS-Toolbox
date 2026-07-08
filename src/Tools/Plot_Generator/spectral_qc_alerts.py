@@ -1,4 +1,4 @@
-"""Plain-language alert summaries for SNR spectral QC findings."""
+"""Plain-language alert summaries for unexpected SNR peak findings."""
 from __future__ import annotations
 
 
@@ -41,6 +41,60 @@ def _format_snr(value: object) -> str:
     if value_float is None:
         return "unknown"
     return f"{value_float:.2f}"
+
+
+def _format_electrode_list(electrodes: object, *, limit: int = 4) -> str:
+    if not isinstance(electrodes, list):
+        return "unknown electrode"
+    names = [str(electrode) for electrode in electrodes if str(electrode).strip()]
+    if not names:
+        return "unknown electrode"
+    shown = names[:limit]
+    suffix = f" and {len(names) - limit} more" if len(names) > limit else ""
+    return ", ".join(shown) + suffix
+
+
+def _conditions_text(conditions: object) -> str:
+    if isinstance(conditions, list):
+        values = [str(condition) for condition in conditions if str(condition).strip()]
+        if values:
+            return ", ".join(values)
+    condition = str(conditions or "").strip()
+    return condition or "unknown condition"
+
+
+def _build_example_line(summary: dict[str, object]) -> str:
+    frequency = _format_range(
+        summary.get("min_frequency_hz"),
+        summary.get("max_frequency_hz"),
+    )
+    pid = str(summary.get("pid") or "unknown participant")
+    electrode = str(summary.get("electrode") or summary.get("strongest_electrode") or "")
+    if not electrode:
+        electrode = _format_electrode_list(summary.get("electrodes"))
+    condition = _conditions_text(summary.get("conditions") or summary.get("condition"))
+    if frequency == "unknown frequency range":
+        return (
+            f"Example: a strong peak was detected at an unexpected frequency at "
+            f"electrode {electrode} in participant {pid} during {condition}. "
+            "This frequency is not the base or oddball frequency, and it is not "
+            "a harmonic of either frequency, so a large SNR peak there is most "
+            "likely artifact or equipment noise."
+        )
+    if "-" in frequency:
+        return (
+            f"Example: strong peaks were detected at unexpected frequencies "
+            f"({frequency}) at electrode {electrode} in participant {pid} "
+            f"during {condition}. These frequencies are not the base or oddball "
+            "frequency, and they are not harmonics of either frequency, so large "
+            "SNR peaks there are most likely artifact or equipment noise."
+        )
+    return (
+        f"Example: a strong peak was detected at {frequency} at electrode {electrode} "
+        f"in participant {pid} during {condition}. {frequency} is not the base or "
+        "oddball frequency, and it is not a harmonic of either frequency, so a "
+        "large SNR peak there is most likely artifact or equipment noise."
+    )
 
 
 def _merge_numeric_field(
@@ -201,7 +255,7 @@ def _summarize_localized_flags(
 def whole_participant_exclusion_candidates(
     flags: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Return PIDs with 64-channel spectral QC failures."""
+    """Return PIDs with 64-channel unexpected SNR peak failures."""
 
     candidates_by_pid: dict[str, dict[str, object]] = {}
     for group in _summarize_condition_groups(flags):
@@ -241,7 +295,7 @@ def build_spectral_qc_alert_message(
     flags: list[dict[str, object]],
     report_paths: list[str],
 ) -> str:
-    """Build the GUI warning text for report-only spectral QC flags."""
+    """Build the GUI warning text for report-only unexpected SNR peak flags."""
     condition_groups = _summarize_condition_groups(flags)
     widespread_groups = [
         group for group in condition_groups if _is_widespread_group(group)
@@ -259,8 +313,17 @@ def build_spectral_qc_alert_message(
     total_flags = sum(_flag_count(flag) for flag in flags)
     whole_participant_candidates = whole_participant_exclusion_candidates(flags)
     localized_count = len(localized_summaries)
+    example_source = (
+        localized_summaries[0] if localized_summaries else condition_groups[0]
+    )
     lines = [
-        "Spectral QC found non-harmonic spectral artifacts.",
+        "Unexpected SNR peaks were detected while generating SNR plots.",
+        "",
+        "FPVS Toolbox checks for strong SNR peaks at frequencies that should not "
+        "contain FPVS responses: not the base frequency, not the oddball "
+        "frequency, and not harmonics of either frequency.",
+        "",
+        _build_example_line(example_source),
         "",
         "Plots and processed data were not changed.",
         "",
@@ -292,7 +355,7 @@ def build_spectral_qc_alert_message(
         lines.extend(
             [
                 "",
-                f"Widespread artifacts needing review: {len(review_widespread_groups)} participant/condition {widespread_label}.",
+                f"Widespread unexpected peaks needing review: {len(review_widespread_groups)} participant/condition {widespread_label}.",
                 "Review these before deciding whether to exclude a participant or a targeted channel.",
             ]
         )
