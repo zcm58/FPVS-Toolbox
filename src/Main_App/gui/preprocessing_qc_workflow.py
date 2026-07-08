@@ -52,6 +52,8 @@ _REMOVED_REVIEW_HEADERS = (
     "Manual additions",
     "Final confirmed removed electrodes",
 )
+_HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
+_PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
 _DATA_QUALITY_STEP_TOTAL = 5
 
 
@@ -508,6 +510,7 @@ def _set_preflight_table(
     table = getattr(host, "processing_files_table", None)
     if table is None:
         return
+    _clear_preflight_table_click_handler(host, table)
     editable_lookup = set(int(column) for column in (editable_columns or ()))
     if editable_last_column and headers:
         editable_lookup.add(len(headers) - 1)
@@ -544,6 +547,18 @@ def _set_preflight_table(
             table.setItem(row_index, column_index, item)
     table.resizeRowsToContents()
     table.scrollToTop()
+
+
+def _clear_preflight_table_click_handler(host: Any, table: Any | None = None) -> None:
+    table = table or getattr(host, "processing_files_table", None)
+    handler = getattr(host, _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR, None)
+    if table is not None and handler is not None:
+        try:
+            table.itemClicked.disconnect(handler)
+        except (TypeError, RuntimeError):
+            pass
+    setattr(host, _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR, None)
+    setattr(host, _HARD_EXCLUSION_DETAILS_ATTR, {})
 
 
 def _await_preflight_choice(
@@ -991,15 +1006,185 @@ def _removed_review_rows_from_table(host: Any) -> list[tuple[str, str, str, str]
     return rows
 
 
-def _hard_candidate_reason(result: PreflightQcFileResult) -> str:
+def _payload_list(payload: Mapping[str, object] | None, key: str) -> tuple[str, ...]:
+    values = (payload or {}).get(key)
+    if not isinstance(values, Sequence) or isinstance(values, str):
+        return ()
+    return tuple(str(value) for value in values if str(value).strip())
+
+
+def _payload_float(payload: Mapping[str, object] | None, key: str) -> float | None:
+    try:
+        value = (payload or {}).get(key)
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_uv(value: float | None) -> str:
+    if value is None:
+        return "not available"
+    return f"{value:.1f} uV"
+
+
+def _hard_candidate_flag(result: PreflightQcFileResult) -> str:
+    if result.raw_qc_excluded and result.raw_spectral_widespread:
+        return "Hard raw + spectral QC"
     if result.raw_qc_excluded:
-        return result.raw_qc_message or "Raw channel-health check failed."
+        return "Hard raw QC"
     if result.raw_spectral_widespread:
+        return "Raw spectral QC"
+    return "Participant QC"
+
+
+def _hard_candidate_reason(result: PreflightQcFileResult) -> str:
+    payload = result.raw_channel_qc or {}
+    rules = set(_payload_list(payload, "triggered_rules"))
+    if "raw_amplitude_baseline_failure" in rules:
+        return "Extremely noisy baseline"
+    if {"left_hemisphere_failure", "right_hemisphere_failure"} & rules:
+        return "Large cap-side failure"
+    if "bad_channel_cluster" in rules:
+        return "Large cluster of bad channels"
+    if {"bad_channel_count", "bad_channel_fraction"} & rules:
+        return "Too many bad channels"
+    if result.raw_spectral_widespread:
+        return "Widespread frequency artifact"
+    if result.raw_qc_excluded:
+        return "Raw channel-health failure"
+    return "Participant-level QC failure"
+
+
+def _hard_candidate_plain_explanation(result: PreflightQcFileResult) -> str:
+    reason = _hard_candidate_reason(result)
+    if reason == "Extremely noisy baseline":
         return (
-            result.raw_spectral_message
-            or "Widespread raw spectral artifact detected before preprocessing."
+            "The participant's raw EEG baseline is far outside the expected range "
+            "across the cap. Interpolating a few electrodes is unlikely to rescue "
+            "this recording."
         )
-    return "Participant-level data quality exclusion criterion met."
+    if reason == "Large cap-side failure":
+        return (
+            "A large portion of one side of the cap failed the raw channel-health "
+            "check before preprocessing."
+        )
+    if reason == "Large cluster of bad channels":
+        return (
+            "Several neighboring channels failed together, which is more serious "
+            "than an isolated bad electrode."
+        )
+    if reason == "Too many bad channels":
+        return (
+            "The raw channel-health check found too many problem channels for this "
+            "participant to enter the processed dataset safely."
+        )
+    if reason == "Widespread frequency artifact":
+        return (
+            "The raw spectral screen found a widespread artifact pattern before "
+            "preprocessing."
+        )
+    return "The participant met a project-level QC exclusion rule before preprocessing."
+
+
+def _hard_candidate_detail_text(result: PreflightQcFileResult) -> str:
+    raw_payload = result.raw_channel_qc or {}
+    thresholds = raw_payload.get("thresholds")
+    if not isinstance(thresholds, Mapping):
+        thresholds = {}
+    baseline_std = _payload_float(raw_payload, "raw_baseline_median_std_uv")
+    baseline_p2p = _payload_float(raw_payload, "raw_baseline_median_p2p_99_uv")
+    baseline_std_limit = _payload_float(
+        thresholds,
+        "baseline_exclusion_median_std_uv",
+    )
+    baseline_p2p_limit = _payload_float(
+        thresholds,
+        "baseline_exclusion_median_p2p_99_uv",
+    )
+    raw_message = result.raw_qc_message
+    spectral_message = result.raw_spectral_message
+    lines = [
+        f"Participant: {result.participant_id}",
+        f"File: {result.path.name}",
+        f"Flag: {_hard_candidate_flag(result)}",
+        f"Reason: {_hard_candidate_reason(result)}",
+        "",
+        _hard_candidate_plain_explanation(result),
+    ]
+    if baseline_std is not None or baseline_p2p is not None:
+        lines.extend(
+            [
+                "",
+                "Baseline metrics:",
+                f"- Median STD: {_format_uv(baseline_std)}"
+                + (
+                    f" (hard exclusion >= {_format_uv(baseline_std_limit)})"
+                    if baseline_std_limit is not None
+                    else ""
+                ),
+                f"- Median P2P99: {_format_uv(baseline_p2p)}"
+                + (
+                    f" (hard exclusion >= {_format_uv(baseline_p2p_limit)})"
+                    if baseline_p2p_limit is not None
+                    else ""
+                ),
+            ]
+        )
+    rule_lines = _payload_list(raw_payload, "triggered_rules")
+    if rule_lines:
+        lines.extend(["", "Triggered rule(s):", "- " + "\n- ".join(rule_lines)])
+    bad_channels = _payload_list(raw_payload, "bad_channels")
+    if bad_channels:
+        lines.extend(["", "Flagged channel(s):", ", ".join(bad_channels)])
+    if raw_message:
+        lines.extend(["", "Original raw QC message:", raw_message])
+    if spectral_message:
+        lines.extend(["", "Original spectral QC message:", spectral_message])
+    return "\n".join(lines)
+
+
+def _install_hard_exclusion_details(
+    host: Any,
+    candidates: Sequence[PreflightQcFileResult],
+) -> None:
+    table = getattr(host, "processing_files_table", None)
+    if table is None:
+        return
+    candidate_by_pid = {result.participant_id.casefold(): result for result in candidates}
+    details_by_pid = {
+        result.participant_id.casefold(): _hard_candidate_detail_text(result)
+        for result in candidates
+    }
+    setattr(host, _HARD_EXCLUSION_DETAILS_ATTR, details_by_pid)
+    table.setSelectionMode(QAbstractItemView.SingleSelection)
+    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is not None:
+            item.setToolTip("Open participant QC details")
+
+    def _show_details(item: QTableWidgetItem) -> None:
+        if item.column() != 0:
+            return
+        pid_item = table.item(item.row(), 0)
+        pid = pid_item.text().strip() if pid_item else ""
+        candidate = candidate_by_pid.get(pid.casefold())
+        details = details_by_pid.get(pid.casefold())
+        if candidate is None or not details:
+            return
+        box = QMessageBox(host)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("Participant QC Details")
+        box.setText(f"{pid}: {_hard_candidate_reason(candidate)}")
+        box.setInformativeText(_hard_candidate_plain_explanation(candidate))
+        box.setDetailedText(details)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.exec()
+
+    table.itemClicked.connect(_show_details)
+    setattr(host, _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR, _show_details)
 
 
 def _confirm_hard_exclusions(
@@ -1046,12 +1231,17 @@ def _confirm_hard_exclusions(
     )
     _set_preflight_table(
         host,
-        ["PID", "Reason"],
+        ["PID", "Flag", "Reason"],
         [
-            (result.participant_id, _hard_candidate_reason(result))
+            (
+                result.participant_id,
+                _hard_candidate_flag(result),
+                _hard_candidate_reason(result),
+            )
             for result in candidates
         ],
     )
+    _install_hard_exclusion_details(host, candidates)
     choice = _await_preflight_choice(
         host,
         (
