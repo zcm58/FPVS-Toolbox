@@ -121,6 +121,9 @@ def end_preproc_audit(
     raw_qc_high_amplitude_channels = _string_list(
         params.get("_fpvs_raw_qc_high_amplitude_channels")
     )
+    raw_qc_rare_burst_channels = _string_list(
+        params.get("_fpvs_raw_qc_rare_burst_channels")
+    )
     raw_qc_spatial_outlier_channels = _string_list(
         params.get("_fpvs_raw_qc_spatial_outlier_channels")
     )
@@ -152,6 +155,14 @@ def end_preproc_audit(
         params.get("_fpvs_removed_electrode_agreement_status") or ""
     )
     raw_qc_warning_rules = _string_list(params.get("_fpvs_raw_qc_warning_rules"))
+    raw_qc_baseline_median_std_uv = _to_float(
+        params.get("_fpvs_raw_qc_baseline_median_std_uv")
+    ) or 0.0
+    raw_qc_baseline_median_p2p_99_uv = _to_float(
+        params.get("_fpvs_raw_qc_baseline_median_p2p_99_uv")
+    ) or 0.0
+    raw_qc_baseline_warning = bool(params.get("_fpvs_raw_qc_baseline_warning"))
+    raw_qc_baseline_excluded = bool(params.get("_fpvs_raw_qc_baseline_excluded"))
     kurtosis_bad_channels = _string_list(params.get("_fpvs_kurtosis_bad_channels"))
     interpolated_channels = _string_list(params.get("_fpvs_interpolated_channels"))
     total_rejected = len(interpolated_channels) if interpolated_channels else int(n_rejected)
@@ -175,6 +186,7 @@ def end_preproc_audit(
         "raw_qc_bad_channels": raw_qc_bad_channels,
         "raw_qc_low_variance_channels": raw_qc_low_variance_channels,
         "raw_qc_high_amplitude_channels": raw_qc_high_amplitude_channels,
+        "raw_qc_rare_burst_channels": raw_qc_rare_burst_channels,
         "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
         "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
         "removed_electrode_original_auto_flagged": removed_electrode_original_auto_flagged,
@@ -188,6 +200,10 @@ def end_preproc_audit(
         "removed_electrode_auto_manual_overlap": removed_electrode_auto_manual_overlap,
         "removed_electrode_agreement_status": removed_electrode_agreement_status,
         "raw_qc_warning_rules": raw_qc_warning_rules,
+        "raw_qc_baseline_median_std_uv": raw_qc_baseline_median_std_uv,
+        "raw_qc_baseline_median_p2p_99_uv": raw_qc_baseline_median_p2p_99_uv,
+        "raw_qc_baseline_warning": raw_qc_baseline_warning,
+        "raw_qc_baseline_excluded": raw_qc_baseline_excluded,
         "kurtosis_bad_channels": kurtosis_bad_channels,
         "interpolated_channels": interpolated_channels,
         "stim_channel": stim_channel,

@@ -1160,6 +1160,11 @@ def _show_suspicious_remainder(
                 "high-amplitude channel(s): "
                 + ", ".join(result.high_amplitude_channels)
             )
+        if result.rare_burst_channels:
+            fragments.append(
+                "rare-burst channel(s): "
+                + ", ".join(result.rare_burst_channels)
+            )
         if result.spatial_outlier_channels:
             fragments.append(
                 "spatially inconsistent channel(s): "

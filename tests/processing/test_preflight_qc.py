@@ -11,6 +11,8 @@ from Main_App.io.load_utils import BdfPreflightInfo
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
 from Main_App.processing.preflight_qc import (
+    PreflightQcFileResult,
+    PreflightQcScan,
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
@@ -77,6 +79,29 @@ def test_scan_preprocessing_qc_prepopulates_auto_removed_electrodes(
     assert scan.cancelled is False
     assert scan.suggested_removed_electrodes == {"P03": ["P9"]}
     assert scan.hard_exclusion_candidates == ()
+
+
+def test_preflight_suggestions_include_review_only_removed_electrode_classes(
+    tmp_path: Path,
+) -> None:
+    scan = PreflightQcScan(
+        results=(
+            PreflightQcFileResult(
+                path=tmp_path / "P37.bdf",
+                participant_id="P37",
+                load_error=None,
+                raw_channel_qc={
+                    "channels_to_interpolate": ["FT7"],
+                    "high_amplitude_channels": ["P9"],
+                    "rare_burst_channels": ["P10"],
+                },
+                raw_spectral_qc=None,
+            ),
+        )
+    )
+
+    assert scan.suggested_removed_electrodes == {"P37": ["FT7", "P9", "P10"]}
+    assert scan.suspicious_results == scan.results
 
 
 def test_scan_preprocessing_qc_uses_parallel_workers(

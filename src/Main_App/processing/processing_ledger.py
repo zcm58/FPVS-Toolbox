@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v6_manual_removed_electrode_qc"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v7_baseline_removed_electrode_qc"
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
@@ -144,6 +144,42 @@ def _removed_electrode_review_payload(source: Mapping[str, Any] | None) -> dict[
     for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
         payload[key] = str(source.get(key) or "")
     return payload
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _raw_qc_extra_payload(source: Mapping[str, Any] | None) -> dict[str, object]:
+    source = source or {}
+    return {
+        "raw_qc_rare_burst_channels": _string_list(
+            source.get("raw_qc_rare_burst_channels", source.get("rare_burst_channels"))
+        ),
+        "raw_qc_baseline_median_std_uv": _float_or_none(
+            source.get(
+                "raw_qc_baseline_median_std_uv",
+                source.get("raw_baseline_median_std_uv"),
+            )
+        ),
+        "raw_qc_baseline_median_p2p_99_uv": _float_or_none(
+            source.get(
+                "raw_qc_baseline_median_p2p_99_uv",
+                source.get("raw_baseline_median_p2p_99_uv"),
+            )
+        ),
+        "raw_qc_baseline_warning": bool(
+            source.get("raw_qc_baseline_warning", source.get("raw_baseline_warning"))
+        ),
+        "raw_qc_baseline_excluded": bool(
+            source.get("raw_qc_baseline_excluded", source.get("raw_baseline_excluded"))
+        ),
+    }
 
 
 def _int_or_default(value: Any, default: int = 0) -> int:
@@ -885,6 +921,7 @@ def record_processing_results(
             "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
             "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
             "raw_qc_warning_rules": raw_qc_warning_rules,
+            **_raw_qc_extra_payload(audit),
             **_removed_electrode_review_payload(audit),
             "kurtosis_bad_channels": kurtosis_bad_channels,
             "interpolated_channels": interpolated_channels,
@@ -952,6 +989,7 @@ def record_processing_results(
                 "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
                 "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
                 "raw_qc_warning_rules": raw_qc_warning_rules,
+                **_raw_qc_extra_payload(qc_payload),
                 **_removed_electrode_review_payload(qc_payload),
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
@@ -1019,6 +1057,7 @@ def record_processing_results(
                 "raw_qc_spatial_outlier_channels": raw_qc_spatial_outlier_channels,
                 "raw_qc_manual_removed_channels": raw_qc_manual_removed_channels,
                 "raw_qc_warning_rules": raw_qc_warning_rules,
+                **_raw_qc_extra_payload(audit),
                 **_removed_electrode_review_payload(audit),
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
@@ -1043,6 +1082,7 @@ def record_processing_results(
             "raw_qc_spatial_outlier_channels": [],
             "raw_qc_manual_removed_channels": [],
             "raw_qc_warning_rules": [],
+            **_raw_qc_extra_payload({}),
             **_removed_electrode_review_payload({}),
             "kurtosis_bad_channels": [],
             "interpolated_channels": [],

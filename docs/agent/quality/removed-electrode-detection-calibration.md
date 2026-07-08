@@ -81,7 +81,11 @@ detector:
 
 - Standard deviation in microvolts.
 - 99 percent peak-to-peak amplitude in microvolts.
+- 99.9 percent and full-window peak-to-peak amplitude in microvolts when
+  checking rare burst behavior.
 - Ratios against the participant's robust good-channel baseline.
+- Participant-level scalp median STD and P2P99 to catch globally noisy baseline
+  failures before channel-level review.
 - Spatial predictability or inconsistency scores from local montage neighbors.
 - Persistence across sampled windows when adding a new window-level rule.
 
@@ -110,15 +114,21 @@ connected bad-channel clusters.
 ## Tuning Rules
 
 The automatic mode is intentionally conservative. Prefer leaving an uncertain
-electrode in the dataset over auto-removing a plugged-in electrode.
+electrode in the dataset over auto-removing a plugged-in electrode. Participant-
+level baseline failures are the exception: if the entire scalp baseline is
+extreme, exclude the participant before preprocessing rather than trying to fix
+the dataset with channel interpolation.
 
 When tuning:
 
 - Start from `DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION`.
-- Adjust one decision branch at a time: low variance, high amplitude, then
-  spatial predictability.
+- Adjust one decision branch at a time: participant baseline, low variance,
+  high amplitude, rare burst, then spatial predictability.
 - Confirm that the method still has very high specificity before improving
   sensitivity.
+- Treat high-amplitude and rare-burst electrode rules as review candidates
+  unless a calibration report shows they do not add plugged-in clean-channel
+  false positives.
 - Do not tune thresholds directly against the target channel list for one study
   without validating against a holdout participant or study when available.
 - Keep manual metadata as the highest-authority input. In Manual list mode,
@@ -165,3 +175,11 @@ Then reprocess a labeled calibration project and compare
 Adding or exporting provenance-only comparison metadata does not require a cache
 or processing-fingerprint bump when the detector thresholds, preprocessing
 order, and final channel inclusion behavior are unchanged.
+
+Current baseline/rare-burst calibration is intentionally narrow. The hard
+participant baseline rule excludes files only when scalp median STD is at least
+10,000 uV and scalp median P2P99 is at least 100,000 uV. The warning rule starts
+at 2,000 uV median STD or 10,000 uV median P2P99. The rare-burst channel rule
+looks for the top-ranked STD outliers with STD at least 8,000 uV and compressed
+P2P99 or a very large full-window/P2P99 ratio; those channels are surfaced in
+preflight review and QC exports rather than silently interpolated.

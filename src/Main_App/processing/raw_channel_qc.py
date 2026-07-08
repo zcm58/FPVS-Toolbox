@@ -109,6 +109,27 @@ class RawChannelQCConfig:
     high_p2p_99_relative_ratio: float = _CALIBRATION.high_p2p_99_relative_ratio
     high_std_uv_floor: float = _CALIBRATION.high_std_uv_floor
     high_p2p_99_uv_floor: float = _CALIBRATION.high_p2p_99_uv_floor
+    baseline_warning_median_std_uv: float = _CALIBRATION.baseline_warning_median_std_uv
+    baseline_warning_median_p2p_99_uv: float = (
+        _CALIBRATION.baseline_warning_median_p2p_99_uv
+    )
+    baseline_exclusion_median_std_uv: float = (
+        _CALIBRATION.baseline_exclusion_median_std_uv
+    )
+    baseline_exclusion_median_p2p_99_uv: float = (
+        _CALIBRATION.baseline_exclusion_median_p2p_99_uv
+    )
+    rare_burst_std_uv_floor: float = _CALIBRATION.rare_burst_std_uv_floor
+    rare_burst_p2p_99_uv_ceiling: float = (
+        _CALIBRATION.rare_burst_p2p_99_uv_ceiling
+    )
+    rare_burst_p2p_999_uv_floor: float = (
+        _CALIBRATION.rare_burst_p2p_999_uv_floor
+    )
+    rare_burst_full_to_p2p_99_ratio: float = (
+        _CALIBRATION.rare_burst_full_to_p2p_99_ratio
+    )
+    rare_burst_rank_limit: int = _CALIBRATION.rare_burst_rank_limit
     auto_detect_removed_electrodes: bool = True
     min_bad_cluster_warning_size: int = _CALIBRATION.min_bad_cluster_warning_size
     min_bad_cluster_size: int = _CALIBRATION.min_bad_cluster_size
@@ -150,7 +171,12 @@ class RawChannelQCResult:
     manual_removed_channels: tuple[str, ...]
     low_variance_channels: tuple[str, ...]
     high_amplitude_channels: tuple[str, ...]
+    rare_burst_channels: tuple[str, ...]
     spatial_outlier_channels: tuple[str, ...]
+    raw_baseline_median_std_uv: float
+    raw_baseline_median_p2p_99_uv: float
+    raw_baseline_warning: bool
+    raw_baseline_excluded: bool
     largest_bad_cluster_size: int
     largest_bad_cluster_channels: tuple[str, ...]
     triggered_rules: tuple[str, ...]
@@ -173,13 +199,28 @@ class RawChannelQCResult:
             "manual_removed_channels": list(self.manual_removed_channels),
             "low_variance_channels": list(self.low_variance_channels),
             "high_amplitude_channels": list(self.high_amplitude_channels),
+            "rare_burst_channels": list(self.rare_burst_channels),
             "spatial_outlier_channels": list(self.spatial_outlier_channels),
+            "raw_baseline_median_std_uv": self.raw_baseline_median_std_uv,
+            "raw_baseline_median_p2p_99_uv": self.raw_baseline_median_p2p_99_uv,
+            "raw_baseline_warning": self.raw_baseline_warning,
+            "raw_baseline_excluded": self.raw_baseline_excluded,
             "largest_bad_cluster_size": self.largest_bad_cluster_size,
             "largest_bad_cluster_channels": list(self.largest_bad_cluster_channels),
             "triggered_rules": list(self.triggered_rules),
             "warning_rules": list(self.warning_rules),
             "thresholds": dict(self.thresholds),
         }
+
+
+@dataclass(frozen=True)
+class _ChannelStats:
+    channel: str
+    group: str
+    std_uv: float
+    p2p_99_uv: float
+    p2p_999_uv: float
+    full_p2p_uv: float
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -518,7 +559,12 @@ def _empty_result(
         manual_removed_channels=(),
         low_variance_channels=(),
         high_amplitude_channels=(),
+        rare_burst_channels=(),
         spatial_outlier_channels=(),
+        raw_baseline_median_std_uv=0.0,
+        raw_baseline_median_p2p_99_uv=0.0,
+        raw_baseline_warning=False,
+        raw_baseline_excluded=False,
         largest_bad_cluster_size=0,
         largest_bad_cluster_channels=(),
         triggered_rules=(),
@@ -587,7 +633,12 @@ def evaluate_raw_channel_qc(
             manual_removed_channels=(),
             low_variance_channels=tuple(str(raw.ch_names[index]) for index in picks),
             high_amplitude_channels=(),
+            rare_burst_channels=(),
             spatial_outlier_channels=(),
+            raw_baseline_median_std_uv=0.0,
+            raw_baseline_median_p2p_99_uv=0.0,
+            raw_baseline_warning=False,
+            raw_baseline_excluded=False,
             largest_bad_cluster_size=0,
             largest_bad_cluster_channels=(),
             triggered_rules=("no_samples",),
@@ -601,7 +652,7 @@ def evaluate_raw_channel_qc(
     ]
     data = np.concatenate(chunks, axis=1)
 
-    channel_stats: list[tuple[str, str, float, float]] = []
+    channel_stats: list[_ChannelStats] = []
     left_total = right_total = midline_total = 0
     for row_index, raw_index in enumerate(picks):
         channel = str(raw.ch_names[raw_index])
@@ -618,11 +669,33 @@ def evaluate_raw_channel_qc(
         p2p_99_uv = float(
             (np.nanpercentile(values, 99.5) - np.nanpercentile(values, 0.5)) * 1e6
         )
-        channel_stats.append((channel, group, std_uv, p2p_99_uv))
+        p2p_999_uv = float(
+            (np.nanpercentile(values, 99.95) - np.nanpercentile(values, 0.05)) * 1e6
+        )
+        full_p2p_uv = float((np.nanmax(values) - np.nanmin(values)) * 1e6)
+        channel_stats.append(
+            _ChannelStats(
+                channel=channel,
+                group=group,
+                std_uv=std_uv,
+                p2p_99_uv=p2p_99_uv,
+                p2p_999_uv=p2p_999_uv,
+                full_p2p_uv=full_p2p_uv,
+            )
+        )
 
-    median_std_uv = _robust_median([row[2] for row in channel_stats])
-    median_p2p_99_uv = _robust_median([row[3] for row in channel_stats])
-    raw_channel_names = {row[0] for row in channel_stats}
+    median_std_uv = _robust_median([row.std_uv for row in channel_stats])
+    median_p2p_99_uv = _robust_median([row.p2p_99_uv for row in channel_stats])
+    raw_baseline_excluded = (
+        median_std_uv >= config.baseline_exclusion_median_std_uv
+        and median_p2p_99_uv >= config.baseline_exclusion_median_p2p_99_uv
+    )
+    raw_baseline_warning = (
+        raw_baseline_excluded
+        or median_std_uv >= config.baseline_warning_median_std_uv
+        or median_p2p_99_uv >= config.baseline_warning_median_p2p_99_uv
+    )
+    raw_channel_names = {row.channel for row in channel_stats}
     manual_removed_channels = [
         channel
         for channel in config.manual_removed_electrodes
@@ -630,10 +703,10 @@ def evaluate_raw_channel_qc(
     ]
 
     low_variance_channels: list[str] = []
-    for channel, _group, std_uv, p2p_99_uv in channel_stats:
+    for row in channel_stats:
         is_bad = is_low_variance_removed_channel(
-            std_uv=std_uv,
-            p2p_99_uv=p2p_99_uv,
+            std_uv=row.std_uv,
+            p2p_99_uv=row.p2p_99_uv,
             median_std_uv=median_std_uv,
             median_p2p_99_uv=median_p2p_99_uv,
             calibration=config,
@@ -641,31 +714,64 @@ def evaluate_raw_channel_qc(
         if not is_bad:
             continue
 
-        low_variance_channels.append(channel)
+        low_variance_channels.append(row.channel)
 
     high_amplitude_channels: list[str] = []
     if config.auto_detect_removed_electrodes:
         low_lookup = set(low_variance_channels)
-        for channel, _group, std_uv, p2p_99_uv in channel_stats:
-            if channel in low_lookup:
+        for row in channel_stats:
+            if row.channel in low_lookup:
                 continue
             is_bad = is_high_amplitude_removed_channel(
-                std_uv=std_uv,
-                p2p_99_uv=p2p_99_uv,
+                std_uv=row.std_uv,
+                p2p_99_uv=row.p2p_99_uv,
                 median_std_uv=median_std_uv,
                 median_p2p_99_uv=median_p2p_99_uv,
                 calibration=config,
             )
             if is_bad:
-                high_amplitude_channels.append(channel)
+                high_amplitude_channels.append(row.channel)
+
+    rare_burst_channels: list[str] = []
+    if config.auto_detect_removed_electrodes:
+        excluded_lookup = {*low_variance_channels, *high_amplitude_channels}
+        std_rank = {
+            row.channel: rank
+            for rank, row in enumerate(
+                sorted(channel_stats, key=lambda item: item.std_uv, reverse=True),
+                start=1,
+            )
+        }
+        for row in channel_stats:
+            if row.channel in excluded_lookup:
+                continue
+            if row.std_uv < config.rare_burst_std_uv_floor:
+                continue
+            if std_rank.get(row.channel, n_channels + 1) > config.rare_burst_rank_limit:
+                continue
+            full_to_p2p_99 = (
+                row.full_p2p_uv / row.p2p_99_uv
+                if row.p2p_99_uv > 0.0
+                else float("inf")
+            )
+            if (
+                row.p2p_99_uv < config.rare_burst_p2p_99_uv_ceiling
+                or full_to_p2p_99 >= config.rare_burst_full_to_p2p_99_ratio
+                or (
+                    row.p2p_999_uv >= config.rare_burst_p2p_999_uv_floor
+                    and row.p2p_99_uv < config.rare_burst_p2p_99_uv_ceiling * 10.0
+                )
+            ):
+                rare_burst_channels.append(row.channel)
 
     spatial_outlier_channels: list[str] = []
     if config.auto_detect_removed_electrodes and config.spatial_qc_enabled:
-        channel_names = [row[0] for row in channel_stats]
+        channel_names = [row.channel for row in channel_stats]
         donor_exclusions = [
             *_raw_bads(raw),
             *low_variance_channels,
             *high_amplitude_channels,
+            *rare_burst_channels,
         ]
         scores = _spatial_predictability_scores(
             raw,
@@ -688,6 +794,7 @@ def evaluate_raw_channel_qc(
                 *manual_removed_channels,
                 *low_variance_channels,
                 *high_amplitude_channels,
+                *rare_burst_channels,
                 *spatial_outlier_channels,
             ]
         )
@@ -734,6 +841,8 @@ def evaluate_raw_channel_qc(
         triggered.append("bad_channel_count")
     if bad_fraction > config.max_bad_fraction:
         triggered.append("bad_channel_fraction")
+    if raw_baseline_excluded:
+        triggered.append("raw_amplitude_baseline_failure")
     if left_total >= config.min_hemisphere_channels and left_fraction >= config.max_hemisphere_bad_fraction:
         triggered.append("left_hemisphere_failure")
     if right_total >= config.min_hemisphere_channels and right_fraction >= config.max_hemisphere_bad_fraction:
@@ -744,6 +853,8 @@ def evaluate_raw_channel_qc(
     ):
         triggered.append("bad_channel_cluster")
     warning_rules: list[str] = []
+    if raw_baseline_warning and not raw_baseline_excluded:
+        warning_rules.append("raw_amplitude_baseline_warning")
     if (
         cluster_rules_enabled
         and len(largest_cluster) >= config.min_bad_cluster_warning_size
@@ -759,10 +870,24 @@ def evaluate_raw_channel_qc(
             f" Largest bad-channel cluster={len(largest_cluster)} "
             f"({', '.join(largest_cluster)})."
         )
-    if excluded:
+    baseline_text = (
+        f" Raw baseline median std={median_std_uv:.1f} uV, "
+        f"median p2p99={median_p2p_99_uv:.1f} uV."
+    )
+    if raw_baseline_excluded:
+        message = (
+            f"{filename} excluded by raw channel-health QC: participant-level raw "
+            "amplitude baseline was excessively noisy."
+            f"{baseline_text} {n_bad}/{n_channels} scalp EEG channels were "
+            "low-amplitude, extreme high-amplitude, rare-burst, or spatially "
+            f"inconsistent; left={left_bad}/{left_total}, "
+            f"right={right_bad}/{right_total}, midline={midline_bad}/{midline_total}."
+            f"{cluster_text} Triggered rule(s): {', '.join(triggered)}."
+        )
+    elif excluded:
         message = (
             f"{filename} excluded by raw channel-health QC: {n_bad}/{n_channels} scalp EEG "
-            "channels were low-amplitude, extreme high-amplitude, or spatially "
+            "channels were low-amplitude, extreme high-amplitude, rare-burst, or spatially "
             f"inconsistent; left={left_bad}/{left_total}, "
             f"right={right_bad}/{right_total}, midline={midline_bad}/{midline_total}."
             f"{cluster_text} Triggered rule(s): {', '.join(triggered)}."
@@ -774,14 +899,14 @@ def evaluate_raw_channel_qc(
             f"({', '.join(channels_to_interpolate)}).{cluster_text}"
         )
         if warning_rules:
-            message += f" Warning rule(s): {', '.join(warning_rules)}."
+            message += f"{baseline_text} Warning rule(s): {', '.join(warning_rules)}."
     else:
         message = (
             f"Raw channel QC passed for {filename}: {n_bad}/{n_channels} scalp EEG channels "
-            "were low-amplitude, extreme high-amplitude, or spatially inconsistent."
+            "were low-amplitude, extreme high-amplitude, rare-burst, or spatially inconsistent."
         )
         if warning_rules:
-            message += f"{cluster_text} Warning rule(s): {', '.join(warning_rules)}."
+            message += f"{cluster_text}{baseline_text} Warning rule(s): {', '.join(warning_rules)}."
 
     return RawChannelQCResult(
         excluded=excluded,
@@ -801,7 +926,12 @@ def evaluate_raw_channel_qc(
         manual_removed_channels=tuple(manual_removed_channels),
         low_variance_channels=tuple(low_variance_channels),
         high_amplitude_channels=tuple(high_amplitude_channels),
+        rare_burst_channels=tuple(rare_burst_channels),
         spatial_outlier_channels=tuple(spatial_outlier_channels),
+        raw_baseline_median_std_uv=median_std_uv,
+        raw_baseline_median_p2p_99_uv=median_p2p_99_uv,
+        raw_baseline_warning=raw_baseline_warning,
+        raw_baseline_excluded=raw_baseline_excluded,
         largest_bad_cluster_size=len(largest_cluster),
         largest_bad_cluster_channels=tuple(largest_cluster),
         triggered_rules=tuple(triggered),

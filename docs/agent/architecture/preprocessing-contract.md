@@ -103,14 +103,15 @@ result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
 The preprocessed Raw cache version is
-`preprocessed-raw-v7-manual-removed-electrode-qc`.
+`preprocessed-raw-v8-baseline-removed-electrode-qc`.
 The project processing-ledger and Stats group-harmonic cache processing
-fingerprints use `processing_fingerprint_v6_manual_removed_electrode_qc`. The
-raw channel-health QC threshold, removed-electrode QC mode, and per-file manual
-removed-electrode list are part of the cache payload so changes to those
-settings invalidate cached preprocessed Raw files. The v7 cache metadata also
-persists raw-QC, manual removed-electrode, kurtosis, and interpolated
-bad-channel names so cache-hit runs can still produce participant QC summaries.
+fingerprints use `processing_fingerprint_v7_baseline_removed_electrode_qc`. The
+raw channel-health QC threshold, removed-electrode QC mode, per-file manual
+removed-electrode list, baseline raw-amplitude metadata, and rare-burst
+candidate list are part of the cache payload so changes to those settings
+invalidate cached preprocessed Raw files. The v8 cache metadata also persists
+raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
+so cache-hit runs can still produce participant QC summaries.
 
 ## Raw QC Hard Exclusions
 
@@ -144,13 +145,23 @@ Conservative auto-detect, or Manual list. The legacy
 `True` only when the mode is `auto`. When conservative auto-detect is enabled,
 persistently flat/very low-variance scalp channels can be automatically added to
 `raw.info["bads"]` before preprocessing. The second-pass raw-QC detector adds
-flag-only candidate lists for extreme high-amplitude outliers and spatially
-inconsistent channels. Those second-pass candidates are reported for review but
-are not automatically added to the interpolation target list. Spatial channels
-are only flagged when local predictability is both low and a robust outlier
-within the participant's own montage. Low-variance raw-QC bad channels are
-excluded from kurtosis donor/pick calculations and are included in the later
-spherical interpolation target list.
+flag-only candidate lists for extreme high-amplitude outliers, rare-burst
+channels, and spatially inconsistent channels. High-amplitude and rare-burst
+candidates are prefilled into the preflight removed-electrode review as FPVS
+Toolbox flagged candidates so users can accept or reject them, but they are not
+automatically added to the interpolation target list without that review.
+Spatial channels are only flagged when local predictability is both low and a
+robust outlier within the participant's own montage. Low-variance raw-QC bad
+channels are excluded from kurtosis donor/pick calculations and are included in
+the later spherical interpolation target list.
+
+Raw channel QC also records participant-level baseline raw-amplitude medians.
+A file is hard-excluded before preprocessing when both the scalp-channel median
+STD is at least 10,000 uV and the scalp-channel median P2P99 is at least
+100,000 uV. A softer warning is recorded when the median STD is at least
+2,000 uV or the median P2P99 is at least 10,000 uV. Baseline metrics and status
+are exported to `Quality Check/Processing_QC_Summary.xlsx` and stored in cache,
+audit, and ledger payloads so skipped incremental files retain prior results.
 
 Manual list mode stores `manual_removed_electrodes` as a PID-to-electrode map in
 project preprocessing settings. Manual entries supersede automatic detection for

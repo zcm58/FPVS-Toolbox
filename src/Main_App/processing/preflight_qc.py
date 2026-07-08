@@ -66,6 +66,14 @@ class PreflightQcFileResult:
         return tuple(str(value) for value in values if str(value).strip())
 
     @property
+    def rare_burst_channels(self) -> tuple[str, ...]:
+        payload = self.raw_channel_qc or {}
+        values = payload.get("rare_burst_channels")
+        if not isinstance(values, Sequence) or isinstance(values, str):
+            return ()
+        return tuple(str(value) for value in values if str(value).strip())
+
+    @property
     def spatial_outlier_channels(self) -> tuple[str, ...]:
         payload = self.raw_channel_qc or {}
         values = payload.get("spatial_outlier_channels")
@@ -121,9 +129,18 @@ class PreflightQcScan:
     def suggested_removed_electrodes(self) -> dict[str, list[str]]:
         suggestions: dict[str, list[str]] = {}
         for result in self.results:
-            if not result.auto_removed_electrodes:
+            channels = list(
+                dict.fromkeys(
+                    [
+                        *result.auto_removed_electrodes,
+                        *result.high_amplitude_channels,
+                        *result.rare_burst_channels,
+                    ]
+                )
+            )
+            if not channels:
                 continue
-            suggestions[result.participant_id] = list(result.auto_removed_electrodes)
+            suggestions[result.participant_id] = channels
         return suggestions
 
     @property
@@ -142,6 +159,7 @@ class PreflightQcScan:
             if result.load_error
             or result.warning_rules
             or result.high_amplitude_channels
+            or result.rare_burst_channels
             or result.spatial_outlier_channels
             or (
                 result.raw_spectral_flagged_channels

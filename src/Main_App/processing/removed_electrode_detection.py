@@ -52,6 +52,15 @@ class RemovedElectrodeDetectionCalibration:
     high_p2p_99_relative_ratio: float = 10.0
     high_std_uv_floor: float = 2_000.0
     high_p2p_99_uv_floor: float = 10_000.0
+    baseline_warning_median_std_uv: float = 2_000.0
+    baseline_warning_median_p2p_99_uv: float = 10_000.0
+    baseline_exclusion_median_std_uv: float = 10_000.0
+    baseline_exclusion_median_p2p_99_uv: float = 100_000.0
+    rare_burst_std_uv_floor: float = 8_000.0
+    rare_burst_p2p_99_uv_ceiling: float = 100.0
+    rare_burst_p2p_999_uv_floor: float = 100_000.0
+    rare_burst_full_to_p2p_99_ratio: float = 1_000.0
+    rare_burst_rank_limit: int = 2
     min_bad_cluster_warning_size: int = 4
     min_bad_cluster_size: int = 6
     neighbor_distance_factor: float = 1.75
@@ -312,6 +321,29 @@ def removed_electrode_threshold_payload(calibration: Any) -> dict[str, float | i
         "high_p2p_99_relative_ratio": float(calibration.high_p2p_99_relative_ratio),
         "high_std_uv_floor": float(calibration.high_std_uv_floor),
         "high_p2p_99_uv_floor": float(calibration.high_p2p_99_uv_floor),
+        "baseline_warning_median_std_uv": float(
+            calibration.baseline_warning_median_std_uv
+        ),
+        "baseline_warning_median_p2p_99_uv": float(
+            calibration.baseline_warning_median_p2p_99_uv
+        ),
+        "baseline_exclusion_median_std_uv": float(
+            calibration.baseline_exclusion_median_std_uv
+        ),
+        "baseline_exclusion_median_p2p_99_uv": float(
+            calibration.baseline_exclusion_median_p2p_99_uv
+        ),
+        "rare_burst_std_uv_floor": float(calibration.rare_burst_std_uv_floor),
+        "rare_burst_p2p_99_uv_ceiling": float(
+            calibration.rare_burst_p2p_99_uv_ceiling
+        ),
+        "rare_burst_p2p_999_uv_floor": float(
+            calibration.rare_burst_p2p_999_uv_floor
+        ),
+        "rare_burst_full_to_p2p_99_ratio": float(
+            calibration.rare_burst_full_to_p2p_99_ratio
+        ),
+        "rare_burst_rank_limit": int(calibration.rare_burst_rank_limit),
         "min_bad_cluster_warning_size": int(calibration.min_bad_cluster_warning_size),
         "min_bad_cluster_size": int(calibration.min_bad_cluster_size),
         "spatial_qc_enabled": bool(calibration.spatial_qc_enabled),

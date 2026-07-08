@@ -85,6 +85,37 @@ def _raw_with_high_amplitude_channel(channel: str) -> mne.io.RawArray:
     return raw
 
 
+def _raw_with_global_baseline(scale_uv: float = 20_000.0) -> mne.io.RawArray:
+    montage = mne.channels.make_standard_montage("biosemi64")
+    names = list(montage.ch_names)
+    rng = np.random.default_rng(2048)
+    data = rng.normal(scale=scale_uv * 1e-6, size=(len(names), 8192))
+    raw = mne.io.RawArray(
+        data,
+        mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
+        verbose=False,
+    )
+    raw.set_montage(montage)
+    return raw
+
+
+def _raw_with_rare_burst_channel(channel: str) -> mne.io.RawArray:
+    montage = mne.channels.make_standard_montage("biosemi64")
+    names = list(montage.ch_names)
+    rng = np.random.default_rng(4096)
+    data = rng.normal(scale=500e-6, size=(len(names), 8192))
+    target = np.zeros(data.shape[1], dtype=float)
+    target[data.shape[1] // 2] = 1.0
+    data[names.index(channel)] = target
+    raw = mne.io.RawArray(
+        data,
+        mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
+        verbose=False,
+    )
+    raw.set_montage(montage)
+    return raw
+
+
 def test_raw_channel_qc_excludes_hemisphere_failure_at_exact_half_channels() -> None:
     result = evaluate_raw_channel_qc(
         _raw_with_left_failure(),
@@ -187,6 +218,49 @@ def test_raw_channel_qc_flags_high_amplitude_outlier_without_interpolation() -> 
     assert result.bad_channels == ("FT8",)
     assert result.channels_to_interpolate == ()
     assert result.triggered_rules == ()
+
+
+def test_raw_channel_qc_excludes_global_baseline_failure() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_global_baseline(),
+        {"stim_channel": "Status", "max_bad_chans": 64},
+        filename="p34.bdf",
+    )
+
+    assert result.excluded is True
+    assert result.raw_baseline_excluded is True
+    assert result.raw_baseline_warning is True
+    assert result.raw_baseline_median_std_uv >= 10_000.0
+    assert result.raw_baseline_median_p2p_99_uv >= 100_000.0
+    assert "raw_amplitude_baseline_failure" in result.triggered_rules
+
+
+def test_raw_channel_qc_warns_for_elevated_baseline_without_excluding() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_global_baseline(scale_uv=2_500.0),
+        {"stim_channel": "Status", "max_bad_chans": 64},
+        filename="p35.bdf",
+    )
+
+    assert result.excluded is False
+    assert result.raw_baseline_excluded is False
+    assert result.raw_baseline_warning is True
+    assert "raw_amplitude_baseline_warning" in result.warning_rules
+
+
+def test_raw_channel_qc_flags_rare_burst_without_interpolation() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_rare_burst_channel("P9"),
+        {"stim_channel": "Status", "max_bad_chans": 20},
+        filename="p32.bdf",
+    )
+
+    assert result.excluded is False
+    assert result.low_variance_channels == ()
+    assert result.high_amplitude_channels == ()
+    assert result.rare_burst_channels == ("P9",)
+    assert result.bad_channels == ("P9",)
+    assert result.channels_to_interpolate == ()
 
 
 def test_raw_channel_qc_toggle_disables_auto_interpolation_candidates() -> None:

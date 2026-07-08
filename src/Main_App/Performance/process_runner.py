@@ -58,7 +58,7 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v7-manual-removed-electrode-qc"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v8-baseline-removed-electrode-qc"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
@@ -83,6 +83,13 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(item) for item in value if str(item).strip()]
     return []
+
+
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _participant_id_for_file(file_path: Path, settings: Dict[str, object]) -> str:
@@ -555,6 +562,9 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_high_amplitude_channels"] = _string_list(
             metadata.get("raw_qc_high_amplitude_channels")
         )
+        settings["_fpvs_raw_qc_rare_burst_channels"] = _string_list(
+            metadata.get("raw_qc_rare_burst_channels")
+        )
         settings["_fpvs_raw_qc_spatial_outlier_channels"] = _string_list(
             metadata.get("raw_qc_spatial_outlier_channels")
         )
@@ -563,6 +573,18 @@ def _load_preprocessed_cache(
         )
         settings["_fpvs_raw_qc_warning_rules"] = _string_list(
             metadata.get("raw_qc_warning_rules")
+        )
+        settings["_fpvs_raw_qc_baseline_median_std_uv"] = _float_or_zero(
+            metadata.get("raw_qc_baseline_median_std_uv")
+        )
+        settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = _float_or_zero(
+            metadata.get("raw_qc_baseline_median_p2p_99_uv")
+        )
+        settings["_fpvs_raw_qc_baseline_warning"] = bool(
+            metadata.get("raw_qc_baseline_warning")
+        )
+        settings["_fpvs_raw_qc_baseline_excluded"] = bool(
+            metadata.get("raw_qc_baseline_excluded")
         )
         for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
             settings[f"_fpvs_{key}"] = _string_list(metadata.get(key))
@@ -624,6 +646,9 @@ def _store_preprocessed_cache(
             "raw_qc_high_amplitude_channels": _string_list(
                 settings.get("_fpvs_raw_qc_high_amplitude_channels")
             ),
+            "raw_qc_rare_burst_channels": _string_list(
+                settings.get("_fpvs_raw_qc_rare_burst_channels")
+            ),
             "raw_qc_spatial_outlier_channels": _string_list(
                 settings.get("_fpvs_raw_qc_spatial_outlier_channels")
             ),
@@ -632,6 +657,18 @@ def _store_preprocessed_cache(
             ),
             "raw_qc_warning_rules": _string_list(
                 settings.get("_fpvs_raw_qc_warning_rules")
+            ),
+            "raw_qc_baseline_median_std_uv": _float_or_zero(
+                settings.get("_fpvs_raw_qc_baseline_median_std_uv")
+            ),
+            "raw_qc_baseline_median_p2p_99_uv": _float_or_zero(
+                settings.get("_fpvs_raw_qc_baseline_median_p2p_99_uv")
+            ),
+            "raw_qc_baseline_warning": bool(
+                settings.get("_fpvs_raw_qc_baseline_warning")
+            ),
+            "raw_qc_baseline_excluded": bool(
+                settings.get("_fpvs_raw_qc_baseline_excluded")
             ),
             **_review_metadata_from_settings(settings),
         }
@@ -872,9 +909,14 @@ def _run_full_pipeline_for_file(
             settings["_fpvs_raw_qc_bad_channels"] = []
             settings["_fpvs_raw_qc_low_variance_channels"] = []
             settings["_fpvs_raw_qc_high_amplitude_channels"] = []
+            settings["_fpvs_raw_qc_rare_burst_channels"] = []
             settings["_fpvs_raw_qc_spatial_outlier_channels"] = []
             settings["_fpvs_raw_qc_manual_removed_channels"] = []
             settings["_fpvs_raw_qc_warning_rules"] = []
+            settings["_fpvs_raw_qc_baseline_median_std_uv"] = 0.0
+            settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = 0.0
+            settings["_fpvs_raw_qc_baseline_warning"] = False
+            settings["_fpvs_raw_qc_baseline_excluded"] = False
             settings["_fpvs_participant_id"] = _participant_id_for_file(
                 file_path,
                 settings,
@@ -944,6 +986,9 @@ def _run_full_pipeline_for_file(
             settings["_fpvs_raw_qc_high_amplitude_channels"] = list(
                 raw_qc_result.high_amplitude_channels
             )
+            settings["_fpvs_raw_qc_rare_burst_channels"] = list(
+                raw_qc_result.rare_burst_channels
+            )
             settings["_fpvs_raw_qc_spatial_outlier_channels"] = list(
                 raw_qc_result.spatial_outlier_channels
             )
@@ -951,6 +996,18 @@ def _run_full_pipeline_for_file(
                 raw_qc_result.manual_removed_channels
             )
             settings["_fpvs_raw_qc_warning_rules"] = list(raw_qc_result.warning_rules)
+            settings["_fpvs_raw_qc_baseline_median_std_uv"] = (
+                raw_qc_result.raw_baseline_median_std_uv
+            )
+            settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = (
+                raw_qc_result.raw_baseline_median_p2p_99_uv
+            )
+            settings["_fpvs_raw_qc_baseline_warning"] = (
+                raw_qc_result.raw_baseline_warning
+            )
+            settings["_fpvs_raw_qc_baseline_excluded"] = (
+                raw_qc_result.raw_baseline_excluded
+            )
             if raw_qc_bads:
                 existing_bads = {str(channel) for channel in raw.info.get("bads", [])}
                 new_bads = [

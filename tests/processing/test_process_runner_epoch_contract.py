@@ -633,8 +633,13 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "_fpvs_raw_qc_bad_channels": ["P9"],
         "_fpvs_raw_qc_low_variance_channels": ["P9"],
         "_fpvs_raw_qc_high_amplitude_channels": [],
+        "_fpvs_raw_qc_rare_burst_channels": ["P10"],
         "_fpvs_raw_qc_spatial_outlier_channels": [],
         "_fpvs_raw_qc_manual_removed_channels": ["P9"],
+        "_fpvs_raw_qc_baseline_median_std_uv": 520.4,
+        "_fpvs_raw_qc_baseline_median_p2p_99_uv": 1671.6,
+        "_fpvs_raw_qc_baseline_warning": False,
+        "_fpvs_raw_qc_baseline_excluded": False,
         "_fpvs_removed_electrode_original_auto_flagged": ["FT7"],
         "_fpvs_removed_electrode_accepted_auto_flagged": ["FT7"],
         "_fpvs_removed_electrode_rejected_auto_flagged": [],
@@ -650,8 +655,13 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     load_settings.pop("_fpvs_raw_qc_bad_channels")
     load_settings.pop("_fpvs_raw_qc_low_variance_channels")
     load_settings.pop("_fpvs_raw_qc_high_amplitude_channels")
+    load_settings.pop("_fpvs_raw_qc_rare_burst_channels")
     load_settings.pop("_fpvs_raw_qc_spatial_outlier_channels")
     load_settings.pop("_fpvs_raw_qc_manual_removed_channels")
+    load_settings.pop("_fpvs_raw_qc_baseline_median_std_uv")
+    load_settings.pop("_fpvs_raw_qc_baseline_median_p2p_99_uv")
+    load_settings.pop("_fpvs_raw_qc_baseline_warning")
+    load_settings.pop("_fpvs_raw_qc_baseline_excluded")
     load_settings.pop("_fpvs_removed_electrode_original_auto_flagged")
     load_settings.pop("_fpvs_removed_electrode_accepted_auto_flagged")
     load_settings.pop("_fpvs_removed_electrode_rejected_auto_flagged")
@@ -686,7 +696,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v7-manual-removed-electrode-qc"
+    assert payload["version"] == "preprocessed-raw-v8-baseline-removed-electrode-qc"
     assert status == "hit"
     assert loaded is not None
     assert loaded.get_data().shape == raw.get_data().shape
@@ -695,8 +705,13 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_raw_qc_bad_channels"] == ["P9"]
     assert load_settings["_fpvs_raw_qc_low_variance_channels"] == ["P9"]
     assert load_settings["_fpvs_raw_qc_high_amplitude_channels"] == []
+    assert load_settings["_fpvs_raw_qc_rare_burst_channels"] == ["P10"]
     assert load_settings["_fpvs_raw_qc_spatial_outlier_channels"] == []
     assert load_settings["_fpvs_raw_qc_manual_removed_channels"] == ["P9"]
+    assert load_settings["_fpvs_raw_qc_baseline_median_std_uv"] == 520.4
+    assert load_settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] == 1671.6
+    assert load_settings["_fpvs_raw_qc_baseline_warning"] is False
+    assert load_settings["_fpvs_raw_qc_baseline_excluded"] is False
     assert load_settings["_fpvs_removed_electrode_original_auto_flagged"] == ["FT7"]
     assert load_settings["_fpvs_removed_electrode_accepted_auto_flagged"] == ["FT7"]
     assert load_settings["_fpvs_removed_electrode_rejected_auto_flagged"] == []

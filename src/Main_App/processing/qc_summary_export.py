@@ -35,17 +35,22 @@ QC_SUMMARY_HEADERS = (
     "Auto and Manual Removed Electrodes",
     "Auto/Manual Removed-Electrode Agreement",
     "Flagged Removed-Electrode Candidates (High Amplitude)",
+    "Flagged Removed-Electrode Candidates (Rare Burst)",
     "Flagged Removed-Electrode Candidates (Spatial Consistency)",
     "Kurtosis-Rejected Electrodes",
     "Electrodes Interpolated",
     "Total Number of Electrodes removed/rejected",
     "Raw QC Warnings",
+    "Raw Baseline Median STD (uV)",
+    "Raw Baseline Median P2P99 (uV)",
+    "Raw Baseline QC",
     "Missing Conditions",
     "Included in Final Set",
     "Exclusion Reason",
 )
 _REVIEW_FLAG_PATTERNS = {
     "high_amplitude": re.compile(r"high-amplitude channel\(s\):\s*([^;]+)", re.IGNORECASE),
+    "rare_burst": re.compile(r"rare-burst channel\(s\):\s*([^;]+)", re.IGNORECASE),
     "spatial_outlier": re.compile(r"spatially inconsistent channel\(s\):\s*([^;]+)", re.IGNORECASE),
     "warning_rules": re.compile(r"raw data warning rule\(s\):\s*([^;]+)", re.IGNORECASE),
 }
@@ -69,6 +74,13 @@ def _int_or_default(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _result_by_path(results: Sequence[Mapping[str, Any]]) -> dict[Path, Mapping[str, Any]]:
@@ -151,6 +163,19 @@ def _raw_qc_high_amplitude_channels_from_result(
     )
 
 
+def _raw_qc_rare_burst_channels_from_result(
+    result: Mapping[str, Any] | None,
+) -> list[str]:
+    if not result:
+        return []
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    return (
+        _string_list(audit.get("raw_qc_rare_burst_channels"))
+        or _string_list(raw_qc.get("rare_burst_channels"))
+    )
+
+
 def _raw_qc_warning_rules_from_result(result: Mapping[str, Any] | None) -> list[str]:
     if not result:
         return []
@@ -160,6 +185,21 @@ def _raw_qc_warning_rules_from_result(result: Mapping[str, Any] | None) -> list[
         _string_list(audit.get("raw_qc_warning_rules"))
         or _string_list(raw_qc.get("warning_rules"))
     )
+
+
+def _raw_qc_scalar_from_result(
+    result: Mapping[str, Any] | None,
+    audit_key: str,
+    raw_qc_key: str,
+) -> Any:
+    if not result:
+        return None
+    audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+    raw_qc = result.get("raw_channel_qc") if isinstance(result.get("raw_channel_qc"), Mapping) else {}
+    value = audit.get(audit_key)
+    if value not in (None, ""):
+        return value
+    return raw_qc.get(raw_qc_key)
 
 
 def _review_list_from_result(
@@ -244,6 +284,7 @@ def _review_flags_by_pid(project: Any) -> dict[str, dict[str, list[str]]]:
                 pid.casefold(),
                 {
                     "high_amplitude": [],
+                    "rare_burst": [],
                     "spatial_outlier": [],
                     "warning_rules": [],
                 },
@@ -515,6 +556,15 @@ def build_processing_qc_rows(
         ) or _string_list(
             review.get("high_amplitude")
         )
+        raw_qc_rare_burst_channels = _raw_qc_rare_burst_channels_from_result(
+            result
+        ) or _string_list(
+            entry.get("raw_qc_rare_burst_channels")
+        ) or _string_list(
+            cache_entry.get("raw_qc_rare_burst_channels")
+        ) or _string_list(
+            review.get("rare_burst")
+        )
         raw_qc_spatial_outlier_channels = _raw_qc_spatial_outlier_channels_from_result(
             result
         ) or _string_list(
@@ -531,6 +581,62 @@ def build_processing_qc_rows(
         ) or _string_list(
             review.get("warning_rules")
         )
+        baseline_median_std = _float_or_none(
+            _raw_qc_scalar_from_result(
+                result,
+                "raw_qc_baseline_median_std_uv",
+                "raw_baseline_median_std_uv",
+            )
+        )
+        if baseline_median_std is None:
+            baseline_median_std = _float_or_none(
+                entry.get("raw_qc_baseline_median_std_uv")
+            )
+        if baseline_median_std is None:
+            baseline_median_std = _float_or_none(
+                cache_entry.get("raw_qc_baseline_median_std_uv")
+            )
+        baseline_median_p2p = _float_or_none(
+            _raw_qc_scalar_from_result(
+                result,
+                "raw_qc_baseline_median_p2p_99_uv",
+                "raw_baseline_median_p2p_99_uv",
+            )
+        )
+        if baseline_median_p2p is None:
+            baseline_median_p2p = _float_or_none(
+                entry.get("raw_qc_baseline_median_p2p_99_uv")
+            )
+        if baseline_median_p2p is None:
+            baseline_median_p2p = _float_or_none(
+                cache_entry.get("raw_qc_baseline_median_p2p_99_uv")
+            )
+        baseline_excluded = bool(
+            _raw_qc_scalar_from_result(
+                result,
+                "raw_qc_baseline_excluded",
+                "raw_baseline_excluded",
+            )
+            or entry.get("raw_qc_baseline_excluded")
+            or cache_entry.get("raw_qc_baseline_excluded")
+        )
+        baseline_warning = bool(
+            _raw_qc_scalar_from_result(
+                result,
+                "raw_qc_baseline_warning",
+                "raw_baseline_warning",
+            )
+            or entry.get("raw_qc_baseline_warning")
+            or cache_entry.get("raw_qc_baseline_warning")
+        )
+        if baseline_excluded:
+            baseline_status = "Excluded"
+        elif baseline_warning:
+            baseline_status = "Warning"
+        elif baseline_median_std is not None or baseline_median_p2p is not None:
+            baseline_status = "OK"
+        else:
+            baseline_status = "None"
         raw_qc_channels = _raw_qc_channels_from_result(result) or _string_list(
             entry.get("raw_qc_bad_channels")
         ) or _string_list(
@@ -541,12 +647,14 @@ def build_processing_qc_rows(
                 raw_qc_manual_removed_channels,
                 raw_qc_low_variance_channels,
                 raw_qc_high_amplitude_channels,
+                raw_qc_rare_burst_channels,
                 raw_qc_spatial_outlier_channels,
             )
         if (
             raw_qc_channels
             and not raw_qc_low_variance_channels
             and not raw_qc_high_amplitude_channels
+            and not raw_qc_rare_burst_channels
             and not raw_qc_spatial_outlier_channels
         ):
             manual_lookup = {
@@ -627,6 +735,9 @@ def build_processing_qc_rows(
                 "Flagged Removed-Electrode Candidates (High Amplitude)": _join_channels(
                     raw_qc_high_amplitude_channels
                 ),
+                "Flagged Removed-Electrode Candidates (Rare Burst)": _join_channels(
+                    raw_qc_rare_burst_channels
+                ),
                 "Flagged Removed-Electrode Candidates (Spatial Consistency)": _join_channels(
                     raw_qc_spatial_outlier_channels
                 ),
@@ -634,6 +745,17 @@ def build_processing_qc_rows(
                 "Electrodes Interpolated": _join_channels(interpolated_channels),
                 "Total Number of Electrodes removed/rejected": count,
                 "Raw QC Warnings": _join_channels(raw_qc_warning_rules),
+                "Raw Baseline Median STD (uV)": (
+                    f"{baseline_median_std:.1f}"
+                    if baseline_median_std is not None
+                    else "None"
+                ),
+                "Raw Baseline Median P2P99 (uV)": (
+                    f"{baseline_median_p2p:.1f}"
+                    if baseline_median_p2p is not None
+                    else "None"
+                ),
+                "Raw Baseline QC": baseline_status,
                 "Missing Conditions": _join_channels(missing_condition_labels),
                 "Included in Final Set": included_text,
                 "Exclusion Reason": _exclusion_reason(entry, result),
