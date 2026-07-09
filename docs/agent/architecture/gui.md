@@ -99,8 +99,8 @@ requires regeneration. Do not put app-level visibility or diagnostics toggles
 in the Preprocessing tab.
 
 The sidebar's default tool list is Statistical Analysis, SNR Plots, Scalp Maps,
-LORETA Visualizer, and Sequence Figure, in that order. Publication Report,
-Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools:
+LORETA Visualizer, and Sequence Figure, in that order. Ratio Calculator,
+Individual Detectability, and Epoch Averaging are beta tools:
 they remain embedded workspace pages, but the sidebar appends them only when
 the global Settings option `tools.enable_beta_tools` is enabled and the app has
 been restarted.

@@ -52,7 +52,6 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
-from Tools.Publication_Report.gui import PublicationReportWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Sequence_Figure.gui import SequenceFigureWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
@@ -614,23 +613,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self._publication_maps_page = page
         return page
 
-    def _ensure_publication_report_page(self) -> PublicationReportWindow:
-        page = getattr(self, "_publication_report_page", None)
-        if page is None:
-            project_root = None
-            project = getattr(self, "currentProject", None)
-            if project is not None and hasattr(project, "project_root"):
-                project_root = str(project.project_root)
-            page = PublicationReportWindow(
-                parent=self,
-                project_root=project_root,
-                embedded=True,
-            )
-            page.setObjectName("embedded_publication_report_page")
-            self.workspace_stack.addWidget(page)
-            self._publication_report_page = page
-        return page
-
     def _ensure_loreta_visualizer_page(self) -> QWidget:
         page = getattr(self, "_loreta_visualizer_page", None)
         if page is None:
@@ -661,18 +643,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
             QMessageBox.StandardButton.Ok,
         )
         self._loreta_beta_warning_acknowledged = True
-
-    def _acknowledge_publication_report_beta_warning(self) -> None:
-        if getattr(self, "_publication_report_beta_warning_acknowledged", False):
-            return
-        QMessageBox.warning(
-            self,
-            "Publication Report Beta",
-            "Warning: the publication report tool is currently in beta. Features are subject to change.",
-            QMessageBox.StandardButton.Ok,
-            QMessageBox.StandardButton.Ok,
-        )
-        self._publication_report_beta_warning_acknowledged = True
 
     def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
         paths = tool_workflows.resolve_epoch_averaging_paths(self)
@@ -713,13 +683,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_publication_maps_page())
         self._set_sidebar_selection("btn_publication_maps")
-
-    def open_publication_report(self) -> None:
-        self._acknowledge_publication_report_beta_warning()
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_publication_report_page())
-        self._set_sidebar_selection("btn_publication_report")
 
     def open_loreta_visualizer(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("LORETA Visualizer"):

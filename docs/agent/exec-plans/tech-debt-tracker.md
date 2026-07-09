@@ -17,8 +17,7 @@ Use this page for known debt that is not yet an active execution plan.
   focused refactors, not opportunistic cleanup during behavior-sensitive work.
 - High-context modules are now a maintainability and agent-cost concern. Future
   refactors should reduce file size and cognitive load without changing
-  behavior, prioritizing `src/Tools/Publication_Report/analysis_tables.py`,
-  `src/Tools/Stats/analysis/dv_policy_group_significant.py`,
+  behavior, prioritizing `src/Tools/Stats/analysis/dv_policy_group_significant.py`,
   `src/Tools/LORETA_Visualizer/gui.py`,
   `src/Tools/LORETA_Visualizer/source_producers/l2_mne_hauk_zscore.py`,
   `src/Tools/LORETA_Visualizer/renderer.py`, and

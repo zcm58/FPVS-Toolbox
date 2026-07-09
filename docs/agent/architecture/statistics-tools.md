@@ -28,23 +28,6 @@ Primary paths:
   BCA colorbar label is
   `Baseline-corrected amplitude (µV)`.
 
-- `src/Tools/Publication_Report/`: embedded single-group publication report
-  workflow. It turns processed condition workbooks into Markdown, DOCX,
-  `Publication_Report_Data.xlsx`, audit JSON, logs, and a figure manifest under
-  `5 - Publication Report`. `runner.py` is GUI-agnostic, `gui.py` owns the
-  manually-run sidebar page, `worker.py` wraps the runner for QThread use, and
-  `analysis_tables.py` owns additive source tables that reuse the locked Stats
-  group-significant harmonic selector. `statistical_tests.py` owns the
-  Publication Report-specific Shapiro-Wilk, parametric/nonparametric selected
-  test, and Holm/Bonferroni diagnostics exported in the manuscript-review
-  sheets; do not move those helpers into Stats unless they become shared Stats
-  behavior. The workbook includes semantic/color ratio outputs, planned ROI
-  comparison decisions, lateralization diagnostics, participant-first
-  individual-detectability tables, Z-score report tables, and base-rate
-  summaries. Keep figure generation optional and independently skippable; the
-  current implementation records figure requests in the manifest while
-  automated figure export is deferred.
-
 Publication-ready table figures:
 
 - Use `.agents/skills/publication-table-export/` for reusable table-only
@@ -182,7 +165,6 @@ python -m pytest tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/g
 python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py tests/stats/data/test_stats_project_context.py -q
 python -m pytest tests/stats/io/test_stats_ready_export.py -q
 python -m pytest tests/publication_maps/test_bca_publication_maps.py -q
-python -m pytest tests/publication_report/test_publication_report_runner.py -q
 python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q
 python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py tests/plot_generator/test_plot_generator_gui.py -q
 ```

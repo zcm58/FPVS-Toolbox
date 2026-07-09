@@ -46,7 +46,6 @@ DEFAULT_TOOL_SPECS = (
 )
 
 BETA_TOOL_SPECS = (
-    ("btn_publication_report", "Publication Report", "report", "open_publication_report"),
     ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
     ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
     ("btn_epoch", "Epoch Averaging", "epoch", "open_epoch_averaging"),

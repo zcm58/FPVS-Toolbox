@@ -12,7 +12,6 @@ only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
 | [Publication Maps / Scalp Maps](publication-maps.md) | Default | Create top down scalp topography plots of BCA, SNR, and z-scores.                                 |
 | [LORETA Visualizer](loreta-visualizer.md) | Default | Investigate the source of your oddball responses on the cortical surface and in three dimensions. |
 | [Sequence Figure](sequence-figure.md) | Default | Create a basic figure illustrating your FPVS conditions and images.                               |
-| [Publication Report](publication-report.md) | Beta | Generate a quick report of publication relevant information.                                      |
 | [Ratio Calculator](ratio-calculator.md) | Beta | Calculate ratios between BCA values of processed conditions.                                      |
 | [Individual-Level Detectability](individual-level-detectability.md) | Beta | Create participant-level detectability figures.                                                   |
 | [Epoch Averaging](epoch-averaging.md) | Beta | Average two similar conditions together prior to preprocessing.                                   |

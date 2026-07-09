@@ -608,7 +608,6 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
     )
     snr_plot = project.subfolders["snr"] / "Condition - Central.png"
     scalp_source = project.project_root / "4 - Scalp Maps" / "Publication_Scalp_Maps_Source_Data.xlsx"
-    report_file = project.project_root / "5 - Publication Report" / "report.html"
     source_file = project.project_root / "6 - Source Localization" / "stale.npz"
     table_file = project.project_root / "9 - Tables" / "Table 1.xlsx"
     stale_qc = project.project_root / "Quality Check" / "SNR_Spectral_QC_Condition.xlsx"
@@ -625,7 +624,6 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
         stats_ready,
         snr_plot,
         scalp_source,
-        report_file,
         source_file,
         table_file,
         stale_qc,
@@ -645,7 +643,6 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
     assert not stats_ready.exists()
     assert not snr_plot.exists()
     assert not scalp_source.exists()
-    assert not report_file.exists()
     assert not source_file.exists()
     assert not table_file.exists()
     assert not stale_qc.exists()

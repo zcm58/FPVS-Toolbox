@@ -737,7 +737,7 @@ def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
             "Reprocess All will delete and recreate generated Excel outputs inside:\n\n"
             f"{excel_root}\n\n"
             "It will also delete stale downstream outputs in the project, including "
-            "SNR plots, statistical-analysis exports, scalp maps, publication reports, "
+            "SNR plots, statistical-analysis exports, scalp maps, "
             "source-localization outputs, and processed-data QC reports.\n\n"
             "Raw data, project settings, logs, and preflight review metadata will not be touched.",
             QMessageBox.Yes | QMessageBox.No,

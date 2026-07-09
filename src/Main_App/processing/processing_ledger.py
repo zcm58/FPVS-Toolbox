@@ -36,7 +36,6 @@ REPROCESS_ALL_DOWNSTREAM_FOLDER_DEFAULTS = {
     "snr": "2 - SNR Plots",
     "stats": "3 - Statistical Analysis Results",
     "scalp_maps": "4 - Scalp Maps",
-    "publication_report": "5 - Publication Report",
     "source_localization": "6 - Source Localization",
     "tables": "9 - Tables",
 }
