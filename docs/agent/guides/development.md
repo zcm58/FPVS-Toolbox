@@ -5,13 +5,18 @@ not part of the end-user documentation.
 
 ## Local Environment
 
-Use `.\.venv1` as the canonical repository virtual environment on development
-machines. Recreate it locally from that machine's Python interpreter rather
-than reusing a copied virtual environment from another computer:
+Prefer `.\.venv1` as the repository virtual-environment name on development
+machines. An existing `.\.venv` is also supported and should be used as the
+fallback instead of creating a duplicate environment only to match examples.
+Recreate either environment locally from that machine's Python interpreter
+rather than reusing a copied virtual environment from another computer:
 
 ```powershell
 python -m venv .venv1
 ```
+
+The command examples below use `.venv1`; substitute `.venv` in the same path
+when that is the environment available in the checkout.
 
 Install dependencies with:
 
@@ -27,8 +32,8 @@ Before running repo commands in a shell, activate the environment:
 
 After activation, use `python` in command examples. If PyCharm or another IDE
 reports that it did not find the executable, repoint the project interpreter to
-`.\.venv1\Scripts\python.exe` and remove stale references to other virtual
-environments.
+the selected `.\.venv1\Scripts\python.exe` or `.\.venv\Scripts\python.exe`
+and remove stale references to virtual environments that no longer exist.
 
 For validation commands, set `PYTHONNOUSERSITE=1` when you need to ensure tests
 and import checks do not fall back to user-site packages from the global Python
@@ -62,8 +67,8 @@ helpers under `src/`; packaging changes belong in `scripts/packaging/`.
 .\scripts\packaging\build_release.ps1 -SkipInstall -SkipSmoke
 ```
 
-Use `-SkipInstall` only when `.\.venv1` already has `requirements.txt`
-installed. Omit it when building from a fresh environment. Use
+Use `-SkipInstall` only when the available repo environment already has
+`requirements.txt` installed. Omit it when building from a fresh environment. Use
 `-InnoCompiler "C:\Path\To\ISCC.exe"` when `ISCC.exe` is not on PATH or in a
 standard Inno Setup 6 location.
 
@@ -138,6 +143,8 @@ Use the narrowest relevant check first. See `docs/agent/quality/test-selection.m
 for pytest marker guidance and focused test commands.
 
 Common gates:
+
+Use `.venv` in place of `.venv1` in the activation path when `.venv1` is absent.
 
 ```powershell
 .\.venv1\Scripts\Activate.ps1

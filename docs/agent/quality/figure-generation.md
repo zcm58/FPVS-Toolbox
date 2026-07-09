@@ -62,5 +62,5 @@ For figure-output changes, use the narrowest relevant non-GUI checks first:
 .\.venv1\Scripts\python.exe -m pytest tests\loreta\test_demo_conditions.py tests\loreta\test_project_l2_mne_export.py -q
 ```
 
-If `.venv1` is unavailable, use the local equivalent and report the
-substitution. Do not run offscreen Qt workflows locally.
+If `.venv1` is unavailable, use the fallback `.venv\Scripts\python.exe` and
+report the substitution. Do not run offscreen Qt workflows locally.

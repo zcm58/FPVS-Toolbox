@@ -6,8 +6,9 @@ this map to choose the narrowest deeper source of truth.
 
 User-facing MkDocs pages live under `docs/user/`.
 
-Activate `.\.venv1` before running Python-based repo commands from agent docs.
-Command examples that use `python` assume that environment is active.
+Activate `.\.venv1` before running Python-based repo commands when it is
+present; otherwise activate `.\.venv`. Command examples that use `python`
+assume the available repo environment is active.
 
 ## Directory Map
 

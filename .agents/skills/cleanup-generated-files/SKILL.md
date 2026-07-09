@@ -8,7 +8,7 @@ description: Clean generated build artifacts, Python/tool caches, test scratch f
 ## Workflow
 
 1. State the cleanup scope before deleting anything.
-2. Preserve `.venv1/`, `.idea/`, root `.fpvs_cache/`, `src/quarantine/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
+2. Preserve `.venv1/`, `.venv/`, `.idea/`, root `.fpvs_cache/`, `src/quarantine/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
 3. Run a dry run first:
 
 ```powershell

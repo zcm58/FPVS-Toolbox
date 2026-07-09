@@ -11,7 +11,7 @@ Use this workflow when a task is near retired `Legacy_App` references or when it
 
 ## Workflow
 
-1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` for Python commands.
+1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` when that environment exists; otherwise use the `.venv` equivalents.
 2. Run `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` before broad manual inspection.
 3. Read only the focused docs or files needed by the task or by script failures.
 4. Identify whether the requested behavior crosses a retired-path, historical-boundary, or removed-feature path:

@@ -1,71 +1,79 @@
-# SNR Plot Generator
+# SNR Plots
 
-The SNR Plot Generator helps you quickly create signal-to-noise ratio (SNR) plots from data that has already been processed in FPVS Toolbox.
-
-Use this tool when you want a fast visual summary of the FPVS response across the conditions and regions of interest (ROIs) in your experiment. Instead of building plots by hand, you select your processed Excel output folder, choose the conditions and ROIs to include, and let FPVS Toolbox generate the figures.
-
-SNR plots are commonly used in FPVS publications because they show how clearly the response at a frequency stands out from the surrounding noise.
+SNR Plots creates region-of-interest (ROI) spectra from the `FullSNR` sheets in
+processed FPVS workbooks. It averages electrodes within each selected ROI and
+participants within each plotted condition or project group.
 
 ## Before You Start
 
-Use the SNR Plot Generator after you have processed your `.bdf` files in FPVS Toolbox and the Toolbox has created Excel output files for each condition.
+Process the relevant BDF files first. The selected Excel root should contain a
+subfolder for each condition, with one processed workbook per participant. Each
+workbook must include the `FullSNR` sheet; this tool does not recompute SNR from
+FFT amplitudes.
 
-You should already have:
+The ROI list comes from the current Toolbox settings. Confirm the ROI electrode
+definitions before generating figures.
 
-- a completed FPVS Toolbox project;
-- processed Excel output files for your conditions;
-- ROIs defined in the Toolbox settings.
+## Single-Group Projects
 
-## What You Can Do
+For a single-group project, you can:
 
-Use this tool to:
+- create a separate spectrum for one condition or queue all conditions;
+- choose one ROI or generate plots for all defined ROIs; and
+- overlay two different conditions on the same plot.
 
-- inspect the SNR response for each condition;
-- generate one plot for each ROI;
-- compare two conditions on the same figure;
-- create high-resolution figure files for reports, presentations, or manuscripts.
+Each curve is the participant-average SNR spectrum for that condition and ROI.
 
-For example, if your project has five conditions and four ROIs, the tool can generate SNR plots for each condition and ROI combination.
+## Multi-Group Projects
 
-## Inputs
+When the active `project.json` defines multiple groups and the canonical project
+Excel root is selected, Group Options become available. Multi-group plotting is
+a one-condition group-overlay workflow:
 
-The tool reads the processed Excel files created by FPVS Toolbox. These files are organized by condition inside your project output folders.
+- choose one condition;
+- choose one or more project groups; and
+- enable the group overlay to draw a separate participant-average curve for
+  each selected group.
 
-Each workbook must include the `FullSNR` sheet created during processing. The SNR Plot Generator does not recompute SNR from FFT amplitude sheets.
+Group membership comes from the participant metadata in `project.json`, not
+from output-folder names. Workbooks for a multi-group project may be nested as
+`<Excel Root>/<Condition>/<Group>/<Workbook>`, but a workbook without a matching
+project participant assignment is omitted from the group curves and reported in
+the log.
 
-The tool also uses the ROI definitions saved in your Toolbox settings, so you do not need to manually select electrodes for each plot.
+Condition A/B overlay is hidden in multi-group mode because group overlay is the
+supported comparison for that mode. The first and second color and legend
+controls map to the first two selected groups.
 
-## Plot Options
+## Figure Options
 
-Before generating plots, you can customize:
-
-- plot title;
-- legend title and labels;
-- x-axis and y-axis labels;
-- x-axis and y-axis limits;
-- condition colors;
-- whether two conditions are overlaid on the same plot.
-
-These settings let you make quick review plots or cleaner figures for sharing with collaborators or for publication.
+You can set the title, legend labels, axis labels, axis limits, colors, and the
+frequency range read from each workbook. Optional spectral quality-control
+checks can write a report of suspicious electrode-level spectra without
+silently changing the plotted source values.
 
 ## Outputs
 
-The SNR Plot Generator saves matching high-resolution `.png` and `.pdf` files for each generated plot.
+The tool writes matching 600-DPI `.png` and `.pdf` files for every generated
+condition × ROI figure. The default filename is `<condition> - <ROI>`. A run
+summary reports generated files, skipped items, and quality-control reports.
 
-The `.png` files are useful for slides, posters, and quick sharing. The `.pdf` files are useful when you need a figure format that can be edited or placed into a manuscript layout.
+SNR is a descriptive frequency-domain normalization. A peak can help show that
+the target response stands above neighboring frequencies, but it is not by
+itself an inferential significance test.
 
 ## Basic Steps
 
-1. Process your data in FPVS Toolbox first.
-2. Open the SNR Plot Generator.
-3. Choose the processed Excel output folder if it is not already selected.
-4. Select the conditions and ROIs you want to plot.
-5. Adjust titles, labels, axis limits, and colors if needed.
-6. Generate the plots.
-7. Review the saved `.png` and `.pdf` files.
+1. Open **SNR Plots** after processing the project.
+2. Confirm the Excel input and figure output folders.
+3. Select the condition and ROI scope.
+4. For a single-group project, optionally enable a two-condition overlay.
+5. For a multi-group project, select groups and enable the group overlay.
+6. Adjust labels, ranges, colors, and optional spectral QC.
+7. Generate and review the matching PNG/PDF figures and run log.
 
 ## References
 
-- David et al. (2025): example FPVS SNR plots.
-- Volfart et al. (2021): example FPVS SNR plots.
-- Stothart et al. (2021): example FPVS SNR plots.
+- Volfart, A., et al. (2021). [Implicit, automatic semantic word categorisation in the left occipito-temporal cortex as revealed by fast periodic visual stimulation](https://doi.org/10.1016/j.neuroimage.2021.118228). *NeuroImage, 238*, 118228.
+- Hauk, O., et al. (2021). [Face-selective responses in combined EEG/MEG recordings with fast periodic visual stimulation (FPVS)](https://doi.org/10.1016/j.neuroimage.2021.118460). *NeuroImage, 242*, 118460.
+- [SNR Plots implementation](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Plot_Generator).

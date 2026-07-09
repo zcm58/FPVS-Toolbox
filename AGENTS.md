@@ -10,7 +10,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Prefer the smallest behavior-preserving change that solves the task.
 - Touch only files required by the task; do not refactor adjacent code opportunistically.
 - Preserve existing processing order, data formats, exports, and user workflows unless the task explicitly changes them.
-- Prefer executable checks over broad reading. Activate `.\.venv1` first, then run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` before reading only the focused docs needed for failures or context.
+- Prefer executable checks over broad reading. Activate the repo environment first (`.\.venv1` when present, otherwise `.\.venv`), then run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` before reading only the focused docs needed for failures or context.
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
 - Start with [docs/agent/agent-index.md](docs/agent/agent-index.md) when choosing skills, scripts, and focused tests.
 - Do not read or route work through `src/Standalone_Scripts/**` unless the user explicitly asks. These scripts are developer-only scratch/manual utilities, not active runtime, not user-facing behavior, and not precedent for app architecture.
@@ -62,6 +62,9 @@ Repo-local skills live in `.agents/skills/`.
 
 Run skill-local scripts before manual inspection when they apply:
 
+Command examples use the preferred `.venv1` path. If that environment is not
+present in the checkout, substitute `.venv` in the same path.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
@@ -75,7 +78,8 @@ Globally installed Codex skills are secondary to these repo-local rules. Use
 `docs/agent/agent-index.md` for the narrow list that applies here; do not route
 normal FPVS Toolbox work through React, Vercel, React Native, or web-app skills
 unless the repo gains that scoped surface in the task being performed. Global
-skills never replace `.\.venv1`, repo-local audits, no-offscreen Qt limits, or
+skills never replace the repo environment (`.venv1` preferred; `.venv`
+fallback), repo-local audits, no-offscreen Qt limits, or
 the focused verification gates below.
 
 ## Useful Docs
@@ -104,6 +108,8 @@ the focused verification gates below.
 ## Standard Verification
 
 Run the narrowest relevant checks first, then broaden when the change affects shared behavior.
+
+Use `.venv` in place of `.venv1` in the command block when `.venv1` is absent.
 
 ```powershell
 .\.venv1\Scripts\Activate.ps1

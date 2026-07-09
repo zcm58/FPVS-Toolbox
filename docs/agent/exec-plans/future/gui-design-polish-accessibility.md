@@ -334,9 +334,8 @@ inspection without adding visual noise:
 
 ## Verification Plan
 
-Run focused non-GUI checks first. Use the repo-local virtual environment if
-available in the active checkout; if `.venv1` is absent, use the available repo
-venv and report that substitution.
+Run focused non-GUI checks first. Prefer `.venv1` in the active checkout; if it
+is absent, use `.venv\Scripts\python.exe` and report that substitution.
 
 Recommended commands after implementation slices:
 

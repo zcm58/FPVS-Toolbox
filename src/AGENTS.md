@@ -2,6 +2,9 @@ Instructions for Codex:
 
 Before broad manual inspection, run the relevant executable check:
 
+Prefer `.venv1` when present; if it is absent, substitute `.venv` in the
+activation path below.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py

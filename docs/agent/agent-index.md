@@ -6,7 +6,8 @@ the result.
 
 ## First Commands
 
-Activate the repo environment before Python commands:
+Activate the repo environment before Python commands. Prefer `.venv1`; if it
+is absent, use `.venv` in the command path below:
 
 ```powershell
 .\.venv1\Scripts\Activate.ps1
@@ -47,7 +48,8 @@ Activate the repo environment before Python commands:
 Repo-local skills and rules are the default for FPVS Toolbox work. Use
 installed/global skills only when the user explicitly names them or the task is
 outside the repo-local skill set; they do not override `AGENTS.md`,
-`ARCHITECTURE.md`, `.venv1`, or the no-offscreen-Qt rule.
+`ARCHITECTURE.md`, the repo environment (`.venv1` preferred; `.venv`
+fallback), or the no-offscreen-Qt rule.
 
 ## Script Layout
 

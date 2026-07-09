@@ -1,5 +1,5 @@
 site_name: FPVS Toolbox
-site_description: Basic FPVS Toolbox documentation, tool pages, and reference links.
+site_description: User documentation, tool guides, and method references for FPVS Toolbox.
 site_url: https://zcm58.github.io/FPVS-Toolbox-Repo/
 repo_url: https://github.com/zcm58/FPVS-Toolbox-Repo
 repo_name: zcm58/FPVS-Toolbox-Repo
@@ -50,13 +50,13 @@ nav:
   - Home: index.md
   - Tools:
       - Overview: tools/index.md
-      - Epoch Averaging: tools/epoch-averaging.md
-      - SNR Plot Generator: tools/snr-plot-generator.md
-      - Publication Maps / Scalp Maps: tools/publication-maps.md
-      - Statistics: tools/statistics.md
-      - Ratio Calculator: tools/ratio-calculator.md
-      - Sequence Figure: tools/sequence-figure.md
-      - Individual-level Detectability: tools/individual-level-detectability.md
+      - Statistical Analysis: tools/statistics.md
+      - SNR Plots: tools/snr-plot-generator.md
+      - Scalp Maps: tools/publication-maps.md
       - LORETA Visualizer: tools/loreta-visualizer.md
+      - Sequence Figure: tools/sequence-figure.md
+      - Ratio Calculator: tools/ratio-calculator.md
+      - Individual Detectability: tools/individual-level-detectability.md
+      - Epoch Averaging: tools/epoch-averaging.md
   - Reference:
-      - Reference Links: reference/index.md
+      - Methods and References: reference/index.md

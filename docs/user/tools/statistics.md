@@ -1,53 +1,85 @@
-# Statistics
+# Statistical Analysis
 
-The Statistics tool summarizes processed FPVS outputs and exports statistical results for single-group FPVS projects.
-
-## What It Does
-
-Use this page to document the supported statistical workflows and the basic outputs users should expect.
+Statistical Analysis turns processed FPVS condition workbooks into a common
+Summed BCA dependent variable, runs the supported single-group analyses, and
+exports reviewable results.
 
 ## When To Use It
 
-Use the Statistics tool after FPVS Toolbox has generated processed Excel outputs for the conditions included in
-the analysis.
+Use this tool after preprocessing and post-processing have created one Excel
+workbook per participant and condition under the project's `1 - Excel Data
+Files` folder. Select at least two conditions and confirm that the project ROIs
+match the analysis plan before running statistics.
 
-## Basic Inputs
+## Inputs and Participant Review
 
-- Processed condition workbooks.
-- Project condition and ROI settings.
-- The selected dependent-variable policy.
+The tool reads the processed workbooks, the active project settings, and the ROI
+definitions saved in Settings. Before a run, you can:
 
-## Basic Outputs
+- choose the conditions included in the analysis;
+- review the participants found across those conditions;
+- apply manual participant exclusions; and
+- review quality-control and non-finite/outlier flags.
 
-- Statistical result workbooks.
-- Stats-ready export workbooks for downstream tools or external statistics software.
-- A harmonic-selection summary workbook when the processing pipeline completes:
-  `Quality Check/Harmonic_Selection_Summary.xlsx`.
-- Plain-language summaries where supported.
+The full in-app statistical pipeline is currently limited to single-group
+projects. In a multi-group project, use **Export Stats-Ready Workbook** and run
+group comparisons in external statistical software.
 
-## Harmonic Selection
+## Summed BCA and Harmonic Selection
 
-By default, FPVS Toolbox detects significant oddball harmonics from the
-grand-average `FullFFT Amplitude (uV)` spectrum over the union of the ROIs
-defined in Settings. It uses a strict `z > 1.64` threshold and excludes
-base-rate overlaps such as 6, 12, and 18 Hz.
+The default policy determines one common list of oddball harmonics from the
+grand-averaged `FullFFT Amplitude (uV)` spectra. Detection uses the union of the
+electrodes in the project's predefined ROIs and a strict `z > 1.64` threshold.
+Base-rate overlaps are excluded.
 
-For Summed BCA, the default summation rule includes all non-base oddball
-harmonics up to the highest detected significant harmonic. For example, if
-2.4, 4.8, and 7.2 Hz are detected as significant, the included summation list
-also includes the lower non-base oddball harmonics through 7.2 Hz. The summary
-workbooks distinguish the harmonics that were detected as significant from the
-harmonics that were included in the final Summed BCA.
+For each candidate harmonic, the noise window spans ±10 FFT bins around the
+target. The target bin and its immediately adjacent bins are excluded, then the
+single lowest and single highest finite noise values are removed before the
+mean and population standard deviation are calculated.
 
-Fixed/predefined harmonic lists remain available as an alternate policy when a
-study requires an explicit list.
+Summed BCA then includes every non-base oddball harmonic through the highest
+detected significant harmonic, even if an intervening harmonic was not itself
+significant. The same included list is applied to every participant, condition,
+and ROI. A fixed predefined list remains available when the study protocol
+requires one.
 
-## Notes To Fill In
+The processing workflow records the selection in
+`Quality Check/Harmonic_Selection_Summary.xlsx`, including the harmonics that
+passed the threshold and those included in the final sum.
 
-- Document the supported analysis types.
-- Add guidance for when users should export a stats-ready workbook.
+## Supported Analyses
+
+**Analyze Single Group** runs the current pipeline:
+
+- repeated-measures ANOVA across selected conditions and ROIs;
+- a linear mixed-effects model;
+- interaction follow-up comparisons with multiplicity correction; and
+- condition-by-ROI baseline-versus-zero tests.
+
+The **Advanced** menu can run or export individual pipeline steps. These tools
+do not replace an analysis plan: check model assumptions, coding, exclusions,
+and multiplicity choices before reporting results.
+
+## Outputs
+
+Statistical result workbooks, text reports, reporting summaries, and participant
+flagging records are written under `3 - Statistical Analysis Results` in the
+active project.
+
+**Export Stats-Ready Workbook** writes `Stats_Ready_Summed_BCA.xlsx` with:
+
+- `Long_Format`: one subject × group × condition × ROI row per observation;
+- `Wide_Format`: one row per subject for repeated-measures software;
+- `Selection_Summary`: the active harmonic policy and included list; and
+- `Harmonic_Selection`: the per-harmonic detection evidence.
+
+Use the stats-ready export for JASP, R/RStudio, SAS, or another external package,
+especially when a project contains multiple groups or needs a model not offered
+by the in-app pipeline.
 
 ## References
 
-- Method references: Add during the manual content pass.
-- Toolbox implementation reference: [src/Tools/Stats](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Stats).
+- Volfart, A., et al. (2021). [Implicit, automatic semantic word categorisation in the left occipito-temporal cortex as revealed by fast periodic visual stimulation](https://doi.org/10.1016/j.neuroimage.2021.118228). *NeuroImage, 238*, 118228.
+- Rossion, B., Retter, T. L., & Liu-Shuang, J. (2020). [Understanding human individuation of unfamiliar faces with oddball fast periodic visual stimulation and electroencephalography](https://doi.org/10.1111/ejn.14865). *European Journal of Neuroscience, 52*(10), 4283–4344.
+- See [Methods and References](../reference/index.md) for the broader FPVS method list.
+- [Statistical Analysis implementation](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Stats).

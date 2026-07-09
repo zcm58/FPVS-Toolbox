@@ -6,7 +6,9 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..\..\..")).Path
 $preservedRelPaths = @(
+    ".venv",
     ".venv1",
+    ".fpvs_cache",
     ".idea",
     "src\quarantine"
 )

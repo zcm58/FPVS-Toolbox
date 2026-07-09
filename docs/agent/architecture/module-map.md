@@ -36,7 +36,9 @@ Current `Legacy_App` runtime couplings:
 
 ## Tools
 
-- `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines, reporting, I/O, CLI, and shared helpers grouped by function. Removed `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.
+- `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines,
+  reporting, I/O, and shared helpers grouped by function. Removed
+  `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.
 - `src/Tools/Plot_Generator/`: SNR/FFT/BCA plot generation. `gui.py` is the
   public window facade; `generation_workflow.py` owns QThread launch/cancel and
   completion handling; `worker.py` keeps `_Worker` as the QObject shell while

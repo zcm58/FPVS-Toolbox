@@ -1,34 +1,68 @@
 # Epoch Averaging
 
-Epoch Averaging is the FPVS Toolbox tool for combining preprocessed epochs before post-processing. This could be useful
-if you have two or more FPVS conditions designed to measure the same type of
-
-## What It Does
-
-Use this page to document how the tool combines epochs from multiple preprocessed files and how the selected averaging
-option affects the result.
+Epoch Averaging is a beta tool that combines selected event epochs before the
+usual FFT, SNR, BCA, and z-score calculations. Unlike its earlier documentation,
+the active workflow starts from raw BioSemi `.bdf` files; it does not take
+preprocessed epoch files as input.
 
 ## When To Use It
 
-Use Epoch Averaging after preprocessing and before downstream post-processing when multiple preprocessed files should
-contribute to a single averaged response.
+Use this tool only when multiple event IDs are scientifically justified as
+measurements of the same response and should form one derived condition. Decide
+and document that grouping before inspecting the result whenever possible.
 
-## Basic Inputs
+The tool uses the active project's preprocessing and epoch settings, so confirm
+the reference, filter, sampling, trigger, and epoch-window settings in the main
+application first.
 
-- Preprocessed epoch files from an FPVS Toolbox workflow.
-- The intended averaging method.
+## Inputs and Group Setup
 
-## Basic Outputs
+Epoch Averaging automatically lists raw `.bdf` files from the active project's
+data folder. You can add or remove BDF files, then create one or more averaging
+groups. For each group, provide:
 
-- Averaged data files for downstream FPVS Toolbox processing.
+- a descriptive output name;
+- the integer event IDs to combine; and
+- an averaging method.
 
-## Notes To Fill In
+The event IDs are applied to every selected BDF file. Files are loaded and
+preprocessed in the background using the active main-app settings before epochs
+are created.
 
-- Explain the difference between pooled averaging and average-of-averages.
-- Note which method is preferred for the intended workflow.
-- Add any reporting language you want users to copy into methods sections.
+## Averaging Methods
+
+**Pool Trials** concatenates all eligible epochs for the selected event IDs and
+then averages them. Conditions with more accepted trials therefore contribute
+more weight. This is the default.
+
+**Average of Averages** first averages each event-ID epoch set and then takes an
+equal-weight grand average of those evoked responses. Each available event set
+therefore contributes equally regardless of trial count.
+
+The two methods answer different weighting questions. Record which method was
+used and review the accepted trial counts before interpreting a derived
+condition.
+
+## Outputs
+
+For each participant and averaging-group recipe, the combined time-domain
+response is passed through the normal FPVS post-processing stage. The tool
+writes the resulting standard frequency-domain outputs to the project's
+configured results folder for downstream plotting or statistics.
+
+Epoch Averaging does not change the original BDF files. Stop requests are
+handled between processing steps, so the current file or step may finish before
+the run stops.
+
+## Interpretation
+
+Do not combine conditions solely to increase signal strength. Pooling can hide
+real condition differences, and Average of Averages can over-weight a condition
+with relatively few accepted trials. Keep the original conditions and the
+derived grouping rule auditable in the study methods.
 
 ## References
 
-- Method references: Add during the manual content pass.
-- Toolbox implementation reference: [src/Tools/Average_Preprocessing](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Average_Preprocessing).
+- [MNE-Python `concatenate_epochs` documentation](https://mne.tools/stable/generated/mne.concatenate_epochs.html).
+- [MNE-Python `grand_average` documentation](https://mne.tools/stable/generated/mne.grand_average.html).
+- [Epoch Averaging implementation](https://github.com/zcm58/FPVS-Toolbox-Repo/tree/main/src/Tools/Average_Preprocessing).

@@ -7,11 +7,10 @@ from Main_App.gui.components import ToolInfoContent
 INDIVIDUAL_DETECTABILITY_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The Individual Detectability tool mirrors the approach laid out in David et al. (2025) to evaluate
-responses at the level of the individual across your FPVS condition. It produces scalp topography maps for
-each participant and plots z-scores. This also evaluates the number of significant electrodes on a per-participant
-basis. False discovery rate (FDR) correction is built in to this process.
-
+Individual Detectability creates participant-level summed-harmonic z-score
+topographies and SNR panels for processed FPVS conditions. Each panel reports
+the number of electrodes meeting the selected z-score and optional
+Benjamini-Hochberg FDR criteria.
 </p>
 
 <h3>Typical Workflow</h3>
@@ -25,7 +24,8 @@ selection, thresholds, ROI behavior, and correction options.
 <p>
 Individual-level detectability is a review and reporting aid. Check the chosen
 harmonics, FDR settings, and excluded participants before comparing results
-across conditions or projects.
+across conditions or projects. The panels are not a diagnosis or a substitute
+for the group statistical analysis.
 </p>
 """
 

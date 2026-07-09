@@ -7,23 +7,27 @@ from Main_App.gui.components import ToolInfoContent
 SNR_PLOTS_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The SNR Plot tool lets you quickly generate SNR plots from your data after processing. You can
-overlay two conditions on the same figure for comparison, and change your x and y axis titles
-and ranges.
-
-The tool outputs figures in 600dpi .png and .pdf formats, which should be acceptable for most publications.
-
+SNR Plots reads the FullSNR sheets created during processing and generates
+participant-averaged spectra for the selected regions of interest. You can edit
+titles, legend labels, colors, and axis ranges. Every figure is exported as a
+matching 600-DPI PNG and PDF.
 </p>
 
 <h3>Typical Workflow</h3>
 <ol>
-  <li>Choose the conditions you'd like to plot</li>
-  <li>Select colors for each figures</li>
-  <li>Set your axis ranges</li>
-  <li>Set titles for your legend</li>
-  <li>Generate Plots!</li>
+  <li>Confirm the processed Excel root and output folder.</li>
+  <li>Select a condition and one or all ROIs.</li>
+  <li>Optionally adjust labels, colors, axis ranges, and spectral QC.</li>
+  <li>Generate and review the PNG/PDF figure pairs.</li>
 </ol>
 
+<h3>Comparison Modes</h3>
+<p>
+Single-group projects can overlay two conditions. Multi-group projects use a
+one-condition group overlay based on participant assignments in project.json;
+workbooks without a matching assignment are omitted from group curves and
+reported in the log.
+</p>
 
 """
 

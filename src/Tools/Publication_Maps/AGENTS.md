@@ -40,9 +40,8 @@ Rules:
 - SNR uses the same color endpoints. The fixed SNR range is optional: it starts
   checked with a `1.0` to `1.5 SNR` range; unchecked maps auto-scale.
 - Shared BCA/SNR scalp-map color stops live in
-  `src/Tools/Publication_Maps/colormaps.py`; keep Publication Maps and Plot
-  Generator scalp renderers on the same ramp unless a task explicitly scopes a
-  split.
+  `src/Tools/Publication_Maps/colormaps.py`; edit the shared ramp there instead
+  of introducing metric-specific copies in Scalp Maps renderers.
 - The BCA colorbar label is `Baseline-corrected amplitude (µV)`. Figure fonts
   should use `Main_App.exports.figure_style`, not GUI typography roles or
   one-off Matplotlib defaults.
@@ -53,6 +52,9 @@ Rules:
 - Do not run offscreen Qt workflows locally.
 
 Focused checks:
+
+Command examples use the preferred `.venv1` interpreter. Substitute
+`.venv\Scripts\python.exe` when `.venv1` is absent.
 
 ```powershell
 Get-ChildItem src\Tools\Publication_Maps\*.py | ForEach-Object { .\.venv1\Scripts\python.exe -m py_compile $_.FullName }

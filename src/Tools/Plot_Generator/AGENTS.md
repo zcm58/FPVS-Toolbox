@@ -33,16 +33,15 @@ Current ownership map:
   QC reports.
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
   configuration.
-- `snr_utils.py`: shared SNR calculation helpers.
 
 v2.1 project contract:
 
 - `project.json` is canonical for group assignments. Prefer participant
   `group_id` and resolve labels/folder names through `project.groups`; legacy
   participant `group` values are compatibility input only.
-- In multi-group project mode, the SNR Plot Generator input folder should come
+- In multi-group project mode, the SNR Plots input folder should come
   from the project manifest's resolved Excel subfolder. Do not let saved
-  Plot Generator `input_folder` settings override that canonical project root.
+  SNR Plots `input_folder` settings override that canonical project root.
   Group Options should only activate when that canonical Excel root is selected.
 - Multi-group plotting is a one-condition, group-overlay workflow. Hide the
   condition overlay checkbox in multi-group mode; the existing
@@ -64,6 +63,9 @@ v2.1 project contract:
 Keep `_Worker` importable from `Tools.Plot_Generator.worker`. New worker helper
 logic should go in the focused helper modules above and remain PySide6-free
 unless it belongs in the QObject shell.
+
+Use `.venv1` when it exists. On a development machine that only has `.venv`,
+substitute `.venv` in the commands below.
 
 Before broad manual inspection, run:
 

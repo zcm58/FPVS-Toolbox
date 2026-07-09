@@ -11,10 +11,10 @@ Primary references:
 
 Do not add Tkinter, CustomTkinter, or CTkMessagebox imports.
 
-For explicit visual polish or UX critique requests, global design skills such
-as `impeccable`/`delight`, `ui-ux-pro-max`, or `frontend-design` may be used as
-input, but their output must be translated into this desktop app's PySide6
-contracts:
+For explicit visual polish or UX critique requests, the available repo-listed
+`frontend-design`, `emil-design-eng`, and `web-design-guidelines` skills may be
+used as input, but their output must be translated into this desktop app's
+PySide6 contracts:
 
 - Start with `Main_App.gui.components`, `theme.py`, `typography.py`, and the
   existing tool workflow before adding local widgets or style rules.

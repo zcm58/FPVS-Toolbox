@@ -1,21 +1,22 @@
 # FPVS Toolbox Documentation
 
-This site includes basic documentation of FPVS Toolbox features and relevant publications supporting the design
-of the toolbox.
+This site explains the active FPVS Toolbox workflow, its built-in tools, and the
+published methods that inform the application.
 
 ## Key Features and Assumptions
 
 ### FPVS Toolbox Project Root
 
-FPVS Toolbox uses a project root folder design to organize your work. Every new project you create and all associated
-output files live inside its own project subfolder within the project root.
+FPVS Toolbox organizes work under a project root. Each project has its own
+subfolder containing the project manifest, source-data location, processed
+workbooks, quality-control records, statistical outputs, and figures.
 
 ### Data Compatibility
 
-FPVS Toolbox currently supports BioSemi 10-10 montage 64-electrode data.
-
-Other electrode layouts, recording systems, or custom montages are not currently supported. Future updates will bring
-support for other data formats and will allow for other montages or custom electrode montages.
+The currently validated workflow targets BioSemi ActiveTwo 64-channel BDF
+recordings using the standard BioSemi64 electrode names. Other recording
+systems, file formats, channel layouts, or custom montages have not been
+validated and may fail or produce incomplete analyses or figures.
 
 ### Experiment Assumptions
 
@@ -27,20 +28,21 @@ data collection.
 
 ## Tool Pages
 
-The sidebar shows the default tools first: Statistics, SNR Plot Generator,
-Publication Maps / Scalp Maps, LORETA Visualizer, and Sequence Figure.
+The **Workspace Tools** section of the app sidebar shows these default tools:
+Statistical Analysis, SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence
+Figure.
 
-Ratio Calculator, Individual-Level Detectability, and Epoch Averaging are beta
-tools. To show them in the sidebar, open Settings >
-Advanced, enable Beta Tools, then close and reopen FPVS Toolbox.
+Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools.
+To show them, open **Settings > Advanced**, enable **Beta Tools**, then close
+and reopen FPVS Toolbox.
 
 See the following sections for more information regarding each tool provided in FPVS Toolbox.
 
-- [Statistics](tools/statistics.md)
-- [SNR Plot Generator](tools/snr-plot-generator.md)
-- [Publication Maps / Scalp Maps](tools/publication-maps.md)
+- [Statistical Analysis](tools/statistics.md)
+- [SNR Plots](tools/snr-plot-generator.md)
+- [Scalp Maps](tools/publication-maps.md)
 - [LORETA Visualizer](tools/loreta-visualizer.md)
 - [Sequence Figure](tools/sequence-figure.md)
 - [Ratio Calculator](tools/ratio-calculator.md)
-- [Individual-Level Detectability](tools/individual-level-detectability.md)
+- [Individual Detectability](tools/individual-level-detectability.md)
 - [Epoch Averaging](tools/epoch-averaging.md)

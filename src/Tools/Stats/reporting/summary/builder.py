@@ -49,7 +49,7 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
         *(mixed_lines or ["- Mixed model: NOT AVAILABLE (not computed by this run)."]),
         "",
         *(["Interactions:", *interaction_lines, ""] if interaction_lines else []),
-        "Please see the newly generated Excel files in the '3 - Statistical Analysis' folder for complete results.",
-        "Consult your favorite statistics expert (for example, ChatGPT) for help interpreting these findings.",
+        "See the newly generated Excel files in the '3 - Statistical Analysis Results' folder for complete results.",
+        "Interpret these findings with the prespecified analysis plan and qualified statistical guidance.",
     ]
     return "\n".join(parts)

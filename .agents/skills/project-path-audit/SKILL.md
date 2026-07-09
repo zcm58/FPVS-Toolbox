@@ -11,7 +11,7 @@ Use this workflow for file dialogs, manifests, imports, exports, generated outpu
 
 ## Workflow
 
-1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` for Python commands.
+1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` when that environment exists; otherwise use the `.venv` equivalents.
 2. Run `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` before broad manual inspection.
 3. Read only the focused docs or files needed by the task or by script failures.
 4. Identify the active project root source for the workflow before changing path logic.

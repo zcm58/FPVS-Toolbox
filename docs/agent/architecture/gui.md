@@ -54,10 +54,6 @@ Primary paths:
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.
-- `src/Main_App/gui/processing_snr_qc_workflow.py`: post-processing automatic
-  SNR plot generation and final spectral QC launch. It reuses the Plot
-  Generator worker and keeps final spectral QC reports under the active
-  project's `Quality Check` folder.
 - `src/Main_App/gui/tool_workflows.py`: update-check, tool-launcher,
   help/about, and auxiliary-window actions used by `MainWindow` compatibility
   wrappers. Settings editing lives in `settings_panel.py` and is routed through

@@ -63,7 +63,6 @@ RETIRED_PATH_PREFIXES = (
 PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
     "scripts/",
     "tests/",
-    "src/Tools/Stats/cli/",
 )
 
 STATS_REMOVED_NAMESPACE_PREFIXES = (

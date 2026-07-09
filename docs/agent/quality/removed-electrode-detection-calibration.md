@@ -138,8 +138,8 @@ When tuning:
 
 ## Verification Commands
 
-Activate the repo environment first. Examples use the documented `.venv1` path;
-use the active local virtual environment path when a checkout differs.
+Activate the repo environment first. Examples use the preferred `.venv1` path;
+substitute `.venv` in the same path when `.venv1` is absent.
 
 ```powershell
 .\.venv1\Scripts\Activate.ps1

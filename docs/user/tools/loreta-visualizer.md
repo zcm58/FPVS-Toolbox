@@ -31,8 +31,11 @@ Use this tool to:
 
 ### L2-MNE Cortical Surface
 
-The L2-MNE cortical-surface view estimates the source of the observed electrode level activity on the cortical surface.
-This is useful when you want a source-space view that is aligned with the outer cortical sheet.
+The L2-MNE cortical-surface view displays a distributed estimate that is
+consistent with the observed electrode-level activity under the selected head
+model, inverse-method assumptions, and regularization. It provides a
+source-space view aligned with the outer cortical sheet; it does not uniquely
+identify the generators of the scalp signal.
 
 The L2-MNE workflow is most relevant to the FPVS source-estimation examples and methodological guidance described by
 Hauk and colleagues. Hauk et al. (2021) and Hauk et al. (2025) provide FPVS examples using EEG/MEG source-space
@@ -57,8 +60,8 @@ Depending on the loaded source-map method, you can use options such as:
 
 - cortical surface view, a 3D interactable model of the cortical surface
 - split-hemisphere cortical view, which allows you to view both left and right hemispheres simultaneously
-- transparent brain mesh view, which is great for visualization of eLORETA source localization
-- MRI slice view (beta) for an MRI like estimation of source localization
+- transparent brain mesh view for inspecting the prepared eLORETA volume estimate;
+- MRI slice view (beta) for viewing that estimate against template anatomy.
 
 The available options may differ depending on whether you are viewing an L2-MNE cortical map or an eLORETA volume map.
 

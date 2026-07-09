@@ -11,7 +11,7 @@ Use this workflow when changing PySide6 widgets, dialogs, menus, toolbar actions
 
 ## Workflow
 
-1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` for Python commands.
+1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` when that environment exists; otherwise use the `.venv` equivalents.
 2. Run `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` before broad manual inspection.
 3. Read only the focused docs or files needed by the task or by script failures.
 4. Identify the smallest GUI cleanup that satisfies the task.

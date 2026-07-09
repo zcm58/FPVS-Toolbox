@@ -11,6 +11,9 @@ Create table-only publication assets that match FPVS Toolbox figure styling and 
 
 Use the bundled script for final assets:
 
+Command examples use the preferred `.venv1` interpreter. Substitute
+`.venv\Scripts\python.exe` when `.venv1` is absent.
+
 ```powershell
 .\.venv1\Scripts\python.exe .agents\skills\publication-table-export\scripts\export_publication_table.py `
   --project-root "C:\Path\To\FPVS Project" `

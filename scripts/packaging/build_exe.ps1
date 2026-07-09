@@ -5,8 +5,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$Python = Join-Path $RepoRoot ".venv1\Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $Python)) {
+$Python = @(
+    (Join-Path $RepoRoot ".venv1\Scripts\python.exe"),
+    (Join-Path $RepoRoot ".venv\Scripts\python.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $Python) {
     $Python = "python"
 }
 

@@ -2,66 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog
 
-from Main_App.gui.components import ActionRow
 from Tools.Stats.workers import stats_workers
 from Tools.Stats.common.stats_core import PipelineId, StepId
-from Tools.Stats.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
-from Tools.Stats.qc.stats_qc_exclusion import QC_REASON_SUMABS
 from Tools.Stats.ui.stats_window import StatsWindow
-
-
-def test_manual_exclusion_dialog_apply_emits_and_closes(qtbot) -> None:
-    dialog = ManualOutlierExclusionDialog(
-        candidates=["P1", "P2"],
-        flagged_map={},
-        preselected=set(),
-    )
-    qtbot.addWidget(dialog)
-
-    action_row = dialog.findChild(ActionRow, "stats_manual_dialog_actions")
-    assert action_row is not None
-    assert action_row.row_layout.indexOf(dialog.select_all_btn) >= 0
-    assert action_row.row_layout.indexOf(dialog.select_none_btn) >= 0
-    assert dialog.clear_exclusions_btn.text() == "Clear exclusions"
-
-    dialog.list_widget.item(0).setCheckState(Qt.Checked)
-    with qtbot.waitSignal(dialog.manualExclusionsApplied, timeout=1000) as blocker:
-        qtbot.mouseClick(dialog.apply_button, Qt.LeftButton)
-
-    assert blocker.args[0] == {"P1"}
-    assert dialog.result() == QDialog.DialogCode.Accepted
-
-
-def test_manual_exclusion_dialog_clear_exclusions_emits_empty(qtbot) -> None:
-    dialog = ManualOutlierExclusionDialog(
-        candidates=["P1", "P2"],
-        flagged_map={},
-        preselected={"P1", "P2"},
-    )
-    qtbot.addWidget(dialog)
-
-    with qtbot.waitSignal(dialog.manualExclusionsApplied, timeout=1000) as blocker:
-        qtbot.mouseClick(dialog.clear_exclusions_btn, Qt.LeftButton)
-
-    assert blocker.args[0] == set()
-    assert dialog.result() == QDialog.DialogCode.Accepted
-
-
-def test_manual_exclusion_dialog_flag_labels_and_tooltips(qtbot) -> None:
-    dialog = ManualOutlierExclusionDialog(
-        candidates=["P1"],
-        flagged_map={"P1": [QC_REASON_SUMABS]},
-        flagged_details_map={"P1": "Flag details for P1"},
-        preselected=set(),
-    )
-    qtbot.addWidget(dialog)
-
-    item = dialog.list_widget.item(0)
-    assert "QC_SUMABS" not in item.text()
-    assert "Large total response" in item.text()
-    assert item.toolTip() == "Flag details for P1"
 
 
 def test_manual_exclusion_state_in_payload(qtbot, monkeypatch) -> None:

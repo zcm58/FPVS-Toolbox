@@ -489,7 +489,7 @@ adds cross-field checks that the schema intentionally does not own.
 
 ## Verification
 
-Use `.venv1` when available; in local checkouts without it, use the equivalent
+Prefer `.venv1` when available; in local checkouts without it, use the fallback
 `.venv\Scripts\python.exe` and report the substitution.
 
 Focused checks for this tool:

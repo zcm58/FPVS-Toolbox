@@ -278,6 +278,9 @@ document a visible smoke path.
 
 Run focused checks after each surface group:
 
+The commands use the preferred `.venv1` interpreter. Substitute
+`.venv\Scripts\python.exe` when `.venv1` is absent.
+
 ```powershell
 .\.venv1\Scripts\python.exe -m py_compile <touched Python files>
 .\.venv1\Scripts\python.exe -m ruff check <touched Python files> --ignore F401,F405

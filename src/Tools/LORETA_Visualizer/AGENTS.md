@@ -384,4 +384,5 @@ Use the narrowest checks first:
 ruff check src\Tools\LORETA_Visualizer
 ```
 
-If `.venv1` is unavailable in the checkout, use the local equivalent `.venv\Scripts\python.exe` and report the substitution.
+Prefer `.venv1` when it is available in the checkout. Otherwise use the
+fallback `.venv\Scripts\python.exe` and report the substitution.

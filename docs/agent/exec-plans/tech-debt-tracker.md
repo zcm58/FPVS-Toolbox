@@ -46,6 +46,9 @@ Use this page for known debt that is not yet an active execution plan.
 
 Run after adding the mechanical garbage-collection gate:
 
+The entries below record the environment used for that scan. Current commands
+also support the `.venv` fallback when `.venv1` is absent.
+
 - Passed with `.\.venv1` activated: `python .agents/scripts/audit/agent_audit.py`
 - Passed with `.\.venv1` activated: `python .agents/scripts/audit/agent_audit.py --check garbage-collection`
 - Passed: tracked artifact scan for cache/build/temp patterns returned no

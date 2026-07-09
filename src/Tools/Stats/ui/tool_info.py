@@ -18,7 +18,9 @@ export analysis-ready results.
 Select the Excel results folder, choose the conditions to analyze, confirm
 participant inclusion, and run the single-group analysis. The tool then writes
 Stats outputs under the active project and keeps export helpers available for
-review, reporting, and downstream publication tools.
+review, reporting, and external statistical software. Multi-group projects can
+export a stats-ready Summed BCA workbook, but the in-app model pipeline remains
+single-group only.
 </p>
 
 <h3>Interpretation Notes</h3>

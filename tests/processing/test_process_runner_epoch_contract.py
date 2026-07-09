@@ -517,6 +517,90 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
     ]
 
 
+def test_run_full_pipeline_uses_condition_specific_oddball_markers(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    info = mne.create_info(["Cz", "Pz", "Status"], sfreq=256.0, ch_types=["eeg", "eeg", "stim"])
+    raw = mne.io.RawArray(np.zeros((3, 5000), dtype=float), info, verbose=False)
+    events = np.asarray(
+        [
+            [100, 0, 1],
+            [200, 0, 51],
+            [840, 0, 51],
+            [1480, 0, 51],
+            [2200, 0, 2],
+            [2300, 0, 52],
+            [2940, 0, 52],
+            [3580, 0, 52],
+        ],
+        dtype=int,
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "begin_preproc_audit",
+        lambda *_args, **_kwargs: {"file": "condition-specific.bdf"},
+    )
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "perform_preprocessing",
+        lambda raw_input, params, log_func, filename_for_log: (raw_input, 0),
+    )
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "finalize_preproc_audit",
+        lambda *args, **kwargs: ({"n_rejected": 0}, []),
+    )
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.load_eeg_file",
+        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+    )
+    monkeypatch.setattr(
+        "Main_App.exports.post_export_adapter.LegacyCtx",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    def _capture_post_export(ctx, _labels):
+        captured["epochs_dict"] = ctx.preprocessed_data
+        return 1
+
+    monkeypatch.setattr(
+        "Main_App.exports.post_export_adapter.run_post_export",
+        _capture_post_export,
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
+
+    fake_bdf = tmp_path / "condition-specific.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "epoch_start": -1.0,
+            "epoch_end": 1.0,
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+        },
+        event_map={"fruit": 1, "veg": 2},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "ok"
+    fruit_epochs = captured["epochs_dict"]["fruit"][0]
+    veg_epochs = captured["epochs_dict"]["veg"][0]
+    assert fruit_epochs.metadata["crop_mode"].tolist() == ["55_onbin"]
+    assert veg_epochs.metadata["crop_mode"].tolist() == ["55_onbin"]
+    assert fruit_epochs.metadata["oddball_id"].tolist() == [51]
+    assert veg_epochs.metadata["oddball_id"].tolist() == [52]
+    assert int(fruit_epochs.get_data().shape[2]) % 640 == 0
+    assert int(veg_epochs.get_data().shape[2]) % 640 == 0
+
+
 def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
     monkeypatch,
     tmp_path: Path,

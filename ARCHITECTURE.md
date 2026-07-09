@@ -6,6 +6,9 @@ This file is the top-level map for agents working in FPVS Toolbox. Keep durable 
 
 Use executable checks before broad reading:
 
+Prefer `.venv1` when it exists in the checkout. If it is absent, use `.venv`
+in the same command paths.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
@@ -94,8 +97,8 @@ Use focused checks for the changed area first.
 - Skill-driven checks: run the matching `.agents/skills/*/scripts/*.py` wrapper before manual grep or broad document reading.
 - GUI wiring or layout changes: pytest-qt smoke test for the changed widget or a documented manual smoke path.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
-- Retired-path work: activate `.\.venv1`, then confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python .agents/scripts/audit/agent_audit.py`.
-- Agent invariants: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py`.
-- Broad shared behavior: activate `.\.venv1`, then run `python -m pytest -q` and lint checks where configured.
+- Retired-path work: activate the available repo environment, then confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python .agents/scripts/audit/agent_audit.py`.
+- Agent invariants: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py`.
+- Broad shared behavior: activate the available repo environment, then run `python -m pytest -q` and lint checks where configured.
 
 See [docs/agent/quality/verification-gates.md](docs/agent/quality/verification-gates.md) for the current command list and fallback reporting rules.

@@ -9,7 +9,10 @@ try {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $scriptsDir = Split-Path -Parent $scriptDir
     $repoRoot = Split-Path -Parent $scriptsDir
-    $pythonExe = Join-Path $repoRoot ".venv1\Scripts\python.exe"
+    $pythonExe = @(
+        (Join-Path $repoRoot ".venv1\Scripts\python.exe"),
+        (Join-Path $repoRoot ".venv\Scripts\python.exe")
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     $mkdocsConfig = Join-Path $repoRoot "mkdocs.yml"
 
     Write-Host "Starting MkDocs GitHub Pages deploy..."
@@ -19,8 +22,8 @@ try {
         Fail "mkdocs.yml was not found at '$mkdocsConfig'."
     }
 
-    if (-not (Test-Path -LiteralPath $pythonExe)) {
-        Fail "Expected repo Python was not found at '$pythonExe'."
+    if (-not $pythonExe) {
+        Fail "Expected repo Python was not found under '.venv1' or '.venv'."
     }
 
     $gitCmd = Get-Command git -ErrorAction SilentlyContinue
@@ -44,12 +47,12 @@ try {
 
         & $pythonExe -c "import mkdocs" 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Fail "MkDocs is not installed in '.venv1'. Install it with: `"$pythonExe`" -m pip install mkdocs mkdocs-material"
+            Fail "MkDocs is not installed in the selected repo environment. Install it with: `"$pythonExe`" -m pip install mkdocs mkdocs-material"
         }
 
         & $pythonExe -c "import json, mkdocs.utils, sys; sys.exit(0 if 'material' in mkdocs.utils.get_theme_names() else 1)" 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Fail "The MkDocs Material theme is not installed in '.venv1'. Install it with: `"$pythonExe`" -m pip install mkdocs-material"
+            Fail "The MkDocs Material theme is not installed in the selected repo environment. Install it with: `"$pythonExe`" -m pip install mkdocs-material"
         }
 
         Write-Host "Running: python -m mkdocs gh-deploy --force"

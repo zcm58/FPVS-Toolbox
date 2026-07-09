@@ -29,6 +29,9 @@ For a compact command map, use `docs/agent/agent-index.md`.
 
 ## Standard Commands
 
+Prefer `.venv1` when it exists in the checkout. If it is absent, substitute
+`.venv` in the activation or interpreter path used by these commands.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
@@ -61,16 +64,16 @@ ruff check .
   focused figure-output tests, `py_compile` for touched renderers, and path/GUI
   audits when outputs or GUI-adjacent code are touched. Figure renderers must
   use `Main_App.exports.figure_style`, not GUI typography helpers.
-- Legacy-boundary changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
-- Source Localization/eLORETA changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
-- LORETA Visualizer changes: activate `.\.venv1`, then run focused checks for
+- Legacy-boundary changes: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
+- Source Localization/eLORETA changes: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
+- LORETA Visualizer changes: activate the available repo environment, then run focused checks for
   `src/Tools/LORETA_Visualizer/` plus
   `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py`
   and `python .agents/scripts/audit/agent_audit.py --check source-localization-refs`.
   Confirm rendering changes do not add source-localization calculation to
   `renderer.py`, `fsaverage_mesh.py`, or GUI code.
 - Processing pipeline changes: verify processing order, output filenames, sheets, and formats remain compatible.
-- Garbage collection: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check garbage-collection` to catch visible cache/temp artifacts, new inline debt markers, and broad production exception handlers.
+- Garbage collection: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py --check garbage-collection` to catch visible cache/temp artifacts, new inline debt markers, and broad production exception handlers.
 
 ## Reporting Failures
 

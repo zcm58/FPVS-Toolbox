@@ -41,7 +41,6 @@ ignore_missing_imports = true
 [tool.ruff]
 exclude = [
     "src/Tools/Stats",
-    "src/Compiler_Script.py",
     "src/quarantine",
 ]
 line-length = 120

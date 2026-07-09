@@ -13,7 +13,7 @@ user explicitly approves a safe visible GUI test environment.
 
 ## Workflow
 
-1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` for Python commands.
+1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` when that environment exists; otherwise use the `.venv` equivalents.
 2. Read `AGENTS.md`, `ARCHITECTURE.md`, `docs/agent/agent-index.md`, and the nearest existing pytest-qt tests in `tests/`.
 3. Add or update the smallest practical pytest-qt smoke test when useful for
    future CI or manual GUI verification.

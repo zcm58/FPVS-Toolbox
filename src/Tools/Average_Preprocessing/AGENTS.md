@@ -5,6 +5,9 @@ GUI edits and minor bug fixes to this directory.
 
 Before broad manual inspection, run:
 
+Prefer `.venv1` when present; if it is absent, substitute `.venv` in the
+activation path below.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py

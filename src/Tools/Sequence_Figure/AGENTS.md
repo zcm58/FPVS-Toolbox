@@ -17,6 +17,9 @@ project manifest writes here unless explicitly scoped.
 
 Before broad manual inspection, run:
 
+Prefer `.venv1` when present; if it is absent, substitute `.venv` in the
+activation and interpreter paths below.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py

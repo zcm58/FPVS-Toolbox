@@ -309,6 +309,10 @@ Goal: make the feature executable by users and future agents.
 
 Use focused checks first:
 
+The commands use the preferred `.venv1` interpreter. Substitute
+`.venv\Scripts\python.exe` when `.venv1` is absent. The baseline below records
+the environment used when that historical verification was run.
+
 ```powershell
 .\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\selection_state.py src\Tools\Plot_Generator\generation_workflow.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\manifest_utils.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\data_collection.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\rendering.py
 .\.venv1\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_worker_config.py tests\plot_generator\test_plot_generator_group_overlay_worker.py tests\plot_generator\test_plot_generator_manifest_utils.py tests\plot_generator\test_plot_generator_excel_inputs.py tests\plot_generator\test_plot_generator_project_input_policy.py -q
@@ -343,9 +347,6 @@ Passed on 2026-05-31:
 Notes:
 
 - The focused pytest command collected 17 tests and all passed.
-- An existing `SyntaxWarning` was reported in
-  `src/Tools/Plot_Generator/snr_utils.py` for a docstring escape sequence. It
-  is unrelated to multi-group overlay behavior.
 - Pytest-qt GUI smoke was not run locally because this repo forbids offscreen
   Qt workflows.
 

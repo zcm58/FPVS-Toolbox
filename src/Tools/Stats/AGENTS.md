@@ -9,6 +9,9 @@ common-harmonic-list, z > 1.64, and neighboring-noise rules documented in
 
 Before broad manual inspection, run:
 
+Prefer `.venv1` when present; if it is absent, substitute `.venv` in the
+activation path below.
+
 ```powershell
 .\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
