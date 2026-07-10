@@ -11,11 +11,15 @@ Choose the processed Excel root, one or more conditions, an output folder, and
 the participants to include. Each workbook must contain `FullFFT Amplitude
 (uV)` and `FullSNR` sheets with compatible electrode and frequency columns.
 
-By default, the tool obtains one common harmonic list using the same
-group-significant selection policy as Statistical Analysis. The selected
-conditions, project ROIs, and included participants therefore affect the common
-list. A custom fixed harmonic list is available as an explicitly exploratory
-advanced option and is identified as such in filenames and metadata.
+By default, the tool loads the project-wide significant-harmonic list saved
+when processing completed. Condition selection and participant display
+exclusions do not recalculate that list. If the saved selection is missing or
+stale, the tool asks you to reprocess the project or recalculate harmonic
+selection from Settings.
+
+A custom fixed harmonic list remains available as an explicitly exploratory
+advanced option and is identified as such in filenames and metadata. It does
+not replace the project's saved significant-harmonic selection.
 
 ## Participant-Level Detection
 

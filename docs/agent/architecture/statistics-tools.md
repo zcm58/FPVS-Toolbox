@@ -9,7 +9,7 @@ Primary paths:
 - Removed CustomTkinter Stats UI source is not part of the active tree; use Git history for reference if needed.
 - `src/Tools/Plot_Generator/`: plot generation GUI, QThread launch workflow,
   `_Worker` QObject shell, worker config, Excel input/data collection helpers,
-  ROI/group aggregation helpers, scalp rendering helpers, Matplotlib rendering,
+  ROI/group aggregation helpers, Matplotlib rendering,
   and manifest helpers.
 - `src/Tools/Ratio_Calculator/`: ratio calculator GUI, pipeline, exports,
   and plots. `gui.py` keeps the public window facade while focused GUI mixins
@@ -17,10 +17,11 @@ Primary paths:
   settings/validation, and run/status/log workflow.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
 - `src/Tools/Publication_Maps/`: embedded Scalp Maps tool. Current scope is
-  BCA-only publication scalp maps. It calls the Stats group-significant harmonic
-  selection builder so significant harmonics and cache reuse stay aligned with
-  the locked Stats method, then sums exact selected `BCA (uV)` columns per
-  electrode before condition-level averaging and PNG/PDF/source-data export.
+  BCA, SNR, and z-score publication scalp maps. It must load the authoritative
+  processing-time significant-harmonic selection from project metadata; it must
+  not calculate or silently replace that list. It then aggregates exact selected
+  metric columns per electrode before condition-level averaging and
+  PNG/PDF/source-data export.
   Its GUI reads base frequency and BCA upper-limit values from Settings and
   exposes low/high BCA color selectors plus an optional fixed BCA colorbar
   range for rendered palette endpoints and scaling. Rendered labels use shared
@@ -65,10 +66,11 @@ Stats grouping:
 - `data/`: project scans, manifest lookup, project-root context, subject IDs, and missing input detection.
 - `analysis/`: Summed BCA DV policy facade and helpers, statistical engines, and vectorized FullSNR/SNR/noise helpers.
 - `analysis/canonical_harmonics.py`: thin shared API for resolving the
-  canonical FPVS Toolbox significant-harmonic list and readable fingerprint.
-  Stats remains the owner of the locked group-level selection/cache behavior;
-  other tools such as Individual Detectability consume this API instead of
-  maintaining a separate primary harmonic list.
+  saved processing-time FPVS Toolbox significant-harmonic list and readable
+  fingerprint. Processing remains the only active project workflow allowed to
+  calculate and persist that list. Scalp Maps and the default Individual
+  Detectability workflow consume this API and fail clearly when the saved
+  selection is missing or stale instead of recalculating it.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
@@ -84,6 +86,13 @@ Rules:
 - Keep the public Stats entry point stable: `Tools.Stats.StatsWindow`.
 - New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
 - New summary-reporting code should import from `Tools.Stats.reporting.summary`; keep `Tools.Stats.reporting.summary_utils` as a compatibility facade.
+- `Main_App.processing.harmonic_selection_qc` owns the authoritative
+  project-wide significant-harmonic calculation at processing completion and
+  explicit Settings recalculation. The exact fingerprinted selection in
+  `project.json` is the downstream source of truth. Active project consumers
+  must load it; they must not derive a condition-, participant-, ROI-, or
+  tool-specific replacement. A missing or stale cache is a user-actionable
+  reprocess/recalculate error.
 - Stats-ready exports must stay explicit and additive. Keep
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
   BCA DV facade, preserve `subject_id` and group labels, and surface missing

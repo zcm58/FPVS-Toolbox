@@ -8,11 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.analysis.dv_policy_group_significant import (
-    build_group_significant_harmonic_selection,
-)
-from Tools.Stats.analysis.dv_policy_settings import DVPolicySettings
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
+from Tools.Stats.analysis.canonical_harmonics import load_project_processing_harmonics
 from Tools.Publication_Maps.excel_inputs import (
     ELECTRODE_COLUMN,
     discover_workbooks,
@@ -92,7 +89,6 @@ def build_publication_map_result(request: PublicationMapRequest) -> PublicationM
 
     selected_harmonics, selection_metadata = _select_stats_significant_harmonics(
         request=request,
-        workbooks=workbooks,
         diagnostics=diagnostics,
     )
     long_rows: list[dict[str, object]] = []
@@ -131,36 +127,21 @@ def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric,
 def _select_stats_significant_harmonics(
     *,
     request: PublicationMapRequest,
-    workbooks: list[WorkbookEntry],
     diagnostics: list[Diagnostic],
 ) -> tuple[tuple[float, ...], dict[str, object]]:
-    subject_data: dict[str, dict[str, str]] = {}
-    for workbook in workbooks:
-        subject_data.setdefault(workbook.subject_id, {})[workbook.condition] = str(workbook.path)
-    subjects = sorted(subject_data)
-    conditions = list(request.conditions)
-    rois = request.selection_rois or {"All scalp electrodes": sorted(biosemi64_names_upper())}
-
     def log_func(message: str) -> None:
         diagnostics.append(Diagnostic(level="info", message=message))
 
-    selection = build_group_significant_harmonic_selection(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_frequency_hz=float(request.base_frequency_hz),
-        rois=rois,
-        log_func=log_func,
-        settings=DVPolicySettings(),
-        max_freq=request.max_frequency_hz,
+    selection = load_project_processing_harmonics(
         project_root=request.project_root,
+        log_func=log_func,
     )
-    metadata = selection.to_metadata()
+    metadata = dict(selection.metadata)
     selected = tuple(round(float(value), 4) for value in selection.selected_harmonics_hz)
     diagnostics.append(
         Diagnostic(
             level="info",
-            message="Stats group-significant harmonics selected for scalp maps.",
+            message="Processing-time significant harmonics loaded for scalp maps.",
             detail=", ".join(f"{freq:g} Hz" for freq in selected),
         )
     )

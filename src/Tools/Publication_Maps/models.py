@@ -60,15 +60,6 @@ class PublicationMetric(str, Enum):
         return "BCA (uV)"
 
 
-class HarmonicMode(str, Enum):
-    """User-visible harmonic selection modes."""
-
-    SINGLE = "single_frequency"
-    EXPLICIT_LIST = "explicit_frequency_list"
-    HIGHEST_ODDBALL = "highest_oddball_harmonic"
-    STATS_SIGNIFICANT = "stats_selected_significant_harmonics"
-
-
 @dataclass(frozen=True)
 class ColorBounds:
     """Rendering bounds for one metric."""
@@ -87,12 +78,7 @@ class PublicationMapRequest:
     input_root: Path
     output_root: Path
     conditions: tuple[str, ...]
-    harmonic_mode: HarmonicMode = HarmonicMode.STATS_SIGNIFICANT
-    harmonic_label: str = ""
-    base_frequency_hz: float = 6.0
-    max_frequency_hz: float | None = None
     subject_exclusions: frozenset[str] = frozenset()
-    selection_rois: dict[str, list[str]] = field(default_factory=dict)
     metrics: tuple[PublicationMetric, ...] = (PublicationMetric.BCA,)
     color_bounds: dict[PublicationMetric, ColorBounds] = field(default_factory=dict)
     export_png: bool = True
@@ -101,9 +87,6 @@ class PublicationMapRequest:
     paired_conditions: tuple[str, ...] = ()
     png_dpi: int = DEFAULT_FIGURE_DPI
     project_root: Path | None = None
-
-    def selected_harmonics_label(self, values: tuple[float, ...]) -> str:
-        return ", ".join(f"{freq:g}" for freq in values)
 
 
 @dataclass(frozen=True)

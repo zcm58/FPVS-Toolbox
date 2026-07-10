@@ -4,6 +4,12 @@
 
 Future plan. Documentation/planning pass only.
 
+Refreshed against the repository on 2026-07-10. The app now exposes active
+tools only through the embedded Main App GUI, tool About buttons have the first
+shared accessible name/description metadata, and the shared subsection-header
+baseline has expanded. The accessibility, focus, validation, copy, motion, and
+visual-identity work below remains future work.
+
 This plan captures recommendations from the repo-local frontend design skills:
 
 - `frontend-design`
@@ -42,6 +48,7 @@ Primary embedded and tool surfaces:
 - `src/Tools/Publication_Maps/`
 - `src/Tools/Individual_Detectability/`
 - `src/Tools/Average_Preprocessing/New_PySide6/`
+- `src/Tools/Sequence_Figure/`
 - `src/Tools/LORETA_Visualizer/`
 
 ## Summary
@@ -74,18 +81,33 @@ not a generic blue-gray admin panel.
   `Qt.StrongFocus` and keyboard activation.
 - `src/Main_App/gui/ui_main.py` builds the landing page, processing setup,
   processing activity page, progress table, and log panel.
+- Active tool pages are embedded in the Main App workspace; retired
+  subprocess/CLI launch paths are no longer part of the user workflow.
 - `docs/agent/design-docs/FRONTEND.md` explicitly says frontend-design advice
   must be translated into PySide6 contracts and must not override the repo's
   desktop-app constraints.
+
+Inventory refreshed on 2026-07-10:
+
+- 53 `SectionCard(...)` construction sites already route titles through the
+  shared card-header contract.
+- 31 `SubsectionHeaderLabel` references include the shared implementation,
+  exports, and curated surface use sites.
+- 2 accessibility metadata calls currently exist, both in the shared tool-info
+  button helper.
+- 176 modal/message-helper call sites require classification before any inline
+  validation migration; the count includes legitimate hard errors,
+  confirmations, and completion messages.
 
 ## Observed Opportunities
 
 ### Accessibility Metadata
 
-No active GUI/tool code currently appears to use `setAccessibleName()` or
-`setAccessibleDescription()`. Many controls already have stable object names,
-tooltips, and shared factories, so accessibility metadata can be added in a
-small number of shared places.
+The shared tool-info button now sets `setAccessibleName()` and
+`setAccessibleDescription()`. Other active GUI/tool controls still have no
+explicit accessibility metadata. Many controls already have stable object
+names, tooltips, and shared factories, so coverage can expand from a small
+number of shared owners.
 
 Candidate shared owners:
 
@@ -123,7 +145,7 @@ Candidate surfaces:
 - Plot Generator required-folder and axis-limit validation
 - Stats missing-folder/ROI/settings validation
 - Ratio Calculator required-field and output-folder validation
-- Publication Maps/Report selection validation
+- Scalp Maps selection validation
 - Individual Detectability required-field validation
 
 ### Interface Copy

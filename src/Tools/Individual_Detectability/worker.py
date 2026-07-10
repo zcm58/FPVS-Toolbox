@@ -12,19 +12,15 @@ from .core import (
     ConditionInfo,
     DetectabilitySettings,
     generate_condition_figure,
-    parse_participant_id,
     sanitize_filename_stem,
 )
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CUSTOM_HARMONIC_SOURCE,
     CanonicalHarmonicSelectionError,
-    analysis_base_frequency_hz,
-    analysis_bca_upper_limit_hz,
     custom_harmonic_selection,
-    select_canonical_group_harmonics,
+    load_project_processing_harmonics,
 )
-from Tools.Stats.data.shared_rois import load_rois_from_settings
 
 
 @dataclass(frozen=True)
@@ -142,25 +138,9 @@ class IndividualDetectabilityWorker(QObject):
                 harmonic_fingerprint=selection.fingerprint_text,
             )
 
-        subjects, subject_data = IndividualDetectabilityWorker._stats_inputs_from_conditions(
-            req.conditions,
-            req.excluded_participants,
-        )
-        if not subjects:
-            raise CanonicalHarmonicSelectionError(
-                "No included participants were found for harmonic selection.",
-                reason="no_subjects",
-            )
-        rois = load_rois_from_settings() or {}
-        selection = select_canonical_group_harmonics(
-            subjects=subjects,
-            conditions=[condition.name for condition in req.conditions],
-            subject_data=subject_data,
-            base_frequency_hz=analysis_base_frequency_hz(),
-            rois=rois,
-            log_func=log,
-            max_freq=analysis_bca_upper_limit_hz(),
+        selection = load_project_processing_harmonics(
             project_root=req.project_root,
+            log_func=log,
         )
         log(selection.fingerprint_text)
         return replace(
@@ -169,21 +149,6 @@ class IndividualDetectabilityWorker(QObject):
             harmonic_source=CANONICAL_HARMONIC_SOURCE,
             harmonic_fingerprint=selection.fingerprint_text,
         )
-
-    @staticmethod
-    def _stats_inputs_from_conditions(
-        conditions: list[ConditionInfo],
-        excluded_participants: set[str],
-    ) -> tuple[list[str], dict[str, dict[str, str]]]:
-        subject_data: dict[str, dict[str, str]] = {}
-        for condition in conditions:
-            for file_path in condition.files:
-                participant = parse_participant_id(file_path.stem)
-                if not participant or participant in excluded_participants:
-                    continue
-                subject_data.setdefault(participant, {})[condition.name] = str(file_path)
-        subjects = sorted(subject_data.keys(), key=_participant_sort_key)
-        return subjects, subject_data
 
     @staticmethod
     def _write_run_metadata(

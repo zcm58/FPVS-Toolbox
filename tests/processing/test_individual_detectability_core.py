@@ -166,7 +166,7 @@ def test_worker_forces_png_export_with_pdf(tmp_path: Path, monkeypatch) -> None:
     assert (tmp_path / "out" / "individual_detectability_custom_harmonics_metadata.json").exists()
 
 
-def test_worker_resolves_canonical_harmonics_before_generating_figures(
+def test_worker_loads_processing_harmonics_before_generating_figures(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -190,7 +190,7 @@ def test_worker_resolves_canonical_harmonics_before_generating_figures(
     )
     captured: dict[str, object] = {}
 
-    def fake_select_canonical_group_harmonics(**kwargs):
+    def fake_load_project_processing_harmonics(**kwargs):
         captured.update(kwargs)
         return SharedHarmonicSelection(
             source=CANONICAL_HARMONIC_SOURCE,
@@ -215,12 +215,9 @@ def test_worker_resolves_canonical_harmonics_before_generating_figures(
     seen_settings: dict[str, object] = {}
     monkeypatch.setattr(
         worker_mod,
-        "select_canonical_group_harmonics",
-        fake_select_canonical_group_harmonics,
+        "load_project_processing_harmonics",
+        fake_load_project_processing_harmonics,
     )
-    monkeypatch.setattr(worker_mod, "analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(worker_mod, "analysis_bca_upper_limit_hz", lambda: 16.8)
-    monkeypatch.setattr(worker_mod, "load_rois_from_settings", lambda: {"LOT": ["P7"]})
     monkeypatch.setattr(
         "Tools.Individual_Detectability.worker.generate_condition_figure",
         fake_generate_condition_figure,
@@ -229,10 +226,7 @@ def test_worker_resolves_canonical_harmonics_before_generating_figures(
     worker = IndividualDetectabilityWorker(request)
     worker._run()
 
-    assert captured["subjects"] == ["P1"]
-    assert captured["conditions"] == ["CondA"]
-    assert captured["subject_data"] == {"P1": {"CondA": str(file_p1)}}
-    assert captured["rois"] == {"LOT": ["P7"]}
+    assert captured["project_root"] == tmp_path
     assert seen_settings["source"] == CANONICAL_HARMONIC_SOURCE
     assert seen_settings["harmonics"] == [1.2, 2.4]
     metadata = tmp_path / "out" / "individual_detectability_metadata.json"

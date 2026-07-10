@@ -14,9 +14,14 @@ project results folder unless you choose another location.
 ## Inputs
 
 Select one or more processed conditions, the metrics to draw, and the output
-folder. Scalp Maps uses the same locked group-level significant-harmonic policy
-as Statistical Analysis; it does not choose a separate set of harmonics for
-each participant, condition, ROI, or metric.
+folder. Scalp Maps loads the project-wide significant-harmonic list that FPVS
+Toolbox saved when processing completed. Selecting fewer conditions or applying
+display exclusions does not recalculate or replace that list.
+
+If the saved selection is missing or no longer matches the processed
+workbooks, project settings, ROIs, or frequency-domain QC state, Scalp Maps
+stops and asks you to reprocess the project or recalculate harmonic selection
+from Settings. It never silently creates a tool-specific harmonic list.
 
 The source workbooks must contain exact `"{frequency:.4f}_Hz"` columns in the
 relevant sheets:

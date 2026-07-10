@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from Tools.Stats.analysis import canonical_harmonics
+from pathlib import Path
+
+from Main_App.processing import harmonic_selection_qc
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CanonicalHarmonicSelectionError,
-    select_canonical_group_harmonics,
+    load_project_processing_harmonics,
 )
 
 
@@ -22,35 +24,30 @@ class _FakeGroupSelection:
             "oddball_frequency_hz": 1.2,
             "selected_harmonics_hz": [1.2, 2.4, 3.6],
             "detected_significant_harmonics_hz": [1.2, 3.6],
-            "selection_cache_source": "computed_this_run_saved_project_metadata",
+            "selection_cache_source": "saved_processing_metadata",
         }
 
 
-def test_select_canonical_group_harmonics_returns_shared_fingerprint(monkeypatch) -> None:
+def test_load_project_processing_harmonics_returns_shared_fingerprint(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     captured: dict[str, object] = {}
 
-    def fake_build_group_significant_harmonic_selection(**kwargs):
-        captured.update(kwargs)
+    def fake_load_processing_harmonic_selection(project, *, log_func):
+        captured["project_root"] = project.project_root
+        captured["log_func"] = log_func
         return _FakeGroupSelection()
 
     monkeypatch.setattr(
-        canonical_harmonics,
-        "build_group_significant_harmonic_selection",
-        fake_build_group_significant_harmonic_selection,
+        harmonic_selection_qc,
+        "load_processing_harmonic_selection",
+        fake_load_processing_harmonic_selection,
     )
 
-    result = select_canonical_group_harmonics(
-        subjects=["P1", "P2"],
-        conditions=["CondA", "CondB"],
-        subject_data={
-            "P1": {"CondA": "p1a.xlsx", "CondB": "p1b.xlsx"},
-            "P2": {"CondA": "p2a.xlsx", "CondB": "p2b.xlsx"},
-        },
-        base_frequency_hz=6.0,
-        rois={"LOT": ["P7", "PO7"]},
+    result = load_project_processing_harmonics(
+        project_root=tmp_path,
         log_func=lambda _message: None,
-        max_freq=16.8,
-        project_root=None,
     )
 
     assert result.source == CANONICAL_HARMONIC_SOURCE
@@ -60,33 +57,30 @@ def test_select_canonical_group_harmonics_returns_shared_fingerprint(monkeypatch
     assert result.fingerprint["detected_significant_harmonics_hz"] == [1.2, 3.6]
     assert "FPVS Toolbox significant harmonics" in result.fingerprint_text
     assert "selected: 1.2, 2.4, 3.6 Hz" in result.fingerprint_text
-    assert captured["rois"] == {"LOT": ["P7", "PO7"]}
+    assert captured["project_root"] == tmp_path.resolve()
 
 
-def test_select_canonical_group_harmonics_rewrites_no_selection_error(monkeypatch) -> None:
-    def fake_build_group_significant_harmonic_selection(**_kwargs):
-        raise RuntimeError(
-            "Group-level significant harmonic selection found no oddball harmonics above z>1.64."
-        )
+def test_load_project_processing_harmonics_reports_missing_cache(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_load_processing_harmonic_selection(_project, *, log_func):
+        _ = log_func
+        raise RuntimeError("No current processing-time significant-harmonic selection is available.")
 
     monkeypatch.setattr(
-        canonical_harmonics,
-        "build_group_significant_harmonic_selection",
-        fake_build_group_significant_harmonic_selection,
+        harmonic_selection_qc,
+        "load_processing_harmonic_selection",
+        fake_load_processing_harmonic_selection,
     )
 
     try:
-        select_canonical_group_harmonics(
-            subjects=["P1"],
-            conditions=["CondA"],
-            subject_data={"P1": {"CondA": "p1a.xlsx"}},
-            base_frequency_hz=6.0,
-            rois={},
+        load_project_processing_harmonics(
+            project_root=tmp_path,
             log_func=lambda _message: None,
         )
     except CanonicalHarmonicSelectionError as exc:
-        assert exc.reason == "no_significant_harmonics"
-        assert "No group-level significant harmonics were found" in str(exc)
-        assert "exploratory fixed-list check" in str(exc)
+        assert exc.reason == "missing_processing_selection"
+        assert "No current processing-time significant-harmonic selection" in str(exc)
     else:
         raise AssertionError("Expected CanonicalHarmonicSelectionError")

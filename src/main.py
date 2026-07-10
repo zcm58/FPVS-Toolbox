@@ -41,20 +41,6 @@ from Main_App import (  # noqa: E402
 )
 
 
-def _maybe_run_cli_tool() -> bool:
-    if "--run-plot-generator" in sys.argv:
-        from Tools.Plot_Generator import plot_generator
-
-        plot_generator.main()
-        return True
-    if "--run-ratio-calculator" in sys.argv:
-        from Tools.Ratio_Calculator import ratio_calculator
-
-        ratio_calculator.main()
-        return True
-    return False
-
-
 def run_app() -> int:
     settings = get_settings()
     debug = settings.debug_enabled()
@@ -73,8 +59,6 @@ def run_app() -> int:
 
 
 def main() -> None:
-    if _maybe_run_cli_tool():
-        return
     sys.exit(run_app())
 
 

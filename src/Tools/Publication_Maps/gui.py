@@ -58,7 +58,6 @@ from Tools.Publication_Maps.models import (
 )
 from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO
 from Tools.Publication_Maps.worker import PublicationMapsWorker
-from Tools.Stats.data.shared_rois import load_rois_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -861,9 +860,6 @@ class PublicationMapsWindow(QWidget):
             input_root=Path(self.input_root_edit.text().strip()),
             output_root=Path(self.output_root_edit.text().strip()),
             conditions=self._selected_conditions(),
-            base_frequency_hz=self._analysis_base_frequency_hz(),
-            max_frequency_hz=self._analysis_bca_upper_limit_hz(),
-            selection_rois=load_rois_from_settings(self._settings_manager()) or {},
             metrics=metrics,
             color_bounds=color_bounds,
             export_png=True,

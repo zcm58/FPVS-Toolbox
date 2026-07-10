@@ -1192,16 +1192,20 @@ def _prepare_group_significant_bca_data(
         return None
 
     started = perf_counter()
-    selection = build_group_significant_harmonic_selection(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_frequency_hz=base_freq,
-        rois=rois_map,
+    if project_root in (None, ""):
+        raise RuntimeError(
+            "Group-significant harmonics must be loaded from processing-time project "
+            "metadata. Reprocess the project, then run Stats from the project GUI."
+        )
+
+    from Main_App.processing.harmonic_selection_qc import (
+        load_processing_harmonic_selection,
+    )
+    from Main_App.projects.project import Project
+
+    selection = load_processing_harmonic_selection(
+        Project.load(Path(project_root)),
         log_func=log_func,
-        settings=settings,
-        max_freq=max_freq,
-        project_root=project_root,
     )
     log_func(
         "Group-level significant harmonics detected: "

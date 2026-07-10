@@ -1,5 +1,6 @@
-The Plot_Generator directory contains the standalone PySide6 tool that builds SNR
-line plots from Excel files created by the FPVS Toolbox. GUI adjustments
+The Plot_Generator directory contains the embedded PySide6 tool that builds SNR
+line plots from Excel files created by the FPVS Toolbox. The Main App GUI is its
+only user-facing entry point. GUI adjustments
 and minor bug fixes are allowed. Keep processing code modular and under 500 lines
 per file. ROI definitions should be loaded from the existing settings using the
 utilities in `Tools.Stats`. Plots should be averaged across participants within

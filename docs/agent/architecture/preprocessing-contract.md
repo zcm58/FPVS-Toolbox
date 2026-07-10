@@ -113,6 +113,15 @@ invalidate cached preprocessed Raw files. The v8 cache metadata also persists
 raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
 so cache-hit runs can still produce participant QC summaries.
 
+After frequency-domain QC is accepted, processing completion calculates the
+project-wide significant-harmonic list once through
+`Main_App.processing.harmonic_selection_qc`, persists its exact fingerprinted
+selection in `project.json`, and writes
+`Quality Check/Harmonic_Selection_Summary.xlsx`. Active downstream project
+tools load this processing-time selection. They must stop with reprocessing or
+Settings-recalculation guidance when it is missing or stale rather than
+calculating another list.
+
 ## Raw QC Hard Exclusions
 
 `src/Main_App/processing/raw_channel_qc.py` owns pre-preprocessing

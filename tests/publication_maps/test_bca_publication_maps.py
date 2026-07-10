@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -15,6 +16,8 @@ from Main_App.exports.figure_style import (
     FIGURE_TEXT_SIZE_PT,
     figure_text_kwargs,
 )
+from Main_App.processing import harmonic_selection_qc
+from Main_App.projects.project import Project
 from Tools.Publication_Maps import metrics as publication_map_metrics
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
@@ -45,6 +48,18 @@ from Tools.Publication_Maps.rendering import (
     render_publication_figures,
 )
 from Tools.Publication_Maps.worker import PublicationMapsWorker
+from Tools.Stats.analysis.canonical_harmonics import CanonicalHarmonicSelectionError
+
+
+@pytest.fixture(autouse=True)
+def _stable_processing_harmonic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+    )
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
 
 
 def test_discovers_condition_workbooks_and_skips_excel_lock_files(tmp_path: Path) -> None:
@@ -69,8 +84,6 @@ def test_bca_maps_use_stats_group_significant_selection_and_sum_per_electrode(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=8.4,
         project_root=project_root,
     )
 
@@ -105,8 +118,6 @@ def test_snr_maps_use_stats_significant_selection_and_mean_per_electrode(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=8.4,
         project_root=project_root,
         metrics=(PublicationMetric.SNR,),
     )
@@ -142,8 +153,6 @@ def test_z_score_maps_use_stats_significant_selection_and_combined_z_per_electro
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=8.4,
         project_root=project_root,
         metrics=(PublicationMetric.Z_SCORE,),
     )
@@ -168,12 +177,11 @@ def test_snr_maps_report_missing_exact_selected_columns(tmp_path: Path) -> None:
     project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
     workbook = excel_root / "Faces" / "S1_Faces_Results.xlsx"
     _drop_sheet_column(workbook, sheet_name="SNR", column="3.6000_Hz")
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(Project.load(project_root))
     request = PublicationMapRequest(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
         metrics=(PublicationMetric.SNR,),
     )
@@ -191,14 +199,12 @@ def test_snr_maps_report_missing_exact_selected_columns(tmp_path: Path) -> None:
     assert result.grand_average_values.empty
 
 
-def test_bca_maps_can_reuse_saved_stats_harmonic_cache(tmp_path: Path) -> None:
+def test_bca_maps_use_saved_processing_harmonic_cache(tmp_path: Path) -> None:
     project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
     request = PublicationMapRequest(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
     )
 
@@ -206,9 +212,29 @@ def test_bca_maps_can_reuse_saved_stats_harmonic_cache(tmp_path: Path) -> None:
     group_policy.clear_group_significant_selection_cache()
     second = build_publication_map_result(request)
 
-    assert first.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6))
-    assert second.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6))
-    assert second.selection_metadata["selection_cache_source"] == "saved_project_metadata"
+    assert first.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6, 4.8, 7.2))
+    assert second.selected_harmonics_hz == pytest.approx((1.2, 2.4, 3.6, 4.8, 7.2))
+    assert second.selection_metadata["selection_cache_source"] == "saved_processing_metadata"
+
+
+def test_bca_maps_require_processing_time_harmonic_selection(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(
+        tmp_path,
+        subjects=("S1",),
+        persist_harmonics=False,
+    )
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=project_root,
+    )
+
+    with pytest.raises(
+        CanonicalHarmonicSelectionError,
+        match="No current processing-time significant-harmonic selection",
+    ):
+        build_publication_map_result(request)
 
 
 def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
@@ -218,8 +244,6 @@ def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
         input_root=excel_root,
         output_root=output_root,
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
     )
     result = build_publication_map_result(request)
@@ -246,8 +270,6 @@ def test_source_workbook_includes_bca_and_snr_when_both_selected(tmp_path: Path)
         input_root=excel_root,
         output_root=output_root,
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
         metrics=(PublicationMetric.BCA, PublicationMetric.SNR),
         color_bounds={
@@ -273,6 +295,8 @@ def test_source_workbook_includes_bca_and_snr_when_both_selected(tmp_path: Path)
         PublicationMetric.SNR.value,
     }
     assert params_by_key["metrics"] == "bca; snr"
+    assert params_by_key["harmonic_source"] == "processing_time_project_selection"
+    assert params_by_key["base_frequency_hz"] == pytest.approx(6.0)
     assert params_by_key["bca_range_max"] == pytest.approx(0.4)
     assert params_by_key["snr_range_min"] == pytest.approx(1.0)
     assert params_by_key["snr_range_max"] == pytest.approx(1.5)
@@ -285,8 +309,6 @@ def test_source_workbook_includes_z_score_threshold_when_selected(tmp_path: Path
         input_root=excel_root,
         output_root=output_root,
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
         metrics=(PublicationMetric.Z_SCORE,),
         color_bounds={
@@ -322,8 +344,6 @@ def test_fast_metric_reader_preserves_publication_map_values(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces", "Objects"),
-        base_frequency_hz=6.0,
-        max_frequency_hz=8.4,
         project_root=project_root,
         metrics=(
             PublicationMetric.BCA,
@@ -377,8 +397,6 @@ def test_metric_collection_reads_only_selected_harmonic_columns(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=8.4,
         project_root=project_root,
         metrics=(
             PublicationMetric.BCA,
@@ -428,8 +446,6 @@ def test_metric_collection_does_not_use_pandas_excel_reader(
         input_root=excel_root,
         output_root=project_root / "4 - Scalp Maps",
         conditions=("Faces",),
-        base_frequency_hz=6.0,
-        max_frequency_hz=8.4,
         project_root=project_root,
         metrics=(PublicationMetric.BCA,),
     )
@@ -458,8 +474,6 @@ def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
         input_root=excel_root,
         output_root=output_root,
         conditions=("Faces", "Objects", "Places"),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
         metrics=(PublicationMetric.BCA, PublicationMetric.SNR),
         export_paired_figures=True,
@@ -493,8 +507,6 @@ def test_exports_combined_paired_condition_figure_with_z_score_third_row(
         input_root=excel_root,
         output_root=output_root,
         conditions=("Faces", "Objects"),
-        base_frequency_hz=6.0,
-        max_frequency_hz=3.6,
         project_root=project_root,
         metrics=(
             PublicationMetric.BCA,
@@ -768,16 +780,22 @@ def _write_project_workbooks(
     *,
     subjects: tuple[str, ...],
     conditions: tuple[str, ...] = ("Faces",),
+    persist_harmonics: bool = True,
 ) -> tuple[Path, Path]:
     project_root = tmp_path / "Project"
     excel_root = project_root / "1 - Excel Data Files"
     project_root.mkdir(parents=True)
     (project_root / "project.json").write_text(
-        (
-            "{\n"
-            '  "schema_version": "2.1.0",\n'
-            '  "subfolders": {"excel": "1 - Excel Data Files"}\n'
-            "}\n"
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {
+                    condition: index for index, condition in enumerate(conditions, start=1)
+                },
+                "preprocessing": {},
+            },
+            indent=2,
         ),
         encoding="utf-8",
     )
@@ -789,6 +807,8 @@ def _write_project_workbooks(
                 condition_root / f"{subject}_{condition}_Results.xlsx",
                 scale=subject_idx + condition_idx - 1,
             )
+    if persist_harmonics:
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(Project.load(project_root))
     return project_root, excel_root
 
 

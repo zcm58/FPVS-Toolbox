@@ -10,6 +10,12 @@ first curated Main App, Stats, Plot Generator, and Ratio Calculator headings.
 This remains a future plan for any additional curated subsection-heading
 migration. Do not treat every plain `QLabel(...)` as remaining work.
 
+Refreshed against the repository on 2026-07-10. The structured inventory now
+finds 53 `SectionCard(...)` sites and 31 `SubsectionHeaderLabel` references
+including imports/exports and curated uses. No direct `setBold(True)` or
+`setProperty("caption", ...)` heading patterns remain. This is now a targeted
+maintenance plan, not a broad mechanical migration.
+
 ## Target
 
 Shared title and subsection header presentation across PySide6 GUI surfaces.
@@ -30,8 +36,11 @@ Primary GUI surfaces:
 - `src/Tools/Stats/ui/`
 - `src/Tools/Plot_Generator/`
 - `src/Tools/Ratio_Calculator/`
+- `src/Tools/Publication_Maps/`
 - `src/Tools/Individual_Detectability/`
 - `src/Tools/Average_Preprocessing/New_PySide6/`
+- `src/Tools/Sequence_Figure/`
+- `src/Tools/LORETA_Visualizer/`
 
 ## Summary
 
@@ -117,6 +126,19 @@ Home page:
 - `Trigger ID`
 - `Log`
 
+Processing activity page:
+
+- `Run Status`
+- `Checks In This Step`
+- `Live Status`
+- `Progress`
+
+Settings:
+
+- `ROI name`
+- `Electrodes`
+- `Frequency-domain QC`
+
 Statistical Analysis, Basic tab:
 
 - `File I/O`
@@ -160,13 +182,20 @@ Ratio Calculator:
 - `Harmonic settings`
 - `Run`
 
+Scalp Maps:
+
+- `Condition A`
+- `Condition B`
+
 Sidebar:
 
 - `Workspace Tools`
 - `Utilities`
 
-This is not the full final list. Continue the pass only as the user confirms
-additional text that should count as a subsection header.
+Continue only as the user confirms additional visible text that should count
+as a subsection header. The absence of manual bold/caption patterns means
+future candidates will mostly be ordinary `QLabel(...)` calls that require
+visual classification, not automatic conversion.
 
 ## Behavior To Preserve
 
@@ -251,8 +280,11 @@ Use one surface group per small change set:
 4. Ratio Calculator:
    - `src/Tools/Ratio_Calculator/`
 5. Remaining embedded tools:
+   - `src/Tools/Publication_Maps/`
    - `src/Tools/Individual_Detectability/`
    - `src/Tools/Average_Preprocessing/New_PySide6/`
+   - `src/Tools/Sequence_Figure/`
+   - `src/Tools/LORETA_Visualizer/`
 
 Stop after each group and report exactly which visible strings were migrated.
 

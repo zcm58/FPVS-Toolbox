@@ -6,16 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from Main_App import SettingsManager
-from Tools.Stats.analysis.dv_policy_group_significant import (
-    build_group_significant_harmonic_selection,
-)
 from Tools.Stats.analysis.dv_policy_settings import (
-    DVPolicySettings,
     GROUP_SIGNIFICANT_POLICY_ID,
     GROUP_SIGNIFICANT_POLICY_LABEL,
-    GROUP_SIGNIFICANT_POLICY_NAME,
-    normalize_dv_policy,
 )
 
 CANONICAL_HARMONIC_SOURCE = "fpvs_toolbox_significant_harmonics"
@@ -43,86 +36,40 @@ class CanonicalHarmonicSelectionError(RuntimeError):
         self.reason = reason
 
 
-def analysis_base_frequency_hz() -> float:
-    """Return the configured FPVS base frequency used by Stats."""
-
-    try:
-        return float(SettingsManager().get("analysis", "base_freq", "6.0"))
-    except (TypeError, ValueError):
-        return 6.0
-
-
-def analysis_bca_upper_limit_hz() -> float | None:
-    """Return the configured BCA candidate harmonic ceiling used by Stats."""
-
-    try:
-        value = float(SettingsManager().get("analysis", "bca_upper_limit", "16.8"))
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
-
-
-def select_canonical_group_harmonics(
+def load_project_processing_harmonics(
     *,
-    subjects: Sequence[str],
-    conditions: Sequence[str],
-    subject_data: Mapping[str, Mapping[str, str]],
-    base_frequency_hz: float,
-    rois: Mapping[str, Sequence[str]] | None,
+    project_root: str | Path | None,
     log_func: Callable[[str], None],
-    dv_policy: dict[str, object] | DVPolicySettings | None = None,
-    max_freq: float | None = None,
-    project_root: str | Path | None = None,
 ) -> SharedHarmonicSelection:
-    """Resolve the canonical FPVS Toolbox significant-harmonic list."""
+    """Load the processing-time project selection without recalculating it."""
 
-    settings = (
-        dv_policy
-        if isinstance(dv_policy, DVPolicySettings)
-        else normalize_dv_policy(dv_policy)
-    )
-    if settings.name != GROUP_SIGNIFICANT_POLICY_NAME:
+    if project_root in (None, ""):
         raise CanonicalHarmonicSelectionError(
-            "The canonical FPVS Toolbox harmonic selection uses group-level "
-            "significant harmonics. Fixed harmonic lists are custom/exploratory "
-            "overrides and cannot replace the canonical selection.",
-            reason="custom_policy_selected",
+            "A loaded FPVS Toolbox project is required to use the saved "
+            "processing-time significant harmonics.",
+            reason="missing_project",
         )
-
-    subject_list = [str(subject) for subject in subjects]
-    condition_list = [str(condition) for condition in conditions]
+    root = Path(project_root).resolve()
     try:
-        selection = build_group_significant_harmonic_selection(
-            subjects=subject_list,
-            conditions=condition_list,
-            subject_data={
-                str(subject): {
-                    str(condition): str(path)
-                    for condition, path in (condition_map or {}).items()
-                }
-                for subject, condition_map in subject_data.items()
-            },
-            base_frequency_hz=float(base_frequency_hz),
-            rois={str(name): [str(ch) for ch in channels] for name, channels in (rois or {}).items()},
-            log_func=log_func,
-            settings=settings,
-            max_freq=max_freq,
-            project_root=project_root,
+        from Main_App.processing.harmonic_selection_qc import (
+            load_processing_harmonic_selection,
         )
-    except RuntimeError as exc:
+        from Main_App.projects.project import Project
+
+        selection = load_processing_harmonic_selection(
+            Project.load(root),
+            log_func=log_func,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
         raise CanonicalHarmonicSelectionError(
-            _user_message_for_selection_failure(str(exc)),
-            reason=_reason_for_selection_failure(str(exc)),
+            str(exc),
+            reason="missing_processing_selection",
         ) from exc
 
     metadata = selection.to_metadata()
     return shared_selection_from_metadata(
         metadata,
-        subjects=subject_list,
-        conditions=condition_list,
-        rois=rois,
-        project_root=project_root,
-        max_freq=max_freq,
+        project_root=root,
     )
 
 
@@ -284,44 +231,6 @@ def format_harmonic_selection_fingerprint(fingerprint: Mapping[str, object]) -> 
     )
 
 
-def _user_message_for_selection_failure(message: str) -> str:
-    reason = _reason_for_selection_failure(message)
-    if reason == "missing_processed_data":
-        return (
-            "FPVS Toolbox could not find the processed FullFFT/BCA outputs needed "
-            "to identify significant harmonics. Reprocess the project data, then "
-            "run this tool again so harmonic selection can be performed automatically.\n\n"
-            f"Details: {message}"
-        )
-    if reason == "no_significant_harmonics":
-        return (
-            "No group-level significant harmonics were found for the current "
-            "analysis definition. The canonical workflow has stopped. You can "
-            "run an exploratory fixed-list check from Advanced > custom harmonics, "
-            "but those outputs will be labeled as custom/exploratory.\n\n"
-            f"Details: {message}"
-        )
-    return message
-
-
-def _reason_for_selection_failure(message: str) -> str:
-    lower = message.lower()
-    if "found no oddball harmonics above" in lower or "no significant harmonics" in lower:
-        return "no_significant_harmonics"
-    missing_tokens = (
-        "fullfft amplitude",
-        "full-spectrum",
-        "bca (uv)",
-        "missing columns",
-        "requires workbooks",
-        "regenerate workbooks",
-        "processed excel outputs",
-    )
-    if any(token in lower for token in missing_tokens):
-        return "missing_processed_data"
-    return "selection_failed"
-
-
 def _float_tuple(value: object) -> tuple[float, ...]:
     if value in (None, ""):
         return ()
@@ -366,11 +275,9 @@ __all__ = [
     "CUSTOM_HARMONIC_SOURCE",
     "CanonicalHarmonicSelectionError",
     "SharedHarmonicSelection",
-    "analysis_base_frequency_hz",
-    "analysis_bca_upper_limit_hz",
     "custom_harmonic_selection",
     "format_harmonic_selection_fingerprint",
     "harmonic_selection_fingerprint",
-    "select_canonical_group_harmonics",
+    "load_project_processing_harmonics",
     "shared_selection_from_metadata",
 ]

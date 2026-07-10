@@ -74,6 +74,18 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
     entries = manifest["tools"]["stats"]["group_significant_harmonics_cache"]["entries"]
     assert len(entries) == 1
 
+    def _unexpected_recalculation(**_kwargs):
+        raise AssertionError("Downstream loading must not recalculate significant harmonics")
+
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "build_group_significant_harmonic_selection",
+        _unexpected_recalculation,
+    )
+    loaded = harmonic_selection_qc.load_processing_harmonic_selection(project)
+    assert loaded.selected_harmonics_hz == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
+    assert loaded.selection_cache_source == "saved_processing_metadata"
+
 
 def test_processing_harmonic_selection_qc_uses_project_summation_settings(
     tmp_path: Path,

@@ -2,7 +2,7 @@
 
 from .gui import PlotGeneratorWindow
 
-__all__ = ["_Worker", "PlotGeneratorWindow", "main"]
+__all__ = ["_Worker", "PlotGeneratorWindow"]
 
 
 def __getattr__(name: str):
@@ -10,8 +10,4 @@ def __getattr__(name: str):
         from .worker import _Worker
 
         return _Worker
-    if name == "main":
-        from .plot_generator import main
-
-        return main
     raise AttributeError(name)

@@ -10,14 +10,16 @@ INDIVIDUAL_DETECTABILITY_TOOL_INFO_HTML = """
 Individual Detectability creates participant-level summed-harmonic z-score
 topographies and SNR panels for processed FPVS conditions. Each panel reports
 the number of electrodes meeting the selected z-score and optional
-Benjamini-Hochberg FDR criteria.
+Benjamini-Hochberg FDR criteria. The default workflow uses the project-wide
+significant harmonics saved when processing completed.
 </p>
 
 <h3>Typical Workflow</h3>
 <p>
 Choose the processed Excel root, select conditions and participants, confirm
-output options, then run the analysis. Advanced settings control harmonic
-selection, thresholds, ROI behavior, and correction options.
+output options, then run the analysis. Advanced settings control exploratory
+custom harmonics, thresholds, ROI behavior, and correction options. Custom
+harmonics do not replace the saved project selection.
 </p>
 
 <h3>Interpretation Notes</h3>

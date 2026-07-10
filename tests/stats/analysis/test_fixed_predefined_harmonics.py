@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from Main_App.processing import harmonic_selection_qc
+from Main_App.projects.project import Project
 from Tools.Stats.analysis import dv_policies
 from Tools.Stats.analysis import dv_policy_fixed_predefined as fixed_policy
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
@@ -337,7 +339,12 @@ def test_group_significant_policy_uses_locked_oddball_independent_of_payload(
     )
 
 
-def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_path: Path) -> None:
+def test_group_significant_policy_sums_selected_common_bca_for_every_roi(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
     subjects = ["S1", "S2"]
     conditions = ["C1", "C2"]
     rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
@@ -345,13 +352,19 @@ def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_pat
     for subject_idx, subject in enumerate(subjects, start=1):
         subject_data[subject] = {}
         for condition_idx, condition in enumerate(conditions, start=1):
-            path = tmp_path / f"group_sum_{subject}_{condition}.xlsx"
+            path = _project_workbook_path(project_root, subject, condition)
             _write_group_policy_workbook(
                 path,
                 scale=subject_idx + condition_idx - 1,
             )
             subject_data[subject][condition] = str(path)
 
+    _persist_processing_harmonics(
+        project_root,
+        rois=rois,
+        max_frequency_hz=8.4,
+        monkeypatch=monkeypatch,
+    )
     dv_policies._DV_DATA_CACHE.clear()
     metadata: dict[str, object] = {}
     provenance: dict[tuple[str, str, str], dict[str, object]] = {}
@@ -366,6 +379,7 @@ def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_pat
         dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
         dv_metadata=metadata,
         max_freq=8.4,
+        project_root=str(project_root),
     )
 
     assert result is not None
@@ -401,12 +415,14 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     group_policy.clear_group_significant_selection_cache()
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
     subjects = ["S1"]
     conditions = ["C1", "C2"]
     rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
     subject_data = {"S1": {}}
     for idx, condition in enumerate(conditions, start=1):
-        path = tmp_path / f"instrumented_{condition}.xlsx"
+        path = _project_workbook_path(project_root, "S1", condition)
         _write_group_policy_workbook(path, scale=idx)
         subject_data["S1"][condition] = str(path)
 
@@ -457,6 +473,14 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
         "_plan_workbook_full_fft_usecols_from_header",
         _recording_fullfft_plan,
     )
+    _persist_processing_harmonics(
+        project_root,
+        rois=rois,
+        max_frequency_hz=3.6,
+        monkeypatch=monkeypatch,
+    )
+    group_policy.clear_group_significant_selection_cache()
+    dv_policies._DV_DATA_CACHE.clear()
 
     result = dv_policies.prepare_summed_bca_data(
         subjects=subjects,
@@ -469,6 +493,7 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
         dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
         dv_metadata={},
         max_freq=3.6,
+        project_root=str(project_root),
     )
 
     assert result is not None
@@ -490,33 +515,21 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
     group_policy.clear_group_significant_selection_cache()
 
 
-def test_group_significant_policy_reuses_cached_selection_between_runs(
+def test_processing_harmonic_selection_reuses_cached_selection_between_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     group_policy.clear_group_significant_selection_cache()
-    subjects = ["S1"]
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
     conditions = ["C1", "C2"]
     rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
-    subject_data = {"S1": {}}
     for idx, condition in enumerate(conditions, start=1):
-        path = tmp_path / f"cached_{condition}.xlsx"
+        path = _project_workbook_path(project_root, "S1", condition)
         _write_group_policy_workbook(path, scale=idx)
-        subject_data["S1"][condition] = str(path)
 
-    original_selected_reader = group_policy.read_xlsx_sheet_selected_columns
     original_fullfft_loader = group_policy._load_mean_amplitude_series
-    calls: list[dict[str, object]] = []
     fullfft_load_count = 0
-
-    def _recording_selected_reader(path, *, sheet_name, required_columns, **kwargs):
-        calls.append({"path": str(path), "sheet_name": sheet_name})
-        return original_selected_reader(
-            path,
-            sheet_name=sheet_name,
-            required_columns=required_columns,
-            **kwargs,
-        )
 
     def _recording_fullfft_loader(*args, **kwargs):
         nonlocal fullfft_load_count
@@ -525,41 +538,28 @@ def test_group_significant_policy_reuses_cached_selection_between_runs(
 
     monkeypatch.setattr(
         group_policy,
-        "read_xlsx_sheet_selected_columns",
-        _recording_selected_reader,
-    )
-    monkeypatch.setattr(
-        group_policy,
         "_load_mean_amplitude_series",
         _recording_fullfft_loader,
     )
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
     messages: list[str] = []
 
     try:
         for _run_idx in range(2):
-            result = dv_policies.prepare_summed_bca_data(
-                subjects=subjects,
-                conditions=conditions,
-                subject_data=subject_data,
-                base_freq=6.0,
+            harmonic_selection_qc.run_processing_harmonic_selection_qc(
+                Project.load(project_root),
                 log_func=messages.append,
-                rois=rois,
-                provenance_map={},
-                dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
-                dv_metadata={},
-                max_freq=3.6,
             )
-            assert result is not None
     finally:
         group_policy.clear_group_significant_selection_cache()
 
-    bca_calls = [call for call in calls if call["sheet_name"] == "BCA (uV)"]
     assert fullfft_load_count == len(conditions)
-    assert len(bca_calls) == len(conditions) * 2
     assert any("Group harmonic selection cache hit" in message for message in messages)
 
 
-def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
+def test_group_significant_policy_uses_processing_metadata_without_fullfft(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -572,28 +572,14 @@ def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
     rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
     subject_data = {"S1": {}}
     for idx, condition in enumerate(conditions, start=1):
-        path = project_root / "1 - Excel Data Files" / condition / f"cached_project_{condition}.xlsx"
+        path = project_root / "1 - Excel Data Files" / condition / f"S1_{condition}.xlsx"
         _write_group_policy_workbook(path, scale=idx)
         subject_data["S1"][condition] = str(path)
 
-    first_metadata: dict[str, object] = {}
-    first_result = dv_policies.prepare_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=6.0,
-        log_func=lambda _message: None,
-        rois=rois,
-        provenance_map={},
-        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
-        dv_metadata=first_metadata,
-        max_freq=3.6,
-        project_root=str(project_root),
-    )
-    assert first_result is not None
-    first_group_meta = first_metadata["group_significant_harmonics"]
-    assert first_group_meta["selection_cache_source"] == "computed_this_run_saved_project_metadata"
-
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(Project.load(project_root))
     group_policy.clear_group_significant_selection_cache()
     dv_policies._DV_DATA_CACHE.clear()
 
@@ -606,8 +592,8 @@ def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
         _unexpected_fullfft_loader,
     )
     messages: list[str] = []
-    second_metadata: dict[str, object] = {}
-    second_result = dv_policies.prepare_summed_bca_data(
+    metadata: dict[str, object] = {}
+    result = dv_policies.prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
@@ -616,17 +602,33 @@ def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
         rois=rois,
         provenance_map={},
         dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
-        dv_metadata=second_metadata,
+        dv_metadata=metadata,
         max_freq=3.6,
         project_root=str(project_root),
     )
 
-    assert second_result is not None
-    second_group_meta = second_metadata["group_significant_harmonics"]
-    assert second_group_meta["selection_cache_source"] == "saved_project_metadata"
-    assert second_group_meta["detected_significant_harmonics_hz"] == pytest.approx([1.2, 3.6])
-    assert second_group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 2.4, 3.6])
-    assert any("Project harmonic cache hit" in message for message in messages)
+    assert result is not None
+    group_meta = metadata["group_significant_harmonics"]
+    assert group_meta["selection_cache_source"] == "saved_processing_metadata"
+    assert group_meta["detected_significant_harmonics_hz"] == pytest.approx([1.2, 3.6])
+    assert group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 2.4, 3.6])
+    assert any("Loaded processing-time significant harmonics" in message for message in messages)
+
+
+def test_group_significant_policy_rejects_missing_project_authority() -> None:
+    with pytest.raises(RuntimeError, match="processing-time project metadata"):
+        dv_policies.prepare_summed_bca_data(
+            subjects=["S1"],
+            conditions=["C1"],
+            subject_data={"S1": {"C1": "unused.xlsx"}},
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois={"Posterior": ["O1", "O2"]},
+            provenance_map={},
+            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+            dv_metadata={},
+            max_freq=3.6,
+        )
 
 
 def test_group_significant_policy_rejects_offgrid_fullfft_frequency_grids(
@@ -643,16 +645,14 @@ def test_group_significant_policy_rejects_offgrid_fullfft_frequency_grids(
         subject_data["S1"][condition] = str(path)
 
     with pytest.raises(RuntimeError, match="requires exact nominal oddball harmonic columns"):
-        dv_policies.prepare_summed_bca_data(
+        build_group_significant_harmonic_selection(
             subjects=subjects,
             conditions=conditions,
             subject_data=subject_data,
-            base_freq=6.0,
+            base_frequency_hz=6.0,
             log_func=lambda _message: None,
             rois=rois,
-            provenance_map={},
-            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
-            dv_metadata={},
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
             max_freq=3.6,
         )
     group_policy.clear_group_significant_selection_cache()
@@ -702,16 +702,14 @@ def test_group_significant_policy_fails_fast_when_any_workbook_lacks_exact_harmo
         RuntimeError,
         match="requires exact nominal oddball harmonic columns in every included FullFFT sheet",
     ):
-        dv_policies.prepare_summed_bca_data(
+        build_group_significant_harmonic_selection(
             subjects=subjects,
             conditions=conditions,
             subject_data=subject_data,
-            base_freq=6.0,
+            base_frequency_hz=6.0,
             log_func=lambda _message: None,
             rois=rois,
-            provenance_map={},
-            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
-            dv_metadata={},
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
             max_freq=3.6,
         )
 
@@ -772,10 +770,23 @@ def test_group_significant_stats_worker_preflights_exact_columns_before_qc(
     group_policy.clear_group_significant_selection_cache()
 
 
-def test_group_significant_policy_requires_exact_selected_bca_columns(tmp_path: Path) -> None:
+def test_group_significant_policy_requires_exact_selected_bca_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     group_policy.clear_group_significant_selection_cache()
-    path = tmp_path / "near_bca_columns.xlsx"
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
+    path = _project_workbook_path(project_root, "S1", "C1")
     _write_group_policy_workbook(path, scale=1, frequency_step=0.3, bca_column_offset=0.0001)
+    _persist_processing_harmonics(
+        project_root,
+        rois={"Posterior": ["O1", "O2"]},
+        max_frequency_hz=3.6,
+        monkeypatch=monkeypatch,
+    )
+    group_policy.clear_group_significant_selection_cache()
+    dv_policies._DV_DATA_CACHE.clear()
 
     with pytest.raises(
         RuntimeError,
@@ -792,9 +803,31 @@ def test_group_significant_policy_requires_exact_selected_bca_columns(tmp_path: 
             dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
             dv_metadata={},
             max_freq=3.6,
+            project_root=str(project_root),
         )
 
     group_policy.clear_group_significant_selection_cache()
+
+
+def _project_workbook_path(project_root: Path, subject: str, condition: str) -> Path:
+    return project_root / "1 - Excel Data Files" / condition / f"{subject}_{condition}.xlsx"
+
+
+def _persist_processing_harmonics(
+    project_root: Path,
+    *,
+    rois: dict[str, list[str]],
+    max_frequency_hz: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_bca_upper_limit_hz",
+        lambda: max_frequency_hz,
+    )
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(Project.load(project_root))
 
 
 def _write_stats_project_manifest(project_root: Path, *, high_pass: float = 0.1) -> None:

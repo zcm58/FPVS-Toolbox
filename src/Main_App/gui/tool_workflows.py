@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtWidgets import QMessageBox
@@ -28,20 +24,6 @@ def check_for_updates(host: Any, update_manager_module: Any) -> None:
     update_manager_module.check_for_updates_async(
         host, silent=False, notify_if_no_update=True, force=True
     )
-
-
-def open_plot_generator(host: Any, source_root: Path) -> None:
-    cmd = [sys.executable]
-    if getattr(sys, "frozen", False):
-        cmd.append("--run-plot-generator")
-    else:
-        script = source_root / "src" / "Tools" / "Plot_Generator" / "plot_generator.py"
-        cmd.append(str(script))
-    env = os.environ.copy()
-    proj = getattr(host, "currentProject", None)
-    if proj and hasattr(proj, "project_root"):
-        env["FPVS_PROJECT_ROOT"] = str(proj.project_root)
-    subprocess.Popen(cmd, close_fds=True, env=env)
 
 
 def resolve_epoch_averaging_paths(host: Any) -> tuple[str, str] | None:

@@ -81,13 +81,18 @@ def export_source_workbook(
                 "key": "metrics",
                 "value": "; ".join(metric.value for metric in requested_metrics),
             },
-            {"key": "harmonic_mode", "value": request.harmonic_mode.value},
+            {
+                "key": "harmonic_source",
+                "value": "processing_time_project_selection",
+            },
             {
                 "key": "selected_harmonics_hz",
                 "value": "; ".join(f"{freq:g}" for freq in result.selected_harmonics_hz),
             },
-            {"key": "base_frequency_hz", "value": request.base_frequency_hz},
-            {"key": "max_frequency_hz", "value": request.max_frequency_hz or ""},
+            {
+                "key": "base_frequency_hz",
+                "value": result.selection_metadata.get("base_frequency_hz", ""),
+            },
             *metric_params,
             {"key": "export_paired_figures", "value": request.export_paired_figures},
             {"key": "paired_conditions", "value": "; ".join(request.paired_conditions)},

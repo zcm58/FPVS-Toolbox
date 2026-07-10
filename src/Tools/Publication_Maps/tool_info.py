@@ -9,7 +9,7 @@ SCALP_MAPS_TOOL_INFO_HTML = """
 <p>
 The Scalp Maps tool exports publication-ready topographic figures from
 processed FPVS workbooks. It can render BCA, SNR, and Z-score maps for selected
-conditions using the current analysis settings and ROI context.
+conditions using the significant-harmonic list saved when processing completed.
 </p>
 
 <h3>Typical Workflow</h3>
@@ -17,7 +17,8 @@ conditions using the current analysis settings and ROI context.
 Select the Excel root folder, choose one or more conditions, confirm metric and
 color-scale options, and run the export. When two conditions are selected, the
 paired condition figure option creates side-by-side maps for easier visual
-comparison.
+comparison. If the processing-time harmonic selection is missing or stale,
+reprocess the project or recalculate harmonic selection from Settings.
 </p>
 
 <h3>Output Notes</h3>

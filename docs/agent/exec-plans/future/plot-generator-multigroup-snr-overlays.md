@@ -1,14 +1,14 @@
-# Plot Generator Multi-Group SNR Overlays
+# SNR Plots Multi-Group Overlay Hardening
 
 ## Status
 
 Future plan. Not active implementation work.
 
-This plan was refreshed against the current code on 2026-05-31. The existing
+This plan was refreshed against the current code on 2026-07-10. The existing
 implementation is no longer just a stub: single-condition group overlays are
 present in the GUI, worker payload, data collection, aggregation, rendering,
-and focused tests. Future work should finish and harden that workflow, not
-restart it.
+focused tests, and user documentation. Future work should finish and harden
+that workflow, not restart it.
 
 ## Scope Decision
 
@@ -145,10 +145,10 @@ Current normalization behavior:
 - Oddball markers are drawn for each plotted group. The first group uses circle
   markers and the second uses triangle markers; additional groups use square
   markers with no extra peak legend label.
-- Current filenames remain unchanged:
-  `{condition}_{roi}_{metric}.png` and `{condition}_{roi}_{metric}.pdf`.
+- Current filenames use the visible title (or condition fallback) plus ROI:
+  `{title or condition} - {ROI}.png` and the matching `.pdf`.
 - This means group overlays currently overwrite the same output path shape as
-  a non-group single-condition plot for the same condition/ROI/metric.
+  a non-group single-condition plot for the same title/condition and ROI.
 
 ### Existing Tests
 
@@ -163,6 +163,7 @@ Current focused coverage already pins:
 - grouped Excel files under condition/group folders;
 - group curves matching project participant IDs;
 - PNG/PDF files being written for group overlays;
+- all-ROI group aggregation across more than one ROI;
 - group color assignment following selected-group order;
 - custom legend defaults switching to selected group labels;
 - pytest-qt GUI smoke for single-group defaults, group overlay selection, and
@@ -215,14 +216,20 @@ covered fixture work unless a test demonstrates a gap.
    warning count. If the GUI should summarize warnings at completion, add an
    explicit warning payload field rather than overloading `failed_items`.
 
-5. **All-ROI grouped rendering needs explicit non-GUI coverage.**
-   The code path should work because `_selected_roi_names()` expands
-   `ALL_ROIS_OPTION`, but current non-GUI group-overlay tests focus on one ROI.
+5. **All-ROI grouped file export needs explicit non-GUI coverage.**
+   Multi-ROI group aggregation is covered, but no focused test proves that the
+   grouped render path writes one PNG/PDF pair per ROI.
 
-6. **Manual visible workflow is not documented in user-facing docs.**
-   If the feature is promoted as user-facing, update the SNR Plot Generator
-   docs with: canonical project requirement, group selection behavior,
-   first/second group color mapping, and unassigned-subject warning behavior.
+## Gaps Resolved Since The Previous Refresh
+
+- `docs/user/tools/snr-plot-generator.md` now documents the canonical project
+  Excel-root requirement, one-condition group overlay, project-manifest group
+  assignments, first/second color and legend mapping, and unassigned-workbook
+  warning behavior.
+- Non-GUI coverage now proves all-ROI group aggregation across two ROIs.
+- The current Windows-safe `{title or condition} - {ROI}` filename contract is
+  documented accurately; the unresolved decision is whether group overlays
+  need a distinguishing suffix.
 
 ## Execution Slices
 
@@ -292,7 +299,7 @@ Goal: prove grouped overlays work beyond the one-ROI happy path.
 
 Goal: make the feature executable by users and future agents.
 
-1. Update user-facing SNR Plot Generator docs if the visible workflow or
+1. Update user-facing SNR Plots docs if the visible workflow or
    filename behavior changes.
 2. Update `src/Tools/Plot_Generator/AGENTS.md` if ownership, policy, or
    verification commands change.

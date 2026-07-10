@@ -21,7 +21,7 @@ from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CUSTOM_HARMONIC_SOURCE,
     SharedHarmonicSelection,
-    select_canonical_group_harmonics,
+    load_project_processing_harmonics,
 )
 
 __all__ = [
@@ -35,7 +35,7 @@ __all__ = [
     "SharedHarmonicSelection",
     "normalize_dv_policy",
     "prepare_summed_bca_data",
-    "select_canonical_group_harmonics",
+    "load_project_processing_harmonics",
 ]
 
 _DV_DATA_CACHE: dict[tuple, tuple[Dict[str, Dict[str, Dict[str, float]]], dict]] = {}

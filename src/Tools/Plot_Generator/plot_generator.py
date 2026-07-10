@@ -1,17 +1,7 @@
 """PySide6 GUI for generating SNR line plots from Excel files."""
 from __future__ import annotations
 
-# Allow running this module directly by ensuring the package root is on sys.path
-if __package__ is None:  # pragma: no cover - executed when run as script
-    import sys
-    from pathlib import Path
-
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-
 from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QApplication
-
-from Main_App.gui.theme import apply_fpvs_theme
 
 from Tools.Plot_Generator import gui as _gui
 from Tools.Plot_Generator import generation_workflow as _generation_workflow
@@ -70,19 +60,6 @@ __all__ = [
     "QThread",
     "_Worker",
     "PlotGeneratorWindow",
-    "main",
     "matplotlib",
     "plt",
 ]
-
-
-def main() -> None:
-    app = QApplication([])
-    apply_fpvs_theme(app)
-    win = PlotGeneratorWindow()
-    win.show()
-    app.exec()
-
-
-if __name__ == "__main__":
-    main()
