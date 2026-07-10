@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-addopts = "-vv -p no:cacheprovider"
+addopts = "-p no:cacheprovider"
 testpaths = [
     "tests",
 ]

@@ -1,6 +1,6 @@
 ---
 name: web-design-guidelines
-description: Review UI code for Web Interface Guidelines compliance. Use when asked to "review my UI", "check accessibility", "audit design", "review UX", or "check my site against best practices".
+description: Review websites and browser UI against Web Interface Guidelines. Use only for explicitly web-scoped UI, accessibility, UX, or site reviews; do not auto-trigger for FPVS Toolbox PySide6 desktop GUI work.
 metadata:
   author: vercel
   version: "1.0.0"

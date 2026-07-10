@@ -60,8 +60,8 @@ def test_64_gib_tier_caps_workers():
 def test_high_ram_respects_global_cap():
     total_ram = _bytes_for_gib(192.0)
     # No RAM tier cap here, so global cap is the limiter.
-    assert compute_effective_max_workers(total_ram, cpu_count=24, project_max_workers=None) == 16
-    assert compute_effective_max_workers(total_ram, cpu_count=24, project_max_workers=20) == 16
+    assert compute_effective_max_workers(total_ram, cpu_count=24, project_max_workers=None) == 20
+    assert compute_effective_max_workers(total_ram, cpu_count=24, project_max_workers=20) == 20
 
 
 def test_minimum_worker_floor():

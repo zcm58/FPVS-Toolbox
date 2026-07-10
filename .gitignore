@@ -102,7 +102,8 @@ src/quarantine/**
 .fpvs_cache/
 
 # Agent harness manifests intentionally tracked despite the general *.txt rule.
-!docs/architecture/protected-paths.txt
+!docs/agent/architecture/protected-paths.txt
+!tests/qt_test_files.txt
 
 # Release packaging definitions live under scripts/packaging.
 !scripts/packaging/*.spec

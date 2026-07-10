@@ -1,0 +1,107 @@
+version = 1
+qt_registry = "tests/qt_test_files.txt"
+
+[scopes.repo]
+audits = ["agent-harness", "garbage-collection"]
+tests = [
+  "tests/audit/test_agent_audit_change_detection.py",
+  "tests/audit/test_agent_audit_stats_reporting_legibility.py",
+  "tests/audit/test_figure_style_contract.py",
+]
+include = [".agents/**", ".github/**", "docs/agent/**", "AGENTS.md", "ARCHITECTURE.md", "pyproject.toml", "tests/conftest.py"]
+manual_smoke = []
+
+[scopes.gui]
+audits = ["gui"]
+tests = []
+include = ["src/Main_App/gui/**", "src/Tools/**/gui*.py", "tests/gui/**"]
+manual_smoke = ["Launch the Main App normally and exercise the changed embedded surface in a visible window."]
+
+[scopes.updates]
+audits = ["gui", "paths"]
+tests = ["tests/updates/test_update_check.py", "tests/updates/test_update_download.py"]
+include = ["src/Main_App/updates/**", "src/Main_App/gui/update_*.py", "tests/updates/**", "scripts/packaging/**"]
+manual_smoke = ["Use File > Check for Updates in a visible Main App window when GUI or installer handoff behavior changed."]
+
+[scopes.project-io]
+audits = ["paths"]
+tests = [
+  "tests/project_io/test_project_enumeration_io.py",
+  "tests/project_io/test_project_results_layout.py",
+  "tests/project_io/test_project_scan_job.py",
+  "tests/project_io/test_project_v2_group_schema.py",
+]
+include = ["src/Main_App/projects/**", "src/Main_App/io/**", "tests/project_io/**"]
+manual_smoke = []
+
+[scopes.processing]
+audits = ["protected", "source-localization"]
+tests = [
+  "tests/processing/test_filter_downsample_order.py",
+  "tests/processing/test_pipeline_speed_safety.py",
+  "tests/processing/test_process_runner_epoch_contract.py",
+  "tests/processing/test_raw_channel_qc.py",
+  "tests/processing/test_removed_electrode_detection.py",
+]
+include = ["src/Main_App/processing/**", "src/Main_App/Performance/**", "src/Main_App/workers/**", "tests/processing/**"]
+manual_smoke = []
+
+[scopes.plot-generator]
+audits = ["gui", "paths"]
+tests = [
+  "tests/plot_generator/test_plot_generator_excel_inputs.py",
+  "tests/plot_generator/test_plot_generator_fft_snr.py",
+  "tests/plot_generator/test_plot_generator_full_snr_roi.py",
+  "tests/plot_generator/test_plot_generator_group_overlay_worker.py",
+  "tests/plot_generator/test_plot_generator_worker_config.py",
+]
+include = ["src/Tools/Plot_Generator/**", "tests/plot_generator/**"]
+manual_smoke = ["Open SNR Plots from the Main App and generate the changed plot type in a visible session."]
+
+[scopes.publication-maps]
+audits = ["gui", "paths"]
+tests = ["tests/publication_maps/test_bca_publication_maps.py", "tests/publication_maps/test_xlsx_metric_reader.py"]
+include = ["src/Tools/Publication_Maps/**", "tests/publication_maps/**"]
+manual_smoke = ["Open Scalp Maps from the Main App and generate the changed map type in a visible session."]
+
+[scopes.ratio-calculator]
+audits = ["gui", "paths"]
+tests = ["tests/ratio_calculator/test_ratio_calculator_plots.py", "tests/ratio_calculator/test_ratio_calculator_file_filters.py"]
+include = ["src/Tools/Ratio_Calculator/**", "tests/ratio_calculator/**"]
+manual_smoke = ["Open Ratio Calculator from the Main App and exercise the changed control or export in a visible session."]
+
+[scopes.sequence-figure]
+audits = ["gui", "paths"]
+tests = ["tests/sequence_figure/test_sequence_figure_renderer.py"]
+include = ["src/Tools/Sequence_Figure/**", "tests/sequence_figure/**"]
+manual_smoke = ["Open Sequence Figure from the Main App and verify the changed control or export in a visible session."]
+
+[scopes.stats]
+audits = ["stats-structure", "stats-reporting-legibility"]
+tests = [
+  "tests/stats/analysis/test_fixed_predefined_harmonics.py",
+  "tests/stats/analysis/test_full_snr_reference_equivalence.py",
+  "tests/stats/analysis/test_summary_utils_mixed_model.py",
+  "tests/stats/analysis/test_summary_utils_posthoc_directions.py",
+  "tests/stats/io/test_stats_ready_export.py",
+]
+include = ["src/Tools/Stats/**", "tests/stats/**"]
+manual_smoke = ["Open Statistical Analysis from the Main App and exercise changed GUI/pipeline controls in a visible session when applicable."]
+
+[scopes.loreta]
+audits = ["source-localization", "source-localization-refs", "gui", "paths"]
+tests = ["tests/loreta"]
+include = ["src/Tools/LORETA_Visualizer/**", "tests/loreta/**"]
+manual_smoke = ["Open LORETA Visualizer visibly and verify the changed display, worker, or export path without offscreen Qt."]
+
+[scopes.figures]
+audits = ["paths"]
+tests = ["tests/audit/test_figure_style_contract.py"]
+include = ["src/Main_App/exports/**", "src/Tools/**/render*.py", "src/Tools/**/plots.py", ".agents/skills/publication-table-export/**"]
+manual_smoke = []
+
+[scopes.legacy-boundary]
+audits = ["protected", "source-localization", "source-localization-refs"]
+tests = ["tests/audit/test_fpvs_app_quarantine.py", "tests/audit/test_phase0_compat_symbols.py"]
+include = ["src/Main_App/**", "src/Tools/**", "tests/audit/**"]
+manual_smoke = []

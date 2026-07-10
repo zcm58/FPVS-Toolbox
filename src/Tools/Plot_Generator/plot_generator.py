@@ -36,7 +36,7 @@ plt = _LazyWorkerAttr("plt")
 
 
 class PlotGeneratorWindow(_gui.PlotGeneratorWindow):
-    """Script entry-point wrapper that preserves patchable module hooks."""
+    """Embedded compatibility facade that preserves patchable module hooks."""
 
     def _start_next_condition(self) -> None:
         old_worker = getattr(_gui, "_Worker", None)

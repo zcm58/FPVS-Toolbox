@@ -74,9 +74,10 @@ own:
 
 Tool implementation lives inside `src/Tools/LORETA_Visualizer/`.
 
-Allowed outside this directory are narrow shell integrations already described
-in the active execution plan: Main App sidebar/page/icon wiring, project-page
-cleanup, focused tests, and documentation.
+Allowed outside this directory are the narrow shell integrations described by
+this contract: Main App sidebar/page/icon wiring, project-page cleanup, focused
+tests, and documentation. Update any matching active execution plan when one
+exists.
 
 ## Data Flow
 
@@ -489,18 +490,12 @@ adds cross-field checks that the schema intentionally does not own.
 
 ## Verification
 
-Prefer `.venv1` when available; in local checkouts without it, use the fallback
-`.venv\Scripts\python.exe` and report the substitution.
-
-Focused checks for this tool:
+Use the focused tool gate; it selects `.venv1` or `.venv`, applies the Qt guard,
+and runs the tool tests, static checks, and legacy/source-localization audits:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m compileall -q src\Tools\LORETA_Visualizer
-.\.venv1\Scripts\python.exe -m ruff check src\Tools\LORETA_Visualizer tests\loreta
-.\.venv1\Scripts\python.exe -m pytest tests\loreta -q
-.\.venv1\Scripts\python.exe .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check source-localization-refs
+python .agents/scripts/verify.py --scope loreta --tier focused
 ```
 
-Do not run offscreen Qt workflows in this repo. For viewport behavior, document
-a visible/manual smoke path instead.
+Qt execution is CI-only by default. For viewport behavior, document a
+visible/manual smoke path instead.

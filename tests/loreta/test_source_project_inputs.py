@@ -23,7 +23,7 @@ def test_project_input_assembler_builds_bca_condition_topographies(tmp_path) -> 
     assert result.metric == SOURCE_TOPOGRAPHY_METRIC_BCA
     assert result.selected_harmonics_hz == (2.4, 4.8)
     assert [condition.label for condition in result.conditions] == ["Condition A", "Condition B"]
-    assert result.excluded_subjects == ()
+    assert result.excluded_subjects == ("P2",)
     assert result.flagged_subjects == ("P2",)
     assert result.diagnostics == ()
 

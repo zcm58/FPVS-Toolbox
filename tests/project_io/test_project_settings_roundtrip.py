@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -9,8 +8,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 @pytest.fixture(scope="session")
 def app():
-    sys.argv += ["-platform", "offscreen"]
-    return QApplication.instance() or QApplication(sys.argv)
+    return QApplication.instance() or QApplication(["pytest"])
 
 
 def test_project_settings_roundtrip(tmp_path, qtbot, monkeypatch, app):

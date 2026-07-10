@@ -139,16 +139,12 @@ level to `DEBUG`. When debug mode is active, the MNE logger is increased to
 
 ## Validation
 
-Use the narrowest relevant check first. See `docs/agent/quality/test-selection.md`
-for pytest marker guidance and focused test commands.
+Use the narrowest relevant scope first. See
+`docs/agent/quality/test-selection.md` for the scope map.
 
 Common gates:
 
-Use `.venv` in place of `.venv1` in the activation path when `.venv1` is absent.
-
 ```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/scripts/audit/agent_audit.py
-python -m pytest -q
-ruff check .
+python .agents/scripts/verify.py --scope <scope> --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
 ```

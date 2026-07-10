@@ -1,6 +1,6 @@
 ---
 name: emil-design-eng
-description: This skill encodes Emil Kowalski's philosophy on UI polish, component design, animation decisions, and the invisible details that make software feel great.
+description: Web/frontend-only UI polish and animation guidance based on Emil Kowalski's design-engineering philosophy. Do not auto-trigger for FPVS Toolbox PySide6 desktop GUI work.
 ---
 
 # Design Engineering

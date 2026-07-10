@@ -19,6 +19,19 @@ class _RecordingWorker(PostProcessingPipelineWorker):
         super().__init__(project)
         self.calls: list[str] = []
 
+    def _run_frequency_domain_qc_review(self) -> dict[str, object]:
+        self.calls.append("qc")
+        self._emit_progress("qc done")
+        return {"review_required": False, "review_reused": False}
+
+    def _sync_frequency_domain_qc_automatic_state(
+        self,
+        project_root: Path,
+        qc_report: dict[str, object],
+    ) -> None:
+        assert qc_report["review_required"] is False
+        self.calls.append(f"sync:{project_root.name}")
+
     def _run_harmonic_selection(self) -> PostProcessingStepResult:
         self.calls.append("harmonics")
         self._emit_progress("harmonics done")
@@ -55,11 +68,18 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
 
     worker.run()
 
-    assert worker.calls == ["harmonics", f"stats:{tmp_path.name}", f"source:{tmp_path.name}"]
-    assert progress == ["harmonics done", "stats ready done", "source maps done"]
+    assert worker.calls == [
+        "qc",
+        f"sync:{tmp_path.name}",
+        "harmonics",
+        f"stats:{tmp_path.name}",
+        f"source:{tmp_path.name}",
+    ]
+    assert progress == ["qc done", "harmonics done", "stats ready done", "source maps done"]
     assert [message for message, _level in logs] == progress
     assert finished and finished[0]["ok"] is True
     assert [step["name"] for step in finished[0]["steps"]] == [
+        "frequency_domain_qc",
         "harmonic_selection",
         "stats_ready_summed_bca",
         "l2_mne_surface",
@@ -74,9 +94,15 @@ def test_post_processing_pipeline_skips_source_maps_when_stats_ready_fails(tmp_p
 
     worker.run()
 
-    assert worker.calls == ["harmonics", f"stats:{tmp_path.name}"]
+    assert worker.calls == [
+        "qc",
+        f"sync:{tmp_path.name}",
+        "harmonics",
+        f"stats:{tmp_path.name}",
+    ]
     assert finished and finished[0]["ok"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
+        "frequency_domain_qc",
         "harmonic_selection",
         "stats_ready_summed_bca",
         "loreta_source_maps",

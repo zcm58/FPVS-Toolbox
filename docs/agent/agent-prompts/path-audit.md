@@ -7,9 +7,7 @@ Goal: review or change project-root file I/O without changing data formats.
 Checks:
 
 ```powershell
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-python .agents/scripts/audit/agent_audit.py --check paths
-python -m pytest <nearest project/path tests> -q
+python .agents/scripts/verify.py --scope project-io --tier focused
 ```
 
 Requirements:

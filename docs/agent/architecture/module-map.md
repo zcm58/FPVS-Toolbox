@@ -14,7 +14,10 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ## Main App
 
 - `src/Main_App/gui/`: canonical GUI package for the main-window shell, settings panel, event map, menu/sidebar/header/icon helpers, style tokens, theme, reusable widgets, operation guard, and update manager. `ui_main.py` owns landing/main page assembly; `event_map.py` owns event-map row construction, binding, Enter-key handling, and entry adapters; `icons.py`, `header_bar.py`, `file_menu.py`, and `menu_bar.py` own shell/menu presentation helpers; `sidebar.py` owns sidebar construction and sidebar button presentation; `widgets/` owns reusable PySide6 presentation primitives, `theme.py` owns the shared FPVS palette/stylesheet helpers, `op_guard.py` owns the non-blocking GUI operation guard, `project_workflows.py` owns project open/create/load/save GUI orchestration, `processing_inputs.py` owns processing input validation, file/mode UI state, and parameter assembly, `processing_workflows.py` owns processing run start/stop/queue/finalization GUI orchestration, `post_export_workflows.py` owns GUI-side post-processing worker launch/error routing and export completion handling, `tool_workflows.py` owns settings/update/tool/help/about action orchestration, and `shell_status.py` owns launch reveal, GUI log routing, and embedded processing activity-page helpers; `main_window.py` is appropriately downsized and should not be targeted for further refactor unless the user explicitly scopes that work.
-- `src/Main_App/exports/`: canonical export adapter import surface. `post_export_adapter.py` bridges process/worker payloads into shared post-processing exports.
+- `src/Main_App/exports/`: canonical export adapter import surface.
+  `post_export_adapter.py` bridges process/worker payloads into shared
+  post-processing exports; `figure_style.py` and `table_style.py` own
+  GUI-neutral publication styling.
 - `src/Main_App/Shared/paths.py`: resource path helper for source and frozen bundles.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical package for active EEG preprocessing and processing entry-point ownership. `preprocess.py` owns the active preprocessing implementation, `processing.py` owns the stable no-op `process_data` coordinator, and `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route.
@@ -39,11 +42,12 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines,
   reporting, I/O, and shared helpers grouped by function. Removed
   `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.
-- `src/Tools/Plot_Generator/`: SNR/FFT/BCA plot generation. `gui.py` is the
-  public window facade; `generation_workflow.py` owns QThread launch/cancel and
-  completion handling; `worker.py` keeps `_Worker` as the QObject shell while
-  focused helper modules own config, Excel input parsing, data collection,
-  ROI/group aggregation, scalp rendering, and line/overlay rendering.
+- `src/Tools/Plot_Generator/`: embedded SNR plot generation. The Main App
+  imports the compatibility facade in `plot_generator.py`; `gui.py` owns the
+  page implementation, `generation_workflow.py` owns QThread launch/cancel and
+  completion handling, and `worker.py` keeps `_Worker` as the QObject shell.
+  Focused helpers own config, Excel input parsing, data collection, ROI/group
+  aggregation, and line/overlay rendering. This tool does not own scalp maps.
 - `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
   `gui.py` is the public window facade; `gui_condition_selection.py`,
   `gui_sections.py`, `gui_rois.py`, `gui_participants.py`,
@@ -80,4 +84,6 @@ Current `Legacy_App` runtime couplings:
 ## Dead Or Quarantined
 
 - Source Localization/eLORETA: removed from active runtime; `src/Tools/SourceLocalization/**` must remain empty of source files unless restoration is explicitly scoped. The separate `src/Tools/LORETA_Visualizer/**` tool is allowed only as the new visualization branch described in its local `AGENTS.md` and `ARCHITECTURE.md`.
-- `src/quarantine/**`: ignored quarantine tree retained outside active runtime.
+- `src/quarantine/**`, when present: ignored historical quarantine outside
+  active runtime. Its absence is valid and agents must not create it merely to
+  satisfy documentation.

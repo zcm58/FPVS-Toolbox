@@ -1,13 +1,13 @@
 ---
 name: publication-table-export
-description: Create FPVS Toolbox publication-ready table assets from small tabular data. Use when a user asks to generate manuscript, poster, supplement, Great Tables-style, table-only, PNG, or SVG tables that should follow toolbox typography/colors and be saved under a project root in `9 - Tables`.
+description: Create FPVS Toolbox publication-ready table assets from small tabular data. Use when a user asks to generate manuscript, poster, supplement, Great Tables-style, table-only, PNG, or SVG tables that should follow the GUI-neutral publication-table style and be saved under a project root in `9 - Tables`.
 ---
 
 # Publication Table Export
 
 ## Purpose
 
-Create table-only publication assets that match FPVS Toolbox figure styling and save them under a project root in `9 - Tables`.
+Create table-only publication assets that match the FPVS Toolbox publication-table style and save them under a project root in `9 - Tables`.
 
 Use the bundled script for final assets:
 
@@ -52,10 +52,13 @@ Command examples use the preferred `.venv1` interpreter. Substitute
 
 ## Styling Contract
 
-- Use `Main_App.gui.typography` and `Main_App.gui.style_tokens`.
-- Body cells use `figure_tick`; column headers use `figure_axis_label`.
-- Header row uses `SURFACE_ALT_BG`; body rows use white with subtle alternating `SURFACE_ALT_BG` stripes.
-- Borders use `BORDER_COLOR` and `BORDER_SOFT_COLOR`; text uses `TEXT_PRIMARY`.
+- Use the GUI-neutral `Main_App.exports.table_style` contract. Publication
+  table assets must not import `Main_App.gui.typography` or
+  `Main_App.gui.style_tokens`.
+- Body and header roles preserve the established table typography through
+  `table_font_size_px(...)` and `table_font_weight(...)`.
+- Header and alternating rows use the shared table surface colors; borders and
+  text use the shared table border/text colors.
 - Use 600 DPI PNG unless the user requests another value.
 - Use 6.5 inches for broad tables. Use a narrower explicit width for compact tables.
 

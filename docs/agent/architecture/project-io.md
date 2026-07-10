@@ -103,12 +103,13 @@ Rules:
   stale reruns delete only the planned participant's expected Excel outputs.
 - User-facing warnings/errors must use PySide6-safe message helpers, not Tk dialogs. Worker/background callers should log rather than block on a GUI popup.
 
-Useful checks:
+Focused local verification:
 
 ```powershell
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-python .agents/scripts/audit/agent_audit.py --check paths
-python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q
+python .agents/scripts/verify.py --scope project-io --tier focused
 ```
 
-Run the skill-local script before manually searching for hard-coded paths across the repo.
+The driver includes the project-path audit and safe project I/O contracts. File
+dialog pytest-qt coverage is CI-only by default; document a visible/manual smoke
+path when dialog behavior changes. Run the skill-local audit directly only as
+an initial diagnostic before manually searching for hard-coded paths.

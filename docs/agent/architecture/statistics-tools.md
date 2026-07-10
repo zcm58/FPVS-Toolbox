@@ -43,11 +43,10 @@ Publication-ready table figures:
   explanation in the PNG/SVG unless the user explicitly asks for those elements
   in the graphic. Put that text in the manuscript, Markdown/DOCX report, source
   workbook, audit JSON, or adjacent HTML preview instead.
-- Match toolbox figure styling: use `Main_App.gui.typography` roles and
-  `Main_App.gui.style_tokens` colors instead of one-off fonts, weights,
-  borders, or palettes. Table body text should align with `figure_tick`, column
-  headers with `figure_axis_label`, and any preview-only title/note text with
-  `figure_title`/`figure_note`.
+- Match toolbox publication-table styling through the GUI-neutral
+  `Main_App.exports.table_style` owner instead of importing GUI typography or
+  GUI style tokens. Keep body/header roles, borders, surfaces, and text colors
+  centralized there rather than adding exporter-local values.
 - Export both vector SVG and high-resolution PNG for final publication tables.
   PNG exports should be 600 DPI unless the user requests a different target.
   SVGs should keep text as text, not rasterized screenshots, when the exporter
@@ -167,13 +166,12 @@ Rules:
 - Run `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` after Stats reporting changes; it flags oversized reporting modules and large function/class spans.
 - Use focused tests around changed data transformations and exports.
 
-Useful tests:
+Focused local verification:
 
 ```powershell
-python -m pytest tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/gui/test_stats_layout_smoke.py -q
-python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py tests/stats/data/test_stats_project_context.py -q
-python -m pytest tests/stats/io/test_stats_ready_export.py -q
-python -m pytest tests/publication_maps/test_bca_publication_maps.py -q
-python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q
-python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py tests/plot_generator/test_plot_generator_gui.py -q
+python .agents/scripts/verify.py --scope stats --tier focused
 ```
+
+Run the affected tool scope as well when Stats changes cross into Publication
+Maps, Ratio Calculator, or Plot Generator. Stats window/layout pytest-qt tests
+are CI-only by default.

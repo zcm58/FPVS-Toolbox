@@ -30,6 +30,8 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 For renderer changes, start with:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\Sequence_Figure\renderer.py src\Tools\Sequence_Figure\worker.py src\Tools\Sequence_Figure\gui.py
-.\.venv1\Scripts\python.exe -m pytest tests\sequence_figure -q
+python .agents/scripts/verify.py --scope sequence-figure --tier focused
 ```
+
+Qt execution is CI-only by default; document a visible/manual embedded-page
+smoke path for GUI wiring changes.

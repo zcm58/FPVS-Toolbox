@@ -138,24 +138,14 @@ When tuning:
 
 ## Verification Commands
 
-Activate the repo environment first. Examples use the preferred `.venv1` path;
-substitute `.venv` in the same path when `.venv1` is absent.
+Use the processing scope; the driver selects `.venv1` or `.venv`:
 
 ```powershell
-.\.venv1\Scripts\Activate.ps1
-python -m pytest tests\processing\test_removed_electrode_detection.py tests\processing\test_raw_channel_qc.py -q
-python -m pytest tests\processing\test_preprocessing_settings.py tests\processing\test_preproc_persistence.py -q
-python -m pytest tests\processing\test_process_runner_epoch_contract.py -q
-python -m py_compile src\Main_App\processing\removed_electrode_detection.py src\Main_App\processing\raw_channel_qc.py src\Main_App\gui\settings_panel.py
-ruff check src\Main_App\processing\removed_electrode_detection.py src\Main_App\processing\raw_channel_qc.py src\Main_App\gui\settings_panel.py tests\processing\test_removed_electrode_detection.py tests\processing\test_raw_channel_qc.py
-python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py
-python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
-python .agents\scripts\audit\agent_audit.py
+python .agents/scripts/verify.py --scope processing --tier focused
 ```
 
-Do not run offscreen Qt or pytest-qt workflows locally. For the Advanced
-Settings info dialog and Manual list modal, use the visible GUI smoke path
-documented in
+Qt execution is CI-only by default. For the Advanced Settings info dialog and
+Manual list modal, use the visible GUI smoke path documented in
 `docs/agent/quality/test-selection.md`.
 
 ## Cache And Fingerprint Updates

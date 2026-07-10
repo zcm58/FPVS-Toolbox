@@ -143,7 +143,6 @@ def test_component_consumer_import_style_remains_available() -> None:
 def test_component_import_does_not_create_qapplication() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
-    env.setdefault("QT_QPA_PLATFORM", "offscreen")
     existing_pythonpath = env.get("PYTHONPATH")
     src_path = str(repo_root / "src")
     env["PYTHONPATH"] = (

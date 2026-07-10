@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import ast
 import fnmatch
+import os
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -18,6 +20,8 @@ ARCHITECTURE_MAP = REPO_ROOT / "ARCHITECTURE.md"
 EXEC_PLANS_README = REPO_ROOT / "docs" / "agent" / "exec-plans" / "README.md"
 TECH_DEBT_TRACKER = REPO_ROOT / "docs" / "agent" / "exec-plans" / "tech-debt-tracker.md"
 COMPLETED_PLANS_DIR = REPO_ROOT / "docs" / "agent" / "exec-plans" / "completed"
+VERIFICATION_DRIVER = REPO_ROOT / ".agents" / "scripts" / "verify.py"
+VERIFICATION_CONFIG = REPO_ROOT / ".agents" / "verification.toml"
 SKILL_SCRIPT_PATHS = (
     ".agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py",
     ".agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py",
@@ -141,6 +145,9 @@ PRINT_BASELINES = {
     ),
 }
 
+AUDIT_BASE_REF_ENV = "FPVS_AGENT_AUDIT_BASE_REF"
+_base_ref_override: str | None = None
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -178,20 +185,58 @@ def _repo_path(path: Path) -> str:
     return _normalize(path.relative_to(REPO_ROOT))
 
 
-def _tracked_files() -> list[str]:
-    return _git_lines("ls-files")
+@lru_cache(maxsize=1)
+def _tracked_files() -> tuple[str, ...]:
+    return tuple(_git_lines("ls-files"))
 
 
-def _untracked_files() -> list[str]:
-    return _git_lines("ls-files", "--others", "--exclude-standard")
+@lru_cache(maxsize=1)
+def _untracked_files() -> tuple[str, ...]:
+    return tuple(_git_lines("ls-files", "--others", "--exclude-standard"))
 
 
-def _tracked_and_untracked_files() -> list[str]:
-    return sorted(set(_tracked_files()) | set(_untracked_files()))
+@lru_cache(maxsize=1)
+def _tracked_and_untracked_files() -> tuple[str, ...]:
+    return tuple(sorted(set(_tracked_files()) | set(_untracked_files())))
 
 
-def _changed_files() -> list[str]:
-    return sorted(set(_git_lines("diff", "--name-only", "HEAD", "--")) | set(_untracked_files()))
+def _comparison_ref() -> str:
+    candidate = _base_ref_override
+    if candidate is None:
+        candidate = os.environ.get(AUDIT_BASE_REF_ENV, "")
+    candidate = candidate.strip()
+    # GitHub reports an all-zero `before` SHA for events without a prior
+    # revision (for example, a branch's first push). Treat that like an
+    # unspecified base rather than passing an invalid object name to git.
+    if candidate and set(candidate) != {"0"}:
+        return candidate
+    return "HEAD"
+
+
+def _clear_git_caches() -> None:
+    for inventory_function in (
+        _tracked_files,
+        _untracked_files,
+        _tracked_and_untracked_files,
+        _changed_files,
+        _added_lines,
+        _file_text_at_comparison_ref,
+    ):
+        clear_cache = getattr(inventory_function, "cache_clear", None)
+        if clear_cache is not None:
+            clear_cache()
+
+
+def _set_base_ref(base_ref: str | None) -> None:
+    global _base_ref_override
+    _base_ref_override = base_ref
+    _clear_git_caches()
+
+
+@lru_cache(maxsize=1)
+def _changed_files() -> tuple[str, ...]:
+    changed = _git_lines("diff", "--name-only", _comparison_ref(), "--")
+    return tuple(sorted(set(changed) | set(_untracked_files())))
 
 
 def _read_text(path: str) -> list[str]:
@@ -238,13 +283,14 @@ def _is_production_code(path: str) -> bool:
     return path.startswith("src/") and _is_python(path) and not path.startswith(PRODUCTION_EXCLUDES)
 
 
+@lru_cache(maxsize=None)
 def _added_lines(path: str) -> list[tuple[int, str]]:
     absolute = REPO_ROOT / path
     if path in _untracked_files():
         return list(enumerate(_read_text(path), start=1)) if absolute.exists() else []
 
     result = subprocess.run(
-        ["git", "diff", "--unified=0", "HEAD", "--", path],
+        ["git", "diff", "--unified=0", _comparison_ref(), "--", path],
         cwd=REPO_ROOT,
         text=True,
         encoding="utf-8",
@@ -277,10 +323,11 @@ def _added_lines(path: str) -> list[tuple[int, str]]:
     return added
 
 
-def _file_text_at_head(path: str) -> str:
+@lru_cache(maxsize=None)
+def _file_text_at_comparison_ref(path: str) -> str:
     try:
         result = subprocess.run(
-            ["git", "show", f"HEAD:{path}"],
+            ["git", "show", f"{_comparison_ref()}:{path}"],
             cwd=REPO_ROOT,
             text=True,
             capture_output=True,
@@ -311,7 +358,7 @@ def _broad_exception_increase_allowed(path: str) -> bool:
     current_count = _broad_exception_count(
         current_path.read_text(encoding="utf-8", errors="replace")
     )
-    baseline_count = _broad_exception_count(_file_text_at_head(baseline_path))
+    baseline_count = _broad_exception_count(_file_text_at_comparison_ref(baseline_path))
     return baseline_count > 0 and current_count <= baseline_count
 
 
@@ -325,7 +372,7 @@ def _print_increase_allowed(path: str) -> bool:
     current_count = _print_count(
         current_path.read_text(encoding="utf-8", errors="replace")
     )
-    baseline_count = _print_count(_file_text_at_head(baseline_path))
+    baseline_count = _print_count(_file_text_at_comparison_ref(baseline_path))
     return baseline_count > 0 and current_count <= baseline_count
 
 
@@ -424,6 +471,8 @@ def check_agent_harness() -> list[Issue]:
     for plan_path, message in (
         (EXEC_PLANS_README, "missing execution-plan directory README"),
         (TECH_DEBT_TRACKER, "missing technical debt tracker"),
+        (VERIFICATION_DRIVER, "missing executable verification driver"),
+        (VERIFICATION_CONFIG, "missing machine-readable verification routing map"),
     ):
         if not plan_path.exists():
             issues.append(
@@ -432,6 +481,37 @@ def check_agent_harness() -> list[Issue]:
                     _repo_path(plan_path),
                     None,
                     message,
+                )
+            )
+    if VERIFICATION_DRIVER.is_file() and VERIFICATION_CONFIG.is_file():
+        try:
+            validation = subprocess.run(
+                [sys.executable, str(VERIFICATION_DRIVER), "--check-config"],
+                cwd=REPO_ROOT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except OSError as exc:
+            validation_error = str(exc)
+        else:
+            validation_error = ""
+            if validation.returncode != 0:
+                validation_error = (
+                    validation.stderr.strip()
+                    or validation.stdout.strip()
+                    or f"verification driver exited with status {validation.returncode}"
+                )
+        if validation_error:
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    _repo_path(VERIFICATION_CONFIG),
+                    None,
+                    f"verification routing validation failed: {validation_error}",
                 )
             )
     if COMPLETED_PLANS_DIR.exists():
@@ -812,11 +892,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="all",
         help="Run one check group instead of the full audit.",
     )
+    parser.add_argument(
+        "--base-ref",
+        default=None,
+        help=(
+            "Compare change-sensitive checks against this Git revision. "
+            f"Defaults to ${AUDIT_BASE_REF_ENV}, then HEAD for local worktree checks."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    _set_base_ref(args.base_ref)
     selected = CHECKS if args.check == "all" else {args.check: CHECKS[args.check]}
 
     issues: list[Issue] = []

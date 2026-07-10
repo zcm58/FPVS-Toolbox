@@ -23,7 +23,7 @@ def _build_window(tmp_path, qtbot, monkeypatch):
         lambda self: setattr(self, "projectsRoot", tmp_path),
     )
 
-    QApplication.instance() or QApplication(["pytest", "-platform", "offscreen"])
+    QApplication.instance() or QApplication(["pytest"])
     win = main_window_module.MainWindow()
     qtbot.addWidget(win)
     win.show()

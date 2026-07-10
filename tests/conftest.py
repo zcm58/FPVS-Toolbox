@@ -1,17 +1,32 @@
 from __future__ import annotations
 
-import os
-import sys
-import types
-from pathlib import Path
+import faulthandler
+import hashlib
 import importlib
 import importlib.util
+import os
 import shutil
-import faulthandler
+import sys
 import threading
+import types
+import uuid
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 
 import pytest
+
+from tests.qt_test_registry import (
+    QT_TESTS_ENV_VAR,
+    load_qt_test_registry,
+    qt_tests_requested,
+    requested_registered_qt_files,
+    repo_relative_path,
+    unregistered_qt_indicator_files,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = ROOT / "src"
+_TEST_TMP_ROOT = ROOT / "test_tmp" / f"pytest-{os.getpid()}-{uuid.uuid4().hex[:10]}"
 
 os.environ.setdefault("FPVS_TEST_MODE", "1")
 
@@ -66,19 +81,90 @@ _AUTO_MARK_RULES = {
     "integration": ("e2e", "integration", "pipeline"),
 }
 
-_QT_HINTS = ("gui", "layout", "main_window", "qt", "window", "dialog")
 _WATCHDOG_MARKERS = {"gui", "plot_generator", "qt"}
 _WATCHDOG_TIMEOUT_SECONDS = int(os.environ.get("FPVS_TEST_WATCHDOG_SECONDS", "20"))
 _SLOW_WATCHDOG_TIMEOUT_SECONDS = int(os.environ.get("FPVS_SLOW_TEST_WATCHDOG_SECONDS", "120"))
 
 
-def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+def pytest_addoption(parser) -> None:
+    group = parser.getgroup("fpvs")
+    group.addoption(
+        "--allow-qt-tests",
+        action="store_true",
+        default=False,
+        help=(
+            "Collect registered Qt tests. These tests require an explicitly "
+            "approved visible or CI Qt environment."
+        ),
+    )
+
+
+def _qt_tests_allowed(config: pytest.Config) -> bool:
+    return qt_tests_requested(
+        cli_opt_in=bool(config.getoption("--allow-qt-tests")),
+        environ=os.environ,
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    try:
+        registry = load_qt_test_registry(ROOT)
+    except (OSError, ValueError) as exc:
+        raise pytest.UsageError(str(exc)) from exc
+
+    missing = unregistered_qt_indicator_files(ROOT, registry)
+    if missing:
+        formatted = "\n".join(f"  - {path}" for path in sorted(missing))
+        raise pytest.UsageError(
+            "Qt-test indicators were found in files missing from "
+            f"tests/qt_test_files.txt:\n{formatted}"
+        )
+    config._fpvs_qt_test_registry = registry
+    if not _qt_tests_allowed(config):
+        explicitly_requested = requested_registered_qt_files(
+            config.args,
+            repo_root=ROOT,
+            registry=registry,
+        )
+        if explicitly_requested:
+            formatted = "\n".join(f"  - {path}" for path in sorted(explicitly_requested))
+            raise pytest.UsageError(
+                "Registered Qt tests require an explicit opt-in before collection:\n"
+                f"{formatted}\nSet {QT_TESTS_ENV_VAR}=1 or pass --allow-qt-tests."
+            )
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """Keep registered Qt modules from importing without an explicit opt-in."""
+
+    if _qt_tests_allowed(config):
+        return None
+    relative_path = repo_relative_path(Path(collection_path), ROOT)
+    registry = config._fpvs_qt_test_registry
+    if relative_path in registry:
+        return True
+    return None
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    registry = config._fpvs_qt_test_registry
+    if _qt_tests_allowed(config):
+        return f"FPVS Qt test guard: explicit opt-in enabled ({len(registry)} registered files)"
+    return (
+        f"FPVS Qt test guard: {len(registry)} registered files excluded before import; "
+        f"set {QT_TESTS_ENV_VAR}=1 or pass --allow-qt-tests to opt in"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    registry = config._fpvs_qt_test_registry
     for item in items:
         node = f"{item.path.as_posix()}::{item.name}".lower()
         for marker_name, hints in _AUTO_MARK_RULES.items():
             if any(hint in node for hint in hints):
                 item.add_marker(getattr(pytest.mark, marker_name))
-        if any(hint in node for hint in _QT_HINTS):
+        relative_path = repo_relative_path(Path(item.path), ROOT)
+        if relative_path in registry:
             item.add_marker(pytest.mark.qt)
 
 
@@ -168,9 +254,7 @@ else:
         if _safe_find_spec(f"PySide6.{qt_module_name}") is not None:
             setattr(pyside6, qt_module_name, importlib.import_module(f"PySide6.{qt_module_name}"))
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = ROOT / "src"
-os.environ.setdefault("FPVS_CONFIG_HOME", str(ROOT / "test_tmp" / "fpvs_config"))
+os.environ.setdefault("FPVS_CONFIG_HOME", str(_TEST_TMP_ROOT / "session_config"))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
@@ -195,7 +279,9 @@ def _nonblocking_qmessagebox(monkeypatch):
 
 
 def _safe_test_name(nodeid: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in nodeid)[-120:]
+    readable = "".join(ch if ch.isalnum() else "_" for ch in nodeid)[-80:]
+    digest = hashlib.sha256(nodeid.encode("utf-8")).hexdigest()[:12]
+    return f"{readable}-{digest}"
 
 
 @pytest.fixture
@@ -208,9 +294,8 @@ def tmp_path(request):
     directly under an ignored repo-local folder avoids that external failure.
     """
 
-    base = ROOT / "test_tmp"
-    base.mkdir(exist_ok=True)
-    path = base / _safe_test_name(request.node.nodeid)
+    _TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+    path = _TEST_TMP_ROOT / _safe_test_name(request.node.nodeid)
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=False)
@@ -250,6 +335,7 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     session-finalization crash path caused by WinError 5 in cleanup_dead_symlinks.
     """
     outcome = yield
+    shutil.rmtree(_TEST_TMP_ROOT, ignore_errors=True)
     excinfo = getattr(outcome, "excinfo", None)
     if not excinfo:
         return

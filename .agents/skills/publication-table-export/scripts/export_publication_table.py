@@ -19,14 +19,16 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from Main_App.gui.style_tokens import (  # noqa: E402
-    BORDER_COLOR,
-    BORDER_SOFT_COLOR,
-    SURFACE_ALT_BG,
-    SURFACE_BG,
-    TEXT_PRIMARY,
+from Main_App.exports.table_style import (  # noqa: E402
+    TABLE_BORDER_COLOR,
+    TABLE_BORDER_SOFT_COLOR,
+    TABLE_FONT_FAMILY_CSS,
+    TABLE_SURFACE_ALT_BG,
+    TABLE_SURFACE_BG,
+    TABLE_TEXT_COLOR,
+    table_font_size_px,
+    table_font_weight,
 )
-from Main_App.gui.typography import css_font_family, css_font_size, css_font_weight  # noqa: E402
 
 
 TABLES_DIR_NAME = "9 - Tables"
@@ -168,8 +170,8 @@ def _build_svg(
     width, col_widths = geometry
     height = _table_height(len(rows))
     x_positions = _x_positions(col_widths)
-    header_px = _scaled_css_px("figure_axis_label", font_scale)
-    body_px = _scaled_css_px("figure_tick", font_scale)
+    header_px = _scaled_css_px("header", font_scale)
+    body_px = _scaled_css_px("body", font_scale)
 
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width / SVG_PX_PER_IN:.4f}in" '
@@ -177,18 +179,19 @@ def _build_svg(
         "<style>",
         (
             "text { font-family: "
-            f"{css_font_family()}; fill: {TEXT_PRIMARY}; dominant-baseline: middle; text-anchor: middle; }}"
+            f"{TABLE_FONT_FAMILY_CSS}; fill: {TABLE_TEXT_COLOR}; "
+            "dominant-baseline: middle; text-anchor: middle; }"
         ),
-        f".header {{ font-size: {header_px}px; font-weight: {css_font_weight('figure_axis_label')}; }}",
-        f".body {{ font-size: {body_px}px; font-weight: {css_font_weight('figure_tick')}; }}",
+        f".header {{ font-size: {header_px}px; font-weight: {table_font_weight('header')}; }}",
+        f".body {{ font-size: {body_px}px; font-weight: {table_font_weight('body')}; }}",
         "</style>",
-        f'<rect x="0" y="0" width="{width}" height="{height}" fill="{SURFACE_BG}"/>',
-        f'<rect x="0" y="0" width="{width}" height="{HEADER_HEIGHT_PX}" fill="{SURFACE_ALT_BG}"/>',
+        f'<rect x="0" y="0" width="{width}" height="{height}" fill="{TABLE_SURFACE_BG}"/>',
+        f'<rect x="0" y="0" width="{width}" height="{HEADER_HEIGHT_PX}" fill="{TABLE_SURFACE_ALT_BG}"/>',
     ]
 
     for row_index in range(len(rows)):
         y = HEADER_HEIGHT_PX + row_index * ROW_HEIGHT_PX
-        fill = SURFACE_ALT_BG if row_index % 2 else SURFACE_BG
+        fill = TABLE_SURFACE_ALT_BG if row_index % 2 else TABLE_SURFACE_BG
         lines.append(f'<rect x="0" y="{y}" width="{width}" height="{ROW_HEIGHT_PX}" fill="{fill}"/>')
 
     lines.extend(_svg_grid_lines(width, height, x_positions, len(rows)))
@@ -204,12 +207,12 @@ def _build_svg(
 def _svg_grid_lines(width: int, height: int, x_positions: list[int], row_count: int) -> list[str]:
     lines = []
     for x in x_positions:
-        lines.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{height}" stroke="{BORDER_SOFT_COLOR}" stroke-width="1"/>')
+        lines.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{height}" stroke="{TABLE_BORDER_SOFT_COLOR}" stroke-width="1"/>')
     for y in [0, HEADER_HEIGHT_PX, height]:
-        lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="{BORDER_COLOR}" stroke-width="1"/>')
+        lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="{TABLE_BORDER_COLOR}" stroke-width="1"/>')
     for row_index in range(1, row_count):
         y = HEADER_HEIGHT_PX + row_index * ROW_HEIGHT_PX
-        lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="{BORDER_SOFT_COLOR}" stroke-width="1"/>')
+        lines.append(f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="{TABLE_BORDER_SOFT_COLOR}" stroke-width="1"/>')
     return lines
 
 
@@ -239,10 +242,10 @@ def _write_png(
     header_height = round(HEADER_HEIGHT_PX * scale)
     row_height = round(ROW_HEIGHT_PX * scale)
 
-    image = Image.new("RGB", (width, height), _hex_to_rgb(SURFACE_BG))
+    image = Image.new("RGB", (width, height), _hex_to_rgb(TABLE_SURFACE_BG))
     draw = ImageDraw.Draw(image)
-    header_font = _load_font("figure_axis_label", bold=True, scale=scale * font_scale)
-    body_font = _load_font("figure_tick", bold=False, scale=scale * font_scale)
+    header_font = _load_font("header", bold=True, scale=scale * font_scale)
+    body_font = _load_font("body", bold=False, scale=scale * font_scale)
 
     _draw_backgrounds(draw, width, header_height, row_height, len(rows))
     x_positions = _x_positions(col_widths)
@@ -264,9 +267,9 @@ def _build_html(svg_text: str) -> str:
   <title>Publication Table Preview</title>
   <style>
     body {{
-      background: {SURFACE_BG};
-      color: {TEXT_PRIMARY};
-      font-family: {css_font_family()};
+      background: {TABLE_SURFACE_BG};
+      color: {TABLE_TEXT_COLOR};
+      font-family: {TABLE_FONT_FAMILY_CSS};
       margin: 0;
       padding: 0;
     }}
@@ -287,11 +290,11 @@ def _x_positions(col_widths: list[int]) -> list[int]:
 
 
 def _draw_backgrounds(draw: ImageDraw.ImageDraw, width: int, header_height: int, row_height: int, row_count: int) -> None:
-    draw.rectangle((0, 0, width, header_height), fill=_hex_to_rgb(SURFACE_ALT_BG))
+    draw.rectangle((0, 0, width, header_height), fill=_hex_to_rgb(TABLE_SURFACE_ALT_BG))
     for row_index in range(row_count):
         if row_index % 2:
             y0 = header_height + row_index * row_height
-            draw.rectangle((0, y0, width, y0 + row_height), fill=_hex_to_rgb(SURFACE_ALT_BG))
+            draw.rectangle((0, y0, width, y0 + row_height), fill=_hex_to_rgb(TABLE_SURFACE_ALT_BG))
 
 
 def _draw_grid(
@@ -306,12 +309,12 @@ def _draw_grid(
 ) -> None:
     border_width = max(1, round(scale))
     for x in x_positions:
-        draw.line((x, 0, x, height), fill=_hex_to_rgb(BORDER_SOFT_COLOR), width=border_width)
+        draw.line((x, 0, x, height), fill=_hex_to_rgb(TABLE_BORDER_SOFT_COLOR), width=border_width)
     for y in (0, header_height, height - 1):
-        draw.line((0, y, width, y), fill=_hex_to_rgb(BORDER_COLOR), width=border_width)
+        draw.line((0, y, width, y), fill=_hex_to_rgb(TABLE_BORDER_COLOR), width=border_width)
     for row_index in range(1, row_count):
         y = header_height + row_index * row_height
-        draw.line((0, y, width, y), fill=_hex_to_rgb(BORDER_SOFT_COLOR), width=border_width)
+        draw.line((0, y, width, y), fill=_hex_to_rgb(TABLE_BORDER_SOFT_COLOR), width=border_width)
 
 
 def _draw_centered_row(
@@ -321,7 +324,7 @@ def _draw_centered_row(
     center_y: float,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> None:
-    fill = _hex_to_rgb(TEXT_PRIMARY)
+    fill = _hex_to_rgb(TABLE_TEXT_COLOR)
     for col_index, value in enumerate(values):
         bbox = draw.textbbox((0, 0), value, font=font)
         text_width = bbox[2] - bbox[0]
@@ -354,7 +357,7 @@ def _scaled_css_px(role: str, font_scale: float) -> int:
 
 
 def _role_px(role: str) -> int:
-    return int(css_font_size(role).rstrip("px"))
+    return table_font_size_px(role)
 
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:

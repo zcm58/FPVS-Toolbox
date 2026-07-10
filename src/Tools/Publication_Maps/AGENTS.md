@@ -53,15 +53,12 @@ Rules:
   from the maximum z-score across the rendered z-score map pair.
 - Do not run offscreen Qt workflows locally.
 
-Focused checks:
-
-Command examples use the preferred `.venv1` interpreter. Substitute
-`.venv\Scripts\python.exe` when `.venv1` is absent.
+Focused local verification:
 
 ```powershell
-Get-ChildItem src\Tools\Publication_Maps\*.py | ForEach-Object { .\.venv1\Scripts\python.exe -m py_compile $_.FullName }
-.\.venv1\Scripts\python.exe -m pytest tests\publication_maps -q
-.\.venv1\Scripts\python.exe -m pytest tests\stats\analysis\test_fixed_predefined_harmonics.py tests\stats\analysis\test_full_snr_reference_equivalence.py -q
-.\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
-.\.venv1\Scripts\python.exe .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py
+python .agents/scripts/verify.py --scope publication-maps --tier focused
+python .agents/scripts/verify.py --scope stats --tier focused
 ```
+
+The second scope protects the shared processing-time harmonic contract. Qt
+execution remains CI-only by default.

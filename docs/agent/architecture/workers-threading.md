@@ -48,8 +48,12 @@ Rules:
   marking participant outputs completed, failed, or incomplete. It requires
   expected Excel files to exist before writing a completed ledger entry.
 
-Useful tests:
+Focused local verification:
 
 ```powershell
-python -m pytest tests/processing/test_postprocess_worker_qt.py tests/stats/gui/test_stats_focus_async.py -q
+python .agents/scripts/verify.py --scope processing --tier focused
 ```
+
+If the worker change is Stats-owned, use the `stats` scope instead. Qt worker
+and focus tests run in CI only by default; document a visible/manual smoke path
+for signal and cancellation behavior changed in the GUI.

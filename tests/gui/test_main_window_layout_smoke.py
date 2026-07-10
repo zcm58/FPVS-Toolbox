@@ -1,6 +1,5 @@
 import importlib.util
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,7 +76,6 @@ def _build_window(
 ) -> main_window_module.MainWindow:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setattr(update_manager, "cleanup_old_executable", lambda: None)
     monkeypatch.setattr(update_manager, "check_for_updates_on_launch", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(

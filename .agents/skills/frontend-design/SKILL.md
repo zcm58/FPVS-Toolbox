@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.
+description: Web/frontend-only guidance for distinctive browser UI, HTML/CSS, or web-component design. Do not auto-trigger for FPVS Toolbox PySide6 desktop GUI work.
 license: Complete terms in LICENSE.txt
 ---
 

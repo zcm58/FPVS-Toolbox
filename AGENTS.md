@@ -46,8 +46,8 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
   do not launch ad-hoc offscreen Qt scripts; they can freeze or hang
   indefinitely in this Windows environment.
 - GUI changes need non-GUI checks plus a documented visible/manual smoke path.
-  Use `py_compile`, `ruff`, GUI import audits, and agent audits locally; leave
-  pytest-qt/offscreen GUI targets for explicit user-approved environments only.
+  PySide6/pytest-qt execution is CI-only by default; run it locally only in an
+  explicitly user-approved safe visible environment.
 
 ## Skills
 
@@ -56,7 +56,9 @@ Repo-local skills live in `.agents/skills/`.
 - `pyside6-gui-cleanup`: PySide6 widgets, layouts, dialogs, actions, status UX, workers, and theme cleanup.
 - `legacy-boundary-review`: refactors near retired legacy paths, removed-feature boundaries, or historical API boundaries.
 - `project-path-audit`: file dialogs, manifests, exports, imports, generated files, and project-root path discipline.
-- `pytest-qt-smoke`: maintain pytest-qt smoke coverage definitions, but do not run pytest-qt/offscreen GUI tests locally unless the user explicitly approves a safe visible test environment.
+- `pytest-qt-smoke`: maintain registered pytest-qt smoke coverage definitions
+  for CI; do not run them locally unless the user explicitly approves a safe
+  visible GUI environment.
 - `cleanup-generated-files`: generated build, cache, temp, and stale local data cleanup.
 - `publication-table-export`: publication-ready table assets using shared toolbox typography, SVG plus 600-DPI PNG, saved under a project root in `9 - Tables`.
 
@@ -107,20 +109,17 @@ the focused verification gates below.
 
 ## Standard Verification
 
-Run the narrowest relevant checks first, then broaden when the change affects shared behavior.
-
-Use `.venv` in place of `.venv1` in the command block when `.venv1` is absent.
+Run the narrowest relevant scope first, then broaden when the change affects
+shared behavior. The driver selects `.venv1` when present and otherwise `.venv`.
 
 ```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/scripts/audit/agent_audit.py
-python -m pytest -q
-ruff check .
+python .agents/scripts/verify.py --scope <scope> --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
 ```
 
-For GUI changes, skip offscreen pytest-qt targets locally and report the
-manual/visible smoke path instead. If any other gate cannot run locally, report
-the command, failure reason, and residual risk.
+Choose the scope in `docs/agent/agent-index.md`. For GUI changes, leave Qt
+execution to CI and report the manual/visible smoke path. If another gate cannot
+run locally, report the command, failure reason, and residual risk.
 
 ## Done Means
 

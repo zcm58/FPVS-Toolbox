@@ -9,8 +9,10 @@ edits, validates, or documents publication-oriented figure outputs.
 - Use `600 dpi` for `.png` outputs and for raster content embedded in generated
   PDFs.
 - Use one single-page PDF per numbered figure or exported figure file.
-- Do not add `.svg` as a publication default. SVG may be restored only for a
-  narrowly scoped workflow that explicitly needs it.
+- Do not add `.svg` as a general publication-figure default. The retained
+  publication-table exporter is the narrow exception: table-only assets use
+  SVG plus 600-DPI PNG so text remains editable and the raster output remains
+  manuscript-ready.
 - Choose the intended physical figure size before rendering. DPI is evaluated at
   final size, not after later scaling.
 - Preserve generated source data, workbook rows, or reproducible code paths
@@ -22,6 +24,9 @@ Figure typography is separate from GUI typography.
 
 - Use `src/Main_App/exports/figure_style.py` for shared figure constants and
   Matplotlib/PIL text helpers.
+- Publication tables use the separate GUI-neutral
+  `src/Main_App/exports/table_style.py` contract. They must not import GUI
+  typography or GUI style tokens.
 - Do not import GUI typography helpers, `Main_App.gui.typography`, or
   `Main_App.gui.components.matplotlib_font_kwargs` from figure renderers.
 - Use Arial for all figure text.
@@ -50,17 +55,14 @@ Figure typography is separate from GUI typography.
 
 ## Verification
 
-For figure-output changes, use the narrowest relevant non-GUI checks first:
+For figure-output changes, run the shared figure contract and then the affected
+tool scope:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Main_App\exports\figure_style.py
-.\.venv1\Scripts\python.exe -m pytest tests\audit\test_figure_style_contract.py -q
-.\.venv1\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_export_pdf_smoke.py tests\plot_generator\test_plot_generator_group_overlay_worker.py -q
-.\.venv1\Scripts\python.exe -m pytest tests\publication_maps\test_bca_publication_maps.py -q
-.\.venv1\Scripts\python.exe -m pytest tests\ratio_calculator\test_ratio_calculator_plots.py -q
-.\.venv1\Scripts\python.exe -m pytest tests\processing\test_individual_detectability_core.py -q
-.\.venv1\Scripts\python.exe -m pytest tests\loreta\test_demo_conditions.py tests\loreta\test_project_l2_mne_export.py -q
+python .agents/scripts/verify.py --scope figures --tier focused
+python .agents/scripts/verify.py --scope <affected-tool> --tier focused
 ```
 
-If `.venv1` is unavailable, use the fallback `.venv\Scripts\python.exe` and
-report the substitution. Do not run offscreen Qt workflows locally.
+The driver selects `.venv1` or `.venv`, checks changed renderers explicitly,
+and keeps registered Qt tests out of local execution. Document a visible/manual
+smoke path for GUI-owned figure actions.

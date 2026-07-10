@@ -37,7 +37,7 @@ Primary areas:
 
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
-- `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure style constants and helpers used by figure-producing tools.
+- `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling.
 - `src/Main_App/processing/`: canonical Main App processing package. It owns active EEG preprocessing, the stable `process_data` entry point, and processing-controller helpers.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
 - `src/Main_App/projects/`: canonical Main App project import surface. It owns the project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing-settings normalization.
@@ -53,11 +53,14 @@ Primary areas:
 - `src/Tools/Sequence_Figure/`: embedded publication-figure tool for drawing FPVS stimulus-sequence illustrations from manually selected stimulus images. Its renderer is widget-free and exports PNG/PDF/SVG figures; it is separate from the SNR Plot Generator.
 - `src/Tools/LORETA_Visualizer/`: new embedded 3D source-visualization tool. Its renderer displays anatomical meshes and prepared source payloads only; future source-localization calculations must stay separate and pass through tool-local helper/adapters. See [LORETA Visualizer Architecture](src/Tools/LORETA_Visualizer/ARCHITECTURE.md).
 - `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Agents should not read these files, treat them as active architecture, or use them as implementation precedent unless the user explicitly asks about this folder.
-- `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
+- `src/quarantine/`, when present: optional ignored historical quarantine kept
+  outside active runtime. Its absence is valid; do not create it to satisfy a
+  documentation route.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
 - `.agents/scripts/audit/`: repo-level agent invariant checks such as `agent_audit.py`.
 - `scripts/docs/`: documentation publishing and maintenance helpers.
-- `.agents/scripts/smoke/`: agent-facing smoke checks that are not pytest tests.
+- `.agents/scripts/smoke/`, when present: optional agent-facing probes that are
+  not default gates. Its absence is valid.
 - `scripts/migration/`: one-off or repeatable local data migration helpers.
 - `scripts/debug/`: focused debugging probes.
 - `scripts/manual_diagnostics/`: developer-run project/data investigation utilities. These are not runtime toolbox APIs.
@@ -101,6 +104,8 @@ Use focused checks for the changed area first.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
 - Retired-path work: activate the available repo environment, then confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python .agents/scripts/audit/agent_audit.py`.
 - Agent invariants: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py`.
-- Broad shared behavior: activate the available repo environment, then run `python -m pytest -q` and lint checks where configured.
+- Broad shared behavior: run `python .agents/scripts/verify.py --scope repo
+  --tier precommit`; the driver selects the repo environment and locally safe
+  checks.
 
 See [docs/agent/quality/verification-gates.md](docs/agent/quality/verification-gates.md) for the current command list and fallback reporting rules.

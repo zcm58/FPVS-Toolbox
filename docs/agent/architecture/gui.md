@@ -231,7 +231,8 @@ are true:
    behavior, validation, messaging, or signal wiring.
 3. It can be introduced without changing labels, defaults, processing behavior,
    generated data, persisted settings, or output formats.
-4. It can be covered with focused pytest-qt smoke or contract tests.
+4. It can be covered by locally safe contract tests or CI-only pytest-qt smoke
+   coverage.
 5. It does not import retired paths, start workers, touch project state, access
    the filesystem at import time, or create windows as an import side effect.
 
@@ -320,13 +321,13 @@ Rules:
 - Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports in repo code; the active UI toolkit is PySide6.
 - Do not run long work in slots on the UI thread.
 
-Useful checks:
+Focused local verification:
 
 ```powershell
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/scripts/audit/agent_audit.py --check gui
-python -m pytest tests/gui/test_ui_components_smoke.py -q
-python -m pytest tests/gui/test_main_window_layout_smoke.py -q
+python .agents/scripts/verify.py --scope gui --tier focused
 ```
 
-Run the skill-local script before manually searching GUI imports or reading broad GUI folders.
+The driver runs the safe import/static checks. Main-window and dialog pytest-qt
+coverage is CI-only by default; document a visible/manual smoke path for the
+changed interaction. Run the GUI audit directly only as an initial diagnostic
+before manually searching broad GUI folders.

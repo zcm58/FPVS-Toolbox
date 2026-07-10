@@ -451,17 +451,26 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
 
     window._set_payload_display_status(valid_payload)
     assert status.variant == "info"
-    assert status.text == "Loaded Hauk et al. (2025) source-estimation cluster mask."
+    assert status.text == (
+        "The vertices displayed here were significant across the group after "
+        "the cluster-based permutation test."
+    )
 
     window._set_payload_display_status(empty_payload)
     assert status.variant == "warning"
-    assert status.text == "No vertices survived the Hauk et al. (2025) cluster-permutation mask."
+    assert status.text == (
+        "Warning: no vertices survived the group-level permutation mask. "
+        "The current view is uncorrected."
+    )
 
     window._use_cluster_mask = False
     window._zscore_display_threshold = 2.32
     window._set_payload_display_status(valid_payload)
-    assert status.variant == "info"
-    assert status.text == "Cluster mask display is disabled. Showing exploratory z >= 2.32 instead."
+    assert status.variant == "warning"
+    assert status.text == (
+        "Warning: disabling the cluster-based permutation mask will likely show "
+        "vertices that were not significant at the group level."
+    )
 
 
 class _StatusProbe:

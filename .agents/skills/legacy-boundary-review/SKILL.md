@@ -18,7 +18,7 @@ Use this workflow when a task is near retired `Legacy_App` references or when it
    - `src/Main_App/Legacy_App/**` is retired and must not be recreated
    - `src/Main_App/PySide6_App/**` is retired and must not be recreated
    - Source Localization/eLORETA is removed from active runtime; `src/Tools/SourceLocalization/**` should stay empty of source files
-   - `src/quarantine/**` is ignored quarantine, not active runtime
+   - `src/quarantine/**`, when present, is ignored quarantine, not active runtime
    - historical legacy modules listed in the quarantine audit
 5. Inspect existing public APIs, imports, adapters, and tests before proposing new boundaries.
 6. Prefer a thin adapter, caller-side normalization, or current-app module when that preserves behavior.

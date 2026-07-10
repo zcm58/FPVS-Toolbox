@@ -8,7 +8,9 @@ each condition and saved to a user-selected output folder.
 
 Current ownership map:
 
-- `gui.py`: public `PlotGeneratorWindow` facade.
+- `plot_generator.py`: Main App-imported embedded compatibility facade that
+  preserves patchable worker/thread hooks; it is not a standalone entry point.
+- `gui.py`: `PlotGeneratorWindow` page implementation.
 - `generation_workflow.py`: condition queueing, QThread worker launch/cancel,
   progress aggregation, and completion handling.
 - `ui_sections.py`, `settings_dialog.py`, `gui_settings.py`,
@@ -82,9 +84,11 @@ Use script output to decide what to read next.
 For Plot Generator worker or rendering changes, start with:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\worker.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\data_collection.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\rendering.py
-.\.venv1\Scripts\python.exe -m pytest tests\plot_generator -q
+python .agents/scripts/verify.py --scope plot-generator --tier focused
 ```
+
+The driver selects `.venv1` or `.venv`, runs locally safe worker/rendering
+checks, and leaves Plot Generator pytest-qt coverage to CI by default.
 
 Future feature/fix plans:
 

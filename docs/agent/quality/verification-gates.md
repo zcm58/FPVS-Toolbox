@@ -12,68 +12,70 @@ For a compact command map, use `docs/agent/agent-index.md`.
 - Avoid broad "import every GUI/tool module" sweeps as verification. GUI imports
   can cascade into optional analysis dependencies, windows, process launchers,
   or slow scientific library initialization.
-- Prefer targeted pytest files, skill-local audits, `py_compile`, and narrow
-  subprocess import probes for the exact public API being changed.
+- Prefer the focused verification scope and narrow subprocess import probes for
+  the exact public API being changed. Use direct skill audits only for initial
+  diagnosis.
 - If an import probe exceeds its expected runtime or reaches an unrelated
   optional dependency failure, stop and report the attempted command, first
   failing module, and safer replacement check.
 - Do not combine many high-risk imports into one long process. Probe one import
   surface or one small module group at a time so failures are attributable and
   interruptible.
-- Do not run offscreen Qt workflows in this repo. Do not set
-  `QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and do
-  not launch ad-hoc offscreen Qt scripts; they can freeze or hang indefinitely
-  in this Windows environment. For GUI work, use non-GUI checks plus a
-  documented visible/manual smoke path unless the user explicitly approves a
-  safe visible GUI test environment.
+- Do not run Qt tests locally. Never set `QT_QPA_PLATFORM=offscreen` or launch
+  ad-hoc offscreen Qt scripts; they can freeze or hang indefinitely in this
+  Windows environment. PySide6/pytest-qt targets execute only in the configured
+  CI Qt job unless the user explicitly approves a safe visible GUI environment.
+  Local GUI verification uses non-GUI checks plus a documented visible/manual
+  smoke path.
 
 ## Standard Commands
 
-Prefer `.venv1` when it exists in the checkout. If it is absent, substitute
-`.venv` in the activation or interpreter path used by these commands.
+Use the verification driver instead of composing pytest, Ruff, compile, and
+audit commands by hand. It selects `.venv1` when present and otherwise `.venv`,
+applies the local Qt guard, and keeps output compact.
 
 ```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/scripts/audit/agent_audit.py
-python .agents/scripts/audit/agent_audit.py --check garbage-collection
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-python -m pytest -q
-ruff check .
+python .agents/scripts/verify.py --scope <scope> --tier focused
+python .agents/scripts/verify.py --scope repo --tier precommit
 ```
+
+Choose the scope from `docs/agent/agent-index.md`. The focused tier is the
+normal change loop; the precommit tier is the broad local handoff gate.
 
 ## Targeted Checks
 
-- GUI changes: do not run pytest-qt/offscreen tests locally. Use `py_compile`,
-  focused `ruff`, `audit_gui_imports.py`, and `agent_audit.py --check gui`;
-  document the visible/manual smoke path for behavior that requires a window.
-- Updater changes: run pure backend tests before GUI smoke checks:
-  `python -m pytest tests/updates/test_update_check.py tests/updates/test_update_download.py -q`.
-  Syntax-check `scripts/packaging/*.ps1`, py-compile
-  `src/Main_App/updates/*.py`, `src/Main_App/gui/update_dialog.py`, and
-  `src/Main_App/gui/update_manager.py`, then document manual Windows smoke for
-  `File > Check for Updates` and installer `/RELAUNCH=1`.
-- Project path or file I/O changes: add or run tests with `tmp_path`; do not depend on a developer machine path.
-- Publication Maps changes: run the focused package tests, `py_compile` touched
-  package modules, `audit_gui_imports.py` for embedded page changes, and
-  `audit_hardcoded_paths.py` for workbook/output path changes. Do not run
-  offscreen GUI tests locally.
-- Publication figure generation changes: run
-  `python -m pytest tests/audit/test_figure_style_contract.py -q`, the nearest
-  focused figure-output tests, `py_compile` for touched renderers, and path/GUI
-  audits when outputs or GUI-adjacent code are touched. Figure renderers must
-  use `Main_App.exports.figure_style`, not GUI typography helpers.
-- Legacy-boundary changes: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
-- Source Localization/eLORETA changes: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
-- LORETA Visualizer changes: activate the available repo environment, then run focused checks for
-  `src/Tools/LORETA_Visualizer/` plus
-  `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py`
-  and `python .agents/scripts/audit/agent_audit.py --check source-localization-refs`.
-  Confirm rendering changes do not add source-localization calculation to
+- GUI changes: run `python .agents/scripts/verify.py --scope gui --tier
+  focused`; document the visible/manual smoke path for behavior that requires a
+  window. Qt tests remain CI-only by default.
+- Updater changes: run `python .agents/scripts/verify.py --scope updates --tier
+  focused`, then document manual Windows smoke for `File > Check for Updates`
+  and installer `/RELAUNCH=1`.
+- Project path or file I/O changes: run `python .agents/scripts/verify.py
+  --scope project-io --tier focused`; tests must use isolated temporary paths.
+- Publication Maps changes: run `python .agents/scripts/verify.py --scope
+  publication-maps --tier focused`.
+- Publication figure generation changes: run `python
+  .agents/scripts/verify.py --scope figures --tier focused`. Figure renderers
+  must use `Main_App.exports.figure_style`, not GUI typography helpers.
+- Legacy-boundary changes: run `python .agents/scripts/verify.py --scope
+  legacy-boundary --tier focused`; retired `Legacy_App` paths must not be
+  recreated and historical cleanup must preserve the processing pipeline.
+- Source Localization/eLORETA or LORETA Visualizer changes: run `python
+  .agents/scripts/verify.py --scope loreta --tier focused`. Source Localization
+  remains removed; rendering changes must not move source calculation into
   `renderer.py`, `fsaverage_mesh.py`, or GUI code.
-- Processing pipeline changes: verify processing order, output filenames, sheets, and formats remain compatible.
-- Garbage collection: activate the available repo environment, then run `python .agents/scripts/audit/agent_audit.py --check garbage-collection` to catch visible cache/temp artifacts, new inline debt markers, and broad production exception handlers.
+- Processing pipeline changes: run `python .agents/scripts/verify.py --scope
+  processing --tier focused`; verify processing order, output filenames,
+  sheets, and formats remain compatible.
+- Garbage collection and repo-wide invariants are part of `python
+  .agents/scripts/verify.py --scope repo --tier precommit`.
+
+## CI Change Detection
+
+CI must give change-sensitive audits a committed comparison point with
+`agent_audit.py --base-ref <revision>` or `FPVS_AGENT_AUDIT_BASE_REF`. A plain
+clean-worktree audit compares against `HEAD` and cannot detect files changed
+only in already-created commits.
 
 ## Reporting Failures
 

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+
+from PIL import Image
+import pytest
+
 from tests import repo_root
 
 from Main_App.exports.figure_style import (
@@ -11,6 +17,12 @@ from Main_App.exports.figure_style import (
     FIGURE_SUBSCRIPT_SUPERSCRIPT_MIN_SIZE_PT,
     FIGURE_TEXT_SIZE_PT,
     figure_text_kwargs,
+)
+from Main_App.exports.table_style import (
+    TABLE_BODY_FONT_SIZE_PX,
+    TABLE_FONT_FAMILY_CSS,
+    TABLE_HEADER_FONT_SIZE_PX,
+    table_font_size_px,
 )
 
 FIGURE_RENDERER_FILES = (
@@ -57,3 +69,66 @@ def test_figure_renderers_do_not_import_gui_typography() -> None:
                 offenders.append(f"{rel_path}: {token}")
 
     assert offenders == []
+
+
+def test_publication_table_style_is_gui_neutral() -> None:
+    exporter = (
+        repo_root()
+        / ".agents"
+        / "skills"
+        / "publication-table-export"
+        / "scripts"
+        / "export_publication_table.py"
+    ).read_text(encoding="utf-8")
+
+    assert "Main_App.exports.table_style" in exporter
+    assert "Main_App.gui.typography" not in exporter
+    assert "Main_App.gui.style_tokens" not in exporter
+    assert TABLE_FONT_FAMILY_CSS == '"Segoe UI", Arial, sans-serif'
+    assert table_font_size_px("header") == TABLE_HEADER_FONT_SIZE_PX == 16
+    assert table_font_size_px("body") == TABLE_BODY_FONT_SIZE_PX == 14
+
+
+def test_publication_table_export_retains_svg_and_600_dpi_png(tmp_path) -> None:
+    exporter_path = (
+        repo_root()
+        / ".agents"
+        / "skills"
+        / "publication-table-export"
+        / "scripts"
+        / "export_publication_table.py"
+    )
+    spec = importlib.util.spec_from_file_location("publication_table_export_test", exporter_path)
+    assert spec is not None and spec.loader is not None
+    exporter = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = exporter
+    spec.loader.exec_module(exporter)
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    source = tmp_path / "source.csv"
+    source.write_text("Condition,Mean\nFaces,1.25\nWords,2.50\n", encoding="utf-8")
+
+    result = exporter.main(
+        [
+            "--project-root",
+            str(project_root),
+            "--input",
+            str(source),
+            "--output-name",
+            "summary",
+        ]
+    )
+
+    output_dir = project_root / "9 - Tables"
+    svg_path = output_dir / "summary.svg"
+    png_path = output_dir / "summary.png"
+    assert result == 0
+    assert svg_path.is_file()
+    assert png_path.is_file()
+    assert "Main_App.gui" not in svg_path.read_text(encoding="utf-8")
+    with Image.open(png_path) as image:
+        dpi = image.info.get("dpi")
+        assert dpi is not None
+        assert dpi[0] == pytest.approx(600, abs=1)
+        assert dpi[1] == pytest.approx(600, abs=1)

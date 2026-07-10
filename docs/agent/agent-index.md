@@ -6,12 +6,9 @@ the result.
 
 ## First Commands
 
-Activate the repo environment before Python commands. Prefer `.venv1`; if it
-is absent, use `.venv` in the command path below:
-
-```powershell
-.\.venv1\Scripts\Activate.ps1
-```
+The verification driver selects `.venv1` when present and otherwise `.venv`.
+Use it for test/lint/compile verification; use the narrow audit commands below
+for initial routing before broad inspection.
 
 | Task | First command |
 | --- | --- |
@@ -40,7 +37,7 @@ is absent, use `.venv` in the command path below:
 | Publication scalp maps and source-data exports | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
 | FPVS sequence illustration figures, manual stimulus image slots, and high-DPI export | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Sequence_Figure/AGENTS.md` |
 | Publication-ready table PNG/SVG exports under a project root | `publication-table-export` + `project-path-audit` | `.agents/skills/publication-table-export/SKILL.md`; `docs/agent/architecture/statistics-tools.md` |
-| GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; do not run pytest-qt/offscreen locally |
+| GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; Qt execution is CI-only unless the user approves a safe visible environment |
 | Generated files, temp folders, local caches | `cleanup-generated-files` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 | Plan pressure-testing, design interrogation, dependency-aware decision trees | `grillme` | Explore code first when the answer is discoverable locally; ask one question at a time |
 | Web/frontend design skill requests outside normal FPVS PySide6 app work | `frontend-design`, `web-design-guidelines`, `emil-design-eng` | Use only when the user explicitly requests web/frontend design; normal FPVS Toolbox GUI work remains PySide6-first |
@@ -54,7 +51,8 @@ fallback), or the no-offscreen-Qt rule.
 ## Script Layout
 
 - `.agents/scripts/audit/`: repo invariant checks.
-- `.agents/scripts/smoke/`: agent-facing smoke checks, not default gates.
+- `.agents/scripts/smoke/`, when present: optional agent-facing probes, never a
+  default gate. Its absence is valid.
 - `scripts/debug/`: focused debugging probes.
 - `scripts/manual_diagnostics/`: developer-run project/data probes.
 - `scripts/packaging/`: release packaging and installer inputs.
@@ -74,21 +72,22 @@ fallback), or the no-offscreen-Qt rule.
 
 ## Test Selection
 
-- Component layer: `python -m pytest tests/gui/test_ui_components_smoke.py -q`
-- Main window or PySide6 layout: update focused pytest-qt coverage when useful,
-  but do not run pytest-qt/offscreen locally.
-- Project I/O: `python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q`
-- Removed-electrode QC calibration: `python -m pytest tests/processing/test_removed_electrode_detection.py tests/processing/test_raw_channel_qc.py -q`
-- Plot Generator: run the nearest `tests/plot_generator/test_*` file first;
-  use `python -m pytest tests/plot_generator -q` after worker, rendering, or
-  output changes.
-- Publication Maps: `python -m pytest tests/publication_maps/test_bca_publication_maps.py -q`
-- Ratio Calculator: `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`
-- Sequence Figure: `python -m pytest tests/sequence_figure -q`
-- Stats GUI/pipeline: `python -m pytest tests/stats/gui/test_stats_layout_smoke.py tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/data/test_stats_project_context.py -q`
-- Stats FullSNR regression: `python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py -q`
-- Stats-ready workbook export: `python -m pytest tests/stats/io/test_stats_ready_export.py -q`
-- Stats reporting summaries: `python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q`
+Route local verification through one command:
+
+```powershell
+python .agents/scripts/verify.py --scope <scope> --tier focused
+```
+
+Supported scopes are `gui`, `updates`, `project-io`, `processing`,
+`plot-generator`, `publication-maps`, `ratio-calculator`, `sequence-figure`,
+`stats`, `loreta`, `figures`, and `legacy-boundary`. Use `--scope repo --tier
+precommit` for the broad local handoff gate. The driver owns the executable
+test registry and excludes Qt execution locally.
+
+PySide6/pytest-qt targets remain useful coverage definitions, but execute them
+only in the configured CI Qt job or an explicitly user-approved safe visible
+environment. Never set `QT_QPA_PLATFORM=offscreen` on local Windows machines.
+See `docs/agent/quality/test-selection.md` for what each scope covers.
 
 ## Reading Rule
 

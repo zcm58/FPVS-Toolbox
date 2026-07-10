@@ -8,7 +8,7 @@ description: Clean generated build artifacts, Python/tool caches, test scratch f
 ## Workflow
 
 1. State the cleanup scope before deleting anything.
-2. Preserve `.venv1/`, `.venv/`, `.idea/`, root `.fpvs_cache/`, `src/quarantine/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
+2. Preserve `.venv1/`, `.venv/`, `.idea/`, root `.fpvs_cache/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. Preserve `src/quarantine/` if it exists; its absence is valid. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
 3. Run a dry run first:
 
 ```powershell
@@ -32,7 +32,8 @@ git status --short --ignored
 - Delete only ignored/generated artifacts or user-approved local data caches.
 - Keep Source Localization/eLORETA code quarantined, but do not keep bundled `fsaverage` MRI template data in tracked source or quarantine paths.
 - Preserve root `.fpvs_cache/` when it contains MNE/fsaverage template data for local LORETA Visualizer use.
-- Do not remove `src/quarantine/`; it is intentionally retained legacy reference material.
+- Do not remove `src/quarantine/` when it exists; it is optional historical
+  reference material, not a required directory.
 - Do not remove virtual environments unless the user explicitly identifies the stale environment.
 - If deletion fails with permission errors, rerun the same script with escalation rather than broadening the command.
 - Report any remaining permission-protected folders instead of silently skipping them.
