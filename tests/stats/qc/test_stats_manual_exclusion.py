@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 from PySide6.QtCore import Qt
 
+from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
 from Tools.Stats.workers import stats_workers
 from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.ui.stats_window import StatsWindow
@@ -66,12 +67,13 @@ def test_manual_exclusion_filters_before_dv_compute(monkeypatch) -> None:
         conditions=["A"],
         conditions_all=["A"],
         subject_data={
-            "P1": {"A": {"ROI": 1.0}},
-            "P2": {"A": {"ROI": 2.0}},
+            "P1": {"A": "p1_a.xlsx"},
+            "P2": {"A": "p2_a.xlsx"},
         },
         base_freq=6.0,
         rois={"ROI": ["Cz"]},
         rois_all={"ROI": ["Cz"]},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
         manual_excluded_pids=["P2"],
     )
 
