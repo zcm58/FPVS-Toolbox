@@ -10,7 +10,13 @@ from __future__ import annotations
 from .actions import ActionRow, make_action_row
 from .messages import confirm, show_error, show_info, show_warning
 from .surfaces import AppDialog, SurfaceSize, configure_window_surface
-from .tool_info import ToolInfoContent, ToolInfoDialog, make_info_button, show_tool_info
+from .tool_info import (
+    ToolInfoContent,
+    ToolInfoDialog,
+    ToolInfoTab,
+    make_info_button,
+    show_tool_info,
+)
 from Main_App.gui.widgets.brain_pulse import BrainPulseWidget
 from Main_App.gui.widgets.busy_spinner import BusySpinner
 from Main_App.gui.widgets.buttons import make_action_button, make_remove_button
@@ -38,6 +44,7 @@ __all__ = (
     "SurfaceSize",
     "ToolInfoContent",
     "ToolInfoDialog",
+    "ToolInfoTab",
     "apply_font_role",
     "confirm",
     "configure_window_surface",

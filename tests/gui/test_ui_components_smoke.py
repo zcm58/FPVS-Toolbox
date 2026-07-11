@@ -33,6 +33,7 @@ from Main_App.gui.components import (
     show_warning,
     ToolInfoContent,
     ToolInfoDialog,
+    ToolInfoTab,
 )
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.theme import apply_fpvs_theme
@@ -50,6 +51,7 @@ EXPECTED_COMPONENT_EXPORTS = (
     "SurfaceSize",
     "ToolInfoContent",
     "ToolInfoDialog",
+    "ToolInfoTab",
     "apply_font_role",
     "confirm",
     "configure_window_surface",
@@ -88,6 +90,7 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import SurfaceSize as ImportedSurfaceSize
     from Main_App.gui.components import ToolInfoContent as ImportedToolInfoContent
     from Main_App.gui.components import ToolInfoDialog as ImportedToolInfoDialog
+    from Main_App.gui.components import ToolInfoTab as ImportedToolInfoTab
     from Main_App.gui.components import apply_font_role as imported_apply_font_role
     from Main_App.gui.components import confirm as imported_confirm
     from Main_App.gui.components import configure_window_surface as imported_configure_window_surface
@@ -118,6 +121,7 @@ def test_component_consumer_import_style_remains_available() -> None:
         "SurfaceSize": ImportedSurfaceSize,
         "ToolInfoContent": ImportedToolInfoContent,
         "ToolInfoDialog": ImportedToolInfoDialog,
+        "ToolInfoTab": ImportedToolInfoTab,
         "apply_font_role": imported_apply_font_role,
         "confirm": imported_confirm,
         "configure_window_surface": imported_configure_window_surface,
@@ -444,6 +448,28 @@ def test_component_tool_info_dialog_uses_shared_shell(qtbot) -> None:
     assert dialog.browser.objectName() == "demo_tool_tool_info_browser"
     assert dialog.browser.openExternalLinks()
     assert "Short editable copy." in dialog.browser.toHtml()
+
+
+def test_component_tool_info_dialog_supports_optional_tabs(qtbot) -> None:
+    content = ToolInfoContent(
+        key="tabbed_demo",
+        title="About Tabbed Demo",
+        html="",
+        tabs=(
+            ToolInfoTab("quick", "Quick Guide", "<p>Start here.</p>"),
+            ToolInfoTab("methods", "Methods", "<p>Technical detail.</p>"),
+        ),
+    )
+    dialog = ToolInfoDialog(content)
+    qtbot.addWidget(dialog)
+
+    assert dialog.tab_widget is not None
+    assert dialog.tab_widget.count() == 2
+    assert dialog.tab_widget.tabText(0) == "Quick Guide"
+    assert dialog.tab_widget.tabText(1) == "Methods"
+    assert dialog.browser is dialog.browsers[0]
+    assert all(browser.openExternalLinks() for browser in dialog.browsers)
+    assert "Technical detail." in dialog.browsers[1].toPlainText()
 
 
 def test_component_action_row_adds_buttons(qtbot) -> None:

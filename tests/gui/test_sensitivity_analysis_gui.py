@@ -37,9 +37,18 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
     assert page.result_banner.text() == "Cohen's dz = 0.60"
     assert page.result_banner.metric_label.text() == "COHEN'S DZ"
     assert page.result_banner.value_label.text() == "0.60"
+    assert page.result_banner.property("statusVariant") == "info"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
+    assert "this model reaches 80% power" in page.plain_language_label.text()
+    assert "24 analyzable participants" in page.assumption_summary_label.text()
+    assert "two-sided paired/one-sample t-test" in page.assumption_summary_label.text()
     assert page.reporting_label.isVisibleTo(page)
     assert not page.equivalent_label.isVisibleTo(page)
+
+    page.sample_size_spin.setValue(30)
+
+    assert page.result_banner.text() == "Set the assumptions and select Calculate."
+    assert "will appear after calculation" in page.plain_language_label.text()
 
 
 def test_rm_anova_result_and_reset(qtbot) -> None:
@@ -59,6 +68,7 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert page.equivalent_label.text() == "Equivalent eta-squared: 0.082"
     assert page.equivalent_label.isVisibleTo(page)
+    assert "2 repeated measurements" in page.assumption_summary_label.text()
 
     qtbot.mouseClick(page.reset_button, Qt.LeftButton)
 
@@ -84,18 +94,120 @@ def test_fpvs_design_inputs_derive_repeated_measurements(qtbot) -> None:
     page.effect_target_combo.setCurrentIndex(page.OMNIBUS_CELLS)
     assert page.measurements_spin.value() == 12
     assert "not interaction power" in page.measurement_explanation.text()
+    assert page.assumption_guidance.property("statusVariant") == "warning"
+    assert "does not isolate condition, ROI, or interaction power" in (
+        page.assumption_guidance.text()
+    )
+
+
+def test_invalid_measurement_count_and_dynamic_bounds_are_explained(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.analysis_combo.setCurrentIndex(page.RM_ANOVA)
+    assert page.epsilon_spin.minimum() == pytest.approx(1.00)
+    page.conditions_spin.setValue(1)
+
+    assert page.measurements_spin.value() == 1
+    assert not page.calculate_button.isEnabled()
+    assert page.assumption_guidance.property("statusVariant") == "error"
+    assert "at least two repeated measurements" in page.assumption_guidance.text()
+
+    page.conditions_spin.setValue(4)
+
+    assert page.calculate_button.isEnabled()
+    assert page.epsilon_spin.minimum() == pytest.approx(0.34)
+    assert page.correlation_spin.minimum() == pytest.approx(-0.33)
+
+    page.conditions_spin.setValue(12)
+
+    assert page.epsilon_spin.minimum() == pytest.approx(0.10)
+    assert page.correlation_spin.minimum() == pytest.approx(-0.09)
+
+
+def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
+    page = _build_page(qtbot)
+    paired_changes = (
+        lambda: page.sample_size_spin.setValue(30),
+        lambda: page.power_spin.setValue(0.85),
+        lambda: page.alpha_spin.setValue(0.04),
+        lambda: page.alternative_combo.setCurrentIndex(1),
+    )
+    for change in paired_changes:
+        page.reset_defaults()
+        page.calculate()
+        change()
+        assert page.result_banner.text() == (
+            "Set the assumptions and select Calculate."
+        )
+
+    rm_changes = (
+        (lambda: None, lambda: page.correlation_spin.setValue(0.60)),
+        (
+            lambda: page.conditions_spin.setValue(3),
+            lambda: page.epsilon_spin.setValue(0.75),
+        ),
+        (lambda: None, lambda: page.conditions_spin.setValue(3)),
+        (
+            lambda: None,
+            lambda: page.effect_target_combo.setCurrentIndex(page.OMNIBUS_CELLS),
+        ),
+    )
+    for setup, change in rm_changes:
+        page.reset_defaults()
+        page.analysis_combo.setCurrentIndex(page.RM_ANOVA)
+        setup()
+        page.calculate()
+        change()
+        assert page.result_banner.text() == (
+            "Set the assumptions and select Calculate."
+        )
+
+
+def test_one_sided_choice_shows_directional_warning(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.alternative_combo.setCurrentIndex(1)
+
+    assert page.calculate_button.isEnabled()
+    assert page.assumption_guidance.property("statusVariant") == "warning"
+    assert "before examining the data" in page.assumption_guidance.text()
+    assert "opposite direction" in page.assumption_guidance.text()
+
+    qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
+
+    assert page.assumption_guidance.isVisibleTo(page)
+    assert page.result_banner.text() != "Set the assumptions and select Calculate."
+
+
+def test_calculation_error_clears_previous_result(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.analysis_combo.setCurrentIndex(page.RM_ANOVA)
+    qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
+    assert page.result_banner.text() == "Cohen's f = 0.30"
+
+    page.measurements_spin.setValue(1)
+    page.calculate()
+
+    assert page.validation_banner.isVisibleTo(page)
+    assert "at least 2" in page.validation_banner.text()
+    assert page.result_banner.text() == "Set the assumptions and select Calculate."
+    assert "will appear after calculation" in page.reporting_label.text()
 
 
 def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
     page = _build_page(qtbot)
     dialog = ToolInfoDialog(SENSITIVITY_ANALYSIS_TOOL_INFO, page)
     qtbot.addWidget(dialog)
-    text = dialog.browser.toPlainText()
+    text = "\n".join(browser.toPlainText() for browser in dialog.browsers)
 
     assert page.tool_info_button.toolTip() == "About Sensitivity Analysis"
+    assert dialog.tab_widget is not None
+    assert dialog.tab_widget.count() == 5
+    assert dialog.tab_widget.tabText(0) == "Quick Guide"
+    assert dialog.tab_widget.tabText(1) == "FPVS Design"
+    assert dialog.tab_widget.tabText(4) == "Methods"
+    assert dialog.minimumWidth() == 600
     assert "Sample size (N) is the number of participants" in text
     assert "repeated measurements = conditions × ROIs" in text
-    assert "does not specifically estimate power" in text
+    assert "does not isolate the condition effect" in text
 
 
 def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:
@@ -110,8 +222,8 @@ def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:
     assert results is not None and results.width() >= 350
     assert inputs.geometry().right() < scroll.widget().width()
     assert results.geometry().right() < scroll.widget().width()
-    assert inputs.height() < scroll.viewport().height()
-    assert results.height() < scroll.viewport().height()
+    assert inputs.minimumSizeHint().height() <= inputs.height()
+    assert results.minimumSizeHint().height() <= results.height()
     assert page.calculate_button.isVisibleTo(page)
     assert page.reset_button.isVisibleTo(page)
     assert page.disclaimer.isVisibleTo(page)

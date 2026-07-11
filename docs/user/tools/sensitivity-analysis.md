@@ -11,10 +11,13 @@ export, or modify any files.
 
 ### Paired or One-Sample t-Test
 
-Enter the sample size, desired power, alpha, and whether the test is two-sided
-or one-sided. The result is the minimum detectable Cohen's *dz*. For a paired
-test, *dz* standardizes the mean within-participant difference by the standard
-deviation of those difference scores.
+Enter the analyzable sample size, desired power, alpha, and whether the test is
+two-sided or one-sided. Analyzable sample size means participants expected to
+provide a complete pair after exclusions. A one-sided test should be used only
+for a directional hypothesis chosen before examining the data. The result is
+the minimum detectable Cohen's *dz*. For a paired test, *dz* standardizes the
+mean within-participant difference by the standard deviation of those
+difference scores.
 
 ### One-Way Repeated-Measures ANOVA
 
@@ -34,12 +37,17 @@ eta-squared value.
 
 The repeated-measures calculation assumes a balanced within-participant design.
 Epsilon must be valid for the selected number of measurements; 1.00 represents
-sphericity.
+sphericity. The interface adjusts the permitted correlation and epsilon ranges
+as the derived measurement count changes and blocks effects with fewer than two
+levels.
 
 The omnibus condition × ROI option treats all cells as levels of one
 within-participant factor. It does not specifically estimate power for a
 condition × ROI interaction. Use the information button in the Study
-Assumptions card for examples and interpretation guidance.
+Assumptions card for five tabs: Quick Guide, FPVS Design, Assumptions,
+Interpretation (including reporting), and Methods (including references). The
+current model does not include between-participant groups or factorial
+interaction power.
 
 ## Defaults
 
@@ -59,9 +67,16 @@ Select **Reset Defaults** at any time to restore these values.
 
 ## Interpreting the Result
 
-The result is a minimum detectable effect, not an expected effect. Under the
-entered assumptions, smaller true effects would have less than the requested
-power.
+The result is the effect at which the model reaches the requested power, not an
+expected effect or a guarantee. Under the entered assumptions, smaller true
+effects have less than the requested power, but they are not ruled out. The
+result panel uses neutral informational styling because the estimate is not a
+pass/fail judgment.
+
+After calculation, the page also provides a plain-language interpretation, a
+compact summary of the assumptions used, and a reporting-ready sentence.
+Changing any result-affecting input clears these outputs so a stale result is
+not shown beside new assumptions.
 
 The tool also shows conventional Cohen benchmarks:
 
@@ -72,3 +87,6 @@ These labels are descriptive reference points only. They do not establish
 theoretical, clinical, or practical importance. Study-specific prior evidence,
 measurement reliability, exclusions, model assumptions, and multiplicity may
 all affect whether a planned sample is adequate.
+
+The alpha entry applies to the test being evaluated. Sensitivity Analysis does
+not automatically adjust alpha for multiple planned tests.

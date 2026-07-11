@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -79,7 +81,7 @@ class _ResultSummary(QWidget):
         self.metric_label.setText(metric.upper())
         self.value_label.setText(formatted_value)
         self.context_label.setText("Minimum detectable standardized effect")
-        self.set_variant("success")
+        self.set_variant("info")
 
     def set_variant(self, variant: str) -> None:
         self.setProperty("statusVariant", variant)
@@ -231,10 +233,11 @@ class SensitivityAnalysisWindow(QWidget):
         self.sample_size_spin.setObjectName("sensitivity_sample_size")
         self.sample_size_spin.setRange(3, 100_000)
         self.sample_size_spin.setToolTip(
-            "Total number of participants or complete paired observations."
+            "Participants expected to contribute the complete observations "
+            "required by the selected analysis, after exclusions."
         )
         self._expand_input(self.sample_size_spin)
-        common_form.addRow("Sample size (N):", self.sample_size_spin)
+        common_form.addRow("Analyzable participants (N):", self.sample_size_spin)
 
         self.power_spin = QDoubleSpinBox(card.content)
         self.power_spin.setObjectName("sensitivity_power")
@@ -335,6 +338,11 @@ class SensitivityAnalysisWindow(QWidget):
         rm_form.addRow("Nonsphericity epsilon:", self.epsilon_spin)
         self.design_stack.addWidget(rm_panel)
 
+        self.assumption_guidance = StatusBanner("", card.content, variant="info")
+        self.assumption_guidance.setObjectName("sensitivity_assumption_guidance")
+        self.assumption_guidance.hide()
+        card.content_layout.addWidget(self.assumption_guidance)
+
         self.validation_banner = StatusBanner("", card.content, variant="error")
         self.validation_banner.setObjectName("sensitivity_validation")
         self.validation_banner.hide()
@@ -382,6 +390,27 @@ class SensitivityAnalysisWindow(QWidget):
         self.equivalent_label.hide()
         card.content_layout.addWidget(self.equivalent_label)
 
+        self.plain_language_label = QLabel(
+            "A plain-language interpretation will appear after calculation.",
+            card.content,
+        )
+        self.plain_language_label.setObjectName("sensitivity_plain_language_result")
+        self.plain_language_label.setWordWrap(True)
+        card.content_layout.addWidget(self.plain_language_label)
+
+        assumptions_heading = QLabel("ASSUMPTIONS USED", card.content)
+        assumptions_heading.setProperty("eyebrow", True)
+        card.content_layout.addWidget(assumptions_heading)
+
+        self.assumption_summary_label = QLabel(
+            "Current assumptions will appear after calculation.",
+            card.content,
+        )
+        self.assumption_summary_label.setObjectName("sensitivity_assumption_summary")
+        self.assumption_summary_label.setProperty("caption", True)
+        self.assumption_summary_label.setWordWrap(True)
+        card.content_layout.addWidget(self.assumption_summary_label)
+
         reporting_heading = QLabel("REPORTING SUMMARY", card.content)
         reporting_heading.setProperty("eyebrow", True)
         card.content_layout.addWidget(reporting_heading)
@@ -406,13 +435,28 @@ class SensitivityAnalysisWindow(QWidget):
 
     def _connect_signals(self) -> None:
         self.analysis_combo.currentIndexChanged.connect(self._set_analysis_type)
+        self.sample_size_spin.valueChanged.connect(self._on_assumptions_changed)
+        self.power_spin.valueChanged.connect(self._on_assumptions_changed)
+        self.alpha_spin.valueChanged.connect(self._on_assumptions_changed)
+        self.alternative_combo.currentIndexChanged.connect(
+            self._on_alternative_changed
+        )
         self.effect_target_combo.currentIndexChanged.connect(
             self._update_derived_measurements
         )
         self.conditions_spin.valueChanged.connect(self._update_derived_measurements)
         self.rois_spin.valueChanged.connect(self._update_derived_measurements)
+        self.correlation_spin.valueChanged.connect(self._on_assumptions_changed)
+        self.epsilon_spin.valueChanged.connect(self._on_assumptions_changed)
         self.calculate_button.clicked.connect(self.calculate)
         self.reset_button.clicked.connect(self.reset_defaults)
+
+    def _on_assumptions_changed(self) -> None:
+        self._clear_result()
+
+    def _on_alternative_changed(self) -> None:
+        self._update_assumption_guidance()
+        self._clear_result()
 
     def _update_derived_measurements(self) -> None:
         conditions = self.conditions_spin.value()
@@ -440,13 +484,78 @@ class SensitivityAnalysisWindow(QWidget):
             )
         self.measurements_spin.setValue(measurements)
         self.measurement_explanation.setText(explanation)
+        self._update_repeated_measure_bounds(measurements)
+        self._update_assumption_guidance()
         self.design_stack.currentWidget().updateGeometry()
         self.design_stack.updateGeometry()
         self._clear_result()
 
+    def _update_repeated_measure_bounds(self, measurements: int) -> None:
+        if measurements < 2:
+            self.correlation_spin.setMinimum(-0.99)
+            self.epsilon_spin.setMinimum(0.01)
+            self.correlation_spin.setToolTip(
+                "Select an effect with at least two measurements first."
+            )
+            self.epsilon_spin.setToolTip(
+                "Select an effect with at least two measurements first."
+            )
+            return
+
+        correlation_bound = -1 / (measurements - 1)
+        correlation_minimum = (math.floor(correlation_bound * 100) + 1) / 100
+        epsilon_bound = 1 / (measurements - 1)
+        epsilon_minimum = math.ceil(epsilon_bound * 100) / 100
+        self.correlation_spin.setMinimum(max(-0.99, correlation_minimum))
+        self.epsilon_spin.setMinimum(max(0.01, epsilon_minimum))
+        self.correlation_spin.setToolTip(
+            f"Valid interface range for {measurements} measurements: "
+            f"{max(-0.99, correlation_minimum):.2f} to 0.99."
+        )
+        self.epsilon_spin.setToolTip(
+            f"Valid range for {measurements} measurements: "
+            f"{epsilon_minimum:.2f} to 1.00."
+        )
+
+    def _update_assumption_guidance(self) -> None:
+        is_rm_anova = self.analysis_combo.currentIndex() == self.RM_ANOVA
+        measurements = self.measurements_spin.value()
+        if is_rm_anova and measurements < 2:
+            self.assumption_guidance.set_variant("error")
+            self.assumption_guidance.set_text(
+                "The selected effect needs at least two repeated measurements. "
+                "Increase the relevant condition or ROI count."
+            )
+            self.assumption_guidance.show()
+            self.calculate_button.setEnabled(False)
+            return
+
+        self.calculate_button.setEnabled(True)
+        if (
+            is_rm_anova
+            and self.effect_target_combo.currentIndex() == self.OMNIBUS_CELLS
+        ):
+            self.assumption_guidance.set_variant("warning")
+            self.assumption_guidance.set_text(
+                "The omnibus option tests whether any cell means differ. It "
+                "does not isolate condition, ROI, or interaction power."
+            )
+            self.assumption_guidance.show()
+        elif not is_rm_anova and self.alternative_combo.currentIndex() == 1:
+            self.assumption_guidance.set_variant("warning")
+            self.assumption_guidance.set_text(
+                "Use a one-sided test only for a directional hypothesis chosen "
+                "before examining the data. An effect in the opposite direction "
+                "would not count as support for that test."
+            )
+            self.assumption_guidance.show()
+        else:
+            self.assumption_guidance.hide()
+
     def _set_analysis_type(self, index: int) -> None:
         self.design_stack.setCurrentIndex(index)
         self.design_stack.updateGeometry()
+        self._update_assumption_guidance()
         if index == self.PAIRED_TEST:
             self.benchmark_label.setText(
                 "Conventional d benchmarks: 0.20 small, 0.50 medium, 0.80 large."
@@ -480,6 +589,12 @@ class SensitivityAnalysisWindow(QWidget):
         self.reporting_label.setText(
             "A reporting-ready summary will appear after calculation."
         )
+        self.plain_language_label.setText(
+            "A plain-language interpretation will appear after calculation."
+        )
+        self.assumption_summary_label.setText(
+            "Current assumptions will appear after calculation."
+        )
 
     def calculate(self) -> None:
         try:
@@ -502,6 +617,7 @@ class SensitivityAnalysisWindow(QWidget):
                     epsilon=self.epsilon_spin.value(),
                 )
         except (ValueError, RuntimeError) as exc:
+            self._clear_result()
             self.validation_banner.set_text(str(exc))
             self.validation_banner.show()
             return
@@ -522,4 +638,41 @@ class SensitivityAnalysisWindow(QWidget):
         else:
             self.equivalent_label.clear()
             self.equivalent_label.hide()
+        self.plain_language_label.setText(self._plain_language_result(result))
+        self.assumption_summary_label.setText(self._assumption_summary())
         self.reporting_label.setText(result.reporting_text)
+
+    def _plain_language_result(self, result: SensitivityResult) -> str:
+        sample_size = self.sample_size_spin.value()
+        power = self.power_spin.value()
+        alpha = self.alpha_spin.value()
+        return (
+            f"With {sample_size} analyzable participants, this model reaches "
+            f"{power:.0%} power at approximately {result.effect_metric} = "
+            f"{result.effect_size:.2f} with alpha = {alpha:g}. Effects smaller "
+            f"than {result.effect_size:.2f} have less than {power:.0%} power "
+            "under these assumptions; they are not ruled out."
+        )
+
+    def _assumption_summary(self) -> str:
+        common = (
+            f"{self.sample_size_spin.value()} analyzable participants · "
+            f"{self.power_spin.value():.0%} power · alpha = "
+            f"{self.alpha_spin.value():g}"
+        )
+        if self.analysis_combo.currentIndex() == self.PAIRED_TEST:
+            sidedness = (
+                "two-sided"
+                if self.alternative_combo.currentIndex() == 0
+                else "one-sided"
+            )
+            return f"{common} · {sidedness} paired/one-sample t-test"
+
+        target = self.effect_target_combo.currentText().lower()
+        return (
+            f"{common} · {self.conditions_spin.value()} conditions · "
+            f"{self.rois_spin.value()} ROIs · {target} · "
+            f"{self.measurements_spin.value()} repeated measurements · "
+            f"average r = {self.correlation_spin.value():.2f} · epsilon = "
+            f"{self.epsilon_spin.value():.2f}"
+        )

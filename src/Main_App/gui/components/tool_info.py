@@ -1,11 +1,17 @@
-"""Shared short-form tool information dialog helpers."""
+"""Shared single-page and tabbed tool information dialog helpers."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QDialogButtonBox, QTextBrowser, QToolButton, QWidget
+from PySide6.QtWidgets import (
+    QDialogButtonBox,
+    QTabWidget,
+    QTextBrowser,
+    QToolButton,
+    QWidget,
+)
 
 from Main_App.gui.icons import tool_info_icon
 
@@ -15,13 +21,26 @@ DEFAULT_TOOL_INFO_SIZE = SurfaceSize(width=620, height=520, min_width=460, min_h
 
 
 @dataclass(frozen=True)
-class ToolInfoContent:
-    """Editable user-facing information shown by a shared modal shell."""
+class ToolInfoTab:
+    """One named HTML page in a tabbed tool-information dialog."""
 
     key: str
     title: str
     html: str
+
+
+@dataclass(frozen=True)
+class ToolInfoContent:
+    """Editable user-facing information shown by a shared modal shell.
+
+    When ``tabs`` is non-empty, the tab content takes precedence over ``html``.
+    """
+
+    key: str
+    title: str
+    html: str = ""
     size: SurfaceSize = DEFAULT_TOOL_INFO_SIZE
+    tabs: tuple[ToolInfoTab, ...] = ()
 
 
 class ToolInfoDialog(AppDialog):
@@ -37,12 +56,38 @@ class ToolInfoDialog(AppDialog):
         super().__init__(content.title, parent, size=content.size)
         self.setObjectName(f"{content.key}_tool_info_dialog")
 
-        browser = QTextBrowser(self)
-        browser.setObjectName(browser_object_name or f"{content.key}_tool_info_browser")
-        browser.setOpenExternalLinks(True)
-        browser.setHtml(content.html)
-        self.root_layout.addWidget(browser, 1)
-        self.browser = browser
+        self.tab_widget: QTabWidget | None = None
+        self.browsers: tuple[QTextBrowser, ...]
+        if content.tabs:
+            tab_widget = QTabWidget(self)
+            tab_widget.setObjectName(f"{content.key}_tool_info_tabs")
+            browsers: list[QTextBrowser] = []
+            for index, tab in enumerate(content.tabs):
+                browser = QTextBrowser(tab_widget)
+                object_name = (
+                    browser_object_name
+                    if index == 0 and browser_object_name
+                    else f"{content.key}_tool_info_{tab.key}_browser"
+                )
+                browser.setObjectName(object_name)
+                browser.setOpenExternalLinks(True)
+                browser.setHtml(tab.html)
+                tab_widget.addTab(browser, tab.title)
+                browsers.append(browser)
+            self.root_layout.addWidget(tab_widget, 1)
+            self.tab_widget = tab_widget
+            self.browsers = tuple(browsers)
+            self.browser = self.browsers[0]
+        else:
+            browser = QTextBrowser(self)
+            browser.setObjectName(
+                browser_object_name or f"{content.key}_tool_info_browser"
+            )
+            browser.setOpenExternalLinks(True)
+            browser.setHtml(content.html)
+            self.root_layout.addWidget(browser, 1)
+            self.browsers = (browser,)
+            self.browser = browser
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         buttons.setObjectName(f"{content.key}_tool_info_buttons")

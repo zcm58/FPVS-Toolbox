@@ -187,7 +187,10 @@ provide the shared modal information-dialog path for tool-level explanatory
 copy. Keep the modal shell, browser/link behavior, close-button behavior, icon
 button properties, and theme-facing presentation in `Main_App.gui.components`;
 keep each tool's editable user-facing text in a small tool-local Python content
-module.
+module. `ToolInfoTab` and the optional `ToolInfoContent.tabs` tuple provide a
+backward-compatible tabbed layout for tools whose explanatory material is too
+complex for one page; content without tabs retains the original single-browser
+dialog.
 
 `PathPickerRow` is used by Plot Generator and Individual Detectability.
 `StatusBanner` is used by Stats, Ratio Calculator, and Individual Detectability.
