@@ -19,8 +19,8 @@ effect, or calculate “observed power.” It does not save or export anything.
 <h3>Quick Workflow</h3>
 <ol>
   <li>Enter the number of complete, analyzable participants.</li>
-  <li>Select a paired test or repeated-measures ANOVA.</li>
-  <li>For ANOVA, describe the conditions, ROIs, and effect being evaluated.</li>
+  <li>Select a paired test, repeated-measures ANOVA, or mixed-model simulation.</li>
+  <li>For repeated designs, describe the conditions, ROIs, and effect.</li>
   <li>Review power, alpha, correlation, and epsilon.</li>
   <li>Select <b>Calculate</b> and review the result and interpretation.</li>
 </ol>
@@ -60,11 +60,12 @@ Example: 4 conditions and 3 ROIs produce 4 measurements for a condition effect,
 
 <h3>Important Design Limit</h3>
 <p>
-The omnibus option treats all condition × ROI cells as levels of one factor and
-tests whether any cell means differ. It does <b>not</b> isolate the condition
-effect, ROI effect, or condition × ROI interaction. The current calculator also
-does not model between-participant groups. Factorial interactions and mixed
-within/between designs require a different power model.
+The one-way ANOVA omnibus option treats all condition × ROI cells as levels of
+one factor and tests whether any cell means differ. It does <b>not</b> isolate
+the condition effect, ROI effect, or condition × ROI interaction. The separate
+mixed-model simulation supports one standardized interaction contrast but does
+not model between-participant groups. Mixed within/between designs require a
+different power model.
 </p>
 """
 
@@ -91,6 +92,62 @@ ASSUMPTIONS_HTML = """
 Sample size, correlation, epsilon, alpha, and desired power all affect the
 detectable effect. A precise result is conditional on these inputs; it is not a
 guarantee about the observed study outcome.
+</p>
+"""
+
+MIXED_MODELS_HTML = """
+<h2>Linear Mixed-Model Simulation</h2>
+<p>
+Mixed-model power is estimated by Monte Carlo simulation. The tool repeatedly
+generates balanced FPVS datasets, fits the planned model, and records how often
+the selected fixed-effect block is significant. It then searches for the
+standardized contrast corresponding approximately to the requested power.
+</p>
+
+<h3>Supported Model</h3>
+<p>
+The current simulation is deliberately limited to
+<b>value ~ condition × ROI + participant random intercept</b>, matching the
+toolbox's current FPVS mixed-model structure. It uses sum contrasts and an
+omnibus Wald test for the selected condition, ROI, or interaction coefficient
+block. It does not support between-participant groups, covariates, random
+slopes, missing cells, or generalized outcomes.
+</p>
+
+<h3>Effect Definition</h3>
+<ul>
+  <li><b>Condition:</b> a standardized difference between two condition levels,
+  embedded in the full condition factor and repeated across ROIs.</li>
+  <li><b>ROI:</b> a standardized difference between two ROI levels, embedded in
+  the full ROI factor and repeated across conditions.</li>
+  <li><b>Interaction:</b> a standardized 2 × 2 difference-in-differences embedded
+  in the full condition × ROI design.</li>
+</ul>
+<p>
+Effects are expressed in residual-standard-deviation units. These are planned
+contrast magnitudes, not Cohen's d, and conventional small/medium/large labels
+are not applied.
+</p>
+
+<h3>Simulation Uncertainty</h3>
+<p>
+The reported Monte Carlo interval describes uncertainty caused by running a
+finite number of simulations. It is not a confidence interval for the true
+study effect. More simulations improve precision but increase runtime. Failed
+or non-converged models count as non-detections and are reported separately.
+</p>
+
+<h3>Method Reference</h3>
+<p>
+The simulation workflow follows the general approach described by Green and
+MacLeod (2016): define a mixed model and design, repeatedly simulate and refit
+the model, and estimate power from the proportion of significant tests.
+</p>
+<p>
+Green, P., &amp; MacLeod, C. J. (2016). SIMR: an R package for power analysis
+of generalized linear mixed models by simulation. <i>Methods in Ecology and
+Evolution, 7</i>(4), 493–498.
+<a href="https://doi.org/10.1111/2041-210X.12504">https://doi.org/10.1111/2041-210X.12504</a>
 </p>
 """
 
@@ -137,12 +194,19 @@ ANOVA. It uses sample size, repeated-measure count, average correlation, and
 epsilon to solve for eta-squared, then converts to Cohen's f using
 <b>f = sqrt(η² / (1 − η²))</b>.
 </p>
+<p>
+The linear mixed-model option uses Statsmodels MixedLM with REML estimation and
+an omnibus Wald test of the selected sum-coded fixed-effect coefficient block.
+The fixed-N effect search and final power estimate use reproducible Monte Carlo
+simulation.
+</p>
 
 <h3>Implementation References</h3>
 <ul>
   <li><a href="https://www.statsmodels.org/stable/generated/statsmodels.stats.power.TTestPower.solve_power.html">Statsmodels TTestPower documentation</a></li>
   <li><a href="https://pingouin-stats.org/generated/pingouin.power_rm_anova.html">Pingouin repeated-measures power documentation</a></li>
   <li><a href="https://doi.org/10.1525/collabra.33267">Lakens (2022), Sample Size Justification</a></li>
+  <li><a href="https://doi.org/10.1111/2041-210X.12504">Green &amp; MacLeod (2016), mixed-model power by simulation</a></li>
 </ul>
 """
 
@@ -155,6 +219,7 @@ SENSITIVITY_ANALYSIS_TOOL_INFO = ToolInfoContent(
         ToolInfoTab("quick_guide", "Quick Guide", QUICK_GUIDE_HTML),
         ToolInfoTab("fpvs_design", "FPVS Design", FPVS_DESIGN_HTML),
         ToolInfoTab("assumptions", "Assumptions", ASSUMPTIONS_HTML),
+        ToolInfoTab("mixed_models", "Mixed Models", MIXED_MODELS_HTML),
         ToolInfoTab("interpretation", "Interpretation", INTERPRETATION_HTML),
         ToolInfoTab("methods", "Methods", METHODS_HTML),
     ),
@@ -165,6 +230,7 @@ __all__ = [
     "FPVS_DESIGN_HTML",
     "INTERPRETATION_HTML",
     "METHODS_HTML",
+    "MIXED_MODELS_HTML",
     "QUICK_GUIDE_HTML",
     "SENSITIVITY_ANALYSIS_TOOL_INFO",
 ]

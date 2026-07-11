@@ -44,10 +44,49 @@ levels.
 The omnibus condition × ROI option treats all cells as levels of one
 within-participant factor. It does not specifically estimate power for a
 condition × ROI interaction. Use the information button in the Study
-Assumptions card for five tabs: Quick Guide, FPVS Design, Assumptions,
-Interpretation (including reporting), and Methods (including references). The
-current model does not include between-participant groups or factorial
-interaction power.
+Assumptions card for six tabs: Quick Guide, FPVS Design, Assumptions, Mixed
+Models, Interpretation (including reporting), and Methods (including
+references). This analytical one-way model does not include
+between-participant groups or factorial interaction power.
+
+### Linear Mixed Model (Simulation)
+
+The advanced simulation mode estimates sensitivity for the toolbox's supported
+FPVS mixed model:
+
+`value ~ condition * ROI + participant random intercept`
+
+Enter analyzable participants, condition and ROI counts, desired power, alpha,
+within-participant correlation, simulation count, and a reproducible random
+seed. Choose one simulated effect:
+
+- a standardized difference between two condition levels;
+- a standardized difference between two ROI levels; or
+- a standardized 2 × 2 condition × ROI difference-in-differences.
+
+The selected contrast is embedded in the full condition × ROI design. Each
+simulated dataset is fitted with the random-intercept mixed model, and the
+selected fixed-effect coefficient block is evaluated with an omnibus Wald test.
+The tool searches for the standardized contrast corresponding approximately to
+the requested power.
+
+Mixed-model effects are reported in residual-standard-deviation units. They are
+not labeled Cohen's *d* or *f*, and conventional small/medium/large benchmarks
+are not applied. The result includes estimated simulated power, a 95% Monte
+Carlo interval, successful fits, failed fits, singular fits, and the random
+seed. The Monte Carlo interval describes finite-simulation uncertainty; it is
+not a confidence interval for the real study effect.
+
+The simulation does not support between-participant groups, random slopes,
+covariates, missing cells, or generalized outcomes. It runs in a background
+worker and can be cancelled without blocking the Main App.
+
+This workflow follows the general simulation-based mixed-model power approach
+described by Green and MacLeod (2016): repeatedly simulate data from a specified
+mixed model, refit the model, and estimate power from the proportion of
+significant tests.
+
+- Green, P., & MacLeod, C. J. (2016). [SIMR: an R package for power analysis of generalized linear mixed models by simulation](https://doi.org/10.1111/2041-210X.12504). *Methods in Ecology and Evolution, 7*(4), 493–498.
 
 ## Defaults
 
@@ -62,6 +101,9 @@ The initial values are:
 - effect evaluated: condition effect, producing 2 repeated measurements;
 - average correlation: 0.50; and
 - epsilon: 1.00.
+
+The mixed-model mode defaults to 2 conditions, 2 ROIs, a condition contrast,
+within-participant correlation of 0.50, 400 final simulations, and seed 2026.
 
 Select **Reset Defaults** at any time to restore these values.
 
@@ -83,7 +125,8 @@ of the assumptions used, and a reporting-ready sentence.
 Changing any result-affecting input clears these outputs so a stale result is
 not shown beside new assumptions.
 
-The tool also shows conventional Cohen benchmarks:
+For the two analytical modes, the tool also shows conventional Cohen
+benchmarks:
 
 - Cohen's *d*: 0.20 small, 0.50 medium, and 0.80 large;
 - Cohen's *f*: 0.10 small, 0.25 medium, and 0.40 large.

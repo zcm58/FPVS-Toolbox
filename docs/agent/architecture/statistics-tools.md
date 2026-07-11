@@ -17,8 +17,12 @@ Primary paths:
   settings/validation, and run/status/log workflow.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
 - `src/Tools/Sensitivity_Analysis/`: standalone manual sensitivity calculator
-  for minimum detectable Cohen's dz or Cohen's f. It uses only values entered
-  on its embedded page and remains outside project I/O and the Stats pipeline.
+  for minimum detectable Cohen's dz, Cohen's f, or a simulation-based
+  standardized contrast for the current random-intercept FPVS mixed model. It
+  uses only values entered on its embedded page and remains outside project I/O
+  and the Stats pipeline. Mixed-model simulation tests sum-coded condition,
+  ROI, or interaction coefficient blocks with an omnibus Wald test and reports
+  Monte Carlo, convergence, failure, and singular-fit diagnostics.
 - `src/Tools/Publication_Maps/`: embedded Scalp Maps tool. Current scope is
   BCA, SNR, and z-score publication scalp maps. It must load the authoritative
   processing-time significant-harmonic selection from project metadata; it must

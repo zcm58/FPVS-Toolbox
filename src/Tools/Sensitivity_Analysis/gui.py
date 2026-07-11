@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QThread
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -33,7 +33,13 @@ from Tools.Sensitivity_Analysis.calculator import (
     calculate_paired_ttest_sensitivity,
     calculate_rm_anova_sensitivity,
 )
+from Tools.Sensitivity_Analysis.lmm_simulation import (
+    LmmSensitivityConfig,
+    LmmSensitivityResult,
+    validate_lmm_config,
+)
 from Tools.Sensitivity_Analysis.tool_info import SENSITIVITY_ANALYSIS_TOOL_INFO
+from Tools.Sensitivity_Analysis.worker import LmmSensitivityWorker
 
 
 class _ResultSummary(QWidget):
@@ -109,6 +115,7 @@ class SensitivityAnalysisWindow(QWidget):
 
     PAIRED_TEST = 0
     RM_ANOVA = 1
+    LMM_SIMULATION = 2
     CONDITION_EFFECT = 0
     ROI_EFFECT = 1
     OMNIBUS_CELLS = 2
@@ -117,6 +124,8 @@ class SensitivityAnalysisWindow(QWidget):
         super().__init__(parent)
         self.setWindowTitle("Sensitivity Analysis")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._lmm_thread: QThread | None = None
+        self._lmm_worker: LmmSensitivityWorker | None = None
         self._build_ui()
         self._connect_signals()
         self.reset_defaults()
@@ -220,7 +229,11 @@ class SensitivityAnalysisWindow(QWidget):
         self.analysis_combo = QComboBox(card.content)
         self.analysis_combo.setObjectName("sensitivity_analysis_type")
         self.analysis_combo.addItems(
-            ["Paired / one-sample t-test", "Repeated-measures ANOVA"]
+            [
+                "Paired / one-sample t-test",
+                "Repeated-measures ANOVA",
+                "Linear mixed model (simulation)",
+            ]
         )
         self.analysis_combo.setSizeAdjustPolicy(
             QComboBox.AdjustToMinimumContentsLengthWithIcon
@@ -338,6 +351,80 @@ class SensitivityAnalysisWindow(QWidget):
         rm_form.addRow("Nonsphericity epsilon:", self.epsilon_spin)
         self.design_stack.addWidget(rm_panel)
 
+        lmm_panel = QWidget(self.design_stack)
+        lmm_form = make_form_layout()
+        lmm_panel.setLayout(lmm_form)
+
+        self.lmm_target_combo = QComboBox(lmm_panel)
+        self.lmm_target_combo.setObjectName("sensitivity_lmm_target")
+        self.lmm_target_combo.addItems(
+            [
+                "Condition effect (two-level contrast)",
+                "ROI effect (two-level contrast)",
+                "Condition × ROI interaction (2 × 2 contrast)",
+            ]
+        )
+        self.lmm_target_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.lmm_target_combo.setMinimumContentsLength(24)
+        self._expand_input(self.lmm_target_combo)
+        lmm_form.addRow("Effect simulated:", self.lmm_target_combo)
+
+        self.lmm_conditions_spin = QSpinBox(lmm_panel)
+        self.lmm_conditions_spin.setObjectName("sensitivity_lmm_conditions")
+        self.lmm_conditions_spin.setRange(1, 20)
+        self._expand_input(self.lmm_conditions_spin)
+        lmm_form.addRow("Number of conditions:", self.lmm_conditions_spin)
+
+        self.lmm_rois_spin = QSpinBox(lmm_panel)
+        self.lmm_rois_spin.setObjectName("sensitivity_lmm_rois")
+        self.lmm_rois_spin.setRange(1, 20)
+        self._expand_input(self.lmm_rois_spin)
+        lmm_form.addRow("Number of ROIs:", self.lmm_rois_spin)
+
+        self.lmm_correlation_spin = QDoubleSpinBox(lmm_panel)
+        self.lmm_correlation_spin.setObjectName("sensitivity_lmm_correlation")
+        self.lmm_correlation_spin.setDecimals(2)
+        self.lmm_correlation_spin.setSingleStep(0.05)
+        self.lmm_correlation_spin.setRange(0.00, 0.94)
+        self.lmm_correlation_spin.setToolTip(
+            "Correlation induced by the participant random intercept across "
+            "condition × ROI observations."
+        )
+        self._expand_input(self.lmm_correlation_spin)
+        lmm_form.addRow("Within-participant correlation:", self.lmm_correlation_spin)
+
+        self.lmm_simulations_spin = QSpinBox(lmm_panel)
+        self.lmm_simulations_spin.setObjectName("sensitivity_lmm_simulations")
+        self.lmm_simulations_spin.setRange(100, 5_000)
+        self.lmm_simulations_spin.setSingleStep(100)
+        self.lmm_simulations_spin.setToolTip(
+            "More simulations reduce Monte Carlo uncertainty but take longer."
+        )
+        self._expand_input(self.lmm_simulations_spin)
+        lmm_form.addRow("Final simulations:", self.lmm_simulations_spin)
+
+        self.lmm_seed_spin = QSpinBox(lmm_panel)
+        self.lmm_seed_spin.setObjectName("sensitivity_lmm_seed")
+        self.lmm_seed_spin.setRange(0, 2_147_483_647)
+        self.lmm_seed_spin.setToolTip(
+            "Use the same seed and assumptions to reproduce the simulation."
+        )
+        self._expand_input(self.lmm_seed_spin)
+        lmm_form.addRow("Random seed:", self.lmm_seed_spin)
+
+        lmm_scope = QLabel(
+            "Model: value ~ condition × ROI + participant random intercept. "
+            "The simulation can take a minute or longer.",
+            lmm_panel,
+        )
+        lmm_scope.setObjectName("sensitivity_lmm_scope")
+        lmm_scope.setProperty("caption", True)
+        lmm_scope.setWordWrap(True)
+        lmm_form.addRow(lmm_scope)
+        self.design_stack.addWidget(lmm_panel)
+
         self.assumption_guidance = StatusBanner("", card.content, variant="info")
         self.assumption_guidance.setObjectName("sensitivity_assumption_guidance")
         self.assumption_guidance.hide()
@@ -356,8 +443,14 @@ class SensitivityAnalysisWindow(QWidget):
             "Reset Defaults", variant="secondary", parent=card.content
         )
         self.reset_button.setObjectName("sensitivity_reset")
+        self.cancel_button = make_action_button(
+            "Cancel", variant="secondary", parent=card.content
+        )
+        self.cancel_button.setObjectName("sensitivity_cancel")
+        self.cancel_button.hide()
         actions = make_action_row(
-            [self.reset_button, self.calculate_button], parent=card.content
+            [self.reset_button, self.cancel_button, self.calculate_button],
+            parent=card.content,
         )
         card.content_layout.addWidget(actions)
 
@@ -373,6 +466,11 @@ class SensitivityAnalysisWindow(QWidget):
         )
         intro.setWordWrap(True)
         card.content_layout.addWidget(intro)
+
+        self.simulation_status = StatusBanner("", card.content, variant="info")
+        self.simulation_status.setObjectName("sensitivity_simulation_status")
+        self.simulation_status.hide()
+        card.content_layout.addWidget(self.simulation_status)
 
         self.result_banner = _ResultSummary(card.content)
         self.result_banner.setObjectName("sensitivity_result")
@@ -448,13 +546,32 @@ class SensitivityAnalysisWindow(QWidget):
         self.rois_spin.valueChanged.connect(self._update_derived_measurements)
         self.correlation_spin.valueChanged.connect(self._on_assumptions_changed)
         self.epsilon_spin.valueChanged.connect(self._on_assumptions_changed)
+        self.lmm_target_combo.currentIndexChanged.connect(
+            self._on_lmm_assumptions_changed
+        )
+        self.lmm_conditions_spin.valueChanged.connect(
+            self._on_lmm_assumptions_changed
+        )
+        self.lmm_rois_spin.valueChanged.connect(self._on_lmm_assumptions_changed)
+        self.lmm_correlation_spin.valueChanged.connect(
+            self._on_lmm_assumptions_changed
+        )
+        self.lmm_simulations_spin.valueChanged.connect(
+            self._on_lmm_assumptions_changed
+        )
+        self.lmm_seed_spin.valueChanged.connect(self._on_lmm_assumptions_changed)
         self.calculate_button.clicked.connect(self.calculate)
+        self.cancel_button.clicked.connect(self._cancel_lmm_simulation)
         self.reset_button.clicked.connect(self.reset_defaults)
 
     def _on_assumptions_changed(self) -> None:
         self._clear_result()
 
     def _on_alternative_changed(self) -> None:
+        self._update_assumption_guidance()
+        self._clear_result()
+
+    def _on_lmm_assumptions_changed(self) -> None:
         self._update_assumption_guidance()
         self._clear_result()
 
@@ -518,13 +635,27 @@ class SensitivityAnalysisWindow(QWidget):
         )
 
     def _update_assumption_guidance(self) -> None:
-        is_rm_anova = self.analysis_combo.currentIndex() == self.RM_ANOVA
+        analysis = self.analysis_combo.currentIndex()
+        is_rm_anova = analysis == self.RM_ANOVA
+        is_lmm = analysis == self.LMM_SIMULATION
         measurements = self.measurements_spin.value()
         if is_rm_anova and measurements < 2:
             self.assumption_guidance.set_variant("error")
             self.assumption_guidance.set_text(
                 "The selected effect needs at least two repeated measurements. "
                 "Increase the relevant condition or ROI count."
+            )
+            self.assumption_guidance.show()
+            self.calculate_button.setEnabled(False)
+            return
+
+        if is_lmm and (
+            self.lmm_conditions_spin.value() < 2 or self.lmm_rois_spin.value() < 2
+        ):
+            self.assumption_guidance.set_variant("error")
+            self.assumption_guidance.set_text(
+                "Linear mixed-model simulation requires at least two conditions "
+                "and two ROIs for the supported condition × ROI model."
             )
             self.assumption_guidance.show()
             self.calculate_button.setEnabled(False)
@@ -541,12 +672,19 @@ class SensitivityAnalysisWindow(QWidget):
                 "does not isolate condition, ROI, or interaction power."
             )
             self.assumption_guidance.show()
-        elif not is_rm_anova and self.alternative_combo.currentIndex() == 1:
+        elif analysis == self.PAIRED_TEST and self.alternative_combo.currentIndex() == 1:
             self.assumption_guidance.set_variant("warning")
             self.assumption_guidance.set_text(
                 "Use a one-sided test only for a directional hypothesis chosen "
                 "before examining the data. An effect in the opposite direction "
                 "would not count as support for that test."
+            )
+            self.assumption_guidance.show()
+        elif is_lmm:
+            self.assumption_guidance.set_variant("info")
+            self.assumption_guidance.set_text(
+                "Simulation estimates an approximate standardized contrast and "
+                "reports Monte Carlo and model-fit uncertainty."
             )
             self.assumption_guidance.show()
         else:
@@ -560,10 +698,18 @@ class SensitivityAnalysisWindow(QWidget):
             self.benchmark_label.setText(
                 "Conventional d benchmarks: 0.20 small, 0.50 medium, 0.80 large."
             )
-        else:
+            self.calculate_button.setText("Calculate")
+        elif index == self.RM_ANOVA:
             self.benchmark_label.setText(
                 "Conventional f benchmarks: 0.10 small, 0.25 medium, 0.40 large."
             )
+            self.calculate_button.setText("Calculate")
+        else:
+            self.benchmark_label.setText(
+                "The standardized contrast is expressed in residual-SD units. "
+                "No universal small, medium, or large benchmarks are applied."
+            )
+            self.calculate_button.setText("Run Simulation")
         self._clear_result()
 
     def reset_defaults(self) -> None:
@@ -578,12 +724,23 @@ class SensitivityAnalysisWindow(QWidget):
         self._update_derived_measurements()
         self.correlation_spin.setValue(0.50)
         self.epsilon_spin.setValue(1.00)
+        self.lmm_target_combo.setCurrentIndex(0)
+        self.lmm_conditions_spin.setValue(2)
+        self.lmm_rois_spin.setValue(2)
+        self.lmm_correlation_spin.setValue(0.50)
+        self.lmm_simulations_spin.setValue(400)
+        self.lmm_seed_spin.setValue(2026)
         self._set_analysis_type(self.PAIRED_TEST)
 
     def _clear_result(self) -> None:
         self.validation_banner.hide()
         self.result_banner.set_placeholder()
-        self.magnitude_label.setText("Conventional magnitude: —")
+        if self.analysis_combo.currentIndex() == self.LMM_SIMULATION:
+            self.magnitude_label.setText(
+                "Effect scale: standardized contrast in residual-SD units"
+            )
+        else:
+            self.magnitude_label.setText("Conventional magnitude: —")
         self.equivalent_label.clear()
         self.equivalent_label.hide()
         self.reporting_label.setText(
@@ -595,8 +752,13 @@ class SensitivityAnalysisWindow(QWidget):
         self.assumption_summary_label.setText(
             "Current assumptions will appear after calculation."
         )
+        if self._lmm_thread is None:
+            self.simulation_status.hide()
 
     def calculate(self) -> None:
+        if self.analysis_combo.currentIndex() == self.LMM_SIMULATION:
+            self._start_lmm_simulation()
+            return
         try:
             if self.analysis_combo.currentIndex() == self.PAIRED_TEST:
                 result = calculate_paired_ttest_sensitivity(
@@ -624,6 +786,182 @@ class SensitivityAnalysisWindow(QWidget):
 
         self.validation_banner.hide()
         self._show_result(result)
+
+    def _lmm_config(self) -> LmmSensitivityConfig:
+        targets = ("condition", "roi", "interaction")
+        return LmmSensitivityConfig(
+            sample_size=self.sample_size_spin.value(),
+            conditions=self.lmm_conditions_spin.value(),
+            rois=self.lmm_rois_spin.value(),
+            target=targets[self.lmm_target_combo.currentIndex()],
+            power=self.power_spin.value(),
+            alpha=self.alpha_spin.value(),
+            correlation=self.lmm_correlation_spin.value(),
+            simulations=self.lmm_simulations_spin.value(),
+            seed=self.lmm_seed_spin.value(),
+        )
+
+    def _start_lmm_simulation(self) -> None:
+        if self._lmm_thread is not None:
+            return
+        config = self._lmm_config()
+        try:
+            validate_lmm_config(config)
+        except ValueError as exc:
+            self._clear_result()
+            self.validation_banner.set_text(str(exc))
+            self.validation_banner.show()
+            return
+
+        self._clear_result()
+        self.validation_banner.hide()
+        self.simulation_status.set_variant("info")
+        self.simulation_status.set_text("Preparing mixed-model simulation...")
+        self.simulation_status.show()
+        self._set_simulation_controls_enabled(False)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+
+        thread = QThread(self)
+        worker = LmmSensitivityWorker(config)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_lmm_progress)
+        worker.completed.connect(self._on_lmm_completed)
+        worker.failed.connect(self._on_lmm_failed)
+        worker.cancelled.connect(self._on_lmm_cancelled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._on_lmm_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._lmm_thread = thread
+        self._lmm_worker = worker
+        thread.start()
+
+    def _set_simulation_controls_enabled(self, enabled: bool) -> None:
+        controls = (
+            self.analysis_combo,
+            self.sample_size_spin,
+            self.power_spin,
+            self.alpha_spin,
+            self.alternative_combo,
+            self.effect_target_combo,
+            self.conditions_spin,
+            self.rois_spin,
+            self.correlation_spin,
+            self.epsilon_spin,
+            self.lmm_target_combo,
+            self.lmm_conditions_spin,
+            self.lmm_rois_spin,
+            self.lmm_correlation_spin,
+            self.lmm_simulations_spin,
+            self.lmm_seed_spin,
+            self.reset_button,
+        )
+        for control in controls:
+            control.setEnabled(enabled)
+        self.calculate_button.setEnabled(enabled)
+
+    def _cancel_lmm_simulation(self) -> None:
+        if self._lmm_worker is None:
+            return
+        self._lmm_worker.cancel()
+        self.cancel_button.setEnabled(False)
+        self.simulation_status.set_variant("info")
+        self.simulation_status.set_text("Cancelling after the current model fit...")
+
+    def _on_lmm_progress(self, percent: int, message: str) -> None:
+        self.simulation_status.set_variant("info")
+        self.simulation_status.set_text(f"{message} — {percent}%")
+        self.simulation_status.show()
+
+    def _on_lmm_completed(self, result: LmmSensitivityResult) -> None:
+        self._show_lmm_result(result)
+        if result.failed_fits or result.singular_fits:
+            self.simulation_status.set_variant("warning")
+            self.simulation_status.set_text(
+                f"Fit diagnostics: {result.failed_fits} failed and "
+                f"{result.singular_fits} singular final fits out of "
+                f"{result.simulations}."
+            )
+            self.simulation_status.show()
+        else:
+            self.simulation_status.hide()
+
+    def _on_lmm_failed(self, message: str) -> None:
+        self._clear_result()
+        self.simulation_status.set_variant("error")
+        self.simulation_status.set_text(message)
+        self.simulation_status.show()
+
+    def _on_lmm_cancelled(self) -> None:
+        self._clear_result()
+        self.simulation_status.set_variant("info")
+        self.simulation_status.set_text("Mixed-model simulation cancelled.")
+        self.simulation_status.show()
+
+    def _on_lmm_finished(self) -> None:
+        self._lmm_thread = None
+        self._lmm_worker = None
+        self._set_simulation_controls_enabled(True)
+        self.cancel_button.hide()
+        self._update_assumption_guidance()
+
+    def shutdown(self, timeout_ms: int = 3_000) -> None:
+        """Request simulation cancellation and briefly join the worker on app exit."""
+
+        worker = self._lmm_worker
+        thread = self._lmm_thread
+        if worker is None or thread is None:
+            return
+        worker.cancel()
+        thread.quit()
+        thread.wait(timeout_ms)
+
+    def _show_lmm_result(self, result: LmmSensitivityResult) -> None:
+        target_labels = {
+            "condition": "condition contrast",
+            "roi": "ROI contrast",
+            "interaction": "condition × ROI difference-in-differences",
+        }
+        target_label = target_labels[result.target]
+        self.result_banner.set_result("Standardized contrast", result.effect_size)
+        self.magnitude_label.setText(
+            f"Simulated effect: {target_label} in residual-SD units"
+        )
+        self.equivalent_label.setText(
+            f"Estimated power: {result.estimated_power:.1%} "
+            f"(95% Monte Carlo interval {result.power_ci_low:.1%}–"
+            f"{result.power_ci_high:.1%})"
+        )
+        self.equivalent_label.show()
+        self.plain_language_label.setText(
+            f"The simulation estimated that a standardized {target_label} of "
+            f"approximately {result.effect_size:.2f} corresponds to the requested "
+            f"power under this model. At that value, {result.estimated_power:.1%} "
+            f"of {result.simulations} simulated studies produced a significant "
+            "omnibus Wald test. The interval describes Monte Carlo uncertainty, "
+            "not uncertainty about the real study effect."
+        )
+        self.assumption_summary_label.setText(
+            f"{self.sample_size_spin.value()} analyzable participants · "
+            f"{self.lmm_conditions_spin.value()} conditions · "
+            f"{self.lmm_rois_spin.value()} ROIs · {target_label} · random-intercept "
+            f"correlation = {self.lmm_correlation_spin.value():.2f} · "
+            f"alpha = {self.alpha_spin.value():g} · "
+            f"target power = {self.power_spin.value():.0%} · "
+            f"seed = {result.seed}"
+        )
+        self.reporting_label.setText(
+            f"A simulation-based sensitivity analysis using {result.simulations} "
+            "replicates of a random-intercept linear mixed model estimated a "
+            f"minimum standardized {target_label} of approximately "
+            f"{result.effect_size:.2f} for {self.power_spin.value():.0%} power at "
+            f"alpha = {self.alpha_spin.value():g}. Final simulated power was "
+            f"{result.estimated_power:.1%} (95% Monte Carlo interval "
+            f"{result.power_ci_low:.1%}–{result.power_ci_high:.1%}); "
+            f"{result.successful_fits}/{result.simulations} final models converged."
+        )
 
     def _show_result(self, result: SensitivityResult) -> None:
         self.result_banner.set_result(result.effect_metric, result.effect_size)

@@ -845,6 +845,9 @@ class MainWindow(QMainWindow, ProcessingMixin):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        sensitivity_page = getattr(self, "_sensitivity_analysis_page", None)
+        if sensitivity_page is not None:
+            sensitivity_page.shutdown()
         if self._post_worker and self._post_thread:
             self._post_worker.stop()
             self._post_thread.quit()

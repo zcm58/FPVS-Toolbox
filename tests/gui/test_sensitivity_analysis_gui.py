@@ -12,7 +12,12 @@ from PySide6.QtWidgets import QScrollArea
 
 from Main_App.gui.components import SectionCard, ToolInfoDialog
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
+from Tools.Sensitivity_Analysis.lmm_simulation import (
+    LmmSensitivityConfig,
+    LmmSensitivityResult,
+)
 from Tools.Sensitivity_Analysis.tool_info import SENSITIVITY_ANALYSIS_TOOL_INFO
+from Tools.Sensitivity_Analysis.worker import LmmSensitivityWorker
 
 
 def _build_page(qtbot) -> SensitivityAnalysisWindow:
@@ -203,14 +208,111 @@ def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
 
     assert page.tool_info_button.toolTip() == "About Sensitivity Analysis"
     assert dialog.tab_widget is not None
-    assert dialog.tab_widget.count() == 5
+    assert dialog.tab_widget.count() == 6
     assert dialog.tab_widget.tabText(0) == "Quick Guide"
     assert dialog.tab_widget.tabText(1) == "FPVS Design"
-    assert dialog.tab_widget.tabText(4) == "Methods"
+    assert dialog.tab_widget.tabText(3) == "Mixed Models"
+    assert dialog.tab_widget.tabText(5) == "Methods"
     assert dialog.minimumWidth() == 600
     assert "Sample size (N) is the number of participants" in text
     assert "repeated measurements = conditions × ROIs" in text
     assert "does not isolate the condition effect" in text
+    assert "Green and MacLeod (2016)" in text
+    assert "10.1111/2041-210X.12504" in text
+
+
+def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.analysis_combo.setCurrentIndex(page.LMM_SIMULATION)
+
+    assert page.design_stack.currentIndex() == page.LMM_SIMULATION
+    assert page.calculate_button.text() == "Run Simulation"
+    assert page.lmm_conditions_spin.value() == 2
+    assert page.lmm_rois_spin.value() == 2
+    assert page.lmm_correlation_spin.value() == pytest.approx(0.50)
+    assert page.lmm_simulations_spin.value() == 400
+    assert page.lmm_seed_spin.value() == 2026
+    assert page.calculate_button.isEnabled()
+    assert "Monte Carlo" in page.assumption_guidance.text()
+
+    page.lmm_rois_spin.setValue(1)
+
+    assert not page.calculate_button.isEnabled()
+    assert page.assumption_guidance.property("statusVariant") == "error"
+    assert "at least two conditions and two ROIs" in page.assumption_guidance.text()
+
+
+def test_lmm_result_reports_simulation_uncertainty_without_cohen_labels(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.analysis_combo.setCurrentIndex(page.LMM_SIMULATION)
+    result = LmmSensitivityResult(
+        effect_size=0.72,
+        estimated_power=0.805,
+        power_ci_low=0.765,
+        power_ci_high=0.840,
+        simulations=400,
+        successful_fits=390,
+        failed_fits=10,
+        singular_fits=4,
+        target="interaction",
+        seed=2026,
+    )
+
+    page._show_lmm_result(result)
+
+    assert page.result_banner.text() == "Standardized contrast = 0.72"
+    assert page.result_banner.property("statusVariant") == "info"
+    assert "residual-SD units" in page.magnitude_label.text()
+    assert "80.5%" in page.equivalent_label.text()
+    assert "Monte Carlo interval" in page.equivalent_label.text()
+    assert "not uncertainty about the real study effect" in (
+        page.plain_language_label.text()
+    )
+    assert "seed = 2026" in page.assumption_summary_label.text()
+    assert "390/400 final models converged" in page.reporting_label.text()
+    assert "No universal small, medium, or large benchmarks" in (
+        page.benchmark_label.text()
+    )
+
+
+def test_lmm_worker_emits_progress_and_completion(qtbot) -> None:
+    config = LmmSensitivityConfig(
+        sample_size=24,
+        conditions=2,
+        rois=2,
+        target="condition",
+        simulations=100,
+    )
+    expected = LmmSensitivityResult(
+        effect_size=0.50,
+        estimated_power=0.80,
+        power_ci_low=0.71,
+        power_ci_high=0.87,
+        simulations=100,
+        successful_fits=100,
+        failed_fits=0,
+        singular_fits=0,
+        target="condition",
+        seed=2026,
+    )
+
+    def fake_runner(config, *, progress, should_cancel):
+        assert config.sample_size == 24
+        assert not should_cancel()
+        progress(50, "Testing")
+        return expected
+
+    worker = LmmSensitivityWorker(config, runner=fake_runner)
+    progress_events = []
+    completed = []
+    worker.progress.connect(lambda percent, text: progress_events.append((percent, text)))
+    worker.completed.connect(completed.append)
+
+    with qtbot.waitSignal(worker.finished):
+        worker.run()
+
+    assert progress_events == [(50, "Testing")]
+    assert completed == [expected]
 
 
 def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:

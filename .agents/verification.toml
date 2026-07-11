@@ -78,9 +78,12 @@ manual_smoke = ["Open Sequence Figure from the Main App and verify the changed c
 
 [scopes.sensitivity-analysis]
 audits = ["gui"]
-tests = ["tests/sensitivity_analysis/test_sensitivity_calculator.py"]
+tests = [
+  "tests/sensitivity_analysis/test_sensitivity_calculator.py",
+  "tests/sensitivity_analysis/test_lmm_sensitivity.py",
+]
 include = ["src/Tools/Sensitivity_Analysis/**", "tests/sensitivity_analysis/**", "tests/gui/test_sensitivity_analysis_gui.py"]
-manual_smoke = ["Open Sensitivity Analysis from the Main App, calculate both supported designs, resize the window, and confirm all controls and result text remain visible."]
+manual_smoke = ["Open Sensitivity Analysis from the Main App, calculate the two analytical designs, run and cancel the mixed-model simulation, review all information tabs, resize the window, and confirm all controls and result text remain visible."]
 
 [scopes.stats]
 audits = ["stats-structure", "stats-reporting-legibility"]
