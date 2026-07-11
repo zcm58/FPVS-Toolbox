@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -23,12 +23,15 @@ from Main_App.gui.components import (
     make_action_button,
     make_action_row,
     make_form_layout,
+    make_info_button,
+    show_tool_info,
 )
 from Tools.Sensitivity_Analysis.calculator import (
     SensitivityResult,
     calculate_paired_ttest_sensitivity,
     calculate_rm_anova_sensitivity,
 )
+from Tools.Sensitivity_Analysis.tool_info import SENSITIVITY_ANALYSIS_TOOL_INFO
 
 
 class _ResultSummary(QWidget):
@@ -85,11 +88,28 @@ class _ResultSummary(QWidget):
         self.update()
 
 
+class _CurrentPageStack(QStackedWidget):
+    """Size a stack from its visible page instead of its tallest hidden page."""
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt virtual method
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt virtual method
+        current = self.currentWidget()
+        if current is not None:
+            return current.minimumSizeHint()
+        return super().minimumSizeHint()
+
+
 class SensitivityAnalysisWindow(QWidget):
     """Input-only sensitivity analysis page embedded in the Main App."""
 
     PAIRED_TEST = 0
     RM_ANOVA = 1
+    CONDITION_EFFECT = 0
+    ROI_EFFECT = 1
+    OMNIBUS_CELLS = 2
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -159,6 +179,15 @@ class SensitivityAnalysisWindow(QWidget):
             object_name="sensitivity_inputs_card",
         )
         inputs_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.tool_info_button = make_info_button(
+            parent=inputs_card,
+            tooltip="About Sensitivity Analysis",
+            object_name="sensitivity_analysis_tool_info_btn",
+        )
+        self.tool_info_button.clicked.connect(
+            lambda: show_tool_info(self, SENSITIVITY_ANALYSIS_TOOL_INFO)
+        )
+        inputs_card.header.add_action_widget(self.tool_info_button)
         sections.addWidget(inputs_card, 0, 0)
         self._build_inputs(inputs_card)
 
@@ -225,7 +254,7 @@ class SensitivityAnalysisWindow(QWidget):
         self._expand_input(self.alpha_spin)
         common_form.addRow("Alpha:", self.alpha_spin)
 
-        self.design_stack = QStackedWidget(card.content)
+        self.design_stack = _CurrentPageStack(card.content)
         self.design_stack.setObjectName("sensitivity_design_stack")
         self.design_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         card.content_layout.addWidget(self.design_stack)
@@ -243,11 +272,51 @@ class SensitivityAnalysisWindow(QWidget):
         rm_panel = QWidget(self.design_stack)
         rm_form = make_form_layout()
         rm_panel.setLayout(rm_form)
+
+        self.effect_target_combo = QComboBox(rm_panel)
+        self.effect_target_combo.setObjectName("sensitivity_effect_target")
+        self.effect_target_combo.addItems(
+            [
+                "Condition effect",
+                "ROI effect",
+                "Omnibus condition × ROI cells",
+            ]
+        )
+        self.effect_target_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.effect_target_combo.setMinimumContentsLength(22)
+        self._expand_input(self.effect_target_combo)
+        rm_form.addRow("Effect evaluated:", self.effect_target_combo)
+
+        self.conditions_spin = QSpinBox(rm_panel)
+        self.conditions_spin.setObjectName("sensitivity_conditions")
+        self.conditions_spin.setRange(1, 100)
+        self._expand_input(self.conditions_spin)
+        rm_form.addRow("Number of conditions:", self.conditions_spin)
+
+        self.rois_spin = QSpinBox(rm_panel)
+        self.rois_spin.setObjectName("sensitivity_rois")
+        self.rois_spin.setRange(1, 100)
+        self._expand_input(self.rois_spin)
+        rm_form.addRow("Number of ROIs:", self.rois_spin)
+
         self.measurements_spin = QSpinBox(rm_panel)
         self.measurements_spin.setObjectName("sensitivity_measurements")
-        self.measurements_spin.setRange(2, 100)
+        self.measurements_spin.setRange(1, 10_000)
+        self.measurements_spin.setReadOnly(True)
+        self.measurements_spin.setButtonSymbols(QSpinBox.NoButtons)
+        self.measurements_spin.setToolTip(
+            "Calculated from the condition count, ROI count, and effect evaluated."
+        )
         self._expand_input(self.measurements_spin)
-        rm_form.addRow("Repeated measurements:", self.measurements_spin)
+        rm_form.addRow("Derived measurements:", self.measurements_spin)
+
+        self.measurement_explanation = QLabel("", rm_panel)
+        self.measurement_explanation.setObjectName("sensitivity_measurement_explanation")
+        self.measurement_explanation.setProperty("caption", True)
+        self.measurement_explanation.setWordWrap(True)
+        rm_form.addRow(self.measurement_explanation)
 
         self.correlation_spin = QDoubleSpinBox(rm_panel)
         self.correlation_spin.setObjectName("sensitivity_correlation")
@@ -337,11 +406,47 @@ class SensitivityAnalysisWindow(QWidget):
 
     def _connect_signals(self) -> None:
         self.analysis_combo.currentIndexChanged.connect(self._set_analysis_type)
+        self.effect_target_combo.currentIndexChanged.connect(
+            self._update_derived_measurements
+        )
+        self.conditions_spin.valueChanged.connect(self._update_derived_measurements)
+        self.rois_spin.valueChanged.connect(self._update_derived_measurements)
         self.calculate_button.clicked.connect(self.calculate)
         self.reset_button.clicked.connect(self.reset_defaults)
 
+    def _update_derived_measurements(self) -> None:
+        conditions = self.conditions_spin.value()
+        rois = self.rois_spin.value()
+        target = self.effect_target_combo.currentIndex()
+        if target == self.CONDITION_EFFECT:
+            measurements = conditions
+            explanation = (
+                f"One value per condition for each participant: {conditions} "
+                "repeated measurements. ROIs are assumed averaged or otherwise "
+                "outside this one-way effect."
+            )
+        elif target == self.ROI_EFFECT:
+            measurements = rois
+            explanation = (
+                f"One value per ROI for each participant: {rois} repeated "
+                "measurements. Conditions are assumed averaged or otherwise "
+                "outside this one-way effect."
+            )
+        else:
+            measurements = conditions * rois
+            explanation = (
+                f"{conditions} conditions × {rois} ROIs = {measurements} cell means. "
+                "This is an omnibus one-way approximation, not interaction power."
+            )
+        self.measurements_spin.setValue(measurements)
+        self.measurement_explanation.setText(explanation)
+        self.design_stack.currentWidget().updateGeometry()
+        self.design_stack.updateGeometry()
+        self._clear_result()
+
     def _set_analysis_type(self, index: int) -> None:
         self.design_stack.setCurrentIndex(index)
+        self.design_stack.updateGeometry()
         if index == self.PAIRED_TEST:
             self.benchmark_label.setText(
                 "Conventional d benchmarks: 0.20 small, 0.50 medium, 0.80 large."
@@ -358,7 +463,10 @@ class SensitivityAnalysisWindow(QWidget):
         self.power_spin.setValue(0.80)
         self.alpha_spin.setValue(0.05)
         self.alternative_combo.setCurrentIndex(0)
-        self.measurements_spin.setValue(2)
+        self.conditions_spin.setValue(2)
+        self.rois_spin.setValue(1)
+        self.effect_target_combo.setCurrentIndex(self.CONDITION_EFFECT)
+        self._update_derived_measurements()
         self.correlation_spin.setValue(0.50)
         self.epsilon_spin.setValue(1.00)
         self._set_analysis_type(self.PAIRED_TEST)

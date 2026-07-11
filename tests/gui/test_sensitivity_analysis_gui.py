@@ -10,8 +10,9 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QScrollArea
 
-from Main_App.gui.components import SectionCard
+from Main_App.gui.components import SectionCard, ToolInfoDialog
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
+from Tools.Sensitivity_Analysis.tool_info import SENSITIVITY_ANALYSIS_TOOL_INFO
 
 
 def _build_page(qtbot) -> SensitivityAnalysisWindow:
@@ -45,6 +46,10 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
     page = _build_page(qtbot)
 
     page.analysis_combo.setCurrentIndex(page.RM_ANOVA)
+    assert page.conditions_spin.value() == 2
+    assert page.rois_spin.value() == 1
+    assert page.effect_target_combo.currentIndex() == page.CONDITION_EFFECT
+    assert page.measurements_spin.value() == 2
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.design_stack.currentIndex() == page.RM_ANOVA
@@ -60,6 +65,37 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
     assert page.analysis_combo.currentIndex() == page.PAIRED_TEST
     assert page.sample_size_spin.value() == 24
     assert page.result_banner.text() == "Set the assumptions and select Calculate."
+
+
+def test_fpvs_design_inputs_derive_repeated_measurements(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.analysis_combo.setCurrentIndex(page.RM_ANOVA)
+    page.conditions_spin.setValue(4)
+    page.rois_spin.setValue(3)
+
+    page.effect_target_combo.setCurrentIndex(page.CONDITION_EFFECT)
+    assert page.measurements_spin.value() == 4
+    assert "ROIs are assumed averaged" in page.measurement_explanation.text()
+
+    page.effect_target_combo.setCurrentIndex(page.ROI_EFFECT)
+    assert page.measurements_spin.value() == 3
+    assert "Conditions are assumed averaged" in page.measurement_explanation.text()
+
+    page.effect_target_combo.setCurrentIndex(page.OMNIBUS_CELLS)
+    assert page.measurements_spin.value() == 12
+    assert "not interaction power" in page.measurement_explanation.text()
+
+
+def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
+    page = _build_page(qtbot)
+    dialog = ToolInfoDialog(SENSITIVITY_ANALYSIS_TOOL_INFO, page)
+    qtbot.addWidget(dialog)
+    text = dialog.browser.toPlainText()
+
+    assert page.tool_info_button.toolTip() == "About Sensitivity Analysis"
+    assert "Sample size (N) is the number of participants" in text
+    assert "repeated measurements = conditions × ROIs" in text
+    assert "does not specifically estimate power" in text
 
 
 def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:
