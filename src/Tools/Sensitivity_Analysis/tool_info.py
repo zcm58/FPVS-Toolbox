@@ -27,9 +27,12 @@ effect, or calculate “observed power.” It does not save or export anything.
 
 <h3>Reading the Result</h3>
 <p>
-“Cohen's dz = 0.60” means the model reaches the requested power at an effect of
-approximately 0.60 under the stated assumptions. Smaller effects are not ruled
-out; they have less than the requested power in this model.
+“Cohen's dz = 0.60 at 80% power” means that, if the true effect were 0.60,
+repeating the same study many times under the stated assumptions would be
+expected to produce a statistically significant result about 80% of the time.
+If the true effect were smaller, that percentage would be below 80%, but the
+study could still detect it. A non-significant result does not prove that no
+effect exists.
 </p>
 """
 

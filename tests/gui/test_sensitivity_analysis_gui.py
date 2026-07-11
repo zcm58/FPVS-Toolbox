@@ -40,6 +40,9 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
     assert page.result_banner.property("statusVariant") == "info"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert "this model reaches 80% power" in page.plain_language_label.text()
+    assert "repeating the same study many times" in page.plain_language_label.text()
+    assert "about 80% of the time" in page.plain_language_label.text()
+    assert "would not prove that no effect exists" in page.plain_language_label.text()
     assert "24 analyzable participants" in page.assumption_summary_label.text()
     assert "two-sided paired/one-sample t-test" in page.assumption_summary_label.text()
     assert page.reporting_label.isVisibleTo(page)

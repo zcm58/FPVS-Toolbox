@@ -649,9 +649,14 @@ class SensitivityAnalysisWindow(QWidget):
         return (
             f"With {sample_size} analyzable participants, this model reaches "
             f"{power:.0%} power at approximately {result.effect_metric} = "
-            f"{result.effect_size:.2f} with alpha = {alpha:g}. Effects smaller "
-            f"than {result.effect_size:.2f} have less than {power:.0%} power "
-            "under these assumptions; they are not ruled out."
+            f"{result.effect_size:.2f} with alpha = {alpha:g}. If the true "
+            f"effect were {result.effect_size:.2f}, repeating the same study "
+            "many times under these assumptions would be expected to produce "
+            f"a statistically significant result about {power:.0%} of the "
+            f"time. If the true effect were smaller than {result.effect_size:.2f}, "
+            f"that percentage would be below {power:.0%}, but detection would "
+            "still be possible. A non-significant result would not prove that "
+            "no effect exists."
         )
 
     def _assumption_summary(self) -> str:

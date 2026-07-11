@@ -69,9 +69,14 @@ Select **Reset Defaults** at any time to restore these values.
 
 The result is the effect at which the model reaches the requested power, not an
 expected effect or a guarantee. Under the entered assumptions, smaller true
-effects have less than the requested power, but they are not ruled out. The
-result panel uses neutral informational styling because the estimate is not a
-pass/fail judgment.
+effects have less than the requested power, but they are not ruled out. For
+example, 80% power at Cohen's *d* = 0.60 means that, if the true effect were
+0.60, repeating the same study many times would be expected to produce a
+statistically significant result about 80% of the time. A smaller true effect
+would produce significance less often than 80%, but it could still be detected.
+A non-significant result does not prove that no effect exists. The result panel
+uses neutral informational styling because the estimate is not a pass/fail
+judgment.
 
 After calculation, the page also provides an interpretation, a compact summary
 of the assumptions used, and a reporting-ready sentence.
