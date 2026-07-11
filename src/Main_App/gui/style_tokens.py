@@ -105,6 +105,24 @@ def build_main_page_stylesheet() -> str:
             color: {TEXT_PRIMARY};
         }}
 
+        QLabel[toolTitle="true"] {{
+            color: {TEXT_PRIMARY};
+            font-size: {css_font_size("tool_title")};
+            font-weight: {css_font_weight("tool_title")};
+        }}
+
+        QLabel[resultValue="true"] {{
+            color: {TEXT_PRIMARY};
+            font-size: {css_font_size("result_value")};
+            font-weight: {css_font_weight("result_value")};
+        }}
+
+        QLabel[eyebrow="true"] {{
+            color: {ACCENT_COLOR};
+            font-size: {css_font_size("caption")};
+            font-weight: {css_font_weight("caption")};
+        }}
+
         QWidget[cardHeader="true"] {{
             background: transparent;
         }}

@@ -108,6 +108,24 @@ def build_fpvs_app_stylesheet() -> str:
             font-weight: {css_font_weight("caption")};
         }}
 
+        QLabel[toolTitle="true"] {{
+            color: {TEXT_PRIMARY};
+            font-size: {css_font_size("tool_title")};
+            font-weight: {css_font_weight("tool_title")};
+        }}
+
+        QLabel[resultValue="true"] {{
+            color: {TEXT_PRIMARY};
+            font-size: {css_font_size("result_value")};
+            font-weight: {css_font_weight("result_value")};
+        }}
+
+        QLabel[eyebrow="true"] {{
+            color: {ACCENT_COLOR};
+            font-size: {css_font_size("caption")};
+            font-weight: {css_font_weight("caption")};
+        }}
+
         QLineEdit,
         QComboBox,
         QSpinBox,

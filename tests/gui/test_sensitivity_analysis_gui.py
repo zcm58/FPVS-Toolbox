@@ -34,6 +34,8 @@ def test_defaults_and_paired_result_are_visible(qtbot) -> None:
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.result_banner.text() == "Cohen's dz = 0.60"
+    assert page.result_banner.metric_label.text() == "COHEN'S DZ"
+    assert page.result_banner.value_label.text() == "0.60"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert page.reporting_label.isVisibleTo(page)
     assert not page.equivalent_label.isVisibleTo(page)
@@ -47,6 +49,8 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
 
     assert page.design_stack.currentIndex() == page.RM_ANOVA
     assert page.result_banner.text() == "Cohen's f = 0.30"
+    assert page.result_banner.metric_label.text() == "COHEN'S F"
+    assert page.result_banner.value_label.text() == "0.30"
     assert page.magnitude_label.text() == "Conventional magnitude: Medium"
     assert page.equivalent_label.text() == "Equivalent eta-squared: 0.082"
     assert page.equivalent_label.isVisibleTo(page)
@@ -70,6 +74,8 @@ def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:
     assert results is not None and results.width() >= 350
     assert inputs.geometry().right() < scroll.widget().width()
     assert results.geometry().right() < scroll.widget().width()
+    assert inputs.height() < scroll.viewport().height()
+    assert results.height() < scroll.viewport().height()
     assert page.calculate_button.isVisibleTo(page)
     assert page.reset_button.isVisibleTo(page)
     assert page.disclaimer.isVisibleTo(page)

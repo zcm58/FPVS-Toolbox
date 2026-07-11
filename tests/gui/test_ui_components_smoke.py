@@ -397,6 +397,9 @@ def test_apply_fpvs_theme_sets_app_stylesheet_and_preserves_button_properties(qt
         assert 'QWidget[statusVariant="warning"]' in app.styleSheet()
         assert 'QWidget[statusVariant="error"]' in app.styleSheet()
         assert 'QWidget[statusVariant="success"]' in app.styleSheet()
+        assert 'QLabel[toolTitle="true"]' in app.styleSheet()
+        assert 'QLabel[resultValue="true"]' in app.styleSheet()
+        assert 'QLabel[eyebrow="true"]' in app.styleSheet()
         assert button.property("variant") == "danger"
         assert button.property("danger") is True
         assert button.property("compact") is True

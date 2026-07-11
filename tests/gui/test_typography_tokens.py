@@ -26,6 +26,8 @@ def test_typography_roles_define_single_font_family_and_role_sizes() -> None:
     assert css_font_size("sidebar_item") == "15px"
     assert FONT_ROLES["sidebar_section"].point_size == FONT_ROLES["sidebar_item"].point_size
     assert FONT_ROLES["project_title"].point_size > FONT_ROLES["caption"].point_size
+    assert FONT_ROLES["tool_title"].point_size > FONT_ROLES["project_title"].point_size
+    assert FONT_ROLES["result_value"].point_size > FONT_ROLES["tool_title"].point_size
     assert FONT_ROLES["landing_title"].point_size == 44
     assert FONT_ROLES["landing_action"].point_size == 15
     assert css_font_family().startswith('"Segoe UI"')
