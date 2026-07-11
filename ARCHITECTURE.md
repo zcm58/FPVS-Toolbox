@@ -51,6 +51,7 @@ Primary areas:
   statistics, detectability, scalp maps, sequence figures, and the LORETA
   Visualizer. User-facing tool entry points are routed through the Main App GUI.
 - `src/Tools/Sequence_Figure/`: embedded publication-figure tool for drawing FPVS stimulus-sequence illustrations from manually selected stimulus images. Its renderer is widget-free and exports PNG/PDF/SVG figures; it is separate from the SNR Plot Generator.
+- `src/Tools/Sensitivity_Analysis/`: embedded, input-only sensitivity calculator. Its widget-free backend estimates minimum detectable standardized effects for paired/one-sample t-tests and balanced one-way repeated-measures ANOVA. It does not read project data, persist settings, write files, or join the Stats pipeline.
 - `src/Tools/LORETA_Visualizer/`: new embedded 3D source-visualization tool. Its renderer displays anatomical meshes and prepared source payloads only; future source-localization calculations must stay separate and pass through tool-local helper/adapters. See [LORETA Visualizer Architecture](src/Tools/LORETA_Visualizer/ARCHITECTURE.md).
 - `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Agents should not read these files, treat them as active architecture, or use them as implementation precedent unless the user explicitly asks about this folder.
 - `src/quarantine/`, when present: optional ignored historical quarantine kept

@@ -48,6 +48,12 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         painter.drawRoundedRect(QRectF(size * 0.18, size * 0.22, size * 0.64, size * 0.46), 2, 2)
         painter.drawLine(QPointF(size * 0.50, size * 0.68), QPointF(size * 0.50, size * 0.82))
         painter.drawLine(QPointF(size * 0.35, size * 0.82), QPointF(size * 0.65, size * 0.82))
+    elif kind == "sensitivity":
+        center = QPointF(size * 0.50, size * 0.58)
+        painter.drawArc(QRectF(size * 0.18, size * 0.26, size * 0.64, size * 0.64), 0, 180 * 16)
+        painter.drawLine(center, QPointF(size * 0.68, size * 0.38))
+        _draw_dot(painter, center, size * 0.055)
+        painter.drawLine(QPointF(size * 0.23, size * 0.67), QPointF(size * 0.77, size * 0.67))
     elif kind == "chart":
         for index, height in enumerate((0.30, 0.52, 0.72)):
             x = size * (0.26 + index * 0.22)

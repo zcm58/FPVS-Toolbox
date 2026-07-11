@@ -80,7 +80,7 @@ python .agents/scripts/verify.py --scope <scope> --tier focused
 
 Supported scopes are `gui`, `updates`, `project-io`, `processing`,
 `plot-generator`, `publication-maps`, `ratio-calculator`, `sequence-figure`,
-`stats`, `loreta`, `figures`, and `legacy-boundary`. Use `--scope repo --tier
+`sensitivity-analysis`, `stats`, `loreta`, `figures`, and `legacy-boundary`. Use `--scope repo --tier
 precommit` for the broad local handoff gate. The driver owns the executable
 test registry and excludes Qt execution locally.
 

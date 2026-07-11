@@ -53,6 +53,7 @@ from Tools.Individual_Detectability.main_window import IndividualDetectabilityWi
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
+from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Sequence_Figure.gui import SequenceFigureWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
@@ -520,6 +521,21 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_stats_page())
         self._set_sidebar_selection("btn_data")
+
+    def _ensure_sensitivity_analysis_page(self) -> SensitivityAnalysisWindow:
+        page = getattr(self, "_sensitivity_analysis_page", None)
+        if page is None:
+            page = SensitivityAnalysisWindow(parent=self.workspace_stack)
+            page.setObjectName("embedded_sensitivity_analysis_page")
+            self.workspace_stack.addWidget(page)
+            self._sensitivity_analysis_page = page
+        return page
+
+    def open_sensitivity_analysis(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_sensitivity_analysis_page())
+        self._set_sidebar_selection("btn_sensitivity_analysis")
 
     def _ensure_ratio_calculator_page(self) -> RatioCalculatorWindow:
         page = getattr(self, "_ratio_calculator_page", None)

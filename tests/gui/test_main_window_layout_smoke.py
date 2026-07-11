@@ -38,11 +38,13 @@ from Tools.Publication_Maps.gui import (
     PublicationMapsWindow,
 )
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
+from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Stats import StatsWindow
 
 
 DEFAULT_TOOL_ROLES = [
     "btn_data",
+    "btn_sensitivity_analysis",
     "btn_graphs",
     "btn_publication_maps",
     "btn_loreta_visualizer",
@@ -50,6 +52,7 @@ DEFAULT_TOOL_ROLES = [
 ]
 DEFAULT_TOOL_LABELS = [
     "Statistical Analysis",
+    "Sensitivity Analysis",
     "SNR Plots",
     "Scalp Maps",
     "LORETA Visualizer",
@@ -525,6 +528,32 @@ def test_sidebar_stats_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_sensitivity_analysis_embeds_without_project_data(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_sensitivity_analysis"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), SensitivityAnalysisWindow)
+    assert (
+        win.workspace_stack.currentWidget().objectName()
+        == "embedded_sensitivity_analysis_page"
+    )
+    assert win._sensitivity_analysis_page.parent() is win.workspace_stack
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_sensitivity_analysis"]
 
 
 def test_sidebar_snr_plot_generator_embeds_in_main_workspace(

@@ -16,6 +16,9 @@ Primary paths:
   own condition selection, section assembly, ROI state, participant state,
   settings/validation, and run/status/log workflow.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
+- `src/Tools/Sensitivity_Analysis/`: standalone manual sensitivity calculator
+  for minimum detectable Cohen's dz or Cohen's f. It uses only values entered
+  on its embedded page and remains outside project I/O and the Stats pipeline.
 - `src/Tools/Publication_Maps/`: embedded Scalp Maps tool. Current scope is
   BCA, SNR, and z-score publication scalp maps. It must load the authoritative
   processing-time significant-harmonic selection from project metadata; it must

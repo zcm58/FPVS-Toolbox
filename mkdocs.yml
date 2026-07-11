@@ -51,6 +51,7 @@ nav:
   - Tools:
       - Overview: tools/index.md
       - Statistical Analysis: tools/statistics.md
+      - Sensitivity Analysis: tools/sensitivity-analysis.md
       - SNR Plots: tools/snr-plot-generator.md
       - Scalp Maps: tools/publication-maps.md
       - LORETA Visualizer: tools/loreta-visualizer.md

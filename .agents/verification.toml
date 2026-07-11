@@ -76,6 +76,12 @@ tests = ["tests/sequence_figure/test_sequence_figure_renderer.py"]
 include = ["src/Tools/Sequence_Figure/**", "tests/sequence_figure/**"]
 manual_smoke = ["Open Sequence Figure from the Main App and verify the changed control or export in a visible session."]
 
+[scopes.sensitivity-analysis]
+audits = ["gui"]
+tests = ["tests/sensitivity_analysis/test_sensitivity_calculator.py"]
+include = ["src/Tools/Sensitivity_Analysis/**", "tests/sensitivity_analysis/**", "tests/gui/test_sensitivity_analysis_gui.py"]
+manual_smoke = ["Open Sensitivity Analysis from the Main App, calculate both supported designs, resize the window, and confirm all controls and result text remain visible."]
+
 [scopes.stats]
 audits = ["stats-structure", "stats-reporting-legibility"]
 tests = [

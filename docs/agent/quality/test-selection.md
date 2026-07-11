@@ -37,6 +37,7 @@ environment.
 | `publication-maps` | Source workbook, processing-time harmonics, BCA/SNR rendering, paired outputs, colorbars | Embedded Scalp Maps page behavior |
 | `ratio-calculator` | Ratio calculations, ROI behavior, plots and exports | Ratio Calculator page/workflow smoke |
 | `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |
+| `sensitivity-analysis` | Paired-test/RM-ANOVA power math, validation, and effect-size interpretation | Embedded page wiring, controls, results, reset, and clipping smoke |
 | `stats` | Data/project context, pipeline, DV/harmonic rules, FullSNR, exports and reporting | Stats layout, focus, and window workflow smoke |
 | `loreta` | Payloads, source producers, project exports, rendering helpers and legacy boundaries | Embedded visualizer interaction and Qt worker smoke |
 | `figures` | Shared figure-style contract and focused output/rendering checks | Figure-export dialog interaction where applicable |

@@ -9,6 +9,7 @@ only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
 | Tool | Sidebar status | Purpose |
 | --- | --- | --- |
 | [Statistical Analysis](statistics.md) | Default | Run the single-group statistical pipeline or export Summed BCA data for external analysis. |
+| [Sensitivity Analysis](sensitivity-analysis.md) | Default | Estimate the minimum detectable effect from manually entered design assumptions. |
 | [SNR Plots](snr-plot-generator.md) | Default | Create ROI-level SNR spectra for conditions or project groups. |
 | [Scalp Maps](publication-maps.md) | Default | Export sensor-space BCA, SNR, and z-score topographies. |
 | [LORETA Visualizer](loreta-visualizer.md) | Default | Inspect beta template-space estimates of FPVS response patterns. |
