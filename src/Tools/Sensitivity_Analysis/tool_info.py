@@ -22,7 +22,7 @@ effect, or calculate “observed power.” It does not save or export anything.
   <li>Select a paired test or repeated-measures ANOVA.</li>
   <li>For ANOVA, describe the conditions, ROIs, and effect being evaluated.</li>
   <li>Review power, alpha, correlation, and epsilon.</li>
-  <li>Select <b>Calculate</b> and read the plain-language result.</li>
+  <li>Select <b>Calculate</b> and review the result and interpretation.</li>
 </ol>
 
 <h3>Reading the Result</h3>

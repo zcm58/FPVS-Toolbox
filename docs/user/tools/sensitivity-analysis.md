@@ -73,8 +73,8 @@ effects have less than the requested power, but they are not ruled out. The
 result panel uses neutral informational styling because the estimate is not a
 pass/fail judgment.
 
-After calculation, the page also provides a plain-language interpretation, a
-compact summary of the assumptions used, and a reporting-ready sentence.
+After calculation, the page also provides an interpretation, a compact summary
+of the assumptions used, and a reporting-ready sentence.
 Changing any result-affecting input clears these outputs so a stale result is
 not shown beside new assumptions.
 

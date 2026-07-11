@@ -391,7 +391,7 @@ class SensitivityAnalysisWindow(QWidget):
         card.content_layout.addWidget(self.equivalent_label)
 
         self.plain_language_label = QLabel(
-            "A plain-language interpretation will appear after calculation.",
+            "An interpretation will appear after calculation.",
             card.content,
         )
         self.plain_language_label.setObjectName("sensitivity_plain_language_result")
@@ -590,7 +590,7 @@ class SensitivityAnalysisWindow(QWidget):
             "A reporting-ready summary will appear after calculation."
         )
         self.plain_language_label.setText(
-            "A plain-language interpretation will appear after calculation."
+            "An interpretation will appear after calculation."
         )
         self.assumption_summary_label.setText(
             "Current assumptions will appear after calculation."
