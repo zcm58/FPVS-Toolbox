@@ -1,16 +1,39 @@
-"""Simulation-based sensitivity analysis for the FPVS linear mixed model."""
+"""Input-only idealized design sensitivity for the FPVS linear mixed model."""
 
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import dataclass
 import math
+from multiprocessing import get_context
+import os
 from typing import Callable, Literal
 import warnings
 
 import numpy as np
 import pandas as pd
+import psutil
 from scipy.stats import norm
 import statsmodels.formula.api as smf
+
+from Main_App.Performance.mp_env import (
+    compute_effective_max_workers,
+    set_blas_threads_multiprocess,
+)
+
+try:
+    from threadpoolctl import threadpool_limits
+except ImportError:  # pragma: no cover - optional runtime optimization
+    threadpool_limits = None
+
+_MAX_PARALLEL_WORKERS = 8
+_PARALLEL_MINIMUM_SIMULATIONS = 1_000
+_PROCESS_BATCH_SIZE = 25
+_SEARCH_INITIAL_SIMULATIONS = 200
+_SEARCH_BATCH_SIZE = 200
+_SEARCH_MAX_SIMULATIONS = 2_000
+_MAX_CONFIRMATION_ROUNDS = 2
 
 LmmEffectTarget = Literal["condition", "roi", "interaction"]
 ProgressCallback = Callable[[int, str], None]
@@ -23,7 +46,7 @@ class LmmSimulationCancelled(RuntimeError):
 
 @dataclass(frozen=True)
 class LmmSensitivityConfig:
-    """Input-only assumptions for the FPVS random-intercept LMM simulation."""
+    """Manual assumptions for the idealized FPVS random-intercept LMM design."""
 
     sample_size: int
     conditions: int
@@ -32,9 +55,9 @@ class LmmSensitivityConfig:
     power: float = 0.80
     alpha: float = 0.05
     correlation: float = 0.50
-    simulations: int = 400
+    simulations: int = 10_000
     seed: int = 2026
-    search_iterations: int = 7
+    search_iterations: int = 9
 
 
 @dataclass(frozen=True)
@@ -51,6 +74,12 @@ class LmmSensitivityResult:
     singular_fits: int
     target: LmmEffectTarget
     seed: int
+    search_simulations: int = 0
+    search_effect_low: float = 0.0
+    search_effect_high: float = 0.0
+    workers_used: int = 1
+    confirmation_rounds: int = 1
+    target_power_met: bool = True
 
 
 @dataclass(frozen=True)
@@ -92,10 +121,10 @@ def validate_lmm_config(config: LmmSensitivityConfig) -> None:
         raise ValueError(
             "Within-participant correlation must be at least 0 and less than 0.95."
         )
-    if not 20 <= config.simulations <= 5_000:
-        raise ValueError("Simulations must be between 20 and 5,000.")
-    if not 3 <= config.search_iterations <= 10:
-        raise ValueError("Search iterations must be between 3 and 10.")
+    if not 100 <= config.simulations <= 50_000:
+        raise ValueError("Simulations must be between 100 and 50,000.")
+    if not 3 <= config.search_iterations <= 12:
+        raise ValueError("Search iterations must be between 3 and 12.")
 
 
 def _fixed_cell_pattern(
@@ -227,6 +256,72 @@ def _simulate_one(
     )
 
 
+def _simulation_worker_init() -> None:
+    """Configure child processes for predictable mixed-model throughput."""
+
+    set_blas_threads_multiprocess()
+
+
+def _simulate_batch(
+    config: LmmSensitivityConfig,
+    effect_size: float,
+    seeds: tuple[int, ...],
+) -> list[_SimulationOutcome | None]:
+    """Run a small spawn-safe batch, preserving failures as non-detections."""
+
+    limit_context = (
+        threadpool_limits(limits=1) if threadpool_limits is not None else nullcontext()
+    )
+    outcomes: list[_SimulationOutcome | None] = []
+    with limit_context:
+        for seed in seeds:
+            try:
+                outcomes.append(_simulate_one(config, effect_size, seed))
+            except Exception:  # noqa: BLE001 - replicate failure boundary
+                outcomes.append(None)
+    return outcomes
+
+
+def _resolve_worker_count(
+    config: LmmSensitivityConfig,
+    requested: int | None,
+) -> int:
+    """Choose a conservative process count for repeated MixedLM fits."""
+
+    if requested is not None:
+        return max(1, min(int(requested), _MAX_PARALLEL_WORKERS))
+    if config.simulations < _PARALLEL_MINIMUM_SIMULATIONS:
+        return 1
+    try:
+        recommended = compute_effective_max_workers(
+            total_ram_bytes=int(psutil.virtual_memory().total),
+            cpu_count=os.cpu_count() or 1,
+            project_max_workers=None,
+        )
+    except Exception:  # pragma: no cover - defensive host inspection fallback
+        recommended = max(1, (os.cpu_count() or 2) - 1)
+    return max(1, min(recommended, _MAX_PARALLEL_WORKERS))
+
+
+def _spawn_seed_values(sequence: np.random.SeedSequence, count: int) -> list[int]:
+    """Create deterministic independent uint32 seeds from a SeedSequence."""
+
+    return [
+        int(child.generate_state(1, dtype=np.uint32)[0])
+        for child in sequence.spawn(count)
+    ]
+
+
+def _combine_estimates(left: _PowerEstimate, right: _PowerEstimate) -> _PowerEstimate:
+    return _PowerEstimate(
+        detected=left.detected + right.detected,
+        attempted=left.attempted + right.attempted,
+        successful=left.successful + right.successful,
+        failed=left.failed + right.failed,
+        singular=left.singular + right.singular,
+    )
+
+
 def _wilson_interval(successes: int, attempts: int, confidence: float = 0.95) -> tuple[float, float]:
     if attempts <= 0:
         return 0.0, 0.0
@@ -250,86 +345,268 @@ def calculate_lmm_sensitivity(
     *,
     progress: ProgressCallback | None = None,
     should_cancel: CancelCallback | None = None,
+    max_workers: int | None = None,
 ) -> LmmSensitivityResult:
-    """Search for the contrast magnitude corresponding to the target simulated power."""
+    """Estimate a detectable contrast with adaptive search and independent confirmation."""
 
     validate_lmm_config(config)
-    search_simulations = max(30, min(150, config.simulations // 4))
-    total_attempts = (
-        (config.search_iterations + 1) * search_simulations + config.simulations
+    worker_count = _resolve_worker_count(config, max_workers)
+    search_max = min(
+        _SEARCH_MAX_SIMULATIONS,
+        max(_SEARCH_INITIAL_SIMULATIONS, config.simulations // 5),
     )
-    completed_attempts = 0
+    search_initial = min(_SEARCH_INITIAL_SIMULATIONS, search_max)
+    search_batch = min(_SEARCH_BATCH_SIZE, search_max)
+    max_search_attempts = (config.search_iterations + 1) * search_max
+
+    root_sequence = np.random.SeedSequence(config.seed)
+    search_one_sequence, final_one_sequence, search_two_sequence, final_two_sequence = (
+        root_sequence.spawn(4)
+    )
+    search_one_seeds = _spawn_seed_values(search_one_sequence, search_max)
+    final_one_seeds = _spawn_seed_values(final_one_sequence, config.simulations)
+
+    stage_completed = {
+        "search_one": 0,
+        "final_one": 0,
+        "search_two": 0,
+        "final_two": 0,
+    }
+    stage_ranges = {
+        "search_one": (1, 35, max_search_attempts),
+        "final_one": (35, 95, config.simulations),
+        "search_two": (95, 97, max_search_attempts),
+        "final_two": (97, 99, config.simulations),
+    }
     last_progress = -1
-    seed_sequence = np.random.SeedSequence(config.seed)
-    seeds = [
-        int(child.generate_state(1, dtype=np.uint32)[0])
-        for child in seed_sequence.spawn(config.simulations)
-    ]
+    search_attempts_total = 0
+    cancelled_run = False
+    executor: ProcessPoolExecutor | None = None
 
     def check_cancelled() -> None:
+        nonlocal cancelled_run
         if should_cancel is not None and should_cancel():
+            cancelled_run = True
             raise LmmSimulationCancelled("Linear mixed-model simulation cancelled.")
 
-    def estimate(
-        effect_size: float,
-        simulation_seeds: list[int],
-        phase: str,
-    ) -> _PowerEstimate:
-        nonlocal completed_attempts, last_progress
+    def emit_attempt_progress(stage: str, increment: int, phase: str) -> None:
+        nonlocal last_progress, search_attempts_total
+        stage_completed[stage] += increment
+        if stage.startswith("search"):
+            search_attempts_total += increment
+        start, stop, maximum = stage_ranges[stage]
+        fraction = min(1.0, stage_completed[stage] / max(1, maximum))
+        percent = max(last_progress, min(99, round(start + (stop - start) * fraction)))
+        if progress is not None and percent != last_progress:
+            progress(percent, phase)
+            last_progress = percent
+
+    def summarize(outcomes: list[_SimulationOutcome | None]) -> _PowerEstimate:
         detected = successful = failed = singular = 0
-        for seed in simulation_seeds:
-            check_cancelled()
-            try:
-                outcome = _simulate_one(config, effect_size, seed)
-            except Exception as _simulation_error:  # noqa: BLE001 - replicate boundary
+        for outcome in outcomes:
+            if outcome is None or not outcome.converged:
                 failed += 1
-            else:
-                if outcome.converged:
-                    successful += 1
-                    singular += int(outcome.singular)
-                    detected += int(outcome.p_value < config.alpha)
-                else:
-                    failed += 1
-            completed_attempts += 1
-            percent = min(100, round(completed_attempts * 100 / total_attempts))
-            if progress is not None and percent != last_progress:
-                progress(percent, phase)
-                last_progress = percent
+                continue
+            successful += 1
+            singular += int(outcome.singular)
+            detected += int(outcome.p_value < config.alpha)
         return _PowerEstimate(
             detected=detected,
-            attempted=len(simulation_seeds),
+            attempted=len(outcomes),
             successful=successful,
             failed=failed,
             singular=singular,
         )
 
-    search_seeds = seeds[:search_simulations]
-    low_effect = 0.0
-    high_effect = 4.0
-    high_estimate = estimate(high_effect, search_seeds, "Finding an effect-size range")
-    if high_estimate.power < config.power:
-        raise ValueError(
-            "The requested power was not reached within the supported standardized "
-            "contrast range (0 to 4)."
+    def estimate_slice(
+        effect_size: float,
+        simulation_seeds: list[int],
+        phase: str,
+        stage: str,
+    ) -> _PowerEstimate:
+        check_cancelled()
+        if executor is None:
+            outcomes: list[_SimulationOutcome | None] = []
+            for seed in simulation_seeds:
+                check_cancelled()
+                try:
+                    outcomes.append(_simulate_one(config, effect_size, seed))
+                except Exception:  # noqa: BLE001 - replicate boundary
+                    outcomes.append(None)
+                emit_attempt_progress(stage, 1, phase)
+            return summarize(outcomes)
+
+        chunks = [
+            tuple(simulation_seeds[index : index + _PROCESS_BATCH_SIZE])
+            for index in range(0, len(simulation_seeds), _PROCESS_BATCH_SIZE)
+        ]
+        pending = {
+            executor.submit(_simulate_batch, config, effect_size, chunk): chunk
+            for chunk in chunks
+        }
+        combined = _PowerEstimate(0, 0, 0, 0, 0)
+        while pending:
+            check_cancelled()
+            completed, _not_done = wait(
+                pending,
+                timeout=0.10,
+                return_when=FIRST_COMPLETED,
+            )
+            if not completed:
+                continue
+            for future in completed:
+                chunk = pending.pop(future)
+                try:
+                    outcomes = future.result()
+                except Exception as exc:
+                    for remaining in pending:
+                        remaining.cancel()
+                    raise RuntimeError(
+                        "A parallel mixed-model simulation worker failed. "
+                        "Restart the simulation or use a smaller run."
+                    ) from exc
+                if len(outcomes) != len(chunk):
+                    raise RuntimeError("A simulation worker returned an incomplete batch.")
+                combined = _combine_estimates(combined, summarize(outcomes))
+                emit_attempt_progress(stage, len(outcomes), phase)
+        return combined
+
+    def adaptive_estimate(
+        effect_size: float,
+        simulation_seeds: list[int],
+        phase: str,
+        stage: str,
+    ) -> tuple[_PowerEstimate, Literal["above", "below"], bool]:
+        estimate = _PowerEstimate(0, 0, 0, 0, 0)
+        used = 0
+        while used < len(simulation_seeds):
+            take = search_initial if used == 0 else search_batch
+            next_used = min(len(simulation_seeds), used + take)
+            estimate = _combine_estimates(
+                estimate,
+                estimate_slice(
+                    effect_size,
+                    simulation_seeds[used:next_used],
+                    phase,
+                    stage,
+                ),
+            )
+            used = next_used
+            ci_low, ci_high = _wilson_interval(estimate.detected, estimate.attempted)
+            if ci_high < config.power:
+                return estimate, "below", True
+            if ci_low >= config.power:
+                return estimate, "above", True
+        classification: Literal["above", "below"] = (
+            "above" if estimate.power >= config.power else "below"
+        )
+        return estimate, classification, False
+
+    def search_effect(
+        simulation_seeds: list[int],
+        stage: str,
+        *,
+        low_effect: float,
+        high_effect: float,
+        label: str,
+        verify_high: bool = True,
+    ) -> tuple[float, float]:
+        if verify_high:
+            _high_estimate, high_classification, _resolved = adaptive_estimate(
+                high_effect,
+                simulation_seeds,
+                f"{label}: checking the upper effect range",
+                stage,
+            )
+            if high_classification != "above":
+                raise ValueError(
+                    "The requested power was not reached within the supported "
+                    "standardized contrast range (0 to 4)."
+                )
+        for step in range(config.search_iterations):
+            midpoint = (low_effect + high_effect) / 2
+            _mid_estimate, classification, _resolved = adaptive_estimate(
+                midpoint,
+                simulation_seeds,
+                f"{label}: refining the effect ({step + 1}/{config.search_iterations})",
+                stage,
+            )
+            if classification == "above":
+                high_effect = midpoint
+            else:
+                low_effect = midpoint
+        return low_effect, high_effect
+
+    if progress is not None:
+        progress(0, f"Preparing {worker_count} simulation worker(s)")
+    if worker_count > 1:
+        executor = ProcessPoolExecutor(
+            max_workers=worker_count,
+            mp_context=get_context("spawn"),
+            initializer=_simulation_worker_init,
         )
 
-    for step in range(config.search_iterations):
-        midpoint = (low_effect + high_effect) / 2
-        estimate_at_midpoint = estimate(
-            midpoint,
-            search_seeds,
-            f"Refining the detectable effect ({step + 1}/{config.search_iterations})",
+    try:
+        search_low, search_high = search_effect(
+            search_one_seeds,
+            "search_one",
+            low_effect=0.0,
+            high_effect=4.0,
+            label="Adaptive search",
         )
-        if estimate_at_midpoint.power >= config.power:
-            high_effect = midpoint
-        else:
-            low_effect = midpoint
+        confirmation_rounds = 1
+        final_estimate = estimate_slice(
+            search_high,
+            final_one_seeds,
+            f"Confirming power with {config.simulations:,} independent studies",
+            "final_one",
+        )
 
-    final_estimate = estimate(
-        high_effect,
-        seeds,
-        "Confirming power at the estimated effect",
-    )
+        if final_estimate.power < config.power and search_high < 4.0:
+            confirmation_rounds = 2
+            search_two_seeds = _spawn_seed_values(search_two_sequence, search_max)
+            final_two_seeds = _spawn_seed_values(
+                final_two_sequence,
+                config.simulations,
+            )
+            correction_low = search_high
+            step_size = max(0.05, search_high - search_low)
+            correction_high = min(4.0, correction_low + step_size)
+            while True:
+                _estimate, classification, _resolved = adaptive_estimate(
+                    correction_high,
+                    search_two_seeds,
+                    "Independent correction: finding a higher effect",
+                    "search_two",
+                )
+                if classification == "above":
+                    break
+                if correction_high >= 4.0:
+                    raise ValueError(
+                        "Independent confirmation did not reach the requested power "
+                        "within the supported standardized contrast range (0 to 4)."
+                    )
+                correction_low = correction_high
+                step_size *= 2
+                correction_high = min(4.0, correction_high + step_size)
+            search_low, search_high = search_effect(
+                search_two_seeds,
+                "search_two",
+                low_effect=correction_low,
+                high_effect=correction_high,
+                label="Independent correction",
+                verify_high=False,
+            )
+            final_estimate = estimate_slice(
+                search_high,
+                final_two_seeds,
+                "Reconfirming power with a fresh independent run",
+                "final_two",
+            )
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=not cancelled_run, cancel_futures=True)
+
     ci_low, ci_high = _wilson_interval(
         final_estimate.detected,
         final_estimate.attempted,
@@ -337,7 +614,7 @@ def calculate_lmm_sensitivity(
     if progress is not None:
         progress(100, "Simulation complete")
     return LmmSensitivityResult(
-        effect_size=high_effect,
+        effect_size=search_high,
         estimated_power=final_estimate.power,
         power_ci_low=ci_low,
         power_ci_high=ci_high,
@@ -347,6 +624,12 @@ def calculate_lmm_sensitivity(
         singular_fits=final_estimate.singular,
         target=config.target,
         seed=config.seed,
+        search_simulations=search_attempts_total,
+        search_effect_low=search_low,
+        search_effect_high=search_high,
+        workers_used=worker_count,
+        confirmation_rounds=confirmation_rounds,
+        target_power_met=final_estimate.power >= config.power,
     )
 
 

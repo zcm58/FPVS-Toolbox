@@ -11,7 +11,9 @@ from Tools.Sensitivity_Analysis.lmm_simulation import (
     LmmSimulationCancelled,
     _SimulationOutcome,
     _fixed_cell_pattern,
+    _resolve_worker_count,
     _simulate_one,
+    _spawn_seed_values,
     _target_parameter_indices,
     _wilson_interval,
     calculate_lmm_sensitivity,
@@ -38,6 +40,10 @@ def test_lmm_config_requires_supported_balanced_design() -> None:
 
     with pytest.raises(ValueError, match="correlation"):
         validate_lmm_config(_config(correlation=-0.10))
+
+    validate_lmm_config(_config(simulations=10_000))
+    with pytest.raises(ValueError, match="between 100 and 50,000"):
+        validate_lmm_config(_config(simulations=50_001))
 
 
 def test_fixed_patterns_encode_documented_standardized_contrasts() -> None:
@@ -89,6 +95,66 @@ def test_simulated_search_finds_threshold_and_reports_monte_carlo_interval(
     assert result.successful_fits == 100
     assert result.failed_fits == 0
     assert result.power_ci_low < result.estimated_power <= result.power_ci_high
+    assert result.search_simulations > 150
+    assert result.search_effect_low < result.effect_size == result.search_effect_high
+    assert result.workers_used == 1
+    assert result.confirmation_rounds == 1
+    assert result.target_power_met
+
+
+def test_search_and_confirmation_use_independent_reproducible_seed_streams() -> None:
+    root_one = np.random.SeedSequence(2026)
+    first_search, first_final = root_one.spawn(2)
+    search_seeds = _spawn_seed_values(first_search, 200)
+    final_seeds = _spawn_seed_values(first_final, 200)
+
+    root_two = np.random.SeedSequence(2026)
+    second_search, second_final = root_two.spawn(2)
+
+    assert set(search_seeds).isdisjoint(final_seeds)
+    assert search_seeds == _spawn_seed_values(second_search, 200)
+    assert final_seeds == _spawn_seed_values(second_final, 200)
+
+
+def test_below_target_confirmation_triggers_fresh_search_and_reconfirmation(
+    monkeypatch,
+) -> None:
+    config = _config()
+    root = np.random.SeedSequence(config.seed)
+    search_one, final_one, search_two, final_two = root.spawn(4)
+    search_one_seeds = set(_spawn_seed_values(search_one, 200))
+    final_one_seeds = set(_spawn_seed_values(final_one, config.simulations))
+    search_two_seeds = set(_spawn_seed_values(search_two, 200))
+    final_two_seeds = set(_spawn_seed_values(final_two, config.simulations))
+
+    def fake_simulation(config, effect_size, seed):
+        del config
+        if seed in final_one_seeds:
+            detected = False
+        elif seed in search_one_seeds:
+            detected = effect_size >= 0.75
+        elif seed in search_two_seeds or seed in final_two_seeds:
+            detected = effect_size >= 0.85
+        else:  # pragma: no cover - every deterministic seed belongs to one stream
+            raise AssertionError("Unexpected simulation seed")
+        return _SimulationOutcome(
+            p_value=0.01 if detected else 0.50,
+            converged=True,
+            singular=False,
+        )
+
+    monkeypatch.setattr(lmm_simulation, "_simulate_one", fake_simulation)
+    result = calculate_lmm_sensitivity(config, max_workers=1)
+
+    assert result.confirmation_rounds == 2
+    assert result.effect_size >= 0.85
+    assert result.estimated_power == pytest.approx(1.0)
+    assert result.target_power_met
+
+
+def test_worker_count_is_serial_for_small_runs_and_capped_for_large_runs() -> None:
+    assert _resolve_worker_count(_config(), requested=None) == 1
+    assert _resolve_worker_count(_config(simulations=10_000), requested=99) == 8
 
 
 def test_simulation_can_be_cancelled(monkeypatch) -> None:

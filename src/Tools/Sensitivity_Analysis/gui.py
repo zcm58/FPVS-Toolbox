@@ -397,10 +397,11 @@ class SensitivityAnalysisWindow(QWidget):
 
         self.lmm_simulations_spin = QSpinBox(lmm_panel)
         self.lmm_simulations_spin.setObjectName("sensitivity_lmm_simulations")
-        self.lmm_simulations_spin.setRange(100, 5_000)
-        self.lmm_simulations_spin.setSingleStep(100)
+        self.lmm_simulations_spin.setRange(100, 50_000)
+        self.lmm_simulations_spin.setSingleStep(1_000)
         self.lmm_simulations_spin.setToolTip(
-            "More simulations reduce Monte Carlo uncertainty but take longer."
+            "Independent confirmation simulations. The 10,000-study default "
+            "provides a high-precision Monte Carlo power estimate."
         )
         self._expand_input(self.lmm_simulations_spin)
         lmm_form.addRow("Final simulations:", self.lmm_simulations_spin)
@@ -683,8 +684,8 @@ class SensitivityAnalysisWindow(QWidget):
         elif is_lmm:
             self.assumption_guidance.set_variant("info")
             self.assumption_guidance.set_text(
-                "Simulation estimates an approximate standardized contrast and "
-                "reports Monte Carlo and model-fit uncertainty."
+                "Idealized design sensitivity estimates a minimum standardized "
+                "contrast and reports Monte Carlo uncertainty and fit diagnostics."
             )
             self.assumption_guidance.show()
         else:
@@ -725,10 +726,10 @@ class SensitivityAnalysisWindow(QWidget):
         self.correlation_spin.setValue(0.50)
         self.epsilon_spin.setValue(1.00)
         self.lmm_target_combo.setCurrentIndex(0)
-        self.lmm_conditions_spin.setValue(2)
-        self.lmm_rois_spin.setValue(2)
+        self.lmm_conditions_spin.setValue(4)
+        self.lmm_rois_spin.setValue(3)
         self.lmm_correlation_spin.setValue(0.50)
-        self.lmm_simulations_spin.setValue(400)
+        self.lmm_simulations_spin.setValue(10_000)
         self.lmm_seed_spin.setValue(2026)
         self._set_analysis_type(self.PAIRED_TEST)
 
@@ -877,7 +878,14 @@ class SensitivityAnalysisWindow(QWidget):
 
     def _on_lmm_completed(self, result: LmmSensitivityResult) -> None:
         self._show_lmm_result(result)
-        if result.failed_fits or result.singular_fits:
+        if not result.target_power_met:
+            self.simulation_status.set_variant("warning")
+            self.simulation_status.set_text(
+                "Independent confirmation remained below the requested power. "
+                "Treat this effect estimate as unresolved and rerun with a different seed."
+            )
+            self.simulation_status.show()
+        elif result.failed_fits or result.singular_fits:
             self.simulation_status.set_variant("warning")
             self.simulation_status.set_text(
                 f"Fit diagnostics: {result.failed_fits} failed and "
@@ -940,8 +948,9 @@ class SensitivityAnalysisWindow(QWidget):
             f"approximately {result.effect_size:.2f} corresponds to the requested "
             f"power under this model. At that value, {result.estimated_power:.1%} "
             f"of {result.simulations} simulated studies produced a significant "
-            "omnibus Wald test. The interval describes Monte Carlo uncertainty, "
-            "not uncertainty about the real study effect."
+            "omnibus Wald test. The final simulations were independent of the "
+            "adaptive effect search. This estimates design sensitivity; it does "
+            "not validate the fit of a model to observed data."
         )
         self.assumption_summary_label.setText(
             f"{self.sample_size_spin.value()} analyzable participants · "
@@ -954,13 +963,18 @@ class SensitivityAnalysisWindow(QWidget):
         )
         self.reporting_label.setText(
             f"A simulation-based sensitivity analysis using {result.simulations} "
-            "replicates of a random-intercept linear mixed model estimated a "
+            "independent confirmation replicates of a random-intercept linear "
+            "mixed model estimated a "
             f"minimum standardized {target_label} of approximately "
             f"{result.effect_size:.2f} for {self.power_spin.value():.0%} power at "
             f"alpha = {self.alpha_spin.value():g}. Final simulated power was "
             f"{result.estimated_power:.1%} (95% Monte Carlo interval "
             f"{result.power_ci_low:.1%}–{result.power_ci_high:.1%}); "
-            f"{result.successful_fits}/{result.simulations} final models converged."
+            f"{result.successful_fits}/{result.simulations} final models converged. "
+            f"The adaptive search used {result.search_simulations} model fits, "
+            f"finished with a {result.search_effect_low:.3f} to "
+            f"{result.search_effect_high:.3f} effect bracket, and ran on "
+            f"{result.workers_used} worker process(es)."
         )
 
     def _show_result(self, result: SensitivityResult) -> None:

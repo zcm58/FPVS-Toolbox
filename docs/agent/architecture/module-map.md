@@ -57,13 +57,14 @@ Current `Legacy_App` runtime couplings:
   `renderer.py` owns widget-free image validation, stimulus-slot drawing, timing
   labels, and PNG/PDF/SVG export; `gui.py` owns the manual image-slot sidebar
   page; `worker.py` keeps rendering off the UI thread.
-- `src/Tools/Sensitivity_Analysis/`: embedded, project-independent sensitivity
-  calculator. `calculator.py` owns paired/one-sample t-test and one-way
+- `src/Tools/Sensitivity_Analysis/`: embedded, project-independent, input-only
+  idealized design-sensitivity calculator. `calculator.py` owns paired/one-sample t-test and one-way
   repeated-measures ANOVA power math; `lmm_simulation.py` owns reproducible
   Monte Carlo sensitivity for the supported random-intercept FPVS mixed model;
   `worker.py` keeps mixed-model fits off the GUI thread; and `gui.py` owns the
-  input-only PySide6 page. It has no file, project, export, or Stats-pipeline
-  integration.
+  PySide6 page. It reports minimum standardized detectable effects conditional
+  on manual assumptions, not observed power or model-fit validation, and has no
+  file, project, export, or Stats-pipeline integration.
 - `src/Tools/Publication_Maps/`: publication-oriented scalp-map source workbook and figure generation.
 - `src/Tools/LORETA_Visualizer/`: embedded 3D LORETA/source-visualization
   viewer. This is a new source-localization visualization branch, not a

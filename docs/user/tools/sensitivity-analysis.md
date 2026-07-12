@@ -2,10 +2,14 @@
 
 Sensitivity Analysis estimates the smallest standardized effect a study would
 be powered to detect under assumptions you enter manually. It is a descriptive,
-G*Power-style calculator and is separate from the Statistical Analysis tool.
+G*Power-style, idealized design-sensitivity calculator and is separate from the
+Statistical Analysis tool. Its primary result is a minimum standardized
+detectable contrast conditional on the entered assumptions.
 
 The tool does not read participant data or project settings. It does not save,
-export, or modify any files.
+export, or modify any files. Because it does not inspect observed data, it does
+not validate residuals, variance estimates, convergence, missingness, or the
+fit of a completed study's model.
 
 ## Supported Designs
 
@@ -70,6 +74,15 @@ selected fixed-effect coefficient block is evaluated with an omnibus Wald test.
 The tool searches for the standardized contrast corresponding approximately to
 the requested power.
 
+The effect search is adaptive. Each candidate begins with a small simulation
+batch and receives additional batches, up to 2,000 simulations, when its Monte
+Carlo interval overlaps the requested power. Candidate effects share the same
+search datasets so comparisons are stable. By default, the final confirmation
+uses 10,000 simulated studies from a separate random stream that did not select
+the effect. If that confirmation falls below target power, the tool performs
+one fresh local search and a second independent confirmation. Up to eight
+worker processes run model fits concurrently while keeping the GUI responsive.
+
 Mixed-model effects are reported in residual-standard-deviation units. They are
 not labeled Cohen's *d* or *f*, and conventional small/medium/large benchmarks
 are not applied. The result includes estimated simulated power, a 95% Monte
@@ -102,8 +115,10 @@ The initial values are:
 - average correlation: 0.50; and
 - epsilon: 1.00.
 
-The mixed-model mode defaults to 2 conditions, 2 ROIs, a condition contrast,
-within-participant correlation of 0.50, 400 final simulations, and seed 2026.
+The mixed-model mode defaults to 4 conditions, 3 ROIs, a condition contrast,
+within-participant correlation of 0.50, 10,000 independent confirmation
+simulations, and seed 2026. Users can change the condition count, ROI count,
+simulation count, and other assumptions before starting another simulation.
 
 Select **Reset Defaults** at any time to restore these values.
 

@@ -12,6 +12,10 @@ tool estimates the <b>minimum detectable standardized effect</b>. A smaller
 number means the design is sensitive to smaller effects.
 </p>
 <p>
+This is an <b>idealized design-sensitivity analysis</b>. Every result is
+conditional on the manually entered design assumptions.
+</p>
+<p>
 The tool does not read project data, count participants, inspect an observed
 effect, or calculate “observed power.” It does not save or export anything.
 </p>
@@ -103,6 +107,11 @@ generates balanced FPVS datasets, fits the planned model, and records how often
 the selected fixed-effect block is significant. It then searches for the
 standardized contrast corresponding approximately to the requested power.
 </p>
+<p>
+This is an input-only design sensitivity analysis. It does not inspect observed
+data and therefore does not validate residuals, variance components,
+convergence, missingness, or the fit of a completed study's model.
+</p>
 
 <h3>Supported Model</h3>
 <p>
@@ -135,6 +144,14 @@ The reported Monte Carlo interval describes uncertainty caused by running a
 finite number of simulations. It is not a confidence interval for the true
 study effect. More simulations improve precision but increase runtime. Failed
 or non-converged models count as non-detections and are reported separately.
+</p>
+<p>
+The effect-size search begins with small simulation batches and adds batches
+when Monte Carlo uncertainty overlaps the requested power. Candidate effects
+share search datasets to make comparisons stable. By default, the final
+10,000-study confirmation uses a separate random stream that was not used to
+select the effect. If confirmation falls below target power, the tool performs
+one fresh local search and a second independent confirmation.
 </p>
 
 <h3>Method Reference</h3>

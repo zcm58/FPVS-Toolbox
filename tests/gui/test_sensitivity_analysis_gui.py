@@ -219,6 +219,9 @@ def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
     assert "does not isolate the condition effect" in text
     assert "Green and MacLeod (2016)" in text
     assert "10.1111/2041-210X.12504" in text
+    assert "idealized design-sensitivity analysis" in text
+    assert "does not validate" in text
+    assert "10,000-study confirmation" in text
 
 
 def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
@@ -227,12 +230,13 @@ def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
 
     assert page.design_stack.currentIndex() == page.LMM_SIMULATION
     assert page.calculate_button.text() == "Run Simulation"
-    assert page.lmm_conditions_spin.value() == 2
-    assert page.lmm_rois_spin.value() == 2
+    assert page.lmm_conditions_spin.value() == 4
+    assert page.lmm_rois_spin.value() == 3
     assert page.lmm_correlation_spin.value() == pytest.approx(0.50)
-    assert page.lmm_simulations_spin.value() == 400
+    assert page.lmm_simulations_spin.value() == 10_000
     assert page.lmm_seed_spin.value() == 2026
     assert page.calculate_button.isEnabled()
+    assert "Idealized design sensitivity" in page.assumption_guidance.text()
     assert "Monte Carlo" in page.assumption_guidance.text()
 
     page.lmm_rois_spin.setValue(1)
@@ -265,7 +269,7 @@ def test_lmm_result_reports_simulation_uncertainty_without_cohen_labels(qtbot) -
     assert "residual-SD units" in page.magnitude_label.text()
     assert "80.5%" in page.equivalent_label.text()
     assert "Monte Carlo interval" in page.equivalent_label.text()
-    assert "not uncertainty about the real study effect" in (
+    assert "does not validate the fit of a model to observed data" in (
         page.plain_language_label.text()
     )
     assert "seed = 2026" in page.assumption_summary_label.text()
@@ -273,6 +277,29 @@ def test_lmm_result_reports_simulation_uncertainty_without_cohen_labels(qtbot) -
     assert "No universal small, medium, or large benchmarks" in (
         page.benchmark_label.text()
     )
+
+
+def test_lmm_below_target_confirmation_is_shown_as_unresolved(qtbot) -> None:
+    page = _build_page(qtbot)
+    page.analysis_combo.setCurrentIndex(page.LMM_SIMULATION)
+    result = LmmSensitivityResult(
+        effect_size=0.55,
+        estimated_power=0.79,
+        power_ci_low=0.78,
+        power_ci_high=0.80,
+        simulations=10_000,
+        successful_fits=10_000,
+        failed_fits=0,
+        singular_fits=0,
+        target="condition",
+        seed=2026,
+        target_power_met=False,
+    )
+
+    page._on_lmm_completed(result)
+
+    assert page.simulation_status.property("statusVariant") == "warning"
+    assert "remained below the requested power" in page.simulation_status.text()
 
 
 def test_lmm_worker_emits_progress_and_completion(qtbot) -> None:
