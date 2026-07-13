@@ -61,12 +61,24 @@ FPVS mixed model:
 `value ~ condition * ROI + participant random intercept`
 
 Enter analyzable participants, condition and ROI counts, desired power, alpha,
-within-participant correlation, simulation count, and a reproducible random
-seed. Choose one simulated effect:
+within-participant correlation, and simulation count. The tool generates a new
+internal random seed each time the embedded page is opened. Choose one simulated
+effect:
 
 - a standardized difference between two condition levels;
 - a standardized difference between two ROI levels; or
 - a standardized 2 × 2 condition × ROI difference-in-differences.
+
+The primary Design tab contains analyzable participants, the effect, condition
+count, and ROI count. These three numeric design inputs start blank whenever the
+tool is opened and must be entered before running a simulation. The Advanced tab
+contains random-intercept correlation and the independent confirmation
+simulation count. Most users can retain both advanced defaults. The 0.50
+correlation is a neutral assumption inherited from the tool's original
+repeated-measures setup; it was not estimated from FPVS data or selected from a
+specific FPVS publication. Under the current residual-SD parameterization, the
+participant random intercept cancels from the supported within-participant
+contrasts, so changing this value usually has little effect on the result.
 
 The selected contrast is embedded in the full condition × ROI design. Each
 simulated dataset is fitted with the random-intercept mixed model, and the
@@ -87,8 +99,10 @@ Mixed-model effects are reported in residual-standard-deviation units. They are
 not labeled Cohen's *d* or *f*, and conventional small/medium/large benchmarks
 are not applied. The result includes estimated simulated power, a 95% Monte
 Carlo interval, successful fits, failed fits, singular fits, and the random
-seed. The Monte Carlo interval describes finite-simulation uncertainty; it is
-not a confidence interval for the real study effect.
+seed used for that run. Reporting the seed preserves an audit trail even though
+it is not an editable input. The Monte Carlo interval describes
+finite-simulation uncertainty; it is not a confidence interval for the real
+study effect.
 
 The simulation does not support between-participant groups, random slopes,
 covariates, missing cells, or generalized outcomes. It runs in a background
@@ -115,10 +129,10 @@ The initial values are:
 - average correlation: 0.50; and
 - epsilon: 1.00.
 
-The mixed-model mode defaults to 4 conditions, 3 ROIs, a condition contrast,
-within-participant correlation of 0.50, 10,000 independent confirmation
-simulations, and seed 2026. Users can change the condition count, ROI count,
-simulation count, and other assumptions before starting another simulation.
+The mixed-model Design tab requires manual entry of analyzable participants,
+conditions, and ROIs for every opening. Its effect defaults to a condition
+contrast. Advanced defaults are random-intercept correlation 0.50 and 10,000
+independent confirmation simulations; a hidden seed is randomized per opening.
 
 Select **Reset Defaults** at any time to restore these values.
 

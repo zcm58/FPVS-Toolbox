@@ -534,7 +534,11 @@ class MainWindow(QMainWindow, ProcessingMixin):
     def open_sensitivity_analysis(self) -> None:
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(self._ensure_sensitivity_analysis_page())
+        existing_page = getattr(self, "_sensitivity_analysis_page", None)
+        page = self._ensure_sensitivity_analysis_page()
+        if existing_page is not None:
+            page.refresh_lmm_seed()
+        self.workspace_stack.setCurrentWidget(page)
         self._set_sidebar_selection("btn_sensitivity_analysis")
 
     def _ensure_ratio_calculator_page(self) -> RatioCalculatorWindow:

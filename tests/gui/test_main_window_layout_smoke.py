@@ -535,6 +535,11 @@ def test_sidebar_sensitivity_analysis_embeds_without_project_data(
     qtbot,
     monkeypatch,
 ) -> None:
+    generated = iter((101, 202))
+    monkeypatch.setattr(
+        "Tools.Sensitivity_Analysis.gui._new_lmm_seed",
+        lambda: next(generated),
+    )
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
@@ -548,12 +553,27 @@ def test_sidebar_sensitivity_analysis_embeds_without_project_data(
         == "embedded_sensitivity_analysis_page"
     )
     assert win._sensitivity_analysis_page.parent() is win.workspace_stack
+    first_page = win._sensitivity_analysis_page
+    assert first_page._lmm_config().seed == 101
+    first_page.analysis_combo.setCurrentIndex(first_page.LMM_SIMULATION)
+    first_page.lmm_sample_size_spin.setValue(24)
+    first_page.lmm_conditions_spin.setValue(4)
+    first_page.lmm_rois_spin.setValue(3)
     selected_roles = [
         widget.property("role")
         for widget in win.sidebar.findChildren(QWidget)
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_sensitivity_analysis"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.mouseClick(_sidebar_button(win, "btn_sensitivity_analysis"), Qt.LeftButton)
+
+    assert win._sensitivity_analysis_page is first_page
+    assert first_page._lmm_config().seed == 202
+    assert first_page.lmm_sample_size_spin.value() == 0
+    assert first_page.lmm_conditions_spin.value() == 0
+    assert first_page.lmm_rois_spin.value() == 0
 
 
 def test_sidebar_snr_plot_generator_embeds_in_main_workspace(

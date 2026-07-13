@@ -122,6 +122,19 @@ omnibus Wald test for the selected condition, ROI, or interaction coefficient
 block. It does not support between-participant groups, covariates, random
 slopes, missing cells, or generalized outcomes.
 </p>
+<p>
+The Advanced tab contains the random-intercept correlation and confirmation
+simulation count. The 0.50 correlation is a neutral default inherited from the
+tool's repeated-measures assumptions, not an estimate from FPVS data or a
+published FPVS study. Because the supported mixed-model effects are
+within-participant contrasts expressed in residual-SD units, this correlation
+usually has little effect on the detectable contrast.
+</p>
+<p>
+The Design tab intentionally starts without participant, condition, or ROI
+counts. Enter all three for each tool opening so a previous design cannot be
+carried into a new sensitivity analysis accidentally.
+</p>
 
 <h3>Effect Definition</h3>
 <ul>
@@ -144,6 +157,11 @@ The reported Monte Carlo interval describes uncertainty caused by running a
 finite number of simulations. It is not a confidence interval for the true
 study effect. More simulations improve precision but increase runtime. Failed
 or non-converged models count as non-detections and are reported separately.
+</p>
+<p>
+A new hidden random seed is generated whenever the embedded tool is opened.
+The seed is included in the result summary for traceability but is not an
+editable assumption.
 </p>
 <p>
 The effect-size search begins with small simulation batches and adds batches

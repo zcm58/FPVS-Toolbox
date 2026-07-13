@@ -8,7 +8,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QScrollArea
+from PySide6.QtWidgets import QScrollArea, QSpinBox
 
 from Main_App.gui.components import SectionCard, ToolInfoDialog
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
@@ -222,6 +222,9 @@ def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
     assert "idealized design-sensitivity analysis" in text
     assert "does not validate" in text
     assert "10,000-study confirmation" in text
+    assert "hidden random seed" in text
+    assert "neutral default" in text
+    assert "usually has little effect" in text
 
 
 def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
@@ -230,11 +233,41 @@ def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
 
     assert page.design_stack.currentIndex() == page.LMM_SIMULATION
     assert page.calculate_button.text() == "Run Simulation"
-    assert page.lmm_conditions_spin.value() == 4
-    assert page.lmm_rois_spin.value() == 3
+    assert page.lmm_sample_size_spin.value() == 0
+    assert page.lmm_conditions_spin.value() == 0
+    assert page.lmm_rois_spin.value() == 0
+    for required_input in (
+        page.lmm_sample_size_spin,
+        page.lmm_conditions_spin,
+        page.lmm_rois_spin,
+    ):
+        assert required_input.text() == ""
+        assert required_input.lineEdit().placeholderText() == "Enter value"
+        assert required_input.buttonSymbols() == QSpinBox.NoButtons
     assert page.lmm_correlation_spin.value() == pytest.approx(0.50)
     assert page.lmm_simulations_spin.value() == 10_000
-    assert page.lmm_seed_spin.value() == 2026
+    assert page.lmm_tabs.count() == 2
+    assert page.lmm_tabs.tabText(0) == "Design"
+    assert page.lmm_tabs.tabText(1) == "Advanced"
+    assert page.lmm_tabs.currentIndex() == 0
+    assert page.lmm_design_panel.minimumHeight() == page.lmm_advanced_panel.minimumHeight()
+    assert page.lmm_design_panel.minimumHeight() > 0
+    assert page.lmm_design_panel.isAncestorOf(page.lmm_sample_size_spin)
+    assert page.lmm_design_panel.isAncestorOf(page.lmm_target_combo)
+    assert page.lmm_advanced_panel.isAncestorOf(page.lmm_correlation_spin)
+    assert page.lmm_advanced_panel.isAncestorOf(page.lmm_simulations_spin)
+    assert "not an FPVS-derived estimate" in page.lmm_correlation_spin.toolTip()
+    assert not hasattr(page, "lmm_seed_spin")
+    assert 0 <= page._lmm_config().seed <= 2_147_483_647
+    assert page.sample_size_label.isHidden()
+    assert page.sample_size_spin.isHidden()
+    assert not page.calculate_button.isEnabled()
+    assert "at least 3 analyzable participants" in page.assumption_guidance.text()
+
+    page.lmm_sample_size_spin.setValue(24)
+    page.lmm_conditions_spin.setValue(4)
+    page.lmm_rois_spin.setValue(3)
+
     assert page.calculate_button.isEnabled()
     assert "Idealized design sensitivity" in page.assumption_guidance.text()
     assert "Monte Carlo" in page.assumption_guidance.text()
@@ -243,12 +276,38 @@ def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
 
     assert not page.calculate_button.isEnabled()
     assert page.assumption_guidance.property("statusVariant") == "error"
-    assert "at least two conditions and two ROIs" in page.assumption_guidance.text()
+    assert "2 conditions, and 2 ROIs" in page.assumption_guidance.text()
+
+    page.lmm_tabs.setCurrentIndex(1)
+    page.reset_defaults()
+    assert page.lmm_tabs.currentIndex() == 0
+    assert page.lmm_sample_size_spin.value() == 0
+    assert page.lmm_conditions_spin.value() == 0
+    assert page.lmm_rois_spin.value() == 0
+
+
+def test_lmm_seed_is_randomized_per_window_and_not_resettable(qtbot, monkeypatch) -> None:
+    generated = iter((101, 202))
+    monkeypatch.setattr(
+        "Tools.Sensitivity_Analysis.gui._new_lmm_seed",
+        lambda: next(generated),
+    )
+
+    first = _build_page(qtbot)
+    second = _build_page(qtbot)
+
+    assert first._lmm_config().seed == 101
+    assert second._lmm_config().seed == 202
+    first.reset_defaults()
+    assert first._lmm_config().seed == 101
 
 
 def test_lmm_result_reports_simulation_uncertainty_without_cohen_labels(qtbot) -> None:
     page = _build_page(qtbot)
     page.analysis_combo.setCurrentIndex(page.LMM_SIMULATION)
+    page.lmm_sample_size_spin.setValue(24)
+    page.lmm_conditions_spin.setValue(4)
+    page.lmm_rois_spin.setValue(3)
     result = LmmSensitivityResult(
         effect_size=0.72,
         estimated_power=0.805,
@@ -282,6 +341,9 @@ def test_lmm_result_reports_simulation_uncertainty_without_cohen_labels(qtbot) -
 def test_lmm_below_target_confirmation_is_shown_as_unresolved(qtbot) -> None:
     page = _build_page(qtbot)
     page.analysis_combo.setCurrentIndex(page.LMM_SIMULATION)
+    page.lmm_sample_size_spin.setValue(24)
+    page.lmm_conditions_spin.setValue(4)
+    page.lmm_rois_spin.setValue(3)
     result = LmmSensitivityResult(
         effect_size=0.55,
         estimated_power=0.79,
