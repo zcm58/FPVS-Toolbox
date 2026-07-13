@@ -163,7 +163,9 @@ benchmarks:
 These labels are descriptive reference points only. They do not establish
 theoretical, clinical, or practical importance. Study-specific prior evidence,
 measurement reliability, exclusions, model assumptions, and multiplicity may
-all affect whether a planned sample is adequate.
+all affect whether a planned sample is adequate. The same benchmark values and
+their limitations are available in the information dialog's **Assumptions** tab
+rather than in a persistent warning banner on the main tool page.
 
 The alpha entry applies to the test being evaluated. Sensitivity Analysis does
 not automatically adjust alpha for multiple planned tests.

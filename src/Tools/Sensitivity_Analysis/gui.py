@@ -234,15 +234,6 @@ class SensitivityAnalysisWindow(QWidget):
         sections.addWidget(results_card, 0, 1)
         self._build_results(results_card)
 
-        self.disclaimer = StatusBanner(
-            "Cohen's conventional small, medium, and large benchmarks are only "
-            "descriptive reference points. They do not establish theoretical, "
-            "clinical, or practical importance.",
-            page,
-            variant="warning",
-        )
-        self.disclaimer.setObjectName("sensitivity_disclaimer")
-        page_layout.addWidget(self.disclaimer)
         page_layout.addStretch(1)
 
     def _build_inputs(self, card: SectionCard) -> None:

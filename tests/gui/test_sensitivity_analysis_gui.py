@@ -8,7 +8,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QScrollArea, QSpinBox
+from PySide6.QtWidgets import QScrollArea, QSpinBox, QWidget
 
 from Main_App.gui.components import SectionCard, ToolInfoDialog
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
@@ -225,6 +225,11 @@ def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
     assert "hidden random seed" in text
     assert "neutral default" in text
     assert "usually has little effect" in text
+    assumptions_text = dialog.browsers[2].toPlainText()
+    assert "Cohen's d: 0.20 small, 0.50 medium, and 0.80 large" in assumptions_text
+    assert "Cohen's f: 0.10 small, 0.25 medium, and 0.40 large" in assumptions_text
+    assert "descriptive reference points only" in assumptions_text
+    assert "do not apply to that simulation" in assumptions_text
 
 
 def test_lmm_mode_exposes_supported_model_and_validation(qtbot) -> None:
@@ -420,4 +425,8 @@ def test_embedded_surface_has_no_horizontal_clipping(qtbot) -> None:
     assert results.minimumSizeHint().height() <= results.height()
     assert page.calculate_button.isVisibleTo(page)
     assert page.reset_button.isVisibleTo(page)
-    assert page.disclaimer.isVisibleTo(page)
+    assert page.findChild(QWidget, "sensitivity_disclaimer") is None
+
+    page.resize(1000, 800)
+    qtbot.wait(30)
+    assert not scroll.verticalScrollBar().isVisible()

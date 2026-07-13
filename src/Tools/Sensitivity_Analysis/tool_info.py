@@ -97,6 +97,18 @@ Sample size, correlation, epsilon, alpha, and desired power all affect the
 detectable effect. A precise result is conditional on these inputs; it is not a
 guarantee about the observed study outcome.
 </p>
+
+<h3>Conventional Effect-Size Benchmarks</h3>
+<ul>
+  <li><b>Cohen's d:</b> 0.20 small, 0.50 medium, and 0.80 large.</li>
+  <li><b>Cohen's f:</b> 0.10 small, 0.25 medium, and 0.40 large.</li>
+</ul>
+<p>
+These conventional labels are descriptive reference points only. They do not
+establish theoretical, clinical, or practical importance. The mixed-model
+standardized contrasts are not Cohen's d or f, so these benchmarks do not apply
+to that simulation.
+</p>
 """
 
 MIXED_MODELS_HTML = """
@@ -193,13 +205,6 @@ The estimate is a detection threshold under the entered assumptions, not an
 expected effect and not evidence that smaller effects are absent. Compare it
 with prior FPVS evidence and the smallest effect that would matter for the
 research question.
-</p>
-
-<h3>Conventional Magnitude Labels</h3>
-<p>
-The displayed small, medium, and large labels are conventional descriptive
-benchmarks. They do not establish theoretical, clinical, or practical
-importance.
 </p>
 
 <h3>Reporting Template</h3>
