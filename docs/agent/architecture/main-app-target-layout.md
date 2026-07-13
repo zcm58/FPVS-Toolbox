@@ -11,7 +11,7 @@ src/Main_App/
   gui/            # Windows/PySide6 user interface, widgets, menus, dialogs
   processing/     # EEG preprocessing and pipeline orchestration import surface
   io/             # BDF loading, project paths, manifests, export path helpers
-  projects/       # Project model, project settings, project manager workflows
+  projects/       # Project model/settings, manifests, dataset identity/indexing
   workers/        # Qt workers, multiprocessing bridge, process runner adapters
   diagnostics/    # Audits, event-time lock reports, debug/reporting helpers
   exports/        # Post-processing/export adapters and export-facing helpers
@@ -34,7 +34,10 @@ src/Main_App/
 surface. It owns the stable no-op `process_data` coordinator plus raw-file
 discovery, batch-file preparation, and compatibility processing-controller
 helpers. It also owns the active preprocessing implementation while the
-preprocessing contract and tests protect behavior.
+preprocessing contract and tests protect behavior. Multi-group batch discovery
+uses all registered raw roots, carries stable group IDs through review and
+incremental planning, computes condition/group output paths, and locks the
+fingerprinted group layout after the first current-run grouped workbook.
 
 `src/Main_App/io/` is now the canonical Main App BDF loader import surface. It
 delegates to the existing shared loader implementation while the BDF loading
@@ -47,7 +50,12 @@ worker/threading tests protect behavior.
 `src/Main_App/projects/` is now the canonical Main App project import surface.
 It owns the project model, project manager workflows, project metadata scanning,
 projects-root helpers, and preprocessing settings normalization while project
-I/O tests protect behavior during the package-layout migration.
+I/O tests protect behavior during the package-layout migration. It also owns
+canonical group and participant manifest normalization, immutable read-only
+project group context, and safe group/output-folder helpers in
+`projects/grouping.py`. The next project-layer addition extends that context
+with a processed-workbook index so Stats, plotting, QC, and export tools can
+share workbook discovery and group selection without cross-tool imports.
 
 `src/Main_App/gui/` is now the canonical Main App GUI import surface. It
 owns project workflow orchestration, processing run start/stop/finalization

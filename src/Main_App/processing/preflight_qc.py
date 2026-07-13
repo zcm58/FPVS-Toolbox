@@ -37,6 +37,7 @@ class HeaderOnlyPreflight:
     path: Path
     participant_id: str
     info: BdfPreflightInfo
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class PreflightQcFileResult:
     load_error: str | None
     raw_channel_qc: Mapping[str, object] | None
     raw_spectral_qc: Mapping[str, object] | None
+    group_id: str | None = None
 
     @property
     def auto_removed_electrodes(self) -> tuple[str, ...]:
@@ -190,6 +192,7 @@ def scan_recording_not_started_files(
                 path=Path(info.path),
                 participant_id=str(info.subject_id),
                 info=preflight,
+                group_id=str(info.group).strip() if info.group else None,
             )
         )
     return tuple(flagged)
@@ -247,6 +250,7 @@ def _scan_one_preflight_file(
 ) -> PreflightQcFileResult | None:
     file_path = Path(info.path)
     participant_id = str(info.subject_id)
+    group_id = str(info.group).strip() if info.group else None
     raw = None
     try:
         preflight = load_utils.inspect_bdf_header(file_path)
@@ -271,12 +275,13 @@ def _scan_one_preflight_file(
             load_error=None,
             raw_channel_qc=_raw_channel_payload(raw_result),
             raw_spectral_qc=spectral_result.to_payload(),
+            group_id=group_id,
         )
     except Exception as exc:
         logger.exception(
             "Preflight QC failed for %s",
             file_path,
-            extra={"participant_id": participant_id},
+            extra={"participant_id": participant_id, "group_id": group_id},
         )
         return PreflightQcFileResult(
             path=file_path,
@@ -284,6 +289,7 @@ def _scan_one_preflight_file(
             load_error=str(exc),
             raw_channel_qc=None,
             raw_spectral_qc=None,
+            group_id=group_id,
         )
     finally:
         raw = None

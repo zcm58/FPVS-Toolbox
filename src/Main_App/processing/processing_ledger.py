@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from Main_App.processing.processing_controller import RawFileInfo
+from Main_App.projects.grouping import (
+    project_group_context,
+    resolve_group_output_directory,
+    resolve_output_directory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -245,16 +250,14 @@ def _condition_folder_name(label: str) -> str:
 
 
 def _group_folder_name(project: Any, group_id: str | None) -> str | None:
+    context = project_group_context(project)
     if not group_id:
+        if context.has_group_metadata:
+            raise ValueError(
+                "Grouped processing input is missing its canonical group_id."
+            )
         return None
-    groups = getattr(project, "groups", {}) or {}
-    if not isinstance(groups, Mapping):
-        return None
-    entry = groups.get(group_id)
-    if not isinstance(entry, Mapping):
-        return group_id
-    folder_name = str(entry.get("folder_name") or entry.get("label") or group_id).strip()
-    return folder_name or group_id
+    return context.group(group_id).folder_name
 
 
 def _expected_excel_paths(
@@ -263,14 +266,14 @@ def _expected_excel_paths(
     condition_labels: Sequence[str],
 ) -> tuple[Path, ...]:
     root = _excel_root(project)
+    group_folder = _group_folder_name(project, info.group)
     paths: list[Path] = []
     for label in condition_labels:
         condition_folder = _condition_folder_name(label)
         file_name = f"{info.subject_id}_{condition_folder}_Results.xlsx"
-        group_folder = _group_folder_name(project, info.group)
-        output_folder = root / condition_folder
+        output_folder = resolve_output_directory(root, condition_folder)
         if group_folder:
-            output_folder = output_folder / group_folder
+            output_folder = resolve_group_output_directory(output_folder, group_folder)
         paths.append((output_folder / file_name).resolve())
     return tuple(paths)
 
@@ -794,7 +797,7 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
     deleted: list[Path] = []
     run_files = {path.resolve() for path in plan.run_files}
     for state in plan.states:
-        if state.info.path.resolve() not in run_files or state.status == "new":
+        if state.info.path.resolve() not in run_files:
             continue
         for expected_output in state.expected_outputs:
             target = _assert_under_excel_root(root, expected_output)
@@ -1091,7 +1094,11 @@ def record_processing_results(
 
     save_ledger(project_root, ledger)
 
-    if getattr(project, "groups", {}) and not getattr(project, "groups_locked", False):
+    if (
+        successful_paths
+        and getattr(project, "groups", {})
+        and not getattr(project, "groups_locked", False)
+    ):
         project.groups_locked = True
         project.groups_locked_at = _now_iso()
         project.save()

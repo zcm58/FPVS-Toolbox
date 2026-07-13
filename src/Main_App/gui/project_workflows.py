@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -20,6 +19,7 @@ from Main_App.projects.project_manager import (
     open_existing_project as _open_existing_project,
 )
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.projects.grouping import project_group_context
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -187,28 +187,41 @@ def load_project(
         file_paths = prepare_batch_files(project)
     except Exception as exc:
         logger.exception("Project raw-file discovery failed during load.")
-        QMessageBox.warning(host, "Project Data Warning", str(exc))
+        QMessageBox.critical(host, "Project Data Error", str(exc))
         file_paths = []
     host.data_paths = [str(p) for p in file_paths]
 
-    groups = getattr(project, "groups", {}) or {}
-    input_dir = Path(project.input_folder)
+    context = project_group_context(project)
     sync_input_folder_display(host)
 
     if host.data_paths:
-        if isinstance(groups, dict) and len(groups) >= 2:
+        if context.has_group_metadata:
             host.log(
-                f"Project data folders set ({len(groups)} groups, {len(host.data_paths)} .bdf files)"
+                "Project data folders set "
+                f"({len(context.groups)} groups, {len(host.data_paths)} .bdf files)"
             )
         else:
             host.log(
-                f"Project data folder set: {input_dir} ({len(host.data_paths)} .bdf files)"
+                "Project data folder set: "
+                f"{project.input_folder} ({len(host.data_paths)} .bdf files)"
             )
     else:
-        host.log(
-            f"Warning: no .bdf files found in project input folder(s): {input_dir}",
-            level=logging.WARNING,
-        )
+        if context.has_group_metadata:
+            configured = "; ".join(
+                f"{group.label}: {group.raw_input_folder}"
+                for group in context.groups
+            )
+            host.log(
+                "Warning: no .bdf files found in registered group folders: "
+                f"{configured}",
+                level=logging.WARNING,
+            )
+        else:
+            host.log(
+                "Warning: no .bdf files found in project input folder: "
+                f"{project.input_folder}",
+                level=logging.WARNING,
+            )
 
     # Provide post_process with a .get() for the Excel output folder.
     excel_subfolder = project.subfolders.get("excel")
@@ -336,11 +349,29 @@ def save_project_settings(host: Any) -> None:
 
 def sync_input_folder_display(host: Any) -> None:
     folder_text = ""
+    tooltip = ""
+    has_groups = False
     if getattr(host, "currentProject", None):
-        folder_text = str(host.currentProject.input_folder)
+        context = project_group_context(host.currentProject)
+        has_groups = context.has_group_metadata
+        if has_groups:
+            folder_text = f"{len(context.groups)} group raw-data folders configured"
+            tooltip = "\n".join(
+                f"{group.label}: {group.raw_input_folder}"
+                for group in context.groups
+            )
+        else:
+            folder_text = str(host.currentProject.input_folder)
+            tooltip = folder_text
     line_edit = getattr(host, "le_input_folder", None)
     if isinstance(line_edit, QLineEdit):
         line_edit.setText(folder_text)
+        line_edit.setToolTip(tooltip)
+    button = getattr(host, "btn_select_input_folder", None)
+    if button and hasattr(button, "setText"):
+        button.setText(
+            "Edit Group Folders..." if has_groups else "Select Data Folder..."
+        )
 
 
 def update_select_button_text(host: Any) -> None:
@@ -360,7 +391,15 @@ def update_select_button_text(host: Any) -> None:
         else:
             btn_folder = getattr(host, "btn_select_input_folder", None)
             if btn_folder and hasattr(btn_folder, "setText"):
-                btn_folder.setText("Select Data Folder...")
+                project = getattr(host, "currentProject", None)
+                has_groups = (
+                    project_group_context(project).has_group_metadata
+                    if project is not None
+                    else False
+                )
+                btn_folder.setText(
+                    "Edit Group Folders..." if has_groups else "Select Data Folder..."
+                )
             btn_generic = getattr(host, "btn_select_input", None)
             if btn_generic and hasattr(btn_generic, "setText"):
                 btn_generic.setText("Select Data Folder...")

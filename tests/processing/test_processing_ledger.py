@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from Main_App.Shared.post_process import _create_output_subfolder
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
@@ -16,7 +20,9 @@ from Main_App.processing.processing_ledger import (
     refresh_skipped_ledger_fingerprints,
     with_processing_choice,
 )
+from Main_App.projects.grouping import GroupConfigurationError
 from Main_App.projects.project import Project
+from Main_App.workers import process_runner
 
 
 def _project_with_raw(tmp_path):
@@ -305,6 +311,104 @@ def test_record_results_locks_multigroup_project_after_success(tmp_path) -> None
 
     assert saved["groups_locked"] is True
     assert saved["groups_locked_at"]
+    assert saved["groups_lock_fingerprint"]
+
+    project.groups["control"]["folder_name"] = "Changed"
+    with pytest.raises(ValueError, match="cannot be changed"):
+        project.save()
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_partial_current_run_output_locks_group_layout(tmp_path, cancelled) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {"Condition A": 1, "Condition B": 2}
+    project.groups = {
+        "control": {
+            "label": "Control",
+            "folder_name": "Control",
+            "raw_input_folder": info.path.parent,
+        }
+    }
+    grouped_info = RawFileInfo(info.path, info.subject_id, "control")
+    project.save()
+    plan = classify_processing_inputs(
+        project,
+        [grouped_info],
+        _settings(),
+        project.event_map,
+    )
+    partial_output = plan.states[0].expected_outputs[0]
+    partial_output.parent.mkdir(parents=True, exist_ok=True)
+    partial_output.write_text("current run", encoding="utf-8")
+
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=cancelled,
+    )
+
+    assert project.groups_locked is True
+    assert project.groups_locked_at
+
+
+@pytest.mark.parametrize(
+    ("outcome", "cancelled"),
+    [
+        pytest.param("error", False, id="worker-error"),
+        pytest.param("excluded", False, id="excluded"),
+        pytest.param("ok_without_outputs", False, id="ok-status-without-output"),
+        pytest.param("cancelled", True, id="cancelled"),
+    ],
+)
+def test_record_results_does_not_lock_multigroup_without_successful_output(
+    tmp_path,
+    outcome,
+    cancelled,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.groups = {
+        "control": {
+            "label": "Control",
+            "folder_name": "Control",
+            "raw_input_folder": info.path.parent,
+        }
+    }
+    grouped_info = RawFileInfo(info.path, info.subject_id, "control")
+    project.save()
+    plan = classify_processing_inputs(project, [grouped_info], _settings(), project.event_map)
+
+    if outcome == "error":
+        results = [{"status": "error", "file": str(info.path)}]
+    elif outcome == "excluded":
+        results = [
+            {
+                "status": "excluded",
+                "file": str(info.path),
+                "reason": "raw_qc_exclusion",
+            }
+        ]
+    elif outcome == "ok_without_outputs":
+        results = [{"status": "ok", "file": str(info.path)}]
+    else:
+        results = []
+
+    record_processing_results(
+        project,
+        plan,
+        results,
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=cancelled,
+    )
+    saved = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
+
+    assert project.groups_locked is False
+    assert project.groups_locked_at is None
+    assert "groups_locked" not in saved
+    assert "groups_locked_at" not in saved
 
 
 def test_multigroup_expected_outputs_are_condition_first_group_second(tmp_path) -> None:
@@ -332,6 +436,105 @@ def test_multigroup_expected_outputs_are_condition_first_group_second(tmp_path) 
     assert output_group_folder_by_file(project, [grouped_info]) == {
         str(info.path.resolve()): "Control Group"
     }
+
+
+def test_two_groups_receive_distinct_canonical_output_routes(tmp_path) -> None:
+    project, control_info = _project_with_raw(tmp_path)
+    treatment_dir = tmp_path / "treatment_raw"
+    treatment_dir.mkdir()
+    treatment_file = treatment_dir / "P02.bdf"
+    treatment_file.write_bytes(b"raw")
+    project.groups = {
+        "control": {
+            "label": "Control",
+            "folder_name": "Control",
+            "raw_input_folder": control_info.path.parent,
+        },
+        "treatment": {
+            "label": "Treatment",
+            "folder_name": "Treatment",
+            "raw_input_folder": treatment_dir,
+        },
+    }
+    grouped_infos = [
+        RawFileInfo(control_info.path, control_info.subject_id, "control"),
+        RawFileInfo(treatment_file.resolve(), "P02", "treatment"),
+    ]
+    project.save()
+
+    plan = classify_processing_inputs(
+        project,
+        grouped_infos,
+        _settings(),
+        project.event_map,
+    )
+
+    assert [state.expected_outputs[0].parent.name for state in plan.states] == [
+        "Control",
+        "Treatment",
+    ]
+    assert output_group_folder_by_file(project, grouped_infos) == {
+        str(control_info.path.resolve()): "Control",
+        str(treatment_file.resolve()): "Treatment",
+    }
+
+
+def test_planned_group_route_matches_runner_and_export_destination(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.groups = {
+        "control": {
+            "label": "Control",
+            "folder_name": "Control",
+            "raw_input_folder": info.path.parent,
+        }
+    }
+    grouped_info = RawFileInfo(info.path, info.subject_id, "control")
+    project.save()
+    plan = classify_processing_inputs(
+        project,
+        [grouped_info],
+        _settings(),
+        project.event_map,
+    )
+    group_mapping = output_group_folder_by_file(project, [grouped_info])
+    file_settings = process_runner._settings_for_file(
+        info.path,
+        {
+            "_fpvs_grouped_project": True,
+            "_fpvs_output_group_by_file": group_mapping,
+        },
+    )
+    destination = _create_output_subfolder(
+        SimpleNamespace(log=lambda _message: None),
+        project.subfolders["excel"],
+        "Condition A",
+        file_settings["output_group_folder"],
+    )
+
+    assert Path(destination) == plan.states[0].expected_outputs[0].parent
+
+
+def test_expected_outputs_reject_unsafe_condition_folder(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.event_map = {"..": 1}
+
+    with pytest.raises(GroupConfigurationError):
+        classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+
+def test_grouped_expected_outputs_require_group_id(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    project.groups = {
+        "control": {
+            "label": "Control",
+            "folder_name": "Control",
+            "raw_input_folder": info.path.parent,
+        }
+    }
+    project.save()
+
+    with pytest.raises(ValueError, match="missing its canonical group_id"):
+        classify_processing_inputs(project, [info], _settings(), project.event_map)
 
 
 def test_record_results_marks_missing_run_file_failed(tmp_path) -> None:
@@ -500,6 +703,7 @@ def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path
     assert changed_plan.incremental_files == (info.path,)
 
 
+
 def test_record_results_requires_at_least_one_expected_output_for_completed_status(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
@@ -595,6 +799,27 @@ def test_clean_participant_outputs_deletes_only_planned_participant(tmp_path) ->
     assert deleted == [output_p01]
     assert not output_p01.exists()
     assert output_p02.exists()
+
+
+def test_clean_participant_outputs_removes_preexisting_output_for_new_file(
+    tmp_path,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    )
+    assert plan.states[0].status == "new"
+    stale_output = plan.states[0].expected_outputs[0]
+    stale_output.parent.mkdir(parents=True, exist_ok=True)
+    stale_output.write_text("untracked stale output", encoding="utf-8")
+
+    deleted = clean_participant_outputs(project, plan)
+
+    assert deleted == [stale_output]
+    assert not stale_output.exists()
 
 
 def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_files(

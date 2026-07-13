@@ -33,6 +33,7 @@ from Main_App.processing.processing_ledger import (
     with_processing_choice,
 )
 from Main_App.processing.qc_summary_export import export_processing_qc_summary
+from Main_App.projects.grouping import project_group_context
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 from Main_App.processing.raw_channel_qc import RAW_CHANNEL_QC_EXCLUSION_REASON
 from Main_App.workers.mp_env import (
@@ -547,6 +548,20 @@ def _start_post_processing_pipeline_after_processing(
     return True
 
 
+def _frequency_domain_qc_participant_groups(project: Any) -> dict[str, str] | None:
+    context = project_group_context(project)
+    if not context.groups:
+        return None
+    groups: dict[str, str] = {}
+    for participant in context.participants:
+        if participant.group_id is None:
+            raise ValueError(
+                "Frequency-domain QC requires group membership for every participant."
+            )
+        groups[participant.participant_id] = context.group(participant.group_id).label
+    return groups
+
+
 def _handle_frequency_domain_qc_review(
     host: Any,
     project: Any,
@@ -560,7 +575,23 @@ def _handle_frequency_domain_qc_review(
         mark_frequency_domain_outputs_stale,
     )
 
-    dialog = FrequencyDomainQcReviewDialog(report, host)
+    try:
+        participant_groups = _frequency_domain_qc_participant_groups(project)
+        dialog = FrequencyDomainQcReviewDialog(
+            report,
+            host,
+            participant_groups=participant_groups,
+        )
+    except (RuntimeError, ValueError) as exc:
+        logger.exception("frequency_domain_qc_group_membership_failed")
+        QMessageBox.critical(host, "Frequency-Domain QC Error", str(exc))
+        mark_frequency_domain_outputs_stale(
+            project.project_root,
+            reason="Frequency-domain QC could not resolve canonical group membership.",
+        )
+        on_finished()
+        _set_resume_post_processing_pending(host, True)
+        return
     accepted = dialog.exec() == QDialog.DialogCode.Accepted
     if accepted:
         try:
@@ -1019,7 +1050,16 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             host.currentProject,
             raw_file_infos,
         )
-        if group_folder_by_file:
+        grouped_project = project_group_context(
+            host.currentProject
+        ).has_group_metadata
+        settings["_fpvs_grouped_project"] = grouped_project
+        if grouped_project:
+            if not group_folder_by_file:
+                raise ValueError(
+                    "Grouped processing produced no canonical per-file output "
+                    "routing. Repair the project group assignments."
+                )
             settings["_fpvs_output_group_by_file"] = group_folder_by_file
         if raw_file_infos:
             settings["_fpvs_participant_id_by_file"] = {

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,6 +9,7 @@ import pytest
 
 from Main_App.gui.processing_inputs import validate_inputs
 from Main_App.processing.processing_controller import (
+    RawFileInfo,
     discover_raw_files,
     participant_review_rows,
     prepare_batch_files,
@@ -52,6 +52,39 @@ def test_prepare_batch_files_multigroup_does_not_fallback_to_input_folder(tmp_pa
     project.input_folder = fallback_input
 
     assert prepare_batch_files(project) == []
+
+
+def test_discover_raw_files_enumerates_every_registered_group(tmp_path) -> None:
+    control_dir = tmp_path / "raw" / "Control"
+    treatment_dir = tmp_path / "raw" / "Treatment"
+    control_dir.mkdir(parents=True)
+    treatment_dir.mkdir()
+    control_file = control_dir / "P01.bdf"
+    treatment_file = treatment_dir / "P02.bdf"
+    control_file.write_bytes(b"")
+    treatment_file.write_bytes(b"")
+    project = _build_group_project(
+        tmp_path,
+        {
+            "control": {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": control_dir,
+            },
+            "treatment": {
+                "label": "Treatment",
+                "folder_name": "Treatment",
+                "raw_input_folder": treatment_dir,
+            },
+        },
+    )
+
+    files = discover_raw_files(project)
+
+    assert [(info.path, info.subject_id, info.group) for info in files] == [
+        (control_file.resolve(), "P01", "control"),
+        (treatment_file.resolve(), "P02", "treatment"),
+    ]
 
 
 def test_discover_raw_files_rejects_duplicate_subjects_same_folder(tmp_path) -> None:
@@ -154,7 +187,11 @@ def test_discover_raw_files_rejects_locked_group_assignment_drift(tmp_path) -> N
         discover_raw_files(project)
 
 
-def test_discover_raw_files_warns_for_missing_known_raw_file(tmp_path, caplog) -> None:
+@pytest.mark.parametrize("groups_locked", [False, True])
+def test_discover_raw_files_rejects_missing_known_raw_file(
+    tmp_path,
+    groups_locked,
+) -> None:
     control_dir = tmp_path / "raw" / "Control"
     control_dir.mkdir(parents=True)
     p02 = control_dir / "P02.bdf"
@@ -169,33 +206,67 @@ def test_discover_raw_files_warns_for_missing_known_raw_file(tmp_path, caplog) -
             },
         },
     )
-    project.groups_locked = True
+    project.groups_locked = groups_locked
     project.participants = {
         "P01": {"group_id": "control", "raw_file": control_dir / "P01.bdf"}
     }
 
-    with caplog.at_level(logging.WARNING):
-        files = discover_raw_files(project)
-
-    assert [info.path for info in files] == [p02.resolve()]
-    assert "missing raw .bdf file" in caplog.text
+    with pytest.raises(FileNotFoundError, match="missing raw .bdf file"):
+        discover_raw_files(project)
 
 
-def test_discover_raw_files_rejects_missing_registered_folder_after_lock(tmp_path) -> None:
-    missing_dir = tmp_path / "raw" / "Missing"
+@pytest.mark.parametrize("groups_locked", [False, True])
+def test_discover_raw_files_rejects_any_missing_registered_group_folder(
+    tmp_path,
+    groups_locked,
+) -> None:
+    control_dir = tmp_path / "raw" / "Control"
+    control_dir.mkdir(parents=True)
+    (control_dir / "P01.bdf").write_bytes(b"")
+    missing_dir = tmp_path / "raw" / "Treatment"
     project = _build_group_project(
         tmp_path,
         {
             "control": {
                 "label": "Control",
                 "folder_name": "Control",
+                "raw_input_folder": control_dir,
+            },
+            "treatment": {
+                "label": "Treatment",
+                "folder_name": "Treatment",
                 "raw_input_folder": missing_dir,
             },
         },
     )
-    project.groups_locked = True
+    project.groups_locked = groups_locked
 
     with pytest.raises(FileNotFoundError, match="Registered raw input folder is missing"):
+        discover_raw_files(project)
+
+
+def test_discover_raw_files_rejects_registered_file_excluded_from_discovery(
+    tmp_path,
+) -> None:
+    control_dir = tmp_path / "raw" / "Control"
+    control_dir.mkdir(parents=True)
+    sidecar = control_dir / "._P01.bdf"
+    sidecar.write_bytes(b"")
+    project = _build_group_project(
+        tmp_path,
+        {
+            "control": {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": control_dir,
+            },
+        },
+    )
+    project.participants = {
+        "P01": {"group_id": "control", "raw_file": sidecar}
+    }
+
+    with pytest.raises(ValueError, match="not found by canonical group discovery"):
         discover_raw_files(project)
 
 
@@ -219,7 +290,6 @@ def test_prepare_batch_files_does_not_persist_before_review(tmp_path) -> None:
     saved = json.loads((project.project_root / "project.json").read_text(encoding="utf-8"))
 
     assert "participants" not in saved
-
 
 def test_register_participants_persists_group_id_and_raw_file(tmp_path) -> None:
     control_dir = tmp_path / "raw" / "Control"
@@ -248,6 +318,41 @@ def test_register_participants_persists_group_id_and_raw_file(tmp_path) -> None:
         "group_id": "control",
         "raw_file": str(p01),
     }
+
+
+def test_register_participants_hard_fails_group_assignment_conflict(tmp_path) -> None:
+    control_dir = tmp_path / "raw" / "Control"
+    treatment_dir = tmp_path / "raw" / "Treatment"
+    control_dir.mkdir(parents=True)
+    treatment_dir.mkdir()
+    control_file = control_dir / "P01.bdf"
+    treatment_file = treatment_dir / "P01.bdf"
+    control_file.write_bytes(b"")
+    treatment_file.write_bytes(b"")
+    project = _build_group_project(
+        tmp_path,
+        {
+            "control": {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": control_dir,
+            },
+            "treatment": {
+                "label": "Treatment",
+                "folder_name": "Treatment",
+                "raw_input_folder": treatment_dir,
+            },
+        },
+    )
+    project.participants = {
+        "P01": {"group_id": "control", "raw_file": control_file}
+    }
+
+    with pytest.raises(ValueError, match="already assigned to group 'control'"):
+        register_participants(
+            project,
+            [RawFileInfo(treatment_file.resolve(), "P01", "treatment")],
+        )
 
 
 def test_raw_file_info_for_path_rejects_unregistered_group_source(tmp_path) -> None:

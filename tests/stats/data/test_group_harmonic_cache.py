@@ -38,7 +38,13 @@ def _write_manifest(project_root: Path, *, high_pass: float = 0.1) -> None:
             "max_parallel_workers_override": 0,
             "stim_channel": "Status",
         },
-        "groups": {"control": {"label": "Control", "folder_name": "Control"}},
+        "groups": {
+            "control": {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": "Input",
+            }
+        },
         "participants": {"S1": {"group_id": "control"}},
     }
     (project_root / "project.json").write_text(

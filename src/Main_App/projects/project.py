@@ -1,13 +1,18 @@
 """Project model and manifest persistence helpers."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
+from .grouping import (
+    make_group_id as make_group_id,
+    normalize_project_groups,
+    normalize_project_participants,
+)
 from .preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
@@ -25,7 +30,7 @@ DEFAULTS: Dict[str, Any] = {
     "input_folder": "Input",
     "results_folder": ".",
     "options": {
-        "mode": "single",
+        "mode": "batch",
     },
     # Friendly label; UI falls back to folder name if None/missing
     "name": None,
@@ -44,21 +49,6 @@ DEFAULTS: Dict[str, Any] = {
     # Preprocessing parameters expected by GUI (dict)
     "preprocessing": {},
 }
-
-
-def make_group_id(value: object, used: set[str] | None = None) -> str:
-    """Return a readable, deterministic group_id slug with collision suffixes."""
-
-    text = str(value or "").strip().lower()
-    base = re.sub(r"[^a-z0-9]+", "_", text).strip("_") or "group"
-    used_ids = used if used is not None else set()
-    candidate = base
-    suffix = 2
-    while candidate in used_ids:
-        candidate = f"{base}_{suffix}"
-        suffix += 1
-    used_ids.add(candidate)
-    return candidate
 
 
 def _resolve_subpath(project_root: Path, value: str) -> Path:
@@ -88,6 +78,30 @@ def _stable_dump(data: Dict[str, Any]) -> str:
     Do not use for on-disk pretty writes.
     """
     return json.dumps(data, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+
+
+def _group_lock_fingerprint(groups: Mapping[str, Mapping[str, Any]]) -> str:
+    """Return a stable fingerprint for the complete locked group definition."""
+
+    payload = [
+        {
+            "group_id": group_id,
+            "label": str(info.get("label") or ""),
+            "folder_name": str(info.get("folder_name") or ""),
+            "raw_input_folder": os.path.normcase(
+                os.fspath(Path(info["raw_input_folder"]).resolve(strict=False))
+            ),
+            "description": str(info.get("description") or ""),
+        }
+        for group_id, info in sorted(groups.items())
+    ]
+    encoded = json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> bool:
@@ -133,7 +147,8 @@ class Project:
     Public attributes:
       - project_root: Path
       - name: str
-      - input_folder: Path (absolute)
+      - input_folder: Path | None (absolute for single-group projects; None when
+        groups provide the canonical raw-data roots)
       - results_folder: Path (absolute)
       - subfolders: Dict[str, Path] (absolute paths under results_folder)
       - options: Dict[str, Any]
@@ -175,6 +190,12 @@ class Project:
             opts = {}
         merged_opts = DEFAULTS["options"].copy()
         merged_opts.update(opts)
+        mode = str(merged_opts.get("mode", "batch")).strip().lower()
+        if mode not in {"single", "batch"}:
+            raise ValueError(
+                "Project options.mode must be either 'single' or 'batch'."
+            )
+        merged_opts["mode"] = mode
         self.options = merged_opts
 
         # Preprocessing dict
@@ -226,83 +247,41 @@ class Project:
         locked_at = manifest.get("groups_locked_at")
         self.groups_locked_at = str(locked_at).strip() if locked_at else None
 
-        # Optional groups metadata normalized to runtime-friendly form
-        groups_raw = manifest.get("groups", {})
-        self.groups: Dict[str, Dict[str, Any]] = {}
-        group_aliases: Dict[str, str] = {}
-        used_group_ids: set[str] = set()
-        if isinstance(groups_raw, Mapping):
-            for raw_key, raw_info in groups_raw.items():
-                try:
-                    raw_key_text = str(raw_key).strip()
-                except Exception:
-                    continue
-                if not raw_key_text:
-                    continue
-                info = raw_info if isinstance(raw_info, Mapping) else {}
-                raw_group_id = info.get("group_id") or raw_key_text
-                group_id = make_group_id(raw_group_id, used_group_ids)
-                label_raw = info.get("label") or raw_key_text
-                label = str(label_raw).strip() if label_raw is not None else raw_key_text
-                if not label:
-                    label = group_id
-                folder_name_raw = info.get("folder_name") or label
-                folder_name = str(folder_name_raw).strip() if folder_name_raw is not None else label
-                if not folder_name:
-                    folder_name = label
-                folder_value = info.get("raw_input_folder") if info else ""
-                folder_path = (
-                    _resolve_subpath(self.project_root, str(folder_value))
-                    if folder_value
-                    else self.input_folder
-                )
-                description_raw = info.get("description", "") if info else ""
-                description = str(description_raw) if description_raw is not None else ""
-                group_entry: Dict[str, Any] = {
-                    "label": label,
-                    "folder_name": folder_name,
-                    "raw_input_folder": folder_path,
-                }
-                if description:
-                    group_entry["description"] = description
-                self.groups[group_id] = group_entry
-                for alias in (raw_key_text, raw_group_id, label, folder_name):
-                    alias_text = str(alias or "").strip()
-                    if alias_text:
-                        group_aliases[alias_text] = group_id
-
-        # Participants metadata. v2.1 stores group_id; legacy manifests may use group.
-        participants_raw = manifest.get("participants", {})
-        self.participants: Dict[str, Dict[str, Any]] = {}
-        if isinstance(participants_raw, Mapping):
-            for raw_pid, raw_data in participants_raw.items():
-                try:
-                    participant_id = str(raw_pid).strip()
-                except Exception:
-                    continue
-                if not participant_id:
-                    continue
-                entry = raw_data if isinstance(raw_data, Mapping) else {}
-                participant_entry: Dict[str, Any] = {}
-                group_value = (
-                    entry.get("group_id")
-                    if entry.get("group_id") is not None
-                    else entry.get("group")
-                )
-                if group_value is not None:
-                    raw_group_text = str(group_value).strip()
-                    if raw_group_text:
-                        participant_entry["group_id"] = group_aliases.get(
-                            raw_group_text,
-                            make_group_id(raw_group_text),
-                        )
-                raw_file_value = entry.get("raw_file") if entry else None
-                if raw_file_value:
-                    participant_entry["raw_file"] = _resolve_subpath(
-                        self.project_root,
-                        str(raw_file_value),
-                    )
-                self.participants[participant_id] = participant_entry
+        # Canonical group/participant metadata. This pure normalizer is also the
+        # read-only source consumed by project-aware downstream tools.
+        self.groups, group_aliases = normalize_project_groups(
+            self.project_root,
+            manifest.get("groups", {}),
+        )
+        self.participants = normalize_project_participants(
+            self.project_root,
+            manifest.get("participants", {}),
+            self.groups,
+            group_aliases,
+        )
+        if self.groups:
+            # Grouped projects have no project-level raw-data folder. Keeping a
+            # synthesized ``<project>/Input`` path here would recreate the old
+            # ambiguous fallback as runtime state even though it is omitted
+            # from project.json.
+            self.input_folder = None
+        current_group_fingerprint = _group_lock_fingerprint(self.groups)
+        stored_group_fingerprint = str(
+            manifest.get("groups_lock_fingerprint") or ""
+        ).strip()
+        if (
+            self.groups_locked
+            and stored_group_fingerprint
+            and stored_group_fingerprint != current_group_fingerprint
+        ):
+            raise ValueError(
+                "Locked project group definitions do not match their stored "
+                "fingerprint. Restore the original group IDs, labels, raw folders, "
+                "and output folder names, or create a new project."
+            )
+        self._groups_lock_fingerprint = (
+            current_group_fingerprint if self.groups_locked else None
+        )
 
         # Results subfolders (absolute paths under results_folder)
         sub = manifest.get("subfolders", {})
@@ -414,15 +393,21 @@ class Project:
         current_results = Path(self.results_folder) if hasattr(self, "results_folder") and self.results_folder else Path(
             data.get("results_folder", DEFAULTS["results_folder"])
         )
-        data["input_folder"] = _relativize(self.project_root, current_input)
         data["results_folder"] = _relativize(self.project_root, current_results)
 
         # Options: ensure default keys exist, keep user values
-        opts = data.get("options", {})
+        opts = getattr(self, "options", data.get("options", {}))
         if not isinstance(opts, dict):
             opts = {}
         normalized_opts = DEFAULTS["options"].copy()
         normalized_opts.update(opts)
+        mode = str(normalized_opts.get("mode", "batch")).strip().lower()
+        if mode not in {"single", "batch"}:
+            raise ValueError(
+                "Project options.mode must be either 'single' or 'batch'."
+            )
+        normalized_opts["mode"] = mode
+        self.options = normalized_opts
         data["options"] = normalized_opts
 
         # Preprocessing: ensure dict type
@@ -470,78 +455,73 @@ class Project:
         else:
             data.pop("groups_locked", None)
             data.pop("groups_locked_at", None)
+            data.pop("groups_lock_fingerprint", None)
 
         # Groups metadata persisted with stable relative paths when possible
         groups_out: Dict[str, Dict[str, Any]] = {}
         groups_live = getattr(self, "groups", {}) or {}
-        if isinstance(groups_live, Mapping):
-            for raw_group_id, raw_info in groups_live.items():
-                try:
-                    group_id = str(raw_group_id).strip()
-                except Exception:
-                    continue
-                if not group_id:
-                    continue
-                info = raw_info if isinstance(raw_info, Mapping) else {}
-                folder_value = info.get("raw_input_folder") if info else None
-                folder_path = None
-                if folder_value:
-                    try:
-                        folder_path = Path(folder_value)
-                    except Exception:
-                        folder_path = None
-                folder_str = (
-                    _relativize(self.project_root, folder_path)
-                    if folder_path is not None
-                    else ""
+        normalized_groups, group_aliases = normalize_project_groups(
+            self.project_root,
+            groups_live,
+        )
+        current_group_fingerprint = _group_lock_fingerprint(normalized_groups)
+        if getattr(self, "groups_locked", False):
+            locked_fingerprint = getattr(
+                self,
+                "_groups_lock_fingerprint",
+                None,
+            )
+            if (
+                locked_fingerprint is not None
+                and locked_fingerprint != current_group_fingerprint
+            ):
+                raise ValueError(
+                    "Locked project group definitions cannot be changed. Restore "
+                    "the registered group layout or create a new project."
                 )
-                label = str(info.get("label") or group_id).strip() if info else group_id
-                folder_name = str(info.get("folder_name") or label).strip() if info else label
-                group_out: Dict[str, Any] = {
-                    "label": label or group_id,
-                    "folder_name": folder_name or label or group_id,
-                    "raw_input_folder": folder_str,
-                }
-                description = info.get("description", "") if info else ""
-                if description:
-                    group_out["description"] = str(description)
-                groups_out[group_id] = group_out
+            self._groups_lock_fingerprint = current_group_fingerprint
+            data["groups_lock_fingerprint"] = current_group_fingerprint
+        self.groups = normalized_groups
+        for group_id, info in normalized_groups.items():
+            group_out: Dict[str, Any] = {
+                "label": str(info["label"]),
+                "folder_name": str(info["folder_name"]),
+                "raw_input_folder": _relativize(
+                    self.project_root,
+                    Path(info["raw_input_folder"]),
+                ),
+            }
+            if info.get("description"):
+                group_out["description"] = str(info["description"])
+            groups_out[group_id] = group_out
         if groups_out:
             data["groups"] = groups_out
+            data.pop("input_folder", None)
         else:
             data.pop("groups", None)
+            data["input_folder"] = _relativize(self.project_root, current_input)
 
         # Participants metadata
         participants_out: Dict[str, Dict[str, Any]] = {}
         participants_live = getattr(self, "participants", {}) or {}
-        if isinstance(participants_live, Mapping):
-            for raw_pid, raw_info in participants_live.items():
-                try:
-                    participant_id = str(raw_pid).strip()
-                except Exception:
-                    continue
-                if not participant_id:
-                    continue
-                info = raw_info if isinstance(raw_info, Mapping) else {}
-                participant_out: Dict[str, Any] = {}
-                group_value = info.get("group_id") if info else None
-                if group_value is None and info:
-                    group_value = info.get("group")
-                if group_value is not None:
-                    group_id = str(group_value).strip()
-                    if group_id:
-                        participant_out["group_id"] = group_id
-                raw_file_value = info.get("raw_file") if info else None
-                if raw_file_value:
-                    try:
-                        participant_out["raw_file"] = _relativize(
-                            self.project_root,
-                            Path(raw_file_value),
-                        )
-                    except (TypeError, ValueError, OSError):
-                        participant_out["raw_file"] = str(raw_file_value)
-                if participant_out:
-                    participants_out[participant_id] = participant_out
+        normalized_participants = normalize_project_participants(
+            self.project_root,
+            participants_live,
+            normalized_groups,
+            group_aliases,
+        )
+        self.participants = normalized_participants
+        for participant_id, info in normalized_participants.items():
+            participant_out: Dict[str, Any] = {}
+            if info.get("group_id"):
+                participant_out["group_id"] = str(info["group_id"])
+            if info.get("raw_file"):
+                participant_out["raw_file"] = _relativize(
+                    self.project_root,
+                    Path(info["raw_file"]),
+                )
+            if participant_out:
+                participants_out[participant_id] = participant_out
         if participants_out:
             data["participants"] = participants_out
         else:

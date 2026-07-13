@@ -39,6 +39,7 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_manual_removed_electrodes_map,
     parse_electrode_list,
 )
+from Main_App.projects.grouping import project_group_context
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
 )
@@ -53,16 +54,20 @@ _DATA_QUALITY_SCAN_WAIT_MESSAGE = (
 _DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
 _REMOVED_REVIEW_HEADERS = (
     "PID",
+    "Group",
     "FPVS Toolbox flagged",
     "Why flagged",
     "Manual additions",
     "Final confirmed removed electrodes",
 )
 _REMOVED_REVIEW_PID_COLUMN = 0
-_REMOVED_REVIEW_AUTO_COLUMN = 1
-_REMOVED_REVIEW_REASON_COLUMN = 2
-_REMOVED_REVIEW_MANUAL_COLUMN = 3
-_REMOVED_REVIEW_FINAL_COLUMN = 4
+_REMOVED_REVIEW_AUTO_COLUMN = 2
+_REMOVED_REVIEW_REASON_COLUMN = 3
+_REMOVED_REVIEW_MANUAL_COLUMN = 4
+_REMOVED_REVIEW_FINAL_COLUMN = 5
+_HARD_EXCLUSION_PID_COLUMN = 0
+_HARD_EXCLUSION_REASON_COLUMN = 3
+_HARD_EXCLUSION_DETAILS_COLUMN = 4
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
 _DATA_QUALITY_STEP_TOTAL = 5
@@ -112,6 +117,55 @@ def _participant_sort_key(value: str) -> tuple[str, int, str]:
     digits = "".join(ch for ch in value if ch.isdigit())
     number = int(digits) if digits else -1
     return prefix, number, value.casefold()
+
+
+def _project_group_labels(host: Any) -> dict[str, str]:
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        raise RuntimeError("Preprocessing QC requires an active project.")
+    context = project_group_context(project)
+    return {group.group_id: group.label for group in context.groups}
+
+
+def _group_display_name(
+    group_id: object,
+    group_labels: Mapping[str, str],
+) -> str:
+    normalized = str(group_id or "").strip()
+    if not normalized:
+        if group_labels:
+            raise RuntimeError(
+                "Multi-group preprocessing QC received a file without a group_id."
+            )
+        return "Single group"
+    if normalized not in group_labels:
+        raise RuntimeError(
+            f"Preprocessing QC received unknown project group_id '{normalized}'."
+        )
+    return str(group_labels[normalized])
+
+
+def _participant_group_display_map(
+    raw_file_infos: Sequence[Any],
+    group_labels: Mapping[str, str],
+) -> dict[str, str]:
+    groups: dict[str, str] = {}
+    for info in raw_file_infos:
+        participant_id = str(info.subject_id).strip()
+        if not participant_id:
+            continue
+        groups[participant_id] = _group_display_name(
+            getattr(info, "group", None),
+            group_labels,
+        )
+    return groups
+
+
+def _result_group_display_name(
+    result: HeaderOnlyPreflight | PreflightQcFileResult,
+    group_labels: Mapping[str, str],
+) -> str:
+    return _group_display_name(result.group_id, group_labels)
 
 
 def _merge_removed_maps(
@@ -187,9 +241,10 @@ def _removed_review_row_values(
     participant_ids: Sequence[str],
     auto_flagged: Mapping[str, Sequence[str]],
     existing_manual: Mapping[str, Sequence[str]],
+    participant_groups: Mapping[str, str],
     flag_reasons: Mapping[str, str] | None = None,
-) -> list[tuple[str, str, str, str, str]]:
-    rows: list[tuple[str, str, str, str, str]] = []
+) -> list[tuple[str, str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str, str]] = []
     seen_pids: set[str] = set()
     all_pids: list[str] = []
     for source_pid in (
@@ -220,9 +275,15 @@ def _removed_review_row_values(
         reason = _string_map_lookup(flag_reasons or {}, pid)
         if not reason and existing_values:
             reason = "Existing manual list"
+        group = _string_map_lookup(participant_groups, pid)
+        if not group:
+            raise RuntimeError(
+                f"Preprocessing QC could not resolve group membership for '{pid}'."
+            )
         rows.append(
             (
                 pid,
+                group,
                 ", ".join(auto_values),
                 reason,
                 ", ".join(manual_additions),
@@ -660,6 +721,19 @@ def _file_name_from_progress(message: str) -> str:
     return ""
 
 
+def _grouped_scan_progress_text(host: Any, message: str) -> str:
+    file_name = _file_name_from_progress(message)
+    if not file_name:
+        return message
+    group_by_file = getattr(host, "_preflight_qc_group_by_file", {}) or {}
+    group = str(group_by_file.get(file_name) or "").strip()
+    if not group:
+        return message
+    action = "Finished" if message.startswith("Finished ") else "Scanning"
+    display_name = message.split(" ", 1)[1].strip()
+    return f"{action} {group} · {display_name}"
+
+
 def _update_scan_row(host: Any, message: str) -> None:
     file_name = _file_name_from_progress(message)
     if not file_name:
@@ -698,7 +772,11 @@ class _PreflightQcEmbeddedBridge(QObject):
     def on_progress(self, message: str, completed: int, total: int) -> None:
         _set_progress(self._host, completed, total)
         _set_label(self._host, "processing_summary_label", _DATA_QUALITY_SCAN_WAIT_MESSAGE)
-        _set_label(self._host, "processing_current_file_label", message)
+        _set_label(
+            self._host,
+            "processing_current_file_label",
+            _grouped_scan_progress_text(self._host, message),
+        )
         _update_scan_row(self._host, message)
 
     @Slot(object)
@@ -725,17 +803,29 @@ class _PreflightQcEmbeddedBridge(QObject):
 def _confirm_recording_not_started(
     host: Any,
     flagged: Sequence[HeaderOnlyPreflight],
+    group_labels: Mapping[str, str],
 ) -> bool:
     if not flagged:
         return True
     names = [item.path.name for item in flagged]
+    detail_rows = [
+        (
+            _result_group_display_name(item, group_labels),
+            item.participant_id,
+            item.path.name,
+        )
+        for item in flagged
+    ]
     _show_data_quality_notice(
         host,
         "Some files do not contain recording data.",
         'These files look like BioSemi recordings that were created, but no data '
         'was actually recorded. The most likely reason is that the experiment '
         'administrator forgot to click "Start Recording".',
-        details="\n".join(names),
+        details="\n".join(
+            f"{group} | {participant_id} | {file_name}"
+            for group, participant_id, file_name in detail_rows
+        ),
     )
     _begin_preflight_page(
         host,
@@ -765,8 +855,12 @@ def _confirm_recording_not_started(
     )
     _set_preflight_table(
         host,
-        ["File", "Recommended action"],
-        [(name, "Exclude from processing") for name in names],
+        ["PID", "Group", "File", "Recommended action"],
+        [
+            (participant_id, group, file_name, "Exclude from processing")
+            for group, participant_id, file_name in detail_rows
+        ],
+        stretch_column=3,
     )
     choice = _await_preflight_choice(
         host,
@@ -794,6 +888,7 @@ def _run_scan_embedded(
     params: dict[str, Any],
     *,
     skip_paths: Sequence[Path],
+    group_labels: Mapping[str, str],
 ) -> PreflightQcScan | None:
     skip_keys = {_path_key(Path(path)) for path in skip_paths}
     remaining = [
@@ -803,6 +898,14 @@ def _run_scan_embedded(
     ]
     if not remaining:
         return PreflightQcScan(results=())
+
+    host._preflight_qc_group_by_file = {
+        Path(info.path).name.casefold(): _group_display_name(
+            getattr(info, "group", None),
+            group_labels,
+        )
+        for info in remaining
+    }
 
     _begin_preflight_page(
         host,
@@ -884,6 +987,7 @@ def _run_scan_embedded(
     host._preflight_qc_thread = None
     host._preflight_qc_worker = None
     host._preflight_qc_bridge = None
+    host._preflight_qc_group_by_file = {}
 
     error = result_holder.get("error")
     if error:
@@ -907,11 +1011,13 @@ def _review_removed_electrodes(
     raw_file_infos: Sequence[Any],
     params: dict[str, Any],
     scan: PreflightQcScan,
+    group_labels: Mapping[str, str],
 ) -> bool:
     existing = normalize_manual_removed_electrodes_map(
         params.get("manual_removed_electrodes")
     )
     participant_ids = [str(info.subject_id) for info in raw_file_infos]
+    participant_groups = _participant_group_display_map(raw_file_infos, group_labels)
     existing_for_review = _filter_removed_map_for_participants(existing, participant_ids)
     auto_flagged = scan.suggested_removed_electrodes
     prompt = (
@@ -954,6 +1060,7 @@ def _review_removed_electrodes(
         participant_ids,
         auto_flagged,
         existing_for_review,
+        participant_groups,
         _removed_review_reason_map(scan),
     )
     _set_preflight_table(
@@ -1160,7 +1267,11 @@ def _hard_candidate_plain_explanation(result: PreflightQcFileResult) -> str:
     return "The participant met a project-level QC exclusion rule before preprocessing."
 
 
-def _hard_candidate_detail_text(result: PreflightQcFileResult) -> str:
+def _hard_candidate_detail_text(
+    result: PreflightQcFileResult,
+    group_labels: Mapping[str, str] | None = None,
+) -> str:
+    labels = group_labels or {}
     raw_payload = result.raw_channel_qc or {}
     thresholds = raw_payload.get("thresholds")
     if not isinstance(thresholds, Mapping):
@@ -1179,6 +1290,7 @@ def _hard_candidate_detail_text(result: PreflightQcFileResult) -> str:
     spectral_message = result.raw_spectral_message
     lines = [
         f"Participant: {result.participant_id}",
+        f"Group: {_result_group_display_name(result, labels)}",
         f"File: {result.path.name}",
         f"Flag: {_hard_candidate_flag(result)}",
         f"Reason: {_hard_candidate_reason(result)}",
@@ -1219,10 +1331,13 @@ def _hard_candidate_detail_text(result: PreflightQcFileResult) -> str:
 
 def _hard_candidate_row_values(
     candidates: Sequence[PreflightQcFileResult],
-) -> list[tuple[str, str, str, str]]:
+    group_labels: Mapping[str, str] | None = None,
+) -> list[tuple[str, str, str, str, str]]:
+    labels = group_labels or {}
     return [
         (
             result.participant_id,
+            _result_group_display_name(result, labels),
             _hard_candidate_flag(result),
             _hard_candidate_reason(result),
             "",
@@ -1235,6 +1350,7 @@ def _show_hard_exclusion_detail_dialog(
     host: Any,
     result: PreflightQcFileResult,
     details: str,
+    group_labels: Mapping[str, str],
 ) -> None:
     dialog = QDialog(host)
     dialog.setObjectName("participant_qc_details_dialog")
@@ -1248,7 +1364,11 @@ def _show_hard_exclusion_detail_dialog(
     layout.setSpacing(12)
 
     title = QLabel(
-        f"{result.participant_id}: {_hard_candidate_reason(result)}",
+        (
+            f"{result.participant_id} · "
+            f"{_result_group_display_name(result, group_labels)}: "
+            f"{_hard_candidate_reason(result)}"
+        ),
         dialog,
     )
     title.setObjectName("participant_qc_details_title")
@@ -1280,19 +1400,23 @@ def _show_hard_exclusion_detail_dialog(
 def _install_hard_exclusion_details(
     host: Any,
     candidates: Sequence[PreflightQcFileResult],
+    group_labels: Mapping[str, str],
 ) -> None:
     table = getattr(host, "processing_files_table", None)
     if table is None:
         return
     candidate_by_pid = {result.participant_id.casefold(): result for result in candidates}
     details_by_pid = {
-        result.participant_id.casefold(): _hard_candidate_detail_text(result)
+        result.participant_id.casefold(): _hard_candidate_detail_text(
+            result,
+            group_labels,
+        )
         for result in candidates
     }
     setattr(host, _HARD_EXCLUSION_DETAILS_ATTR, details_by_pid)
     table.setSelectionMode(QAbstractItemView.NoSelection)
     for row in range(table.rowCount()):
-        item = table.item(row, 0)
+        item = table.item(row, _HARD_EXCLUSION_PID_COLUMN)
         pid = item.text().strip() if item else ""
         candidate = candidate_by_pid.get(pid.casefold())
         details = details_by_pid.get(pid.casefold())
@@ -1303,10 +1427,15 @@ def _install_hard_exclusion_details(
         button.setMinimumWidth(96)
         button.clicked.connect(
             lambda _checked=False, current=candidate, text=details: (
-                _show_hard_exclusion_detail_dialog(host, current, text)
+                _show_hard_exclusion_detail_dialog(
+                    host,
+                    current,
+                    text,
+                    group_labels,
+                )
             )
         )
-        table.setCellWidget(row, 3, button)
+        table.setCellWidget(row, _HARD_EXCLUSION_DETAILS_COLUMN, button)
     table.resizeRowsToContents()
 
 
@@ -1314,6 +1443,7 @@ def _confirm_hard_exclusions(
     host: Any,
     params: dict[str, Any],
     scan: PreflightQcScan,
+    group_labels: Mapping[str, str],
 ) -> set[str]:
     candidates = scan.hard_exclusion_candidates
     if not candidates:
@@ -1354,12 +1484,12 @@ def _confirm_hard_exclusions(
     )
     _set_preflight_table(
         host,
-        ["PID", "Flag", "Reason", "More info"],
-        _hard_candidate_row_values(candidates),
-        stretch_column=2,
+        ["PID", "Group", "Flag", "Reason", "More info"],
+        _hard_candidate_row_values(candidates, group_labels),
+        stretch_column=_HARD_EXCLUSION_REASON_COLUMN,
         center_columns=True,
     )
-    _install_hard_exclusion_details(host, candidates)
+    _install_hard_exclusion_details(host, candidates, group_labels)
     choice = _await_preflight_choice(
         host,
         (
@@ -1431,7 +1561,7 @@ def _style_preflight_review_sheet(worksheet: Any) -> None:
 
 def _write_preflight_review_flags(
     host: Any,
-    rows: Sequence[tuple[str, str, str]],
+    rows: Sequence[tuple[str, str, str, str]],
 ) -> Path:
     target = _quality_check_dir(host).resolve() / _DATA_QUALITY_REVIEW_FLAGS_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1439,7 +1569,7 @@ def _write_preflight_review_flags(
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Review Flags"
-    worksheet.append(("PID", "Source File", "Review Item"))
+    worksheet.append(("PID", "Group", "Source File", "Flagged Item"))
     for row in rows:
         worksheet.append(row)
     _style_preflight_review_sheet(worksheet)
@@ -1450,8 +1580,10 @@ def _write_preflight_review_flags(
 def _remaining_review_rows(
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
-) -> list[tuple[str, str, str]]:
-    rows: list[tuple[str, str, str]] = []
+    group_labels: Mapping[str, str] | None = None,
+) -> list[tuple[str, str, str, str]]:
+    labels = group_labels or {}
+    rows: list[tuple[str, str, str, str]] = []
     for result in scan.suspicious_results:
         if result.participant_id.casefold() in accepted_hard_exclusions:
             continue
@@ -1473,7 +1605,14 @@ def _remaining_review_rows(
                 + ", ".join(result.raw_spectral_flagged_channels[:8])
             )
         if fragments:
-            rows.append((result.participant_id, result.path.name, "; ".join(fragments)))
+            rows.append(
+                (
+                    result.participant_id,
+                    _result_group_display_name(result, labels),
+                    result.path.name,
+                    "; ".join(fragments),
+                )
+            )
     return rows
 
 
@@ -1481,8 +1620,9 @@ def _show_suspicious_remainder(
     host: Any,
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
+    group_labels: Mapping[str, str],
 ) -> bool:
-    rows = _remaining_review_rows(scan, accepted_hard_exclusions)
+    rows = _remaining_review_rows(scan, accepted_hard_exclusions, group_labels)
     if not rows:
         return True
 
@@ -1532,7 +1672,12 @@ def _show_suspicious_remainder(
         "processing_current_file_label",
         f"Please make note of these and manually investigate them later. {report_message}",
     )
-    _set_preflight_table(host, ["PID", "Source File", "Review item"], rows)
+    _set_preflight_table(
+        host,
+        ["PID", "Group", "Source File", "Review item"],
+        rows,
+        stretch_column=3,
+    )
     choice = _await_preflight_choice(
         host,
         (
@@ -1552,6 +1697,8 @@ def run_preprocessing_qc_workflow(
 
     if not raw_file_infos:
         return True
+
+    group_labels = _project_group_labels(host)
 
     _show_data_quality_notice(
         host,
@@ -1581,7 +1728,11 @@ def run_preprocessing_qc_workflow(
         "Looking for empty recordings before the deeper data quality scan.",
     )
     header_only = scan_recording_not_started_files(raw_file_infos)
-    if header_only and not _confirm_recording_not_started(host, header_only):
+    if header_only and not _confirm_recording_not_started(
+        host,
+        header_only,
+        group_labels,
+    ):
         return False
     params["_fpvs_preflight_recording_not_started_files"] = _path_strings(header_only)
     header_only_keys = {_path_key(item.path) for item in header_only}
@@ -1596,15 +1747,32 @@ def run_preprocessing_qc_workflow(
         active_infos,
         params,
         skip_paths=[item.path for item in header_only],
+        group_labels=group_labels,
     )
     if scan is None or scan.cancelled:
         return False
 
-    if active_infos and not _review_removed_electrodes(host, active_infos, params, scan):
+    if active_infos and not _review_removed_electrodes(
+        host,
+        active_infos,
+        params,
+        scan,
+        group_labels,
+    ):
         return False
 
-    accepted_hard_exclusions = _confirm_hard_exclusions(host, params, scan)
-    if not _show_suspicious_remainder(host, scan, accepted_hard_exclusions):
+    accepted_hard_exclusions = _confirm_hard_exclusions(
+        host,
+        params,
+        scan,
+        group_labels,
+    )
+    if not _show_suspicious_remainder(
+        host,
+        scan,
+        accepted_hard_exclusions,
+        group_labels,
+    ):
         return False
     return True
 

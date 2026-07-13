@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from Main_App.projects import project_manager
-from Main_App.projects.project import PROJECT_SCHEMA_VERSION, Project, make_group_id
+from Main_App.projects.project import DEFAULTS, PROJECT_SCHEMA_VERSION, Project, make_group_id
 
 
 def test_make_group_id_uses_readable_collision_suffixes() -> None:
@@ -13,6 +15,16 @@ def test_make_group_id_uses_readable_collision_suffixes() -> None:
     assert make_group_id("Control Group", used) == "control_group"
     assert make_group_id("Control Group", used) == "control_group_2"
     assert make_group_id("!!!", used) == "group"
+
+
+def test_project_defaults_to_batch_processing(tmp_path) -> None:
+    project_root = tmp_path / "DefaultProject"
+    project_root.mkdir()
+
+    project = Project.load(project_root)
+
+    assert DEFAULTS["options"]["mode"] == "batch"
+    assert project.options["mode"] == "batch"
 
 
 def test_project_roundtrips_v2_group_schema(tmp_path) -> None:
@@ -67,6 +79,86 @@ def test_project_roundtrips_v2_group_schema(tmp_path) -> None:
         "group_id": "control",
         "raw_file": str(p01_raw),
     }
+    assert "input_folder" not in saved
+
+
+@pytest.mark.parametrize(
+    "group_entry",
+    [
+        pytest.param(
+            {"label": "Control", "folder_name": "Control"},
+            id="missing",
+        ),
+        pytest.param(
+            {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": "",
+            },
+            id="blank",
+        ),
+    ],
+)
+def test_project_rejects_group_without_raw_input_folder(tmp_path, group_entry) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    manifest = {"groups": {"control": group_entry}}
+    (project_root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="raw_input_folder"):
+        Project.load(project_root)
+
+
+@pytest.mark.parametrize(
+    "folder_name",
+    [
+        pytest.param(".", id="current-directory"),
+        pytest.param("..", id="parent-directory"),
+        pytest.param("Control/Subgroup", id="forward-slash"),
+        pytest.param(r"Control\Subgroup", id="backslash"),
+        pytest.param("Control/../Outside", id="traversal"),
+        pytest.param("CON", id="windows-reserved-name"),
+        pytest.param("Control.", id="windows-trailing-dot"),
+    ],
+)
+def test_project_rejects_unsafe_group_output_folder_name(tmp_path, folder_name) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    raw_dir = tmp_path / "raw" / "Control"
+    raw_dir.mkdir(parents=True)
+    manifest = {
+        "groups": {
+            "control": {
+                "label": "Control",
+                "folder_name": folder_name,
+                "raw_input_folder": str(raw_dir),
+            }
+        }
+    }
+    (project_root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="folder_name"):
+        Project.load(project_root)
+
+
+def test_project_rejects_absolute_group_output_folder_name(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    raw_dir = tmp_path / "raw" / "Control"
+    raw_dir.mkdir(parents=True)
+    manifest = {
+        "groups": {
+            "control": {
+                "label": "Control",
+                "folder_name": str(tmp_path / "outside"),
+                "raw_input_folder": str(raw_dir),
+            }
+        }
+    }
+    (project_root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="folder_name"):
+        Project.load(project_root)
 
 
 def test_project_loads_legacy_group_manifest_as_slugged_group_id(tmp_path) -> None:
@@ -147,6 +239,33 @@ def test_project_load_does_not_create_missing_multigroup_raw_folder(tmp_path) ->
     assert not missing_raw.exists()
 
 
+def test_locked_group_fingerprint_rejects_manual_manifest_changes(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    raw_dir = tmp_path / "raw" / "Control"
+    raw_dir.mkdir(parents=True)
+    project = Project.load(
+        project_root,
+        manifest={
+            "groups_locked": True,
+            "groups": {
+                "control": {
+                    "label": "Control",
+                    "folder_name": "Control",
+                    "raw_input_folder": str(raw_dir),
+                }
+            },
+        },
+    )
+    project.save()
+    manifest_path = project_root / "project.json"
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    saved["groups"]["control"]["folder_name"] = "Changed"
+    manifest_path.write_text(json.dumps(saved), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="do not match their stored fingerprint"):
+        Project.load(project_root)
+
+
 def test_new_project_single_group_writes_no_groups_metadata(tmp_path, monkeypatch) -> None:
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
@@ -175,8 +294,46 @@ def test_new_project_single_group_writes_no_groups_metadata(tmp_path, monkeypatc
     assert loaded
     saved = json.loads((host.projectsRoot / "Single Study" / "project.json").read_text(encoding="utf-8"))
     assert saved["input_folder"] == str(raw_dir)
+    assert saved["options"]["mode"] == "batch"
     assert "groups" not in saved
     assert "participants" not in saved
+
+
+def test_new_project_rejects_existing_project_without_overwriting_manifest(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    projects_root = tmp_path / "projects"
+    project_root = projects_root / "Existing Study"
+    project_root.mkdir(parents=True)
+    manifest_path = project_root / "project.json"
+    original_manifest = {"name": "Existing Study", "event_map": {"A": 1}}
+    manifest_path.write_text(json.dumps(original_manifest), encoding="utf-8")
+    host = SimpleNamespace(projectsRoot=projects_root)
+    messages: list[str] = []
+
+    monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getText",
+        lambda *args, **kwargs: ("Existing Study", True),
+    )
+    monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getInt",
+        lambda *args, **kwargs: pytest.fail(
+            "existing project must fail before collecting group settings"
+        ),
+    )
+    monkeypatch.setattr(
+        project_manager.QMessageBox,
+        "critical",
+        lambda _parent, _title, message: messages.append(message),
+    )
+
+    project_manager.new_project(host)
+
+    assert messages and "will not be overwritten" in messages[0]
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == original_manifest
 
 
 def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monkeypatch) -> None:
@@ -218,7 +375,8 @@ def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monk
     assert loaded
     assert group_default_labels == ["Control", "Treatment"]
     saved = json.loads((host.projectsRoot / "Multi Study" / "project.json").read_text(encoding="utf-8"))
-    assert saved["input_folder"] == str(control_dir)
+    assert "input_folder" not in saved
+    assert saved["options"]["mode"] == "batch"
     assert saved["groups"] == {
         "control": {
             "label": "Control",
@@ -231,6 +389,109 @@ def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monk
             "raw_input_folder": str(treatment_dir),
         },
     }
+
+
+def test_edit_unlocked_multigroup_folders_updates_registered_participant_paths(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    old_control = tmp_path / "old" / "Control"
+    old_treatment = tmp_path / "old" / "Treatment"
+    new_control = tmp_path / "new" / "Control"
+    new_treatment = tmp_path / "new" / "Treatment"
+    for folder, participant_id in (
+        (old_control, "P01"),
+        (old_treatment, "P02"),
+        (new_control, "P01"),
+        (new_treatment, "P02"),
+    ):
+        folder.mkdir(parents=True)
+        (folder / f"{participant_id}.bdf").write_bytes(b"")
+    project = Project.load(
+        project_root,
+        manifest={
+            "groups": {
+                "control": {
+                    "label": "Control",
+                    "folder_name": "Control",
+                    "raw_input_folder": str(old_control),
+                },
+                "treatment": {
+                    "label": "Treatment",
+                    "folder_name": "Treatment",
+                    "raw_input_folder": str(old_treatment),
+                },
+            },
+            "participants": {
+                "P01": {
+                    "group_id": "control",
+                    "raw_file": str(old_control / "P01.bdf"),
+                },
+                "P02": {
+                    "group_id": "treatment",
+                    "raw_file": str(old_treatment / "P02.bdf"),
+                },
+            },
+        },
+    )
+    project.save()
+    loaded: list[Project] = []
+    host = SimpleNamespace(currentProject=project, loadProject=loaded.append)
+    folder_iter = iter([str(new_control), str(new_treatment)])
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: next(folder_iter),
+    )
+    monkeypatch.setattr(project_manager.QMessageBox, "critical", lambda *a, **k: None)
+    monkeypatch.setattr(project_manager.QMessageBox, "warning", lambda *a, **k: None)
+
+    project_manager.edit_project_settings(host)
+
+    assert loaded == [project]
+    assert project.groups["control"]["raw_input_folder"] == new_control.resolve()
+    assert project.groups["treatment"]["raw_input_folder"] == new_treatment.resolve()
+    assert project.participants["P01"]["raw_file"] == (new_control / "P01.bdf").resolve()
+    assert project.participants["P02"]["raw_file"] == (new_treatment / "P02.bdf").resolve()
+    saved = json.loads((project_root / "project.json").read_text(encoding="utf-8"))
+    assert "input_folder" not in saved
+
+
+def test_edit_locked_multigroup_folders_hard_stops_without_opening_dialog(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    raw_folder = tmp_path / "Raw" / "Control"
+    raw_folder.mkdir(parents=True)
+    project = Project.load(
+        tmp_path / "Project",
+        manifest={
+            "groups_locked": True,
+            "groups": {
+                "control": {
+                    "folder_name": "Control",
+                    "raw_input_folder": str(raw_folder),
+                }
+            },
+        },
+    )
+    host = SimpleNamespace(currentProject=project)
+    messages: list[str] = []
+    monkeypatch.setattr(
+        project_manager.QMessageBox,
+        "critical",
+        lambda _parent, _title, message: messages.append(message),
+    )
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: pytest.fail("locked group editor must not open"),
+    )
+
+    project_manager.edit_project_settings(host)
+
+    assert messages and "locked" in messages[0].lower()
 
 
 def test_new_project_from_fpvs_config_creates_project_directly(tmp_path, monkeypatch) -> None:

@@ -146,6 +146,13 @@ signals; accepted participant exclusions are still saved through the manual
 participant exclusion setting. The deeper per-file raw preflight scan may run
 with bounded parallel workers using the same resolved worker limit as the
 processing run; output ordering must remain deterministic for reporting.
+For grouped projects, `HeaderOnlyPreflight` and `PreflightQcFileResult` retain
+the canonical `group_id` from `RawFileInfo`. The GUI resolves that ID through
+`ProjectGroupContext` and shows the configured group label in live scan status,
+empty-recording review, removed-electrode review, hard-exclusion review and
+details, and remaining review flags. A missing or unknown grouped assignment is
+an error; folder names are not a membership fallback. Participant exclusions
+and removed-electrode maps remain keyed by project-wide unique participant ID.
 
 The project preprocessing setting `removed_electrode_detection_mode` defaults
 to `auto` and is exposed in Settings > Advanced > Processing QC as Off,
@@ -195,6 +202,10 @@ provenance fields are copied into per-file audit, raw-QC exclusion payloads,
 preprocessed-cache metadata, and processing-ledger entries; skipped incremental
 runs can therefore still report the prior auto/manual comparison without
 rescanning already-current files.
+The saved `Data_Quality_Check_Review_Flags.xlsx` workbook uses the canonical
+`PID`, `Group`, `Source File`, and `Flagged Item` columns so its group label is
+visible and `qc_summary_export` can merge its flags through the existing named
+columns.
 
 The project preprocessing setting `manual_excluded_participants` stores
 participant IDs that should be skipped without removing their raw `.bdf` files

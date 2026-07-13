@@ -1,12 +1,31 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from openpyxl import load_workbook
 
 pytest.importorskip("PySide6")
 
 from Main_App.gui import preprocessing_qc_workflow as workflow  # noqa: E402
+
+
+def test_group_display_requires_canonical_membership() -> None:
+    assert workflow._group_display_name(None, {}) == "Single group"
+    with pytest.raises(RuntimeError, match="without a group_id"):
+        workflow._group_display_name(None, {"control": "Control"})
+    with pytest.raises(RuntimeError, match="unknown project group_id"):
+        workflow._group_display_name("missing", {"control": "Control"})
+
+
+def test_live_scan_status_includes_group_label() -> None:
+    host = SimpleNamespace(_preflight_qc_group_by_file={"p01.bdf": "Control"})
+
+    assert (
+        workflow._grouped_scan_progress_text(host, "Scanning P01.bdf")
+        == "Scanning Control · P01.bdf"
+    )
 
 
 def _hard_candidate(raw_payload: dict[str, object]) -> workflow.PreflightQcFileResult:
@@ -16,6 +35,7 @@ def _hard_candidate(raw_payload: dict[str, object]) -> workflow.PreflightQcFileR
         load_error=None,
         raw_channel_qc=raw_payload,
         raw_spectral_qc=None,
+        group_id="control",
     )
 
 
@@ -31,6 +51,7 @@ def _review_candidate(
         load_error=None,
         raw_channel_qc=raw_payload,
         raw_spectral_qc=spectral_payload,
+        group_id="patient",
     )
 
 
@@ -58,12 +79,14 @@ def test_removed_electrode_review_rows_split_auto_and_manual_sources() -> None:
         ["P34"],
         {"P34": ["FT7"]},
         {"P34": ["FT7", "P9"]},
+        {"P34": "Control"},
         {"P34": "Low signal / flat candidate(s): FT7"},
     )
 
     assert rows == [
         (
             "P34",
+            "Control",
             "FT7",
             "Low signal / flat candidate(s): FT7",
             "P9",
@@ -151,8 +174,17 @@ def test_remaining_review_rows_exclude_removed_electrode_candidate_classes() -> 
         )
     )
 
-    assert workflow._remaining_review_rows(scan, set()) == [
-        ("P17", "p17.bdf", "spatially inconsistent channel(s): AF3, F7")
+    assert workflow._remaining_review_rows(
+        scan,
+        set(),
+        {"patient": "Patient"},
+    ) == [
+        (
+            "P17",
+            "Patient",
+            "p17.bdf",
+            "spatially inconsistent channel(s): AF3, F7",
+        )
     ]
 
 
@@ -177,13 +209,36 @@ def test_hard_participant_exclusion_reason_is_condensed_with_details() -> None:
 
     assert workflow._hard_candidate_flag(result) == "Hard raw QC"
     assert workflow._hard_candidate_reason(result) == "Extremely noisy baseline"
-    assert workflow._hard_candidate_row_values([result]) == [
-        ("P34", "Hard raw QC", "Extremely noisy baseline", "")
+    assert workflow._hard_candidate_row_values(
+        [result],
+        {"control": "Control"},
+    ) == [
+        ("P34", "Control", "Hard raw QC", "Extremely noisy baseline", "")
     ]
     assert "far outside the expected range" in workflow._hard_candidate_plain_explanation(result)
 
-    details = workflow._hard_candidate_detail_text(result)
+    details = workflow._hard_candidate_detail_text(result, {"control": "Control"})
+    assert "Group: Control" in details
     assert "Median STD: 32193.4 uV (hard exclusion >= 10000.0 uV)" in details
     assert "Median P2P99: 260426.5 uV (hard exclusion >= 100000.0 uV)" in details
     assert "raw_amplitude_baseline_failure" in details
     assert "Original raw QC message" in details
+
+
+def test_review_flags_workbook_preserves_group_membership(tmp_path: Path) -> None:
+    host = SimpleNamespace(currentProject=SimpleNamespace(project_root=tmp_path))
+
+    path = workflow._write_preflight_review_flags(
+        host,
+        [("P17", "Patient", "p17.bdf", "spatially inconsistent channel(s): AF3")],
+    )
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        rows = list(workbook["Review Flags"].iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    assert rows == [
+        ("PID", "Group", "Source File", "Flagged Item"),
+        ("P17", "Patient", "p17.bdf", "spatially inconsistent channel(s): AF3"),
+    ]

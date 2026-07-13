@@ -35,13 +35,22 @@ class FrequencyDomainQcReviewDialog(QDialog):
         self,
         report: Mapping[str, object],
         parent: QWidget | None = None,
+        *,
+        participant_groups: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(parent)
         self._report = report
+        self._group_membership_required = participant_groups is not None
+        self._participant_groups = {
+            str(participant_id).strip().casefold(): str(group_label).strip()
+            for participant_id, group_label in (participant_groups or {}).items()
+            if str(participant_id).strip() and str(group_label).strip()
+        }
         self._manual_controls: dict[str, tuple[QCheckBox, QComboBox]] = {}
         self.setWindowTitle("Frequency-Domain QC Review")
         self.setModal(True)
-        self.resize(980, 680)
+        self.setMinimumSize(900, 640)
+        self.resize(1120, 720)
         self._build_ui()
 
     def manual_participant_reasons(self) -> dict[str, str]:
@@ -77,10 +86,11 @@ class FrequencyDomainQcReviewDialog(QDialog):
 
         self.summary_table = QTableWidget(self)
         self.summary_table.setObjectName("frequency_domain_qc_summary_table")
-        self.summary_table.setColumnCount(5)
+        self.summary_table.setColumnCount(6)
         self.summary_table.setHorizontalHeaderLabels(
             [
                 "Participant",
+                "Group",
                 "Finding",
                 "Automatic action",
                 "Exclude whole participant",
@@ -92,10 +102,11 @@ class FrequencyDomainQcReviewDialog(QDialog):
         self.summary_table.setSelectionMode(QAbstractItemView.NoSelection)
         header = self.summary_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         layout.addWidget(self.summary_table, 2)
         self._populate_summary_table()
 
@@ -126,9 +137,16 @@ class FrequencyDomainQcReviewDialog(QDialog):
 
         self.details_table = QTableWidget(self)
         self.details_table.setObjectName("frequency_domain_qc_details_table")
-        self.details_table.setColumnCount(5)
+        self.details_table.setColumnCount(6)
         self.details_table.setHorizontalHeaderLabels(
-            ["Participant", "Condition", "Electrode", "Summed BCA", "Severity"]
+            [
+                "Participant",
+                "Group",
+                "Condition",
+                "Electrode",
+                "Summed BCA",
+                "Severity",
+            ]
         )
         self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.details_table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -167,6 +185,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
             auto_participant = bool(item.get("auto_participant_excluded"))
             values = [
                 participant_id,
+                self._group_for_participant(participant_id),
                 _finding_text(item),
                 _automatic_action_text(
                     item,
@@ -186,14 +205,14 @@ class FrequencyDomainQcReviewDialog(QDialog):
                 if auto_participant
                 else "Optionally remove this whole participant from frequency-domain outputs."
             )
-            self.summary_table.setCellWidget(row, 3, _centered_cell_widget(checkbox))
+            self.summary_table.setCellWidget(row, 4, _centered_cell_widget(checkbox))
 
             combo = QComboBox(self.summary_table)
             combo.addItems(list(MANUAL_EXCLUSION_REASONS))
             combo.setCurrentText(WARNING_REASON_UNUSUAL_VALUES)
             combo.setEnabled(checkbox.isEnabled() and checkbox.isChecked())
             checkbox.toggled.connect(combo.setEnabled)
-            self.summary_table.setCellWidget(row, 4, combo)
+            self.summary_table.setCellWidget(row, 5, combo)
             self._manual_controls[participant_id] = (checkbox, combo)
 
         self.summary_table.resizeColumnsToContents()
@@ -205,6 +224,7 @@ class FrequencyDomainQcReviewDialog(QDialog):
         for row, item in enumerate(flags):
             values = [
                 str(item.get("participant_id") or ""),
+                self._group_for_participant(item.get("participant_id")),
                 str(item.get("condition") or ""),
                 str(item.get("electrode") or ""),
                 f"{float(item.get('summed_bca_uv') or 0.0):.3f}",
@@ -213,11 +233,23 @@ class FrequencyDomainQcReviewDialog(QDialog):
             for column, text in enumerate(values):
                 table_item = QTableWidgetItem(text)
                 table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-                if column == 3:
+                if column == 4:
                     table_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.details_table.setItem(row, column, table_item)
         self.details_table.resizeColumnsToContents()
         self.details_table.resizeRowsToContents()
+
+    def _group_for_participant(self, participant_id: object) -> str:
+        normalized = str(participant_id or "").strip()
+        if not self._group_membership_required:
+            return "Single group"
+        group = self._participant_groups.get(normalized.casefold())
+        if not group:
+            raise ValueError(
+                "Frequency-domain QC found participant "
+                f"'{normalized}' without canonical project group membership."
+            )
+        return group
 
     def _toggle_rules(self, checked: bool) -> None:
         self.rules_label.setVisible(bool(checked))

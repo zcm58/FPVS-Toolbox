@@ -48,11 +48,14 @@ def test_scan_recording_not_started_files_uses_bdf_header(monkeypatch, tmp_path:
         ),
     )
 
-    flagged = scan_recording_not_started_files([RawFileInfo(raw_path, "P01")])
+    flagged = scan_recording_not_started_files(
+        [RawFileInfo(raw_path, "P01", "control")]
+    )
 
     assert len(flagged) == 1
     assert flagged[0].participant_id == "P01"
     assert flagged[0].path == raw_path
+    assert flagged[0].group_id == "control"
 
 
 def test_scan_preprocessing_qc_prepopulates_auto_removed_electrodes(
@@ -72,13 +75,40 @@ def test_scan_preprocessing_qc_prepopulates_auto_removed_electrodes(
     )
 
     scan = scan_preprocessing_qc(
-        [RawFileInfo(raw_path, "P03")],
+        [RawFileInfo(raw_path, "P03", "patient")],
         {"stim_channel": "Status", "max_bad_chans": 20},
     )
 
     assert scan.cancelled is False
     assert scan.suggested_removed_electrodes == {"P03": ["P9"]}
     assert scan.hard_exclusion_candidates == ()
+    assert scan.results[0].group_id == "patient"
+
+
+def test_scan_preprocessing_qc_preserves_group_id_on_load_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P04.bdf"
+    raw_path.write_bytes(b"not a real bdf for this unit test")
+    monkeypatch.setattr(preflight_qc.load_utils, "inspect_bdf_header", lambda _path: None)
+
+    def _raise_load_error(*_args, **_kwargs):
+        raise RuntimeError("load failed")
+
+    monkeypatch.setattr(
+        preflight_qc.load_utils,
+        "load_eeg_file",
+        _raise_load_error,
+    )
+
+    scan = scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P04", "patient")],
+        {"stim_channel": "Status", "max_bad_chans": 20},
+    )
+
+    assert scan.results[0].group_id == "patient"
+    assert scan.results[0].load_error == "load failed"
 
 
 def test_preflight_suggestions_include_review_only_removed_electrode_classes(
@@ -157,7 +187,11 @@ def test_scan_preprocessing_qc_uses_parallel_workers(
 
     scan = scan_preprocessing_qc(
         [
-            RawFileInfo(path, f"P{index + 1:02d}")
+            RawFileInfo(
+                path,
+                f"P{index + 1:02d}",
+                "control" if index % 2 == 0 else "patient",
+            )
             for index, path in enumerate(paths)
         ],
         {"stim_channel": "Status", "max_bad_chans": 20},
@@ -173,4 +207,12 @@ def test_scan_preprocessing_qc_uses_parallel_workers(
         "P04",
         "P05",
         "P06",
+    ]
+    assert [result.group_id for result in scan.results] == [
+        "control",
+        "patient",
+        "control",
+        "patient",
+        "control",
+        "patient",
     ]

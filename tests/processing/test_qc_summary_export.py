@@ -284,10 +284,11 @@ def test_processing_qc_summary_merges_saved_preflight_review_flags(
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Review Flags"
-    worksheet.append(("PID", "Source File", "Flagged Item"))
+    worksheet.append(("PID", "Group", "Source File", "Flagged Item"))
     worksheet.append(
         (
             "P01",
+            "Single group",
             "P01.bdf",
             "high-amplitude channel(s): F8, FC6; spatially inconsistent channel(s): AF7, C6",
         )
@@ -295,6 +296,7 @@ def test_processing_qc_summary_merges_saved_preflight_review_flags(
     worksheet.append(
         (
             "P01",
+            "Single group",
             "P01.bdf",
             "raw data warning rule(s): possible_bad_channel_cluster",
         )

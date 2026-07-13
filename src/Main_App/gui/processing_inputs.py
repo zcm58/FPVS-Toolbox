@@ -17,13 +17,13 @@ from PySide6.QtWidgets import (
 )
 
 import config
-from Main_App.Shared.file_filters import is_bdf_file
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.participant_review import review_participants_for_processing
 from Main_App.processing.processing_controller import (
     participant_review_rows,
     prepare_batch_file_infos,
     raw_file_info_for_path,
+    raw_selection_start_folder,
     register_participants,
 )
 from Main_App.processing.processing_ledger import classify_processing_inputs
@@ -64,6 +64,13 @@ def validate_inputs(host: Any) -> bool:
 
     # File selection rules differ in Single vs Batch
     mode_now = (host.file_mode.get() if hasattr(host, "file_mode") else "Batch")
+    if mode_now not in {"Single", "Batch"}:
+        QMessageBox.critical(
+            host,
+            "Invalid Processing Mode",
+            f"Unsupported processing mode: {mode_now!r}. Select Single or Batch.",
+        )
+        return False
     raw_file_infos = []
     if mode_now == "Single":
         # In single mode, require an explicit .bdf selection
@@ -98,25 +105,6 @@ def validate_inputs(host: Any) -> bool:
             return False
         file_paths = [info.path for info in raw_file_infos]
         host.data_paths = [str(p) for p in file_paths]
-        host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
-
-    # Single: if we somehow have no data_paths at this point, fall back to
-    # the legacy input_folder glob (defensive-only; normal flow requires an
-    # explicit file selection above).
-    elif not host.data_paths:
-        input_dir = Path(host.currentProject.input_folder)
-        if not input_dir.is_dir():
-            QMessageBox.critical(host, "Input Folder Missing", str(input_dir))
-            return False
-        bdf_files = sorted(str(p) for p in input_dir.glob("*.bdf") if is_bdf_file(p))
-        if not bdf_files:
-            QMessageBox.warning(
-                host,
-                "No Data",
-                "No .bdf files found in the input folder.",
-            )
-            return False
-        host.data_paths = bdf_files
         host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
 
     # Save/output folder from project
@@ -630,7 +618,11 @@ def select_single_file(host: Any) -> None:
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Please open or create a project first.")
         return
-    start_dir = str(Path(host.currentProject.input_folder))
+    try:
+        start_dir = str(raw_selection_start_folder(host.currentProject))
+    except Exception as exc:
+        QMessageBox.critical(host, "Project Data Error", str(exc))
+        return
     fname, _ = QFileDialog.getOpenFileName(
         host,
         "Select EEG File (.bdf)",

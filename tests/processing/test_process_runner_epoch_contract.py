@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import mne
 import numpy as np
+import pytest
 
 from Main_App.Shared.fft_crop_utils import CropResult
 from Main_App.processing.raw_channel_qc import (
@@ -26,6 +27,36 @@ def _write_bdf_header(path: Path, *, header_bytes: int = 512, data_records: int 
     _put(244, 252, 1)
     _put(252, 256, channels)
     path.write_bytes(bytes(header) + (b" " * max(0, header_bytes - 256)))
+
+
+def test_group_output_settings_are_routed_per_raw_file_and_require_complete_map(
+    tmp_path: Path,
+) -> None:
+    control_file = tmp_path / "Control" / "P01.bdf"
+    treatment_file = tmp_path / "Treatment" / "P02.bdf"
+    mapping = {
+        str(control_file.resolve()): "Control",
+        str(treatment_file.resolve()): "Treatment",
+    }
+    settings = {
+        "_fpvs_grouped_project": True,
+        "_fpvs_output_group_by_file": mapping,
+        "alpha": 0.05,
+    }
+
+    control_settings = process_runner._settings_for_file(control_file, settings)
+    treatment_settings = process_runner._settings_for_file(treatment_file, settings)
+
+    assert control_settings["output_group_folder"] == "Control"
+    assert treatment_settings["output_group_folder"] == "Treatment"
+    assert "output_group_folder" not in settings
+    with pytest.raises(ValueError, match="no output-folder assignment"):
+        process_runner._settings_for_file(tmp_path / "P03.bdf", settings)
+    with pytest.raises(ValueError, match="requires a canonical per-file"):
+        process_runner._settings_for_file(
+            control_file,
+            {"_fpvs_grouped_project": True},
+        )
 
 
 def test_run_full_pipeline_excludes_header_only_bdf_before_loader(monkeypatch, tmp_path: Path) -> None:
@@ -498,6 +529,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
+
         project_root=tmp_path / "project",
     )
 

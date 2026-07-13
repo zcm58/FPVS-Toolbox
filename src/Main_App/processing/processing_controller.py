@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from Main_App.Shared.file_filters import is_bdf_file
+from Main_App.projects.grouping import project_group_context
 from Main_App.io.load_utils import (
     format_bdf_recording_not_started_message,
     inspect_bdf_header,
@@ -87,16 +88,27 @@ def _iter_group_folders(project: "Project") -> Iterable[tuple[str | None, Path]]
     For legacy/single-group projects, yields a single (None, project.input_folder)
     entry so callers can treat the iteration uniformly.
     """
-    groups = getattr(project, "groups", {}) or {}
-    if isinstance(groups, dict) and groups:
-        for name, info in groups.items():
-            folder = info.get("raw_input_folder") if isinstance(info, dict) else None
-            if not folder:
-                continue
-            folder_path = Path(folder)
-            yield name, folder_path
+    context = project_group_context(project)
+    if context.groups:
+        for group in context.groups:
+            yield group.group_id, group.raw_input_folder
     else:
+        if project.input_folder is None:
+            raise ValueError(
+                "Single-group project is missing its canonical input_folder."
+            )
         yield None, Path(project.input_folder)
+
+
+def raw_selection_start_folder(project: "Project") -> Path:
+    """Return a real registered raw root for file-dialog navigation only."""
+
+    context = project_group_context(project)
+    if context.groups:
+        return context.groups[0].raw_input_folder
+    if project.input_folder is None:
+        raise ValueError("Project is missing its canonical input_folder.")
+    return Path(project.input_folder)
 
 
 def _is_within_path(parent: Path, child: Path) -> bool:
@@ -164,41 +176,80 @@ def _same_path(left: Path | None, right: Path) -> bool:
 def _group_label(project: "Project", group_id: str | None) -> str:
     if not group_id:
         return "Single group"
-    groups = getattr(project, "groups", {}) or {}
-    if isinstance(groups, Mapping):
-        entry = groups.get(group_id)
-        if isinstance(entry, Mapping):
-            label = str(entry.get("label") or entry.get("folder_name") or group_id).strip()
-            if label:
-                return label
-    return group_id
+    return project_group_context(project).group(group_id).label
 
 
-def _warn_missing_known_raw_files(project: "Project") -> None:
-    participants = getattr(project, "participants", {}) or {}
-    if not isinstance(participants, Mapping):
-        return
-    for participant_id, raw_entry in participants.items():
-        entry = raw_entry if isinstance(raw_entry, Mapping) else {}
-        raw_file = _participant_raw_file(project, entry)
+def _validate_known_raw_files(
+    project: "Project",
+    discovered_files: Sequence[RawFileInfo],
+) -> None:
+    context = project_group_context(project)
+    discovered_by_path = {
+        info.path.resolve(strict=False): info for info in discovered_files
+    }
+    missing_files: list[tuple[str, Path]] = []
+    missing_metadata: list[str] = []
+    undiscovered_files: list[tuple[str, Path]] = []
+    for participant in context.participants:
+        participant_id = participant.participant_id
+        raw_file = participant.raw_file
         if raw_file is None:
+            missing_metadata.append(str(participant_id))
             continue
         try:
-            raw_exists = raw_file.exists()
+            raw_exists = raw_file.is_file()
         except OSError:
             raw_exists = False
         if not raw_exists:
-            logger.warning(
-                "Known participant %s has a missing raw .bdf file at %s; "
-                "leaving project.json unchanged and continuing with discovered files.",
-                participant_id,
-                raw_file,
-                extra={
-                    "project_root": str(getattr(project, "project_root", "")),
-                    "participant_id": str(participant_id),
-                    "raw_file": str(raw_file),
-                },
+            missing_files.append((str(participant_id), raw_file))
+            continue
+        discovered = discovered_by_path.get(raw_file.resolve(strict=False))
+        if discovered is None:
+            undiscovered_files.append((str(participant_id), raw_file))
+            continue
+        if participant.group_id != discovered.group:
+            raise ValueError(
+                f"Participant '{participant_id}' is assigned to group "
+                f"'{participant.group_id}', but its registered raw file was "
+                f"discovered in group '{discovered.group}'."
             )
+        if participant_id.casefold() != discovered.subject_id.casefold():
+            raise ValueError(
+                f"Participant '{participant_id}' is registered to {raw_file.name}, "
+                "but that filename resolves to participant ID "
+                f"'{discovered.subject_id}'. Repair project.json or rename the file."
+            )
+
+    if missing_metadata:
+        participant_list = ", ".join(sorted(missing_metadata, key=str.casefold))
+        raise ValueError(
+            "Registered participant metadata is missing raw_file for: "
+            f"{participant_list}. Repair project.json before processing."
+        )
+    if missing_files:
+        details = "; ".join(
+            f"{participant_id}: {raw_file}"
+            for participant_id, raw_file in sorted(
+                missing_files,
+                key=lambda item: item[0].casefold(),
+            )
+        )
+        raise FileNotFoundError(
+            "Registered participant has a missing raw .bdf file. "
+            f"Restore or correct the registered path(s): {details}"
+        )
+    if undiscovered_files:
+        details = "; ".join(
+            f"{participant_id}: {raw_file}"
+            for participant_id, raw_file in sorted(
+                undiscovered_files,
+                key=lambda item: item[0].casefold(),
+            )
+        )
+        raise ValueError(
+            "Registered participant raw file was not found by canonical group "
+            f"discovery: {details}"
+        )
 
 
 def _validate_locked_assignment(project: "Project", info: RawFileInfo) -> None:
@@ -256,21 +307,13 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
     """
     files: List[RawFileInfo] = []
     seen_subjects: Dict[str, RawFileInfo] = {}
-    groups_locked = bool(getattr(project, "groups_locked", False))
     for group_name, folder in _iter_group_folders(project):
         folder_path = Path(folder)
-        if not folder_path.exists():
-            if groups_locked:
-                raise FileNotFoundError(
-                    "Registered raw input folder is missing after group lock: "
-                    f"{folder_path}. Restore the folder or create a new project."
-                )
-            logger.warning(
-                "Input folder %s for group %s does not exist",
-                folder_path,
-                group_name,
+        if not folder_path.is_dir():
+            raise FileNotFoundError(
+                "Registered raw input folder is missing or is not a directory: "
+                f"{folder_path}. Restore the folder or update the project definition."
             )
-            continue
         for candidate in sorted(folder_path.glob("*.bdf")):
             if not is_bdf_file(candidate):
                 continue
@@ -292,8 +335,7 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
             _validate_locked_assignment(project, info)
             seen_subjects[subject_key] = info
             files.append(info)
-    if groups_locked:
-        _warn_missing_known_raw_files(project)
+    _validate_known_raw_files(project, files)
     logger.debug(
         "discover_raw_files",
         extra={
@@ -358,8 +400,8 @@ def _update_project_participants(project: "Project", files: Sequence[RawFileInfo
     """
     Merge subject→group assignments from the given files into project.participants.
 
-    Conflicting assignments for the same subject are logged and the existing
-    mapping is preserved.
+    Conflicting assignments hard-fail so no caller can silently preserve an
+    ambiguous participant/group mapping.
     """
     if not files:
         return False
@@ -378,14 +420,10 @@ def _update_project_participants(project: "Project", files: Sequence[RawFileInfo
         participant_key = existing_key or participant_id
         existing_group = _participant_group_id(existing)
         if group and existing_group and existing_group != group:
-            logger.warning(
-                "Conflicting group assignments for participant %s (%s vs %s). "
-                "Keeping existing.",
-                participant_key,
-                existing_group,
-                group,
+            raise ValueError(
+                f"Participant '{participant_key}' is already assigned to group "
+                f"'{existing_group}' and cannot be registered to '{group}'."
             )
-            continue
         existing_entry = dict(existing or {})
         existing_entry.pop("group", None)
         updated_entry = dict(existing_entry)
@@ -506,7 +544,7 @@ def start_processing(self) -> None:
     """
     try:
         project: Project = self.currentProject
-        input_dir = Path(project.input_folder)
+        input_dir = raw_selection_start_folder(project)
 
         batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
 

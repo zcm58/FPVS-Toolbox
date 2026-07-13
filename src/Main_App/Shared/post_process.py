@@ -9,6 +9,7 @@ import mne
 import re
 from contextvars import ContextVar
 from fractions import Fraction
+from pathlib import Path
 from time import perf_counter
 import config
 from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
@@ -16,6 +17,10 @@ from typing import List, Any, Dict
 from Tools.Stats.analysis.full_snr import compute_full_snr_from_amplitudes
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 from Main_App.Shared.fft_crop_utils import compute_onbin_N, compute_onbin_step
+from Main_App.projects.grouping import (
+    resolve_group_output_directory,
+    resolve_output_directory,
+)
 
 
 from Main_App.Shared.post_process_excel import build_fft_neighbors_rows, write_results_workbook
@@ -31,6 +36,28 @@ _EXPORT_TIMING_SINK: ContextVar[list[dict[str, object]] | None] = ContextVar(
 
 def _elapsed_ms(started_at: float) -> int:
     return int((perf_counter() - started_at) * 1000)
+
+
+def _create_output_subfolder(
+    app: Any,
+    parent_folder: str | os.PathLike[str],
+    condition_folder: object,
+    group_folder: object | None,
+) -> str:
+    """Create one strict condition/group export folder or raise."""
+
+    output_path = resolve_output_directory(Path(parent_folder), condition_folder)
+    if group_folder:
+        output_path = resolve_group_output_directory(output_path, group_folder)
+    try:
+        os.makedirs(output_path, exist_ok=True)
+    except OSError as exc:
+        app.log(
+            f"Error creating required output folder {output_path}: {exc}. "
+            "Processing cannot continue."
+        )
+        raise
+    return os.fspath(output_path)
 
 
 def _log_export_timing(
@@ -356,24 +383,22 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             excel_filename = f"{pid}_{filename_condition_part}_Results.xlsx"
 
         output_group_folder = None
+        grouped_project = False
         settings = getattr(app, "settings", None)
         if isinstance(settings, dict):
             output_group_folder = settings.get("output_group_folder")
+            grouped_project = bool(settings.get("_fpvs_grouped_project", False))
+        if grouped_project and not output_group_folder:
+            raise ValueError(
+                "Grouped processing is missing its canonical output group folder."
+            )
 
-        # Create subfolder
-        output_subfolder_path = os.path.join(parent_folder, folder_name_base)
-        if output_group_folder:
-            output_subfolder_path = os.path.join(
-                output_subfolder_path,
-                str(output_group_folder),
-            )
-        try:
-            os.makedirs(output_subfolder_path, exist_ok=True)
-        except OSError as e:
-            app.log(
-                f"Error creating subfolder {output_subfolder_path}: {e}. Saving to parent folder: {parent_folder}"
-            )
-            output_subfolder_path = parent_folder
+        output_subfolder_path = _create_output_subfolder(
+            app,
+            parent_folder,
+            folder_name_base,
+            output_group_folder,
+        )
 
         full_excel_path = os.path.join(output_subfolder_path, excel_filename)
         app.log(f"Target Excel path for '{cond_label_from_keys}': {full_excel_path}")

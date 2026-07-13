@@ -13,7 +13,20 @@ _PROJECT_NAMES = {
     "SNR_SUBFOLDER_NAME",
     "STATS_SUBFOLDER_NAME",
     "_LEGACY_BANDPASS_WARNED",
+}
+_GROUPING_NAMES = {
+    "GroupConfigurationError",
+    "GroupInfo",
+    "ParticipantInfo",
+    "ProjectGroupContext",
+    "load_project_group_context",
     "make_group_id",
+    "normalize_project_groups",
+    "normalize_project_participants",
+    "project_group_context",
+    "resolve_group_output_directory",
+    "resolve_output_directory",
+    "validate_group_folder_name",
 }
 _PREPROCESSING_NAMES = {
     "PREPROCESSING_CANONICAL_KEYS",
@@ -21,10 +34,14 @@ _PREPROCESSING_NAMES = {
     "normalize_preprocessing_settings",
 }
 
-__all__ = sorted(_PROJECT_NAMES | _PREPROCESSING_NAMES)
+__all__ = sorted(_GROUPING_NAMES | _PROJECT_NAMES | _PREPROCESSING_NAMES)
 
 
 def __getattr__(name: str) -> Any:
+    if name in _GROUPING_NAMES:
+        grouping = importlib.import_module("Main_App.projects.grouping")
+
+        return getattr(grouping, name)
     if name in _PROJECT_NAMES:
         project = importlib.import_module("Main_App.projects.project")
 

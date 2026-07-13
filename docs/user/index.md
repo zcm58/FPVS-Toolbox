@@ -11,6 +11,21 @@ FPVS Toolbox organizes work under a project root. Each project has its own
 subfolder containing the project manifest, source-data location, processed
 workbooks, quality-control records, statistical outputs, and figures.
 
+### Multi-Group Projects
+
+When creating a project with two or more experimental groups, select one raw
+`.bdf` folder for each group. Batch mode is the default and processes every
+registered group folder in one run. Processed workbooks are organized by
+condition and then group.
+
+Group definitions are strict so partial projects are not processed silently.
+Missing group folders, missing registered participant files, duplicate
+participant IDs, or invalid group output-folder names stop processing with an
+error that identifies what must be repaired. After the first grouped workbook
+is produced—even if another condition or participant is later interrupted—the
+group-folder layout is locked and fingerprinted. Restore a missing registered
+folder or create a new project if the group design itself must change.
+
 ### Data Compatibility
 
 The currently validated workflow targets BioSemi ActiveTwo 64-channel BDF

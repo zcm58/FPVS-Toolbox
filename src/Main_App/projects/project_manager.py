@@ -23,7 +23,13 @@ from Main_App.projects.fpvs_config_import import (
     FPVSConfigImportError,
     create_project_from_fpvs_config,
 )
-from Main_App.projects.project import Project, make_group_id
+from Main_App.projects.grouping import (
+    GroupConfigurationError,
+    make_group_id,
+    project_group_context,
+    validate_group_folder_name,
+)
+from Main_App.projects.project import Project
 from Main_App.projects.project_metadata import ProjectMetadata, read_project_metadata
 from Main_App.projects.projects_root import ensure_projects_root
 
@@ -32,12 +38,6 @@ logger.addHandler(logging.NullHandler())
 
 _open_project_guard = OpGuard()
 _open_selected_project_guard = OpGuard()
-WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS = set('<>:"/\\|?*')
-WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS_TEXT = '< > : " / \\ | ? *'
-
-
-def _illegal_group_folder_chars(label: str) -> list[str]:
-    return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS})
 
 
 class _ProjectScanSignals(QObject):
@@ -126,6 +126,16 @@ def new_project(self) -> None:
     )
     if not ok or not name.strip():
         return
+    project_name = name.strip()
+    project_dir = self.projectsRoot / project_name
+    if project_dir.exists():
+        QMessageBox.critical(
+            self,
+            "Project Already Exists",
+            f"A project named '{project_name}' already exists. Choose a new name; "
+            "existing project data will not be overwritten.",
+        )
+        return
 
     group_count, ok = QInputDialog.getInt(
         self,
@@ -201,19 +211,18 @@ def new_project(self) -> None:
                         "Group names cannot be empty.",
                     )
                     continue
-                illegal_chars = _illegal_group_folder_chars(group_name)
-                if illegal_chars:
-                    bad = " ".join(illegal_chars)
+                try:
+                    validate_group_folder_name(group_name)
+                except GroupConfigurationError as exc:
                     QMessageBox.warning(
                         self,
                         "Invalid Group Folder Name",
                         (
-                            "Group names become output folder names and cannot contain "
-                            "characters that are invalid for Windows folders.\n\n"
+                            "Group names become output folder names and must be one safe "
+                            "Windows folder name.\n\n"
                             f"Group: {group_name}\n"
-                            f"Illegal character(s): {bad}\n\n"
-                            "Please choose a group name using only allowed characters.\n"
-                            f"Not allowed: {WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS_TEXT}"
+                            f"Problem: {exc}\n\n"
+                            "Please choose another group name."
                         ),
                     )
                     continue
@@ -227,19 +236,28 @@ def new_project(self) -> None:
                 group_folders[group_name] = folder
                 break
 
-    project_dir = self.projectsRoot / name.strip()
-    project_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        project_dir.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        QMessageBox.critical(
+            self,
+            "Project Creation Failed",
+            f"Could not create project folder {project_dir}: {exc}",
+        )
+        return
 
-    project = Project.load(project_dir)
-    project.name = name.strip()
     if group_count == 1:
-        project.input_folder = Path(group_folders["Input Folder"])
-        project.groups = {}
+        project = Project.load(
+            project_dir,
+            manifest={
+                "name": project_name,
+                "input_folder": group_folders["Input Folder"],
+                "options": {"mode": "batch"},
+            },
+        )
     else:
-        first_group = next(iter(group_folders))
-        project.input_folder = Path(group_folders[first_group])
         used_group_ids: set[str] = set()
-        groups_payload = {}
+        groups_payload: dict[str, dict[str, object]] = {}
         for group_name, folder in group_folders.items():
             group_id = make_group_id(group_name, used_group_ids)
             groups_payload[group_id] = {
@@ -247,7 +265,16 @@ def new_project(self) -> None:
                 "folder_name": group_name,
                 "raw_input_folder": Path(folder),
             }
-        project.groups = groups_payload
+        project = Project.load(
+            project_dir,
+            manifest={
+                "name": project_name,
+                "options": {"mode": "batch"},
+                "groups": groups_payload,
+            },
+        )
+    project.name = project_name
+    project.options["mode"] = "batch"
     project.participants = {}
     project.groups_locked = False
     project.groups_locked_at = None
@@ -574,8 +601,9 @@ def loadProject(self, project: Project) -> None:
     self.currentProject = project
     self.lbl_currentProject.setText(f"Current Project: {project.name}")
 
-    self.settings.set("paths", "data_folder", str(project.input_folder))
-    self.settings.save()
+    if not project_group_context(project).has_group_metadata:
+        self.settings.set("paths", "data_folder", str(project.input_folder))
+        self.settings.save()
 
     mode = project.options.get("mode", "batch").lower()
     self.rb_single.setChecked(mode == "single")
@@ -598,11 +626,108 @@ def edit_project_settings(self) -> None:
     if not getattr(self, "currentProject", None):
         QMessageBox.warning(self, "No Project", "Please open or create a project first.")
         return
+    project = self.currentProject
+    groups = getattr(project, "groups", {}) or {}
+    if groups:
+        if getattr(project, "groups_locked", False):
+            QMessageBox.critical(
+                self,
+                "Group Folders Locked",
+                "Group raw-data folders are locked because this project has successful "
+                "processed outputs. Restore the registered folders, or create a new "
+                "project if the group layout must change.",
+            )
+            return
+
+        selected_folders: dict[str, Path] = {}
+        used_paths: set[Path] = set()
+        for group_id, raw_info in groups.items():
+            if not isinstance(raw_info, dict):
+                QMessageBox.critical(
+                    self,
+                    "Invalid Group Configuration",
+                    f"Group '{group_id}' metadata is invalid. Repair project.json.",
+                )
+                return
+            label = str(raw_info.get("label") or group_id)
+            current_folder = Path(raw_info["raw_input_folder"])
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                f"Select Raw Data Folder for {label}",
+                str(current_folder),
+            )
+            if not folder:
+                return
+            folder_path = Path(folder).resolve()
+            if not folder_path.is_dir():
+                QMessageBox.critical(
+                    self,
+                    "Group Folder Missing",
+                    f"The selected folder does not exist: {folder_path}",
+                )
+                return
+            if folder_path in used_paths:
+                QMessageBox.warning(
+                    self,
+                    "Duplicate Group Folder",
+                    "Each group must use a unique raw-data folder.",
+                )
+                return
+            used_paths.add(folder_path)
+            selected_folders[str(group_id)] = folder_path
+
+        updated_groups = {
+            str(group_id): {
+                **dict(raw_info),
+                "raw_input_folder": selected_folders[str(group_id)],
+            }
+            for group_id, raw_info in groups.items()
+        }
+        updated_participants = {
+            str(participant_id): dict(raw_info)
+            for participant_id, raw_info in (
+                getattr(project, "participants", {}) or {}
+            ).items()
+        }
+        for participant_id, participant in updated_participants.items():
+            group_id = str(
+                participant.get("group_id") or participant.get("group") or ""
+            ).strip()
+            raw_file = participant.get("raw_file")
+            if not group_id or not raw_file or group_id not in selected_folders:
+                continue
+            moved_path = selected_folders[group_id] / Path(raw_file).name
+            if not moved_path.is_file():
+                QMessageBox.critical(
+                    self,
+                    "Registered Participant File Missing",
+                    f"Participant {participant_id} is registered to "
+                    f"{Path(raw_file).name}, but that file is not present in "
+                    f"{selected_folders[group_id]}. No project changes were saved.",
+                )
+                return
+            participant["raw_file"] = moved_path
+
+        previous_groups = project.groups
+        previous_participants = project.participants
+        try:
+            project.groups = updated_groups
+            project.participants = updated_participants
+            project.save()
+        except Exception as exc:
+            project.groups = previous_groups
+            project.participants = previous_participants
+            logger.exception("Failed to update multi-group raw folders.")
+            QMessageBox.critical(self, "Project Save Error", str(exc))
+            return
+        self.loadProject(project)
+        return
+
     folder = QFileDialog.getExistingDirectory(
-        self, "Select Input Folder", str(self.currentProject.input_folder)
+        self, "Select Input Folder", str(project.input_folder)
     )
     if not folder:
         return
-    self.currentProject.input_folder = folder
-    self.currentProject.save()
-    self.loadProject(self.currentProject)
+    project.input_folder = Path(folder)
+    project.save()
+    self.loadProject(project)

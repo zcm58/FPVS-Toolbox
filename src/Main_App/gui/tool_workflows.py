@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 from PySide6.QtWidgets import QMessageBox
 
+from Main_App.projects.grouping import project_group_context
+
 
 def open_settings_window(host: Any, settings_dialog_cls: Callable[..., Any]) -> None:
     if host._settings_dialog and host._settings_dialog.isVisible():
@@ -33,6 +35,15 @@ def resolve_epoch_averaging_paths(host: Any) -> tuple[str, str] | None:
 
     data_dir = host.currentProject.subfolders.get("data")
     if data_dir is None:
+        if project_group_context(host.currentProject).has_group_metadata:
+            QMessageBox.critical(
+                host,
+                "Grouped Project Not Supported",
+                "Epoch Averaging requires an explicit processed-data folder for a "
+                "grouped project. It will not substitute a project-level input "
+                "folder. Configure the data source before opening this beta tool.",
+            )
+            return None
         data_dir = str(host.currentProject.input_folder)
     else:
         data_dir = str(host.currentProject.project_root / data_dir)

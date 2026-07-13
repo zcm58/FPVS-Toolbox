@@ -30,6 +30,13 @@ FPVS Toolbox uses a strict hybrid settings model:
   entries carry `label`, `folder_name`, and `raw_input_folder`. Participant
   entries use `group_id` plus `raw_file`; legacy `group` values may be read only
   as migration/input compatibility.
+- Every declared group requires a nonblank `raw_input_folder`. Its
+  `folder_name` must be a safe single Windows path component; absolute paths,
+  separators/traversal, reserved device names, and trailing dots/spaces are
+  invalid. Group raw folders and output `folder_name` values must be unique.
+- Grouped manifests do not persist a top-level `input_folder`; the registered
+  group raw roots are the complete source of truth. New projects default to
+  batch processing.
 - `group_count == 1` projects keep the normal single-group shape and do not
   write `groups` metadata.
 - Generated incremental-processing state lives under the active project root at
@@ -81,6 +88,54 @@ FPVS Toolbox uses a strict hybrid settings model:
   `L2-MNE Cortical Surface Beta/`. These are generated payload/manifest files,
   not `project.json` settings.
 
+## Multi-Group Processing Foundation
+
+`Main_App.projects.grouping` is the canonical, GUI-neutral normalizer for group
+and participant metadata. It exposes immutable `GroupInfo`, `ParticipantInfo`,
+and `ProjectGroupContext` records plus a read-only `project.json` loader that
+does not create project directories. `Main_App.projects.project.Project` uses
+the same normalizer when loading and saving. Active processing carries stable
+`group_id` values from registered raw folders through participant review,
+incremental planning, worker routing, and post-processing export.
+
+The processing contract is deliberately strict:
+
+- Batch mode scans every registered group raw-input folder and does not fall
+  back to only `project.input_folder` for a grouped project.
+- Grouped manifests omit top-level `input_folder`, and the active `Project`
+  exposes `input_folder = None`; all grouped consumers must use
+  `ProjectGroupContext.groups`.
+- Participant IDs must be unique across the whole project. Duplicate IDs across
+  files or groups, including case-only manifest duplicates, hard-block
+  processing. Ambiguous group aliases hard-block project loading.
+- New participant/group/raw-file assignments require review before they are
+  saved. Canceling review must not mutate `project.json`.
+- Missing registered group folders and missing participant `raw_file` paths
+  hard-block processing before or after group lock. Files selected outside a
+  registered raw root, registered files that are not direct `.bdf` children of
+  their assigned root, and known participants discovered in a different group
+  also hard-block processing.
+- The processing ledger computes expected condition/group workbook paths before
+  work starts. The active process runner passes a per-source-file group folder
+  to post-processing, which writes the condition-first/group-second layout.
+- Missing per-file group routing and output-directory creation errors hard-fail;
+  the exporter does not redirect a workbook to a parent folder.
+- The first current-run grouped workbook sets `groups_locked`,
+  `groups_locked_at`, and a group-definition fingerprint. This includes a
+  partial-condition result or completed participant before cancellation.
+  Project creation and participant review alone do not lock the layout. Later
+  direct model or manifest changes to locked group definitions hard-fail.
+
+The shared read-only group/participant context is now available from
+`Main_App.projects`. The current downstream workbook scanners are compatibility
+implementations, not the intended long-term ownership boundary. The remaining
+target is a processed-workbook index under `Main_App.projects` that adds
+conditions and workbook records to that context for all tools. New code should
+not add another manifest normalizer or import a scanner from Stats or Plot
+Generator. Until the shared index lands, preserve existing adapters and output
+behavior. See
+`docs/agent/exec-plans/active/multi-group-project-foundation.md`.
+
 Rules:
 
 - Preserve existing output formats, filenames, sheet names, and folder layout unless explicitly asked to change them.
@@ -95,8 +150,8 @@ Rules:
   for multi-group projects. It updates `data_paths`, `_selected_bdf`, the input
   line edit, logs, and Start enabled state without changing project paths.
 - Loading a multi-group project must not silently recreate missing registered
-  raw folders; after group lock, missing registered raw folders hard-block
-  processing.
+  raw folders; missing registered raw folders hard-block processing regardless
+  of lock state.
 - `Reprocess All` may delete generated Excel workbook files only under the
   managed Excel output root. It must preserve condition/group directories and
   non-workbook files, then recreate the root before processing. Incremental

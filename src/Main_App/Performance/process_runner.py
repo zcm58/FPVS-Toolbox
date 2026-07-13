@@ -28,7 +28,7 @@ from fractions import Fraction
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
@@ -43,6 +43,7 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_removed_electrode_detection_mode,
 )
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
+from Main_App.projects.grouping import validate_group_folder_name
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
 )
@@ -722,6 +723,37 @@ def _build_epoch_data_from_spans(
     return data
 
 
+def _settings_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> Dict[str, object]:
+    """Return per-file settings with strict canonical group output routing."""
+
+    file_settings = dict(settings)
+    grouped_project = bool(file_settings.get("_fpvs_grouped_project", False))
+    output_group_by_file = file_settings.get("_fpvs_output_group_by_file")
+    if output_group_by_file is None:
+        if grouped_project:
+            raise ValueError(
+                "Grouped processing requires a canonical per-file output-folder "
+                "mapping."
+            )
+        return file_settings
+    if not isinstance(output_group_by_file, Mapping):
+        raise ValueError("_fpvs_output_group_by_file must be a path-to-folder mapping.")
+
+    file_key = str(file_path.resolve())
+    if file_key not in output_group_by_file:
+        raise ValueError(
+            "Grouped processing has no output-folder assignment for raw file: "
+            f"{file_key}"
+        )
+    file_settings["output_group_folder"] = validate_group_folder_name(
+        output_group_by_file[file_key]
+    )
+    return file_settings
+
+
 def _run_full_pipeline_for_file(
     file_path: Path,
     settings: Dict[str, object],
@@ -739,12 +771,7 @@ def _run_full_pipeline_for_file(
     t0 = time.perf_counter()
     timings_ms: Dict[str, int] = {}
     cache_status = "not_checked"
-    settings = dict(settings)
-    output_group_by_file = settings.get("_fpvs_output_group_by_file")
-    if isinstance(output_group_by_file, dict):
-        group_folder = output_group_by_file.get(str(file_path.resolve()))
-        if group_folder:
-            settings["output_group_folder"] = str(group_folder)
+    settings = _settings_for_file(file_path, settings)
 
     def _record_timing(section: str, started_at: float) -> None:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)

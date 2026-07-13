@@ -27,11 +27,12 @@ manual_smoke = ["Use File > Check for Updates in a visible Main App window when 
 audits = ["paths"]
 tests = [
   "tests/project_io/test_project_enumeration_io.py",
+  "tests/project_io/test_project_group_context.py",
   "tests/project_io/test_project_results_layout.py",
   "tests/project_io/test_project_scan_job.py",
   "tests/project_io/test_project_v2_group_schema.py",
 ]
-include = ["src/Main_App/projects/**", "src/Main_App/io/**", "tests/project_io/**"]
+include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
 manual_smoke = []
 
 [scopes.processing]
@@ -39,11 +40,16 @@ audits = ["protected", "source-localization"]
 tests = [
   "tests/processing/test_filter_downsample_order.py",
   "tests/processing/test_pipeline_speed_safety.py",
+  "tests/processing/test_post_process_target_freqs.py",
+  "tests/processing/test_preflight_qc.py",
   "tests/processing/test_process_runner_epoch_contract.py",
+  "tests/processing/test_processing_discovery_v2.py",
+  "tests/processing/test_processing_ledger.py",
+  "tests/processing/test_qc_summary_export.py",
   "tests/processing/test_raw_channel_qc.py",
   "tests/processing/test_removed_electrode_detection.py",
 ]
-include = ["src/Main_App/processing/**", "src/Main_App/Performance/**", "src/Main_App/workers/**", "tests/processing/**"]
+include = ["src/Main_App/processing/**", "src/Main_App/Performance/**", "src/Main_App/workers/**", "src/Main_App/Shared/post_process.py", "src/Main_App/gui/processing_inputs.py", "src/Main_App/gui/processing_workflows.py", "tests/processing/**"]
 manual_smoke = []
 
 [scopes.plot-generator]

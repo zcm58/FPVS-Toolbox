@@ -32,7 +32,10 @@ Primary paths:
   strong warnings, or repeated warning patterns. The dialog presents a
   participant summary first, optional flagged-cell details second, and lets the
   user add manual participant-level frequency-domain exclusions before
-  processing resumes.
+  processing resumes. Participant and detail rows show the canonical project
+  group label resolved from manifest membership; an unknown participant or
+  missing grouped assignment blocks the review instead of displaying inferred
+  membership.
 - `src/Main_App/gui/processing_inputs.py`: processing input validation,
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
@@ -50,7 +53,10 @@ Primary paths:
   repainting/responding during scan handoffs. Review-only findings are saved
   under the active project's
   `Quality Check/Data_Quality_Check_Review_Flags.xlsx` workbook before
-  processing continues.
+  processing continues. Raw preflight results retain canonical `group_id`
+  provenance, and every file/participant review table plus live scan status
+  displays the manifest group label. Exclusion and removed-electrode settings
+  remain keyed by globally unique participant ID.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.

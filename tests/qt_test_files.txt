@@ -10,6 +10,7 @@ tests/gui/test_main_window_excel_popup_logic.py
 tests/gui/test_main_window_layout_smoke.py
 tests/gui/test_main_window_processing.py
 tests/gui/test_nonblocking_qmessagebox.py
+tests/gui/test_qc_group_membership.py
 tests/gui/test_sensitivity_analysis_gui.py
 tests/gui/test_settings_and_status.py
 tests/gui/test_ui_components_smoke.py
@@ -29,6 +30,7 @@ tests/processing/test_audit_surface.py
 tests/processing/test_event_time_lock_report.py
 tests/processing/test_mp_runner_bridge_full_pipeline_smoke.py
 tests/processing/test_postprocess_worker_qt.py
+tests/processing/test_preprocessing_qc_workflow_helpers.py
 tests/processing/test_single_file_process_mode.py
 tests/processing/test_worker_integration.py
 tests/project_io/test_open_existing_project_dialog.py

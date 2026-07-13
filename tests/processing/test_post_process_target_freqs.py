@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from Main_App.Shared.post_process import _resolve_target_frequencies, post_process
+from Main_App.Shared.post_process import (
+    _create_output_subfolder,
+    _resolve_target_frequencies,
+    post_process,
+)
 
 
 def test_resolve_target_frequencies_from_nested_analysis_dict() -> None:
@@ -46,6 +50,39 @@ def test_resolve_target_frequencies_rejects_non_locked_oddball() -> None:
 
     with pytest.raises(ValueError, match="locked at 1.2 Hz"):
         _resolve_target_frequencies(app)
+
+
+def test_create_output_subfolder_routes_condition_then_group(tmp_path) -> None:
+    app = SimpleNamespace(log=lambda _message: None)
+
+    output = _create_output_subfolder(
+        app,
+        tmp_path,
+        "Condition A",
+        "Control",
+    )
+
+    assert output == str((tmp_path / "Condition A" / "Control").resolve())
+    assert (tmp_path / "Condition A" / "Control").is_dir()
+
+
+def test_create_output_subfolder_raises_instead_of_falling_back(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    logs: list[str] = []
+    app = SimpleNamespace(log=logs.append)
+
+    def fail_mkdir(*_args, **_kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("Main_App.Shared.post_process.os.makedirs", fail_mkdir)
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        _create_output_subfolder(app, tmp_path, "Condition A", "Control")
+
+    assert logs and "Processing cannot continue" in logs[-1]
+    assert "Saving to parent" not in logs[-1]
 
 
 def test_post_process_logs_export_timing_when_no_data(tmp_path, caplog) -> None:
