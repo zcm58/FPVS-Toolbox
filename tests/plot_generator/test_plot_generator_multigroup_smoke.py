@@ -193,7 +193,11 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
 
     win.group_overlay_check.setChecked(True)
     item = win.group_list.item(0)
-    item.setCheckState(Qt.Unchecked)
+    assert item.text() == ""
+    assert item.data(Qt.UserRole) == "GroupA"
+    assert not item.flags() & Qt.ItemIsUserCheckable
+    assert win._group_checkboxes["GroupA"].text() == "GroupA"
+    win._group_checkboxes["GroupA"].setChecked(False)
 
     data_store["subjects"] = {
         "CondA": {
@@ -206,7 +210,7 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
     win._generate()
 
     curves = plot_records[-1]["group_curves"]
-    assert list(curves.keys()) == [win.group_list.item(1).text()]
+    assert list(curves.keys()) == [win.group_list.item(1).data(Qt.UserRole)]
 
 
 @pytest.mark.qt

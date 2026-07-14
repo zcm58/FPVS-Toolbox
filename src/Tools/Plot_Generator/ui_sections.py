@@ -304,7 +304,6 @@ class PlotGeneratorUiSectionsMixin:
         group_layout.addWidget(self.group_overlay_check)
         self.group_list = QListWidget()
         self.group_list.setSelectionMode(QListWidget.NoSelection)
-        self.group_list.itemChanged.connect(self._on_group_selection_changed)
         self.group_list.setMinimumHeight(58)
         self.group_list.setMaximumHeight(80)
         group_layout.addWidget(self.group_list)

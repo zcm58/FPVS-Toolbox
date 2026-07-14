@@ -96,13 +96,6 @@ class PlotGeneratorSelectionMixin:
         self._update_legend_group_visibility()
         self._check_required()
 
-    def _on_group_selection_changed(self, _item: QListWidgetItem) -> None:
-        if self._group_overlay_enabled():
-            self._update_group_color_widgets()
-            self._force_legend_defaults()
-            self._update_legend_group_visibility()
-        self._check_required()
-
     def _on_group_check_toggled(self) -> None:
         if self._group_overlay_enabled():
             self._update_group_color_widgets()
@@ -215,9 +208,11 @@ class PlotGeneratorSelectionMixin:
         self._group_color_buttons = {}
         if self._has_multi_groups:
             for name in groups:
-                item = QListWidgetItem(name)
-                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
-                item.setCheckState(Qt.Checked)
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, name)
+                item.setFlags(
+                    item.flags() & ~(Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                )
                 self.group_list.addItem(item)
                 row = self._make_group_row_widget(name)
                 item.setSizeHint(row.sizeHint())
@@ -284,17 +279,11 @@ class PlotGeneratorSelectionMixin:
         if isinstance(checkboxes, dict) and checkboxes:
             return [
                 group_name
-                for idx, group_name in enumerate(self._available_groups)
+                for group_name in self._available_groups
                 if group_name in checkboxes
                 and checkboxes[group_name].isChecked()
-                and self.group_list.item(idx).checkState() != Qt.Unchecked
             ]
-        selected: list[str] = []
-        for idx in range(self.group_list.count()):
-            item = self.group_list.item(idx)
-            if item.checkState() == Qt.Checked:
-                selected.append(item.text())
-        return selected
+        return []
 
     def _group_overlay_enabled(self) -> bool:
         return self.group_box.isVisible() and self.group_overlay_check.isChecked()
