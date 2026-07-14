@@ -37,6 +37,11 @@ from Main_App.io.load_utils import (
     format_bdf_recording_not_started_message,
     inspect_bdf_header,
 )
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_COMPONENT_COUNT,
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     manual_removed_electrodes_for_pid,
@@ -59,7 +64,7 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v8-baseline-removed-electrode-qc"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v9-fft-multinotch"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
@@ -91,6 +96,34 @@ def _float_or_zero(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _float_list(value: Any) -> list[float]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    values: list[float] = []
+    for item in value:
+        try:
+            number = float(item)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            values.append(number)
+    return values
+
+
+def _fft_multinotch_skipped_list(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    skipped: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        centers = _float_list([item.get("center_hz")])
+        reason = str(item.get("reason") or "").strip()
+        if centers and reason:
+            skipped.append({"center_hz": centers[0], "reason": reason})
+    return skipped
 
 
 def _participant_id_for_file(file_path: Path, settings: Dict[str, object]) -> str:
@@ -420,6 +453,14 @@ def _preproc_cache_payload(
         "ref_channel1": settings.get("ref_channel1", settings.get("ref_ch1")),
         "ref_channel2": settings.get("ref_channel2", settings.get("ref_ch2")),
         "stim_channel": settings.get("stim_channel"),
+        "line_noise_filter_enabled": settings.get(
+            "line_noise_filter_enabled",
+            True,
+        ),
+        "line_noise_frequency_hz": settings.get("line_noise_frequency_hz", 60),
+        "line_noise_filter_method_version": FFT_MULTINOTCH_METHOD_VERSION,
+        "line_noise_filter_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
+        "line_noise_filter_component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
         "max_idx_keep": settings.get("max_idx_keep"),
         "max_bad_chans": settings.get(
             "max_bad_chans",
@@ -554,6 +595,17 @@ def _load_preprocessed_cache(
         settings["_fpvs_interpolated_channels"] = _string_list(
             metadata.get("interpolated_channels")
         )
+        settings["_fpvs_fft_multinotch_requested_centers_hz"] = _float_list(
+            metadata.get("fft_multinotch_requested_centers_hz")
+        )
+        settings["_fpvs_fft_multinotch_applied_centers_hz"] = _float_list(
+            metadata.get("fft_multinotch_applied_centers_hz")
+        )
+        settings["_fpvs_fft_multinotch_skipped_centers"] = (
+            _fft_multinotch_skipped_list(
+                metadata.get("fft_multinotch_skipped_centers")
+            )
+        )
         settings["_fpvs_raw_qc_bad_channels"] = _string_list(
             metadata.get("raw_qc_bad_channels")
         )
@@ -637,6 +689,15 @@ def _store_preprocessed_cache(
             ),
             "interpolated_channels": _string_list(
                 settings.get("_fpvs_interpolated_channels")
+            ),
+            "fft_multinotch_requested_centers_hz": _float_list(
+                settings.get("_fpvs_fft_multinotch_requested_centers_hz")
+            ),
+            "fft_multinotch_applied_centers_hz": _float_list(
+                settings.get("_fpvs_fft_multinotch_applied_centers_hz")
+            ),
+            "fft_multinotch_skipped_centers": _fft_multinotch_skipped_list(
+                settings.get("_fpvs_fft_multinotch_skipped_centers")
             ),
             "raw_qc_bad_channels": _string_list(
                 settings.get("_fpvs_raw_qc_bad_channels")

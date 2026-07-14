@@ -11,6 +11,11 @@ from queue import Empty  # <-- important: handle queue.Empty separately
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_COMPONENT_COUNT,
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
 from Main_App.workers.mp_env import set_blas_threads_single_process
 from Main_App.workers.process_runner import RunParams, run_project_parallel
 
@@ -25,7 +30,14 @@ def _build_preproc_fingerprint(settings: Dict[str, object]) -> str:
     r1 = settings.get("ref_channel1")
     r2 = settings.get("ref_channel2")
     stim = settings.get("stim_channel")
-    return f"hp={hp}|lp={lp}|ds={ds}|rz={rz}|ref={r1},{r2}|stim={stim}"
+    notch_enabled = settings.get("line_noise_filter_enabled", True)
+    notch_frequency = settings.get("line_noise_frequency_hz", 60)
+    return (
+        f"hp={hp}|lp={lp}|ds={ds}|rz={rz}|ref={r1},{r2}|stim={stim}"
+        f"|fft_multinotch={notch_enabled},{notch_frequency},"
+        f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
+        f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
+    )
 
 
 class MpRunnerBridge(QObject):

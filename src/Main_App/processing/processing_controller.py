@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from Main_App.Shared.file_filters import is_bdf_file
 from Main_App.projects.grouping import project_group_context
+from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 from Main_App.io.load_utils import (
     format_bdf_recording_not_started_message,
     inspect_bdf_header,
@@ -608,6 +609,12 @@ def start_processing(self) -> None:
 
         # Preprocessing parameters with precedence: project → settings → defaults
         p = project.preprocessing or {}
+        line_noise_settings = normalize_preprocessing_settings(
+            {
+                "line_noise_filter_enabled": p.get("line_noise_filter_enabled"),
+                "line_noise_frequency_hz": p.get("line_noise_frequency_hz"),
+            }
+        )
 
         ref1 = (
             p.get("ref_channel1")
@@ -631,6 +638,12 @@ def start_processing(self) -> None:
             "downsample_rate": p.get("downsample"),
             "low_pass": p.get("low_pass"),
             "high_pass": p.get("high_pass"),
+            "line_noise_filter_enabled": bool(
+                line_noise_settings["line_noise_filter_enabled"]
+            ),
+            "line_noise_frequency_hz": int(
+                line_noise_settings["line_noise_frequency_hz"]
+            ),
             "reject_thresh": p.get("rejection_z"),
             "ref_channel1": ref1,
             "ref_channel2": ref2,

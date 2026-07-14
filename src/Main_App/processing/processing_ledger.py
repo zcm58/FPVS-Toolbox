@@ -11,6 +11,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_COMPONENT_COUNT,
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.projects.grouping import (
     project_group_context,
@@ -23,7 +28,7 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v7_baseline_removed_electrode_qc"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v8_fft_multinotch"
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
@@ -312,6 +317,13 @@ def build_processing_fingerprint(
     payload = {
         "version": PROCESSING_FINGERPRINT_VERSION,
         "settings": dict(settings),
+        "fft_multinotch": {
+            "enabled": settings.get("line_noise_filter_enabled", True),
+            "mains_frequency_hz": settings.get("line_noise_frequency_hz", 60),
+            "method_version": FFT_MULTINOTCH_METHOD_VERSION,
+            "half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
+            "component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
+        },
         "event_map": {str(key): int(value) for key, value in event_map.items()},
         "project_preprocessing": getattr(project, "preprocessing", {}) or {},
         "project_options": getattr(project, "options", {}) or {},

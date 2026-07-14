@@ -11,9 +11,10 @@ Pipeline Order:
     2. Drop the selected reference pair channels.
     3. Optional channel limit (max_idx_keep; keeps stim if needed).
     4. FIR filter (legacy mapping and kernel).
-    5. Downsample (if requested).
-    6. Kurtosis-based rejection & interpolation.
-    7. Final average reference.
+    5. Optional smart FFT multi-notch line-noise filter.
+    6. Downsample (if requested).
+    7. Kurtosis-based rejection & interpolation.
+    8. Final average reference.
 """
 
 from __future__ import annotations
@@ -31,12 +32,20 @@ from Main_App.diagnostics.audit import (
     end_preproc_audit,
     compare_preproc,
 )
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_COMPONENT_COUNT,
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+    apply_fft_multinotch,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["perform_preprocessing", "begin_preproc_audit", "finalize_preproc_audit"]
 
-PREPROCESSING_ORDER_VERSION = "filter_then_downsample_v1"
+PREPROCESSING_ORDER_VERSION = (
+    "filter_then_optional_fft_multinotch_then_downsample_v2"
+)
 
 # Import configuration with a graceful fallback when run standalone
 try:
@@ -60,9 +69,14 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
     r1 = params.get("ref_channel1")
     r2 = params.get("ref_channel2")
     stim = params.get("stim_channel")
+    line_noise_enabled = bool(params.get("line_noise_filter_enabled", True))
+    line_noise_frequency = params.get("line_noise_frequency_hz", 60)
     return (
         f"order={PREPROCESSING_ORDER_VERSION}|hp={hp}|lp={lp}|ds={ds}|"
-        f"rz={rz}|ref={r1},{r2}|stim={stim}"
+        f"rz={rz}|ref={r1},{r2}|stim={stim}|"
+        f"fft_multinotch={line_noise_enabled},{line_noise_frequency},"
+        f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
+        f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
     )
 
 
@@ -111,6 +125,9 @@ def begin_preproc_audit(
     params.pop("_fpvs_initial_ref_pair", None)
     params.pop("_fpvs_kurtosis_bad_channels", None)
     params.pop("_fpvs_interpolated_channels", None)
+    params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
+    params.pop("_fpvs_fft_multinotch_applied_centers_hz", None)
+    params.pop("_fpvs_fft_multinotch_skipped_centers", None)
 
     try:
         logger.debug(
@@ -241,6 +258,10 @@ def perform_preprocessing(
             - 'downsample_rate' (int/float): Target Hz.
             - 'low_pass' (float): LPF cutoff in Hz.
             - 'high_pass' (float): HPF cutoff in Hz.
+            - 'line_noise_filter_enabled' (bool): Enable smart FFT multi-notch.
+            - 'line_noise_frequency_hz' (int): Recording-site mains frequency,
+              exactly 50 or 60 Hz. The fundamental plus two harmonics are
+              considered.
             - 'reject_thresh' (float): Z-score threshold for kurtosis rejection.
             - 'ref_channel1', 'ref_channel2' (str): Channels for initial reference.
             - 'max_idx_keep' (int): Number of EEG channels to retain.
@@ -260,6 +281,9 @@ def perform_preprocessing(
     # Ensure per-run audit keys do not leak across files when params is reused
     params.pop("_fpvs_initial_ref_ok", None)
     params.pop("_fpvs_initial_ref_pair", None)
+    params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
+    params.pop("_fpvs_fft_multinotch_applied_centers_hz", None)
+    params.pop("_fpvs_fft_multinotch_skipped_centers", None)
 
     debug_enabled = bool(params.get("debug_preproc", False)) or logger.isEnabledFor(logging.DEBUG)
 
@@ -272,6 +296,22 @@ def perform_preprocessing(
     downsample_rate = params.get("downsample_rate")
     low_pass = params.get("low_pass")
     high_pass = params.get("high_pass")
+    line_noise_filter_enabled = bool(
+        params.get("line_noise_filter_enabled", True)
+    )
+    line_noise_frequency_raw = params.get("line_noise_frequency_hz", 60)
+    if line_noise_filter_enabled:
+        try:
+            line_noise_frequency_hz = float(line_noise_frequency_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Line-noise frequency must be exactly 50 or 60 Hz."
+            ) from exc
+        if line_noise_frequency_hz not in {50.0, 60.0}:
+            raise ValueError("Line-noise frequency must be exactly 50 or 60 Hz.")
+    else:
+        # The disabled path deliberately does not validate or touch EEG data.
+        line_noise_frequency_hz = line_noise_frequency_raw
     log_func(
         f"DEBUG [preprocess cutoffs {filename_for_log}]: "
         f"high_pass={high_pass!r} low_pass={low_pass!r}"
@@ -305,6 +345,8 @@ def perform_preprocessing(
                     "reject_thresh": reject_thresh,
                     "max_idx_keep": max_keep,
                     "stim_ch": stim_ch,
+                    "line_noise_filter_enabled": line_noise_filter_enabled,
+                    "line_noise_frequency_hz": line_noise_frequency_hz,
                 },
             )
         except Exception:
@@ -492,6 +534,7 @@ def perform_preprocessing(
         l_freq = hp if (hp is not None and hp > 0) else None
         h_freq = lp
         filter_info_to_preserve: Dict[str, float] = {}
+        effective_low_pass_for_notch: Optional[float] = None
         if l_freq or h_freq:
             try:
                 low_trans_bw, high_trans_bw = 0.1, 0.1
@@ -574,6 +617,7 @@ def perform_preprocessing(
                     filter_info_to_preserve["highpass"] = float(applied_highpass)
                 if h_freq is not None and applied_lowpass is not None:
                     filter_info_to_preserve["lowpass"] = float(applied_lowpass)
+                    effective_low_pass_for_notch = float(applied_lowpass)
                 applied_payload = (
                     f"file={filename_for_log} "
                     f"applied_highpass={applied_highpass!r} "
@@ -644,7 +688,74 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
-        # 5) Downsample after filtering
+        # 5) Optional smart FFT multi-notch after FIR and before downsampling
+        if line_noise_filter_enabled:
+            try:
+                notch_result = apply_fft_multinotch(
+                    raw,
+                    fundamental_hz=line_noise_frequency_hz,
+                    low_pass=effective_low_pass_for_notch,
+                    stim_channel=stim_ch,
+                    h_trans_bandwidth=0.1,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"FFT multi-notch failed for {filename_for_log}: {exc}"
+                ) from exc
+
+            requested_centers = list(notch_result.requested_centers_hz)
+            applied_centers = list(notch_result.applied_centers_hz)
+            skipped_centers = [
+                {"center_hz": skipped.center_hz, "reason": skipped.reason}
+                for skipped in notch_result.skipped_centers
+            ]
+            params["_fpvs_fft_multinotch_requested_centers_hz"] = requested_centers
+            params["_fpvs_fft_multinotch_applied_centers_hz"] = applied_centers
+            params["_fpvs_fft_multinotch_skipped_centers"] = skipped_centers
+
+            requested_text = ",".join(f"{value:g}" for value in requested_centers)
+            applied_text = ",".join(f"{value:g}" for value in applied_centers)
+            skipped_text = ";".join(
+                f"{entry['center_hz']:g}:{entry['reason']}"
+                for entry in skipped_centers
+            )
+            if applied_centers:
+                message = (
+                    "FFT_MULTINOTCH_APPLIED "
+                    f"file={filename_for_log} requested_hz={requested_text} "
+                    f"applied_hz={applied_text} skipped={skipped_text or 'none'} "
+                    f"half_width_hz={notch_result.half_width_hz:g} "
+                    f"channel_count={len(notch_result.filtered_channels)} "
+                    f"segments={notch_result.segment_count}"
+                )
+            else:
+                message = (
+                    "FFT_MULTINOTCH_SMART_SKIP "
+                    f"file={filename_for_log} requested_hz={requested_text} "
+                    f"skipped={skipped_text or 'none'}"
+                )
+            log_func(message)
+            logger.debug(message)
+            try:
+                logger.debug(
+                    "preprocess_stage_after_fft_multinotch",
+                    extra={
+                        "file": filename_for_log,
+                        "requested_centers_hz": requested_centers,
+                        "applied_centers_hz": applied_centers,
+                        "skipped_centers": skipped_centers,
+                        "sfreq": float(raw.info.get("sfreq", -1.0)),
+                    },
+                )
+            except (TypeError, ValueError, RuntimeError):
+                logger.debug(
+                    "preprocess_stage_after_fft_multinotch_logging_failed",
+                    extra={"file": filename_for_log},
+                )
+        else:
+            log_func(f"Skip FFT multi-notch for {filename_for_log} (disabled).")
+
+        # 6) Downsample after filtering
         if downsample_rate:
             sf = float(raw.info["sfreq"])
             log_func(
@@ -723,7 +834,7 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
-        # 6) Kurtosis rejection & interpolation
+        # 7) Kurtosis rejection & interpolation
         params["_fpvs_kurtosis_bad_channels"] = []
         params["_fpvs_interpolated_channels"] = []
         bad_k_auto: List[str] = []
@@ -923,7 +1034,7 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
-        # 7) Average reference (final)
+        # 8) Average reference (final)
         try:
             log_func(f"Applying average reference to {filename_for_log}...")
             eeg_picks_for_ref = mne.pick_types(

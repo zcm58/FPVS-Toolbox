@@ -10,6 +10,7 @@ from Main_App.processing.preprocess import (  # noqa: E402
     _build_preproc_fingerprint,
     perform_preprocessing,
 )
+from Main_App.processing import preprocess as preprocess_module  # noqa: E402
 
 
 def _comparison_raw() -> mne.io.RawArray:
@@ -44,6 +45,8 @@ def _params() -> dict[str, object]:
         "ref_channel2": "EXG2",
         "max_idx_keep": 4,
         "stim_channel": "Status",
+        "line_noise_filter_enabled": True,
+        "line_noise_frequency_hz": 60,
     }
 
 
@@ -85,8 +88,11 @@ def test_filter_runs_before_downsample_and_only_changes_numerics() -> None:
     assert rejected == 0
 
     filter_idx = next(i for i, msg in enumerate(logs) if msg.startswith("FILTER_SNAPSHOT"))
+    notch_idx = next(
+        i for i, msg in enumerate(logs) if msg.startswith("FFT_MULTINOTCH_SMART_SKIP")
+    )
     downsample_idx = next(i for i, msg in enumerate(logs) if msg.startswith("Downsample check"))
-    assert filter_idx < downsample_idx
+    assert filter_idx < notch_idx < downsample_idx
     assert "sfreq=512.0" in logs[filter_idx]
     assert "filter_length=16897" in logs[filter_idx]
     assert any(msg == "Filter OK for order_compare.bdf." for msg in logs)
@@ -105,8 +111,62 @@ def test_filter_runs_before_downsample_and_only_changes_numerics() -> None:
 
 
 def test_filter_then_downsample_order_is_fingerprint_guarded() -> None:
-    assert PREPROCESSING_ORDER_VERSION == "filter_then_downsample_v1"
+    assert PREPROCESSING_ORDER_VERSION == (
+        "filter_then_optional_fft_multinotch_then_downsample_v2"
+    )
 
     fingerprint = _build_preproc_fingerprint(_params())
 
-    assert fingerprint.startswith("order=filter_then_downsample_v1|")
+    assert fingerprint.startswith(
+        "order=filter_then_optional_fft_multinotch_then_downsample_v2|"
+    )
+    assert "|fft_multinotch=True,60,fft_hann_multinotch_v1,0.5,3" in fingerprint
+
+
+def test_effective_multinotch_runs_between_fir_and_downsample() -> None:
+    params = _params()
+    params["low_pass"] = 100.0
+    logs: list[str] = []
+
+    processed, rejected = perform_preprocessing(
+        _comparison_raw(),
+        params,
+        logs.append,
+        "notch_order.bdf",
+    )
+
+    assert processed is not None
+    assert rejected == 0
+    filter_idx = next(i for i, msg in enumerate(logs) if msg.startswith("FILTER_APPLIED"))
+    notch_idx = next(i for i, msg in enumerate(logs) if msg.startswith("FFT_MULTINOTCH_APPLIED"))
+    downsample_idx = next(i for i, msg in enumerate(logs) if msg.startswith("Downsample check"))
+    assert filter_idx < notch_idx < downsample_idx
+    assert "requested_hz=60,120,180" in logs[notch_idx]
+    assert "applied_hz=60" in logs[notch_idx]
+    assert params["_fpvs_fft_multinotch_applied_centers_hz"] == [60.0]
+
+
+def test_disabled_multinotch_bypasses_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    params = _params()
+    params["line_noise_filter_enabled"] = False
+    params["line_noise_frequency_hz"] = "ignored while disabled"
+
+    def _unexpected_multinotch(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Disabled multi-notch must not call the numerical helper")
+
+    monkeypatch.setattr(
+        preprocess_module,
+        "apply_fft_multinotch",
+        _unexpected_multinotch,
+    )
+    processed, rejected = perform_preprocessing(
+        _comparison_raw(),
+        params,
+        lambda _message: None,
+        "notch_disabled.bdf",
+    )
+
+    assert processed is not None
+    assert rejected == 0

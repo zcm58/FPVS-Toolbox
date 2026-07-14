@@ -12,14 +12,35 @@ For raw EEG preprocessing, the active order is:
 2. drop the reference channels;
 3. optionally limit channels while preserving the stimulation channel;
 4. apply the configured FIR filter;
-5. downsample;
-6. detect high-kurtosis channels and interpolate them; and
-7. apply the final average reference.
+5. optionally apply the smart FFT Hann multi-notch line-noise filter;
+6. downsample;
+7. detect high-kurtosis channels and interpolate them; and
+8. apply the final average reference.
 
-The order matters. In particular, filtering occurs before downsampling, and the
-final average reference occurs after channel-quality handling. The toolbox then
-extracts epochs and writes frequency-domain FFT-amplitude, SNR, BCA, and z-score
-tables.
+The line-noise option is enabled at 60 Hz by default and can instead target
+50 Hz. It requests the selected mains fundamental and two harmonics, using a
+Hann-shaped FFT notch with a 0.5 Hz half-width. The toolbox applies only centers
+that overlap the preceding FIR's retained frequencies and fit below the raw
+Nyquist limit. For example, with a 1--100 Hz FIR it applies the 50 or 60 Hz
+fundamental; the 50 Hz setting also applies the supported portion of its 100 Hz
+notch, while requested components above the retained band are skipped. If the
+FIR has already removed every requested center, the FFT operation is skipped.
+Turning the option off bypasses this stage without changing the existing
+signal-processing path.
+
+The parameter precedent is Retter and Rossion's FPVS analysis, which reports
+an FFT multi-notch with a 0.5 Hz width at three 50 Hz harmonics after a
+0.1--120 Hz band-pass
+([Neuropsychologia, 2016](https://doi.org/10.1016/j.neuropsychologia.2016.07.028)).
+FPVS Toolbox defines that value precisely as a 0.5 Hz Hann half-width. Its smart
+skip follows the same principle illustrated by the
+[Letswave preprocessing guide](https://letswave.cn/tu_ch1_2): do not add a
+line-frequency notch when the preceding band-pass has already excluded it.
+
+The order matters. In particular, the FIR and any effective multi-notch
+filtering occur before downsampling, and the final average reference occurs
+after channel-quality handling. The toolbox then extracts epochs and writes
+frequency-domain FFT-amplitude, SNR, BCA, and z-score tables.
 
 FPVS Toolbox does not automatically apply independent component analysis (ICA)
 or an equivalent component-rejection stage. Describe any artifact procedures
@@ -62,7 +83,9 @@ In a manuscript or preregistration, report:
 
 - the FPVS Toolbox release or commit used;
 - the raw recording format and montage;
-- all preprocessing settings and the processing order above;
+- all preprocessing settings and the processing order above, including whether
+  line-noise filtering was enabled and the selected 50 or 60 Hz mains
+  frequency;
 - epoch timing and trigger definitions;
 - the SNR, BCA, z-score, and harmonic-selection settings used;
 - ROI definitions and participant/electrode exclusions;

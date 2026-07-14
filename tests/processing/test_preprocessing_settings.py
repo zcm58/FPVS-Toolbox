@@ -9,10 +9,31 @@ def test_defaults_use_expected_bandpass():
     normalized = normalize_preprocessing_settings({})
     assert normalized["high_pass"] == 0.1
     assert normalized["low_pass"] == 50.0
+    assert normalized["line_noise_filter_enabled"] is True
+    assert normalized["line_noise_frequency_hz"] == 60
     assert normalized["auto_detect_removed_electrodes"] is True
     assert normalized["removed_electrode_detection_mode"] == "auto"
     assert normalized["manual_removed_electrodes"] == {}
     assert normalized["manual_excluded_participants"] == []
+
+
+def test_line_noise_settings_normalize_to_typed_values():
+    normalized = normalize_preprocessing_settings(
+        {
+            "line_noise_filter_enabled": "false",
+            "line_noise_frequency_hz": "50.0",
+        }
+    )
+
+    assert normalized["line_noise_filter_enabled"] is False
+    assert normalized["line_noise_frequency_hz"] == 50
+    assert isinstance(normalized["line_noise_frequency_hz"], int)
+
+
+@pytest.mark.parametrize("frequency", [0, 49, 50.5, 55, 61, "60 Hz"])
+def test_line_noise_frequency_must_be_exactly_50_or_60(frequency):
+    with pytest.raises(ValueError, match="exactly 50 or 60 Hz"):
+        normalize_preprocessing_settings({"line_noise_frequency_hz": frequency})
 
 
 def test_inverted_bandpass_raises():

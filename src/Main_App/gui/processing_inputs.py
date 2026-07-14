@@ -27,6 +27,11 @@ from Main_App.processing.processing_controller import (
     register_participants,
 )
 from Main_App.processing.processing_ledger import classify_processing_inputs
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_COMPONENT_COUNT,
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
@@ -198,6 +203,8 @@ def validate_inputs(host: Any) -> bool:
             "ref_chan2",
             "max_idx_keep",
             "max_bad_chans",
+            "line_noise_filter_enabled",
+            "line_noise_frequency_hz",
             "auto_detect_removed_electrodes",
             "removed_electrode_detection_mode",
             "manual_removed_electrodes",
@@ -232,6 +239,12 @@ def validate_inputs(host: Any) -> bool:
                 key: edit.text()
                 for key, edit in zip(dialog_preproc_keys, host._settings_dialog.preproc_edits)
             }
+            dialog_snapshot["line_noise_filter_enabled"] = (
+                host._settings_dialog.line_noise_filter_enabled_check.isChecked()
+            )
+            dialog_snapshot["line_noise_frequency_hz"] = (
+                host._settings_dialog.line_noise_frequency_combo.currentData()
+            )
         except Exception:
             dialog_snapshot = {"error": "unavailable"}
     if debug_enabled:
@@ -255,9 +268,14 @@ def validate_inputs(host: Any) -> bool:
     fp_r1 = params.get("ref_channel1")
     fp_r2 = params.get("ref_channel2")
     fp_stim = params.get("stim_channel")
+    fp_line_noise_enabled = bool(params.get("line_noise_filter_enabled", True))
+    fp_line_noise_frequency = int(params.get("line_noise_frequency_hz", 60))
     validated_fingerprint = (
         f"hp={fp_hp}|lp={fp_lp}|ds={fp_ds}|rz={fp_rz}|"
-        f"ref={fp_r1},{fp_r2}|stim={fp_stim}"
+        f"ref={fp_r1},{fp_r2}|stim={fp_stim}|"
+        f"fft_multinotch={fp_line_noise_enabled},{fp_line_noise_frequency},"
+        f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
+        f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
     )
     logger.debug("PREPROC_FINGERPRINT_VALIDATED %s", validated_fingerprint)
     host._preproc_fingerprint_validated = validated_fingerprint
@@ -270,10 +288,16 @@ def validate_inputs(host: Any) -> bool:
     r1, r2 = params.get("ref_channel1"), params.get("ref_channel2")
     ep = (params.get("epoch_start"), params.get("epoch_end"))
     stim = params.get("stim_channel")
+    line_noise_summary = (
+        f"{fp_line_noise_frequency}Hz smart FFT"
+        if fp_line_noise_enabled
+        else "off"
+    )
     host.log(
         f"Preproc params → HPF={hp if hp is not None else 'DC'}Hz, "
         f"LPF={lp if lp is not None else 'Nyq'}Hz, DS={ds}Hz, "
-        f"Zreject={rz}, ref=({r1},{r2}), epoch=[{ep[0]}, {ep[1]}], stim='{stim}', "
+        f"Zreject={rz}, ref=({r1},{r2}), epoch=[{ep[0]}, {ep[1]}], "
+        f"line-notch={line_noise_summary}, stim='{stim}', "
         f"events={len(params.get('event_id_map', {}))}"
     )
     return True
@@ -355,11 +379,14 @@ def build_validated_params(host: Any) -> dict | None:
     normalized = normalize_preprocessing_settings(host.currentProject.preprocessing)
     logger.debug(
         "NORMALIZED_PREPROC_SNAPSHOT file_mode=%s normalized.high_pass=%r "
-        "normalized.low_pass=%r normalized.downsample=%r",
+        "normalized.low_pass=%r normalized.downsample=%r "
+        "normalized.line_noise_filter_enabled=%r normalized.line_noise_frequency_hz=%r",
         getattr(host, "file_mode", None).get() if hasattr(host, "file_mode") else "UNKNOWN",
         normalized.get("high_pass"),
         normalized.get("low_pass"),
         normalized.get("downsample"),
+        normalized.get("line_noise_filter_enabled"),
+        normalized.get("line_noise_frequency_hz"),
     )
 
     # Event map from UI rows → {label: int_id}
@@ -436,6 +463,12 @@ def build_validated_params(host: Any) -> dict | None:
         "high_pass": float(normalized.get("high_pass")),
         "downsample": int(normalized.get("downsample")),
         "downsample_rate": int(normalized.get("downsample")),
+        "line_noise_filter_enabled": bool(
+            normalized.get("line_noise_filter_enabled")
+        ),
+        "line_noise_frequency_hz": int(
+            normalized.get("line_noise_frequency_hz")
+        ),
         "reject_thresh": float(normalized.get("rejection_z")),
         "ref_channel1": (normalized.get("ref_chan1") or None),
         "ref_channel2": (normalized.get("ref_chan2") or None),
@@ -469,10 +502,13 @@ def build_validated_params(host: Any) -> dict | None:
     }
     logger.debug(
         "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "
+        "line_noise_filter_enabled=%r line_noise_frequency_hz=%r "
         "reject_thresh=%r ref=(%r,%r) stim=%r",
         params.get("high_pass"),
         params.get("low_pass"),
         params.get("downsample_rate"),
+        params.get("line_noise_filter_enabled"),
+        params.get("line_noise_frequency_hz"),
         params.get("reject_thresh"),
         params.get("ref_channel1"),
         params.get("ref_channel2"),

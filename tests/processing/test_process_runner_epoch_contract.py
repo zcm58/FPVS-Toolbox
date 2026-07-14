@@ -766,6 +766,12 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "_fpvs_removed_electrode_agreement_status": "partial",
         "_fpvs_kurtosis_bad_channels": ["Cz"],
         "_fpvs_interpolated_channels": ["P9", "Cz"],
+        "_fpvs_fft_multinotch_requested_centers_hz": [60.0, 120.0, 180.0],
+        "_fpvs_fft_multinotch_applied_centers_hz": [60.0],
+        "_fpvs_fft_multinotch_skipped_centers": [
+            {"center_hz": 120.0, "reason": "above_low_pass_transition"},
+            {"center_hz": 180.0, "reason": "above_low_pass_transition"},
+        ],
     }
     load_settings = dict(settings)
     load_settings.pop("_fpvs_raw_qc_bad_channels")
@@ -788,6 +794,9 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     load_settings.pop("_fpvs_removed_electrode_agreement_status")
     load_settings.pop("_fpvs_kurtosis_bad_channels")
     load_settings.pop("_fpvs_interpolated_channels")
+    load_settings.pop("_fpvs_fft_multinotch_requested_centers_hz")
+    load_settings.pop("_fpvs_fft_multinotch_applied_centers_hz")
+    load_settings.pop("_fpvs_fft_multinotch_skipped_centers")
     audit_before = {"file": "fake.bdf", "ch_names": ["Cz", "EXG1", "EXG2", "Status"]}
     payload = process_runner._preproc_cache_payload(
         fake_bdf,
@@ -812,7 +821,12 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v8-baseline-removed-electrode-qc"
+    assert payload["version"] == "preprocessed-raw-v9-fft-multinotch"
+    assert payload["preprocessing_settings"]["line_noise_filter_enabled"] is True
+    assert payload["preprocessing_settings"]["line_noise_frequency_hz"] == 60
+    assert payload["preprocessing_settings"]["line_noise_filter_method_version"]
+    assert payload["preprocessing_settings"]["line_noise_filter_half_width_hz"] == 0.5
+    assert payload["preprocessing_settings"]["line_noise_filter_component_count"] == 3
     assert status == "hit"
     assert loaded is not None
     assert loaded.get_data().shape == raw.get_data().shape
@@ -843,6 +857,51 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_removed_electrode_agreement_status"] == "partial"
     assert load_settings["_fpvs_kurtosis_bad_channels"] == ["Cz"]
     assert load_settings["_fpvs_interpolated_channels"] == ["P9", "Cz"]
+    assert load_settings["_fpvs_fft_multinotch_requested_centers_hz"] == [
+        60.0,
+        120.0,
+        180.0,
+    ]
+    assert load_settings["_fpvs_fft_multinotch_applied_centers_hz"] == [60.0]
+    assert load_settings["_fpvs_fft_multinotch_skipped_centers"] == [
+        {"center_hz": 120.0, "reason": "above_low_pass_transition"},
+        {"center_hz": 180.0, "reason": "above_low_pass_transition"},
+    ]
+
+
+def test_preprocessed_cache_key_tracks_fft_multinotch_settings(tmp_path: Path) -> None:
+    fake_bdf = tmp_path / "fake.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    base_settings = {
+        "stim_channel": "Status",
+        "ref_channel1": "EXG1",
+        "ref_channel2": "EXG2",
+        "line_noise_filter_enabled": True,
+        "line_noise_frequency_hz": 60,
+    }
+
+    enabled_60 = process_runner._preproc_cache_payload(
+        fake_bdf,
+        base_settings,
+        mne_version=str(mne.__version__),
+    )
+    enabled_50 = process_runner._preproc_cache_payload(
+        fake_bdf,
+        {**base_settings, "line_noise_frequency_hz": 50},
+        mne_version=str(mne.__version__),
+    )
+    disabled = process_runner._preproc_cache_payload(
+        fake_bdf,
+        {**base_settings, "line_noise_filter_enabled": False},
+        mne_version=str(mne.__version__),
+    )
+
+    assert process_runner._preproc_cache_key(enabled_60) != process_runner._preproc_cache_key(
+        enabled_50
+    )
+    assert process_runner._preproc_cache_key(enabled_60) != process_runner._preproc_cache_key(
+        disabled
+    )
 
 
 def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -> None:

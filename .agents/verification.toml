@@ -38,6 +38,7 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_fft_multinotch.py",
   "tests/processing/test_filter_downsample_order.py",
   "tests/processing/test_pipeline_speed_safety.py",
   "tests/processing/test_post_process_target_freqs.py",

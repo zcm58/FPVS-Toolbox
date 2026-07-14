@@ -24,6 +24,11 @@ lowest-risk maintenance path is:
 `src/Main_App/processing/preprocess.py` is the canonical active implementation
 owner for EEG preprocessing.
 
+`src/Main_App/processing/fft_multinotch.py` owns the internal, versioned
+frequency-domain line-noise mask and application helper. It has no settings or
+GUI responsibilities; `preprocess.py` remains the public pipeline orchestrator
+and decides whether and where the helper runs.
+
 Current app processing must call:
 
 ```python
@@ -103,15 +108,18 @@ result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
 The preprocessed Raw cache version is
-`preprocessed-raw-v8-baseline-removed-electrode-qc`.
+`preprocessed-raw-v9-fft-multinotch`.
 The project processing-ledger and Stats group-harmonic cache processing
-fingerprints use `processing_fingerprint_v7_baseline_removed_electrode_qc`. The
+fingerprints use `processing_fingerprint_v8_fft_multinotch`. The
 raw channel-health QC threshold, removed-electrode QC mode, per-file manual
 removed-electrode list, baseline raw-amplitude metadata, and rare-burst
 candidate list are part of the cache payload so changes to those settings
-invalidate cached preprocessed Raw files. The v8 cache metadata also persists
+invalidate cached preprocessed Raw files. The cache identity also includes the
+line-noise-filter enabled state, selected 50 or 60 Hz mains frequency, method
+version, half-width, and component count. The v9 cache metadata also persists
 raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
-so cache-hit runs can still produce participant QC summaries.
+plus requested, applied, and skipped FFT multi-notch centers so cache-hit runs
+can still produce complete participant QC and preprocessing provenance.
 
 After frequency-domain QC is accepted, processing completion calculates the
 project-wide significant-harmonic list once through
@@ -296,9 +304,10 @@ documentation refactors:
 3. Optional channel limit through `max_idx_keep`, preserving the stim channel
    when needed.
 4. FIR filter using the current PySide6/legacy-parity cutoff mapping.
-5. Downsample when requested.
-6. Kurtosis-based bad-channel rejection and interpolation.
-7. Final average reference.
+5. Optional smart FFT Hann multi-notch filtering of retained mains components.
+6. Downsample when requested.
+7. Kurtosis-based bad-channel rejection and interpolation.
+8. Final average reference.
 
 The order is part of the app contract. A refactor that preserves each individual
 operation but reorders stages is a statistical-method behavior change. Any
@@ -319,7 +328,8 @@ The `params` dictionary is also mutable during a run:
 - On successful selected-pair referencing, those audit keys are written back.
 - The filter fingerprint is computed from the preprocessing order version,
   `high_pass`, `low_pass`, `downsample_rate` or `downsample`, `reject_thresh`,
-  reference channels, and stim channel.
+  reference channels, stim channel, line-noise-filter enabled state, selected
+  mains frequency, and the versioned FFT multi-notch constants.
 
 Invalid filter cutoff ordering is intentionally fail-fast: if both cutoffs are
 present and `high_pass >= low_pass`, `perform_preprocessing` raises
@@ -375,9 +385,53 @@ Filtering:
   mismatch diagnostics. These messages are part of the current regression
   surface because they help diagnose accidental cutoff changes.
 
+FFT multi-notch line-noise filtering:
+
+- The optional line-noise stage runs after the existing FIR and immediately
+  before downsampling. It does not move or change any existing pipeline stage.
+- New project settings default to the filter enabled at a 60 Hz mains
+  frequency. The alternative is 50 Hz.
+- The requested components are the fundamental plus two harmonics:
+  50, 100, and 150 Hz or 60, 120, and 180 Hz.
+- `fft_hann_multinotch_v1` uses an FFT-domain Hann notch with a 0.5 Hz
+  half-width around each effective center. The center gain is zero and the
+  mask returns to unity at the center plus or minus 0.5 Hz.
+- The stage is smart: it applies only requested components whose notch support
+  overlaps frequencies retained by the preceding FIR and that fit below the
+  raw-data Nyquist limit. For example, a 1--100 Hz FIR retains the 50 Hz
+  fundamental and the supported portion of the 100 Hz notch for the 50 Hz
+  setting, while it retains the 60 Hz fundamental but not 120 or 180 Hz for the
+  60 Hz setting. When no requested component remains effective, FFT/IFFT
+  processing is skipped.
+- When `line_noise_filter_enabled` is false, the helper is not called and no
+  FFT data round trip occurs. The EEG processing result therefore follows the
+  pre-feature numerical path unchanged.
+- The enabled state, selected mains frequency, method version, half-width, and
+  component count are processing provenance and cache-invalidating inputs.
+
+Evidence and implementation rationale:
+
+- Retter and Rossion's FPVS preprocessing used a 0.1--120 Hz band-pass followed
+  by an FFT multi-notch described as 0.5 Hz wide at the first three 50 Hz
+  harmonics ([Neuropsychologia 91, 9--28, 2016](https://doi.org/10.1016/j.neuropsychologia.2016.07.028)).
+- The Letswave preprocessing guide explicitly omits a 50 Hz notch when its
+  0.05--30 Hz band-pass has already excluded that contamination
+  ([Letswave preprocessing tutorial](https://letswave.cn/tu_ch1_2)). This is the
+  basis for skipping a requested notch whose complete support is above the
+  preceding FIR transition.
+- The paper supplies the 0.5 Hz numeric precedent and three-component harmonic
+  count; `fft_hann_multinotch_v1` makes the otherwise ambiguous width semantics
+  reproducible by defining 0.5 Hz as the Hann half-width. This Toolbox-specific
+  definition must be reported as such rather than attributed verbatim to the
+  paper.
+- Edge-annotated spans are transformed independently, matching MNE's documented
+  rule that filtering on either side of an `edge` annotation treats the spans
+  as independent signals
+  ([MNE `Raw.filter` documentation](https://mne.tools/stable/generated/mne.io.Raw.html#mne.io.Raw.filter)).
+
 Downsampling:
 
-- Downsampling runs after filtering.
+- Downsampling runs after the FIR and optional FFT multi-notch stages.
 - It runs only when `downsample_rate` is truthy and the current sampling
   frequency is greater than the requested target.
 - It uses MNE `raw.resample(..., npad="auto", window="hann", verbose=False)`.

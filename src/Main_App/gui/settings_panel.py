@@ -258,6 +258,72 @@ class SettingsDialog(QDialog):
             else:
                 edit.setText(self.manager.get(sec, opt, fallback))
 
+        if project_pp is not None:
+            line_noise_settings = project_pp
+        else:
+            line_noise_raw = {
+                "line_noise_filter_enabled": self.manager.get(
+                    "preprocessing",
+                    "line_noise_filter_enabled",
+                    str(PREPROCESSING_DEFAULTS["line_noise_filter_enabled"]),
+                ),
+                "line_noise_frequency_hz": self.manager.get(
+                    "preprocessing",
+                    "line_noise_frequency_hz",
+                    str(PREPROCESSING_DEFAULTS["line_noise_frequency_hz"]),
+                ),
+            }
+            try:
+                line_noise_settings = normalize_preprocessing_settings(line_noise_raw)
+            except ValueError:
+                line_noise_settings = normalize_preprocessing_settings({})
+
+        line_noise_tooltip = (
+            "Smart FFT Hann multi-notch with a 0.5 Hz width on each side of the "
+            "mains frequency and its first two harmonics. Components already removed "
+            "by the FIR low-pass are skipped."
+        )
+        line_noise_row = (len(params) + 1) // 2
+        self.line_noise_filter_enabled_check = QCheckBox(
+            "Remove mains line noise",
+            self.group_preproc,
+        )
+        self.line_noise_filter_enabled_check.setObjectName(
+            "settings_line_noise_filter_enabled"
+        )
+        self.line_noise_filter_enabled_check.setToolTip(line_noise_tooltip)
+        self.line_noise_filter_enabled_check.setChecked(
+            bool(line_noise_settings["line_noise_filter_enabled"])
+        )
+        grid.addWidget(self.line_noise_filter_enabled_check, line_noise_row, 0, 1, 2)
+
+        line_noise_frequency_label = QLabel(
+            "Recording-site mains frequency:",
+            self.group_preproc,
+        )
+        line_noise_frequency_label.setToolTip(line_noise_tooltip)
+        self.line_noise_frequency_combo = QComboBox(self.group_preproc)
+        self.line_noise_frequency_combo.setObjectName(
+            "settings_line_noise_frequency_hz"
+        )
+        self.line_noise_frequency_combo.setToolTip(line_noise_tooltip)
+        self.line_noise_frequency_combo.addItem("60 Hz", 60)
+        self.line_noise_frequency_combo.addItem("50 Hz", 50)
+        line_noise_frequency_index = self.line_noise_frequency_combo.findData(
+            int(line_noise_settings["line_noise_frequency_hz"])
+        )
+        self.line_noise_frequency_combo.setCurrentIndex(
+            max(0, line_noise_frequency_index)
+        )
+        self.line_noise_frequency_combo.setEnabled(
+            self.line_noise_filter_enabled_check.isChecked()
+        )
+        self.line_noise_filter_enabled_check.toggled.connect(
+            self.line_noise_frequency_combo.setEnabled
+        )
+        grid.addWidget(line_noise_frequency_label, line_noise_row, 2)
+        grid.addWidget(self.line_noise_frequency_combo, line_noise_row, 3)
+
         layout.addWidget(self.group_preproc)
         self._add_harmonic_selection_section(tab, layout, project_pp)
 
@@ -1449,6 +1515,16 @@ class SettingsDialog(QDialog):
                 "manual_excluded_participants",
                 json.dumps(validated_preproc.get("manual_excluded_participants", [])),
             )
+            self.manager.set(
+                "preprocessing",
+                "line_noise_filter_enabled",
+                str(bool(validated_preproc.get("line_noise_filter_enabled"))),
+            )
+            self.manager.set(
+                "preprocessing",
+                "line_noise_frequency_hz",
+                str(int(validated_preproc.get("line_noise_frequency_hz", 60))),
+            )
             for option in (
                 "harmonic_selection_policy",
                 "group_significant_electrode_scope",
@@ -1554,6 +1630,12 @@ class SettingsDialog(QDialog):
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
+        values["line_noise_filter_enabled"] = (
+            self.line_noise_filter_enabled_check.isChecked()
+        )
+        values["line_noise_frequency_hz"] = int(
+            self.line_noise_frequency_combo.currentData()
+        )
         mode = self._removed_electrode_detection_mode()
         values["removed_electrode_detection_mode"] = mode
         values["auto_detect_removed_electrodes"] = (

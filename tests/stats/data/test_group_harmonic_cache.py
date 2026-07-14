@@ -9,7 +9,10 @@ from Tools.Stats.analysis.dv_policy_settings import (
     normalize_dv_policy,
 )
 from Tools.Stats.data.group_harmonic_cache import (
+    PREPROCESSING_ORDER_VERSION_LABEL,
+    PROCESSING_FINGERPRINT_VERSION_LABEL,
     build_group_harmonic_cache_request,
+    build_project_processing_signature,
     clear_cached_group_harmonic_selections,
     lookup_cached_group_harmonic_selection,
     save_cached_group_harmonic_selection,
@@ -113,6 +116,26 @@ def test_group_harmonic_cache_roundtrip_and_settings_invalidation(tmp_path: Path
     stale_lookup = lookup_cached_group_harmonic_selection(_request(project_root, workbook))
     assert stale_lookup.hit is None
     assert "preprocessing/settings changed" in stale_lookup.reason
+
+
+def test_project_processing_signature_tracks_fft_multinotch_settings(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    enabled_60 = build_project_processing_signature(manifest)
+    manifest["preprocessing"]["line_noise_frequency_hz"] = 50
+    enabled_50 = build_project_processing_signature(manifest)
+    manifest["preprocessing"]["line_noise_filter_enabled"] = False
+    disabled = build_project_processing_signature(manifest)
+
+    assert enabled_60["preprocessing_order_version"] == PREPROCESSING_ORDER_VERSION_LABEL
+    assert enabled_60["processing_fingerprint_version"] == PROCESSING_FINGERPRINT_VERSION_LABEL
+    assert enabled_60["preprocessing"]["line_noise_filter_enabled"] is True
+    assert enabled_60["preprocessing"]["line_noise_frequency_hz"] == 60
+    assert enabled_60 != enabled_50
+    assert enabled_50 != disabled
 
 
 def test_clear_group_harmonic_cache_preserves_manifest_shape(tmp_path: Path) -> None:

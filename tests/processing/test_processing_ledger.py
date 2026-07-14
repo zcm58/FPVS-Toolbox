@@ -161,6 +161,46 @@ def test_classify_settings_change_stales_completed_entry(tmp_path) -> None:
     assert plan.incremental_files == (info.path,)
 
 
+def test_classify_fft_multinotch_change_stales_completed_entry(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    initial_settings = {
+        **_settings(),
+        "line_noise_filter_enabled": True,
+        "line_noise_frequency_hz": 60,
+    }
+    initial_plan = classify_processing_inputs(
+        project,
+        [info],
+        initial_settings,
+        project.event_map,
+    )
+    _write_expected_outputs(initial_plan)
+    record_processing_results(
+        project,
+        initial_plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    frequency_changed = classify_processing_inputs(
+        project,
+        [info],
+        {**initial_settings, "line_noise_frequency_hz": 50},
+        project.event_map,
+    )
+    disabled = classify_processing_inputs(
+        project,
+        [info],
+        {**initial_settings, "line_noise_filter_enabled": False},
+        project.event_map,
+    )
+
+    assert frequency_changed.states[0].status == "changed_settings"
+    assert disabled.states[0].status == "changed_settings"
+
+
 def test_pre_qc_completed_state_survives_new_participant_qc_metadata(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     project.update_preprocessing(

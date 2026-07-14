@@ -11,6 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
 
+from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
 from Main_App.gui.manual_participant_exclusions_dialog import (
@@ -34,6 +35,8 @@ def _prep_project(root):
             "low_pass": 45.0,
             "high_pass": 0.25,
             "downsample": 512,
+            "line_noise_filter_enabled": True,
+            "line_noise_frequency_hz": 60,
             "rejection_z": 4.0,
             "epoch_start_s": -0.25,
             "epoch_end_s": 95.0,
@@ -75,6 +78,9 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert dlg.preproc_edits[2].text() == "512"
     assert not hasattr(dlg, "stim_edit")
     assert not hasattr(dlg, "save_fif_check")
+    assert dlg.line_noise_filter_enabled_check.isChecked() is True
+    assert dlg.line_noise_frequency_combo.currentData() == 60
+    assert dlg.line_noise_frequency_combo.isEnabled() is True
 
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[4].setText("3.5")
@@ -85,6 +91,12 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.harmonic_electrode_scope_combo.setCurrentIndex(all_electrodes_index)
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
+    dlg.line_noise_frequency_combo.setCurrentIndex(
+        dlg.line_noise_frequency_combo.findData(50)
+    )
+    dlg.line_noise_filter_enabled_check.setChecked(False)
+    assert dlg.line_noise_frequency_combo.isEnabled() is False
+    assert dlg.line_noise_frequency_combo.currentData() == 50
 
     dlg._save()
 
@@ -92,6 +104,8 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["downsample"] == 256
     assert reloaded.preprocessing["rejection_z"] == 3.5
     assert reloaded.preprocessing["epoch_end_s"] == 100.0
+    assert reloaded.preprocessing["line_noise_filter_enabled"] is False
+    assert reloaded.preprocessing["line_noise_frequency_hz"] == 50
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
     assert reloaded.preprocessing["manual_excluded_participants"] == []
@@ -108,6 +122,9 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert dlg2.preproc_edits[2].text() == "256"
     assert not hasattr(dlg2, "stim_edit")
     assert not hasattr(dlg2, "save_fif_check")
+    assert dlg2.line_noise_filter_enabled_check.isChecked() is False
+    assert dlg2.line_noise_frequency_combo.currentData() == 50
+    assert dlg2.line_noise_frequency_combo.isEnabled() is False
 
     win.loadProject(reloaded)
     first_row = win.event_rows[0].findChildren(QLineEdit)
@@ -118,11 +135,42 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["downsample"] == 256
     assert params["reject_thresh"] == 3.5
     assert params["epoch_end"] == 100.0
+    assert params["line_noise_filter_enabled"] is False
+    assert params["line_noise_frequency_hz"] == 50
     assert params["auto_detect_removed_electrodes"] is False
     assert params["removed_electrode_detection_mode"] == "off"
     assert params["manual_excluded_participants"] == []
     assert params["stim_channel"] == "Status"
     assert params["save_preprocessed_fif"] is False
+
+
+def test_dialog_loads_saves_app_line_noise_settings_without_project(tmp_path, qtbot):
+    QApplication.instance() or QApplication([])
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+
+    dlg = SettingsDialog(manager)
+    qtbot.addWidget(dlg)
+    assert dlg.line_noise_filter_enabled_check.isChecked() is True
+    assert dlg.line_noise_frequency_combo.currentData() == 60
+
+    dlg.line_noise_frequency_combo.setCurrentIndex(
+        dlg.line_noise_frequency_combo.findData(50)
+    )
+    dlg.line_noise_filter_enabled_check.setChecked(False)
+    dlg._save()
+
+    reloaded_manager = SettingsManager(str(tmp_path / "settings.ini"))
+    assert (
+        reloaded_manager.get("preprocessing", "line_noise_filter_enabled")
+        == "False"
+    )
+    assert reloaded_manager.get("preprocessing", "line_noise_frequency_hz") == "50"
+
+    dlg2 = SettingsDialog(reloaded_manager)
+    qtbot.addWidget(dlg2)
+    assert dlg2.line_noise_filter_enabled_check.isChecked() is False
+    assert dlg2.line_noise_frequency_combo.currentData() == 50
+    assert dlg2.line_noise_frequency_combo.isEnabled() is False
 
 
 def test_settings_dialog_beta_tools_save_prompts_for_restart(tmp_path, qtbot, monkeypatch):
@@ -199,6 +247,28 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
+    assert cards["Preprocessing Parameters"].isAncestorOf(
+        dlg.line_noise_filter_enabled_check
+    )
+    assert cards["Preprocessing Parameters"].isAncestorOf(
+        dlg.line_noise_frequency_combo
+    )
+    assert dlg.line_noise_filter_enabled_check.text() == "Remove mains line noise"
+    assert dlg.line_noise_filter_enabled_check.isChecked() is True
+    assert dlg.line_noise_frequency_combo.currentData() == 60
+    assert dlg.line_noise_frequency_combo.itemData(0) == 60
+    assert dlg.line_noise_frequency_combo.itemData(1) == 50
+    assert "0.5 Hz" in dlg.line_noise_filter_enabled_check.toolTip()
+    assert "first two harmonics" in dlg.line_noise_frequency_combo.toolTip()
+    dlg.line_noise_frequency_combo.setCurrentIndex(
+        dlg.line_noise_frequency_combo.findData(50)
+    )
+    dlg.line_noise_filter_enabled_check.setChecked(False)
+    assert dlg.line_noise_frequency_combo.isEnabled() is False
+    assert dlg.line_noise_frequency_combo.currentData() == 50
+    dlg.line_noise_filter_enabled_check.setChecked(True)
+    assert dlg.line_noise_frequency_combo.isEnabled() is True
+    assert dlg.line_noise_frequency_combo.currentData() == 50
     assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_summation_method_combo)
     assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_electrode_scope_combo)
     assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_freqs_edit)

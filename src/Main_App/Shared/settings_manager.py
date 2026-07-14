@@ -52,6 +52,8 @@ DEFAULTS = {
         'alpha': '0.05'
     },
     'preprocessing': {
+        'line_noise_filter_enabled': 'True',
+        'line_noise_frequency_hz': '60',
         'harmonic_selection_policy': 'Group-level significant harmonics (Volfart/Retter/Rossion style)',
         'group_significant_electrode_scope': 'union_roi_electrodes',
         'group_significant_summation_method': 'through_highest_significant',

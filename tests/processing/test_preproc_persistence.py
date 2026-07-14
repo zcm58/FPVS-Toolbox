@@ -9,6 +9,7 @@ if importlib.util.find_spec("PySide6") is None:
 
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import PREPROCESSING_CANONICAL_KEYS
+from Main_App.Shared.settings_manager import SettingsManager
 
 
 def test_normalization_and_roundtrip(tmp_path):
@@ -41,6 +42,8 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["high_pass"] == 0.25
     assert normalized["low_pass"] == 45.0
     assert normalized["downsample"] == 512
+    assert normalized["line_noise_filter_enabled"] is True
+    assert normalized["line_noise_frequency_hz"] == 60
     assert normalized["rejection_z"] == 4.2
     assert normalized["epoch_start_s"] == -0.5
     assert normalized["epoch_end_s"] == 110.0
@@ -60,6 +63,8 @@ def test_normalization_and_roundtrip(tmp_path):
             "low_pass": 30,
             "high_pass": 0.5,
             "downsample": 256,
+            "line_noise_filter_enabled": False,
+            "line_noise_frequency_hz": 50,
             "rejection_z": 3.0,
             "epoch_start_s": -1.0,
             "epoch_end_s": 120.0,
@@ -80,6 +85,8 @@ def test_normalization_and_roundtrip(tmp_path):
     stored_keys = set(saved["preprocessing"].keys())
     assert stored_keys == set(PREPROCESSING_CANONICAL_KEYS)
     assert saved["preprocessing"]["downsample"] == 256
+    assert saved["preprocessing"]["line_noise_filter_enabled"] is False
+    assert saved["preprocessing"]["line_noise_frequency_hz"] == 50
     assert saved["preprocessing"]["auto_detect_removed_electrodes"] is False
     assert saved["preprocessing"]["removed_electrode_detection_mode"] == "manual"
     assert saved["preprocessing"]["manual_removed_electrodes"] == {"P01": ["P9"]}
@@ -89,6 +96,8 @@ def test_normalization_and_roundtrip(tmp_path):
     fresh = Project.load(tmp_path)
     assert fresh.preprocessing["high_pass"] == 0.5
     assert fresh.preprocessing["low_pass"] == 30.0
+    assert fresh.preprocessing["line_noise_filter_enabled"] is False
+    assert fresh.preprocessing["line_noise_frequency_hz"] == 50
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
     assert fresh.preprocessing["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert fresh.preprocessing["manual_excluded_participants"] == ["P12"]
@@ -111,3 +120,19 @@ def test_project_loads_legacy_inverted_bandpass(tmp_path):
     project = Project.load(tmp_path)
     assert project.preprocessing["low_pass"] == 50.0
     assert project.preprocessing["high_pass"] == 0.1
+
+
+def test_app_settings_line_noise_defaults_and_roundtrip(tmp_path):
+    ini_path = tmp_path / "settings.ini"
+    manager = SettingsManager(str(ini_path))
+
+    assert manager.get("preprocessing", "line_noise_filter_enabled") == "True"
+    assert manager.get("preprocessing", "line_noise_frequency_hz") == "60"
+
+    manager.set("preprocessing", "line_noise_filter_enabled", "False")
+    manager.set("preprocessing", "line_noise_frequency_hz", "50")
+    manager.save()
+
+    reloaded = SettingsManager(str(ini_path))
+    assert reloaded.get("preprocessing", "line_noise_filter_enabled") == "False"
+    assert reloaded.get("preprocessing", "line_noise_frequency_hz") == "50"

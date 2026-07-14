@@ -31,6 +31,7 @@ _FLOAT = "float"
 _INT = "int"
 _STR = "str"
 _BOOL = "bool"
+_LINE_NOISE_FREQUENCY = "line_noise_frequency"
 _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
 _MANUAL_EXCLUDED_PARTICIPANTS = "manual_excluded_participants"
@@ -45,6 +46,18 @@ _FIELDS: tuple[_Field, ...] = (
     _Field("low_pass", ("low_pass",), 50.0, _FLOAT),
     _Field("high_pass", ("high_pass",), 0.1, _FLOAT),
     _Field("downsample", ("downsample", "downsample_rate"), 256, _INT),
+    _Field(
+        "line_noise_filter_enabled",
+        ("line_noise_filter_enabled",),
+        True,
+        _BOOL,
+    ),
+    _Field(
+        "line_noise_frequency_hz",
+        ("line_noise_frequency_hz",),
+        60,
+        _LINE_NOISE_FREQUENCY,
+    ),
     _Field("rejection_z", ("rejection_z", "reject_thresh", "rejection_thresh"), 5.0, _FLOAT),
     _Field("epoch_start_s", ("epoch_start_s", "epoch_start"), -1.0, _FLOAT),
     _Field("epoch_end_s", ("epoch_end_s", "epoch_end"), 125.0, _FLOAT),
@@ -215,6 +228,20 @@ def _coerce_bool(value: Any, *, default: bool, field: str) -> bool:
     raise ValueError(f"Invalid boolean for '{field}': {value!r}")  # pragma: no cover
 
 
+def _coerce_line_noise_frequency(value: Any, *, default: int) -> int:
+    if value in (None, ""):
+        return int(default)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Line-noise frequency must be exactly 50 or 60 Hz."
+        ) from exc
+    if not numeric.is_integer() or int(numeric) not in {50, 60}:
+        raise ValueError("Line-noise frequency must be exactly 50 or 60 Hz.")
+    return int(numeric)
+
+
 def _coerce_removed_electrode_mode(value: Any, *, default: str) -> str:
     return normalize_removed_electrode_detection_mode(
         value,
@@ -317,6 +344,11 @@ def normalize_preprocessing_settings(
             normalized[field.name] = _coerce_str(raw_value, default=field.default, field=field.name)
         elif field.type == _BOOL:
             normalized[field.name] = _coerce_bool(raw_value, default=field.default, field=field.name)
+        elif field.type == _LINE_NOISE_FREQUENCY:
+            normalized[field.name] = _coerce_line_noise_frequency(
+                raw_value,
+                default=int(field.default),
+            )
         elif field.type == _REMOVED_ELECTRODE_MODE:
             normalized[field.name] = _coerce_removed_electrode_mode(
                 raw_value,
