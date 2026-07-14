@@ -70,7 +70,11 @@ _HARD_EXCLUSION_REASON_COLUMN = 3
 _HARD_EXCLUSION_DETAILS_COLUMN = 4
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
-_DATA_QUALITY_STEP_TOTAL = 5
+_DATA_QUALITY_STEP_TOTAL = 4
+_SCAN_SIGNAL_HEALTH_STEP = 1
+_CONFIRM_REMOVED_ELECTRODES_STEP = 2
+_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP = 3
+_REVIEW_OTHER_FLAGS_STEP = 4
 
 
 class _PreflightQcWorker(QObject):
@@ -529,7 +533,7 @@ def _set_data_quality_sections(
 def _begin_preflight_page(
     host: Any,
     *,
-    step: int,
+    step: int | None,
     title: str,
     message: str,
     busy: bool,
@@ -551,8 +555,11 @@ def _begin_preflight_page(
     )
     step_label = getattr(host, "processing_step_label", None)
     if step_label is not None:
-        step_label.setText(f"Step {step} of {_DATA_QUALITY_STEP_TOTAL}: {title}")
-        step_label.setVisible(True)
+        if step is None:
+            step_label.setVisible(False)
+        else:
+            step_label.setText(f"Step {step} of {_DATA_QUALITY_STEP_TOTAL}: {title}")
+            step_label.setVisible(True)
     _set_label(host, "processing_message_label", message)
     _set_label(host, "processing_summary_label", "Preparing data quality checks...")
     _set_label(host, "processing_current_file_label", "Latest file: Not started")
@@ -829,7 +836,7 @@ def _confirm_recording_not_started(
     )
     _begin_preflight_page(
         host,
-        step=1,
+        step=None,
         title="Check Raw Files",
         message="FPVS Toolbox found files that do not contain recording data.",
         busy=False,
@@ -909,7 +916,7 @@ def _run_scan_embedded(
 
     _begin_preflight_page(
         host,
-        step=2,
+        step=_SCAN_SIGNAL_HEALTH_STEP,
         title="Scan Signal Health",
         message=_DATA_QUALITY_SCAN_WAIT_MESSAGE,
         busy=True,
@@ -1036,7 +1043,7 @@ def _review_removed_electrodes(
     )
     _begin_preflight_page(
         host,
-        step=3,
+        step=_CONFIRM_REMOVED_ELECTRODES_STEP,
         title="Confirm Removed Electrodes",
         message="Review the removed-electrode list before processing begins.",
         busy=False,
@@ -1457,7 +1464,7 @@ def _confirm_hard_exclusions(
     )
     _begin_preflight_page(
         host,
-        step=4,
+        step=_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
         title="Confirm Participant Exclusions",
         message="Review participant-level data quality failures before processing begins.",
         busy=False,
@@ -1649,7 +1656,7 @@ def _show_suspicious_remainder(
     )
     _begin_preflight_page(
         host,
-        step=5,
+        step=_REVIEW_OTHER_FLAGS_STEP,
         title="Review Other Flags",
         message="FPVS Toolbox found non-electrode-removal items that should be reviewed later.",
         busy=False,
@@ -1710,7 +1717,7 @@ def run_preprocessing_qc_workflow(
     )
     _begin_preflight_page(
         host,
-        step=1,
+        step=None,
         title="Check Raw Files",
         message=_DATA_QUALITY_SCAN_WAIT_MESSAGE,
         busy=True,

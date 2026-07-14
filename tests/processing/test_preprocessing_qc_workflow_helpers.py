@@ -11,6 +11,80 @@ pytest.importorskip("PySide6")
 from Main_App.gui import preprocessing_qc_workflow as workflow  # noqa: E402
 
 
+class _LabelStub:
+    def __init__(self) -> None:
+        self.text = ""
+        self.visible = True
+
+    def setText(self, text: str) -> None:
+        self.text = text
+
+    def setVisible(self, visible: bool) -> None:
+        self.visible = visible
+
+
+@pytest.mark.parametrize(
+    ("step", "title", "expected"),
+    (
+        (
+            workflow._SCAN_SIGNAL_HEALTH_STEP,
+            "Scan Signal Health",
+            "Step 1 of 4: Scan Signal Health",
+        ),
+        (
+            workflow._CONFIRM_REMOVED_ELECTRODES_STEP,
+            "Confirm Removed Electrodes",
+            "Step 2 of 4: Confirm Removed Electrodes",
+        ),
+        (
+            workflow._CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
+            "Confirm Participant Exclusions",
+            "Step 3 of 4: Confirm Participant Exclusions",
+        ),
+        (
+            workflow._REVIEW_OTHER_FLAGS_STEP,
+            "Review Other Flags",
+            "Step 4 of 4: Review Other Flags",
+        ),
+    ),
+)
+def test_data_quality_step_labels_are_contiguous(
+    step: int,
+    title: str,
+    expected: str,
+) -> None:
+    label = _LabelStub()
+    host = SimpleNamespace(processing_step_label=label)
+
+    workflow._begin_preflight_page(
+        host,
+        step=step,
+        title=title,
+        message="Checking data quality.",
+        busy=False,
+        review_visible=False,
+    )
+
+    assert label.text == expected
+    assert label.visible is True
+
+
+def test_data_quality_preparation_hides_step_label() -> None:
+    label = _LabelStub()
+    host = SimpleNamespace(processing_step_label=label)
+
+    workflow._begin_preflight_page(
+        host,
+        step=None,
+        title="Check Raw Files",
+        message="Checking BDF headers.",
+        busy=True,
+        review_visible=False,
+    )
+
+    assert label.visible is False
+
+
 def test_group_display_requires_canonical_membership() -> None:
     assert workflow._group_display_name(None, {}) == "Single group"
     with pytest.raises(RuntimeError, match="without a group_id"):
