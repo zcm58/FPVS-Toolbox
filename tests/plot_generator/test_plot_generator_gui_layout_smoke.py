@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QPushButton
 
 from Main_App.gui.typography import font_for_role
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
@@ -49,6 +49,14 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert 8 <= window.progress_bar.height() <= 12
     assert window.folder_edit.width() >= 220
     assert window.out_edit.width() >= 220
+    output_picker = window.out_edit.parentWidget()
+    output_browse_button = output_picker.button
+    output_open_button = next(
+        button
+        for button in output_picker.findChildren(QPushButton)
+        if button.text() == "Open..."
+    )
+    assert output_browse_button.size() == output_open_button.size()
     assert window.title_edit.objectName() == "plot_generator_internal_figure_name"
     assert not window.title_edit.isVisible()
     advanced_labels = [label.text() for label in window.advanced_box.findChildren(QLabel)]
