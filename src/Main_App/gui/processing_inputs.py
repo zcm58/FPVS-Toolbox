@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 import config
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
 from Main_App.gui.participant_review import review_participants_for_processing
+from Main_App.gui.event_map import has_complete_event_map_entry
 from Main_App.processing.processing_controller import (
     participant_review_rows,
     prepare_batch_file_infos,
@@ -633,20 +634,32 @@ def set_controls_enabled(host: Any, enabled: bool) -> None:
 
 
 def update_start_enabled(host: Any) -> None:
-    """Enable Start only when valid selection exists in Single mode."""
+    """Enable Start only when inputs include a complete event-map entry."""
     btn = getattr(host, "btn_start", None)
     if not btn:
         return
+    if getattr(host, "_run_active", False) or getattr(
+        host,
+        "_frequency_domain_post_processing_resume_pending",
+        False,
+    ):
+        return
+    event_map_ready = has_complete_event_map_entry(host)
     try:
         mode = host.file_mode.get()
     except Exception:
         mode = "Batch"
     if mode == "Single":
         txt = getattr(host, "le_input_file", None).text() if hasattr(host, "le_input_file") else ""
-        ok = bool(txt) and Path(txt).suffix.lower() == ".bdf" and Path(txt).exists()
+        ok = (
+            event_map_ready
+            and bool(txt)
+            and Path(txt).suffix.lower() == ".bdf"
+            and Path(txt).exists()
+        )
         btn.setEnabled(ok)
     else:
-        btn.setEnabled(True)
+        btn.setEnabled(event_map_ready)
 
 
 def select_single_file(host: Any) -> None:

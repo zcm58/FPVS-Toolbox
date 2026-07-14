@@ -7,7 +7,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton
 
 from Main_App.gui import main_window as main_window_module
 import Main_App.gui.update_manager as update_manager
@@ -143,3 +143,59 @@ def test_disabled_add_button_blocks_enter(tmp_path, qtbot, monkeypatch):
     qtbot.wait(50)
 
     assert len(_live_rows(win)) == len(initial_rows)
+
+
+def test_start_processing_requires_complete_event_map_entry(tmp_path, qtbot, monkeypatch):
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    row = _live_rows(win)[0]
+    label_edit, id_edit = _row_fields(win, row)
+
+    assert win.rb_batch.isChecked()
+    assert not win.btn_start.isEnabled()
+
+    label_edit.setText("Cond A")
+    assert not win.btn_start.isEnabled()
+
+    id_edit.setText("0")
+    assert not win.btn_start.isEnabled()
+
+    label_edit.clear()
+    _type_valid_id(id_edit, qtbot, "10")
+    assert not win.btn_start.isEnabled()
+
+    label_edit.setText("Cond A")
+    assert win.btn_start.isEnabled()
+
+    id_edit.clear()
+    assert not win.btn_start.isEnabled()
+
+    _type_valid_id(id_edit, qtbot, "10")
+    assert win.btn_start.isEnabled()
+
+    win.add_event_row()
+    assert len(_live_rows(win)) == 2
+    assert win.btn_start.isEnabled()
+
+    remove_button = row.findChild(QPushButton, "event_map_remove_button")
+    assert remove_button is not None
+    qtbot.mouseClick(remove_button, Qt.LeftButton)
+    assert not win.btn_start.isEnabled()
+
+
+def test_single_mode_requires_event_map_and_bdf(tmp_path, qtbot, monkeypatch):
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    row = _live_rows(win)[0]
+    label_edit, id_edit = _row_fields(win, row)
+    bdf_path = tmp_path / "sample.bdf"
+    bdf_path.touch()
+
+    win.rb_single.setChecked(True)
+    label_edit.setText("Cond A")
+    _type_valid_id(id_edit, qtbot, "10")
+    assert not win.btn_start.isEnabled()
+
+    win.le_input_file.setText(str(bdf_path))
+    assert win.btn_start.isEnabled()
+
+    label_edit.clear()
+    assert not win.btn_start.isEnabled()

@@ -58,6 +58,12 @@ def bind_event_map_row_widgets(owner: object, row: QWidget) -> None:
     if not id_edit.property("event_map_enter_bound"):
         id_edit.installEventFilter(owner)
         id_edit.setProperty("event_map_enter_bound", True)
+    for edit in (label_edit, id_edit):
+        if not edit.property("event_map_start_readiness_bound"):
+            edit.textChanged.connect(
+                lambda _text, bound_owner=owner: _refresh_start_enabled(bound_owner)
+            )
+            edit.setProperty("event_map_start_readiness_bound", True)
     ensure_event_row_registered(owner, row)
 
 
@@ -117,6 +123,27 @@ def is_valid_event_map_id(id_edit: QLineEdit) -> bool:
         return text.isdigit()
     state, _, _ = validator.validate(text, len(text))
     return state == QValidator.State.Acceptable
+
+
+def has_complete_event_map_entry(owner: object) -> bool:
+    """Return whether any live row has a condition and valid trigger ID."""
+
+    for row in live_event_map_rows(owner):
+        label_edit, id_edit = event_row_edits(row)
+        if (
+            label_edit is not None
+            and id_edit is not None
+            and bool(label_edit.text().strip())
+            and is_valid_event_map_id(id_edit)
+        ):
+            return True
+    return False
+
+
+def _refresh_start_enabled(owner: object) -> None:
+    refresh = getattr(owner, "_update_start_enabled", None)
+    if callable(refresh):
+        refresh()
 
 
 def handle_event_map_id_enter(owner: object, id_edit: QLineEdit) -> bool:
@@ -194,6 +221,7 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
             event_rows.remove(row)
         row.deleteLater()
         owner.log("Event map row removed.")
+        _refresh_start_enabled(owner)
 
     btn_rm.clicked.connect(_remove)
 
@@ -203,6 +231,7 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
     getattr(owner, "event_layout").addWidget(row)
     bind_event_map_row_widgets(owner, row)
     owner.log("Added event map row")
+    _refresh_start_enabled(owner)
 
 
 def event_map_entries(
