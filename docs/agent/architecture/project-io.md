@@ -49,6 +49,19 @@ FPVS Toolbox uses a strict hybrid settings model:
   roots and never derives a location from the current working directory. Cache
   entries contain derived QC payloads only, are safe to delete, and are treated
   as misses when missing, corrupt, schema-incompatible, or fingerprint-stale.
+- **File > Reset Project Processing Cache...** makes the next data-quality,
+  raw-preprocessing, and incremental-planning run cold by deleting only
+  `.fpvs_processing/preflight_qc/v2`,
+  `.fpvs_cache/preprocessed`, `.fpvs_processing/processing_ledger.json.tmp`, and
+  `.fpvs_processing/processing_ledger.json` beneath the active absolute project
+  root. `Main_App.processing.project_processing_cache` owns this exact deletion
+  boundary. It must preserve `.fpvs_processing/processing_runs.jsonl`, every
+  other `.fpvs_cache` child, `project.json`, raw data, current outputs, logs,
+  saved manual QC choices, and review workbooks. Existing participant outputs
+  remain until the next run begins; normal processing then replaces the outputs
+  it recomputes. The ledger reset deliberately removes its derived
+  participant-status/QC provenance; if the following run is cancelled, that
+  index remains absent until a later run rebuilds it.
 - Processing-end harmonic selection writes
   `Quality Check/Harmonic_Selection_Summary.xlsx` under the active project root
   and saves the matching harmonic-selection metadata into

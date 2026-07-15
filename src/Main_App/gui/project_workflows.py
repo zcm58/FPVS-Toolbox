@@ -6,10 +6,13 @@ import logging
 from types import SimpleNamespace
 from typing import Any, Callable
 
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.processing.processing_controller import prepare_batch_files
+from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 from Main_App.gui.op_guard import OpGuard
+from Main_App.gui import shell_status
 from Main_App.projects.project_manager import (
     edit_project_settings as _edit_project_settings,
     loadProject as _load_project,
@@ -20,6 +23,9 @@ from Main_App.projects.project_manager import (
 )
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 from Main_App.projects.grouping import project_group_context
+from Main_App.workers.project_processing_cache_worker import (
+    ProjectProcessingCacheResetWorker,
+)
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -85,6 +91,264 @@ def edit_project_settings(host: Any) -> None:
     _edit_project_settings(host)
     sync_input_folder_display(host)
     host._update_start_enabled()
+
+
+def _format_cache_size(total_bytes: int) -> str:
+    size = float(max(0, total_bytes))
+    for unit in ("bytes", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024.0 or unit == "TiB":
+            if unit == "bytes":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{int(total_bytes)} bytes"
+
+
+def _processing_cache_reset_is_busy(host: Any) -> bool:
+    if bool(getattr(host, "_run_active", False)):
+        return True
+    start_guard = getattr(host, "_start_guard", None)
+    is_active = getattr(start_guard, "is_active", None)
+    if callable(is_active):
+        try:
+            if is_active():
+                return True
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+    for attribute in (
+        "_preflight_qc_thread",
+        "_post_processing_pipeline_thread",
+        "_settings_harmonic_recalc_thread",
+        "_project_processing_cache_thread",
+    ):
+        thread = getattr(host, attribute, None)
+        is_running = getattr(thread, "isRunning", None)
+        if not callable(is_running):
+            continue
+        try:
+            if is_running():
+                return True
+        except RuntimeError:
+            continue
+    return False
+
+
+def _set_processing_cache_reset_ui_locked(host: Any, locked: bool) -> None:
+    action = getattr(host, "actionResetProjectProcessingCache", None)
+    if action is not None:
+        action.setEnabled(not locked)
+        action.setText(
+            "Resetting Project Processing Cache..."
+            if locked
+            else "Reset Project Processing Cache..."
+        )
+    shell_status._set_processing_navigation_locked(host, locked)
+    workspace = getattr(host, "workspace_stack", None)
+    if workspace is not None:
+        if locked:
+            host._project_processing_cache_workspace_was_enabled = (
+                workspace.isEnabled()
+            )
+            workspace.setEnabled(False)
+        else:
+            workspace.setEnabled(
+                bool(
+                    getattr(
+                        host,
+                        "_project_processing_cache_workspace_was_enabled",
+                        True,
+                    )
+                )
+            )
+            host._project_processing_cache_workspace_was_enabled = True
+    set_controls_enabled = getattr(host, "_set_controls_enabled", None)
+    if callable(set_controls_enabled):
+        set_controls_enabled(not locked)
+    start_button = getattr(host, "btn_start", None)
+    if locked and start_button is not None:
+        start_button.setEnabled(False)
+    if not locked:
+        update_start_enabled = getattr(host, "_update_start_enabled", None)
+        if callable(update_start_enabled):
+            update_start_enabled()
+
+
+def _release_processing_cache_start_guard(host: Any) -> None:
+    if not getattr(host, "_project_processing_cache_holds_start_guard", False):
+        return
+    host._project_processing_cache_holds_start_guard = False
+    start_guard = getattr(host, "_start_guard", None)
+    end = getattr(start_guard, "end", None)
+    if callable(end):
+        end()
+
+
+def reset_project_processing_cache(host: Any) -> None:
+    """Confirm and clear only active-project state that makes runs warm."""
+
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        QMessageBox.warning(
+            host,
+            "No Project",
+            "Open or create a project before resetting its processing cache.",
+        )
+        return
+    if _processing_cache_reset_is_busy(host):
+        QMessageBox.warning(
+            host,
+            "Processing Is Active",
+            "Wait for the current data-quality or processing run to finish before "
+            "resetting the project cache.",
+        )
+        return
+
+    response = QMessageBox.question(
+        host,
+        "Reset Project Processing Cache?",
+        (
+            "Resetting removes only:\n"
+            "- cached Data Quality Check results\n"
+            "- cached preprocessed EEG data\n"
+            "- the incremental completion index and its derived QC provenance\n\n"
+            "Raw BDF files, project settings, manual QC choices, current generated "
+            "outputs, and processing run history are not deleted. The next Start "
+            "Processing run will recheck every file and recompute from raw data. "
+            "Once that run begins, normal processing will replace its participant "
+            "output files. If that run is cancelled, the completion index remains "
+            "empty until a later run rebuilds it.\n\n"
+            "Make sure no other FPVS Toolbox window is processing this project.\n\n"
+            "Continue?"
+        ),
+        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.No,
+    )
+    if response != QMessageBox.Yes:
+        return
+
+    start_guard = getattr(host, "_start_guard", None)
+    acquire_start_guard = getattr(start_guard, "start", None)
+    if not callable(acquire_start_guard) or not acquire_start_guard():
+        QMessageBox.warning(
+            host,
+            "Processing Is Active",
+            "Processing state changed before the cache reset could start. Wait for "
+            "the current operation to finish and try again.",
+        )
+        return
+    host._project_processing_cache_holds_start_guard = True
+
+    project_root = project.project_root
+    thread = QThread(host)
+    worker = ProjectProcessingCacheResetWorker(project_root)
+    worker.moveToThread(thread)
+    host._project_processing_cache_thread = thread
+    host._project_processing_cache_worker = worker
+    _set_processing_cache_reset_ui_locked(host, True)
+    log = getattr(host, "log", None)
+    if callable(log):
+        log("Resetting the active project's FPVS-managed processing cache...")
+
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    worker.failed.connect(thread.quit)
+    worker.finished.connect(worker.deleteLater)
+    worker.failed.connect(worker.deleteLater)
+    worker.finished.connect(host._on_project_processing_cache_reset_finished)
+    worker.failed.connect(host._on_project_processing_cache_reset_failed)
+    thread.finished.connect(thread.deleteLater)
+    thread.finished.connect(host._on_project_processing_cache_reset_thread_finished)
+    try:
+        thread.start()
+    except RuntimeError as exc:
+        host._project_processing_cache_thread = None
+        host._project_processing_cache_worker = None
+        _release_processing_cache_start_guard(host)
+        worker.deleteLater()
+        thread.deleteLater()
+        _set_processing_cache_reset_ui_locked(host, False)
+        logger.exception(
+            "project_processing_cache_thread_start_failed root=%s",
+            project_root,
+        )
+        QMessageBox.critical(
+            host,
+            "Cache Reset Failed",
+            f"FPVS Toolbox could not start the cache-reset worker.\n\n{exc}",
+        )
+
+
+def on_project_processing_cache_reset_finished(
+    host: Any,
+    removed: ProjectProcessingCacheUsage,
+) -> None:
+    project = getattr(host, "currentProject", None)
+    project_root = getattr(project, "project_root", "")
+    if removed.is_empty:
+        message = (
+            "No FPVS-managed processing cache was present. The next run will "
+            "already recheck every participant and preprocess from raw BDF data."
+        )
+        logger.info("project_processing_cache_already_empty root=%s", project_root)
+        log = getattr(host, "log", None)
+        if callable(log):
+            log(message)
+        QMessageBox.information(host, "Processing Cache Already Empty", message)
+        return
+
+    logger.info(
+        "project_processing_cache_reset root=%s files=%d bytes=%d",
+        project_root,
+        removed.file_count,
+        removed.total_bytes,
+    )
+    log_message = (
+        "Reset project processing cache: "
+        f"{removed.file_count} file(s), {_format_cache_size(removed.total_bytes)}. "
+        "The next run will be cold for FPVS-managed data-quality, raw-preprocessing, "
+        "and incremental-planning caches."
+    )
+    log = getattr(host, "log", None)
+    if callable(log):
+        log(log_message)
+    QMessageBox.information(
+        host,
+        "Processing Cache Reset",
+        (
+            f"Removed {removed.file_count} managed cache file(s) "
+            f"({_format_cache_size(removed.total_bytes)}).\n\n"
+            "The next processing run will recheck every participant and preprocess "
+            "from raw BDF data. Project settings, manual QC choices, current outputs, "
+            "and run history were preserved."
+        ),
+    )
+
+
+def on_project_processing_cache_reset_failed(host: Any, error: str) -> None:
+    project = getattr(host, "currentProject", None)
+    project_root = getattr(project, "project_root", "")
+    logger.error(
+        "project_processing_cache_reset_failed root=%s error=%s",
+        project_root,
+        error,
+    )
+    QMessageBox.critical(
+        host,
+        "Cache Reset Failed",
+        (
+            "FPVS Toolbox could not fully reset the processing cache. Some cache "
+            "files may already have been removed; project data and outputs were not "
+            "targeted. Close programs using the project and try again.\n\n"
+            f"{error}"
+        ),
+    )
+
+
+def on_project_processing_cache_reset_thread_finished(host: Any) -> None:
+    host._project_processing_cache_thread = None
+    host._project_processing_cache_worker = None
+    _release_processing_cache_start_guard(host)
+    _set_processing_cache_reset_ui_locked(host, False)
 
 
 def on_project_ready(host: Any) -> None:

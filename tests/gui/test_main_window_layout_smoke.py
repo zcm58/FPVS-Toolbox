@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSizePolicy,
@@ -28,6 +30,7 @@ from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
+from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
@@ -359,6 +362,169 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.sidebar.graphicsEffect() is None
     assert win.sidebar.property("processingLocked") is False
     assert win.menuBar().isEnabled()
+
+
+def test_reset_project_processing_cache_action_requires_confirmation_and_is_scoped(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+
+    preprocessed_cache = project_root / ".fpvs_cache" / "preprocessed"
+    preprocessed_cache.mkdir(parents=True)
+    (preprocessed_cache / "P01_raw.fif").write_bytes(b"cached-raw")
+    preflight_cache = project_root / ".fpvs_processing" / "preflight_qc" / "v2"
+    preflight_cache.mkdir(parents=True)
+    (preflight_cache / "P01.json").write_bytes(b"cached-qc")
+    ledger = project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger.write_bytes(b'{"entries":{"P01":{}}}')
+
+    preserved = {
+        project_root / "project.json": b'{"name":"Valence"}',
+        project_root / ".fpvs_processing" / "processing_runs.jsonl": b"run-history\n",
+        project_root / "1 - Excel Data Files" / "P01_Results.xlsx": b"output",
+    }
+    for path, payload in preserved.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    action = win.actionResetProjectProcessingCache
+    assert action.text() == "Reset Project Processing Cache..."
+    assert action.objectName() == "actionResetProjectProcessingCache"
+
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.No,
+    )
+    action.trigger()
+    assert preprocessed_cache.exists()
+    assert preflight_cache.exists()
+    assert ledger.exists()
+
+    messages: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "information",
+        lambda _parent, title, message, *_args, **_kwargs: messages.append(
+            (title, message)
+        ),
+    )
+    action.trigger()
+
+    qtbot.waitUntil(
+        lambda: getattr(win, "_project_processing_cache_thread", None) is None,
+        timeout=5_000,
+    )
+
+    assert not preprocessed_cache.exists()
+    assert not preflight_cache.exists()
+    assert not ledger.exists()
+    assert {path: path.read_bytes() for path in preserved} == preserved
+    assert messages
+    assert messages[-1][0] == "Processing Cache Reset"
+    assert "preprocess from raw BDF data" in messages[-1][1]
+
+
+def test_reset_project_processing_cache_refuses_without_project_or_while_busy(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    warnings: list[tuple[str, str]] = []
+    questions: list[str] = []
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args, **_kwargs: warnings.append(
+            (title, message)
+        ),
+    )
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "question",
+        lambda _parent, title, *_args, **_kwargs: questions.append(title),
+    )
+
+    win.actionResetProjectProcessingCache.trigger()
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+    win._settings_harmonic_recalc_thread = SimpleNamespace(isRunning=lambda: True)
+    win.actionResetProjectProcessingCache.trigger()
+
+    assert [title for title, _message in warnings] == [
+        "No Project",
+        "Processing Is Active",
+    ]
+    assert not questions
+
+
+def test_reset_project_processing_cache_disables_start_until_worker_finishes(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+    event_edits = win.event_rows[0].findChildren(QLineEdit)
+    event_edits[0].setText("Condition")
+    event_edits[1].setText("1")
+    win._update_start_enabled()
+    assert win.btn_start.isEnabled()
+
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+
+    def slow_cache_reset(_project_root: Path) -> ProjectProcessingCacheUsage:
+        worker_started.set()
+        release_worker.wait(timeout=5.0)
+        return ProjectProcessingCacheUsage()
+
+    monkeypatch.setattr(
+        "Main_App.workers.project_processing_cache_worker.clear_project_processing_cache",
+        slow_cache_reset,
+    )
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        main_window_module.project_workflows.QMessageBox,
+        "information",
+        lambda *_args, **_kwargs: None,
+    )
+
+    win.actionResetProjectProcessingCache.trigger()
+    try:
+        qtbot.waitUntil(worker_started.is_set, timeout=5_000)
+        assert not win.btn_start.isEnabled()
+        assert win._start_guard.is_active()
+        assert not win.workspace_stack.isEnabled()
+    finally:
+        release_worker.set()
+
+    qtbot.waitUntil(
+        lambda: getattr(win, "_project_processing_cache_thread", None) is None,
+        timeout=5_000,
+    )
+    assert not win._start_guard.is_active()
+    assert win.btn_start.isEnabled()
+    assert win.workspace_stack.isEnabled()
 
 
 def test_processing_activity_tracks_completed_files(

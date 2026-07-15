@@ -282,6 +282,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
         # Worker management
         self._post_worker = None
         self._post_thread = None
+        self._project_processing_cache_thread = None
+        self._project_processing_cache_worker = None
+        self._project_processing_cache_holds_start_guard = False
+        self._project_processing_cache_workspace_was_enabled = True
         self._start_guard = OpGuard()
 
         # Flags/vars the mixin expects
@@ -475,6 +479,21 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     def edit_project_settings(self) -> None:
         project_workflows.edit_project_settings(self)
+
+    def reset_project_processing_cache(self) -> None:
+        project_workflows.reset_project_processing_cache(self)
+
+    @Slot(object)
+    def _on_project_processing_cache_reset_finished(self, removed: object) -> None:
+        project_workflows.on_project_processing_cache_reset_finished(self, removed)
+
+    @Slot(str)
+    def _on_project_processing_cache_reset_failed(self, error: str) -> None:
+        project_workflows.on_project_processing_cache_reset_failed(self, error)
+
+    @Slot()
+    def _on_project_processing_cache_reset_thread_finished(self) -> None:
+        project_workflows.on_project_processing_cache_reset_thread_finished(self)
 
     def _on_project_ready(self) -> None:
         project_workflows.on_project_ready(self)
@@ -849,6 +868,19 @@ class MainWindow(QMainWindow, ProcessingMixin):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        cache_thread = getattr(self, "_project_processing_cache_thread", None)
+        try:
+            cache_reset_running = cache_thread is not None and cache_thread.isRunning()
+        except RuntimeError:
+            cache_reset_running = False
+        if cache_reset_running:
+            QMessageBox.information(
+                self,
+                "Cache Reset In Progress",
+                "Wait for the project processing-cache reset to finish before closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         sensitivity_page = getattr(self, "_sensitivity_analysis_page", None)
         if sensitivity_page is not None:
             sensitivity_page.shutdown()

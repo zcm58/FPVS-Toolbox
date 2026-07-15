@@ -1112,6 +1112,22 @@ class SettingsDialog(QDialog):
         if self.project is None:
             return False
         owner = getattr(self, "host", None) or self
+        cache_reset_thread = getattr(owner, "_project_processing_cache_thread", None)
+        cache_reset_is_running = getattr(cache_reset_thread, "isRunning", None)
+        try:
+            cache_reset_active = bool(
+                callable(cache_reset_is_running) and cache_reset_is_running()
+            )
+        except RuntimeError:
+            cache_reset_active = False
+        if cache_reset_active:
+            QMessageBox.information(
+                self,
+                "Cache Reset In Progress",
+                "Wait for the project processing-cache reset to finish before "
+                "recalculating harmonics.",
+            )
+            return False
         if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
             QMessageBox.information(
                 self,

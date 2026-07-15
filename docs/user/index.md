@@ -11,6 +11,16 @@ FPVS Toolbox organizes work under a project root. Each project has its own
 subfolder containing the project manifest, source-data location, processed
 workbooks, quality-control records, statistical outputs, and figures.
 
+To benchmark or troubleshoot data-quality and raw preprocessing without reusing
+their FPVS-managed caches, choose **File > Reset Project Processing Cache...**.
+This clears cached data-quality results, cached preprocessed EEG data, and the
+incremental completion index for the active project. It does not delete raw BDF
+files, project settings, manual QC choices, current outputs, or processing run
+history. The next processing run rechecks every file and recomputes from raw
+data; once that run starts, its normal output step replaces the participant
+outputs being recomputed. Windows may still retain its own filesystem cache,
+which this action does not control.
+
 ### Multi-Group Projects
 
 When creating a project with two or more experimental groups, select one raw

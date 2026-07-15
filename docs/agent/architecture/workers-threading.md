@@ -36,6 +36,11 @@ Common long-running work:
   replace completed per-file rows with downstream progress across frequency-
   domain QC, harmonic selection, Stats-ready export, L2-MNE maps, and eLORETA
   maps; numeric progress must not be inferred from free-form log messages.
+- `ProjectProcessingCacheResetWorker` performs recursive cache inspection and
+  deletion in a background `QThread`. The GUI confirms the exact scope first,
+  then locks project navigation, the active workspace, the Start button, and
+  the shared processing start guard until the worker emits completion or
+  failure; the worker never touches widgets.
 
 Rules:
 

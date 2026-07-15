@@ -45,6 +45,7 @@ tests = [
   "tests/processing/test_filter_downsample_order.py",
   "tests/processing/test_pipeline_speed_safety.py",
   "tests/processing/test_post_process_target_freqs.py",
+  "tests/processing/test_project_processing_cache.py",
   "tests/processing/test_preflight_qc.py",
   "tests/processing/test_preflight_qc_cache.py",
   "tests/processing/test_preflight_qc_plan.py",

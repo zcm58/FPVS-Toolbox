@@ -22,7 +22,8 @@ Primary paths:
 - `src/Main_App/gui/op_guard.py`: non-blocking re-entrancy guard for
   GUI-triggered operations.
 - `src/Main_App/gui/project_workflows.py`: project open/create/load/save GUI
-  orchestration used by `MainWindow` compatibility wrappers.
+  orchestration and the confirmed active-project processing-cache reset used by
+  `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
   queue polling, worker completion/error, and finalization GUI orchestration
   used by `MainWindow` compatibility wrappers.

@@ -32,6 +32,15 @@ def init_file_menu(self) -> None:
     action_save.triggered.connect(self.saveProjectSettings)
     file_menu.addAction(action_save)
 
+    action_reset_cache = QAction("Reset Project Processing Cache...", self)
+    action_reset_cache.setObjectName("actionResetProjectProcessingCache")
+    action_reset_cache.setStatusTip(
+        "Remove only FPVS-managed cache state so the next processing run starts cold"
+    )
+    action_reset_cache.triggered.connect(self.reset_project_processing_cache)
+    self.actionResetProjectProcessingCache = action_reset_cache
+    file_menu.addAction(action_reset_cache)
+
     action_settings = QAction("Settings", self)
     action_settings.triggered.connect(self.open_settings_window)
     file_menu.addAction(action_settings)

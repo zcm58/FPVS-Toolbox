@@ -198,6 +198,23 @@ are cached atomically under the active project root at
 entry is a cache miss. The key includes raw path/size/mtime, relevant settings,
 method and dependency versions, and the resolved event/span plan.
 
+The project lifecycle action **File > Reset Project Processing Cache...**
+forces the next run through a cold data-quality, raw-preprocessing, and
+incremental-planning path. It removes the preflight cache above, the
+preprocessed-Raw cache at
+`.fpvs_cache/preprocessed`, and the incremental completion ledger at
+`.fpvs_processing/processing_ledger.json` (plus a leftover ledger temporary
+file). Clearing the ledger is required because input classification occurs
+before preflight QC and otherwise omits completed files from the scan. The
+action preserves raw data, `project.json`, manual QC settings, current outputs,
+review workbooks, and `.fpvs_processing/processing_runs.jsonl`. It does not
+attempt to flush operating-system filesystem caches. Once the following run
+begins, normal participant-output cleanup replaces the outputs being
+recomputed.
+
+Downstream tool caches, including Stats harmonic-selection caches, are outside
+this raw-processing reset and retain their normal fingerprint invalidation.
+
 `src/Main_App/processing/preflight_qc_plan.py` owns the condition/event plan,
 and `src/Main_App/processing/preflight_qc_cache.py` owns the GUI-neutral cache
 primitive. `raw_channel_qc.py` and `raw_spectral_qc.py` retain their existing v1
