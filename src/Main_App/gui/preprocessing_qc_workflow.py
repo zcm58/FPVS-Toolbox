@@ -33,6 +33,7 @@ from Main_App.processing.preflight_qc import (
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
+from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     build_removed_electrode_review_record,
@@ -49,7 +50,9 @@ logger.addHandler(logging.NullHandler())
 
 _DATA_QUALITY_CHECK_TITLE = "Data Quality Check"
 _DATA_QUALITY_SCAN_WAIT_MESSAGE = (
-    "FPVS Toolbox is currently checking your data for anything strange. This will only take a moment."
+    "FPVS Toolbox is checking the configured condition intervals in your data. "
+    "Large recordings can take several minutes; completed participants are reused "
+    "if the check is restarted."
 )
 _DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
 _REMOVED_REVIEW_HEADERS = (
@@ -88,12 +91,16 @@ class _PreflightQcWorker(QObject):
         settings: dict[str, Any],
         skip_paths: Sequence[Path],
         max_workers: int,
+        project_root: Path | None = None,
+        event_map: Mapping[str, int] | None = None,
     ) -> None:
         super().__init__()
         self._raw_file_infos = list(raw_file_infos)
         self._settings = dict(settings)
         self._skip_paths = [Path(path) for path in skip_paths]
         self._max_workers = max(1, int(max_workers))
+        self._project_root = Path(project_root) if project_root is not None else None
+        self._event_map = dict(event_map or {})
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -108,6 +115,8 @@ class _PreflightQcWorker(QObject):
                 max_workers=self._max_workers,
                 progress=self.progress.emit,
                 should_cancel=lambda: self._cancelled,
+                project_root=self._project_root,
+                event_map=self._event_map,
             )
         except Exception as exc:  # pragma: no cover - defensive signal bridge
             logger.exception("Preprocessing QC scan failed.")
@@ -722,9 +731,10 @@ def _await_preflight_choice(
 
 
 def _file_name_from_progress(message: str) -> str:
-    for prefix in ("Scanning ", "Finished "):
+    for prefix in ("Planning ", "Scanning ", "Cached ", "Finished "):
         if message.startswith(prefix):
-            return message[len(prefix) :].strip().casefold()
+            detail = message[len(prefix) :].strip()
+            return detail.split(" · ", 1)[0].strip().casefold()
     return ""
 
 
@@ -736,7 +746,7 @@ def _grouped_scan_progress_text(host: Any, message: str) -> str:
     group = str(group_by_file.get(file_name) or "").strip()
     if not group:
         return message
-    action = "Finished" if message.startswith("Finished ") else "Scanning"
+    action = message.split(" ", 1)[0]
     display_name = message.split(" ", 1)[1].strip()
     return f"{action} {group} · {display_name}"
 
@@ -754,7 +764,15 @@ def _update_scan_row(host: Any, message: str) -> None:
     if status_item is None:
         status_item = QTableWidgetItem()
         table.setItem(row, 0, status_item)
-    status_item.setText("Checked" if message.startswith("Finished ") else "Scanning")
+    if message.startswith("Cached "):
+        status = "Cached"
+    elif message.startswith("Finished "):
+        status = "Checked"
+    elif message.startswith("Planning "):
+        status = "Planning"
+    else:
+        status = "Scanning"
+    status_item.setText(status)
     status_item.setTextAlignment(Qt.AlignCenter)
     table.scrollToItem(status_item)
 
@@ -778,7 +796,11 @@ class _PreflightQcEmbeddedBridge(QObject):
     @Slot(str, int, int)
     def on_progress(self, message: str, completed: int, total: int) -> None:
         _set_progress(self._host, completed, total)
-        _set_label(self._host, "processing_summary_label", _DATA_QUALITY_SCAN_WAIT_MESSAGE)
+        _set_label(
+            self._host,
+            "processing_summary_label",
+            f"Checked {completed} of {total} participant file(s).",
+        )
         _set_label(
             self._host,
             "processing_current_file_label",
@@ -922,9 +944,9 @@ def _run_scan_embedded(
         busy=True,
         review_visible=False,
         checklist=(
+            "Inspect every 10-second block inside configured conditions",
             "Look for electrodes that appear physically disconnected",
-            "Check for participant-level signal failures",
-            "Screen for unusual narrowband spectral peaks",
+            "Screen exact on-bin condition spectra through the retained band",
         ),
     )
     host._preflight_qc_file_rows = {}
@@ -932,7 +954,20 @@ def _run_scan_embedded(
         max_workers = max(1, int(getattr(host, "max_workers", 1) or 1))
     except (TypeError, ValueError):
         max_workers = 1
-    worker_count = min(max_workers, len(remaining))
+    worker_count = min(max_workers, len(remaining), PREFLIGHT_QC_MAX_WORKERS)
+    project = getattr(host, "currentProject", None)
+    project_root_value = getattr(project, "project_root", None)
+    project_root = (
+        Path(project_root_value).resolve()
+        if project_root_value not in (None, "")
+        else None
+    )
+    raw_event_map = params.get("event_id_map")
+    event_map = (
+        {str(label): int(code) for label, code in raw_event_map.items()}
+        if isinstance(raw_event_map, Mapping)
+        else {}
+    )
     try:
         host.log(
             f"Data quality scan using {worker_count} parallel worker(s).",
@@ -954,6 +989,8 @@ def _run_scan_embedded(
         params,
         skip_paths,
         max_workers=worker_count,
+        project_root=project_root,
+        event_map=event_map,
     )
     worker.moveToThread(thread)
     result_holder: dict[str, Any] = {}
@@ -970,7 +1007,7 @@ def _run_scan_embedded(
         _set_label(
             host,
             "processing_current_file_label",
-            "Cancelling after the current file...",
+            "Cancelling as soon as the active condition reads finish...",
         )
 
     _install_preflight_actions(

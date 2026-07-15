@@ -20,7 +20,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
   GUI-neutral publication styling.
 - `src/Main_App/Shared/paths.py`: resource path helper for source and frozen bundles.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
-- `src/Main_App/processing/`: canonical package for active EEG preprocessing and processing entry-point ownership. `preprocess.py` owns the active preprocessing implementation, `processing.py` owns the stable no-op `process_data` coordinator, and `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route.
+- `src/Main_App/processing/`: canonical package for active EEG preprocessing and processing entry-point ownership. `preprocess.py` owns the active preprocessing implementation, `processing.py` owns the stable no-op `process_data` coordinator, and `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route. `preflight_qc.py` coordinates GUI-neutral raw QC; `preflight_qc_plan.py` owns condition/event sample planning and shared locked FFT-span reuse; `preflight_qc_cache.py` owns the project-local condition-aware QC cache; and `raw_channel_qc.py`/`raw_spectral_qc.py` own the versioned v1 and condition-aware v2 evaluators.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
 - `src/Main_App/projects/`: canonical owner for project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing settings normalization.
 - `src/Main_App/updates/`: canonical non-GUI updater backend for typed release

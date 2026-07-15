@@ -38,19 +38,26 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/processing/test_condition_spectral_qc.py",
+  "tests/processing/test_fft_crop_utils.py",
   "tests/processing/test_fft_multinotch.py",
   "tests/processing/test_filter_downsample_order.py",
   "tests/processing/test_pipeline_speed_safety.py",
   "tests/processing/test_post_process_target_freqs.py",
   "tests/processing/test_preflight_qc.py",
+  "tests/processing/test_preflight_qc_cache.py",
+  "tests/processing/test_preflight_qc_plan.py",
+  "tests/processing/test_preflight_qc_v2.py",
   "tests/processing/test_process_runner_epoch_contract.py",
   "tests/processing/test_processing_discovery_v2.py",
   "tests/processing/test_processing_ledger.py",
   "tests/processing/test_qc_summary_export.py",
   "tests/processing/test_raw_channel_qc.py",
+  "tests/processing/test_raw_channel_qc_v2.py",
   "tests/processing/test_removed_electrode_detection.py",
+  "tests/processing/test_shared_load_utils.py",
 ]
-include = ["src/Main_App/processing/**", "src/Main_App/Performance/**", "src/Main_App/workers/**", "src/Main_App/Shared/post_process.py", "src/Main_App/gui/processing_inputs.py", "src/Main_App/gui/processing_workflows.py", "tests/processing/**"]
+include = ["src/Main_App/processing/**", "src/Main_App/Performance/**", "src/Main_App/workers/**", "src/Main_App/Shared/post_process.py", "src/Main_App/Shared/fft_crop_utils.py", "src/Main_App/Shared/load_utils.py", "src/Main_App/io/load_utils.py", "src/Main_App/gui/processing_inputs.py", "src/Main_App/gui/processing_workflows.py", "src/Main_App/gui/preprocessing_qc_workflow.py", "tests/processing/**"]
 manual_smoke = []
 
 [scopes.plot-generator]

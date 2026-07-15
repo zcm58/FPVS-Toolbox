@@ -13,10 +13,11 @@ import ast
 import re
 import tempfile
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, Optional, Sequence, Set, Tuple
 
 import mne
 
@@ -325,6 +326,209 @@ def _apply_montage_suppressing_expected_ref_warnings(
             category=caught.category,
             stacklevel=2,
         )
+
+
+def _apply_preflight_channel_and_montage_contract(
+    app: Any,
+    raw: mne.io.BaseRaw,
+    *,
+    base: str,
+    ref_pair: Tuple[str, str],
+    stim_name: str,
+) -> None:
+    """Apply the existing EXG/stim and montage policy to a lazy preflight Raw."""
+    ref_keep: Set[str] = set()
+    try:
+        logger.debug("[LOADER STAGE] file=%s stage=channel_typing_start", base)
+        ref_keep = _canon_present(raw.ch_names, ref_pair)
+        exg_labels = [f"EXG{i}" for i in range(1, 9)]
+        exg_present = _canon_present(raw.ch_names, exg_labels)
+
+        app.log(
+            f"[LOADER DEBUG] {base}: exg_present={sorted(exg_present)} "
+            f"ref_keep={sorted(ref_keep)}"
+        )
+
+        to_misc = {ch: "misc" for ch in exg_present if ch not in ref_keep}
+        to_eeg = {ch: "eeg" for ch in ref_keep}
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"The unit for channel\(s\) .* has changed from .* to .*\.",
+                category=RuntimeWarning,
+            )
+            if to_misc:
+                raw.set_channel_types(to_misc)
+            if to_eeg:
+                raw.set_channel_types(to_eeg)
+            if stim_name in raw.ch_names:
+                raw.set_channel_types({stim_name: "stim"})
+
+        kept = sorted(ref_keep)
+        demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
+        app.log(f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}")
+        logger.debug(
+            "[LOADER STAGE] file=%s stage=channel_typing_done ref_keep=%s demoted=%s",
+            base,
+            kept,
+            demoted,
+        )
+    except Exception as e:
+        app.log(f"Warning: EXG/stim typing adjustment failed: {e}")
+
+    app.log("Applying standard_1005 montage for 10-10 coverage...")
+    try:
+        logger.debug("[LOADER STAGE] file=%s stage=montage_apply_start", base)
+        _apply_montage_suppressing_expected_ref_warnings(
+            raw,
+            _cached_1010(),
+            expected_missing_refs=ref_keep,
+        )
+        logger.debug("[LOADER STAGE] file=%s stage=montage_apply_done", base)
+        app.log("Montage applied.")
+    except Exception as e:
+        app.log(f"Warning: Montage error: {e}")
+
+
+@contextmanager
+def open_preflight_eeg_file(
+    app: Any,
+    filepath: str,
+    ref_pair: Optional[Tuple[str, str]] = None,
+    first_n_channels: Optional[int] = None,
+    stim_channel: Optional[str] = None,
+) -> Iterator[Optional[mne.io.BaseRaw]]:
+    """Open a BDF lazily for preflight QC and always close it on context exit.
+
+    Unlike :func:`load_eeg_file`, this opt-in reader never calls ``load_data``
+    and never creates a full-recording memmap. Callers must keep all lazy reads
+    inside the returned context manager.
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    base = os.path.basename(filepath)
+    app.log(f"[PREFLIGHT LAZY LOADER START] {base}: ext='{ext}'")
+
+    if ext != ".bdf":
+        user_messages.show_warning(
+            "Unsupported File",
+            f"Format '{ext}' not supported. Only '.bdf' is supported.",
+        )
+        yield None
+        return
+
+    raw: Optional[mne.io.BaseRaw] = None
+    try:
+        stim_name = str(stim_channel or "").strip() or _resolve_stim(app)
+        resolved_ref_pair = ref_pair or _resolve_ref_pair(app)
+        app.log(
+            f"[PREFLIGHT LAZY LOADER DEBUG] {base}: stim='{stim_name}' "
+            f"ref_pair={resolved_ref_pair}"
+        )
+
+        preflight = inspect_bdf_header(filepath)
+        if preflight and preflight.recording_not_started:
+            message = format_bdf_recording_not_started_message([base])
+            detailed = (
+                f"[LOADER EXCLUDED] {base}: {message} "
+                f"(size={preflight.file_size} bytes, "
+                f"header_bytes={preflight.header_bytes}, "
+                f"data_records={preflight.data_records})"
+            )
+            if not _try_warning_log(app, detailed):
+                app.log(detailed)
+            logger.warning(
+                "bdf_recording_not_started file=%s size=%d header_bytes=%s data_records=%s",
+                filepath,
+                preflight.file_size,
+                preflight.header_bytes,
+                preflight.data_records,
+            )
+        else:
+            include_channels = None
+            if first_n_channels:
+                try:
+                    include_channels = _resolve_channel_subset(
+                        filepath,
+                        stim_name=stim_name,
+                        ref_pair=resolved_ref_pair,
+                        first_n_channels=first_n_channels,
+                    )
+                    app.log(
+                        f"[LOADER CHANNEL SUBSET] {base}: opening "
+                        f"{len(include_channels or [])} channels lazily "
+                        f"(first_n={first_n_channels}, refs={resolved_ref_pair}, "
+                        f"stim='{stim_name}')"
+                    )
+                except Exception as subset_err:
+                    app.log(
+                        f"[LOADER CHANNEL SUBSET WARNING] {base}: failed to resolve "
+                        f"first_n={first_n_channels}; falling back to full load: {subset_err}"
+                    )
+
+            with warnings.catch_warnings(record=True) as caught_read_warnings:
+                warnings.simplefilter("always")
+                with mne.utils.use_log_level("WARNING"):
+                    logger.debug(
+                        "[PREFLIGHT LAZY LOADER STAGE] file=%s stage=read_raw_bdf_start "
+                        "selected_channels=%s",
+                        base,
+                        len(include_channels) if include_channels else "all",
+                    )
+                    raw = mne.io.read_raw_bdf(
+                        filepath,
+                        preload=False,
+                        stim_channel=stim_name if stim_name else "Status",
+                        include=include_channels,
+                        verbose=False,
+                    )
+                    logger.debug(
+                        "[PREFLIGHT LAZY LOADER STAGE] file=%s stage=read_raw_bdf_done "
+                        "channels=%d",
+                        base,
+                        len(raw.ch_names),
+                    )
+            _emit_reader_warnings(app, filepath, caught_read_warnings)
+
+            if raw is None:
+                raise ValueError("MNE load returned None.")
+
+            app.log(
+                f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz."
+            )
+            _apply_preflight_channel_and_montage_contract(
+                app,
+                raw,
+                base=base,
+                ref_pair=resolved_ref_pair,
+                stim_name=stim_name,
+            )
+            app.log(f"[PREFLIGHT LAZY LOADER READY] {base}")
+    except Exception as e:
+        app.log(f"!!! Load Error {base}: {e}")
+        if raw is not None:
+            try:
+                raw.close()
+            except (AttributeError, RuntimeError, OSError, ValueError):
+                pass
+            raw = None
+        try:
+            user_messages.show_error("Loading Error", f"Could not load: {base}\nError: {e}")
+        except (RuntimeError, TypeError):
+            pass
+
+    if raw is None:
+        yield None
+        return
+
+    try:
+        yield raw
+    finally:
+        try:
+            raw.close()
+        except (AttributeError, RuntimeError, OSError, ValueError) as close_error:
+            app.log(f"Warning: Could not close lazy BDF {base}: {close_error}")
+        app.log(f"[PREFLIGHT LAZY LOADER CLOSED] {base}")
 
 
 def load_eeg_file(

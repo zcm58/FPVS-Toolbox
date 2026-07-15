@@ -2,9 +2,11 @@ import numpy as np
 import pytest
 
 from Main_App.Shared.fft_crop_utils import (
+    CropResult,
     compute_fft_crop_from_events,
     compute_onbin_N,
     compute_onbin_step,
+    plan_condition_fft_spans,
     resolve_oddball_ids_by_condition,
 )
 
@@ -135,3 +137,88 @@ def test_no_55_fallback():
     results, _, _ = compute_fft_crop_from_events(events, fs=fs, onset_ids={1, 2}, stream_end_sample=2000)
     assert results[(1, 0)].fallback
     assert results[(2, 0)].fallback
+
+
+def _crop_result(
+    *,
+    start: int,
+    n_samples: int,
+    fallback: bool = False,
+    fallback_reason: str | None = None,
+) -> CropResult:
+    return CropResult(
+        crop_start_sample=start,
+        n_samples=n_samples,
+        n55_raw=2,
+        n55_dedup=2,
+        cycles=1,
+        block_start_sample=start,
+        block_end_sample=start + n_samples,
+        fallback=fallback,
+        fallback_reason=fallback_reason,
+    )
+
+
+def test_condition_fft_span_plan_uses_one_onbin_length_for_all_repetitions():
+    crop_results = {
+        (2, 0): _crop_result(start=9000, n_samples=6400),
+        (1, 1): _crop_result(start=5000, n_samples=7100),
+        (1, 0): _crop_result(start=1000, n_samples=7680),
+    }
+
+    plan = plan_condition_fft_spans(
+        crop_results,
+        condition_id=1,
+        n_step=640,
+    )
+
+    assert plan.condition_id == 1
+    assert plan.repetition_keys == ((1, 0), (1, 1))
+    assert plan.n_step == 640
+    assert plan.n_common == 7040
+    assert plan.repetition_spans == ((1000, 8040), (5000, 12040))
+    assert plan.fallback_repetition_reasons == ()
+
+
+def test_condition_fft_span_plan_preserves_fallback_diagnostics():
+    crop_results = {
+        (1, 0): _crop_result(start=1000, n_samples=6400),
+        (1, 1): _crop_result(
+            start=9000,
+            n_samples=0,
+            fallback=True,
+            fallback_reason="insufficient_55",
+        ),
+        (1, 2): _crop_result(
+            start=17000,
+            n_samples=0,
+            fallback=True,
+        ),
+    }
+
+    plan = plan_condition_fft_spans(
+        crop_results,
+        condition_id=1,
+        n_step=640,
+    )
+
+    assert plan.n_common == 6400
+    assert plan.repetition_spans == ()
+    assert plan.fallback_repetition_reasons == (
+        "rep=1:insufficient_55",
+        "rep=2:unknown",
+    )
+
+
+@pytest.mark.parametrize("n_step", [None, 0])
+def test_condition_fft_span_plan_has_no_spans_without_valid_step(n_step):
+    crop_results = {(1, 0): _crop_result(start=1000, n_samples=6400)}
+
+    plan = plan_condition_fft_spans(
+        crop_results,
+        condition_id=1,
+        n_step=n_step,
+    )
+
+    assert plan.n_common is None
+    assert plan.repetition_spans == ()

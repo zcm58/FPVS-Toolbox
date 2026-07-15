@@ -129,6 +129,22 @@ on-bin `N` can be computed. Do not convert these diagnostics into
 `fixed_epoch_fallback` epochs, skip repetitions, use fixed epoch windows, or let
 post-processing choose nearest FFT bins.
 
+## Shared Condition Span Plan
+
+`plan_condition_fft_spans(crop_results, condition_id, n_step)` is the public
+owner of repetition ordering, the shortest valid common on-bin length, aligned
+`[start, stop)` spans, and fallback-repetition diagnostics for one condition.
+The normal process runner consumes this plan and retains its existing hard-fail
+messages and behavior.
+
+Condition-aware preflight spectral QC also consumes this exact plan at the raw
+source sampling rate. It may report a review-only skipped spectrum when a
+locked span is unavailable or falls outside the configured condition completion
+interval, but it must not invent a 90-second crop, use the whole arbitrary
+condition duration, or duplicate the common-length calculation. This reuse is
+what keeps preflight bin spacing aligned with the existing FPVS crop contract
+without changing the later 256 Hz preprocessing/downsample path.
+
 Run-level warnings are exactly `empty_events`, `no_onsets`, or `non_integer_fs:{fs}` where applicable.
 
 ## Refactor Constraints

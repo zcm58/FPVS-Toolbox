@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 import Main_App.Shared.load_utils as shared_load_utils
 import Main_App.io.load_utils as load_utils
 
@@ -14,9 +16,15 @@ class _FakeRaw:
         self.channel_type_calls = []
         self.montage_kwargs = None
         self.montage = None
+        self.load_data_calls = 0
+        self.close_calls = 0
 
     def load_data(self) -> None:
+        self.load_data_calls += 1
         return None
+
+    def close(self) -> None:
+        self.close_calls += 1
 
     def set_channel_types(self, mapping):
         self.channel_type_calls.append(mapping)
@@ -107,6 +115,7 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
     assert captured["filepath"] == str(path)
     assert captured["preload"] == str(tmp_path / "sample_raw.dat")
     assert captured["stim_channel"] == "Status"
+    assert fake_raw.load_data_calls == 1
     assert fake_raw.channel_type_calls == [
         {"EXG3": "misc"},
         {"EXG1": "eeg", "EXG2": "eeg"},
@@ -157,6 +166,91 @@ def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
     assert "stage=read_raw_bdf_start" in caplog.text
     assert "stage=load_data_done" in caplog.text
     assert "stage=montage_apply_done" in caplog.text
+
+
+def test_open_preflight_eeg_file_is_lazy_subsetted_and_context_managed(
+    monkeypatch,
+    tmp_path,
+):
+    header_raw = _FakeRaw()
+    lazy_raw = _FakeRaw()
+    calls = []
+
+    def _fake_read_raw_bdf(filepath, **kwargs):
+        calls.append((filepath, dict(kwargs)))
+        return header_raw if len(calls) == 1 else lazy_raw
+
+    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
+    monkeypatch.setattr(
+        shared_load_utils,
+        "_resolve_stim",
+        lambda _app: (_ for _ in ()).throw(
+            AssertionError("explicit preflight stim channel must win")
+        ),
+    )
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+    monkeypatch.setattr(
+        shared_load_utils,
+        "_memmap_dir_for_pid",
+        lambda: (_ for _ in ()).throw(AssertionError("lazy loader must not create a memmap")),
+    )
+
+    logs: list[str] = []
+    path = tmp_path / "sample.bdf"
+
+    with load_utils.open_preflight_eeg_file(
+        _app(logs),
+        str(path),
+        ref_pair=("EXG1", "EXG2"),
+        first_n_channels=1,
+        stim_channel="Status",
+    ) as raw:
+        assert raw is lazy_raw
+        assert lazy_raw.load_data_calls == 0
+        assert lazy_raw.close_calls == 0
+
+    assert calls[0][0] == str(path)
+    assert calls[0][1]["preload"] is False
+    assert "include" not in calls[0][1]
+    assert calls[1][1]["preload"] is False
+    assert calls[1][1]["include"] == ["Cz", "EXG1", "EXG2", "Status"]
+    assert header_raw.close_calls == 1
+    assert lazy_raw.close_calls == 1
+    assert lazy_raw.channel_type_calls == [
+        {"EXG3": "misc"},
+        {"EXG1": "eeg", "EXG2": "eeg"},
+        {"Status": "stim"},
+    ]
+    assert lazy_raw.montage_kwargs == {
+        "on_missing": "warn",
+        "match_case": False,
+        "verbose": False,
+    }
+    assert any("[PREFLIGHT LAZY LOADER READY]" in message for message in logs)
+    assert any("[PREFLIGHT LAZY LOADER CLOSED]" in message for message in logs)
+    assert shared_load_utils.open_preflight_eeg_file is load_utils.open_preflight_eeg_file
+
+
+def test_open_preflight_eeg_file_closes_when_caller_raises(monkeypatch, tmp_path):
+    lazy_raw = _FakeRaw()
+
+    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
+    monkeypatch.setattr(
+        shared_load_utils.mne.io,
+        "read_raw_bdf",
+        lambda *_args, **_kwargs: lazy_raw,
+    )
+
+    with pytest.raises(RuntimeError, match="caller failed"):
+        with load_utils.open_preflight_eeg_file(
+            _app([]),
+            str(tmp_path / "sample.bdf"),
+        ) as raw:
+            assert raw is lazy_raw
+            raise RuntimeError("caller failed")
+
+    assert lazy_raw.load_data_calls == 0
+    assert lazy_raw.close_calls == 1
 
 
 def test_shared_load_eeg_file_unsupported_extension_warns_and_returns_none(monkeypatch, tmp_path):

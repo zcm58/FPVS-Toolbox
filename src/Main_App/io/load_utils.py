@@ -20,6 +20,7 @@ from Main_App.Shared.load_utils import (
     _resolve_stim,
     _try_warning_log,
     load_eeg_file,
+    open_preflight_eeg_file,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "_resolve_stim",
     "_try_warning_log",
     "load_eeg_file",
+    "open_preflight_eeg_file",
 ]

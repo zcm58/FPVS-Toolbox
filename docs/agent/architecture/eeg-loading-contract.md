@@ -18,6 +18,27 @@ host object to provide:
 The canonical active import path is
 `Main_App.io.load_utils.load_eeg_file`.
 
+Condition-aware preflight QC has a separate opt-in entry point:
+
+```python
+with Main_App.io.load_utils.open_preflight_eeg_file(
+    app,
+    filepath,
+    ref_pair=(ref1, ref2),
+    first_n_channels=64,
+    stim_channel=stim,
+) as raw:
+    ...
+```
+
+This context manager opens BDF data with `preload=False`, applies the same
+channel-subset, EXG/stim typing, and montage contract, and always closes the
+lazy Raw on exit. It never calls `load_data()` and never creates the normal
+full-recording float64 memmap. All lazy sample reads must remain inside the
+context. The explicit `stim_channel` argument keeps event discovery and the
+header subset on the same configured channel; when omitted, the normal host
+resolution and `Status` fallback still apply.
+
 The implementation still lives in `Main_App.Shared.load_utils` during this
 layout migration slice. Do not change that implementation as part of
 import-surface moves.
@@ -36,6 +57,12 @@ implementation module and must not duplicate logic elsewhere.
   exclusion warning and returns `None`, while the process runner reports the
   file as `status="excluded"` instead of a processing error.
 - BDF files load through `mne.io.read_raw_bdf(...)`.
+- The normal processing loader remains disk-preloaded and unchanged. Only the
+  explicit preflight context uses `preload=False` for on-demand condition reads.
+- Preflight keeps ordinary condition intervals in RAM. An interval exceeding
+  256 MiB is copied in 10-second reads to an automatically removed,
+  condition-only float64 temporary memmap; the complete BDF is never preloaded
+  or mapped by this path.
 - `.set`/EEGLAB loading is intentionally unsupported in the active toolbox.
 - Disk-backed preload files are created under
   `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>/<file-stem>_raw.dat`.

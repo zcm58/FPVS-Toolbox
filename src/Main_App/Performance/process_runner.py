@@ -55,6 +55,7 @@ from Main_App.projects.preprocessing_settings import (
 from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
     compute_onbin_step,
+    plan_condition_fft_spans,
     resolve_oddball_ids_by_condition,
 )
 
@@ -1320,23 +1321,18 @@ def _run_full_pipeline_for_file(
                 epochs_dict[label] = []
                 continue
 
-            rep_keys = sorted([k for k in crop_results if int(k[0]) == code_int], key=lambda x: x[1])
+            span_plan = plan_condition_fft_spans(
+                crop_results=crop_results,
+                condition_id=code_int,
+                n_step=n_step,
+            )
+            rep_keys = list(span_plan.repetition_keys)
             rep_spans: List[Tuple[int, int]] = []
             rep_events: List[List[int]] = []
             rep_metadata: List[dict] = []
 
-            n_common: Optional[int] = None
-            fallback_rep_reasons = [
-                f"rep={int(rep_key[1])}:{crop_results[rep_key].fallback_reason or 'unknown'}"
-                for rep_key in rep_keys
-                if crop_results[rep_key].fallback
-            ]
-            if n_step:
-                rep_lengths = [crop_results[k].n_samples for k in rep_keys if not crop_results[k].fallback and crop_results[k].n_samples > 0]
-                if rep_lengths:
-                    n_common = (min(rep_lengths) // n_step) * n_step
-                    if n_common <= 0:
-                        n_common = None
+            n_common = span_plan.n_common
+            fallback_rep_reasons = list(span_plan.fallback_repetition_reasons)
 
             if not n_step:
                 raise RuntimeError(
@@ -1372,7 +1368,11 @@ def _run_full_pipeline_for_file(
                 n_step,
             )
 
-            for rep_key in rep_keys:
+            for rep_key, planned_span in zip(
+                rep_keys,
+                span_plan.repetition_spans,
+                strict=True,
+            ):
                 crop = crop_results[rep_key]
                 fallback_reason = ""
                 crop_mode = "55_onbin"
@@ -1390,8 +1390,7 @@ def _run_full_pipeline_for_file(
                         f"rep={int(rep_key[1])}: {crop.fallback_reason or 'unknown'}."
                     )
 
-                start_samp = int(crop.crop_start_sample)
-                stop_samp = int(start_samp + n_common)
+                start_samp, stop_samp = planned_span
 
                 expected_n = max(0, stop_samp - start_samp)
 

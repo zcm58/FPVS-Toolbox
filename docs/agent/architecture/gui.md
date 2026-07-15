@@ -56,7 +56,17 @@ Primary paths:
   processing continues. Raw preflight results retain canonical `group_id`
   provenance, and every file/participant review table plus live scan status
   displays the manifest group label. Exclusion and removed-electrode settings
-  remain keyed by globally unique participant ID.
+  remain keyed by globally unique participant ID. The normal scan passes the
+  active project root and complete event map to the GUI-neutral worker so the
+  condition-aware v2 path and its project-local cache are used. Live status
+  distinguishes planning, condition/time-block scanning, exact on-bin spectral
+  scanning, cache reuse, and participant completion while the progress value
+  counts completed participant files. The GUI caps the displayed worker count
+  at the backend's four-participant QC limit. The backend independently caps
+  BDF readers and spectral evaluators at two each. Cancellation requests are
+  relayed through the worker and take effect between condition reads,
+  time-domain blocks, FFT channel batches, and cache writes; widgets remain
+  signal consumers and never read BDF data directly.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.

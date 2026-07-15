@@ -102,6 +102,46 @@ def test_live_scan_status_includes_group_label() -> None:
     )
 
 
+def test_live_scan_status_keeps_file_identity_with_condition_detail() -> None:
+    host = SimpleNamespace(_preflight_qc_group_by_file={"p01.bdf": "Control"})
+
+    message = "Scanning P01.bdf · Faces 2/4 · time-domain blocks"
+
+    assert workflow._file_name_from_progress(message) == "p01.bdf"
+    assert workflow._grouped_scan_progress_text(host, message) == (
+        "Scanning Control · P01.bdf · Faces 2/4 · time-domain blocks"
+    )
+
+
+def test_preflight_worker_passes_explicit_project_and_event_scope(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _scan(raw_file_infos, settings, **kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        captured["raw_file_infos"] = raw_file_infos
+        captured["settings"] = settings
+        return workflow.PreflightQcScan(results=())
+
+    monkeypatch.setattr(workflow, "scan_preprocessing_qc", _scan)
+    worker = workflow._PreflightQcWorker(
+        [],
+        {"event_id_map": {"Faces": 1}},
+        [],
+        max_workers=12,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    worker.run()
+
+    assert captured["project_root"] == tmp_path
+    assert captured["event_map"] == {"Faces": 1}
+    assert captured["max_workers"] == 12
+
+
 def _hard_candidate(raw_payload: dict[str, object]) -> workflow.PreflightQcFileResult:
     return workflow.PreflightQcFileResult(
         path=Path("p34.bdf"),

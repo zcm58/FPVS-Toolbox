@@ -145,15 +145,64 @@ one obvious adjustment point. Use
 those defaults.
 
 `src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
-scan without importing Qt. It reuses `raw_channel_qc.py` for removed-electrode,
-hemisphere, bad-fraction, and connected-cluster decisions. It also calls
-`src/Main_App/processing/raw_spectral_qc.py`, a deliberately conservative raw
-off-harmonic spectral screen intended to surface very large participant-level
-artifacts before full preprocessing. Raw spectral preflight flags are review
-signals; accepted participant exclusions are still saved through the manual
-participant exclusion setting. The deeper per-file raw preflight scan may run
-with bounded parallel workers using the same resolved worker limit as the
-processing run; output ordering must remain deterministic for reporting.
+scan without importing Qt. The normal GUI route supplies an explicit active
+project root and condition event map, which enables condition-aware preflight
+QC v2. The compatibility v1 route remains available to callers that do not
+supply both inputs.
+
+V2 reads the complete configured Status channel to plan events, then requests
+EEG samples only from each configured condition onset through the earliest of
+the planned condition completion, the next configured condition onset, or the
+recording boundary. The configured epoch end is the minimum completion. When
+the shared locked FFT plan proves that normal processing will use a longer
+interval, completion extends through that exact spectral span rather than
+following a discontinuous oddball stream beyond the crop. It never scores EEG
+outside those intervals. Time-domain
+QC examines every consecutive 10-second block plus the final partial block and
+retains exact float64 full-condition metrics plus transient worst-block
+provenance. Only channels classified consistently across every relevant
+condition occurrence are participant-persistent and feed the existing removed-
+electrode confirmation table; condition-specific and 10-second-block findings
+remain separately identified provenance. A channel's quietest 10-second block
+is recorded, but the persistent relative low-variance calibration is not
+misapplied to that isolated block as a removed-electrode flag. Extreme
+high-amplitude and rare-burst block findings remain review signals.
+
+V2 spectral QC uses the same shared per-condition, shortest-repetition,
+integer-oddball-cycle FFT span planner as normal processing. It evaluates the
+Hann-windowed FFT for every channel in deterministic memory-bounded batches;
+focused parity tests require byte-identical per-channel amplitudes relative to
+the all-channel formula. Evaluation continues through the configured retained
+upper band, bounded by the source and configured downsample-target
+Nyquist frequencies. The configured downsample target remains 256 Hz by
+default; 128 Hz is only that target's Nyquist frequency and no 128 Hz
+resampling is introduced. Neighboring noise explicitly uses +/-12 FFT bins,
+excludes the target and immediately adjacent bins, and removes one global
+minimum and maximum, leaving 20 bins for the mean and population standard
+deviation. Expected FPVS harmonics, effective configured mains-notch centers,
+their collisions, and unexpected off-harmonic peaks are reported separately.
+
+Condition-aware findings are review-only in preflight v2. They do not create a
+new hard-exclusion rule; the established hard raw-channel rules remain
+unchanged in the normal process runner. A review-only condition finding can
+therefore be deferred to the existing processing-time decision rather than
+silently changing that calibrated rule. V2 caps participant workers at four,
+simultaneous BDF reads at two, and simultaneous spectral evaluators at two. A
+condition buffer larger than 256 MiB is filled in 10-second chunks into a
+temporary condition-only float64 memmap; no full-recording preflight memmap is
+created. V2 preserves deterministic result order and checks cancellation
+between condition reads, time blocks, FFT channel batches, and cache writes.
+Successful participant results
+are cached atomically under the active project root at
+`.fpvs_processing/preflight_qc/v2`; a missing, corrupt, or fingerprint-stale
+entry is a cache miss. The key includes raw path/size/mtime, relevant settings,
+method and dependency versions, and the resolved event/span plan.
+
+`src/Main_App/processing/preflight_qc_plan.py` owns the condition/event plan,
+and `src/Main_App/processing/preflight_qc_cache.py` owns the GUI-neutral cache
+primitive. `raw_channel_qc.py` and `raw_spectral_qc.py` retain their existing v1
+APIs alongside their versioned condition-aware evaluators. Output ordering must
+remain deterministic for reporting.
 For grouped projects, `HeaderOnlyPreflight` and `PreflightQcFileResult` retain
 the canonical `group_id` from `RawFileInfo`. The GUI resolves that ID through
 `ProjectGroupContext` and shows the configured group label in live scan status,

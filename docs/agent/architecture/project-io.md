@@ -43,6 +43,12 @@ FPVS Toolbox uses a strict hybrid settings model:
   `.fpvs_processing/processing_ledger.json` and
   `.fpvs_processing/processing_runs.jsonl`. This folder is recoverable state,
   not canonical project configuration.
+- Condition-aware preflight QC stores recoverable, atomically written JSON
+  entries under `.fpvs_processing/preflight_qc/v2`. The GUI must pass the
+  active absolute project root explicitly; the cache helper rejects relative
+  roots and never derives a location from the current working directory. Cache
+  entries contain derived QC payloads only, are safe to delete, and are treated
+  as misses when missing, corrupt, schema-incompatible, or fingerprint-stale.
 - Processing-end harmonic selection writes
   `Quality Check/Harmonic_Selection_Summary.xlsx` under the active project root
   and saves the matching harmonic-selection metadata into

@@ -29,6 +29,18 @@ class CropResult:
     oddball_id: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class ConditionFFTSpanPlan:
+    """Shared-length FFT spans for every repetition of one condition."""
+
+    condition_id: int
+    repetition_keys: tuple[Tuple[int, int], ...]
+    n_step: Optional[int]
+    n_common: Optional[int]
+    repetition_spans: tuple[Tuple[int, int], ...]
+    fallback_repetition_reasons: tuple[str, ...]
+
+
 ODDBALL_FREQ = Fraction(6, 5)
 CONDITION_SPECIFIC_ODDBALL_OFFSET = 50
 
@@ -46,6 +58,64 @@ def compute_onbin_N(available_samples: int, N_step: int) -> int:
     if available_samples <= 0 or N_step <= 0:
         return 0
     return (available_samples // N_step) * N_step
+
+
+def plan_condition_fft_spans(
+    crop_results: Mapping[Tuple[int, int], CropResult],
+    condition_id: int,
+    n_step: Optional[int],
+) -> ConditionFFTSpanPlan:
+    """Plan ordered, equal-length FFT spans for one condition.
+
+    The common length is the largest ``n_step`` multiple that fits every
+    non-fallback repetition, matching the locked normal-processing behavior.
+    Fallback diagnostics are returned for the caller to present in its own
+    context; spans are only emitted when a positive common length exists.
+    """
+    condition_id = int(condition_id)
+    repetition_keys = tuple(
+        sorted(
+            (key for key in crop_results if int(key[0]) == condition_id),
+            key=lambda key: key[1],
+        )
+    )
+    fallback_repetition_reasons = tuple(
+        f"rep={int(rep_key[1])}:{crop_results[rep_key].fallback_reason or 'unknown'}"
+        for rep_key in repetition_keys
+        if crop_results[rep_key].fallback
+    )
+
+    n_common: Optional[int] = None
+    if n_step:
+        repetition_lengths = [
+            int(crop_results[key].n_samples)
+            for key in repetition_keys
+            if not crop_results[key].fallback
+            and int(crop_results[key].n_samples) > 0
+        ]
+        if repetition_lengths:
+            n_common = (min(repetition_lengths) // int(n_step)) * int(n_step)
+            if n_common <= 0:
+                n_common = None
+
+    repetition_spans: tuple[Tuple[int, int], ...] = ()
+    if n_common is not None and not fallback_repetition_reasons:
+        repetition_spans = tuple(
+            (
+                int(crop_results[key].crop_start_sample),
+                int(crop_results[key].crop_start_sample) + int(n_common),
+            )
+            for key in repetition_keys
+        )
+
+    return ConditionFFTSpanPlan(
+        condition_id=condition_id,
+        repetition_keys=repetition_keys,
+        n_step=n_step,
+        n_common=n_common,
+        repetition_spans=repetition_spans,
+        fallback_repetition_reasons=fallback_repetition_reasons,
+    )
 
 
 def condition_specific_oddball_id(
