@@ -21,6 +21,7 @@ from Main_App.io.load_utils import (
 )
 from Main_App.processing.processing_ledger import (
     MISSING_EXPECTED_OUTPUTS_WARNING,
+    PROCESSING_FINGERPRINT_VERSION,
     ProcessingPlan,
     carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
@@ -1163,6 +1164,10 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             host.currentProject
         ).has_group_metadata
         settings["_fpvs_grouped_project"] = grouped_project
+        settings["_fpvs_processing_fingerprint"] = chosen_plan.fingerprint
+        settings["_fpvs_processing_fingerprint_version"] = (
+            PROCESSING_FINGERPRINT_VERSION
+        )
         if grouped_project:
             if not group_folder_by_file:
                 raise ValueError(
@@ -1174,6 +1179,11 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             settings["_fpvs_participant_id_by_file"] = {
                 str(info.path.resolve()): info.subject_id
                 for info in raw_file_infos
+            }
+            settings["_fpvs_group_id_by_file"] = {
+                str(info.path.resolve()): info.group
+                for info in raw_file_infos
+                if info.group is not None
             }
 
         host._mp = MpRunnerBridge(host)
@@ -1321,6 +1331,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     plan = getattr(host, "_processing_plan", None)
     failed_run_results: list[dict] = []
     condition_warning_results: list[dict] = []
+    ledger_update_succeeded = plan is None
     if plan is not None:
         try:
             record_processing_results(
@@ -1335,6 +1346,7 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
             logger.exception("Failed to update processing ledger.")
             host.log(f"Processing ledger update failed: {exc}", level=logging.WARNING)
         else:
+            ledger_update_succeeded = True
             failed_run_results = _run_failed_results_from_ledger(host, plan)
             condition_warning_results = _run_condition_warning_results_from_ledger(
                 host,
@@ -1399,13 +1411,19 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         for result in results
         if str(result.get("status") or "").casefold() in {"ok", "completed", "success"}
     ]
-    if not cancelled and successful_results:
+    if not cancelled and successful_results and ledger_update_succeeded:
         started_post_processing = _start_post_processing_pipeline_after_processing(
             host,
             on_finished=_finish_processing_run,
         )
         if started_post_processing:
             return
+    elif not cancelled and successful_results:
+        host.log(
+            "Post-processing and source-map generation were skipped because the "
+            "processing ledger could not be updated safely.",
+            level=logging.WARNING,
+        )
 
     _finish_processing_run()
 

@@ -28,10 +28,13 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v8_fft_multinotch"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v9_source_ready_time_domain"
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
+SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT = (
+    Path("6 - Source Localization") / "Source-Ready Time Domain v1"
+)
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
     "removed_electrode_accepted_auto_flagged",
@@ -207,6 +210,97 @@ def _resolved_path_strings(values: Sequence[Any]) -> set[str]:
         except (OSError, TypeError, ValueError):
             continue
     return resolved
+
+
+def _source_derivative_result_payload(result: Mapping[str, Any] | None) -> dict[str, object]:
+    source = result or {}
+    return {
+        "source_derivative_status": str(source.get("source_derivative_status") or "").strip(),
+        "source_derivative_manifest": str(source.get("source_derivative_manifest") or "").strip(),
+        "source_derivative_outputs": _string_list(source.get("source_derivative_outputs")),
+        "source_derivative_warning": str(source.get("source_derivative_warning") or "").strip(),
+    }
+
+
+def _source_derivative_root(project_root: Path) -> Path:
+    root = Path(project_root).resolve()
+    source_root = (root / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT).resolve()
+    if source_root == root or root not in source_root.parents:
+        raise ValueError(
+            "Refusing source-ready derivative access outside the project root: "
+            f"{source_root}"
+        )
+    return source_root
+
+
+def _resolve_source_derivative_path(project_root: Path, value: Any) -> Path:
+    root = Path(project_root).resolve()
+    source_root = _source_derivative_root(root)
+    supplied = Path(str(value))
+    target = (root / supplied).resolve() if not supplied.is_absolute() else supplied.resolve()
+    if target == source_root or source_root not in target.parents:
+        raise ValueError(
+            "Refusing to touch source derivative path outside "
+            f"{SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT}: {target}"
+        )
+    return target
+
+
+def _recorded_source_derivative_paths(
+    project_root: Path,
+    entry: Mapping[str, Any] | None,
+) -> tuple[Path, ...]:
+    if not isinstance(entry, Mapping):
+        return ()
+    recorded = _string_list(entry.get("source_derivative_outputs"))
+    manifest = str(entry.get("source_derivative_manifest") or "").strip()
+    if manifest:
+        recorded.append(manifest)
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    for value in recorded:
+        target = _resolve_source_derivative_path(project_root, value)
+        if target in seen:
+            continue
+        seen.add(target)
+        paths.append(target)
+    return tuple(paths)
+
+
+def _source_derivative_reuse_problem(
+    project_root: Path,
+    entry: Mapping[str, Any],
+) -> str | None:
+    status = str(entry.get("source_derivative_status") or "").strip().casefold()
+    if not status:
+        # Compatibility for focused callers that predate the runner result fields.
+        # Real entries from the v9 runner always carry an explicit status.
+        return None
+    if status != "complete":
+        return f"Source-ready time-domain derivative status is {status!r}, not complete."
+
+    manifest_value = str(entry.get("source_derivative_manifest") or "").strip()
+    output_values = _string_list(entry.get("source_derivative_outputs"))
+    if not manifest_value:
+        return "Source-ready time-domain derivative manifest was not recorded."
+    if not output_values:
+        return "Source-ready time-domain derivative outputs were not recorded."
+    try:
+        manifest_path = _resolve_source_derivative_path(project_root, manifest_value)
+        output_paths = tuple(
+            _resolve_source_derivative_path(project_root, value) for value in output_values
+        )
+    except ValueError as exc:
+        return str(exc)
+    if not manifest_path.is_file():
+        return f"Source-ready time-domain derivative manifest is missing: {manifest_path}"
+    artifact_paths = {path for path in output_paths if path != manifest_path}
+    if not artifact_paths:
+        return "Source-ready time-domain derivative artifact outputs were not recorded."
+    missing = [path for path in output_paths if not path.is_file()]
+    if missing:
+        return f"Source-ready time-domain derivative output is missing: {missing[0]}"
+    return None
 
 
 def _has_missing_condition_warning(entry: Mapping[str, Any]) -> bool:
@@ -497,6 +591,22 @@ def classify_processing_inputs(
             )
             continue
 
+        source_derivative_problem = _source_derivative_reuse_problem(
+            Path(project.project_root),
+            entry,
+        )
+        if source_derivative_problem:
+            states.append(
+                ProcessingInputState(
+                    info=info,
+                    participant_id=participant_id,
+                    status="missing_outputs",
+                    reason=source_derivative_problem,
+                    expected_outputs=expected_outputs,
+                )
+            )
+            continue
+
         missing_outputs = missing_outputs_now
         if missing_outputs:
             if (
@@ -570,6 +680,9 @@ def _state_still_matches_ledger(
 
     if state.status == "excluded":
         return str(entry.get("status") or "") == "excluded"
+
+    if _source_derivative_reuse_problem(Path(project.project_root), entry):
+        return False
 
     present_outputs = [path for path in state.expected_outputs if path.exists()]
     missing_outputs = [path for path in state.expected_outputs if not path.exists()]
@@ -714,6 +827,60 @@ def _assert_under_project_root(project_root: Path, path: Path, label: str) -> Pa
     raise ValueError(f"Refusing to delete unmanaged {label} output path: {target}")
 
 
+def _delete_recorded_source_derivative_targets(
+    project_root: Path,
+    targets: Sequence[Path],
+) -> list[Path]:
+    source_root = _source_derivative_root(project_root)
+    deleted: list[Path] = []
+    touched_parents: set[Path] = set()
+    for target in targets:
+        validated = _resolve_source_derivative_path(project_root, target)
+        if not validated.exists():
+            continue
+        if not validated.is_file():
+            raise ValueError(f"Refusing to delete non-file source derivative artifact: {validated}")
+        deleted.append(_delete_generated_file(validated, "source derivative"))
+        touched_parents.add(validated.parent)
+    for parent in sorted(touched_parents, key=lambda path: len(path.parts), reverse=True):
+        _prune_empty_source_derivative_parents(source_root, parent)
+    return deleted
+
+
+def _prune_empty_source_derivative_parents(source_root: Path, start: Path) -> None:
+    current = start
+    while current != source_root and source_root in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+    try:
+        source_root.rmdir()
+    except OSError:
+        pass
+
+
+def _remove_empty_source_derivative_tree(project_root: Path) -> None:
+    source_root = _source_derivative_root(project_root)
+    if not source_root.exists():
+        return
+    directories = sorted(
+        (path for path in source_root.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for directory in directories:
+        try:
+            directory.rmdir()
+        except OSError:
+            continue
+    try:
+        source_root.rmdir()
+    except OSError:
+        pass
+
+
 def clean_managed_excel_root(project: Any) -> Path:
     root = _excel_root(project).resolve()
     project_root = Path(project.project_root).resolve()
@@ -789,6 +956,8 @@ def clean_downstream_outputs_for_reprocess_all(project: Any) -> list[Path]:
         for path in files:
             deleted.append(_delete_generated_file(path, key))
 
+    _remove_empty_source_derivative_tree(project_root)
+
     quality_root = _assert_under_project_root(
         project_root,
         project_root / "Quality Check",
@@ -806,8 +975,22 @@ def clean_downstream_outputs_for_reprocess_all(project: Any) -> list[Path]:
 
 def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
     root = _excel_root(project).resolve()
+    project_root = Path(project.project_root).resolve()
+    ledger = load_ledger(project_root)
+    entries = ledger.get("entries", {})
+    if not isinstance(entries, Mapping):
+        entries = {}
     deleted: list[Path] = []
     run_files = {path.resolve() for path in plan.run_files}
+    derivative_targets: dict[str, tuple[Path, ...]] = {}
+    for state in plan.states:
+        if state.info.path.resolve() not in run_files:
+            continue
+        entry = entries.get(state.participant_id)
+        derivative_targets[state.participant_id] = _recorded_source_derivative_paths(
+            project_root,
+            entry if isinstance(entry, Mapping) else None,
+        )
     for state in plan.states:
         if state.info.path.resolve() not in run_files:
             continue
@@ -816,11 +999,23 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
             if target.exists():
                 target.unlink()
                 deleted.append(target)
+        deleted.extend(
+            _delete_recorded_source_derivative_targets(
+                project_root,
+                derivative_targets.get(state.participant_id, ()),
+            )
+        )
     return deleted
 
 
-def _remove_expected_outputs_for_state(project: Any, state: ProcessingInputState) -> list[str]:
+def _remove_expected_outputs_for_state(
+    project: Any,
+    state: ProcessingInputState,
+    entry: Mapping[str, Any] | None = None,
+) -> list[str]:
     root = _excel_root(project).resolve()
+    project_root = Path(project.project_root).resolve()
+    derivative_targets = _recorded_source_derivative_paths(project_root, entry)
     removed: list[str] = []
     for expected_output in state.expected_outputs:
         target = _assert_under_excel_root(root, expected_output)
@@ -835,6 +1030,13 @@ def _remove_expected_outputs_for_state(project: Any, state: ProcessingInputState
             )
             continue
         removed.append(str(target))
+    removed.extend(
+        str(path)
+        for path in _delete_recorded_source_derivative_targets(
+            project_root,
+            derivative_targets,
+        )
+    )
     return removed
 
 
@@ -863,9 +1065,12 @@ def record_processing_results(
     partial_condition_paths: set[Path] = set()
     excluded_by_path: dict[Path, Mapping[str, Any]] = {}
     no_output_failures_by_path: dict[Path, dict[str, Any]] = {}
+    results_by_path: dict[Path, Mapping[str, Any]] = {}
     for result in results:
+        raw_path_value = result.get("file")
+        if raw_path_value:
+            results_by_path[Path(str(raw_path_value)).resolve()] = result
         if result.get("status") == "excluded":
-            raw_path_value = result.get("file")
             if raw_path_value:
                 excluded_by_path[Path(str(raw_path_value)).resolve()] = result
             continue
@@ -948,6 +1153,7 @@ def record_processing_results(
             "missing_outputs": missing_outputs,
             "missing_condition_labels": missing_condition_labels,
             "present_outputs": present_outputs,
+            **_source_derivative_result_payload(result),
         }
 
     run_files = {path.resolve() for path in plan.run_files}
@@ -958,7 +1164,12 @@ def record_processing_results(
             continue
         excluded_result = excluded_by_path.get(raw_path)
         if excluded_result is not None:
-            removed_outputs = _remove_expected_outputs_for_state(project, state)
+            previous_entry = entries.get(state.participant_id)
+            removed_outputs = _remove_expected_outputs_for_state(
+                project,
+                state,
+                previous_entry if isinstance(previous_entry, Mapping) else None,
+            )
             qc_payload = (
                 excluded_result.get("raw_channel_qc")
                 if isinstance(excluded_result.get("raw_channel_qc"), Mapping)
@@ -1009,6 +1220,7 @@ def record_processing_results(
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
                 "n_rejected": n_rejected,
+                **_source_derivative_result_payload(excluded_result),
             }
             continue
         no_output_failure = no_output_failures_by_path.get(raw_path)
@@ -1077,9 +1289,16 @@ def record_processing_results(
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
                 "n_rejected": n_rejected,
+                **_source_derivative_result_payload(result),
             }
             continue
-        removed_outputs = _remove_expected_outputs_for_state(project, state)
+        previous_entry = entries.get(state.participant_id)
+        removed_outputs = _remove_expected_outputs_for_state(
+            project,
+            state,
+            previous_entry if isinstance(previous_entry, Mapping) else None,
+        )
+        failed_result = results_by_path.get(raw_path)
         entries[state.participant_id] = {
             "participant_id": state.participant_id,
             "group_id": state.info.group,
@@ -1102,6 +1321,7 @@ def record_processing_results(
             "kurtosis_bad_channels": [],
             "interpolated_channels": [],
             "n_rejected": 0,
+            **_source_derivative_result_payload(failed_result),
         }
 
     save_ledger(project_root, ledger)

@@ -16,11 +16,16 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/gui/`: canonical GUI package for the main-window shell, settings panel, event map, menu/sidebar/header/icon helpers, style tokens, theme, reusable widgets, operation guard, and update manager. `ui_main.py` owns landing/main page assembly; `event_map.py` owns event-map row construction, binding, Enter-key handling, and entry adapters; `icons.py`, `header_bar.py`, `file_menu.py`, and `menu_bar.py` own shell/menu presentation helpers; `sidebar.py` owns sidebar construction and sidebar button presentation; `widgets/` owns reusable PySide6 presentation primitives, `theme.py` owns the shared FPVS palette/stylesheet helpers, `op_guard.py` owns the non-blocking GUI operation guard, `project_workflows.py` owns project open/create/load/save GUI orchestration, `processing_inputs.py` owns processing input validation, file/mode UI state, and parameter assembly, `processing_workflows.py` owns processing run start/stop/queue/finalization GUI orchestration, `post_export_workflows.py` owns GUI-side post-processing worker launch/error routing and export completion handling, `tool_workflows.py` owns settings/update/tool/help/about action orchestration, and `shell_status.py` owns launch reveal, GUI log routing, and embedded processing activity-page helpers; `main_window.py` is appropriately downsized and should not be targeted for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/exports/`: canonical export adapter import surface.
   `post_export_adapter.py` bridges process/worker payloads into shared
-  post-processing exports; `figure_style.py` and `table_style.py` own
-  GUI-neutral publication styling.
+  post-processing exports; `source_time_domain_export.py` writes the signed,
+  repetition-averaged EEG Raw FIF/JSON pairs and participant commit manifests
+  consumed by the current source-PSD workflow; `figure_style.py` and
+  `table_style.py` own GUI-neutral publication styling.
 - `src/Main_App/Shared/paths.py`: resource path helper for source and frozen bundles.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical package for active EEG preprocessing and processing entry-point ownership. `preprocess.py` owns the active preprocessing implementation, `processing.py` owns the stable no-op `process_data` coordinator, and `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route. `preflight_qc.py` coordinates GUI-neutral raw QC; `preflight_qc_plan.py` owns condition/event sample planning and shared locked FFT-span reuse; `preflight_qc_cache.py` owns the project-local condition-aware QC cache; and `raw_channel_qc.py`/`raw_spectral_qc.py` own the versioned v1 and condition-aware v2 evaluators.
+  `processing_ledger.py` also records source-derivative readiness and confines
+  incremental cleanup to ledger-recorded files under the versioned derivative
+  root.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
 - `src/Main_App/projects/`: canonical owner for project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing settings normalization.
 - `src/Main_App/updates/`: canonical non-GUI updater backend for typed release
@@ -76,11 +81,14 @@ Current `Legacy_App` runtime couplings:
   Preserve this root `.fpvs_cache/` local dependency cache during routine
   cleanup unless the user explicitly requests cache removal.
   `source_payloads.py`, `transforms.py`, and `scalar_fields.py` are the bridge
-  helpers between future calculation outputs and the renderer. Project source
-  calculation lives in `source_producers/`, which reads existing flat or
-  condition/group project workbooks and writes prepared JSON/manifest files
-  under the active project root. Future numerical source-localization
-  calculation belongs outside renderer/fsaverage/GUI code.
+  helpers between calculation outputs and the renderer. Project source
+  calculation lives in `source_producers/`. The current normal path uses
+  `project_time_domain_inputs.py` to validate committed signed derivatives,
+  `hauk_source_psd.py` for exact-bin MNE source PSD and Toolbox neighboring-bin
+  z scoring, and `project_l2_mne_hauk_source_psd_export.py` for project-local
+  prepared payloads. Workbook-derived L2-MNE/eLORETA producers remain
+  legacy/exploratory import paths. Numerical source-localization calculation
+  belongs outside renderer/fsaverage/GUI code.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
 - `.agents/scripts/audit/agent_audit.py` and `.agents/skills/*/scripts/`: repo-evaluation and agent harness checks, not runtime toolbox diagnostics.

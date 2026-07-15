@@ -59,6 +59,44 @@ class ProjectSourceTopographyInputSet:
     diagnostics: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ProjectSourceParticipantSelection:
+    """Read-only participant exclusions shared by project source producers."""
+
+    excluded_subjects: tuple[str, ...]
+    flagged_subjects: tuple[str, ...]
+
+
+def project_source_participant_selection(
+    project_root: str | Path,
+    *,
+    include_flagged_subjects: bool = False,
+) -> ProjectSourceParticipantSelection:
+    """Return the current project-level source participant exclusion set."""
+
+    root = Path(project_root).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"Project root does not exist: {root}")
+    stats_root = root / "3 - Statistical Analysis Results"
+    excluded_subjects = _read_subject_list(stats_root / "Excluded Participants.xlsx")
+    flagged_subjects = _read_subject_list(stats_root / "Flagged Participants.xlsx")
+    frequency_exclusions = active_frequency_domain_exclusions(root)
+    source_electrode_excluded_subjects = {
+        participant
+        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
+        if electrodes
+    }
+    excluded_lookup = set(excluded_subjects)
+    excluded_lookup.update(frequency_exclusions.excluded_participants)
+    excluded_lookup.update(source_electrode_excluded_subjects)
+    if not include_flagged_subjects:
+        excluded_lookup.update(flagged_subjects)
+    return ProjectSourceParticipantSelection(
+        excluded_subjects=tuple(sorted(excluded_lookup)),
+        flagged_subjects=tuple(sorted(flagged_subjects)),
+    )
+
+
 def build_l2_mne_conditions_from_project(
     project_root: str | Path,
     *,
@@ -79,19 +117,12 @@ def build_l2_mne_conditions_from_project(
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
-    excluded_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Excluded Participants.xlsx")
-    flagged_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Flagged Participants.xlsx")
-    frequency_exclusions = active_frequency_domain_exclusions(root)
-    source_electrode_excluded_subjects = {
-        participant
-        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
-        if electrodes
-    }
-    excluded_lookup = set(excluded_subjects)
-    excluded_lookup.update(frequency_exclusions.excluded_participants)
-    excluded_lookup.update(source_electrode_excluded_subjects)
-    if not include_flagged_subjects:
-        excluded_lookup.update(flagged_subjects)
+    participant_selection = project_source_participant_selection(
+        root,
+        include_flagged_subjects=include_flagged_subjects,
+    )
+    excluded_lookup = set(participant_selection.excluded_subjects)
+    flagged_subjects = participant_selection.flagged_subjects
 
     expected_electrodes = tuple(name.upper() for name in DEFAULT_ELECTRODE_NAMES_64)
     diagnostics: list[str] = []
@@ -168,8 +199,8 @@ def build_l2_mne_conditions_from_project(
         electrode_names=expected_electrodes,
         conditions=tuple(source_conditions),
         summaries=tuple(summaries),
-        excluded_subjects=tuple(sorted(excluded_lookup)),
-        flagged_subjects=tuple(flagged_subjects),
+        excluded_subjects=participant_selection.excluded_subjects,
+        flagged_subjects=participant_selection.flagged_subjects,
         diagnostics=tuple(diagnostics),
     )
 

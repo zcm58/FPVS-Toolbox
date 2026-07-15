@@ -16,6 +16,15 @@ from Tools.LORETA_Visualizer.source_producers.contracts import (
 )
 
 if TYPE_CHECKING:
+    from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+        HaukSourcePsdConfig,
+        HaukSourcePsdFrequencyPlan,
+        HaukSourcePsdResult,
+        HaukSourcePsdZScoreResult,
+        build_hauk_source_psd_frequency_plan,
+        compute_hauk_source_psd,
+        compute_hauk_source_zscores,
+    )
     from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
         L2MNECorticalForwardModel,
         L2MNEFPVSCondition,
@@ -31,6 +40,7 @@ if TYPE_CHECKING:
         L2MNEHaukParticipantGroupCondition,
         L2MNEHaukParticipantSourceInput,
         L2MNEHaukParticipantZScoreValues,
+        L2MNEHaukPrecomputedParticipantGroupCondition,
         L2MNEHaukClusterPermutationResult,
         L2MNEHaukZScoreCondition,
         L2MNEHaukZScoreConfig,
@@ -40,6 +50,7 @@ if TYPE_CHECKING:
         compute_l2_mne_hauk_source_cluster_mask,
         compute_l2_mne_hauk_zscore_source_values,
         summarize_l2_mne_hauk_participant_zscores,
+        write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads,
         write_l2_mne_hauk_participant_zscore_surface_payloads,
         write_l2_mne_hauk_zscore_surface_payloads,
     )
@@ -77,10 +88,17 @@ if TYPE_CHECKING:
         write_project_l2_mne_hauk_zscore_payloads,
     )
     from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
+        MneFsaverageSourcePsdModel,
         ProjectL2MNEExportResult,
         build_mne_fsaverage_l2_mne_forward_model,
+        build_mne_fsaverage_source_psd_model,
         default_project_l2_mne_output_dir,
         write_project_l2_mne_cortical_surface_payloads,
+    )
+    from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
+        ProjectL2MNEHaukSourcePsdExportResult,
+        default_project_l2_mne_hauk_source_psd_output_dir,
+        write_project_l2_mne_hauk_source_psd_payloads,
     )
     from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
         ProjectELORETAVolumeExportResult,
@@ -116,11 +134,21 @@ _L2_MNE_EXPORTS = {
     "write_l2_mne_cortical_surface_fixture",
     "write_l2_mne_cortical_surface_payloads",
 }
+_HAUK_SOURCE_PSD_EXPORTS = {
+    "HaukSourcePsdConfig",
+    "HaukSourcePsdFrequencyPlan",
+    "HaukSourcePsdResult",
+    "HaukSourcePsdZScoreResult",
+    "build_hauk_source_psd_frequency_plan",
+    "compute_hauk_source_psd",
+    "compute_hauk_source_zscores",
+}
 _L2_MNE_HAUK_ZSCORE_EXPORTS = {
     "L2MNEHaukHarmonicBins",
     "L2MNEHaukParticipantGroupCondition",
     "L2MNEHaukParticipantSourceInput",
     "L2MNEHaukParticipantZScoreValues",
+    "L2MNEHaukPrecomputedParticipantGroupCondition",
     "L2MNEHaukClusterPermutationResult",
     "L2MNEHaukZScoreCondition",
     "L2MNEHaukZScoreConfig",
@@ -130,6 +158,7 @@ _L2_MNE_HAUK_ZSCORE_EXPORTS = {
     "compute_l2_mne_hauk_source_cluster_mask",
     "compute_l2_mne_hauk_zscore_source_values",
     "summarize_l2_mne_hauk_participant_zscores",
+    "write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_zscore_surface_payloads",
 }
@@ -159,10 +188,17 @@ _PROJECT_INPUT_EXPORTS = {
     "build_l2_mne_conditions_from_project",
 }
 _PROJECT_L2_MNE_EXPORTS = {
+    "MneFsaverageSourcePsdModel",
     "ProjectL2MNEExportResult",
     "build_mne_fsaverage_l2_mne_forward_model",
+    "build_mne_fsaverage_source_psd_model",
     "default_project_l2_mne_output_dir",
     "write_project_l2_mne_cortical_surface_payloads",
+}
+_PROJECT_HAUK_SOURCE_PSD_EXPORTS = {
+    "ProjectL2MNEHaukSourcePsdExportResult",
+    "default_project_l2_mne_hauk_source_psd_output_dir",
+    "write_project_l2_mne_hauk_source_psd_payloads",
 }
 _PROJECT_ELORETA_VOLUME_EXPORTS = {
     "ProjectELORETAVolumeExportResult",
@@ -197,16 +233,22 @@ _SOURCE_VALIDATION_REPORT_EXPORTS = {
 }
 
 __all__ = [
+    "HaukSourcePsdConfig",
+    "HaukSourcePsdFrequencyPlan",
+    "HaukSourcePsdResult",
+    "HaukSourcePsdZScoreResult",
     "L2MNECorticalForwardModel",
     "L2MNEFPVSCondition",
     "L2MNEHaukHarmonicBins",
     "L2MNEHaukParticipantGroupCondition",
     "L2MNEHaukParticipantSourceInput",
     "L2MNEHaukParticipantZScoreValues",
+    "L2MNEHaukPrecomputedParticipantGroupCondition",
     "L2MNEHaukClusterPermutationResult",
     "L2MNEHaukZScoreCondition",
     "L2MNEHaukZScoreConfig",
     "L2MNEProducerConfig",
+    "MneFsaverageSourcePsdModel",
     "ELORETAVolumeForwardModel",
     "ELORETAVolumeParticipantZScoreSummary",
     "ELORETAVolumeParticipantZScoreValues",
@@ -220,6 +262,7 @@ __all__ = [
     "ProjectELORETAVolumeExportResult",
     "ProjectFullFftBinPlan",
     "ProjectL2MNEHaukZScoreExportResult",
+    "ProjectL2MNEHaukSourcePsdExportResult",
     "ProjectL2MNEExportResult",
     "ProjectParticipantSourceFrequencyBinInputSet",
     "ProjectSourceFrequencyBinInputSet",
@@ -235,30 +278,37 @@ __all__ = [
     "build_l2_mne_hauk_participant_zscore_summary_payload",
     "build_l2_mne_hauk_zscore_conditions_from_project",
     "build_l2_mne_hauk_zscore_surface_payload",
+    "build_hauk_source_psd_frequency_plan",
     "build_mne_fsaverage_eloreta_volume_forward_model",
     "build_mne_fsaverage_l2_mne_forward_model",
+    "build_mne_fsaverage_source_psd_model",
     "build_l2_mne_cortical_surface_payload",
     "build_l2_mne_conditions_from_project",
     "build_source_lateralization_rows",
     "compute_eloreta_volume_participant_zscore_source_values",
     "compute_eloreta_volume_source_cluster_mask",
     "compute_eloreta_volume_zscore_source_values",
+    "compute_hauk_source_psd",
+    "compute_hauk_source_zscores",
     "compute_l2_mne_hauk_participant_zscore_source_values",
     "compute_l2_mne_hauk_source_cluster_mask",
     "compute_l2_mne_hauk_zscore_source_values",
     "compute_l2_mne_source_values",
     "default_project_eloreta_volume_output_dir",
     "default_project_l2_mne_hauk_zscore_output_dir",
+    "default_project_l2_mne_hauk_source_psd_output_dir",
     "default_project_l2_mne_output_dir",
     "make_l2_mne_cortical_surface_beta_fixture",
     "summarize_eloreta_volume_participant_zscores",
     "summarize_l2_mne_hauk_participant_zscores",
     "write_eloreta_volume_participant_zscore_payloads",
     "write_l2_mne_hauk_participant_zscore_surface_payloads",
+    "write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_zscore_surface_payloads",
     "write_project_eloreta_volume_hauk_zscore_payloads",
     "write_project_l2_mne_hauk_zscore_group_first_payloads",
     "write_project_l2_mne_hauk_zscore_payloads",
+    "write_project_l2_mne_hauk_source_psd_payloads",
     "write_project_l2_mne_cortical_surface_payloads",
     "write_project_source_validation_report",
     "write_l2_mne_cortical_surface_fixture",
@@ -276,6 +326,11 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.l2_mne_cortical"
         )
         return getattr(l2_mne_cortical, name)
+    if name in _HAUK_SOURCE_PSD_EXPORTS:
+        hauk_source_psd = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.hauk_source_psd"
+        )
+        return getattr(hauk_source_psd, name)
     if name in _L2_MNE_HAUK_ZSCORE_EXPORTS:
         l2_mne_hauk_zscore = importlib.import_module(
             "Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore"
@@ -301,6 +356,11 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export"
         )
         return getattr(project_l2_mne_export, name)
+    if name in _PROJECT_HAUK_SOURCE_PSD_EXPORTS:
+        project_l2_mne_hauk_source_psd_export = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export"
+        )
+        return getattr(project_l2_mne_hauk_source_psd_export, name)
     if name in _PROJECT_ELORETA_VOLUME_EXPORTS:
         project_eloreta_volume_export = importlib.import_module(
             "Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export"

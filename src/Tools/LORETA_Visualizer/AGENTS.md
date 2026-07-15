@@ -15,9 +15,12 @@ schemas. Do not consult retired Source Localization code for additional context.
 
 Implementation should remain inside `src/Tools/LORETA_Visualizer/`. The only
 normal integration edits outside it are the Main App page factory, sidebar,
-icon, cached-page cleanup, focused tests, and agent/user documentation. Do not
-spread visualizer code into unrelated Main App, Stats, preprocessing, project
-I/O, diagnostics, worker, or tool packages.
+icon, cached-page cleanup, focused tests, and agent/user documentation. The
+active Hauk source-PSD plan additionally permits one GUI-neutral Main App
+time-domain derivative writer plus narrow process-runner, processing-ledger,
+and post-processing-worker integration. Source estimation must still remain in
+this tool's `source_producers/`; do not spread it into Main App, Stats,
+preprocessing, project I/O, diagnostics, or unrelated tool packages.
 
 ## Hard Boundary
 
@@ -43,12 +46,32 @@ I/O, diagnostics, worker, or tool packages.
 
 ## Retained Beta Method Contracts
 
+- `l2_mne_hauk_source_psd_v1` is the normal time-domain-first L2-MNE beta
+  producer. It consumes signed, repetition-averaged EEG Raw FIF derivatives,
+  computes MNE source PSD before magnitude/harmonic aggregation, converts power
+  to source amplitude, sums aligned harmonic target/noise positions, and then
+  z-scores each participant independently.
+- The source-PSD method intentionally supports EEG with the MNE `fsaverage`
+  template and Toolbox BioSemi64 geometry. MEG, individual MRI,
+  participant-specific coregistration, and mixed-modality fusion are out of
+  scope rather than missing fallbacks.
+- Exact project-selected oddball harmonic bins remain authoritative. Nearest-bin
+  substitution is forbidden. The intentional Toolbox noise rule uses offsets
+  `-10..-2` and `+2..+10`, drops one minimum and one maximum finite amplitude
+  per source, and uses population SD. This nine-candidate-bins-per-side rule is
+  a documented Toolbox adaptation where it differs from interpretations of the
+  Hauk reference implementation.
+- Source-ready time-domain derivatives are durable generated project outputs
+  under `6 - Source Localization/Source-Ready Time Domain v1/`. They are EEG
+  only, signed volts, exact-length, and average repetitions before any FFT.
+  Main App serialization must not compute inverse solutions or source metrics.
 - The beta L2-MNE cortical-surface producer remains swappable and explicitly
   method-labeled (for example `l2_mne_cortical_surface_beta`). Project export
   reads existing flat or condition/group topography workbooks, uses the external
   MNE/fsaverage BioSemi64 template forward model, and writes project-local
   prepared payloads.
-- Hauk-style L2-MNE z-score export remains beta and method-labeled (for example
+- The amplitude-workbook Hauk-style L2-MNE z-score export remains readable as a
+  legacy/exploratory beta and method-labeled (for example
   `l2_mne_cortical_surface_hauk_zscore_beta`) with
   `source_value_unit: z-score`. It must use raw `FullFFT Amplitude (uV)` target
   and neighboring-bin topographies, apply the same inverse model to target and
@@ -89,10 +112,13 @@ I/O, diagnostics, worker, or tool packages.
   `6 - Source Localization/eLORETA Volume Beta/`.
 - Volume cluster masks are recomputed in volume source space with method-neutral
   `cluster_mask_source_indices`. Never reuse or mutate the L2 cortical mask.
-- When a project has no source-map manifests, one background rebuild generates
-  both default methods: L2-MNE surface and eLORETA volume. Source Map Options
-  exposes one rebuild action, not a numerical-method picker. The GUI may switch
-  loaded manifests for display; source estimation stays producer-owned.
+- When a project has no current source-PSD manifest, the normal background
+  rebuild generates the time-domain L2-MNE source-PSD method. Existing
+  amplitude-derived L2-MNE/eLORETA manifests remain viewable with explicit
+  legacy/exploratory labeling; eLORETA source-PSD migration is a separately
+  validated later feature. Source Map Options exposes one normal rebuild
+  action, not numerical controls. The GUI may switch loaded manifests for
+  display; source estimation stays producer-owned.
 
 ## Retained Display And Fallback Behavior
 

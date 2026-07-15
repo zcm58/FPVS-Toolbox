@@ -16,6 +16,27 @@ from Main_App.processing.raw_channel_qc import (
 from Main_App.workers import process_runner
 
 
+def test_source_epoch_set_requires_every_configured_condition() -> None:
+    with pytest.raises(RuntimeError, match="every configured condition; missing: B"):
+        process_runner._complete_source_epoch_set(
+            {"A": [object()], "B": []},
+            {"A": 21, "B": 22},
+        )
+
+
+def test_source_epoch_set_preserves_configured_condition_order() -> None:
+    first = [object()]
+    second = [object()]
+
+    result = process_runner._complete_source_epoch_set(
+        {"B": second, "A": first},
+        {"A": 21, "B": 22},
+    )
+
+    assert list(result) == ["A", "B"]
+    assert result == {"A": first, "B": second}
+
+
 def _write_bdf_header(path: Path, *, header_bytes: int = 512, data_records: int = 0, channels: int = 1) -> None:
     header = bytearray(b" " * 256)
 
@@ -506,6 +527,26 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
         "Main_App.exports.post_export_adapter.run_post_export",
         _capture_post_export,
     )
+
+    def _capture_source_derivative(**kwargs):
+        captured["source_derivative_kwargs"] = kwargs
+        source_root = tmp_path / "project" / "6 - Source Localization"
+        return SimpleNamespace(
+            participant_id="fake",
+            artifacts=(
+                SimpleNamespace(
+                    fif_path=source_root / "fake_A_avg_raw.fif",
+                    sidecar_path=source_root / "fake_A_avg_raw.json",
+                ),
+            ),
+            manifest_path=source_root / "manifests" / "fake.json",
+        )
+
+    monkeypatch.setattr(
+        process_runner,
+        "write_source_ready_time_domain_derivatives",
+        _capture_source_derivative,
+    )
     monkeypatch.setattr(process_runner, "compute_fft_crop_from_events", lambda **_kwargs: (crop_results, 4, []))
     monkeypatch.setattr(
         process_runner,
@@ -526,6 +567,8 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
+            "_fpvs_processing_fingerprint": "fixture-fingerprint",
+            "_fpvs_processing_fingerprint_version": "fixture-version",
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -547,6 +590,28 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
     assert result["export_timing_records"] == [
         {"source": "post_process", "stage": "workbook_write", "elapsed_ms": 7}
     ]
+    source_kwargs = captured["source_derivative_kwargs"]
+    assert tuple(source_kwargs["condition_epochs"]) == ("A",)
+    assert (
+        source_kwargs["condition_epochs"]["A"]
+        is captured["epochs_dict"]["A"]
+    )
+    assert source_kwargs["condition_ids"] == {"A": 21}
+    assert source_kwargs["processing_provenance"] == {
+        "processing_fingerprint": "fixture-fingerprint",
+        "processing_fingerprint_version": "fixture-version",
+        "preprocessing_order_version": process_runner.backend_preprocess.PREPROCESSING_ORDER_VERSION,
+        "preprocessed_raw_cache_version": process_runner.PREPROC_CACHE_VERSION,
+    }
+    assert result["source_derivative_status"] == "complete"
+    assert result["source_derivative_warning"] == ""
+    assert result["source_derivative_manifest"].endswith("manifests/fake.json")
+    assert not Path(result["source_derivative_manifest"]).is_absolute()
+    assert all(
+        not Path(path).is_absolute()
+        for path in result["source_derivative_outputs"]
+    )
+    assert len(result["source_derivative_outputs"]) == 3
 
 
 def test_run_full_pipeline_uses_condition_specific_oddball_markers(
@@ -602,6 +667,15 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
         "Main_App.exports.post_export_adapter.run_post_export",
         _capture_post_export,
     )
+
+    def _failed_source_derivative(**_kwargs):
+        raise RuntimeError("fixture source derivative failure")
+
+    monkeypatch.setattr(
+        process_runner,
+        "write_source_ready_time_domain_derivatives",
+        _failed_source_derivative,
+    )
     monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     fake_bdf = tmp_path / "condition-specific.bdf"
@@ -616,6 +690,8 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
+            "_fpvs_processing_fingerprint": "fixture-fingerprint",
+            "_fpvs_processing_fingerprint_version": "fixture-version",
         },
         event_map={"fruit": 1, "veg": 2},
         save_folder=tmp_path / "out",
@@ -631,6 +707,10 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
     assert veg_epochs.metadata["oddball_id"].tolist() == [52]
     assert int(fruit_epochs.get_data().shape[2]) % 640 == 0
     assert int(veg_epochs.get_data().shape[2]) % 640 == 0
+    assert result["post_export_ok"] is True
+    assert result["source_derivative_status"] == "incomplete"
+    assert result["source_derivative_outputs"] == []
+    assert result["source_derivative_warning"] == "fixture source derivative failure"
 
 
 def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(

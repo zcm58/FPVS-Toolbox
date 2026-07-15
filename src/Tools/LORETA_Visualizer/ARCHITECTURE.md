@@ -37,15 +37,16 @@ project condition topographies, an external MNE/fsaverage BioSemi64 template
 EEG forward model, and the existing prepared payload/manifest bridge so real
 project data can be viewed without changing renderer internals.
 
-Current project source-map readers support both flat condition workbook folders
-and condition/group workbook subfolders. They require the Stats-ready workbook
-for selected harmonics. The GUI may generate that workbook in a worker by
-reusing the existing Stats export service when the user opens LORETA before
-running the Stats-ready export manually; the workbook is still written to the
-standard Stats results folder expected by the project source-map producers.
-The Hauk-style z-score path also requires
-`FullFFT Amplitude (uV)` target and neighboring-bin columns in included
-participant workbooks.
+Current amplitude-derived project source-map readers support both flat
+condition workbook folders and condition/group workbook subfolders. Those
+legacy/exploratory routes require the Stats-ready workbook and, for z-scores,
+`FullFFT Amplitude (uV)` target and neighboring-bin columns.
+
+The normal Hauk-informed source-PSD route instead reads the processing-time
+harmonic selection and durable, signed time-domain derivatives written while
+condition epochs are resident. Frequency QC/harmonic selection and Stats-ready
+export are sibling downstream consumers: a Stats workbook failure does not by
+itself invalidate otherwise complete source-PSD inputs.
 
 The beta eLORETA volume method is implemented as a sibling source producer. It
 uses the same project FullFFT participant-first z-score contract as the current
@@ -194,6 +195,44 @@ and neighboring frequency-bin topographies, sums selected harmonics in sensor
 space, estimates target/noise source amplitudes through the same inverse model,
 and writes `source_value_unit: z-score` payloads. It must not derive z-scores
 from already summed BCA values or compact selected-harmonic summaries.
+
+The Hauk source-PSD feature adds `project_time_domain_inputs.py`,
+`hauk_source_psd.py`, and `project_l2_mne_hauk_source_psd_export.py` as a new,
+versioned sibling path. Main App processing publishes one signed,
+repetition-averaged EEG Raw FIF per participant/condition plus provenance and a
+participant commit manifest. The read-only adapter validates complete enabled
+participant/condition sets. The producer reuses an EEG-only fsaverage
+BioSemi64 inverse, calls MNE source PSD before amplitude/harmonic aggregation,
+and sends participant source z-score arrays through the retained aggregation,
+cluster, ROI, lateralization, and prepared-payload stages.
+When a project has multiple canonical participant groups, the exporter creates
+separate group-by-condition aggregation and cluster inputs. Group identity is
+preserved in prepared condition metadata; experimental groups are not pooled
+silently.
+
+This method is deliberately Toolbox-specific where appropriate: project-selected
+significant oddball harmonics remain authoritative, exact FPVS bins are
+required, and neighboring noise uses offsets `-10..-2` and `+2..+10` before
+one global minimum/maximum removal and population-SD (`ddof=0`) z scoring. The
+method metadata must identify that nine-candidate-bins-per-side rule as an
+intentional Toolbox adaptation, not an exact reproduction claim.
+
+The methodological precedents are Hauk et al. (2021), *Face-selective responses
+in combined EEG/MEG recordings with fast periodic visual stimulation (FPVS)*
+([DOI](https://doi.org/10.1016/j.neuroimage.2021.118460)), and the public
+[`olafhauk/FPVS_sweep`](https://github.com/olafhauk/FPVS_sweep) repository,
+including `FPVS_PSD_Source_sweep.py`. Cite them as influences on the
+source-spectrum design; do not claim that this EEG-only template implementation
+exactly reproduces their combined EEG/MEG or individual-anatomy pipeline.
+
+The supported source model is EEG-only `fsaverage` with Toolbox BioSemi64
+geometry. MEG, individual MRI/coregistration, and mixed-modality fusion are
+explicit non-goals. The inverse remains MNE-native with `method="MNE"`,
+`loose=0.2`, `depth=None`, `fixed=False`, `lambda2=1/9`, and no dSPM,
+sLORETA, or eLORETA normalization. It uses MNE's ad-hoc diagonal EEG noise
+covariance because the Toolbox workflow does not require a separate
+resting/noise acquisition; this is a documented departure from the reference
+pipeline's recorded resting covariance.
 
 Phase 6E adds documentation and GUI source-map options around those producer
 paths. Project source-map generation excludes participants listed in
@@ -460,7 +499,30 @@ statistics in the renderer. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space
-noise mean and population SD.
+noise mean and population SD (`ddof=0`).
+
+The time-domain source-PSD exporter writes generated prepared outputs under
+`6 - Source Localization/L2-MNE Hauk Source PSD Beta/` with method identity
+`l2_mne_hauk_source_psd_v1`. Its canonical inputs live under
+`6 - Source Localization/Source-Ready Time Domain v1/` in
+condition-first/group-second layout. An artifact pair is
+`<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.fif` and
+`<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.json`;
+participant commit manifests are
+`manifests/[<group>/]<participant>.json`. Each manifest is written only after
+all expected condition FIF/sidecar pairs succeed. Readers reject missing,
+stale, checksum-mismatched, incompatible-channel, or off-bin sets rather than
+silently dropping participants or falling back to amplitude workbooks. The FIF
+contains signed EEG volts, exact processed `N` and sampling rate,
+montage/reference state, and no FFT or source values.
+
+For each included participant/condition, source PSD is computed on the complete
+averaged time series with the intended MNE inverse settings. Power is converted
+to amplitude, exact target/noise positions are aligned across the canonical
+harmonic plan, corresponding positions are summed in source space, and the
+Toolbox neighboring-bin z-score is applied per source. Only compact participant
+results are cached; complete source spectra are reproducible from the durable
+time-domain derivative and are not retained by default.
 
 The project eLORETA volume exporter writes generated files under
 `6 - Source Localization/eLORETA Volume Beta/` by default. Its manifest can be
@@ -470,12 +532,14 @@ volume view uses the same saved cluster-mask toggle semantics: when enabled,
 saved source-index cluster masks filter displayed source locations; when
 disabled or unavailable, transparent volume z-score overlays use positive-only
 exploratory display filtering. Neither path changes saved payload values.
-On first open, if no default project source-map manifests exist, the GUI starts
-one background rebuild that writes both default method outputs. Manual rebuilds
-from the Options dialog use the same batch behavior, so users do not need to
-choose a calculation method before generating source maps. The Method selector
-remains a display selector over already-loaded manifests, not a rebuild-method
-decision.
+On first open, if no current time-domain source-PSD manifest exists, the GUI may
+start one background rebuild for the normal L2-MNE source-PSD output. Manual
+rebuilds use the same path, so users do not choose numerical parameters.
+Existing amplitude-derived L2-MNE and eLORETA manifests remain importable but
+are labeled legacy/exploratory; eLORETA is not rebuilt by the normal source-PSD
+batch until its own time-domain method is separately validated. The Method
+selector remains a display selector over loaded manifests, not a numerical
+method editor.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in

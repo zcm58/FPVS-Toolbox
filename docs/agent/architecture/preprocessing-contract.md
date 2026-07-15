@@ -63,8 +63,11 @@ The canonical file-level process runner is
 8. Extract events from the configured stim channel.
 9. Build epochs per event-map label.
 10. Run post-export through `Main_App.exports.post_export_adapter`.
-11. Finalize the preprocessing audit with `finalize_preproc_audit`.
-12. Clean up worker memory and temporary memmap paths.
+11. When post-export succeeds, publish the source-ready signed time-domain EEG
+    derivative from the already-built condition epochs. This serialization step
+    performs no new preprocessing, FFT, or source estimation.
+12. Finalize the preprocessing audit with `finalize_preproc_audit`.
+13. Clean up worker memory and temporary memmap paths.
 
 GUI processing must route through the active process runner. Single-file runs use
 the same runner with `max_workers=1`. Do not add a fallback path that bypasses
@@ -101,6 +104,13 @@ skip fallback repetitions. If a selected repetition cannot produce a valid
 Downstream `FullFFT Amplitude (uV)` columns are expected to include the exact
 nominal oddball harmonics from this crop behavior.
 
+The source-ready derivative uses those same aligned `55_onbin` epochs. It
+averages repetitions sample-by-sample in signed volts and preserves exact `N`,
+sampling frequency, crop/bin metadata, EEG channel order, montage, bad-channel
+provenance, and final average-reference state. It must not introduce a second
+crop plan, nearest-bin fallback, spectral window, rectification, or magnitude
+operation.
+
 The process runner logs `[TIMING] file=... section=... elapsed_ms=...` for
 cache lookup, load, pre-audit, preprocessing, cache store, events, epochs,
 export, post-audit, and cleanup when those stages run. The returned per-file
@@ -110,7 +120,7 @@ first-run and cache-hit runtimes.
 The preprocessed Raw cache version is
 `preprocessed-raw-v9-fft-multinotch`.
 The project processing-ledger and Stats group-harmonic cache processing
-fingerprints use `processing_fingerprint_v8_fft_multinotch`. The
+fingerprints use `processing_fingerprint_v9_source_ready_time_domain`. The
 raw channel-health QC threshold, removed-electrode QC mode, per-file manual
 removed-electrode list, baseline raw-amplitude metadata, and rare-burst
 candidate list are part of the cache payload so changes to those settings

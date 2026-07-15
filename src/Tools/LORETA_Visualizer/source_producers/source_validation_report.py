@@ -82,6 +82,7 @@ def write_project_source_validation_report(
         "participant_sidecar_summary": participant_summary,
         "lateralization_summary": lateralization_summary,
         "forward_model_summary": _forward_model_summary(forward_model_metadata or {}),
+        "intended_scope": _intended_scope(),
         "validation_checks": _validation_checks(
             payloads=payloads,
             participant_summary=participant_summary,
@@ -206,6 +207,13 @@ def _input_summary(project_inputs: Any) -> dict[str, Any]:
         summaries.append(
             {
                 "condition": str(getattr(summary, "condition", "")),
+                "input_file_count": int(
+                    getattr(
+                        summary,
+                        "input_file_count",
+                        getattr(summary, "workbook_count", 0),
+                    )
+                ),
                 "workbook_count": int(getattr(summary, "workbook_count", 0)),
                 "included_subject_count": int(getattr(summary, "included_subject_count", 0)),
                 "included_subjects": list(getattr(summary, "included_subjects", ())),
@@ -261,6 +269,7 @@ def _forward_model_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "noise_normalization",
         "fsaverage_subject",
         "fsaverage_spacing",
+        "source_spacing",
         "volume_pos_mm",
         "source_space_kind",
         "source_count",
@@ -293,10 +302,17 @@ def _validation_checks(
 def _beta_limitations() -> list[str]:
     return [
         "This is a beta source-localization workflow.",
-        "Current real-project source methods are EEG-only template-source workflows, including L2-MNE surface maps and beta eLORETA volume maps when enabled.",
-        "The workflow does not use subject-specific MRIs or subject-specific forward models.",
+        "Template-anatomy source coordinates are approximate and must not be interpreted as participant-specific anatomical localization.",
         "Cluster masks are source-space producer outputs; the renderer only displays prepared masks.",
         "Source-space lateralization summaries are descriptive companion metrics and do not replace sensor-space BCA lateralization statistics.",
+    ]
+
+
+def _intended_scope() -> list[str]:
+    return [
+        "EEG-only FPVS projects using the canonical BioSemi64 channel geometry.",
+        "MNE fsaverage template anatomy shared across participants.",
+        "MEG fusion, individual MRI, and participant-specific coregistration are outside this workflow by design.",
     ]
 
 
@@ -325,6 +341,10 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- Payloads: {validation['payload_count']}",
         f"- Cluster-masked payloads: {validation['cluster_masked_payload_count']}",
         f"- Selected harmonics: {_join_values(input_summary['selected_harmonics_hz'])}",
+        "",
+        "## Intended Scope",
+        "",
+        *(f"- {item}" for item in report["intended_scope"]),
         "",
         "## Validation Checks",
         "",

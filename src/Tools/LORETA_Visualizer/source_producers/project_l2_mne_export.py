@@ -9,11 +9,12 @@ GUI, renderer, display mesh, or display-transform modules.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import ssl
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 from urllib.error import URLError
 
 import numpy as np
@@ -61,6 +62,38 @@ SUPPORTED_PROJECT_SOURCE_METRICS = (
 
 class ProjectL2MNEExportError(RuntimeError):
     """Raised when project-level beta L2-MNE source maps cannot be written."""
+
+
+@dataclass(frozen=True)
+class MneFsaverageSourcePsdModel:
+    """Opaque native MNE inverse resources for time-domain source PSD.
+
+    Display-facing code receives only ``forward_model``. The native ``info``
+    and ``inverse_operator`` stay inside source-producer orchestration.
+    """
+
+    forward_model: L2MNECorticalForwardModel
+    info: Any
+    inverse_operator: Any
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return dict(self.forward_model.metadata)
+
+
+@dataclass(frozen=True)
+class _MneFsaverageInverseResources:
+    mne_module: Any
+    subjects_dir: Path
+    info: Any
+    inverse_operator: Any
+    loose_forward: Any
+    leadfield: np.ndarray
+    source_points: np.ndarray
+    faces: np.ndarray
+    hemi_counts: tuple[int, ...]
+    source_vertex_ids: tuple[int, ...]
+    source_hemispheres: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -167,9 +200,87 @@ def build_mne_fsaverage_l2_mne_forward_model(
     loose_orientation: float = DEFAULT_MNE_LOOSE_ORIENTATION,
 ) -> L2MNECorticalForwardModel:
     """Build a Hauk-style loose-orientation BioSemi64/fsaverage inverse model with MNE."""
+    resources = _build_mne_fsaverage_inverse_resources(
+        spacing=spacing,
+        allow_fetch_fsaverage=allow_fetch_fsaverage,
+        mindist_mm=mindist_mm,
+        loose_orientation=loose_orientation,
+        sfreq=100.0,
+        channel_names=tuple(DEFAULT_ELECTRODE_NAMES_64),
+    )
+    try:
+        from mne.minimum_norm import apply_inverse
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise ProjectL2MNEExportError(
+            f"MNE is required for the beta fsaverage forward model: {exc}"
+        ) from exc
+    source_estimator = _make_mne_native_source_estimator(
+        resources.mne_module,
+        info=resources.info,
+        apply_inverse_func=apply_inverse,
+        inverse_operator=resources.inverse_operator,
+        source_count=len(resources.source_points),
+    )
+    return _l2_mne_forward_model_from_resources(
+        resources,
+        spacing=spacing,
+        mindist_mm=mindist_mm,
+        loose_orientation=loose_orientation,
+        source_estimator=source_estimator,
+        input_description="uV topographies converted to V before MNE apply_inverse",
+    )
+
+
+def build_mne_fsaverage_source_psd_model(
+    *,
+    sfreq: float,
+    channel_names: Sequence[str] = DEFAULT_ELECTRODE_NAMES_64,
+    spacing: str = DEFAULT_MNE_FSAVERAGE_SPACING,
+    allow_fetch_fsaverage: bool = False,
+    mindist_mm: float = DEFAULT_MNE_MINDIST_MM,
+    loose_orientation: float = DEFAULT_MNE_LOOSE_ORIENTATION,
+) -> MneFsaverageSourcePsdModel:
+    """Build the EEG-only fsaverage inverse used by time-domain source PSD."""
+
+    resources = _build_mne_fsaverage_inverse_resources(
+        spacing=spacing,
+        allow_fetch_fsaverage=allow_fetch_fsaverage,
+        mindist_mm=mindist_mm,
+        loose_orientation=loose_orientation,
+        sfreq=sfreq,
+        channel_names=tuple(str(name) for name in channel_names),
+    )
+    forward_model = _l2_mne_forward_model_from_resources(
+        resources,
+        spacing=spacing,
+        mindist_mm=mindist_mm,
+        loose_orientation=loose_orientation,
+        source_estimator=None,
+        input_description=(
+            "signed EEG Raw in V; source PSD is computed before amplitude and harmonic aggregation"
+        ),
+    )
+    return MneFsaverageSourcePsdModel(
+        forward_model=forward_model,
+        info=resources.info,
+        inverse_operator=resources.inverse_operator,
+    )
+
+
+def _build_mne_fsaverage_inverse_resources(
+    *,
+    spacing: str,
+    allow_fetch_fsaverage: bool,
+    mindist_mm: float,
+    loose_orientation: float,
+    sfreq: float,
+    channel_names: tuple[str, ...],
+) -> _MneFsaverageInverseResources:
+    """Build shared native MNE resources without exposing them to display code."""
+
     try:
         import mne
-        from mne.minimum_norm import apply_inverse, make_inverse_operator
+        from mne.minimum_norm import make_inverse_operator
     except (ImportError, ModuleNotFoundError) as exc:
         raise ProjectL2MNEExportError(f"MNE is required for the beta fsaverage forward model: {exc}") from exc
 
@@ -180,8 +291,15 @@ def build_mne_fsaverage_l2_mne_forward_model(
     _require_file(bem_path, description="fsaverage BEM solution")
     _require_file(trans_path, description="fsaverage transform")
 
-    channel_names = tuple(DEFAULT_ELECTRODE_NAMES_64)
-    info = _biosemi64_info(mne, channel_names)
+    expected_channels = tuple(DEFAULT_ELECTRODE_NAMES_64)
+    if channel_names != expected_channels:
+        raise ProjectL2MNEExportError(
+            "The EEG-only fsaverage source model requires the canonical BioSemi64 channel order."
+        )
+    resolved_sfreq = float(sfreq)
+    if not np.isfinite(resolved_sfreq) or resolved_sfreq <= 0.0:
+        raise ProjectL2MNEExportError("Source-PSD model sampling frequency must be positive and finite.")
+    info = _biosemi64_info(mne, channel_names, sfreq=resolved_sfreq)
     info = _with_eeg_average_reference_projection(mne, info)
     try:
         src = mne.setup_source_space(
@@ -237,19 +355,50 @@ def build_mne_fsaverage_l2_mne_forward_model(
         raise ProjectL2MNEExportError(
             "MNE forward model source count does not match extracted source-space coordinates."
         )
-    source_estimator = _make_mne_native_source_estimator(
-        mne,
+    return _MneFsaverageInverseResources(
+        mne_module=mne,
+        subjects_dir=subjects_dir,
         info=info,
-        apply_inverse_func=apply_inverse,
         inverse_operator=inverse_operator,
-        source_count=len(source_points),
+        loose_forward=loose_forward,
+        leadfield=leadfield,
+        source_points=source_points,
+        faces=faces,
+        hemi_counts=hemi_counts,
+        source_vertex_ids=source_vertex_ids,
+        source_hemispheres=source_hemispheres,
     )
 
+
+def _l2_mne_forward_model_from_resources(
+    resources: _MneFsaverageInverseResources,
+    *,
+    spacing: str,
+    mindist_mm: float,
+    loose_orientation: float,
+    source_estimator: Any,
+    input_description: str,
+) -> L2MNECorticalForwardModel:
+    channel_names = tuple(resources.info.ch_names)
+    leadfield = resources.leadfield
+    leadfield_representation = "native_mne_orientation_columns"
+    if source_estimator is None:
+        # The time-domain source-PSD path keeps the native loose-orientation
+        # inverse operator for all numerical work.  Its renderer-facing model,
+        # however, has a one-column-per-cortical-source contract.  Collapse
+        # each source's three orientation columns to their Euclidean norm only
+        # for that descriptor; compute_source_psd still receives the untouched
+        # native inverse operator above.
+        leadfield = _source_aligned_leadfield(
+            resources.leadfield,
+            source_count=len(resources.source_points),
+        )
+        leadfield_representation = "orientation_norm_per_source_descriptor_only"
     return L2MNECorticalForwardModel(
         channel_names=channel_names,
-        source_points=source_points,
+        source_points=resources.source_points,
         leadfield=leadfield,
-        faces=faces,
+        faces=resources.faces,
         coordinate_space=COORDINATE_SPACE_FSAVERAGE,
         label=f"MNE fsaverage {spacing} BioSemi64 loose-orientation cortical surface",
         metadata={
@@ -264,26 +413,72 @@ def build_mne_fsaverage_l2_mne_forward_model(
             "noise_covariance": "mne_ad_hoc_diagonal_eeg",
             "average_reference_projection": True,
             "regularization": "MNE inverse lambda2 with SNR=3 default",
-            "input_unit_conversion": "uV topographies converted to V before MNE apply_inverse",
-            "mne_version": str(mne.__version__),
-            "fsaverage_subjects_dir": str(subjects_dir),
+            "input_unit_conversion": input_description,
+            "mne_version": str(resources.mne_module.__version__),
+            "fsaverage_subjects_dir": str(resources.subjects_dir),
             "fsaverage_subject": FSAVERAGE_SUBJECT,
             "source_spacing": str(spacing),
             "mindist_mm": float(mindist_mm),
+            "model_sfreq_hz": float(resources.info["sfreq"]),
             "source_points_unit": "FreeSurfer surface millimeters",
-            "leadfield_shape": [int(leadfield.shape[0]), int(leadfield.shape[1])],
-            "hemi_source_counts": list(hemi_counts),
+            "leadfield_shape": [
+                int(leadfield.shape[0]),
+                int(leadfield.shape[1]),
+            ],
+            "native_mne_leadfield_shape": [
+                int(resources.leadfield.shape[0]),
+                int(resources.leadfield.shape[1]),
+            ],
+            "native_mne_leadfield_sha256": _array_content_sha256(
+                resources.leadfield
+            ),
+            "leadfield_representation": leadfield_representation,
+            "hemi_source_counts": list(resources.hemi_counts),
             "source_vertex_ids_by_hemi": _source_vertex_ids_by_hemi(
-                source_vertex_ids=source_vertex_ids,
-                source_hemispheres=source_hemispheres,
+                source_vertex_ids=resources.source_vertex_ids,
+                source_hemispheres=resources.source_hemispheres,
             ),
             "source_vertex_id_source": "MNE source-space vertno values",
             "subject_mri": "template fsaverage only",
         },
         source_estimator=source_estimator,
-        source_vertex_ids=source_vertex_ids,
-        source_hemispheres=source_hemispheres,
+        source_vertex_ids=resources.source_vertex_ids,
+        source_hemispheres=resources.source_hemispheres,
     )
+
+
+def _source_aligned_leadfield(
+    native_leadfield: np.ndarray,
+    *,
+    source_count: int,
+) -> np.ndarray:
+    """Return one deterministic descriptor column per cortical source."""
+
+    leadfield = np.asarray(native_leadfield, dtype=float)
+    if leadfield.ndim != 2 or source_count <= 0:
+        raise ProjectL2MNEExportError("MNE leadfield/source count is invalid.")
+    if leadfield.shape[1] == source_count:
+        return leadfield.copy()
+    if leadfield.shape[1] == source_count * 3:
+        return np.linalg.norm(
+            leadfield.reshape(leadfield.shape[0], source_count, 3),
+            axis=2,
+        )
+    raise ProjectL2MNEExportError(
+        "MNE leadfield must contain either one or three orientation columns "
+        f"per source; got {leadfield.shape[1]} columns for {source_count} sources."
+    )
+
+
+def _array_content_sha256(values: np.ndarray) -> str:
+    """Hash array shape, dtype, and values for numerical-model provenance."""
+
+    array = np.ascontiguousarray(np.asarray(values))
+    digest = hashlib.sha256()
+    digest.update(array.dtype.str.encode("ascii"))
+    digest.update(np.asarray(array.shape, dtype=np.int64).tobytes(order="C"))
+    digest.update(array.tobytes(order="C"))
+    return digest.hexdigest()
 
 
 def _project_root(project_root: str | Path) -> Path:
@@ -351,12 +546,21 @@ def _require_file(path: Path, *, description: str) -> None:
         raise ProjectL2MNEExportError(f"Missing {description}: {path}")
 
 
-def _biosemi64_info(mne_module, channel_names: tuple[str, ...]):  # noqa: ANN001, ANN202
+def _biosemi64_info(  # noqa: ANN001, ANN202
+    mne_module,
+    channel_names: tuple[str, ...],
+    *,
+    sfreq: float = 100.0,
+):
     montage = mne_module.channels.make_standard_montage("biosemi64")
     missing = sorted(set(channel_names) - set(montage.ch_names))
     if missing:
         raise ProjectL2MNEExportError(f"BioSemi64 montage is missing expected channels: {missing}")
-    info = mne_module.create_info(ch_names=list(channel_names), sfreq=100.0, ch_types="eeg")
+    info = mne_module.create_info(
+        ch_names=list(channel_names),
+        sfreq=float(sfreq),
+        ch_types="eeg",
+    )
     info.set_montage(montage, match_case=False)
     return info
 

@@ -102,12 +102,12 @@ MRI_SLICE_PREVIEW_SCALE = 2.25
 MRI_SLICE_PREVIEW_MIN_PIXELS = (1800, 1050)
 MRI_SLICE_PREVIEW_MAX_PIXELS = (3600, 2200)
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
+PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD = "l2_mne_source_psd"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 PROJECT_SOURCE_EXPORT_ELORETA_VOLUME = "eloreta_volume_hauk_zscore"
 PROJECT_SOURCE_EXPORT_ALL_ZSCORE = "all_zscore"
 PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
-    PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
-    PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+    PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
 )
 LORETA_SUMMARY_REPORT_STATUS = "FPVS Toolbox is preparing the LORETA summary report."
 LORETA_SOURCE_MAP_BUILD_STATUS = "Generating source-space maps for 3D visualization of oddball responses."
@@ -146,14 +146,17 @@ DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
     ("MRI slices", DISPLAY_MODE_MRI_SLICES),
 )
+SOURCE_METHOD_L2_MNE_SOURCE_PSD = "l2_mne_source_psd"
 SOURCE_METHOD_L2_MNE_SURFACE = "l2_mne_surface"
 SOURCE_METHOD_ELORETA_VOLUME = "eloreta_volume"
 SOURCE_METHOD_PREPARED = "prepared_source"
 SOURCE_METHOD_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("L2-MNE surface", SOURCE_METHOD_L2_MNE_SURFACE),
-    ("eLORETA volume", SOURCE_METHOD_ELORETA_VOLUME),
+    ("L2-MNE source PSD", SOURCE_METHOD_L2_MNE_SOURCE_PSD),
+    ("Legacy amplitude-derived L2-MNE", SOURCE_METHOD_L2_MNE_SURFACE),
+    ("Legacy amplitude-derived eLORETA", SOURCE_METHOD_ELORETA_VOLUME),
 )
 SOURCE_METHOD_DEFAULT_DISPLAY_MODE = {
+    SOURCE_METHOD_L2_MNE_SOURCE_PSD: DISPLAY_MODE_SPLIT_HEMISPHERE,
     SOURCE_METHOD_L2_MNE_SURFACE: DISPLAY_MODE_SPLIT_HEMISPHERE,
     SOURCE_METHOD_ELORETA_VOLUME: DISPLAY_MODE_TRANSPARENT_MESH,
     SOURCE_METHOD_PREPARED: DEFAULT_DISPLAY_MODE,
@@ -326,12 +329,14 @@ class ProjectSourceMapExportWorker(QObject):
         export_modes: tuple[str, ...],
         include_flagged_subjects: bool,
         zscore_model: str,
+        project: object | None = None,
     ) -> None:
         super().__init__()
         self._project_root = project_root
         self._export_modes = export_modes
         self._include_flagged_subjects = include_flagged_subjects
         self._zscore_model = zscore_model
+        self._project = project
 
     @Slot()
     def run(self) -> None:
@@ -364,6 +369,25 @@ class ProjectSourceMapExportWorker(QObject):
             self.finished.emit()
 
     def _run_export_mode(self, export_mode: str) -> object:
+        if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
+            from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
+                write_project_l2_mne_hauk_source_psd_payloads,
+            )
+
+            if self._project is None:
+                raise RuntimeError(
+                    "Open the active FPVS project before rebuilding time-domain source maps."
+                )
+            self.progress.emit(
+                "Starting Hauk-informed time-domain L2-MNE source-PSD rebuild..."
+            )
+            return write_project_l2_mne_hauk_source_psd_payloads(
+                project=self._project,
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                allow_fetch_fsaverage=True,
+                progress_callback=self.progress.emit,
+            )
         if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
             from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
                 write_project_l2_mne_hauk_zscore_payloads,
@@ -429,6 +453,9 @@ def resolve_loreta_import_start_dir(
     if last_import_dir is not None and last_import_dir.is_dir():
         return str(last_import_dir)
     if project_root is not None and project_root.is_dir():
+        from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
+            default_project_l2_mne_hauk_source_psd_output_dir,
+        )
         from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
             default_project_eloreta_volume_output_dir,
         )
@@ -440,6 +467,7 @@ def resolve_loreta_import_start_dir(
         )
 
         for source_dir in (
+            default_project_l2_mne_hauk_source_psd_output_dir(project_root),
             default_project_l2_mne_hauk_zscore_output_dir(project_root),
             default_project_eloreta_volume_output_dir(project_root),
             default_project_l2_mne_output_dir(project_root),
@@ -466,11 +494,32 @@ def default_project_zscore_manifest_path(project_root: Path | None) -> Path | No
     return manifest_path if manifest_path.is_file() else None
 
 
+def default_project_source_psd_manifest_path(
+    project_root: Path | None,
+) -> Path | None:
+    """Return the preferred time-domain source-PSD manifest when it exists."""
+    if project_root is None or not project_root.is_dir():
+        return None
+    from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
+        DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME,
+        default_project_l2_mne_hauk_source_psd_output_dir,
+    )
+
+    manifest_path = (
+        default_project_l2_mne_hauk_source_psd_output_dir(project_root)
+        / DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME
+    )
+    return manifest_path if manifest_path.is_file() else None
+
+
 def default_project_source_manifest_paths(project_root: Path | None) -> tuple[Path, ...]:
     """Return existing default project source manifests in preferred display order."""
     if project_root is None or not project_root.is_dir():
         return ()
     paths: list[Path] = []
+    source_psd_manifest = default_project_source_psd_manifest_path(project_root)
+    if source_psd_manifest is not None:
+        return (source_psd_manifest,)
     zscore_manifest = default_project_zscore_manifest_path(project_root)
     if zscore_manifest is not None:
         paths.append(zscore_manifest)
@@ -596,6 +645,8 @@ def _manifest_entry_source_method_id(entry: PreparedSourceManifestEntry) -> str:
     joined = " ".join(str(value).lower() for value in identifiers if value is not None)
     if "eloreta" in joined or "eloreta_volume" in joined:
         return SOURCE_METHOD_ELORETA_VOLUME
+    if "l2_mne_hauk_source_psd" in joined or "source_psd" in joined:
+        return SOURCE_METHOD_L2_MNE_SOURCE_PSD
     if "l2_mne" in joined or "l2-mne" in joined or "hauk_zscore" in joined:
         return SOURCE_METHOD_L2_MNE_SURFACE
     return SOURCE_METHOD_PREPARED
@@ -719,6 +770,18 @@ def _project_root_from_object(candidate: object | None) -> Path | None:
     if root is not None:
         return root
     return _coerce_existing_project_root(getattr(candidate, "project_root", None))
+
+
+def _project_from_object(candidate: object | None) -> object | None:
+    """Return an active project model from a host or project-like object."""
+    if candidate is None:
+        return None
+    project = getattr(candidate, "currentProject", None)
+    if _coerce_existing_project_root(getattr(project, "project_root", None)) is not None:
+        return project
+    if _coerce_existing_project_root(getattr(candidate, "project_root", None)) is not None:
+        return candidate
+    return None
 
 
 def _activation_color_ramp_stylesheet(colors: tuple[str, ...] = LORETA_SCALAR_COLORS) -> str:
@@ -907,6 +970,8 @@ def _source_export_status_text(
     _ = automatic, include_flagged_subjects, zscore_model
     if export_mode == PROJECT_SOURCE_EXPORT_ALL_ZSCORE:
         return LORETA_SOURCE_MAP_BUILD_STATUS
+    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
+        return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
         return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
@@ -915,16 +980,29 @@ def _source_export_status_text(
 
 
 def _source_export_mode_label(export_mode: str) -> str:
+    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
+        return "Hauk-informed time-domain L2-MNE source maps"
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-        return "L2-MNE surface source maps"
+        return "legacy amplitude-derived L2-MNE source maps"
     if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
-        return "eLORETA volume source maps"
+        return "legacy amplitude-derived eLORETA volume source maps"
     return "source maps"
 
 
 def _project_source_export_failure_text(message: str) -> str:
     detail = str(message).strip()
     lowered = detail.lower()
+    if (
+        "source-ready time domain" in lowered
+        or "source-ready-time-domain" in lowered
+        or "time-domain derivative" in lowered
+        or "participant manifest" in lowered
+    ):
+        return (
+            "Time-domain source inputs are incomplete or stale. Reprocess the listed "
+            "participants to regenerate their source-ready derivatives, then rebuild "
+            f"source maps. Details: {detail}"
+        )
     if (
         "stats-ready workbook" in lowered
         or "harmonic_selection" in lowered
@@ -934,8 +1012,7 @@ def _project_source_export_failure_text(message: str) -> str:
         or "fullfft source z-score" in lowered
     ):
         return (
-            "Project source maps are not ready yet. Generate the Stats-ready summary report, then rebuild "
-            "source maps."
+            "A legacy amplitude-derived source export is missing its Stats-ready or FullFFT inputs."
             f" Details: {detail}"
         )
     return f"Project source export failed: {detail}"
@@ -961,8 +1038,9 @@ class SourceMapOptionsDialog(AppDialog):
         self._syncing_threshold_controls = False
 
         method_label = QLabel(
-            "Project maps use participant-first source-space z-scores from project FullFFT target/noise bins "
-            "and Stats-selected oddball harmonics. Choose the source method to rebuild below.",
+            "New project maps average signed FPVS repetitions in the time domain, estimate an EEG-only "
+            "L2-MNE spectrum on the fsaverage template, and use the project's selected oddball harmonics "
+            "with the FPVS Toolbox exact-bin noise rule.",
             self,
         )
         method_label.setObjectName("loreta_source_options_method_label")
@@ -1045,7 +1123,8 @@ class SourceMapOptionsDialog(AppDialog):
         tabs.addTab(data_tab, "Data")
 
         data_note = QLabel(
-            "Project rebuilds generate participant-first L2-MNE surface and eLORETA volume z-score maps.",
+            "Project rebuilds generate the Hauk-informed time-domain L2-MNE surface workflow. Older "
+            "amplitude-derived L2-MNE and eLORETA manifests remain available through Load manifest.",
             data_tab,
         )
         data_note.setObjectName("loreta_source_options_data_note")
@@ -1063,7 +1142,10 @@ class SourceMapOptionsDialog(AppDialog):
         if export_busy:
             availability_text = "A source-map rebuild is already running. Rebuild actions will be available when it finishes."
         elif project_available:
-            availability_text = "Rebuilds write project-local JSON and load the resulting manifest."
+            availability_text = (
+                "Rebuilds validate source-ready participant derivatives, write project-local JSON, "
+                "and load the resulting manifest."
+            )
         else:
             availability_text = "Open a project to rebuild source maps."
         availability_label = QLabel(availability_text, self)
@@ -1073,7 +1155,9 @@ class SourceMapOptionsDialog(AppDialog):
 
         self.rebuild_zscore_btn = make_action_button("Rebuild source maps", compact=True, parent=self)
         self.rebuild_zscore_btn.setObjectName("loreta_options_rebuild_zscore_btn")
-        self.rebuild_zscore_btn.setToolTip("Write L2-MNE surface and eLORETA volume source-space z-score JSON.")
+        self.rebuild_zscore_btn.setToolTip(
+            "Build EEG-only fsaverage L2-MNE source-PSD z-score maps from signed time-domain derivatives."
+        )
         self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
         data_layout.addWidget(self.rebuild_zscore_btn)
 
@@ -1290,6 +1374,7 @@ class LoretaVisualizerWindow(QWidget):
         configure_window_surface(self, title="LORETA Visualizer", size=surface_size)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+        self._project = self._resolve_project()
         self._project_root = self._resolve_project_root(project_root)
         self.renderer: BrainRendererWidget | None = None
         self.mri_slice_view: MriSliceImageLabel | None = None
@@ -1315,7 +1400,7 @@ class LoretaVisualizerWindow(QWidget):
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._manifest_method_groups: dict[str, _ManifestMethodGroup] = {}
         self._manifest_condition_groups: dict[str, _ManifestConditionGroup] = {}
-        self._selected_source_method_id = SOURCE_METHOD_L2_MNE_SURFACE
+        self._selected_source_method_id = SOURCE_METHOD_L2_MNE_SOURCE_PSD
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
@@ -1353,8 +1438,26 @@ class LoretaVisualizerWindow(QWidget):
         if self.renderer is not None:
             self._start_fsaverage_load(allow_fetch=True)
 
-    def _resolve_project_root(self, provided_root: str | os.PathLike[str] | None) -> Path | None:
+    def _resolve_project(self) -> object | None:
+        parent: QObject | None = self.parent()
+        while parent is not None:
+            project = _project_from_object(parent)
+            if project is not None:
+                return project
+            parent = parent.parent()
+        window = self.window()
+        if window is not self:
+            return _project_from_object(window)
+        return None
+
+    def _resolve_project_root(
+        self,
+        provided_root: str | os.PathLike[str] | None,
+    ) -> Path | None:
         root = _coerce_existing_project_root(provided_root)
+        if root is not None:
+            return root
+        root = _project_root_from_object(self._project)
         if root is not None:
             return root
         widget_root = _project_root_from_object(self.window())
@@ -1376,6 +1479,9 @@ class LoretaVisualizerWindow(QWidget):
         return None
 
     def _refresh_project_root(self) -> Path | None:
+        project = self._resolve_project()
+        if project is not None:
+            self._project = project
         root = self._resolve_project_root(None)
         if root is None:
             root = _coerce_existing_project_root(self._project_root)
@@ -1912,7 +2018,8 @@ class LoretaVisualizerWindow(QWidget):
             and renderer.can_export_split_hemisphere_figure()
         )
         can_export_stacked_split_figures = (
-            self._selected_source_method_id == SOURCE_METHOD_L2_MNE_SURFACE
+            self._selected_source_method_id
+            in {SOURCE_METHOD_L2_MNE_SOURCE_PSD, SOURCE_METHOD_L2_MNE_SURFACE}
             and len(self._condition_options()) >= 2
         )
         can_export_mri_slice_figures = self._can_export_mri_slice_figure()
@@ -2334,7 +2441,7 @@ class LoretaVisualizerWindow(QWidget):
             use_cluster_mask=self._use_cluster_mask,
             source_map_visible=self._activation_visible,
             transparent_spin_enabled=self._transparent_spin_enabled,
-            project_available=project_root is not None,
+            project_available=project_root is not None and self._project is not None,
             export_busy=self._source_export_thread is not None or self._stats_ready_export_thread is not None,
         )
         dialog.exec()
@@ -2453,17 +2560,38 @@ class LoretaVisualizerWindow(QWidget):
                 variant="info",
             )
             return
-        if self._stats_ready_export_thread is not None and not skip_stats_ready_check:
+        requires_legacy_stats_ready = any(
+            mode in {
+                PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+                PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+            }
+            for mode in modes
+        )
+        if (
+            self._stats_ready_export_thread is not None
+            and requires_legacy_stats_ready
+            and not skip_stats_ready_check
+        ):
             self._set_source_export_status(
                 "The LORETA summary report is already being generated. Source maps will build when it finishes.",
                 variant="info",
             )
             return
-        if not skip_stats_ready_check and not stats_ready_workbook_exists(project_root):
+        if (
+            requires_legacy_stats_ready
+            and not skip_stats_ready_check
+            and not stats_ready_workbook_exists(project_root)
+        ):
             self._prompt_generate_stats_ready_workbook_then_rebuild(
                 project_root,
                 modes,
                 automatic=automatic,
+            )
+            return
+        if PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD in modes and self._project is None:
+            self._set_source_export_status(
+                "Open the active FPVS project before rebuilding time-domain source maps.",
+                variant="warning",
             )
             return
         include_flagged_subjects = self._include_flagged_subjects
@@ -2492,6 +2620,7 @@ class LoretaVisualizerWindow(QWidget):
             export_modes=modes,
             include_flagged_subjects=include_flagged_subjects,
             zscore_model=zscore_model,
+            project=self._project,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -2670,21 +2799,26 @@ class LoretaVisualizerWindow(QWidget):
         else:
             status_variant = "success"
             status_text = (
-                f"Prepared L2-MNE surface and eLORETA volume source-space z-score maps "
-                f"for {total_payload_count} condition summaries. Loaded regenerated maps."
+                f"Prepared Hauk-informed time-domain L2-MNE source-space z-score maps for "
+                f"{total_payload_count} condition summaries. Loaded regenerated maps."
             )
         self._set_source_export_status(status_text, variant=status_variant)
         joined_methods = " ".join(method_ids).lower()
         joined_manifests = " ".join(str(path).lower() for path in valid_manifest_paths)
         preferred_method = self._selected_source_method_id
-        if preferred_method not in {SOURCE_METHOD_L2_MNE_SURFACE, SOURCE_METHOD_ELORETA_VOLUME}:
-            preferred_method = SOURCE_METHOD_L2_MNE_SURFACE
+        if preferred_method not in {
+            SOURCE_METHOD_L2_MNE_SOURCE_PSD,
+            SOURCE_METHOD_L2_MNE_SURFACE,
+            SOURCE_METHOD_ELORETA_VOLUME,
+        }:
+            preferred_method = SOURCE_METHOD_L2_MNE_SOURCE_PSD
         if len(valid_manifest_paths) == 1:
-            preferred_method = (
-                SOURCE_METHOD_ELORETA_VOLUME
-                if "eloreta" in joined_methods or "eloreta" in joined_manifests
-                else SOURCE_METHOD_L2_MNE_SURFACE
-            )
+            if "eloreta" in joined_methods or "eloreta" in joined_manifests:
+                preferred_method = SOURCE_METHOD_ELORETA_VOLUME
+            elif "source_psd" in joined_methods or "source psd" in joined_methods:
+                preferred_method = SOURCE_METHOD_L2_MNE_SOURCE_PSD
+            else:
+                preferred_method = SOURCE_METHOD_L2_MNE_SURFACE
         self._selected_source_method_id = preferred_method
         project_root = self._refresh_project_root()
         default_paths = default_project_source_manifest_paths(project_root) if project_root is not None else ()
@@ -2825,7 +2959,10 @@ class LoretaVisualizerWindow(QWidget):
 
     def _set_selected_source_method_from_loaded_groups(self) -> None:
         if self._selected_source_method_id not in self._manifest_method_groups:
-            self._selected_source_method_id = next(iter(self._manifest_method_groups), SOURCE_METHOD_L2_MNE_SURFACE)
+            self._selected_source_method_id = next(
+                iter(self._manifest_method_groups),
+                SOURCE_METHOD_L2_MNE_SOURCE_PSD,
+            )
         for index in range(self.source_method_combo.count()):
             if self.source_method_combo.itemData(index) == self._selected_source_method_id:
                 self.source_method_combo.setCurrentIndex(index)

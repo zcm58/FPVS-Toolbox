@@ -16,6 +16,24 @@ Active post-export adapter imports should use `Main_App.exports.post_export_adap
 
 The function logs start/end status, skips conditions without data, and logs a warning if no Excel files are saved.
 
+## Source-Ready Time-Domain Sibling Export
+
+The Hauk source-PSD feature does not change this Excel adapter or any workbook
+formula. After a successful Excel export, the process runner may pass the same
+resident condition Epochs to the GUI-neutral source time-domain derivative
+writer. That writer averages repetitions in signed volts, keeps EEG only, and
+atomically writes Raw FIF/provenance under the active project root at
+`6 - Source Localization/Source-Ready Time Domain v1/`.
+Artifact pairs use
+`<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.fif` and a
+sibling `_avg_raw.json`; participant commit manifests use
+`manifests/[<group>/]<participant>.json` and are published last.
+
+This is a sibling generated output, not an alternate `post_process()` entry
+point. It must reuse the already-validated exact `55_onbin` crop metadata and
+must not calculate FFT amplitudes, neighboring-bin metrics, source estimates,
+or modify the existing Excel output paths/sheets.
+
 ## Analysis Settings
 
 Target frequencies come from `settings["analysis"]`, `settings.get("analysis", key, fallback)`, flat dict keys, or attributes:

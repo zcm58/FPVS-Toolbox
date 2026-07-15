@@ -5,7 +5,8 @@ def test_loreta_method_info_copy_covers_mask_and_references() -> None:
     html = LORETA_METHOD_INFO_HTML
 
     assert "Cluster-Based Permutation Mask" in html
-    assert "eLORETA volume view is included as a visual estimate" in html
+    assert "Previously generated eLORETA volume manifests remain importable" in html
+    assert "legacy/exploratory workflows" in html
     assert "fsaverage template" in html
     assert "https://doi.org/10.1016/j.neuroimage.2021.118460" in html
     assert "https://doi.org/10.1016/j.neuroimage.2022.119177" in html

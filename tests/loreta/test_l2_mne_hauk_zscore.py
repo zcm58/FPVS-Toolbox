@@ -11,8 +11,10 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     PARTICIPANT_ZSCORE_AGGREGATION_MEAN,
     PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN,
     PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN,
+    METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1,
     L2MNEHaukHarmonicBins,
     L2MNEHaukParticipantGroupCondition,
+    L2MNEHaukPrecomputedParticipantGroupCondition,
     L2MNEHaukParticipantSourceInput,
     L2MNEHaukParticipantZScoreValues,
     L2MNEHaukZScoreCondition,
@@ -23,6 +25,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     compute_l2_mne_hauk_zscore_source_values,
     summarize_l2_mne_hauk_participant_zscores,
     write_l2_mne_hauk_participant_zscore_surface_payloads,
+    write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads,
     write_l2_mne_hauk_zscore_surface_payloads,
 )
 
@@ -270,6 +273,49 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     assert lateralization["metadata"]["positive_lateralization_index"] == "right_lateralized"
     assert "occipitotemporal_lot_rot" in lateralization["metadata"]["roi_definitions"]
     assert len(lateralization["rows"]) == 10
+
+
+def test_precomputed_source_psd_writer_reuses_group_output_contract(tmp_path) -> None:
+    participant_values = tuple(
+        L2MNEHaukParticipantZScoreValues(
+            participant_id=participant_id,
+            values=np.asarray([scale, scale + 1.0, scale + 2.0]),
+            target_source_values=np.asarray([4.0, 5.0, 6.0]),
+            noise_mean_values=np.asarray([1.0, 1.0, 1.0]),
+            noise_std_values=np.asarray([1.0, 1.0, 1.0]),
+            noise_offsets_used=tuple(range(-10, -1)) + tuple(range(2, 11)),
+            zero_noise_sd_source_count=0,
+        )
+        for participant_id, scale in (("P1", 1.0), ("P2", 2.0))
+    )
+    condition = L2MNEHaukPrecomputedParticipantGroupCondition(
+        condition_id="Condition A",
+        label="Condition A",
+        participant_values=participant_values,
+        metadata={"input_domain": "signed_time_domain_source_psd"},
+    )
+
+    result = write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads(
+        forward_model=_identity_forward_model(),
+        conditions=(condition,),
+        config=L2MNEHaukZScoreConfig(
+            selected_harmonics_hz=(1.0, 2.0),
+            method_id=METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1,
+            cluster_mask_enabled=False,
+            metadata={"toolbox_frequency_bin_policy": "offsets_-10_to_-2_and_2_to_10"},
+        ),
+        output_dir=tmp_path,
+    )
+
+    assert result.producer_result.method_id == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
+    assert payload["source_model"] == f"{METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1}_mean"
+    assert payload["metadata"]["base_producer_method"] == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    assert payload["metadata"]["reference_method_relation"].startswith("Hauk-informed")
+    assert payload["metadata"]["condition_input_domain"] == "signed_time_domain_source_psd"
+    assert payload["metadata"]["cluster_mask"] == "disabled"
+    manifest = json.loads(result.producer_result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["metadata"]["producer_method"] == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
 
 
 def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:

@@ -10,6 +10,7 @@ from Main_App.Shared.post_process import _create_output_subfolder
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
+    SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT,
     carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
     clean_downstream_outputs_for_reprocess_all,
@@ -63,6 +64,44 @@ def _write_expected_outputs(plan) -> None:
             output_path.write_text("ok", encoding="utf-8")
 
 
+def _write_source_derivative_result(
+    project: Project,
+    participant_id: str,
+    *,
+    condition_id: str = "1",
+    group_folder: str | None = None,
+    relative_paths: bool = False,
+) -> dict[str, object]:
+    root = project.project_root / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT
+    condition_folder = root / "Condition A"
+    manifest_folder = root / "manifests"
+    if group_folder:
+        condition_folder = condition_folder / group_folder
+        manifest_folder = manifest_folder / group_folder
+    fif_path = condition_folder / f"{participant_id}_{condition_id}_avg_raw.fif"
+    sidecar_path = condition_folder / f"{participant_id}_{condition_id}_avg_raw.json"
+    manifest_path = manifest_folder / f"{participant_id}.json"
+    for path in (fif_path, sidecar_path, manifest_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("source derivative", encoding="utf-8")
+
+    def _stored_path(path: Path) -> str:
+        if relative_paths:
+            return path.relative_to(project.project_root).as_posix()
+        return str(path)
+
+    return {
+        "source_derivative_status": "complete",
+        "source_derivative_manifest": _stored_path(manifest_path),
+        "source_derivative_outputs": [
+            _stored_path(fif_path),
+            _stored_path(sidecar_path),
+            _stored_path(manifest_path),
+        ],
+        "source_derivative_warning": "",
+    }
+
+
 def test_classify_new_file_without_ledger(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
 
@@ -100,6 +139,99 @@ def test_record_results_creates_completed_ledger_and_run_log(tmp_path) -> None:
     assert entry["processing_fingerprint_version"] == PROCESSING_FINGERPRINT_VERSION
     assert entry["run_mode"] == "Batch"
     assert '"successful_files": 1' in runs
+
+
+def test_record_results_persists_complete_source_derivative_contract(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+    source_result = _write_source_derivative_result(project, "P01")
+
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "ok", "file": str(info.path), **source_result}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    ledger = json.loads(
+        (project.project_root / ".fpvs_processing" / "processing_ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    entry = ledger["entries"]["P01"]
+    assert PROCESSING_FINGERPRINT_VERSION == "processing_fingerprint_v9_source_ready_time_domain"
+    assert entry["source_derivative_status"] == "complete"
+    assert entry["source_derivative_manifest"] == source_result["source_derivative_manifest"]
+    assert entry["source_derivative_outputs"] == source_result["source_derivative_outputs"]
+    assert entry["source_derivative_warning"] == ""
+    assert classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    ).states[0].status == "completed"
+
+
+@pytest.mark.parametrize("missing_kind", ["manifest", "artifact"])
+def test_classify_complete_source_derivative_with_missing_file_is_stale(
+    tmp_path,
+    missing_kind,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+    source_result = _write_source_derivative_result(project, "P01")
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "ok", "file": str(info.path), **source_result}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    target = (
+        Path(str(source_result["source_derivative_manifest"]))
+        if missing_kind == "manifest"
+        else Path(str(source_result["source_derivative_outputs"][0]))
+    )
+    target.unlink()
+
+    stale = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert stale.states[0].status == "missing_outputs"
+    assert "Source-ready time-domain derivative" in stale.states[0].reason
+    assert stale.incremental_files == (info.path,)
+
+
+def test_classify_explicitly_incomplete_source_derivative_is_stale(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+    record_processing_results(
+        project,
+        plan,
+        [
+            {
+                "status": "ok",
+                "file": str(info.path),
+                "source_derivative_status": "incomplete",
+                "source_derivative_manifest": "",
+                "source_derivative_outputs": [],
+                "source_derivative_warning": "disk full",
+            }
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    stale = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert stale.states[0].status == "missing_outputs"
+    assert "not complete" in stale.states[0].reason
 
 
 def test_classify_completed_requires_ledger_and_expected_outputs(tmp_path) -> None:
@@ -841,6 +973,94 @@ def test_clean_participant_outputs_deletes_only_planned_participant(tmp_path) ->
     assert output_p02.exists()
 
 
+def test_clean_participant_outputs_deletes_only_recorded_source_derivatives(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    info2 = _add_raw_file(info.path.parent, "P02")
+    plan = classify_processing_inputs(
+        project,
+        [info, info2],
+        _settings(),
+        project.event_map,
+    )
+    _write_expected_outputs(plan)
+    p01_source = _write_source_derivative_result(
+        project,
+        "P01",
+        relative_paths=True,
+    )
+    p02_source = _write_source_derivative_result(
+        project,
+        "P02",
+        relative_paths=True,
+    )
+    source_root = project.project_root / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT
+    unrelated = source_root / "unrelated-source-output.json"
+    unrelated.write_text("preserve", encoding="utf-8")
+    record_processing_results(
+        project,
+        plan,
+        [
+            {"status": "ok", "file": str(info.path), **p01_source},
+            {"status": "ok", "file": str(info2.path), **p02_source},
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    info.path.write_bytes(b"changed")
+    stale_plan = classify_processing_inputs(
+        project,
+        [info, info2],
+        _settings(),
+        project.event_map,
+    )
+
+    deleted = clean_participant_outputs(project, stale_plan)
+
+    p01_paths = {
+        project.project_root / Path(str(path))
+        for path in p01_source["source_derivative_outputs"]
+    }
+    p02_paths = {
+        project.project_root / Path(str(path))
+        for path in p02_source["source_derivative_outputs"]
+    }
+    assert p01_paths.issubset(set(deleted))
+    assert all(not path.exists() for path in p01_paths)
+    assert all(path.exists() for path in p02_paths)
+    assert unrelated.exists()
+
+
+def test_clean_participant_outputs_refuses_external_ledger_derivative_path(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+    source_result = _write_source_derivative_result(project, "P01")
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "ok", "file": str(info.path), **source_result}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    external = tmp_path / "outside-source.fif"
+    external.write_text("preserve", encoding="utf-8")
+    ledger_path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["entries"]["P01"]["source_derivative_outputs"].append(str(external))
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    info.path.write_bytes(b"changed")
+    stale_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    excel_output = stale_plan.states[0].expected_outputs[0]
+
+    with pytest.raises(ValueError, match="outside 6 - Source Localization"):
+        clean_participant_outputs(project, stale_plan)
+
+    assert external.exists()
+    assert excel_output.exists()
+
+
 def test_clean_participant_outputs_removes_preexisting_output_for_new_file(
     tmp_path,
 ) -> None:
@@ -915,6 +1135,17 @@ def test_clean_downstream_outputs_for_reprocess_all_removes_stale_generated_file
     assert not qc_summary.exists()
     assert preflight_review.exists()
     assert raw_file.exists()
+
+
+def test_reprocess_all_removes_empty_source_ready_derivative_tree(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    source_root = project.project_root / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT
+    empty_nested = source_root / "Condition A" / "Control"
+    empty_nested.mkdir(parents=True)
+
+    clean_downstream_outputs_for_reprocess_all(project)
+
+    assert not source_root.exists()
 
 
 def test_clean_downstream_outputs_for_reprocess_all_refuses_external_folder(

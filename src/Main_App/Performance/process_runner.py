@@ -32,6 +32,9 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
+from Main_App.exports.source_time_domain_export import (
+    write_source_ready_time_domain_derivatives,
+)
 from Main_App.io.load_utils import (
     BDF_RECORDING_NOT_STARTED_REASON,
     format_bdf_recording_not_started_message,
@@ -140,6 +143,42 @@ def _participant_id_for_file(file_path: Path, settings: Dict[str, object]) -> st
             except (OSError, RuntimeError, TypeError, ValueError):
                 continue
     return file_path.stem
+
+
+def _group_id_for_file(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> str | None:
+    mapping = settings.get("_fpvs_group_id_by_file")
+    if not isinstance(mapping, Mapping):
+        return None
+    file_key = str(file_path.resolve())
+    direct = mapping.get(file_key)
+    if direct is not None and str(direct).strip():
+        return str(direct)
+    for raw_path, group_id in mapping.items():
+        try:
+            if Path(str(raw_path)).resolve() == file_path.resolve():
+                text = str(group_id).strip()
+                return text or None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _complete_source_epoch_set(
+    epochs_by_condition: Mapping[str, object],
+    event_map: Mapping[str, int],
+) -> dict[str, object]:
+    """Return the full configured condition set or refuse a false commit."""
+
+    missing = [label for label in event_map if not epochs_by_condition.get(label)]
+    if missing:
+        raise RuntimeError(
+            "Source-ready time-domain derivatives require every configured "
+            "condition; missing: " + ", ".join(missing)
+        )
+    return {label: epochs_by_condition[label] for label in event_map}
 
 
 def _manual_removed_electrodes_for_file(
@@ -828,7 +867,8 @@ def _run_full_pipeline_for_file(
 
     Pipeline order (must not change):
       load → preproc audit (before) → preprocessing → events → epochs →
-      post_export → preproc audit (after) → cleanup.
+      post_export → source-ready time-domain derivative →
+      preproc audit (after) → cleanup.
     """
     t0 = time.perf_counter()
     timings_ms: Dict[str, int] = {}
@@ -1523,6 +1563,91 @@ def _run_full_pipeline_for_file(
         )
         _record_timing("export", section_started)
 
+        # Preserve the exact signed, repetition-averaged time-domain waveform
+        # while the validated on-bin Epochs remain resident. Source estimation
+        # itself stays in the LORETA source-producer package.
+        source_derivative_status = "incomplete"
+        source_derivative_manifest = ""
+        source_derivative_outputs: list[str] = []
+        source_derivative_warning = ""
+        stage = "source_time_domain_export"
+        section_started = time.perf_counter()
+        try:
+            processing_fingerprint = str(
+                settings.get("_fpvs_processing_fingerprint") or ""
+            ).strip()
+            processing_fingerprint_version = str(
+                settings.get("_fpvs_processing_fingerprint_version") or ""
+            ).strip()
+            if not processing_fingerprint or not processing_fingerprint_version:
+                raise RuntimeError(
+                    "The canonical processing fingerprint was not supplied; "
+                    "source-ready time-domain derivatives were not published."
+                )
+            source_epochs = _complete_source_epoch_set(epochs_dict, event_map)
+            source_stat = file_path.stat()
+            source_result = write_source_ready_time_domain_derivatives(
+                project_root=project_root,
+                participant_id=_participant_id_for_file(file_path, settings),
+                group_id=_group_id_for_file(file_path, settings),
+                group_folder=(
+                    str(settings.get("output_group_folder"))
+                    if settings.get("output_group_folder")
+                    else None
+                ),
+                condition_epochs=source_epochs,
+                condition_ids={
+                    label: int(event_map[label])
+                    for label in source_epochs
+                },
+                processing_provenance={
+                    "processing_fingerprint": processing_fingerprint,
+                    "processing_fingerprint_version": processing_fingerprint_version,
+                    "preprocessing_order_version": backend_preprocess.PREPROCESSING_ORDER_VERSION,
+                    "preprocessed_raw_cache_version": PREPROC_CACHE_VERSION,
+                },
+                source_signature={
+                    "raw_file": str(file_path.resolve()),
+                    "raw_size": int(source_stat.st_size),
+                    "raw_mtime_ns": int(source_stat.st_mtime_ns),
+                },
+                resolved_protocol_by_condition={
+                    label: {
+                        "presentation_rate_hz": settings.get("base_freq"),
+                        "oddball_rate_hz": float(ODDBALL_FREQ),
+                        "contrast_modulation": settings.get("contrast_modulation"),
+                    }
+                    for label in source_epochs
+                },
+            )
+            source_derivative_status = "complete"
+            resolved_project_root = project_root.resolve()
+            source_derivative_manifest = (
+                source_result.manifest_path.resolve()
+                .relative_to(resolved_project_root)
+                .as_posix()
+            )
+            source_derivative_outputs = [
+                path.resolve().relative_to(resolved_project_root).as_posix()
+                for artifact in source_result.artifacts
+                for path in (artifact.fif_path, artifact.sidecar_path)
+            ]
+            source_derivative_outputs.append(source_derivative_manifest)
+            logger.info(
+                "source_ready_time_domain_complete file=%s participant=%s conditions=%d",
+                file_path.name,
+                source_result.participant_id,
+                len(source_result.artifacts),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            source_derivative_warning = str(exc)
+            logger.exception(
+                "source_ready_time_domain_failed file=%s error=%s",
+                file_path.name,
+                exc,
+            )
+        _record_timing("source_time_domain_export", section_started)
+
         # 7) Preproc audit (after)
         stage = "audit"
         section_started = time.perf_counter()
@@ -1618,6 +1743,10 @@ def _run_full_pipeline_for_file(
             "export_timing_records": export_timing_records,
             "preproc_cache_status": cache_status,
             "post_export_ok": True,
+            "source_derivative_status": source_derivative_status,
+            "source_derivative_manifest": source_derivative_manifest,
+            "source_derivative_outputs": source_derivative_outputs,
+            "source_derivative_warning": source_derivative_warning,
         }
     except Exception as e:  # pragma: no cover - worker error path
         crop_logger.exception("file=%s stage=%s worker_error=%s", file_path.name, stage, str(e))

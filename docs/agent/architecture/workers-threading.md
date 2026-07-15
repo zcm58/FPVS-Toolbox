@@ -25,17 +25,24 @@ Common long-running work:
   receive a per-file output group-folder map so post-export writes into the
   condition-first/group-second Excel tree.
 - After a successful Main App processing run, `PostProcessingPipelineWorker`
-  orchestrates downstream analysis prep in a background `QThread`: processing
-  harmonic-selection QC, Stats-ready Summed BCA export, and default LORETA
-  source-map generation. This worker is orchestration only; harmonic selection,
-  Summed BCA export, and source-estimation logic remain owned by their existing
-  processing, Stats, and LORETA source-producer modules.
+  orchestrates downstream analysis prep in a background `QThread`: frequency
+  QC/harmonic selection, Stats-ready Summed BCA export, and time-domain L2-MNE
+  source-PSD generation. Stats export and source generation are sibling
+  consumers after harmonic selection; one failure must be reported without
+  making the other scientifically invalid. This worker is orchestration only;
+  harmonic selection, Summed BCA export, and source-estimation logic remain
+  owned by their existing processing, Stats, and LORETA source-producer
+  modules.
+- Downstream post-processing starts only after the processing ledger update
+  succeeds. A ledger-write failure skips source generation so the exporter
+  cannot infer a participant cohort from stale or partial state.
 - `PostProcessingPipelineWorker` retains its text progress signal for logging
   and also emits structured phase progress as `(phase_id, completed_units,
   total_units, user_message)`. The main-thread GUI bridge uses that contract to
   replace completed per-file rows with downstream progress across frequency-
-  domain QC, harmonic selection, Stats-ready export, L2-MNE maps, and eLORETA
-  maps; numeric progress must not be inferred from free-form log messages.
+  domain QC, harmonic selection, Stats-ready export, and time-domain L2-MNE
+  source maps; numeric progress must not be inferred from free-form log
+  messages.
 - `ProjectProcessingCacheResetWorker` performs recursive cache inspection and
   deletion in a background `QThread`. The GUI confirms the exact scope first,
   then locks project navigation, the active workspace, the Start button, and

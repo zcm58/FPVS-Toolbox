@@ -106,6 +106,21 @@ FPVS Toolbox uses a strict hybrid settings model:
   subfolders such as `L2-MNE Hauk Z-Score Beta/` and
   `L2-MNE Cortical Surface Beta/`. These are generated payload/manifest files,
   not `project.json` settings.
+- Source-PSD input derivatives are durable generated outputs under
+  `6 - Source Localization/Source-Ready Time Domain v1/`. Artifact routing is
+  `<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.fif` with a
+  sibling `<participant>_<condition_id>_avg_raw.json`; the optional group folder
+  therefore remains second. Participant commit manifests are
+  `manifests/[<group>/]<participant>.json` and are published only after all
+  expected condition pairs succeed. These derivatives are distinct from
+  resettable `.fpvs_cache/preprocessed` Raw files and are not deleted by
+  **Reset Project Processing Cache**. Incremental reprocessing may replace only
+  the planned participant's ledger-recorded derivative files. Ledger paths are
+  project-relative so copied projects rebase safely; every resolved cleanup
+  target must remain beneath the active project root.
+- Time-domain Hauk-informed prepared outputs use
+  `6 - Source Localization/L2-MNE Hauk Source PSD Beta/`. Source derivative,
+  inverse-cache, and prepared-output state must not be written to `project.json`.
 
 ## Multi-Group Processing Foundation
 

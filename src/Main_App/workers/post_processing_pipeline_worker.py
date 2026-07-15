@@ -20,8 +20,7 @@ PIPELINE_STEP_EXCEPTIONS = (
     KeyError,
     TypeError,
 )
-SOURCE_OUTPUT_MODES = ("l2_mne_surface", "eloreta_volume")
-PARTICIPANT_FIRST_ZSCORE_MODEL = "participant_first"
+SOURCE_OUTPUT_MODES = ("l2_mne_source_psd",)
 POST_PROCESSING_PHASE_COUNT = 3 + len(SOURCE_OUTPUT_MODES)
 
 _PHASE_FREQUENCY_DOMAIN_QC = "frequency_domain_qc"
@@ -29,12 +28,12 @@ _PHASE_HARMONIC_SELECTION = "harmonic_selection"
 _PHASE_STATS_READY_EXPORT = "stats_ready_export"
 _PHASE_COMPLETE = "post_processing_complete"
 _SOURCE_PHASE_BY_MODE = {
-    "l2_mne_surface": "l2_mne_source_maps",
-    "eloreta_volume": "eloreta_source_maps",
+    "l2_mne_source_psd": "l2_mne_source_maps",
 }
 _SOURCE_PHASE_MESSAGE_BY_MODE = {
-    "l2_mne_surface": "Generating L2-MNE source maps for 3D visualization of oddball responses.",
-    "eloreta_volume": "Generating eLORETA source maps for 3D visualization of oddball responses.",
+    "l2_mne_source_psd": (
+        "Generating Hauk-informed time-domain L2-MNE source maps for 3D visualization of oddball responses."
+    ),
 }
 
 
@@ -144,16 +143,10 @@ class PostProcessingPipelineWorker(QObject):
                 3,
                 stats_message,
             )
-            if stats_step.ok:
-                steps.extend(self._run_source_maps(project_root))
-            else:
-                steps.append(
-                    PostProcessingStepResult(
-                        "loreta_source_maps",
-                        False,
-                        "Skipped LORETA source maps because the Stats-ready Summed BCA workbook was not generated.",
-                    )
-                )
+            # Stats-ready export and source localization are sibling consumers
+            # of the accepted harmonic selection. A failure in one must not
+            # suppress the other scientific workflow.
+            steps.extend(self._run_source_maps(project_root))
         except PIPELINE_STEP_EXCEPTIONS as exc:
             logger.exception("post_processing_pipeline_failed")
             steps.append(
@@ -250,7 +243,9 @@ class PostProcessingPipelineWorker(QObject):
         )
 
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
-        self._emit_progress("Generating source-space maps for 3D visualization of oddball responses.")
+        self._emit_progress(
+            "Generating Hauk-informed time-domain source-space maps for 3D visualization of oddball responses."
+        )
         steps: list[PostProcessingStepResult] = []
         completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
         for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
@@ -274,55 +269,25 @@ class PostProcessingPipelineWorker(QObject):
         project_root: Path,
         mode: str,
     ) -> PostProcessingStepResult:
-        if mode == "l2_mne_surface":
-            label = "L2-MNE surface source maps"
+        if mode == "l2_mne_source_psd":
+            label = "Hauk-informed time-domain L2-MNE source maps"
             try:
-                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
-                    default_project_l2_mne_hauk_zscore_output_dir,
-                    write_project_l2_mne_hauk_zscore_payloads,
-                )
+                default_output_dir, write_payloads = _load_source_psd_export_api()
 
                 self._clear_output_dir(
-                    default_project_l2_mne_hauk_zscore_output_dir(project_root),
+                    default_output_dir(project_root),
                     project_root=project_root,
                     label=label,
                 )
-                result = write_project_l2_mne_hauk_zscore_payloads(
+                result = write_payloads(
+                    project=self._project,
                     project_root=project_root,
                     include_flagged_subjects=False,
-                    zscore_model=PARTICIPANT_FIRST_ZSCORE_MODEL,
+                    allow_fetch_fsaverage=True,
                     progress_callback=self._emit_progress,
                 )
             except PIPELINE_STEP_EXCEPTIONS as exc:
-                logger.exception("post_processing_l2_mne_source_maps_failed")
-                return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
-            return PostProcessingStepResult(
-                mode,
-                True,
-                f"{label} generated.",
-                str(result.manifest_path),
-            )
-
-        if mode == "eloreta_volume":
-            label = "eLORETA volume source maps"
-            try:
-                from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
-                    default_project_eloreta_volume_output_dir,
-                    write_project_eloreta_volume_hauk_zscore_payloads,
-                )
-
-                self._clear_output_dir(
-                    default_project_eloreta_volume_output_dir(project_root),
-                    project_root=project_root,
-                    label=label,
-                )
-                result = write_project_eloreta_volume_hauk_zscore_payloads(
-                    project_root=project_root,
-                    include_flagged_subjects=False,
-                    progress_callback=self._emit_progress,
-                )
-            except PIPELINE_STEP_EXCEPTIONS as exc:
-                logger.exception("post_processing_eloreta_source_maps_failed")
+                logger.exception("post_processing_l2_mne_source_psd_maps_failed")
                 return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
             return PostProcessingStepResult(
                 mode,
@@ -386,7 +351,7 @@ class PostProcessingPipelineWorker(QObject):
         completed_units: int,
         message: str,
     ) -> None:
-        """Emit coarse, structured progress across the five downstream phases."""
+        """Emit coarse, structured progress across the downstream phases."""
 
         completed = max(0, min(POST_PROCESSING_PHASE_COUNT, int(completed_units)))
         self.phase_progress.emit(
@@ -395,6 +360,19 @@ class PostProcessingPipelineWorker(QObject):
             POST_PROCESSING_PHASE_COUNT,
             str(message).strip(),
         )
+
+
+def _load_source_psd_export_api():  # noqa: ANN202
+    """Import the time-domain exporter through one narrow integration seam."""
+    from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
+        default_project_l2_mne_hauk_source_psd_output_dir,
+        write_project_l2_mne_hauk_source_psd_payloads,
+    )
+
+    return (
+        default_project_l2_mne_hauk_source_psd_output_dir,
+        write_project_l2_mne_hauk_source_psd_payloads,
+    )
 
 
 __all__ = [

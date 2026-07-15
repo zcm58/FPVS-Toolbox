@@ -72,7 +72,9 @@ turn exploratory tools into confirmatory analyses.
 Source-space figures are inverse-model estimates rather than direct anatomical
 measurements. Template anatomy adds further uncertainty. Use the
 [LORETA Visualizer guide](../tools/loreta-visualizer.md) for the current
-tool-specific cautions.
+tool-specific cautions. For the current time-domain L2-MNE source-PSD method,
+use the [methods and reporting checklist](methods-reporting-checklist.md) for
+the exact input, FFT-bin, neighboring-noise, and attribution requirements.
 
 - Hauk, O., Stenroos, M., & Treder, M. S. (2022). [Towards an objective evaluation of EEG/MEG source estimation methods: The linear approach](https://doi.org/10.1016/j.neuroimage.2022.119177). *NeuroImage, 255*, 119177.
 - Pascual-Marqui, R. D. (2007). [Discrete, 3D distributed, linear imaging methods of electric neuronal activity. Part 1: Exact, zero error localization](https://doi.org/10.48550/arXiv.0710.3341).
