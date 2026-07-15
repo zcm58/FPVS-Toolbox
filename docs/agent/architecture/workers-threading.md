@@ -30,6 +30,12 @@ Common long-running work:
   source-map generation. This worker is orchestration only; harmonic selection,
   Summed BCA export, and source-estimation logic remain owned by their existing
   processing, Stats, and LORETA source-producer modules.
+- `PostProcessingPipelineWorker` retains its text progress signal for logging
+  and also emits structured phase progress as `(phase_id, completed_units,
+  total_units, user_message)`. The main-thread GUI bridge uses that contract to
+  replace completed per-file rows with downstream progress across frequency-
+  domain QC, harmonic selection, Stats-ready export, L2-MNE maps, and eLORETA
+  maps; numeric progress must not be inferred from free-form log messages.
 
 Rules:
 

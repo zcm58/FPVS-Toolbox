@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Slot
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
+from Main_App.gui import shell_status
 from Main_App.gui.post_export_workflows import excel_snapshot
 from Main_App.io.load_utils import (
     BDF_RECORDING_NOT_STARTED_REASON,
@@ -60,6 +61,35 @@ _POST_PROCESSING_SOURCE_MAPS_TITLE = "Generating Source Maps"
 _POST_PROCESSING_SOURCE_MAPS_MESSAGE = (
     "Generating source-space maps for 3D visualization of oddball responses."
 )
+_POST_PROCESSING_PROGRESS_SETTLE_MS = 250
+_POST_PROCESSING_PHASE_STATES = {
+    "frequency_domain_qc": (1, _POST_PROCESSING_QC_TITLE, _POST_PROCESSING_QC_MESSAGE),
+    "harmonic_selection": (
+        2,
+        _POST_PROCESSING_HARMONICS_TITLE,
+        _POST_PROCESSING_HARMONICS_MESSAGE,
+    ),
+    "stats_ready_export": (
+        3,
+        _POST_PROCESSING_OUTPUTS_TITLE,
+        _POST_PROCESSING_OUTPUTS_MESSAGE,
+    ),
+    "l2_mne_source_maps": (
+        4,
+        "Generating L2-MNE Source Maps",
+        "FPVS Toolbox is generating L2-MNE source maps for 3D visualization.",
+    ),
+    "eloreta_source_maps": (
+        5,
+        "Generating eLORETA Source Maps",
+        "FPVS Toolbox is generating eLORETA source maps for 3D visualization.",
+    ),
+    "post_processing_complete": (
+        5,
+        "Post-Processing Complete",
+        "FPVS Toolbox has finished preparing downstream analysis outputs.",
+    ),
+}
 
 
 class _PostProcessingPipelineBridge(QObject):
@@ -69,18 +99,35 @@ class _PostProcessingPipelineBridge(QObject):
         self,
         *,
         progress_callback: Callable[[str], None],
+        phase_progress_callback: Callable[[str, int, int, str], None],
         log_callback: Callable[[str, int], None],
         finished_callback: Callable[[dict], None],
         parent: QObject | None,
     ) -> None:
         super().__init__(parent)
         self._progress_callback = progress_callback
+        self._phase_progress_callback = phase_progress_callback
         self._log_callback = log_callback
         self._finished_callback = finished_callback
 
     @Slot(str)
     def handle_progress(self, message: str) -> None:
         self._progress_callback(message)
+
+    @Slot(str, int, int, str)
+    def handle_phase_progress(
+        self,
+        phase_id: str,
+        completed_units: int,
+        total_units: int,
+        message: str,
+    ) -> None:
+        self._phase_progress_callback(
+            phase_id,
+            completed_units,
+            total_units,
+            message,
+        )
 
     @Slot(str, int)
     def handle_log_message(self, message: str, level: int) -> None:
@@ -106,6 +153,23 @@ def _post_processing_display_state(message: str) -> tuple[str, str]:
     if "data processing is complete" in lowered:
         return _POST_PROCESSING_OUTPUTS_TITLE, _POST_PROCESSING_STATUS_MESSAGE
     return _POST_PROCESSING_OUTPUTS_TITLE, _POST_PROCESSING_OUTPUTS_MESSAGE
+
+
+def _post_processing_phase_display_state(
+    phase_id: str,
+    message: str = "",
+) -> tuple[str, str, int]:
+    """Resolve stable display text and ordering from a structured worker phase."""
+
+    phase_state = _POST_PROCESSING_PHASE_STATES.get(str(phase_id))
+    if phase_state is None:
+        return (
+            _POST_PROCESSING_OUTPUTS_TITLE,
+            str(message).strip() or _POST_PROCESSING_OUTPUTS_MESSAGE,
+            1,
+        )
+    phase_index, title, default_message = phase_state
+    return title, str(message).strip() or default_message, phase_index
 
 
 def _post_processing_message_mentions_source_maps(lowered: str) -> bool:
@@ -420,6 +484,7 @@ def _start_post_processing_pipeline_after_processing(
     host: Any,
     *,
     on_finished: Callable[[], None],
+    completed_phase_floor: int = 0,
 ) -> bool:
     if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
         return False
@@ -429,6 +494,7 @@ def _start_post_processing_pipeline_after_processing(
 
     try:
         from Main_App.workers.post_processing_pipeline_worker import (
+            POST_PROCESSING_PHASE_COUNT,
             PostProcessingPipelineWorker,
         )
     except Exception as exc:  # noqa: BLE001
@@ -444,6 +510,12 @@ def _start_post_processing_pipeline_after_processing(
     worker.moveToThread(thread)
     host._post_processing_pipeline_thread = thread
     host._post_processing_pipeline_worker = worker
+    phase_floor = max(0, min(POST_PROCESSING_PHASE_COUNT, int(completed_phase_floor)))
+    initial_progress_pct = round((phase_floor / POST_PROCESSING_PHASE_COUNT) * 100)
+    shell_status.prepare_post_processing_activity(
+        host,
+        initial_progress_pct=initial_progress_pct,
+    )
     title_label = getattr(host, "processing_title_label", None)
     if title_label is not None:
         title_label.setText(_POST_PROCESSING_OUTPUTS_TITLE)
@@ -451,12 +523,43 @@ def _start_post_processing_pipeline_after_processing(
     if message_label is not None:
         message_label.setText(_POST_PROCESSING_STATUS_MESSAGE)
 
+    active_phase_id: str | None = None
+
     def _handle_progress(message: str) -> None:
-        title, display_message = _post_processing_display_state(message)
+        if active_phase_id is None:
+            title, display_message = _post_processing_display_state(message)
+        else:
+            title, display_message, _phase_index = _post_processing_phase_display_state(
+                active_phase_id
+            )
         if title_label is not None:
             title_label.setText(title)
         if message_label is not None:
             message_label.setText(display_message)
+
+    def _handle_phase_progress(
+        phase_id: str,
+        completed_units: int,
+        total_units: int,
+        message: str,
+    ) -> None:
+        nonlocal active_phase_id
+        active_phase_id = str(phase_id)
+        title, display_message, phase_index = _post_processing_phase_display_state(
+            active_phase_id,
+            message,
+        )
+        if title_label is not None:
+            title_label.setText(title)
+        if message_label is not None:
+            message_label.setText(display_message)
+        shell_status.update_post_processing_progress(
+            host,
+            completed_units=completed_units,
+            total_units=total_units,
+            phase_index=phase_index,
+            minimum_completed_units=phase_floor,
+        )
 
     def _handle_log_message(message: str, level: int) -> None:
         try:
@@ -524,10 +627,11 @@ def _start_post_processing_pipeline_after_processing(
                     on_finished=on_finished,
                 )
             else:
-                on_finished()
+                QTimer.singleShot(_POST_PROCESSING_PROGRESS_SETTLE_MS, on_finished)
 
     bridge = _PostProcessingPipelineBridge(
         progress_callback=_handle_progress,
+        phase_progress_callback=_handle_phase_progress,
         log_callback=_handle_log_message,
         finished_callback=_handle_finished,
         parent=host,
@@ -535,6 +639,7 @@ def _start_post_processing_pipeline_after_processing(
     host._post_processing_pipeline_bridge = bridge
     thread.started.connect(worker.run)
     worker.progress.connect(bridge.handle_progress)
+    worker.phase_progress.connect(bridge.handle_phase_progress)
     worker.log_message.connect(bridge.handle_log_message)
     worker.finished.connect(thread.quit)
     worker.finished.connect(worker.deleteLater)
@@ -615,7 +720,11 @@ def _handle_frequency_domain_qc_review(
             "Frequency-domain QC review accepted; resuming final harmonic selection.",
             level=logging.INFO,
         )
-        if _start_post_processing_pipeline_after_processing(host, on_finished=on_finished):
+        if _start_post_processing_pipeline_after_processing(
+            host,
+            on_finished=on_finished,
+            completed_phase_floor=1,
+        ):
             return
         on_finished()
         return

@@ -38,6 +38,7 @@ manual_smoke = []
 [scopes.processing]
 audits = ["protected", "source-localization"]
 tests = [
+  "tests/gui/test_processing_post_status_text.py",
   "tests/processing/test_condition_spectral_qc.py",
   "tests/processing/test_fft_crop_utils.py",
   "tests/processing/test_fft_multinotch.py",
@@ -56,8 +57,25 @@ tests = [
   "tests/processing/test_raw_channel_qc_v2.py",
   "tests/processing/test_removed_electrode_detection.py",
   "tests/processing/test_shared_load_utils.py",
+  "tests/workers/test_post_processing_pipeline_worker.py",
 ]
-include = ["src/Main_App/processing/**", "src/Main_App/Performance/**", "src/Main_App/workers/**", "src/Main_App/Shared/post_process.py", "src/Main_App/Shared/fft_crop_utils.py", "src/Main_App/Shared/load_utils.py", "src/Main_App/io/load_utils.py", "src/Main_App/gui/processing_inputs.py", "src/Main_App/gui/processing_workflows.py", "src/Main_App/gui/preprocessing_qc_workflow.py", "tests/processing/**"]
+include = [
+  "src/Main_App/processing/**",
+  "src/Main_App/Performance/**",
+  "src/Main_App/workers/**",
+  "src/Main_App/Shared/post_process.py",
+  "src/Main_App/Shared/fft_crop_utils.py",
+  "src/Main_App/Shared/load_utils.py",
+  "src/Main_App/io/load_utils.py",
+  "src/Main_App/gui/processing_inputs.py",
+  "src/Main_App/gui/processing_workflows.py",
+  "src/Main_App/gui/preprocessing_qc_workflow.py",
+  "src/Main_App/gui/shell_status.py",
+  "src/Main_App/gui/style_tokens.py",
+  "tests/gui/test_processing_post_status_text.py",
+  "tests/processing/**",
+  "tests/workers/test_post_processing_pipeline_worker.py",
+]
 manual_smoke = []
 
 [scopes.plot-generator]

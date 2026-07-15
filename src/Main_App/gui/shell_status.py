@@ -199,6 +199,12 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     table.setSelectionMode(QAbstractItemView.NoSelection)
     progress_bar = getattr(host, "progress_bar", None)
     if progress_bar is not None:
+        progress_animation = getattr(host, "_progress_anim", None)
+        if progress_animation is not None:
+            progress_animation.stop()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        progress_bar.setFormat("%p%")
         progress_bar.setVisible(True)
     table.setRowCount(len(files))
     for row, file_path in enumerate(files):
@@ -220,6 +226,82 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     current_label = getattr(host, "processing_current_file_label", None)
     if current_label is not None:
         current_label.setText("Latest file: Waiting for processing to begin")
+
+
+def prepare_post_processing_activity(
+    host: Any,
+    *,
+    initial_progress_pct: int = 0,
+) -> None:
+    """Switch the activity page from per-file rows to downstream phase progress."""
+
+    files_card = getattr(host, "processing_files_card", None)
+    if files_card is not None:
+        files_card.setVisible(False)
+
+    status_card = getattr(host, "processing_status_card", None)
+    if status_card is not None:
+        status_card.setVisible(True)
+
+    progress_heading = getattr(host, "processing_progress_heading_label", None)
+    if progress_heading is not None:
+        progress_heading.setText("Post-Processing Progress")
+        progress_heading.setVisible(True)
+
+    step_label = getattr(host, "processing_step_label", None)
+    if step_label is not None:
+        step_label.setText("Preparing post-processing phases")
+        step_label.setVisible(True)
+
+    progress_animation = getattr(host, "_progress_anim", None)
+    if progress_animation is not None:
+        progress_animation.stop()
+
+    progress_bar = getattr(host, "progress_bar", None)
+    if progress_bar is not None:
+        initial_pct = max(0, min(100, int(initial_progress_pct)))
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(initial_pct)
+        progress_bar.setFormat("%p%")
+        progress_bar.setVisible(True)
+
+
+def update_post_processing_progress(
+    host: Any,
+    *,
+    completed_units: int,
+    total_units: int,
+    phase_index: int,
+    minimum_completed_units: int = 0,
+) -> None:
+    """Update the activity page from structured downstream phase milestones."""
+
+    progress_bar = getattr(host, "progress_bar", None)
+    if progress_bar is None:
+        return
+
+    total = max(0, int(total_units))
+    completed = max(0, min(total, int(completed_units))) if total else 0
+    if total:
+        minimum = max(0, min(total, int(minimum_completed_units)))
+        completed = max(completed, minimum)
+    if total == 0:
+        progress_bar.setRange(0, 0)
+    else:
+        progress_bar.setRange(0, 100)
+        progress_bar.setFormat("%p%")
+        target_pct = round((completed / total) * 100)
+        animate = getattr(host, "_animate_progress_to", None)
+        if callable(animate):
+            animate(target_pct / 100.0)
+        else:
+            progress_bar.setValue(target_pct)
+
+    step_label = getattr(host, "processing_step_label", None)
+    if step_label is not None:
+        bounded_phase = max(1, min(total or 1, int(phase_index)))
+        step_label.setText(f"Post-processing phase {bounded_phase} of {total or 1}")
+        step_label.setVisible(True)
 
 
 def update_processing_progress(host: Any, pct: int) -> None:

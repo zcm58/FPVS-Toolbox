@@ -387,6 +387,39 @@ def test_processing_activity_tracks_completed_files(
     assert win.processing_summary_label.text() == "1 of 2 files complete (50%)"
 
 
+def test_processing_activity_switches_to_post_processing_phase_progress(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    files = [tmp_path / "P001.bdf", tmp_path / "P002.bdf"]
+    win._prepare_processing_activity(files)
+    win.progress_bar.setValue(100)
+
+    main_window_module.shell_status.prepare_post_processing_activity(win)
+
+    assert win.processing_files_card.isHidden()
+    assert not win.processing_status_card.isHidden()
+    assert win.processing_progress_heading_label.text() == "Post-Processing Progress"
+    assert win.progress_bar.value() == 0
+
+    main_window_module.shell_status.update_post_processing_progress(
+        win,
+        completed_units=1,
+        total_units=5,
+        phase_index=2,
+    )
+    qtbot.waitUntil(lambda: win.progress_bar.value() == 20, timeout=1_000)
+    assert win.processing_step_label.text() == "Post-processing phase 2 of 5"
+
+    win._prepare_processing_activity(files)
+    assert not win.processing_files_card.isHidden()
+    assert win.processing_progress_heading_label.text() == "Overall Progress"
+    assert (win.progress_bar.minimum(), win.progress_bar.maximum()) == (0, 100)
+    assert win.progress_bar.value() == 0
+
+
 def test_processing_activity_tracks_excluded_files(
     tmp_path: Path,
     qtbot,

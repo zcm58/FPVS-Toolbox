@@ -22,6 +22,20 @@ PIPELINE_STEP_EXCEPTIONS = (
 )
 SOURCE_OUTPUT_MODES = ("l2_mne_surface", "eloreta_volume")
 PARTICIPANT_FIRST_ZSCORE_MODEL = "participant_first"
+POST_PROCESSING_PHASE_COUNT = 3 + len(SOURCE_OUTPUT_MODES)
+
+_PHASE_FREQUENCY_DOMAIN_QC = "frequency_domain_qc"
+_PHASE_HARMONIC_SELECTION = "harmonic_selection"
+_PHASE_STATS_READY_EXPORT = "stats_ready_export"
+_PHASE_COMPLETE = "post_processing_complete"
+_SOURCE_PHASE_BY_MODE = {
+    "l2_mne_surface": "l2_mne_source_maps",
+    "eloreta_volume": "eloreta_source_maps",
+}
+_SOURCE_PHASE_MESSAGE_BY_MODE = {
+    "l2_mne_surface": "Generating L2-MNE source maps for 3D visualization of oddball responses.",
+    "eloreta_volume": "Generating eLORETA source maps for 3D visualization of oddball responses.",
+}
 
 
 @dataclass(frozen=True)
@@ -46,6 +60,7 @@ class PostProcessingPipelineWorker(QObject):
     """Run downstream analysis prep after preprocessing without touching widgets."""
 
     progress = Signal(str)
+    phase_progress = Signal(str, int, int, str)
     log_message = Signal(str, int)
     finished = Signal(dict)
 
@@ -58,7 +73,18 @@ class PostProcessingPipelineWorker(QObject):
         steps: list[PostProcessingStepResult] = []
         try:
             project_root = Path(self._project.project_root).expanduser().resolve()
+            qc_message = "FPVS Toolbox is checking summed BCA values before final harmonic selection."
+            self._emit_phase_progress(
+                _PHASE_FREQUENCY_DOMAIN_QC,
+                0,
+                qc_message,
+            )
             qc_report = self._run_frequency_domain_qc_review()
+            self._emit_phase_progress(
+                _PHASE_FREQUENCY_DOMAIN_QC,
+                1,
+                qc_message,
+            )
             if qc_report.get("review_required"):
                 steps.append(
                     PostProcessingStepResult(
@@ -93,9 +119,31 @@ class PostProcessingPipelineWorker(QObject):
                         "Frequency-domain QC found no review-blocking flags.",
                     )
                 )
+            harmonic_message = "FPVS Toolbox is currently identifying significant harmonics."
+            self._emit_phase_progress(
+                _PHASE_HARMONIC_SELECTION,
+                1,
+                harmonic_message,
+            )
             steps.append(self._run_harmonic_selection())
+            self._emit_phase_progress(
+                _PHASE_HARMONIC_SELECTION,
+                2,
+                harmonic_message,
+            )
+            stats_message = "FPVS Toolbox is preparing analysis files for downstream tools."
+            self._emit_phase_progress(
+                _PHASE_STATS_READY_EXPORT,
+                2,
+                stats_message,
+            )
             stats_step = self._run_stats_ready_export(project_root)
             steps.append(stats_step)
+            self._emit_phase_progress(
+                _PHASE_STATS_READY_EXPORT,
+                3,
+                stats_message,
+            )
             if stats_step.ok:
                 steps.extend(self._run_source_maps(project_root))
             else:
@@ -116,6 +164,16 @@ class PostProcessingPipelineWorker(QObject):
                 )
             )
         ok = all(step.ok for step in steps)
+        completion_message = (
+            "Post-processing is complete."
+            if ok
+            else "Post-processing finished with warnings; review the processing log for details."
+        )
+        self._emit_phase_progress(
+            _PHASE_COMPLETE,
+            POST_PROCESSING_PHASE_COUNT,
+            completion_message,
+        )
         self.finished.emit(
             {
                 "ok": ok,
@@ -194,8 +252,21 @@ class PostProcessingPipelineWorker(QObject):
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
         self._emit_progress("Generating source-space maps for 3D visualization of oddball responses.")
         steps: list[PostProcessingStepResult] = []
-        for mode in SOURCE_OUTPUT_MODES:
+        completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(SOURCE_OUTPUT_MODES)
+        for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
+            phase_id = _SOURCE_PHASE_BY_MODE[mode]
+            phase_message = _SOURCE_PHASE_MESSAGE_BY_MODE[mode]
+            self._emit_phase_progress(
+                phase_id,
+                completed_before_source_maps + index - 1,
+                phase_message,
+            )
             steps.append(self._run_source_map_mode(project_root, mode))
+            self._emit_phase_progress(
+                phase_id,
+                completed_before_source_maps + index,
+                phase_message,
+            )
         return steps
 
     def _run_source_map_mode(
@@ -309,5 +380,25 @@ class PostProcessingPipelineWorker(QObject):
         self.progress.emit(text)
         self.log_message.emit(text, logging.DEBUG)
 
+    def _emit_phase_progress(
+        self,
+        phase_id: str,
+        completed_units: int,
+        message: str,
+    ) -> None:
+        """Emit coarse, structured progress across the five downstream phases."""
 
-__all__ = ["PostProcessingPipelineWorker", "PostProcessingStepResult"]
+        completed = max(0, min(POST_PROCESSING_PHASE_COUNT, int(completed_units)))
+        self.phase_progress.emit(
+            str(phase_id),
+            completed,
+            POST_PROCESSING_PHASE_COUNT,
+            str(message).strip(),
+        )
+
+
+__all__ = [
+    "POST_PROCESSING_PHASE_COUNT",
+    "PostProcessingPipelineWorker",
+    "PostProcessingStepResult",
+]

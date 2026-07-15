@@ -364,6 +364,8 @@ def build_main_page_stylesheet() -> str:
 
         #processing_progress_bar {{
             min-height: 38px;
+            border: none;
+            padding: 0;
         }}
 
         #processing_files_table {{
