@@ -404,22 +404,48 @@ def _cache_miss_reason(
         return "No saved group-significant harmonics."
     current = request.fingerprint
     current_without_processing = _fingerprint_without_processing(current)
-    for entry in entries.values():
-        if not isinstance(entry, Mapping):
-            continue
-        fingerprint = entry.get("fingerprint")
-        if not isinstance(fingerprint, Mapping):
-            continue
+    fingerprints = [
+        fingerprint
+        for entry in entries.values()
+        if isinstance(entry, Mapping)
+        and isinstance((fingerprint := entry.get("fingerprint")), Mapping)
+    ]
+    for fingerprint in fingerprints:
         if _fingerprint_without_processing(fingerprint) == current_without_processing:
             return (
                 "Project preprocessing/settings changed since saved harmonics; "
                 "recalculating group-level significant harmonics."
             )
-        if _selection_inputs(fingerprint) == _selection_inputs(current):
-            if _stats_settings(fingerprint) != _stats_settings(current):
-                return "Stats harmonic settings changed since saved harmonics; recalculating."
-            if _source_workbooks(fingerprint) != _source_workbooks(current):
-                return "Source workbook files changed since saved harmonics; recalculating."
+
+    matching_inputs = [
+        fingerprint
+        for fingerprint in fingerprints
+        if _selection_inputs(fingerprint) == _selection_inputs(current)
+    ]
+    if not matching_inputs:
+        return "Saved harmonics do not match current participants, conditions, settings, or workbooks."
+
+    matching_method = [
+        fingerprint
+        for fingerprint in matching_inputs
+        if _method_version(fingerprint) == _method_version(current)
+    ]
+    if not matching_method:
+        return "Harmonic-selection method version changed since saved harmonics."
+
+    matching_settings = [
+        fingerprint
+        for fingerprint in matching_method
+        if _stats_settings(fingerprint) == _stats_settings(current)
+    ]
+    if not matching_settings:
+        return "Stats harmonic settings changed since saved harmonics; recalculating."
+
+    if not any(
+        _source_workbooks(fingerprint) == _source_workbooks(current)
+        for fingerprint in matching_settings
+    ):
+        return "Source workbook files changed since saved harmonics; recalculating."
     return "Saved harmonics do not match current participants, conditions, settings, or workbooks."
 
 
@@ -432,6 +458,10 @@ def _fingerprint_without_processing(fingerprint: Mapping[str, object]) -> dict[s
 
 def _selection_inputs(fingerprint: Mapping[str, object]) -> object:
     return _json_safe(fingerprint.get("selection_inputs"))
+
+
+def _method_version(fingerprint: Mapping[str, object]) -> str:
+    return str(fingerprint.get("method_version") or "")
 
 
 def _stats_settings(fingerprint: Mapping[str, object]) -> object:

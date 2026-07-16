@@ -53,6 +53,10 @@ study protocol requires one.
 The processing workflow records the selection in
 `Quality Check/Harmonic_Selection_Summary.xlsx`, including the harmonics that
 passed the threshold and those included in the final sum.
+`Recalculate Harmonics` reports success only after the current selection is
+saved to project metadata and can be loaded by downstream tools. If saving the
+project metadata fails, close other programs that may be writing
+`project.json`, then retry; EEG/FIF reprocessing is not required.
 
 ## Supported Analyses
 

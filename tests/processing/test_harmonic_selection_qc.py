@@ -9,6 +9,9 @@ import pytest
 from openpyxl import load_workbook
 
 from Main_App.processing import harmonic_selection_qc
+from Tools.Stats.data.group_harmonic_cache import (
+    clear_cached_group_harmonic_selections,
+)
 from Tools.Stats.io.stats_ready_export import HARMONIC_SELECTION_COLUMNS
 
 
@@ -74,6 +77,19 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
     entries = manifest["tools"]["stats"]["group_significant_harmonics_cache"]["entries"]
     assert len(entries) == 1
 
+    assert clear_cached_group_harmonic_selections(project_root) == 1
+    repaired_report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+    assert repaired_report.selection_metadata["selected_harmonics_hz"] == pytest.approx(
+        [1.2, 2.4, 3.6, 4.8, 7.2]
+    )
+    repaired_manifest = json.loads(
+        (project_root / "project.json").read_text(encoding="utf-8")
+    )
+    repaired_entries = repaired_manifest["tools"]["stats"][
+        "group_significant_harmonics_cache"
+    ]["entries"]
+    assert len(repaired_entries) == 1
+
     def _unexpected_recalculation(**_kwargs):
         raise AssertionError("Downstream loading must not recalculate significant harmonics")
 
@@ -136,6 +152,96 @@ def test_processing_harmonic_selection_qc_uses_project_summation_settings(
     )
 
 
+def test_processing_harmonic_selection_method_upgrade_error_is_actionable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = SimpleNamespace(
+        project_root=tmp_path,
+        subjects=("S1",),
+        conditions=("Faces",),
+        subject_data={"S1": {"Faces": str(tmp_path / "S1_Faces_Results.xlsx")}},
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        settings=SimpleNamespace(name=harmonic_selection_qc.GROUP_SIGNIFICANT_POLICY_NAME),
+        rois={"Posterior": ["O1", "O2"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_processing_harmonic_selection_inputs",
+        lambda _project, log_func=None: inputs,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "build_group_harmonic_cache_request",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "lookup_cached_group_harmonic_selection",
+        lambda _request: SimpleNamespace(
+            hit=None,
+            reason="Harmonic-selection method version changed since saved harmonics.",
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        harmonic_selection_qc.load_processing_harmonic_selection(object())
+
+    message = str(exc_info.value)
+    assert "Settings > Recalculate Harmonics" in message
+    assert "current FPVS Toolbox version" in message
+    assert "EEG/FIF reprocessing is not required" in message
+    assert "method version changed" in message
+
+
+def test_processing_harmonic_selection_does_not_report_success_without_saved_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = SimpleNamespace(
+        project_root=tmp_path,
+        subjects=("S1",),
+        conditions=("Faces",),
+        subject_data={"S1": {"Faces": str(tmp_path / "S1_Faces_Results.xlsx")}},
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        settings=SimpleNamespace(name=harmonic_selection_qc.GROUP_SIGNIFICANT_POLICY_NAME),
+        rois={"Posterior": ["O1", "O2"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_processing_harmonic_selection_inputs",
+        lambda _project, log_func=None: inputs,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "build_group_significant_harmonic_selection",
+        lambda **_kwargs: SimpleNamespace(to_metadata=lambda: {"selected_harmonics_hz": [1.2]}),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "build_group_harmonic_cache_request",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "lookup_cached_group_harmonic_selection",
+        lambda _request: SimpleNamespace(
+            hit=None,
+            reason="No saved group-significant harmonics.",
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(object())
+
+    message = str(exc_info.value)
+    assert "calculated but could not be saved" in message
+    assert "downstream tools cannot load it" in message
+    assert "Settings > Recalculate Harmonics" in message
+
+
 def test_processing_harmonic_selection_qc_resolves_relative_excel_subfolder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -143,6 +249,18 @@ def test_processing_harmonic_selection_qc_resolves_relative_excel_subfolder(
     project_root = tmp_path / "Project"
     condition_root = project_root / "1 - Excel Data Files" / "Faces"
     condition_root.mkdir(parents=True)
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1},
+                "preprocessing": {},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     _write_group_policy_workbook(condition_root / "S1_Faces_Results.xlsx", scale=1)
     _write_group_policy_workbook(condition_root / "S2_Faces_Results.xlsx", scale=2)
     project = SimpleNamespace(

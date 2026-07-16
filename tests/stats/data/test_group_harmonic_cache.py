@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
 from Main_App.projects.project import Project
+from Tools.Stats.data import group_harmonic_cache as cache_mod
 from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_POLICY_NAME,
     normalize_dv_policy,
@@ -141,6 +143,38 @@ def test_project_processing_signature_tracks_fft_multinotch_settings(tmp_path: P
     assert enabled_60["preprocessing"]["line_noise_frequency_hz"] == 60
     assert enabled_60 != enabled_50
     assert enabled_50 != disabled
+
+
+def test_cache_miss_reports_method_upgrade_before_older_workbook_drift(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
+    workbook.parent.mkdir(parents=True)
+    workbook.write_bytes(b"placeholder")
+    request = _request(project_root, workbook)
+    assert request is not None
+
+    matching_legacy = deepcopy(request.fingerprint)
+    matching_legacy["method_version"] = (
+        "group_significant_harmonics_roi_union_through_highest_v2"
+    )
+    stale_legacy = deepcopy(matching_legacy)
+    stale_workbooks = stale_legacy["source_workbooks"]
+    assert isinstance(stale_workbooks, list)
+    assert isinstance(stale_workbooks[0], dict)
+    stale_workbooks[0]["size_bytes"] = int(stale_workbooks[0]["size_bytes"] or 0) + 1
+
+    reason = cache_mod._cache_miss_reason(
+        {
+            "older-stale-entry": {"fingerprint": stale_legacy},
+            "newer-workbook-matching-entry": {"fingerprint": matching_legacy},
+        },
+        request,
+    )
+
+    assert reason == "Harmonic-selection method version changed since saved harmonics."
 
 
 def test_clear_group_harmonic_cache_preserves_manifest_shape(tmp_path: Path) -> None:

@@ -91,6 +91,7 @@ def run_processing_harmonic_selection_qc(
             project_root=project_root,
         )
         metadata = selection.to_metadata()
+        _require_persisted_group_harmonic_selection(inputs)
     else:
         dv_metadata: dict[str, object] = {}
         prepare_summed_bca_data(
@@ -122,6 +123,30 @@ def run_processing_harmonic_selection_qc(
     )
 
 
+def _require_persisted_group_harmonic_selection(
+    inputs: ProcessingHarmonicSelectionInputs,
+) -> None:
+    cache_request = build_group_harmonic_cache_request(
+        project_root=inputs.project_root,
+        subjects=inputs.subjects,
+        conditions=inputs.conditions,
+        subject_data=inputs.subject_data,
+        base_frequency_hz=inputs.base_frequency_hz,
+        max_freq_hz=inputs.max_frequency_hz,
+        settings=inputs.settings,
+        rois=inputs.rois,
+    )
+    lookup = lookup_cached_group_harmonic_selection(cache_request)
+    if lookup.hit is not None:
+        return
+    raise RuntimeError(
+        "Harmonic selection was calculated but could not be saved to project "
+        "metadata, so downstream tools cannot load it. Close other processes "
+        "that may be writing project.json, then use Settings > Recalculate "
+        f"Harmonics again. Details: {lookup.reason}"
+    )
+
+
 def load_processing_harmonic_selection(
     project: Any,
     *,
@@ -150,8 +175,9 @@ def load_processing_harmonic_selection(
     if lookup.hit is None:
         raise RuntimeError(
             "No current processing-time significant-harmonic selection is available. "
-            "Reprocess the project or use Settings to recalculate harmonic selection, "
-            f"then try again. Details: {lookup.reason}"
+            "Use Settings > Recalculate Harmonics in the current FPVS Toolbox "
+            "version, then try again. EEG/FIF reprocessing is not required. "
+            f"Details: {lookup.reason}"
         )
     try:
         selection = group_significant_selection_from_metadata(

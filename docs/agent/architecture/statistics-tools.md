@@ -150,6 +150,12 @@ Rules:
   can become the downstream source of truth. This recalculates harmonic
   selection from existing FullFFT workbooks; it does not require EEG
   preprocessing.
+- Processing completion and explicit Settings recalculation must verify that
+  the exact current fingerprint was persisted to `project.json` before
+  reporting success. An in-memory selection alone is insufficient because
+  downstream tools load the durable record. If manifest persistence fails,
+  report a recalculation failure instead of allowing a later source-map cache
+  error; an eligible in-memory hit may first repair the missing durable entry.
 - Frequency-domain QC exclusions are applied before final harmonic selection,
   Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
   Maps metric collection, and source-map input preparation. Full participant

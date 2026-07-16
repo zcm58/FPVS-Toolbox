@@ -24,6 +24,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
 from Tools.Stats.data.group_harmonic_cache import (
+    GROUP_HARMONIC_METHOD_VERSION,
     GroupHarmonicCacheRequest,
     build_group_harmonic_cache_request,
     lookup_cached_group_harmonic_selection,
@@ -269,6 +270,7 @@ class WorkbookSignature:
 
 @dataclass(frozen=True)
 class GroupSignificantSelectionCacheKey:
+    method_version: str
     subjects: tuple[str, ...]
     conditions: tuple[str, ...]
     workbooks: tuple[WorkbookSignature, ...]
@@ -391,6 +393,7 @@ def _group_significant_selection_cache_key(
         for roi_name, channels in sorted((rois or {}).items())
     )
     return GroupSignificantSelectionCacheKey(
+        method_version=GROUP_HARMONIC_METHOD_VERSION,
         subjects=subject_key,
         conditions=condition_key,
         workbooks=workbook_signatures,
@@ -474,6 +477,22 @@ def _save_project_cached_selection(
         selection_cache_saved_at=saved_at,
         selection_cache_key=cache_request.cache_key,
     )
+
+
+def _repair_project_cache_for_in_memory_selection(
+    cache_request: GroupHarmonicCacheRequest | None,
+    selection: GroupSignificantHarmonicSelection,
+    log_func: Callable[[str], None],
+) -> GroupSignificantHarmonicSelection:
+    if cache_request is None:
+        return selection
+    if lookup_cached_group_harmonic_selection(cache_request).hit is not None:
+        return selection
+    log_func(
+        "Project harmonic metadata was missing for an in-memory selection; "
+        "restoring the durable cache entry."
+    )
+    return _save_project_cached_selection(cache_request, selection, log_func)
 
 
 def group_significant_selection_from_metadata(
@@ -798,6 +817,11 @@ def build_group_significant_harmonic_selection(
     )
     cached = _get_cached_group_significant_selection(cache_key)
     if cached is not None:
+        cached = _repair_project_cache_for_in_memory_selection(
+            cache_request,
+            cached,
+            log_func,
+        )
         elapsed = perf_counter() - started
         log_func(
             "[PERF] Group harmonic selection cache hit: "
