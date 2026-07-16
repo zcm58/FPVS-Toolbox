@@ -124,6 +124,32 @@ def _set_processing_summary(host: Any, pct: int | None = None) -> None:
         label.setText(summary)
 
 
+def _set_activity_section_title(
+    host: Any,
+    *,
+    label_attr: str,
+    container_attr: str,
+    title: str,
+) -> None:
+    """Set a flat activity-section title with legacy card-host fallback."""
+
+    label = getattr(host, label_attr, None)
+    if label is not None:
+        try:
+            label.setText(title)
+        except RuntimeError:
+            pass
+        return
+
+    container = getattr(host, container_attr, None)
+    if container is None:
+        return
+    try:
+        container.header.title_label.setText(title)
+    except (AttributeError, RuntimeError):
+        pass
+
+
 def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     table = getattr(host, "processing_files_table", None)
     if table is None:
@@ -175,17 +201,21 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
     status_card = getattr(host, "processing_status_card", None)
     if status_card is not None:
         status_card.setVisible(True)
-        try:
-            status_card.header.title_label.setText("Run Progress")
-        except RuntimeError:
-            pass
+    _set_activity_section_title(
+        host,
+        label_attr="processing_status_title_label",
+        container_attr="processing_status_card",
+        title="Run Progress",
+    )
     files_card = getattr(host, "processing_files_card", None)
     if files_card is not None:
         files_card.setVisible(True)
-        try:
-            files_card.header.title_label.setText("File Completion")
-        except RuntimeError:
-            pass
+    _set_activity_section_title(
+        host,
+        label_attr="processing_files_title_label",
+        container_attr="processing_files_card",
+        title="File Completion",
+    )
 
     host._processing_file_total = len(files)
     host._processing_completed_file_keys = set()

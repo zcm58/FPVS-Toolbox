@@ -216,6 +216,13 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.findChild(QWidget, "processing_activity_header") is not None
     assert win.findChild(QWidget, "processing_status_card") is not None
     assert win.findChild(QWidget, "processing_files_card") is not None
+    assert not isinstance(win.processing_status_card, SectionCard)
+    assert not isinstance(win.processing_files_card, SectionCard)
+    assert win.processing_page.findChildren(SectionCard) == []
+    assert isinstance(win.processing_status_title_label, SubsectionHeaderLabel)
+    assert isinstance(win.processing_files_title_label, SubsectionHeaderLabel)
+    assert win.processing_instruction_panel.property("processingSection") is None
+    assert win.processing_checklist_panel.property("processingSection") is None
     assert win.progress_bar.objectName() == "processing_progress_bar"
     assert win.findChild(QWidget, "processing_action_slot") is win.processing_action_slot
     assert win.processing_files_table.columnCount() == 2
@@ -535,9 +542,13 @@ def test_processing_activity_tracks_completed_files(
     win = _build_window(tmp_path, qtbot, monkeypatch)
     first_file = tmp_path / "P001.bdf"
     second_file = tmp_path / "P002.bdf"
+    win.processing_status_title_label.setText("Stale status title")
+    win.processing_files_title_label.setText("Stale review title")
 
     win._prepare_processing_activity([first_file, second_file])
 
+    assert win.processing_status_title_label.text() == "Run Progress"
+    assert win.processing_files_title_label.text() == "File Completion"
     assert win.processing_files_table.rowCount() == 2
     assert win.processing_files_table.item(0, 0).text() == "Queued"
     assert win.processing_files_table.item(0, 1).text() == "P001.bdf"

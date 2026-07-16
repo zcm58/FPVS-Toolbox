@@ -491,13 +491,25 @@ def _set_spinner_running(host: Any, running: bool) -> None:
         spinner.update()
 
 
-def _set_card_title(host: Any, attr_name: str, title: str) -> None:
-    card = getattr(host, attr_name, None)
-    if card is None:
+def _set_activity_section_title(host: Any, attr_name: str, title: str) -> None:
+    label_attr = {
+        "processing_status_card": "processing_status_title_label",
+        "processing_files_card": "processing_files_title_label",
+    }.get(attr_name)
+    label = getattr(host, label_attr, None) if label_attr is not None else None
+    if label is not None:
+        try:
+            label.setText(title)
+        except RuntimeError:
+            pass
+        return
+
+    container = getattr(host, attr_name, None)
+    if container is None:
         return
     try:
-        card.header.title_label.setText(title)
-    except RuntimeError:
+        container.header.title_label.setText(title)
+    except (AttributeError, RuntimeError):
         pass
 
 
@@ -506,7 +518,7 @@ def _set_review_visible(host: Any, visible: bool, *, title: str = "Review") -> N
     if card is not None:
         card.setVisible(visible)
     if visible:
-        _set_card_title(host, "processing_files_card", title)
+        _set_activity_section_title(host, "processing_files_card", title)
 
 
 def _set_progress_visible(host: Any, visible: bool) -> None:
@@ -572,7 +584,7 @@ def _begin_preflight_page(
     _set_label(host, "processing_message_label", message)
     _set_label(host, "processing_summary_label", "Preparing data quality checks...")
     _set_label(host, "processing_current_file_label", "Latest file: Not started")
-    _set_card_title(host, "processing_status_card", title)
+    _set_activity_section_title(host, "processing_status_card", title)
     _set_review_visible(host, review_visible, title=review_title)
     _set_progress_visible(host, progress_visible)
     _set_spinner_running(host, busy)

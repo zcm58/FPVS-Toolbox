@@ -163,3 +163,21 @@ def test_processing_progress_bar_style_removes_inset_frame() -> None:
     body = match.group("body")
     assert "border: none;" in body
     assert "padding: 0;" in body
+
+
+def test_processing_activity_styles_do_not_define_nested_card_frames() -> None:
+    stylesheet = build_main_page_stylesheet()
+
+    assert "#processing_activity_header" not in stylesheet
+    assert "#processing_status_card" not in stylesheet
+    assert "#processing_files_card" not in stylesheet
+    assert 'QWidget[processingSection="true"]' not in stylesheet
+
+    table_match = re.search(
+        r"#processing_files_table\s*\{(?P<body>[^}]*)\}",
+        stylesheet,
+    )
+    assert table_match is not None
+    table_body = table_match.group("body")
+    assert "border: none;" in table_body
+    assert "border-radius: 0;" in table_body

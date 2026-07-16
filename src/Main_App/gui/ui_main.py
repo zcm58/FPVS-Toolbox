@@ -425,7 +425,7 @@ def init_ui(self) -> None:
     processing_header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     processing_header_layout = QHBoxLayout(processing_header)
-    processing_header_layout.setContentsMargins(24, 22, 24, 22)
+    processing_header_layout.setContentsMargins(0, 0, 0, 0)
     processing_header_layout.setSpacing(20)
 
     self.processing_spinner = BusySpinner(processing_header, diameter=54)
@@ -479,24 +479,31 @@ def init_ui(self) -> None:
     )
     processing_layout.addWidget(processing_header)
 
-    self.processing_status_card = SectionCard(
-        "Run Progress",
-        processing_page,
-        object_name="processing_status_card",
-    )
-    processing_status_layout = self.processing_status_card.content_layout
+    # These compatibility-named containers intentionally remain plain widgets.
+    # The activity page is already the section boundary, so framing its children
+    # would create a card-within-card hierarchy during processing and QC review.
+    self.processing_status_card = QWidget(processing_page)
+    self.processing_status_card.setObjectName("processing_status_card")
+    processing_status_layout = QVBoxLayout(self.processing_status_card)
+    processing_status_layout.setContentsMargins(0, 0, 0, 0)
     processing_status_layout.setSpacing(16)
+
+    self.processing_status_title_label = SubsectionHeaderLabel(
+        "Run Progress",
+        self.processing_status_card,
+    )
+    self.processing_status_title_label.setObjectName("processing_status_title")
+    processing_status_layout.addWidget(self.processing_status_title_label)
 
     self.processing_overview_row = QWidget(self.processing_status_card)
     self.processing_overview_row.setObjectName("processing_overview_row")
     processing_overview_layout = QHBoxLayout(self.processing_overview_row)
     processing_overview_layout.setContentsMargins(0, 0, 0, 0)
-    processing_overview_layout.setSpacing(16)
+    processing_overview_layout.setSpacing(SECTION_GAP * 2)
 
     self.processing_instruction_panel = QWidget(self.processing_overview_row)
-    self.processing_instruction_panel.setProperty("processingSection", True)
     processing_instruction_layout = QVBoxLayout(self.processing_instruction_panel)
-    processing_instruction_layout.setContentsMargins(14, 12, 14, 12)
+    processing_instruction_layout.setContentsMargins(0, 0, 0, 0)
     processing_instruction_layout.setSpacing(8)
 
     self.processing_summary_heading_label = SubsectionHeaderLabel(
@@ -518,9 +525,8 @@ def init_ui(self) -> None:
     processing_overview_layout.addWidget(self.processing_instruction_panel, 3)
 
     self.processing_checklist_panel = QWidget(self.processing_overview_row)
-    self.processing_checklist_panel.setProperty("processingSection", True)
     processing_checklist_layout = QVBoxLayout(self.processing_checklist_panel)
-    processing_checklist_layout.setContentsMargins(14, 12, 14, 12)
+    processing_checklist_layout.setContentsMargins(0, 0, 0, 0)
     processing_checklist_layout.setSpacing(8)
 
     self.processing_checklist_heading_label = SubsectionHeaderLabel(
@@ -579,12 +585,18 @@ def init_ui(self) -> None:
     processing_status_layout.addStretch(1)
     processing_layout.addWidget(self.processing_status_card)
 
-    self.processing_files_card = SectionCard(
+    self.processing_files_card = QWidget(processing_page)
+    self.processing_files_card.setObjectName("processing_files_card")
+    processing_files_layout = QVBoxLayout(self.processing_files_card)
+    processing_files_layout.setContentsMargins(0, 0, 0, 0)
+    processing_files_layout.setSpacing(SECTION_GAP)
+
+    self.processing_files_title_label = SubsectionHeaderLabel(
         "File Completion",
-        processing_page,
-        object_name="processing_files_card",
+        self.processing_files_card,
     )
-    processing_files_layout = self.processing_files_card.content_layout
+    self.processing_files_title_label.setObjectName("processing_files_title")
+    processing_files_layout.addWidget(self.processing_files_title_label)
 
     self.processing_files_table = QTableWidget(0, 2, self.processing_files_card)
     self.processing_files_table.setObjectName("processing_files_table")

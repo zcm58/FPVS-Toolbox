@@ -54,7 +54,11 @@ def test_data_quality_step_labels_are_contiguous(
     expected: str,
 ) -> None:
     label = _LabelStub()
-    host = SimpleNamespace(processing_step_label=label)
+    section_title = _LabelStub()
+    host = SimpleNamespace(
+        processing_step_label=label,
+        processing_status_title_label=section_title,
+    )
 
     workflow._begin_preflight_page(
         host,
@@ -67,6 +71,7 @@ def test_data_quality_step_labels_are_contiguous(
 
     assert label.text == expected
     assert label.visible is True
+    assert section_title.text == title
 
 
 def test_data_quality_preparation_hides_step_label() -> None:
@@ -83,6 +88,20 @@ def test_data_quality_preparation_hides_step_label() -> None:
     )
 
     assert label.visible is False
+
+
+def test_data_quality_review_updates_flat_section_title() -> None:
+    review_panel = _LabelStub()
+    review_title = _LabelStub()
+    host = SimpleNamespace(
+        processing_files_card=review_panel,
+        processing_files_title_label=review_title,
+    )
+
+    workflow._set_review_visible(host, True, title="Review flagged channels")
+
+    assert review_panel.visible is True
+    assert review_title.text == "Review flagged channels"
 
 
 def test_group_display_requires_canonical_membership() -> None:

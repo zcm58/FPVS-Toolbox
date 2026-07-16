@@ -320,18 +320,7 @@ def build_main_page_stylesheet() -> str:
         }}
 
         #processing_page {{
-            background: #E8EDF3;
-        }}
-
-        #processing_activity_header {{
-            background: {SURFACE_BG};
-            border: 1px solid {BORDER_COLOR};
-            border-radius: {CORNER_RADIUS}px;
-        }}
-
-        #processing_status_card,
-        #processing_files_card {{
-            background: {SURFACE_BG};
+            background: {CONTENT_BG};
         }}
 
         #processing_title {{
@@ -342,12 +331,6 @@ def build_main_page_stylesheet() -> str:
 
         #processing_message {{
             color: {TEXT_SECONDARY};
-        }}
-
-        QWidget[processingSection="true"] {{
-            background: {SURFACE_ALT_BG};
-            border: 1px solid {BORDER_SOFT_COLOR};
-            border-radius: 8px;
         }}
 
         #processing_checklist_label,
@@ -371,8 +354,8 @@ def build_main_page_stylesheet() -> str:
         #processing_files_table {{
             background: {SURFACE_BG};
             alternate-background-color: {SURFACE_ALT_BG};
-            border: 1px solid {BORDER_SOFT_COLOR};
-            border-radius: 8px;
+            border: none;
+            border-radius: 0;
             gridline-color: {BORDER_SOFT_COLOR};
             color: {TEXT_PRIMARY};
         }}
