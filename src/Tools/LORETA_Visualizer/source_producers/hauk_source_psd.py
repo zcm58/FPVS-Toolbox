@@ -13,8 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
+from scipy.fft import rfft
+from scipy.signal import get_window
 
 HAUK_SOURCE_PSD_METHOD_ID = "l2_mne_hauk_source_psd_v1"
+HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID = "l2_mne_hauk_source_psd_cortical_normal_v1"
 HAUK_SOURCE_PSD_METHOD_VERSION = "hauk_source_psd_v1"
 HAUK_2021_REFERENCE_DOI = "10.1016/j.neuroimage.2021.118460"
 HAUK_REFERENCE_CODE_URL = "https://github.com/olafhauk/FPVS_sweep"
@@ -25,8 +28,18 @@ DEFAULT_BIN_POSITION_TOLERANCE = 1e-7
 DEFAULT_NEGATIVE_POWER_RELATIVE_TOLERANCE = 1e-12
 DEFAULT_ZERO_NOISE_SD_RELATIVE_TOLERANCE = 1e-12
 SUPPORTED_MNE_INVERSE_METHODS = ("MNE", "dSPM", "sLORETA", "eLORETA")
+SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM = "legacy_mne_psd_power_norm"
+SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL = "cortical_normal"
+SOURCE_ORIENTATION_MODE_VECTOR_NORM = "vector_norm"
+SUPPORTED_SOURCE_ORIENTATION_MODES = (
+    SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+    SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    SOURCE_ORIENTATION_MODE_VECTOR_NORM,
+)
+SOURCE_ORIENTATION_CONTRACT_VERSION = "hauk_source_orientation_v1"
 
 ComputeSourcePsdCallable = Callable[..., Any]
+ApplyInverseCallable = Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -42,6 +55,7 @@ class HaukSourcePsdConfig:
     method_params: Mapping[str, Any] = field(default_factory=dict)
     prepared: bool = False
     method_id: str = HAUK_SOURCE_PSD_METHOD_ID
+    source_orientation_mode: str = SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -67,6 +81,9 @@ class HaukSourcePsdConfig:
         method_id = str(self.method_id).strip()
         if not method_id:
             raise ValueError("Hauk source-PSD method_id cannot be empty.")
+        source_orientation_mode = _validated_source_orientation_mode(
+            self.source_orientation_mode
+        )
         object.__setattr__(self, "selected_harmonics_hz", harmonics)
         object.__setattr__(self, "lambda2", lambda2)
         object.__setattr__(self, "bin_position_tolerance", bin_tolerance)
@@ -76,10 +93,14 @@ class HaukSourcePsdConfig:
         object.__setattr__(self, "method_params", dict(self.method_params))
         object.__setattr__(self, "prepared", bool(self.prepared))
         object.__setattr__(self, "method_id", method_id)
+        object.__setattr__(self, "source_orientation_mode", source_orientation_mode)
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def to_metadata(self) -> dict[str, Any]:
         """Return deterministic, JSON-safe method metadata for provenance/cache keys."""
+        orientation_contract = _source_orientation_contract(
+            self.source_orientation_mode
+        )
         return {
             "method_id": self.method_id,
             "method_version": HAUK_SOURCE_PSD_METHOD_VERSION,
@@ -99,10 +120,12 @@ class HaukSourcePsdConfig:
             "source_psd_bandwidth": "hann",
             "source_psd_low_bias": True,
             "source_psd_nave": 1,
-            "source_psd_pca": True,
-            "source_psd_pick_ori": None,
+            "source_psd_pca": orientation_contract["source_psd_pca"],
+            "source_psd_pick_ori": orientation_contract["mne_pick_ori"],
             "source_psd_decibels": False,
-            "power_to_amplitude": "sqrt_after_nonnegative_validation",
+            "power_to_amplitude": orientation_contract["power_to_amplitude"],
+            "source_orientation_mode": self.source_orientation_mode,
+            "source_orientation_contract": orientation_contract,
             "harmonic_aggregation": "sum_corresponding_source_amplitude_offsets_before_zscore",
             "aligned_offsets": [int(value) for value in DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS],
             "noise_offsets": [int(value) for value in DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS],
@@ -356,6 +379,7 @@ def compute_hauk_source_psd(
     inverse_operator: Any,
     config: HaukSourcePsdConfig,
     compute_source_psd_func: ComputeSourcePsdCallable | None = None,
+    apply_inverse_func: ApplyInverseCallable | None = None,
 ) -> HaukSourcePsdResult:
     """Compute one participant/condition Hauk-informed source-space z-score map."""
     sfreq = _raw_sfreq(averaged_raw)
@@ -366,7 +390,57 @@ def compute_hauk_source_psd(
         selected_harmonics_hz=config.selected_harmonics_hz,
         bin_position_tolerance=config.bin_position_tolerance,
     )
+    if config.source_orientation_mode == SOURCE_ORIENTATION_MODE_VECTOR_NORM:
+        source_amplitudes, source_frequencies = _vector_norm_source_amplitudes(
+            averaged_raw=averaged_raw,
+            inverse_operator=inverse_operator,
+            config=config,
+            frequency_plan=plan,
+            apply_inverse_func=apply_inverse_func,
+        )
+    else:
+        source_amplitudes, source_frequencies = _scalar_source_amplitudes(
+            averaged_raw=averaged_raw,
+            inverse_operator=inverse_operator,
+            config=config,
+            frequency_plan=plan,
+            compute_source_psd_func=compute_source_psd_func,
+        )
+    summed = sum_harmonic_source_amplitudes(
+        source_amplitudes=source_amplitudes,
+        source_psd_frequencies_hz=source_frequencies,
+        frequency_plan=plan,
+        bin_position_tolerance=config.bin_position_tolerance,
+    )
+    zscore = compute_hauk_source_zscores(
+        summed,
+        aligned_offsets=plan.aligned_offsets,
+        zero_sd_relative_tolerance=config.zero_noise_sd_relative_tolerance,
+    )
+    return HaukSourcePsdResult(
+        config=config,
+        frequency_plan=plan,
+        summed_source_amplitudes=summed,
+        zscore=zscore,
+        source_count=int(source_amplitudes.shape[0]),
+        source_psd_frequency_count=int(source_amplitudes.shape[1]),
+    )
+
+
+def _scalar_source_amplitudes(
+    *,
+    averaged_raw: Any,
+    inverse_operator: Any,
+    config: HaukSourcePsdConfig,
+    frequency_plan: HaukSourcePsdFrequencyPlan,
+    compute_source_psd_func: ComputeSourcePsdCallable | None,
+) -> tuple[np.ndarray, np.ndarray]:
     source_psd_callable = compute_source_psd_func or _default_compute_source_psd()
+    pick_ori = (
+        "normal"
+        if config.source_orientation_mode == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
+        else None
+    )
     source_psd = source_psd_callable(
         raw=averaged_raw,
         inverse_operator=inverse_operator,
@@ -374,11 +448,11 @@ def compute_hauk_source_psd(
         method=config.inverse_method,
         tmin=0.0,
         tmax=None,
-        fmin=float(plan.fmin_hz),
-        fmax=float(plan.fmax_hz),
-        n_fft=int(plan.n_times),
+        fmin=float(frequency_plan.fmin_hz),
+        fmax=float(frequency_plan.fmax_hz),
+        n_fft=int(frequency_plan.n_times),
         overlap=0.0,
-        pick_ori=None,
+        pick_ori=pick_ori,
         nave=1,
         pca=True,
         prepared=bool(config.prepared),
@@ -403,24 +477,119 @@ def compute_hauk_source_psd(
         source_power,
         negative_relative_tolerance=config.negative_power_relative_tolerance,
     )
-    summed = sum_harmonic_source_amplitudes(
-        source_amplitudes=source_amplitudes,
-        source_psd_frequencies_hz=source_frequencies,
-        frequency_plan=plan,
-        bin_position_tolerance=config.bin_position_tolerance,
+    return source_amplitudes, source_frequencies
+
+
+def _vector_norm_source_amplitudes(
+    *,
+    averaged_raw: Any,
+    inverse_operator: Any,
+    config: HaukSourcePsdConfig,
+    frequency_plan: HaukSourcePsdFrequencyPlan,
+    apply_inverse_func: ApplyInverseCallable | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    sensor_coefficients = _mne_hann_one_sided_sensor_coefficients(
+        averaged_raw,
+        frequency_plan=frequency_plan,
     )
-    zscore = compute_hauk_source_zscores(
-        summed,
-        aligned_offsets=plan.aligned_offsets,
-        zero_sd_relative_tolerance=config.zero_noise_sd_relative_tolerance,
+    evoked = _complex_frequency_evoked(
+        sensor_coefficients,
+        averaged_raw=averaged_raw,
     )
-    return HaukSourcePsdResult(
-        config=config,
-        frequency_plan=plan,
-        summed_source_amplitudes=summed,
-        zscore=zscore,
-        source_count=int(source_power.shape[0]),
-        source_psd_frequency_count=int(source_power.shape[1]),
+    apply_inverse_callable = apply_inverse_func or _default_apply_inverse()
+    source_estimate = apply_inverse_callable(
+        evoked=evoked,
+        inverse_operator=inverse_operator,
+        lambda2=float(config.lambda2),
+        method=config.inverse_method,
+        pick_ori="vector",
+        prepared=bool(config.prepared),
+        method_params=dict(config.method_params) or None,
+        return_residual=False,
+        verbose=False,
+    )
+    try:
+        source_coefficients = np.asarray(source_estimate.data)
+    except AttributeError as exc:
+        raise TypeError(
+            "Vector inverse callable must return an object with a data array."
+        ) from exc
+    expected_frequency_count = len(frequency_plan.required_bin_indices)
+    if (
+        source_coefficients.ndim != 3
+        or source_coefficients.shape[0] == 0
+        or source_coefficients.shape[1] != 3
+        or source_coefficients.shape[2] != expected_frequency_count
+    ):
+        raise ValueError(
+            "Vector inverse output must have shape n_sources x 3 x n_required_frequencies."
+        )
+    if not np.all(np.isfinite(source_coefficients)):
+        raise ValueError("Vector inverse output contains non-finite values.")
+    amplitudes = np.linalg.norm(source_coefficients, axis=1)
+    if not np.all(np.isfinite(amplitudes)):
+        raise ValueError("Vector source orientation pooling produced non-finite amplitudes.")
+    frequencies = (
+        np.asarray(frequency_plan.required_bin_indices, dtype=float)
+        * frequency_plan.frequency_resolution_hz
+    )
+    return amplitudes.astype(float), frequencies
+
+
+def _mne_hann_one_sided_sensor_coefficients(
+    averaged_raw: Any,
+    *,
+    frequency_plan: HaukSourcePsdFrequencyPlan,
+) -> np.ndarray:
+    try:
+        data = np.asarray(averaged_raw.get_data(), dtype=float)
+    except AttributeError as exc:
+        raise TypeError("Vector source mode requires averaged_raw.get_data().") from exc
+    if data.ndim != 2 or data.shape[0] == 0 or data.shape[1] != frequency_plan.n_times:
+        raise ValueError(
+            "Vector source mode requires Raw data with shape n_channels x averaged_raw.n_times."
+        )
+    if not np.all(np.isfinite(data)):
+        raise ValueError("Vector source mode Raw data contains non-finite values.")
+
+    centered = data - np.mean(data, axis=-1, keepdims=True)
+    periodic_hann = get_window("hann", frequency_plan.n_times)
+    spectrum = rfft(
+        centered * periodic_hann[np.newaxis, :],
+        n=frequency_plan.n_times,
+        axis=-1,
+    )
+    one_sided_scale = np.full(spectrum.shape[1], np.sqrt(2.0), dtype=float)
+    one_sided_scale[0] = 1.0
+    if frequency_plan.n_times % 2 == 0:
+        one_sided_scale[-1] = 1.0
+    required_bins = np.asarray(frequency_plan.required_bin_indices, dtype=int)
+    coefficients = spectrum[:, required_bins] * one_sided_scale[required_bins]
+    if not np.all(np.isfinite(coefficients)):
+        raise ValueError("Hann sensor spectrum contains non-finite values.")
+    return coefficients.astype(np.complex128, copy=False)
+
+
+def _complex_frequency_evoked(
+    sensor_coefficients: np.ndarray,
+    *,
+    averaged_raw: Any,
+) -> Any:
+    try:
+        info = averaged_raw.info.copy()
+    except AttributeError as exc:
+        raise TypeError("Vector source mode requires averaged_raw.info.copy().") from exc
+    try:
+        from mne import EvokedArray
+    except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - dependency contract
+        raise ImportError("MNE is required for vector Hauk source estimation.") from exc
+    return EvokedArray(
+        sensor_coefficients,
+        info,
+        tmin=0.0,
+        comment="Hauk exact-bin complex sensor coefficients",
+        nave=1,
+        verbose=False,
     )
 
 
@@ -463,6 +632,14 @@ def _default_compute_source_psd() -> ComputeSourcePsdCallable:
     except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - dependency contract
         raise ImportError("MNE is required for Hauk source-PSD estimation.") from exc
     return compute_source_psd
+
+
+def _default_apply_inverse() -> ApplyInverseCallable:
+    try:
+        from mne.minimum_norm import apply_inverse
+    except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - dependency contract
+        raise ImportError("MNE is required for vector Hauk source estimation.") from exc
+    return apply_inverse
 
 
 def _raw_sfreq(raw: Any) -> float:
@@ -509,6 +686,56 @@ def _validated_inverse_method(value: Any) -> str:
         ) from exc
 
 
+def _validated_source_orientation_mode(value: Any) -> str:
+    mode = str(value).strip()
+    if mode not in SUPPORTED_SOURCE_ORIENTATION_MODES:
+        supported = ", ".join(SUPPORTED_SOURCE_ORIENTATION_MODES)
+        raise ValueError(
+            f"Unsupported Hauk source_orientation_mode {value!r}; expected one of: {supported}."
+        )
+    return mode
+
+
+def _source_orientation_contract(mode: str) -> dict[str, Any]:
+    if mode == SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM:
+        return {
+            "contract_version": SOURCE_ORIENTATION_CONTRACT_VERSION,
+            "mne_entry_point": "compute_source_psd",
+            "mne_pick_ori": None,
+            "source_psd_pca": True,
+            "inverse_before_orientation_pooling": True,
+            "orientation_pooling": "mne_euclidean_norm_of_component_psd_then_sqrt",
+            "power_to_amplitude": "sqrt_after_nonnegative_validation",
+            "rotation_invariant_amplitude": False,
+        }
+    if mode == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL:
+        return {
+            "contract_version": SOURCE_ORIENTATION_CONTRACT_VERSION,
+            "mne_entry_point": "compute_source_psd",
+            "mne_pick_ori": "normal",
+            "source_psd_pca": True,
+            "inverse_before_orientation_pooling": True,
+            "orientation_pooling": "cortical_surface_normal_component",
+            "power_to_amplitude": "sqrt_after_nonnegative_validation",
+            "rotation_invariant_amplitude": None,
+        }
+    if mode == SOURCE_ORIENTATION_MODE_VECTOR_NORM:
+        return {
+            "contract_version": SOURCE_ORIENTATION_CONTRACT_VERSION,
+            "mne_entry_point": "apply_inverse_on_complex_hann_coefficients",
+            "mne_pick_ori": "vector",
+            "source_psd_pca": False,
+            "inverse_before_orientation_pooling": True,
+            "orientation_pooling": "sqrt_sum_abs_squared_complex_xyz",
+            "power_to_amplitude": "direct_complex_vector_l2_norm",
+            "rotation_invariant_amplitude": True,
+            "sensor_spectrum": "mean_removed_periodic_hann_rfft",
+            "one_sided_scaling": "mne_1_9_compute_source_psd_equivalent",
+            "inverse_frequency_scope": "required_exact_bins_only",
+        }
+    raise AssertionError(f"Unhandled source orientation mode: {mode}")
+
+
 def _positive_finite(value: Any, *, label: str) -> float:
     number = float(value)
     if not np.isfinite(number) or number <= 0.0:
@@ -524,16 +751,23 @@ def _nonnegative_finite(value: Any, *, label: str) -> float:
 
 
 __all__ = [
+    "ApplyInverseCallable",
     "DEFAULT_BIN_POSITION_TOLERANCE",
     "DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS",
     "DEFAULT_HAUK_SOURCE_PSD_LAMBDA2",
     "DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS",
     "DEFAULT_NEGATIVE_POWER_RELATIVE_TOLERANCE",
     "DEFAULT_ZERO_NOISE_SD_RELATIVE_TOLERANCE",
+    "HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID",
     "HAUK_SOURCE_PSD_METHOD_ID",
     "HAUK_SOURCE_PSD_METHOD_VERSION",
     "HAUK_2021_REFERENCE_DOI",
     "HAUK_REFERENCE_CODE_URL",
+    "SOURCE_ORIENTATION_CONTRACT_VERSION",
+    "SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL",
+    "SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM",
+    "SOURCE_ORIENTATION_MODE_VECTOR_NORM",
+    "SUPPORTED_SOURCE_ORIENTATION_MODES",
     "SUPPORTED_MNE_INVERSE_METHODS",
     "HaukSourcePsdConfig",
     "HaukSourcePsdFrequencyPlan",

@@ -46,18 +46,30 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 
 ## Retained Beta Method Contracts
 
-- `l2_mne_hauk_source_psd_v1` is the normal time-domain-first L2-MNE beta
-  producer. It consumes signed, repetition-averaged EEG Raw FIF derivatives,
-  computes MNE source PSD before magnitude/harmonic aggregation, converts power
-  to source amplitude, sums aligned harmonic target/noise positions, and then
-  z-scores each participant independently.
-- `eloreta_volume_hauk_source_psd_v1` is the normal time-domain eLORETA
-  sibling. It consumes the same signed FIF derivatives, complete-case cohort,
-  saved oddball harmonics, exact FFT-bin plan, and neighboring-bin z-score
-  algorithm, but applies an independent MNE eLORETA inverse in fsaverage volume
-  source space. It must compute and cache its own participant source-power and
-  z-score arrays. Never reuse L2-MNE source arrays or the cortical cluster mask
-  as eLORETA values.
+- `l2_mne_hauk_source_psd_cortical_normal_v1` is the default time-domain-first
+  L2-MNE beta producer. It consumes signed, repetition-averaged EEG Raw FIF
+  derivatives and calls MNE source PSD with `pick_ori="normal"` so the cortical
+  surface-normal component is selected before power-to-amplitude conversion,
+  harmonic aggregation, and participant-first z scoring. This orientation
+  estimator matches the Hauk source-spectrum approach more closely than the
+  historical pooled-orientation implementation, without claiming exact study
+  reproduction.
+- `l2_mne_hauk_source_psd_v1` is retained as the explicit legacy L2-MNE mode.
+  The Source Map Options GUI may select it for a rebuild to reproduce older
+  maps that used MNE's pooled free-orientation source-PSD output. The two modes
+  keep distinct method identities, provenance, and cache entries.
+- `eloreta_volume_hauk_source_psd_vector_norm_v1` is the current time-domain
+  eLORETA sibling. It consumes the same signed FIF derivatives, complete-case
+  cohort, saved oddball harmonics, exact FFT-bin plan, and neighboring-bin
+  z-score algorithm, but forms complex periodic-Hann coefficients only at the
+  exact required bins, calls MNE `apply_inverse(..., pick_ori="vector")`, and
+  reduces each three-component source coefficient as
+  `sqrt(sum(abs(Cxyz)^2))`. It must compute and cache its own participant source
+  amplitudes and z-score arrays. Never reuse L2-MNE source arrays or the
+  cortical cluster mask as eLORETA values. The historical
+  `eloreta_volume_hauk_source_psd_v1` identity remains readable as a
+  legacy, orientation-basis-dependent result and must not be relabeled as the
+  corrected vector-norm method.
 - The source-PSD methods intentionally support EEG with the MNE `fsaverage`
   template and Toolbox BioSemi64 geometry. MEG, individual MRI,
   participant-specific coregistration, and mixed-modality fusion are out of
@@ -75,6 +87,9 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   under `6 - Source Localization/Source-Ready Time Domain v1/`. They are EEG
   only, signed volts, exact-length, and average repetitions before any FFT.
   Main App serialization must not compute inverse solutions or source metrics.
+  Existing valid signed FIF/JSON derivatives can be reused when changing the
+  L2 orientation mode or rebuilding corrected eLORETA maps; reprocessing the
+  sensor data is not required merely to regenerate source maps.
 - Source-PSD project orchestration uses the versioned
   `complete_case_all_canonical_conditions_v1` eligibility policy. A completed
   participant with any missing canonical condition or an explicitly incomplete
@@ -132,7 +147,9 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 - The time-domain eLORETA producer writes independently calculated
   `volume_points` under
   `6 - Source Localization/eLORETA Hauk Source PSD Beta/` with method identity
-  `eloreta_volume_hauk_source_psd_v1`.
+  `eloreta_volume_hauk_source_psd_vector_norm_v1`. The older
+  `eloreta_volume_hauk_source_psd_v1` method identity is historical and
+  orientation-basis-dependent.
 - Volume cluster masks are recomputed in volume source space with method-neutral
   `cluster_mask_source_indices`. Never reuse or mutate the L2 cortical mask.
 - When a project has no current source-PSD manifest, the normal background
@@ -142,8 +159,10 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   manual and post-processing rebuilds still target both methods. Existing
   amplitude-derived L2-MNE/eLORETA manifests remain viewable with explicit
   legacy/exploratory labeling. Source Map Options exposes one normal rebuild
-  action, not numerical controls. The GUI may switch loaded manifests for
-  display; source estimation stays producer-owned.
+  action plus the L2 cortical-orientation choice; it does not expose eLORETA
+  vector pooling as a display or numerical choice. The GUI may switch loaded
+  manifests for display; source estimation stays producer-owned, and rendering
+  remains calculation-agnostic.
 
 ## Retained Display And Fallback Behavior
 

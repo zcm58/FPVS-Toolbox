@@ -39,8 +39,11 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import (
 from Tools.LORETA_Visualizer.source_producers.contracts import SourceProducerRunResult
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS,
+    HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
     HAUK_SOURCE_PSD_METHOD_ID,
     HAUK_SOURCE_PSD_METHOD_VERSION,
+    SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
     ComputeSourcePsdCallable,
     HaukSourcePsdConfig,
     HaukSourcePsdResult,
@@ -133,6 +136,8 @@ class ProjectL2MNEHaukSourcePsdExportResult:
     project_inputs: ProjectTimeDomainInputSet
     producer_result: SourceProducerRunResult
     forward_model: L2MNECorticalForwardModel
+    method_id: str
+    source_orientation_mode: str
     selected_harmonics_hz: tuple[float, ...]
     processing_fingerprint: str
     processing_fingerprint_version: str
@@ -243,6 +248,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     spacing: str = DEFAULT_MNE_FSAVERAGE_SPACING,
     allow_fetch_fsaverage: bool = False,
     source_psd_model: MneFsaverageSourcePsdModel | None = None,
+    source_orientation_mode: str = SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
     selected_harmonics_hz: Sequence[float] | None = None,
     compute_source_psd_func: ComputeSourcePsdCallable | None = None,
     aggregations: Sequence[str] = DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS,
@@ -311,8 +317,13 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         selected_harmonics_hz=selected_harmonics_hz,
         progress_callback=progress_callback,
     )
+    selected_method_id = _source_psd_method_id_for_orientation_mode(
+        source_orientation_mode
+    )
     source_psd_config = HaukSourcePsdConfig(
         selected_harmonics_hz=harmonics,
+        source_orientation_mode=source_orientation_mode,
+        method_id=selected_method_id,
         metadata={
             "harmonic_selection": harmonic_metadata,
             "processing_fingerprint": input_plan.processing_fingerprint,
@@ -408,7 +419,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
     )
     output_config = L2MNEHaukZScoreConfig(
         selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
-        method_id=HAUK_SOURCE_PSD_METHOD_ID,
+        method_id=source_psd_config.method_id,
         lambda2=source_psd_config.lambda2,
         cluster_mask_enabled=cluster_mask_enabled,
         cluster_forming_p_value=cluster_forming_p_value,
@@ -425,6 +436,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
             "processing_fingerprint_version": input_plan.processing_fingerprint_version,
             "harmonic_selection": harmonic_metadata,
             "source_psd_method_metadata": method_metadata,
+            "source_orientation_mode": source_psd_config.source_orientation_mode,
             "include_flagged_subjects": bool(include_flagged_subjects),
             "participant_eligibility_policy": SOURCE_PARTICIPANT_ELIGIBILITY_POLICY,
             "included_participants": list(input_plan.participants),
@@ -539,7 +551,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         manifest_path=producer_result.manifest_path,
         payloads=producer_result.payloads,
         project_inputs=validation_inputs,
-        export_model=HAUK_SOURCE_PSD_METHOD_ID,
+        export_model=source_psd_config.method_id,
         participant_sidecar_path=participant_result.participant_sidecar_path,
         lateralization_summary_path=participant_result.lateralization_summary_path,
         lateralization_summary_csv_path=participant_result.lateralization_summary_csv_path,
@@ -549,6 +561,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         project_inputs=project_inputs,
         producer_result=producer_result,
         forward_model=model.forward_model,
+        method_id=source_psd_config.method_id,
+        source_orientation_mode=source_psd_config.source_orientation_mode,
         selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
         processing_fingerprint=input_plan.processing_fingerprint,
         processing_fingerprint_version=input_plan.processing_fingerprint_version,
@@ -570,6 +584,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
             "project_root": str(root),
             "output_dir": str(result.output_dir),
             "manifest_path": str(result.manifest_path),
+            "method_id": result.method_id,
+            "source_orientation_mode": result.source_orientation_mode,
             "participant_count": len(result.included_participants),
             "source_ineligible_participant_count": len(
                 result.source_ineligible_participants
@@ -1040,11 +1056,26 @@ def _participant_cache_metadata(
         "group_id": record.group_id,
         "condition_id": record.condition_id,
         "condition_label": record.condition_label,
-        "method_id": HAUK_SOURCE_PSD_METHOD_ID,
+        "method_id": result.config.method_id,
         "method_version": HAUK_SOURCE_PSD_METHOD_VERSION,
+        "source_orientation_mode": result.config.source_orientation_mode,
         "source_psd_frequency_count": result.source_psd_frequency_count,
         "frequency_plan": result.frequency_plan.to_metadata(),
     }
+
+
+def _source_psd_method_id_for_orientation_mode(
+    source_orientation_mode: str,
+) -> str:
+    mode = str(source_orientation_mode).strip().casefold()
+    if mode == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL:
+        return HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
+    if mode == SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM:
+        return HAUK_SOURCE_PSD_METHOD_ID
+    raise ValueError(
+        "Unsupported L2-MNE source orientation mode: "
+        f"{source_orientation_mode!r}."
+    )
 
 
 def _enrich_source_psd_provenance(

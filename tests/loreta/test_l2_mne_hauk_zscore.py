@@ -6,6 +6,9 @@ import numpy as np
 import pytest
 
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
+from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+    HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+)
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT,
     PARTICIPANT_ZSCORE_AGGREGATION_MEAN,
@@ -275,7 +278,17 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     assert len(lateralization["rows"]) == 10
 
 
-def test_precomputed_source_psd_writer_reuses_group_output_contract(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "method_id",
+    (
+        METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1,
+        HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+    ),
+)
+def test_precomputed_source_psd_writer_reuses_group_output_contract(
+    tmp_path,
+    method_id: str,
+) -> None:
     participant_values = tuple(
         L2MNEHaukParticipantZScoreValues(
             participant_id=participant_id,
@@ -300,22 +313,22 @@ def test_precomputed_source_psd_writer_reuses_group_output_contract(tmp_path) ->
         conditions=(condition,),
         config=L2MNEHaukZScoreConfig(
             selected_harmonics_hz=(1.0, 2.0),
-            method_id=METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1,
+            method_id=method_id,
             cluster_mask_enabled=False,
             metadata={"toolbox_frequency_bin_policy": "offsets_-10_to_-2_and_2_to_10"},
         ),
         output_dir=tmp_path,
     )
 
-    assert result.producer_result.method_id == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    assert result.producer_result.method_id == method_id
     payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
-    assert payload["source_model"] == f"{METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1}_mean"
-    assert payload["metadata"]["base_producer_method"] == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    assert payload["source_model"] == f"{method_id}_mean"
+    assert payload["metadata"]["base_producer_method"] == method_id
     assert payload["metadata"]["reference_method_relation"].startswith("Hauk-informed")
     assert payload["metadata"]["condition_input_domain"] == "signed_time_domain_source_psd"
     assert payload["metadata"]["cluster_mask"] == "disabled"
     manifest = json.loads(result.producer_result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["metadata"]["producer_method"] == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    assert manifest["metadata"]["producer_method"] == method_id
 
 
 def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:

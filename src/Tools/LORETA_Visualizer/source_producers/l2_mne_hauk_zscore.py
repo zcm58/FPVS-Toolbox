@@ -23,6 +23,9 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import (
     validate_prepared_source_payload_mapping,
 )
 from Tools.LORETA_Visualizer.source_producers.contracts import ProducedPayload, SourceProducerRunResult
+from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+    HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+)
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     DEFAULT_LAMBDA2,
     HARMONIC_STRATEGY_SUM_SENSOR_TOPOGRAPHIES_THEN_INVERT,
@@ -61,6 +64,12 @@ METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_TRIMMED_MEAN = (
     "l2_mne_fsaverage_participant_zscore_trimmed_mean"
 )
 METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1 = "l2_mne_hauk_source_psd_v1"
+L2_MNE_HAUK_SOURCE_PSD_METHOD_IDS = frozenset(
+    {
+        METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1,
+        HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+    }
+)
 PARTICIPANT_ZSCORE_AGGREGATION_MEAN = "mean"
 PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN = "median"
 PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN = "trimmed_mean"
@@ -991,7 +1000,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
         "format": PREPARED_SOURCE_MANIFEST_FORMAT,
         "label": (
             "L2-MNE Hauk-informed source-PSD participant z-score maps"
-            if config.method_id == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+            if _is_l2_mne_hauk_source_psd_method(config.method_id)
             else "L2-MNE participant-first source-space z-score maps"
         ),
         "conditions": manifest_conditions,
@@ -1130,8 +1139,8 @@ def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> 
 
 
 def _participant_base_method_id(config: L2MNEHaukZScoreConfig) -> str:
-    if config.method_id == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1:
-        return METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    if _is_l2_mne_hauk_source_psd_method(config.method_id):
+        return config.method_id
     return METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE
 
 
@@ -1140,9 +1149,13 @@ def _participant_aggregation_method_id(
     aggregation: str,
 ) -> str:
     aggregation_id = _validate_participant_zscore_aggregation(aggregation)
-    if config.method_id == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1:
-        return f"{METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1}_{aggregation_id}"
+    if _is_l2_mne_hauk_source_psd_method(config.method_id):
+        return f"{config.method_id}_{aggregation_id}"
     return PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id]
+
+
+def _is_l2_mne_hauk_source_psd_method(method_id: str) -> bool:
+    return str(method_id) in L2_MNE_HAUK_SOURCE_PSD_METHOD_IDS
 
 
 def _validated_precomputed_participant_rows(
@@ -1656,7 +1669,7 @@ def _participant_summary_payload_metadata(
     rows = tuple(participant_values)
     participant_ids = [row.participant_id for row in rows]
     common_offsets = sorted({offset for row in rows for offset in row.noise_offsets_used})
-    source_psd_method = config.method_id == METHOD_ID_L2_MNE_HAUK_SOURCE_PSD_V1
+    source_psd_method = _is_l2_mne_hauk_source_psd_method(config.method_id)
     participant_zscore_order = (
         [
             "load signed repetition-averaged participant EEG time series",

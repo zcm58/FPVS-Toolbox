@@ -13,9 +13,15 @@ Use the LORETA Visualizer after your data has been processed in FPVS Toolbox.
 To use the tool, you should already have:
 
 - a completed FPVS Toolbox project;
-- processed Excel output files for your conditions;
-- a Stats-ready workbook or the project outputs required by the source-map workflow;
+- valid signed source-ready FIF/JSON derivatives created during processing;
+- a current saved significant-oddball-harmonic selection; and
 - condition and harmonic settings that match the experiment you ran.
+
+If valid source-ready FIFs already exist, changing the current source method or
+orientation does not require reprocessing the EEG. Use Source Map Options to
+rebuild the maps from those existing derivatives. Legacy amplitude-derived maps
+have different workbook prerequisites and remain viewable only as explicitly
+legacy/exploratory results.
 
 ## What You Can Do
 
@@ -37,22 +43,52 @@ model, inverse-method assumptions, and regularization. It provides a
 source-space view aligned with the outer cortical sheet; it does not uniquely
 identify the generators of the scalp signal.
 
-The L2-MNE workflow is most relevant to the FPVS source-estimation examples and methodological guidance described by
-Hauk and colleagues. Hauk et al. (2021) and Hauk et al. (2025) provide FPVS examples using EEG/MEG source-space
-analysis. Hauk et al. (2022) provides broader guidance on evaluating linear EEG/MEG source-estimation methods,
-including L2-MNE-type methods.
+The recommended L2 setting is "Cortical normal (Hauk-style)" and is recorded as
+`l2_mne_hauk_source_psd_cortical_normal_v1`. It asks MNE to estimate the
+component normal to the cortical surface before converting source power to
+amplitude. This matches Hauk's source estimator more closely, while retaining
+the Toolbox's EEG-only fsaverage and FPVS-bin adaptations. Source Map Options
+also provides "Legacy MNE pooled orientation" with method ID
+`l2_mne_hauk_source_psd_v1` when you need to reproduce maps generated before
+this correction.
+
+Hauk et al. (2021) and Hauk et al. (2025) provide FPVS examples using EEG/MEG
+source-space analysis. Hauk et al. (2022) provides broader guidance on
+evaluating linear EEG/MEG source-estimation methods, including L2-MNE-type
+methods.
 
 ### eLORETA Volume
 
-The eLORETA volume view estimates activity in a 3D source space rather than only on the cortical surface. This can be useful when you want to inspect a volume-style source map for the same FPVS response.
+The eLORETA volume view estimates activity in a 3D source space rather than only
+on the cortical surface. This can be useful when you want to inspect a
+volume-style source map for the same FPVS response.
 
-eLORETA stands for exact low-resolution electromagnetic tomography. It belongs to the LORETA family of distributed EEG source-estimation methods and is designed to estimate source activity from scalp-recorded electrical signals. Because it is still a low-resolution inverse method, the result should be interpreted as an estimated source-space pattern, not a precise anatomical location.
+The current method, `eloreta_volume_hauk_source_psd_vector_norm_v1`, keeps the
+complex periodic-Hann coefficient at each required exact FPVS bin while MNE
+applies the eLORETA inverse in all three source orientations. It then combines
+the three coefficients as
+`sqrt(abs(Cx)^2 + abs(Cy)^2 + abs(Cz)^2)`. This vector length is unchanged by a
+rotation of the arbitrary volume-source orientation basis. The former
+`eloreta_volume_hauk_source_psd_v1` method remains loadable as a historical
+result, but its free-orientation pooling was basis-dependent and it is not
+treated as the corrected method.
+
+This eLORETA workflow is an FPVS Toolbox extension of Hauk's source-spectrum
+sequence; it is not a claim that Hauk and colleagues implemented this exact
+EEG-only fsaverage volume method. Because eLORETA is still a low-resolution
+inverse method, interpret the result as an estimated source-space pattern, not
+a precise anatomical location.
 
 ## Inputs
 
-The tool uses FPVS Toolbox project outputs that have already been created during processing and statistics export. When source maps are available, the visualizer loads the prepared source-map files for the selected conditions.
+The current methods use the signed, repetition-averaged source-ready FIF files
+created during processing plus the saved project harmonic selection. When
+source maps are available, the visualizer loads the prepared source-map files
+for the selected conditions.
 
-If source maps are not already available, the Toolbox may need to prepare them from the current project outputs before they can be displayed.
+If source maps are absent or use a historical orientation method, Source Map
+Options can rebuild them from valid existing FIF derivatives. Reprocessing is
+needed only when those derivatives are missing, stale, or invalid.
 
 ## Display Options
 
@@ -65,6 +101,10 @@ Depending on the loaded source-map method, you can use options such as:
 
 The available options may differ depending on whether you are viewing an L2-MNE cortical map or an eLORETA volume map.
 
+Display choices never change the source calculation. Surface painting, volume
+smoothing, masks, camera position, and MRI slices operate on already-prepared
+values; the L2 orientation choice affects only the next source-map rebuild.
+
 ## Outputs
 
 The LORETA Visualizer can export source-map figures from supported views.
@@ -74,7 +114,7 @@ Use exported figures as review or presentation images unless your analysis plan 
 ## Basic Steps
 
 1. Process your data in FPVS Toolbox.
-2. Export or confirm the required statistics/project outputs.
+2. Confirm that current source-ready derivatives and harmonic selection exist.
 3. Open the LORETA Visualizer.
 4. Load or generate the available source maps for the project.
 5. Choose the source-map method and condition to view.

@@ -88,6 +88,10 @@ from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source
     default_project_eloreta_volume_hauk_source_psd_output_dir,
 )
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
+from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+    SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+)
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
     DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
     PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER,
@@ -792,6 +796,9 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
         export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
         include_flagged_subjects=True,
         zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+        l2_source_orientation_mode=(
+            SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM
+        ),
         project=project,
     )
     progress_messages: list[str] = []
@@ -812,6 +819,10 @@ def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_defaul
         assert call["include_flagged_subjects"] is True
         assert call["allow_fetch_fsaverage"] is True
         assert "zscore_model" not in call
+    assert l2_calls[0]["source_orientation_mode"] == (
+        SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM
+    )
+    assert "source_orientation_mode" not in eloreta_calls[0]
     assert len(exported) == 1
     result = exported[0]
     assert isinstance(result, ProjectSourceMapExportBatchResult)
@@ -864,6 +875,7 @@ def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, mo
         export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
         include_flagged_subjects=False,
         zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+        l2_source_orientation_mode=SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
         project=SimpleNamespace(project_root=tmp_path),
     )
     progress_messages: list[str] = []

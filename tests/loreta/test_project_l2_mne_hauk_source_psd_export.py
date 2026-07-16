@@ -16,7 +16,10 @@ from Main_App.projects.project import Project
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     HAUK_2021_REFERENCE_DOI,
     HAUK_REFERENCE_CODE_URL,
+    HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
     HAUK_SOURCE_PSD_METHOD_ID,
+    SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
 )
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_inputs import ProjectSourceParticipantSelection
@@ -83,13 +86,17 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     _write_time_domain_derivative(project.project_root, participant_id="P01")
     model = _source_psd_model()
     calls: list[str] = []
+    pick_ori_calls: list[str | None] = []
 
     first = write_project_l2_mne_hauk_source_psd_payloads(
         project=project,
         project_root=project.project_root,
         source_psd_model=model,
         selected_harmonics_hz=(20.0,),
-        compute_source_psd_func=_source_psd_callable(calls),
+        compute_source_psd_func=_source_psd_callable(
+            calls,
+            pick_ori_calls=pick_ori_calls,
+        ),
         aggregations=("mean",),
         cluster_mask_enabled=False,
     )
@@ -102,14 +109,23 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
         first.validation_report_markdown_path is not None
         and first.validation_report_markdown_path.is_file()
     )
-    assert first.producer_result.method_id == HAUK_SOURCE_PSD_METHOD_ID
+    assert first.producer_result.method_id == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
+    assert first.method_id == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
+    assert first.source_orientation_mode == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
     assert first.selected_harmonics_hz == (20.0,)
     assert first.included_participants == ("P01",)
     assert first.cache_hit_count == 0
     assert first.cache_miss_count == 1
     assert calls == ["P01"]
+    assert pick_ori_calls == ["normal"]
     manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["metadata"]["producer_method"] == HAUK_SOURCE_PSD_METHOD_ID
+    assert (
+        manifest["metadata"]["producer_method"]
+        == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
+    )
+    assert manifest["metadata"]["source_psd_method"]["source_orientation_mode"] == (
+        SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
+    )
     assert manifest["metadata"]["reference_publication_doi"] == HAUK_2021_REFERENCE_DOI
     assert manifest["metadata"]["reference_code_repository"] == HAUK_REFERENCE_CODE_URL
     participant_sidecar = json.loads(first.participant_sidecar_path.read_text(encoding="utf-8"))
@@ -120,6 +136,9 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert payload["metadata"]["config_source_psd_method_metadata"][
         "reference_publication_doi"
     ] == HAUK_2021_REFERENCE_DOI
+    assert payload["metadata"]["config_source_orientation_mode"] == (
+        SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
+    )
     validation_report = json.loads(first.validation_report_path.read_text(encoding="utf-8"))
     assert validation_report["input_summary"]["selected_harmonics_hz"] == [20.0]
     assert validation_report["input_summary"]["condition_count"] == 1
@@ -145,6 +164,97 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert second.cache_hit_count == 1
     assert second.cache_miss_count == 0
     assert second.manifest_path == first.manifest_path
+
+
+def test_project_source_psd_orientation_modes_have_distinct_methods_and_caches(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(tmp_path, participants=("P01",))
+    _write_time_domain_derivative(project.project_root, participant_id="P01")
+    model = _source_psd_model()
+    calls: list[str] = []
+    pick_ori_calls: list[str | None] = []
+    source_psd_callable = _source_psd_callable(
+        calls,
+        pick_ori_calls=pick_ori_calls,
+    )
+
+    normal = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=model,
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=source_psd_callable,
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+    )
+    legacy = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=model,
+        source_orientation_mode=SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=source_psd_callable,
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+    )
+
+    assert normal.method_id == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
+    assert normal.source_orientation_mode == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
+    assert legacy.method_id == HAUK_SOURCE_PSD_METHOD_ID
+    assert legacy.source_orientation_mode == SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM
+    assert normal.cache_hit_count == 0 and normal.cache_miss_count == 1
+    assert legacy.cache_hit_count == 0 and legacy.cache_miss_count == 1
+    assert pick_ori_calls == ["normal", None]
+
+    cache_metadata_paths = sorted(
+        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob(
+            "*.json"
+        )
+    )
+    assert len(cache_metadata_paths) == 2
+    cached_methods = {
+        (
+            metadata["key_payload"]["method_metadata"]["method_id"],
+            metadata["key_payload"]["method_metadata"]["source_orientation_mode"],
+        )
+        for metadata in (
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in cache_metadata_paths
+        )
+    }
+    assert cached_methods == {
+        (
+            HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+            SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+        ),
+        (
+            HAUK_SOURCE_PSD_METHOD_ID,
+            SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+        ),
+    }
+
+    def fail_if_recomputed(**_kwargs: Any) -> Any:
+        raise AssertionError("orientation-specific compact cache entry should have been reused")
+
+    normal_cached = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=model,
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=fail_if_recomputed,
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+    )
+    legacy_cached = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=model,
+        source_orientation_mode=SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=fail_if_recomputed,
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+    )
+
+    assert normal_cached.cache_hit_count == 1 and normal_cached.cache_miss_count == 0
+    assert legacy_cached.cache_hit_count == 1 and legacy_cached.cache_miss_count == 0
 
 
 def test_project_source_psd_export_loads_harmonics_from_the_active_project(
@@ -796,10 +906,16 @@ def _source_psd_model() -> MneFsaverageSourcePsdModel:
     )
 
 
-def _source_psd_callable(calls: list[str]):
+def _source_psd_callable(
+    calls: list[str],
+    *,
+    pick_ori_calls: list[str | None] | None = None,
+):
     def compute_source_psd(**kwargs: Any) -> SimpleNamespace:
         raw = kwargs["raw"]
         calls.append("P01" if len(calls) == 0 else f"call-{len(calls) + 1}")
+        if pick_ori_calls is not None:
+            pick_ori_calls.append(kwargs["pick_ori"])
         df = float(raw.info["sfreq"]) / int(kwargs["n_fft"])
         first_bin = int(round(float(kwargs["fmin"]) / df))
         last_bin = int(round(float(kwargs["fmax"]) / df))

@@ -1,10 +1,11 @@
 # Reporting the Hauk-Informed Source-PSD Workflow
 
-This page describes the current Option 1 source-localization workflow in FPVS
+This page describes the current source-localization workflow in FPVS
 Toolbox. It prepares signed time-domain EEG during normal processing and later
 uses MNE to estimate independent L2 minimum-norm cortical and eLORETA volume
-source power spectra. The current method identifiers are
-`l2_mne_hauk_source_psd_v1` and `eloreta_volume_hauk_source_psd_v1`.
+source amplitudes. The default current method identifiers are
+`l2_mne_hauk_source_psd_cortical_normal_v1` and
+`eloreta_volume_hauk_source_psd_vector_norm_v1`.
 
 The workflow is informed by the source-spectrum approach used by Hauk et al.
 (2021) and by the public
@@ -64,21 +65,36 @@ report, processing log, and LORETA status identify every omitted participant
 and reason. Files that claim to be complete but fail checksum, compatibility,
 or manifest validation still stop the source build.
 
+These signed FIF/JSON derivatives are sufficient input for the source-method
+orientation changes described below. If they are already present and valid,
+you can rebuild the source maps without reprocessing the participant EEG.
+
 ## Current Source Calculations
 
-The normal source build is intentionally EEG-only and generates both methods.
-They use the same signed FIF derivatives, complete-case source cohort, saved
-oddball harmonics, exact FPVS frequency bins, and neighboring-bin z-score
+The normal source build is intentionally EEG-only and generates both current
+methods. They use the same signed FIF derivatives, complete-case source cohort,
+saved oddball harmonics, exact FPVS frequency bins, and neighboring-bin z-score
 algorithm. They do not share source values: each inverse produces and caches
-its own participant source-power and z-score arrays.
+its own participant source-amplitude and z-score arrays.
 
-Both methods use the Toolbox
-BioSemi64 channel geometry with the `fsaverage` template rather than individual
-MRI/coregistration, MEG, or EEG/MEG fusion. The cortical inverse is MNE-native
+Both methods use the Toolbox BioSemi64 channel geometry with the `fsaverage`
+template rather than individual MRI/coregistration, MEG, or EEG/MEG fusion. The
+cortical inverse is MNE-native
 L2-MNE with `method="MNE"`, `loose=0.2`, `depth=None`, `fixed=False`, and
-`lambda2=1/9`; it does not apply dSPM, sLORETA, or eLORETA normalization. The
-independent volume inverse uses `method="eLORETA"`, a 10 mm fsaverage volume
-grid, `loose=1.0`, `depth=None`, `fixed=False`, and `lambda2=1/9`.
+`lambda2=1/9`; it does not apply dSPM, sLORETA, or eLORETA normalization. By
+default it uses `pick_ori="normal"` to select the cortical surface-normal
+component and records method identity
+`l2_mne_hauk_source_psd_cortical_normal_v1`. This is closer to the Hauk source
+estimator than the older pooled-orientation implementation. Source Map Options
+can instead select "Legacy MNE pooled orientation" to reproduce older
+`l2_mne_hauk_source_psd_v1` maps; the two results use separate method labels,
+provenance, and caches.
+
+The independent volume inverse uses `method="eLORETA"`, a 10 mm fsaverage
+volume grid, `loose=1.0`, `depth=None`, `fixed=False`, and `lambda2=1/9`. Its
+current method identity is `eloreta_volume_hauk_source_psd_vector_norm_v1`.
+It preserves complex exact-bin coefficients through a vector inverse rather
+than accepting a basis-dependent scalar pooling of free orientations.
 Because the Toolbox workflow does not require a separate resting/noise
 recording, it builds MNE's ad-hoc diagonal EEG noise covariance. This is an
 intentional Toolbox adaptation of the Hauk reference pipeline, which used a
@@ -94,12 +110,15 @@ For each participant and condition, the producer:
    allowed;
 2. requires every selected harmonic and every required neighboring position to
    fall on an exact FFT bin for the derivative's `N` and sampling frequency;
-3. calls MNE's `mne.minimum_norm.compute_source_psd` independently for each
-   method on the complete
-   repetition-averaged Raw time series, using `n_fft=N`, zero overlap, the Hann
-   setting, and the method's own L2-MNE cortical or eLORETA volume inverse;
-4. validates nonnegative source power and takes its square root to obtain source
-   amplitude;
+3. for default L2-MNE, calls `mne.minimum_norm.compute_source_psd` on the
+   complete repetition-averaged Raw time series with `n_fft=N`, zero overlap,
+   the Hann setting, and `pick_ori="normal"`, then validates nonnegative source
+   power and takes its square root to obtain cortical-normal source amplitude;
+4. for current eLORETA, mean-removes the signed sensor time series, computes
+   complex periodic-Hann coefficients at only the exact required FFT bins,
+   calls `mne.minimum_norm.apply_inverse(..., pick_ori="vector")`, and computes
+   the rotation-invariant amplitude
+   `sqrt(abs(Cx)^2 + abs(Cy)^2 + abs(Cz)^2)` at each volume source and bin;
 5. sums corresponding target and neighboring-bin amplitudes across the selected
    harmonics in source space; and
 6. converts that summed target to a neighboring-bin z score at each source.
@@ -118,7 +137,15 @@ does not invalidate otherwise complete source inputs.
 The eLORETA calculation is a Hauk-informed extension of the published
 source-spectrum sequence, not a claim that Hauk et al. implemented this exact
 EEG-only fsaverage eLORETA volume workflow. In particular, an L2-MNE z-score
-array is never transformed or relabeled as eLORETA.
+array is never transformed or relabeled as eLORETA. The historical method ID
+`eloreta_volume_hauk_source_psd_v1` identifies older signed-FIF eLORETA maps
+whose free-orientation scalar pooling was basis-dependent; those maps remain
+loadable but are not relabeled as corrected vector-norm results.
+
+All orientation selection, inverse calculation, vector pooling, harmonic
+aggregation, and z scoring happen in source producers before the visualizer
+loads a payload. Mesh, split-hemisphere, transparent-volume, and MRI-slice
+choices change only the display of saved values.
 
 For projects with more than one canonical participant group, the Toolbox
 creates a separate source summary and cluster-inference input for each group and
@@ -148,17 +175,22 @@ explicitly rather than describing the output only as a generic Hauk z score.
 Existing amplitude-derived L2-MNE Hauk z-score and eLORETA prepared manifests
 remain importable in the visualizer and are labeled legacy/exploratory. They do
 not serve as fallback inputs for either current source-PSD workflow. Normal
-manual and post-processing rebuilds create both time-domain methods. MEG
-fusion, individual-MRI modeling, and the phase-preserving complex-Fourier
-Option 2 remain possible later additions, not current behavior.
+manual and post-processing rebuilds create both time-domain methods. The signed-
+FIF IDs `l2_mne_hauk_source_psd_v1` and
+`eloreta_volume_hauk_source_psd_v1` are also historical: the former remains an
+explicit GUI-selectable reproduction mode, while the latter remains loadable
+but records a basis-dependent orientation result. MEG fusion, individual-MRI
+modeling, and alternative phase-sensitive estimators beyond the current
+exact-bin vector eLORETA route remain possible later additions.
 
 ## Manuscript Or Preregistration Checklist
 
 Report at least:
 
 - the FPVS Toolbox release or commit and both method identifiers,
-  `l2_mne_hauk_source_psd_v1` and
-  `eloreta_volume_hauk_source_psd_v1`;
+  normally `l2_mne_hauk_source_psd_cortical_normal_v1` and
+  `eloreta_volume_hauk_source_psd_vector_norm_v1`; if the L2 legacy toggle was
+  used, report `l2_mne_hauk_source_psd_v1` and the pooled-orientation choice;
 - that source inputs were EEG-only, signed, sample-wise repetition averages in
   volts, and the number of repetitions contributing to each derivative;
 - preprocessing, reference, montage/channel, epoch crop, `N`, sampling
@@ -170,15 +202,19 @@ Report at least:
   individual MRI/coregistration, MEG, and modality fusion;
 - the MNE version, cortical spacing, volume-grid spacing, each method's
   independent inverse settings, ad-hoc diagonal EEG noise covariance, and
-  source-PSD settings;
+  source settings;
+- L2 `pick_ori="normal"` and square-root PSD amplitude conversion, plus eLORETA
+  exact-bin complex periodic-Hann coefficients, `pick_ori="vector"`, and
+  `sqrt(sum(abs(Cxyz)^2))` orientation pooling;
 - the exact-bin/no-nearest-bin requirement;
 - amplitude conversion, harmonic aggregation, offsets `-10..-2` and `+2..+10`,
   one global minimum/maximum removal, and population SD (`ddof=0`);
 - participant exclusions, flagged-participant policy, group summary, and each
   method's source-space cluster inference, plus L2-MNE ROI/lateralization
   settings and every source-only complete-case omission and its reason; and
-- that the method was Hauk-informed but Toolbox-adapted, citing both the study
-  and public code reference below.
+- that cortical-normal L2 follows the Hauk estimator more closely but remains
+  Toolbox-adapted, and that vector-norm eLORETA is a Toolbox extension, citing
+  both the study and public code reference below.
 
 Retain the source-ready FIF/JSON pairs, participant commit manifests, harmonic
 selection record, and prepared source-output manifest with the analysis record.

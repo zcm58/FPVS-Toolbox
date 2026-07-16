@@ -17,6 +17,11 @@ from Tools.LORETA_Visualizer.source_producers.contracts import (
 
 if TYPE_CHECKING:
     from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+        HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+        HAUK_SOURCE_PSD_METHOD_ID,
+        SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+        SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+        SOURCE_ORIENTATION_MODE_VECTOR_NORM,
         HaukSourcePsdConfig,
         HaukSourcePsdFrequencyPlan,
         HaukSourcePsdResult,
@@ -62,6 +67,7 @@ if TYPE_CHECKING:
         ELORETAVolumeParticipantZScoreWriteResult,
         ELORETAVolumeZScoreConfig,
         ELORETAVolumeZScoreValues,
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
         METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
         compute_eloreta_volume_participant_zscore_source_values,
         compute_eloreta_volume_source_cluster_mask,
@@ -146,6 +152,11 @@ _L2_MNE_EXPORTS = {
     "write_l2_mne_cortical_surface_payloads",
 }
 _HAUK_SOURCE_PSD_EXPORTS = {
+    "HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID",
+    "HAUK_SOURCE_PSD_METHOD_ID",
+    "SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL",
+    "SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM",
+    "SOURCE_ORIENTATION_MODE_VECTOR_NORM",
     "HaukSourcePsdConfig",
     "HaukSourcePsdFrequencyPlan",
     "HaukSourcePsdResult",
@@ -181,6 +192,7 @@ _ELORETA_VOLUME_EXPORTS = {
     "ELORETAVolumeParticipantZScoreWriteResult",
     "ELORETAVolumeZScoreConfig",
     "ELORETAVolumeZScoreValues",
+    "METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1",
     "METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1",
     "compute_eloreta_volume_participant_zscore_source_values",
     "compute_eloreta_volume_source_cluster_mask",
@@ -255,6 +267,8 @@ _SOURCE_VALIDATION_REPORT_EXPORTS = {
 }
 
 __all__ = [
+    "HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID",
+    "HAUK_SOURCE_PSD_METHOD_ID",
     "HaukSourcePsdConfig",
     "HaukSourcePsdFrequencyPlan",
     "HaukSourcePsdResult",
@@ -279,6 +293,7 @@ __all__ = [
     "ELORETAVolumeParticipantZScoreWriteResult",
     "ELORETAVolumeZScoreConfig",
     "ELORETAVolumeZScoreValues",
+    "METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1",
     "METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1",
     "PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST",
     "PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST",
@@ -297,6 +312,9 @@ __all__ = [
     "DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID",
     "SOURCE_LATERALIZATION_SUMMARY_FORMAT",
     "SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK",
+    "SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL",
+    "SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM",
+    "SOURCE_ORIENTATION_MODE_VECTOR_NORM",
     "SOURCE_VALIDATION_REPORT_FORMAT",
     "SourceRoiMaskPair",
     "SourceProducerRunResult",

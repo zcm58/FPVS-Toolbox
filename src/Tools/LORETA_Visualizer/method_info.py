@@ -15,12 +15,14 @@ anatomical ground truth.
 </p>
 <p>
 The normal FPVS Toolbox workflow generates both EEG-only L2-MNE cortical and
-eLORETA volume source-PSD maps. Both are Hauk-informed extensions that adapt
-the sequence used in published FPVS source work (Hauk et al., 2021) to the
-Toolbox's user-friendly, fsaverage-based setting. They do not claim to exactly
-reproduce that study's combined EEG/MEG or individual-MRI pipeline. Older
-amplitude-derived L2-MNE and eLORETA maps remain importable as explicitly
-legacy/exploratory workflows.
+eLORETA volume maps from signed time-domain derivatives. The default L2 method,
+<code>l2_mne_hauk_source_psd_cortical_normal_v1</code>, uses the cortical-normal
+orientation and matches the Hauk source estimator more closely. The current
+eLORETA method, <code>eloreta_volume_hauk_source_psd_vector_norm_v1</code>, is a
+Hauk-informed Toolbox extension for EEG-only fsaverage volume source space.
+Neither claims to reproduce the reference study's combined EEG/MEG or
+individual-MRI pipeline exactly. Older amplitude-derived maps and historical
+orientation methods remain importable with explicit legacy labels.
 </p>
 
 <h3>Shared Time-Domain FPVS Method</h3>
@@ -28,17 +30,32 @@ legacy/exploratory workflows.
 During processing, FPVS Toolbox averages each participant's repetitions while
 the EEG waveform is still signed and saves the same source-ready FIF inputs for
 both methods. Both builds use the same complete-case participant cohort,
-project-selected oddball harmonics, exact FFT bins, power-to-amplitude step,
-harmonic alignment, and neighboring-bin z-score algorithm. This ordering avoids
+project-selected oddball harmonics, exact FFT bins, harmonic alignment, and
+neighboring-bin z-score algorithm. Their orientation and source-amplitude
+calculations differ as described below. Starting from signed waveforms avoids
 projecting a scalp magnitude map that has already discarded phase and polarity.
 </p>
 <p>
-The two maps are nevertheless independent source calculations. L2-MNE applies
-its cortical inverse to the signed time series, while eLORETA applies a separate
-volume inverse and computes separate participant source-power and z-score
-arrays. FPVS Toolbox never reuses the L2-MNE source arrays as eLORETA values.
+The two maps are independent source calculations. Default L2-MNE asks MNE for
+the cortical surface-normal source PSD (<code>pick_ori="normal"</code>) before
+converting power to amplitude. Source Map Options can instead select the legacy
+pooled-orientation method <code>l2_mne_hauk_source_psd_v1</code> to reproduce
+older L2 maps. The two L2 choices retain separate method labels, provenance,
+and caches.
+</p>
+<p>
+Current eLORETA computes complex periodic-Hann coefficients at only the exact
+required FPVS bins, applies the separate eLORETA volume inverse with
+<code>pick_ori="vector"</code>, and combines its three complex source components
+as <code>sqrt(sum(abs(Cxyz)^2))</code>. This vector norm does not depend on the
+arbitrary orientation basis of a volume source. FPVS Toolbox never reuses the
+L2-MNE source arrays as eLORETA values.
+</p>
+<p>
 The normal rebuild generates both methods from the signed FIF derivatives and
-does not fall back to FullFFT amplitude workbooks.
+does not fall back to FullFFT amplitude workbooks. If valid source-ready FIFs
+already exist, maps can be rebuilt after this method update without reprocessing
+the EEG.
 </p>
 <p>
 Exact FPVS Toolbox frequency bins are intentional: a target must fall on the
@@ -51,6 +68,11 @@ every detail matches the reference scripts.
 <p>
 Participant z-score maps are summarized only after the participant-level source
 calculation. You can view the arithmetic mean, a 20% trimmed mean, or the median.
+</p>
+<p>
+The Method and Display controls only select and render already-prepared values.
+Surface painting, volume smoothing, MRI slices, masks, and camera choices do not
+change the inverse calculation or orientation pooling.
 </p>
 
 <h3>Cluster-Based Permutation Mask</h3>
@@ -76,13 +98,16 @@ across your dataset, so use caution when interpreting data without the mask.
 
 <h3>eLORETA Volume View</h3>
 <p>
-The current eLORETA workflow estimates source PSD independently in an
-fsaverage volume source space with MNE's eLORETA inverse. Its participant maps
-are aggregated and cluster-tested with volume-source adjacency, not with the
-L2-MNE cortical arrays or cortical mask. Previously generated
-amplitude-derived eLORETA manifests remain importable for comparison and retain
-their legacy method labels; they are never treated as time-domain source-PSD
-results.
+The current eLORETA workflow preserves complex exact-bin coefficients through
+MNE's eLORETA vector inverse in fsaverage volume source space, then computes a
+rotation-invariant three-component amplitude. Its participant maps are
+aggregated and cluster-tested with volume-source adjacency, not with the L2-MNE
+cortical arrays or cortical mask. Historical
+<code>eloreta_volume_hauk_source_psd_v1</code> maps remain loadable but are
+labeled legacy because their pooled free-orientation result was basis-dependent.
+Previously generated amplitude-derived eLORETA manifests also retain their
+legacy labels; neither historical route is treated as the corrected vector-norm
+result.
 </p>
 
 <h3>fsaverage Anatomy</h3>

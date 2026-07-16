@@ -2,14 +2,20 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import mne
 import numpy as np
 import pytest
+from scipy.signal import get_window
 
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS,
     DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
     DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS,
+    HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
     HAUK_SOURCE_PSD_METHOD_VERSION,
+    SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+    SOURCE_ORIENTATION_MODE_VECTOR_NORM,
     HaukSourcePsdConfig,
     build_hauk_source_psd_frequency_plan,
     compute_hauk_source_psd,
@@ -198,6 +204,7 @@ def test_compute_source_psd_calls_mne_contract_then_sums_in_source_space() -> No
     assert call["bandwidth"] == "hann"
     assert call["low_bias"] is True
     assert call["return_sensor"] is False
+    assert call["pick_ori"] is None
     assert call["fmin"] == pytest.approx(10.0)
     assert call["fmax"] == pytest.approx(70.0)
     assert np.array_equal(result.summed_source_amplitudes, desired_summed)
@@ -218,7 +225,132 @@ def test_compute_source_psd_calls_mne_contract_then_sums_in_source_space() -> No
     assert fingerprint["method"]["noise_offsets"] == list(DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS)
     assert fingerprint["method"]["noise_standard_deviation_ddof"] == 0
     assert fingerprint["method"]["nearest_fft_bin_substitution"] == "forbidden"
+    assert fingerprint["method"]["source_orientation_mode"] == (
+        SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM
+    )
+    assert fingerprint["method"]["source_orientation_contract"][
+        "rotation_invariant_amplitude"
+    ] is False
     assert fingerprint["frequency_plan"]["harmonic_bin_indices"] == [20, 60]
+
+
+def test_cortical_normal_mode_calls_mne_normal_orientation_contract() -> None:
+    raw = _AveragedRaw(sfreq=100.0, n_times=100)
+    frequencies = np.arange(10.0, 31.0)
+    amplitudes = np.arange(1.0, len(frequencies) + 1.0).reshape(1, -1)
+    calls: list[dict[str, object]] = []
+
+    def fake_compute_source_psd(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(kwargs)
+        return SimpleNamespace(data=amplitudes**2, times=frequencies)
+
+    config = HaukSourcePsdConfig(
+        selected_harmonics_hz=(20.0,),
+        method_id=HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+        source_orientation_mode=SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    )
+    result = compute_hauk_source_psd(
+        averaged_raw=raw,
+        inverse_operator=object(),
+        config=config,
+        compute_source_psd_func=fake_compute_source_psd,
+    )
+
+    assert result.source_count == 1
+    assert len(calls) == 1
+    assert calls[0]["pick_ori"] == "normal"
+    method = result.cache_fingerprint_payload()["method"]
+    assert method["method_id"] == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
+    assert method["source_orientation_mode"] == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
+    assert method["source_psd_pick_ori"] == "normal"
+    assert method["source_orientation_contract"]["orientation_pooling"] == (
+        "cortical_surface_normal_component"
+    )
+
+
+def test_vector_norm_mode_uses_exact_complex_hann_bins_and_is_rotation_invariant() -> None:
+    sfreq = 200.0
+    n_times = 200
+    times = np.arange(n_times, dtype=float) / sfreq
+    sensor_data = np.vstack(
+        (
+            2.0 + np.sin(2.0 * np.pi * 20.0 * times),
+            -1.0 + 0.5 * np.cos(2.0 * np.pi * 60.0 * times),
+        )
+    )
+    info = mne.create_info(("EEG 001", "EEG 002"), sfreq, ch_types="eeg")
+    raw = mne.io.RawArray(sensor_data, info, verbose=False)
+    inverse_operator = object()
+    method_params = {"eps": 1e-6, "max_iter": 20, "force_equal": False}
+    calls: list[dict[str, object]] = []
+
+    def fake_apply_inverse(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(kwargs)
+        n_frequencies = kwargs["evoked"].data.shape[1]
+        magnitude = np.arange(1.0, n_frequencies + 1.0)
+        vector_data = np.zeros((2, 3, n_frequencies), dtype=np.complex128)
+        vector_data[0, 0] = magnitude
+        vector_data[1, 0] = magnitude * 3.0 / 5.0
+        vector_data[1, 1] = magnitude * 4.0 / 5.0
+        return SimpleNamespace(data=vector_data)
+
+    def fail_compute_source_psd(**_kwargs):  # noqa: ANN003, ANN202
+        raise AssertionError("vector mode must not call scalar compute_source_psd")
+
+    config = HaukSourcePsdConfig(
+        selected_harmonics_hz=(20.0, 60.0),
+        inverse_method="eLORETA",
+        method_params=method_params,
+        prepared=True,
+        method_id="eloreta_volume_hauk_source_psd_v2",
+        source_orientation_mode=SOURCE_ORIENTATION_MODE_VECTOR_NORM,
+    )
+    result = compute_hauk_source_psd(
+        averaged_raw=raw,
+        inverse_operator=inverse_operator,
+        config=config,
+        compute_source_psd_func=fail_compute_source_psd,
+        apply_inverse_func=fake_apply_inverse,
+    )
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["inverse_operator"] is inverse_operator
+    assert call["method"] == "eLORETA"
+    assert call["pick_ori"] == "vector"
+    assert call["prepared"] is True
+    assert call["method_params"] == method_params
+    assert call["method_params"] is not method_params
+    assert call["return_residual"] is False
+    assert call["lambda2"] == pytest.approx(DEFAULT_HAUK_SOURCE_PSD_LAMBDA2)
+
+    plan = result.frequency_plan
+    required_bins = np.asarray(plan.required_bin_indices, dtype=int)
+    evoked_coefficients = call["evoked"].data
+    assert np.iscomplexobj(evoked_coefficients)
+    assert evoked_coefficients.shape == (2, len(required_bins))
+    centered = sensor_data - np.mean(sensor_data, axis=-1, keepdims=True)
+    expected_full = np.fft.rfft(centered * get_window("hann", n_times)[None, :])
+    expected_scale = np.full(expected_full.shape[1], np.sqrt(2.0))
+    expected_scale[0] = 1.0
+    expected_scale[-1] = 1.0
+    expected = expected_full[:, required_bins] * expected_scale[required_bins]
+    assert evoked_coefficients == pytest.approx(expected)
+
+    assert result.source_count == 2
+    assert result.source_psd_frequency_count == len(required_bins)
+    assert result.summed_source_amplitudes[0] == pytest.approx(
+        result.summed_source_amplitudes[1]
+    )
+    assert result.values[0] == pytest.approx(result.values[1])
+    method = result.cache_fingerprint_payload()["method"]
+    assert method["source_orientation_mode"] == SOURCE_ORIENTATION_MODE_VECTOR_NORM
+    assert method["source_psd_pick_ori"] == "vector"
+    assert method["source_psd_pca"] is False
+    assert method["source_orientation_contract"]["orientation_pooling"] == (
+        "sqrt_sum_abs_squared_complex_xyz"
+    )
+    assert method["source_orientation_contract"]["rotation_invariant_amplitude"] is True
 
 
 def test_compute_source_psd_supports_explicit_eloreta_method_contract() -> None:
@@ -273,6 +405,12 @@ def test_source_psd_config_rejects_unsupported_inverse_contracts() -> None:
         HaukSourcePsdConfig(
             selected_harmonics_hz=(20.0,),
             method_params=("not", "a", "mapping"),  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(ValueError, match="Unsupported Hauk source_orientation_mode"):
+        HaukSourcePsdConfig(
+            selected_harmonics_hz=(20.0,),
+            source_orientation_mode="unknown_orientation",
         )
 
 

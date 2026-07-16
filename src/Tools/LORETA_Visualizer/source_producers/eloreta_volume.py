@@ -74,6 +74,15 @@ ProgressCallback = Callable[[str], None]
 METHOD_ID_ELORETA_VOLUME_HAUK_ZSCORE_BETA = "eloreta_volume_hauk_zscore_beta"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE = "eloreta_volume_participant_zscore"
 METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1 = "eloreta_volume_hauk_source_psd_v1"
+METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1 = (
+    "eloreta_volume_hauk_source_psd_vector_norm_v1"
+)
+ELORETA_SOURCE_PSD_METHOD_IDS = frozenset(
+    {
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
+    }
+)
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEAN = "eloreta_volume_participant_zscore_mean"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEDIAN = "eloreta_volume_participant_zscore_median"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_TRIMMED_MEAN = (
@@ -83,10 +92,6 @@ ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS = {
     PARTICIPANT_ZSCORE_AGGREGATION_MEAN: METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEAN,
     PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN: METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEDIAN,
     PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN: METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_TRIMMED_MEAN,
-}
-ELORETA_SOURCE_PSD_AGGREGATION_METHOD_IDS = {
-    aggregation: f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1}_{aggregation}"
-    for aggregation in PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS
 }
 HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE = (
     "sum_corresponding_source_psd_amplitude_offsets_before_zscore"
@@ -127,7 +132,7 @@ class ELORETAVolumeZScoreConfig:
         lambda2 = float(self.lambda2)
         if not np.isfinite(lambda2) or lambda2 <= 0.0:
             raise ValueError("eLORETA volume lambda2 must be positive and finite.")
-        if self.method_id == METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1:
+        if self.method_id in ELORETA_SOURCE_PSD_METHOD_IDS:
             harmonic_strategy = (
                 HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE
             )
@@ -701,8 +706,8 @@ def write_eloreta_volume_precomputed_participant_zscore_payloads(
 
     if not _is_source_psd_config(config):
         raise ValueError(
-            "Precomputed time-domain eLORETA maps require method_id "
-            f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1!r}."
+            "Precomputed time-domain eLORETA maps require method_id to be a "
+            f"supported source-PSD method; got {config.method_id!r}."
         )
     condition_list = tuple(conditions)
     rows_by_condition = {
@@ -807,12 +812,12 @@ def _drop_extreme_noise_rows(noise_source_values: np.ndarray) -> np.ndarray:
 
 
 def _is_source_psd_config(config: ELORETAVolumeZScoreConfig) -> bool:
-    return config.method_id == METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+    return config.method_id in ELORETA_SOURCE_PSD_METHOD_IDS
 
 
 def _participant_base_method_id(config: ELORETAVolumeZScoreConfig) -> str:
     if _is_source_psd_config(config):
-        return METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+        return config.method_id
     return METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE
 
 
@@ -822,7 +827,7 @@ def _participant_aggregation_method_id(
 ) -> str:
     aggregation_id = _validate_participant_zscore_aggregation(aggregation)
     if _is_source_psd_config(config):
-        return ELORETA_SOURCE_PSD_AGGREGATION_METHOD_IDS[aggregation_id]
+        return f"{config.method_id}_{aggregation_id}"
     return ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id]
 
 

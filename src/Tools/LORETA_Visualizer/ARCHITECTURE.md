@@ -47,15 +47,32 @@ harmonic selection and durable, signed time-domain derivatives written while
 condition epochs are resident. One rebuild generates both L2-MNE cortical and
 eLORETA volume outputs. Frequency QC/harmonic selection and Stats-ready export
 are sibling downstream consumers: a Stats workbook failure does not by itself
-invalidate otherwise complete source-PSD inputs.
+invalidate otherwise complete source-PSD inputs. Existing valid signed
+FIF/JSON derivatives can therefore be reused to rebuild source maps after an
+orientation-method update; sensor preprocessing need not be repeated solely to
+regenerate the maps.
 
-The current eLORETA volume source-PSD method shares the L2-MNE route's signed
+The default L2 method, `l2_mne_hauk_source_psd_cortical_normal_v1`, selects the
+cortical surface-normal component with MNE source PSD `pick_ori="normal"`. The
+GUI can instead request historical `l2_mne_hauk_source_psd_v1` when a user
+needs to reproduce older pooled-orientation maps. Method IDs, provenance, and
+caches remain distinct. The cortical-normal estimator is closer to the Hauk
+source-spectrum implementation, but this EEG-only fsaverage route is still a
+Toolbox adaptation rather than an exact reproduction.
+
+The current eLORETA volume method,
+`eloreta_volume_hauk_source_psd_vector_norm_v1`, shares the L2 route's signed
 FIF inputs, complete-case cohort, selected harmonics, exact frequency-bin plan,
-and neighboring-bin z-score algorithm. It nevertheless applies an independent
-MNE eLORETA inverse in fsaverage volume source space and computes separate
-participant source-power and z-score arrays. L2-MNE arrays and cortical masks
-are never reused as eLORETA values. Both current methods refuse FullFFT
-workbooks as fallback source-PSD inputs.
+and neighboring-bin z-score algorithm. It nevertheless forms complex
+periodic-Hann coefficients at the exact required bins, applies an independent
+MNE eLORETA inverse with `pick_ori="vector"` in fsaverage volume source space,
+and reduces the resulting three-component coefficient as
+`sqrt(sum(abs(Cxyz)^2))` at each source and frequency. It computes separate
+participant source-amplitude and z-score arrays; L2-MNE arrays and cortical
+masks are never reused as eLORETA values. The old
+`eloreta_volume_hauk_source_psd_v1` identity remains readable as a historical,
+orientation-basis-dependent result. Both current methods refuse FullFFT
+workbooks as fallback source inputs.
 
 ## Non-Goals
 
@@ -208,11 +225,14 @@ repetition-averaged EEG Raw FIF per participant/condition plus provenance and a
 participant commit manifest. Project orchestration derives one explicit
 complete-case source cohort, and the read-only adapter strictly validates the
 complete retained participant/condition set. Each producer applies its own
-EEG-only fsaverage BioSemi64 inverse, calls MNE source PSD before
-amplitude/harmonic aggregation, and sends its own participant source z-score
-arrays through the relevant aggregation, cluster, and prepared-payload stages.
-The L2-MNE cortical path additionally retains surface ROI/lateralization output;
-the eLORETA volume path does not fabricate cortical lateralization rows.
+EEG-only fsaverage BioSemi64 inverse. Default L2-MNE calls MNE source PSD with
+the cortical-normal orientation before amplitude/harmonic aggregation; current
+eLORETA applies its inverse to complex exact-bin Hann coefficients and performs
+rotation-invariant vector pooling afterward. Each sends its own participant
+source z-score arrays through the relevant aggregation, cluster, and
+prepared-payload stages. The L2-MNE cortical path additionally retains surface
+ROI/lateralization output; the eLORETA volume path does not fabricate cortical
+lateralization rows.
 When a project has multiple canonical participant groups, the exporter creates
 separate group-by-condition aggregation and cluster inputs. Group identity is
 preserved in prepared condition metadata; experimental groups are not pooled
@@ -230,8 +250,11 @@ in combined EEG/MEG recordings with fast periodic visual stimulation (FPVS)*
 ([DOI](https://doi.org/10.1016/j.neuroimage.2021.118460)), and the public
 [`olafhauk/FPVS_sweep`](https://github.com/olafhauk/FPVS_sweep) repository,
 including `FPVS_PSD_Source_sweep.py`. Cite them as influences on the
-source-spectrum design; do not claim that this EEG-only template implementation
-exactly reproduces their combined EEG/MEG or individual-anatomy pipeline.
+source-spectrum design. The default cortical-normal L2 estimator follows the
+Hauk orientation choice more closely, while the vector-norm eLORETA volume path
+is an FPVS Toolbox extension. Do not claim that either EEG-only template
+implementation exactly reproduces their combined EEG/MEG or individual-anatomy
+pipeline.
 
 The supported source models are EEG-only `fsaverage` with Toolbox BioSemi64
 geometry. MEG, individual MRI/coregistration, and mixed-modality fusion are
@@ -244,6 +267,13 @@ covariance because the Toolbox workflow does not require a separate
 resting/noise acquisition. These EEG/template choices are documented
 departures from the reference pipeline's recorded resting covariance,
 individual anatomy, and combined EEG/MEG analysis.
+
+Source orientation is producer-owned and versioned. Source Map Options may pass
+the default cortical-normal or historical pooled-orientation choice into the
+next L2 rebuild, but the visualizer's Method and Display selectors only select
+already-prepared results and rendering styles. They never recompute, reinterpret,
+or change source orientation. Current eLORETA always uses vector-norm pooling;
+it is not a display option.
 
 Phase 6E adds documentation and GUI source-map options around those producer
 paths. Project source-map generation excludes participants listed in
@@ -371,9 +401,12 @@ compact rebuild summaries, but source-estimation math still belongs only to
   FullFFT/z-score input contract. The current
   `project_eloreta_volume_hauk_source_psd_export.py` path instead consumes the
   signed source-ready FIF contract and writes independently computed
-  `eloreta_volume_hauk_source_psd_v1` `volume_points` payloads. Both write a
-  participant sidecar and method-neutral source-index cluster-mask metadata;
-  neither emits surface lateralization rows.
+  `eloreta_volume_hauk_source_psd_vector_norm_v1` `volume_points` payloads.
+  Historical signed-FIF outputs with method identity
+  `eloreta_volume_hauk_source_psd_v1` remain loadable but are explicitly
+  orientation-basis-dependent legacy results. Both write a participant sidecar
+  and method-neutral source-index cluster-mask metadata; neither emits surface
+  lateralization rows.
   Later producers may use other LORETA/eLORETA volume or mixed source-space
   models.
 - `source_rois.py`: producer-side anatomical ROI helpers that map named
@@ -521,9 +554,13 @@ noise mean and population SD (`ddof=0`).
 
 The time-domain source-PSD exporters write independently calculated prepared
 outputs under `6 - Source Localization/L2-MNE Hauk Source PSD Beta/` with
-method identity `l2_mne_hauk_source_psd_v1` and under
-`6 - Source Localization/eLORETA Hauk Source PSD Beta/` with method identity
-`eloreta_volume_hauk_source_psd_v1`. Their shared canonical inputs live under
+default method identity `l2_mne_hauk_source_psd_cortical_normal_v1`. Source Map
+Options can explicitly rebuild the historical pooled-orientation method
+`l2_mne_hauk_source_psd_v1` instead. eLORETA outputs are written under
+`6 - Source Localization/eLORETA Hauk Source PSD Beta/` with current method
+identity `eloreta_volume_hauk_source_psd_vector_norm_v1`; the historical
+`eloreta_volume_hauk_source_psd_v1` identity denotes the older
+orientation-basis-dependent implementation. Their shared canonical inputs live under
 `6 - Source Localization/Source-Ready Time Domain v1/` in
 condition-first/group-second layout. An artifact pair is
 `<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.fif` and
@@ -543,14 +580,16 @@ complete but is missing or corrupt still stops the build. The FIF
 contains signed EEG volts, exact processed `N` and sampling rate,
 montage/reference state, and no FFT or source values.
 
-For each included participant/condition, both methods compute source PSD on the
-complete averaged time series. L2-MNE uses its cortical inverse; eLORETA uses a
-separately prepared volume inverse. Each method then independently converts
-power to amplitude, aligns exact target/noise positions across the canonical
-harmonic plan, sums corresponding positions in its own source space, and
-applies the Toolbox neighboring-bin z-score. Only compact method-specific
-participant results are cached; complete source spectra are reproducible from
-the durable time-domain derivative and are not retained by default.
+For each included participant/condition, default L2-MNE computes cortical-normal
+source PSD on the complete averaged time series, converts power to amplitude,
+and then aligns exact target/noise positions. Current eLORETA instead computes
+the required complex periodic-Hann sensor coefficients, preserves them through
+`apply_inverse(..., pick_ori="vector")`, and obtains an orientation-invariant
+amplitude with `sqrt(sum(abs(Cxyz)^2))`. Both then sum corresponding positions
+across the canonical harmonic plan in their own source spaces and apply the
+Toolbox neighboring-bin z-score. Only compact method-specific participant
+results are cached; source amplitudes are reproducible from the durable
+time-domain derivative and are not retained in full by default.
 
 The legacy amplitude-derived eLORETA exporter continues to write under
 `6 - Source Localization/eLORETA Volume Beta/`. Its manifest and the legacy
@@ -562,15 +601,16 @@ locations; when disabled or unavailable, transparent volume z-score overlays
 use positive-only exploratory display filtering. Display behavior does not
 change saved payload values.
 
-On first open, if no current time-domain source-PSD manifest exists, the GUI may
-start one background rebuild that generates both normal methods. If one current
-method is already available, the GUI loads that valid partial result instead of
-automatically rebuilding only because the sibling is absent. Manual and
-post-processing rebuilds use the two-method batch, so users do not choose
-numerical parameters. One method may report a method-specific failure without
-relabeling or discarding a successfully generated sibling result. The Method
-selector remains a display selector over loaded manifests, not a numerical
-method editor.
+On first open, if no current time-domain source manifest exists, the GUI may
+start one background rebuild that generates default cortical-normal L2-MNE and
+vector-norm eLORETA outputs. If one current method is already available, the GUI
+loads that valid partial result instead of automatically rebuilding only because
+the sibling is absent. Manual and post-processing rebuilds use the two-method
+batch; Source Map Options exposes only the L2 orientation choice because the
+corrected eLORETA vector norm is fixed. One method may report a method-specific
+failure without relabeling or discarding a successfully generated sibling
+result. The Method selector remains a display selector over loaded manifests,
+not a numerical method editor.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in

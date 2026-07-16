@@ -71,6 +71,10 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     format_scalar_value,
     resolve_scalar_limits,
 )
+from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+    SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+    SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+)
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_VOLUME_POINTS,
     SourcePayload,
@@ -334,6 +338,7 @@ class ProjectSourceMapExportWorker(QObject):
         export_modes: tuple[str, ...],
         include_flagged_subjects: bool,
         zscore_model: str,
+        l2_source_orientation_mode: str = SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
         project: object | None = None,
     ) -> None:
         super().__init__()
@@ -341,6 +346,7 @@ class ProjectSourceMapExportWorker(QObject):
         self._export_modes = export_modes
         self._include_flagged_subjects = include_flagged_subjects
         self._zscore_model = zscore_model
+        self._l2_source_orientation_mode = l2_source_orientation_mode
         self._project = project
 
     @Slot()
@@ -390,6 +396,7 @@ class ProjectSourceMapExportWorker(QObject):
                 project=self._project,
                 project_root=self._project_root,
                 include_flagged_subjects=self._include_flagged_subjects,
+                source_orientation_mode=self._l2_source_orientation_mode,
                 allow_fetch_fsaverage=True,
                 progress_callback=self.progress.emit,
             )
@@ -1092,6 +1099,7 @@ class SourceMapOptionsDialog(AppDialog):
         use_cluster_mask: bool,
         source_map_visible: bool,
         transparent_spin_enabled: bool,
+        source_orientation_mode: str,
         project_available: bool,
         export_busy: bool,
     ) -> None:
@@ -1194,6 +1202,37 @@ class SourceMapOptionsDialog(AppDialog):
         data_note.setObjectName("loreta_source_options_data_note")
         data_note.setWordWrap(True)
         data_layout.addWidget(data_note)
+
+        orientation_label = QLabel("L2 source orientation", data_tab)
+        orientation_label.setObjectName("loreta_l2_source_orientation_label")
+        data_layout.addWidget(orientation_label)
+
+        self.source_orientation_combo = QComboBox(data_tab)
+        self.source_orientation_combo.setObjectName("loreta_l2_source_orientation_combo")
+        self.source_orientation_combo.addItem(
+            "Cortical normal (Hauk-style; recommended)",
+            SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL,
+        )
+        self.source_orientation_combo.addItem(
+            "Legacy MNE pooled orientation (reproduce older maps)",
+            SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM,
+        )
+        orientation_index = self.source_orientation_combo.findData(source_orientation_mode)
+        self.source_orientation_combo.setCurrentIndex(max(0, orientation_index))
+        self.source_orientation_combo.setToolTip(
+            "Choose the orientation calculation for the next L2-MNE source-map rebuild."
+        )
+        self.source_orientation_combo.setEnabled(project_available and not export_busy)
+        data_layout.addWidget(self.source_orientation_combo)
+
+        orientation_note = QLabel(
+            "This affects rebuilt L2-MNE cortical maps only. eLORETA volume maps always use "
+            "the corrected vector norm.",
+            data_tab,
+        )
+        orientation_note.setObjectName("loreta_l2_source_orientation_note")
+        orientation_note.setWordWrap(True)
+        data_layout.addWidget(orientation_note)
 
         self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
         self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
@@ -1467,6 +1506,7 @@ class LoretaVisualizerWindow(QWidget):
         self._selected_source_method_id = SOURCE_METHOD_L2_MNE_SOURCE_PSD
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
+        self._l2_source_orientation_mode = SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._use_cluster_mask = True
         self._activation_visible = True
@@ -2505,11 +2545,13 @@ class LoretaVisualizerWindow(QWidget):
             use_cluster_mask=self._use_cluster_mask,
             source_map_visible=self._activation_visible,
             transparent_spin_enabled=self._transparent_spin_enabled,
+            source_orientation_mode=self._l2_source_orientation_mode,
             project_available=project_root is not None and self._project is not None,
             export_busy=self._source_export_thread is not None or self._stats_ready_export_thread is not None,
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
+        self._l2_source_orientation_mode = str(dialog.source_orientation_combo.currentData())
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         self._set_cluster_mask_enabled(dialog.use_cluster_mask_check.isChecked())
         self._set_activation_visibility_enabled(dialog.source_map_visible_check.isChecked())
@@ -2705,6 +2747,7 @@ class LoretaVisualizerWindow(QWidget):
                 "project_root": str(project_root),
                 "export_mode": ",".join(modes),
                 "include_flagged_subjects": include_flagged_subjects,
+                "l2_source_orientation_mode": self._l2_source_orientation_mode,
                 "zscore_model": zscore_model,
             },
         )
@@ -2715,6 +2758,7 @@ class LoretaVisualizerWindow(QWidget):
             export_modes=modes,
             include_flagged_subjects=include_flagged_subjects,
             zscore_model=zscore_model,
+            l2_source_orientation_mode=self._l2_source_orientation_mode,
             project=self._project,
         )
         worker.moveToThread(thread)

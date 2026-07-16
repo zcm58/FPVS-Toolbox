@@ -36,16 +36,17 @@ from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
     ELORETAVolumeParticipantZScoreValues,
     ELORETAVolumePrecomputedParticipantGroupCondition,
     ELORETAVolumeZScoreConfig,
-    METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+    METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
     write_eloreta_volume_precomputed_participant_zscore_payloads,
 )
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+    ApplyInverseCallable,
     DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
     DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS,
     HAUK_SOURCE_PSD_METHOD_VERSION,
-    ComputeSourcePsdCallable,
     HaukSourcePsdConfig,
     HaukSourcePsdResult,
+    SOURCE_ORIENTATION_MODE_VECTOR_NORM,
     build_hauk_source_psd_frequency_plan,
     compute_hauk_source_psd,
 )
@@ -123,7 +124,7 @@ class ProjectELORETAVolumeHaukSourcePsdExportResult:
     participant_sidecar_path: Path
     validation_report_path: Path | None = None
     validation_report_markdown_path: Path | None = None
-    export_model: str = "participant_first_time_domain_source_psd"
+    export_model: str = METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
 
     @property
     def output_dir(self) -> Path:
@@ -192,7 +193,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     selected_harmonics_hz: Sequence[float] | None = None,
     lambda2: float = DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
     method_params: Mapping[str, Any] | None = None,
-    compute_source_psd_func: ComputeSourcePsdCallable | None = None,
+    apply_inverse_func: ApplyInverseCallable | None = None,
     aggregations: Sequence[str] = DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS,
     trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
     cluster_mask_enabled: bool = True,
@@ -307,7 +308,8 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         inverse_method="eLORETA",
         method_params=resolved_method_params,
         prepared=model.prepared,
-        method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+        method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
+        source_orientation_mode=SOURCE_ORIENTATION_MODE_VECTOR_NORM,
         metadata={
             "harmonic_selection": harmonic_metadata,
             "processing_fingerprint": input_plan.processing_fingerprint,
@@ -368,7 +370,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
                 averaged_raw=loaded.raw,
                 inverse_operator=model.inverse_operator,
                 config=source_psd_config,
-                compute_source_psd_func=compute_source_psd_func,
+                apply_inverse_func=apply_inverse_func,
             )
             participant_values = _participant_values_from_source_psd(
                 source_psd_result,
@@ -392,7 +394,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
     )
     output_config = ELORETAVolumeZScoreConfig(
         selected_harmonics_hz=source_psd_config.selected_harmonics_hz,
-        method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+        method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
         lambda2=source_psd_config.lambda2,
         eloreta_method_params=resolved_method_params,
         cluster_mask_enabled=cluster_mask_enabled,
@@ -524,7 +526,7 @@ def write_project_eloreta_volume_hauk_source_psd_payloads(
         manifest_path=producer_result.manifest_path,
         payloads=producer_result.payloads,
         project_inputs=validation_inputs,
-        export_model=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+        export_model=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
         participant_sidecar_path=participant_result.participant_sidecar_path,
         lateralization_summary_path=None,
         lateralization_summary_csv_path=None,
@@ -761,7 +763,7 @@ def _cache_result(
             "group_id": record.group_id,
             "condition_id": record.condition_id,
             "condition_label": record.condition_label,
-            "method_id": METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+            "method_id": METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
             "method_version": HAUK_SOURCE_PSD_METHOD_VERSION,
             "inverse_method": "eLORETA",
             "source_psd_frequency_count": (

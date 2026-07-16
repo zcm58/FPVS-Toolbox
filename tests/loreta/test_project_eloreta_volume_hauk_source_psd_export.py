@@ -17,7 +17,7 @@ from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 from Main_App.projects.project import Project
 from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
     ELORETAVolumeForwardModel,
-    METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+    METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
 )
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
@@ -52,7 +52,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         project_root=project.project_root,
         source_psd_model=model,
         selected_harmonics_hz=(20.0,),
-        compute_source_psd_func=_source_psd_callable(calls),
+        apply_inverse_func=_apply_inverse_callable(calls),
         aggregations=("mean",),
         cluster_mask_enabled=False,
     )
@@ -63,15 +63,11 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert call["method_params"] == dict(DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS)
     assert call["prepared"] is True
     assert call["lambda2"] == pytest.approx(DEFAULT_HAUK_SOURCE_PSD_LAMBDA2)
-    assert call["n_fft"] == N_TIMES
-    assert call["overlap"] == 0.0
-    assert call["bandwidth"] == "hann"
-    assert call["low_bias"] is True
-    assert call["return_sensor"] is False
-    assert call["fmin"] == pytest.approx(10.0)
-    assert call["fmax"] == pytest.approx(30.0)
-    raw_values = call["raw"].get_data()
-    assert float(np.min(raw_values)) < 0.0 < float(np.max(raw_values))
+    assert call["pick_ori"] == "vector"
+    assert call["return_residual"] is False
+    sensor_coefficients = np.asarray(call["evoked"].data)
+    assert sensor_coefficients.shape == (len(DEFAULT_ELECTRODE_NAMES_64), 19)
+    assert np.iscomplexobj(sensor_coefficients)
 
     assert first.manifest_path.name == (
         DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME
@@ -80,7 +76,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         project.project_root
     )
     assert first.producer_result.method_id == (
-        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
     )
     assert first.included_participants == ("P01",)
     assert first.cache_hit_count == 0
@@ -92,7 +88,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
 
     manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
     assert manifest["metadata"]["producer_method"] == (
-        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
     )
     assert manifest["metadata"]["input_domain"] == (
         "signed_repetition_averaged_eeg_time_series"
@@ -103,6 +99,8 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS
     )
     assert method_metadata["prepared"] is True
+    assert method_metadata["source_orientation_mode"] == "vector_norm"
+    assert method_metadata["source_orientation_contract"]["rotation_invariant_amplitude"] is True
 
     payload = json.loads(
         (first.output_dir / manifest["conditions"][0]["file"]).read_text(
@@ -111,7 +109,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     )
     assert payload["kind"] == "volume_points"
     assert payload["source_model"] == (
-        f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1}_mean"
+        f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1}_mean"
     )
     assert payload["metadata"]["input_domain"] == (
         "signed_repetition_averaged_eeg_time_series"
@@ -124,7 +122,9 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert payload["metadata"]["renderer_dependency"] == "none"
 
     validation = json.loads(first.validation_report_path.read_text(encoding="utf-8"))
-    assert validation["export_model"] == METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+    assert validation["export_model"] == (
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
+    )
     assert validation["input_summary"]["condition_summaries"][0]["workbook_count"] == 0
     assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"][
         "diagnostics"
@@ -137,7 +137,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         project=project,
         source_psd_model=model,
         selected_harmonics_hz=(20.0,),
-        compute_source_psd_func=fail_if_recomputed,
+        apply_inverse_func=fail_if_recomputed,
         aggregations=("mean",),
         cluster_mask_enabled=False,
     )
@@ -150,7 +150,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         project=project,
         source_psd_model=_source_psd_model(method_params=alternate_params),
         selected_harmonics_hz=(20.0,),
-        compute_source_psd_func=_source_psd_callable(alternate_calls),
+        apply_inverse_func=_apply_inverse_callable(alternate_calls),
         aggregations=("mean",),
         cluster_mask_enabled=False,
     )
@@ -182,7 +182,7 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     } == {1e-6, 2e-6}
     assert {
         payload["result_metadata"]["method_id"] for payload in cache_metadata
-    } == {METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1}
+    } == {METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1}
 
 
 def test_project_eloreta_source_psd_uses_complete_case_group_splits(
@@ -225,7 +225,7 @@ def test_project_eloreta_source_psd_uses_complete_case_group_splits(
         project=project,
         source_psd_model=_source_psd_model(),
         selected_harmonics_hz=(20.0,),
-        compute_source_psd_func=_source_psd_callable([]),
+        apply_inverse_func=_apply_inverse_callable([]),
         aggregations=("mean",),
         cluster_mask_enabled=False,
         progress_callback=progress.append,
@@ -511,21 +511,22 @@ def _source_psd_model(
     )
 
 
-def _source_psd_callable(calls: list[dict[str, Any]]):
-    def compute_source_psd(**kwargs: Any) -> SimpleNamespace:
+def _apply_inverse_callable(calls: list[dict[str, Any]]):
+    def apply_inverse(**kwargs: Any) -> SimpleNamespace:
         calls.append(dict(kwargs))
-        raw = kwargs["raw"]
-        df = float(raw.info["sfreq"]) / int(kwargs["n_fft"])
-        first_bin = int(round(float(kwargs["fmin"]) / df))
-        last_bin = int(round(float(kwargs["fmax"]) / df))
-        frequencies = np.arange(first_bin, last_bin + 1, dtype=float) * df
+        frequency_count = int(kwargs["evoked"].data.shape[1])
         source_count = int(kwargs["inverse_operator"]["source_count"])
         amplitudes = (
             1.0
             + np.arange(source_count, dtype=float)[:, None] * 0.05
-            + frequencies[None, :] * 0.02
+            + np.arange(frequency_count, dtype=float)[None, :] * 0.02
         )
-        amplitudes[:, np.isclose(frequencies, 20.0)] += 1.5
-        return SimpleNamespace(data=amplitudes**2, times=frequencies)
+        amplitudes[:, frequency_count // 2] += 1.5
+        vector_coefficients = np.zeros(
+            (source_count, 3, frequency_count),
+            dtype=np.complex128,
+        )
+        vector_coefficients[:, 0, :] = amplitudes * np.exp(0.25j)
+        return SimpleNamespace(data=vector_coefficients)
 
-    return compute_source_psd
+    return apply_inverse
