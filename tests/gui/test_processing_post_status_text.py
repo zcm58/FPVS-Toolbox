@@ -6,6 +6,7 @@ from Main_App.gui.processing_workflows import (
     _PostProcessingPipelineBridge,
     _post_processing_display_state,
     _post_processing_phase_display_state,
+    _refresh_cached_loreta_source_maps,
 )
 from Main_App.gui.style_tokens import build_main_page_stylesheet
 
@@ -153,6 +154,38 @@ def test_post_processing_bridge_forwards_structured_phase_progress() -> None:
     bridge.handle_phase_progress("harmonic_selection", 1, 5, "Identifying harmonics")
 
     assert received == [("harmonic_selection", 1, 5, "Identifying harmonics")]
+
+
+def test_post_processing_refreshes_only_an_existing_loreta_page() -> None:
+    calls: list[str] = []
+    page = SimpleNamespace(
+        reload_project_source_maps_from_disk=lambda: calls.append("reload") or True
+    )
+
+    assert _refresh_cached_loreta_source_maps(SimpleNamespace()) is False
+    assert (
+        _refresh_cached_loreta_source_maps(
+            SimpleNamespace(_loreta_visualizer_page=page)
+        )
+        is True
+    )
+    assert calls == ["reload"]
+
+
+def test_post_processing_loreta_refresh_failure_does_not_break_completion() -> None:
+    def _raise_deleted_page() -> bool:
+        raise RuntimeError("wrapped C/C++ object has been deleted")
+
+    page = SimpleNamespace(
+        reload_project_source_maps_from_disk=_raise_deleted_page,
+    )
+
+    assert (
+        _refresh_cached_loreta_source_maps(
+            SimpleNamespace(_loreta_visualizer_page=page)
+        )
+        is False
+    )
 
 
 def test_processing_progress_bar_style_removes_inset_frame() -> None:

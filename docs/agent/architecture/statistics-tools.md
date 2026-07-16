@@ -156,6 +156,12 @@ Rules:
   downstream tools load the durable record. If manifest persistence fails,
   report a recalculation failure instead of allowing a later source-map cache
   error; an eligible in-memory hit may first repair the missing durable entry.
+- Harmonic-cache identity includes the frequency-domain QC method, thresholds,
+  and participant/electrode exclusions, but not
+  `frequency_domain_qc.downstream_outputs_stale`. That field is workflow status
+  toggled around downstream regeneration, not a scientific input. Cache lookup
+  may accept an older entry that differs only by this retired status bit; every
+  scientific setting and source-workbook fingerprint must still match exactly.
 - Frequency-domain QC exclusions are applied before final harmonic selection,
   Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
   Maps metric collection, and source-map input preparation. Full participant

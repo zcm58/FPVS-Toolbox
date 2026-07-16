@@ -191,7 +191,6 @@ def _frequency_domain_qc_signature(manifest: Mapping[str, object]) -> dict[str, 
         "manual_participant_exclusions": _json_safe(
             state.get("manual_participant_exclusions") or []
         ),
-        "downstream_outputs_stale": bool(state.get("downstream_outputs_stale", False)),
     }
 
 
@@ -218,22 +217,55 @@ def lookup_cached_group_harmonic_selection(
     entries = cache.get("entries")
     if not isinstance(entries, Mapping):
         return GroupHarmonicCacheLookup(hit=None, reason="No saved group-significant harmonics.")
-    entry = entries.get(request.cache_key)
-    if isinstance(entry, Mapping):
-        selection_metadata = entry.get("selection_metadata")
-        if isinstance(selection_metadata, Mapping):
-            saved_at = str(entry.get("saved_at") or "")
+    exact_hit = _cache_hit_from_entry(request.cache_key, entries.get(request.cache_key))
+    if exact_hit is not None:
+        return GroupHarmonicCacheLookup(
+            hit=exact_hit,
+            reason="Saved harmonics match current inputs.",
+        )
+
+    current_scientific_fingerprint = _fingerprint_without_workflow_state(
+        request.fingerprint
+    )
+    for saved_key, candidate in entries.items():
+        if not isinstance(candidate, Mapping):
+            continue
+        saved_fingerprint = candidate.get("fingerprint")
+        if not isinstance(saved_fingerprint, Mapping):
+            continue
+        if (
+            _fingerprint_without_workflow_state(saved_fingerprint)
+            != current_scientific_fingerprint
+        ):
+            continue
+        compatible_hit = _cache_hit_from_entry(str(saved_key), candidate)
+        if compatible_hit is not None:
             return GroupHarmonicCacheLookup(
-                hit=GroupHarmonicCacheHit(
-                    cache_key=request.cache_key,
-                    saved_at=saved_at,
-                    selection_metadata=copy.deepcopy(dict(selection_metadata)),
+                hit=compatible_hit,
+                reason=(
+                    "Saved harmonics match current scientific inputs; ignored "
+                    "legacy downstream-output workflow status."
                 ),
-                reason="Saved harmonics match current inputs.",
             )
     return GroupHarmonicCacheLookup(
         hit=None,
         reason=_cache_miss_reason(entries, request),
+    )
+
+
+def _cache_hit_from_entry(
+    cache_key: str,
+    entry: object,
+) -> GroupHarmonicCacheHit | None:
+    if not isinstance(entry, Mapping):
+        return None
+    selection_metadata = entry.get("selection_metadata")
+    if not isinstance(selection_metadata, Mapping):
+        return None
+    return GroupHarmonicCacheHit(
+        cache_key=str(cache_key),
+        saved_at=str(entry.get("saved_at") or ""),
+        selection_metadata=copy.deepcopy(dict(selection_metadata)),
     )
 
 
@@ -452,6 +484,25 @@ def _cache_miss_reason(
 def _fingerprint_without_processing(fingerprint: Mapping[str, object]) -> dict[str, object]:
     out = dict(fingerprint)
     out.pop("project_processing_signature", None)
+    out.pop("project_processing_signature_hash", None)
+    return _json_safe(out)
+
+
+def _fingerprint_without_workflow_state(
+    fingerprint: Mapping[str, object],
+) -> dict[str, object]:
+    """Normalize legacy fingerprints by removing non-scientific status state."""
+
+    out = copy.deepcopy(dict(fingerprint))
+    processing_signature = out.get("project_processing_signature")
+    if isinstance(processing_signature, Mapping):
+        normalized_signature = copy.deepcopy(dict(processing_signature))
+        frequency_domain_qc = normalized_signature.get("frequency_domain_qc")
+        if isinstance(frequency_domain_qc, Mapping):
+            normalized_qc = copy.deepcopy(dict(frequency_domain_qc))
+            normalized_qc.pop("downstream_outputs_stale", None)
+            normalized_signature["frequency_domain_qc"] = normalized_qc
+        out["project_processing_signature"] = normalized_signature
     out.pop("project_processing_signature_hash", None)
     return _json_safe(out)
 

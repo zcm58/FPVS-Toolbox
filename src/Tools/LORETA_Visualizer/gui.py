@@ -2600,6 +2600,31 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES, automatic=True)
 
+    def reload_project_source_maps_from_disk(self) -> bool:
+        """Reload completed project manifests without starting source estimation."""
+
+        project_root = self._refresh_project_root()
+        manifest_paths = default_project_source_manifest_paths(project_root)
+        if not manifest_paths:
+            return False
+        self._auto_project_zscore_attempted = True
+        self._set_source_export_status(
+            "Loading newly generated project source-space z-score maps...",
+            variant="info",
+        )
+        self._import_prepared_source_manifests(
+            manifest_paths,
+            preferred_source_method_id=self._selected_source_method_id,
+        )
+        logger.info(
+            "loreta_project_source_maps_reloaded",
+            extra={
+                "project_root": str(project_root),
+                "manifest_paths": [str(path) for path in manifest_paths],
+            },
+        )
+        return True
+
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
         self._build_project_source_maps_for_modes((export_mode,), automatic=automatic)
 

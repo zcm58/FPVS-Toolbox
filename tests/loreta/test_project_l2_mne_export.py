@@ -19,6 +19,7 @@ from Tools.LORETA_Visualizer.gui import (
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
     PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
     PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+    LoretaVisualizerWindow,
     ProjectSourceMapExportBatchResult,
     ProjectSourceMapExportWorker,
     ProjectStatsReadyExportWorker,
@@ -583,6 +584,53 @@ def test_default_project_source_manifest_paths_returns_current_pair_then_legacy(
 
     eloreta_source_psd_manifest.unlink()
     assert default_project_source_manifest_paths(project_root) == (zscore_manifest, eloreta_manifest)
+
+
+def test_loreta_reload_project_source_maps_from_disk_clears_stale_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    manifest_paths = (
+        project_root / "l2_manifest.json",
+        project_root / "eloreta_manifest.json",
+    )
+    available_paths = [manifest_paths]
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.gui.default_project_source_manifest_paths",
+        lambda root: available_paths[0] if root == project_root else (),
+    )
+    statuses: list[tuple[str, str]] = []
+    imports: list[tuple[tuple[Path, ...], str | None]] = []
+    window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
+    window._auto_project_zscore_attempted = False
+    window._selected_source_method_id = SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD
+    window._refresh_project_root = lambda: project_root
+    window._set_source_export_status = (
+        lambda message, *, variant: statuses.append((message, variant))
+    )
+    window._import_prepared_source_manifests = (
+        lambda paths, *, preferred_source_method_id=None: imports.append(
+            (paths, preferred_source_method_id)
+        )
+    )
+
+    assert window.reload_project_source_maps_from_disk() is True
+    assert window._auto_project_zscore_attempted is True
+    assert statuses == [
+        ("Loading newly generated project source-space z-score maps...", "info")
+    ]
+    assert imports == [
+        (manifest_paths, SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD)
+    ]
+
+    available_paths[0] = ()
+    statuses.clear()
+    imports.clear()
+    assert window.reload_project_source_maps_from_disk() is False
+    assert statuses == []
+    assert imports == []
 
 
 def test_loreta_project_root_resolver_reads_current_project(tmp_path) -> None:

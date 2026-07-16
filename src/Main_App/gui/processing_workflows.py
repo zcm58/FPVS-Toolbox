@@ -241,6 +241,20 @@ def _sync_project_tools_metadata_from_disk(project: Any) -> None:
         manifest["tools"] = tools
 
 
+def _refresh_cached_loreta_source_maps(host: Any) -> bool:
+    """Reload generated manifests when the embedded LORETA page already exists."""
+
+    page = getattr(host, "_loreta_visualizer_page", None)
+    reload_maps = getattr(page, "reload_project_source_maps_from_disk", None)
+    if not callable(reload_maps):
+        return False
+    try:
+        return bool(reload_maps())
+    except (OSError, RuntimeError, TypeError, ValueError):
+        logger.warning("loreta_cached_page_refresh_failed", exc_info=True)
+        return False
+
+
 def _format_timing_summary(result: dict) -> str | None:
     timings = result.get("timings_ms")
     if not isinstance(timings, dict) or not timings:
@@ -606,6 +620,7 @@ def _start_post_processing_pipeline_after_processing(
                     _sync_project_tools_metadata_from_disk(project)
                 except Exception:
                     logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
+                _refresh_cached_loreta_source_maps(host)
                 if result.get("has_warnings"):
                     host.log(
                         "Post-processing completed with usable LORETA outputs and "

@@ -71,6 +71,28 @@ def _request(project_root: Path, workbook: Path):
     )
 
 
+def _write_frequency_domain_qc_state(
+    project_root: Path,
+    *,
+    downstream_outputs_stale: bool,
+    manual_participant_exclusions: list[str] | None = None,
+) -> None:
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tools = manifest.setdefault("tools", {})
+    tools["frequency_domain_qc"] = {
+        "method_version": "frequency_domain_qc_v1",
+        "thresholds": {"absolute_z_threshold": 3.0},
+        "auto_participant_electrode_exclusions": [],
+        "auto_participant_exclusions": [],
+        "manual_participant_exclusions": list(
+            manual_participant_exclusions or []
+        ),
+        "downstream_outputs_stale": downstream_outputs_stale,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
 def _selection_metadata() -> dict[str, object]:
     return {
         "harmonic_policy": "group_level_significant_harmonics",
@@ -143,6 +165,91 @@ def test_project_processing_signature_tracks_fft_multinotch_settings(tmp_path: P
     assert enabled_60["preprocessing"]["line_noise_frequency_hz"] == 60
     assert enabled_60 != enabled_50
     assert enabled_50 != disabled
+
+
+def test_frequency_domain_workflow_status_does_not_invalidate_harmonics(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
+    workbook.parent.mkdir(parents=True)
+    workbook.write_bytes(b"placeholder")
+    _write_frequency_domain_qc_state(
+        project_root,
+        downstream_outputs_stale=True,
+        manual_participant_exclusions=["S2"],
+    )
+
+    stale_request = _request(project_root, workbook)
+    assert stale_request is not None
+    assert "downstream_outputs_stale" not in stale_request.project_processing_signature[
+        "frequency_domain_qc"
+    ]
+    save_cached_group_harmonic_selection(stale_request, _selection_metadata())
+
+    _write_frequency_domain_qc_state(
+        project_root,
+        downstream_outputs_stale=False,
+        manual_participant_exclusions=["S2"],
+    )
+    current_request = _request(project_root, workbook)
+    assert current_request is not None
+    assert current_request.cache_key == stale_request.cache_key
+    assert lookup_cached_group_harmonic_selection(current_request).hit is not None
+
+    _write_frequency_domain_qc_state(
+        project_root,
+        downstream_outputs_stale=False,
+        manual_participant_exclusions=["S2", "S3"],
+    )
+    changed_exclusions_request = _request(project_root, workbook)
+    assert changed_exclusions_request is not None
+    assert changed_exclusions_request.cache_key != current_request.cache_key
+    assert lookup_cached_group_harmonic_selection(changed_exclusions_request).hit is None
+
+
+def test_lookup_accepts_legacy_cache_differing_only_by_workflow_status(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    workbook = project_root / "1 - Excel Data Files" / "S1_Face.xlsx"
+    workbook.parent.mkdir(parents=True)
+    workbook.write_bytes(b"placeholder")
+    _write_frequency_domain_qc_state(
+        project_root,
+        downstream_outputs_stale=False,
+    )
+    request = _request(project_root, workbook)
+    assert request is not None
+    save_cached_group_harmonic_selection(request, _selection_metadata())
+
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = manifest["tools"]["stats"]["group_significant_harmonics_cache"][
+        "entries"
+    ]
+    legacy_entry = entries.pop(request.cache_key)
+    legacy_fingerprint = deepcopy(legacy_entry["fingerprint"])
+    legacy_signature = legacy_fingerprint["project_processing_signature"]
+    legacy_signature["frequency_domain_qc"]["downstream_outputs_stale"] = True
+    legacy_signature_hash = cache_mod._hash_payload(legacy_signature)
+    legacy_fingerprint["project_processing_signature_hash"] = legacy_signature_hash
+    legacy_key = cache_mod._hash_payload(legacy_fingerprint)
+    legacy_entry["cache_key"] = legacy_key
+    legacy_entry["fingerprint"] = legacy_fingerprint
+    legacy_entry["project_processing_signature"] = legacy_signature
+    legacy_entry["project_processing_signature_hash"] = legacy_signature_hash
+    entries[legacy_key] = legacy_entry
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    lookup = lookup_cached_group_harmonic_selection(_request(project_root, workbook))
+
+    assert lookup.hit is not None
+    assert lookup.hit.cache_key == legacy_key
+    assert lookup.hit.selection_metadata["selected_harmonics_hz"] == [1.2, 3.6, 7.2]
+    assert "ignored legacy downstream-output workflow status" in lookup.reason
 
 
 def test_cache_miss_reports_method_upgrade_before_older_workbook_drift(

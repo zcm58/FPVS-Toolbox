@@ -261,7 +261,11 @@ compact rebuild summaries, but source-estimation math still belongs only to
   crowding the side panel. The method selector groups loaded manifests by
   source method, keeps condition/summary selection method-local, and restricts
   non-cortical volume payloads to Transparent brain mesh and MRI slices
-  displays.
+  displays. When Main App post-processing successfully writes both current
+  source-map manifests, an already-cached visualizer page reloads those files
+  from disk and replaces any obsolete build warning; this refresh never starts
+  source estimation and does not instantiate the page when it has not been
+  opened.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
