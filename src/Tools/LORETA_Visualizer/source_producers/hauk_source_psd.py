@@ -23,6 +23,12 @@ HAUK_2021_REFERENCE_DOI = "10.1016/j.neuroimage.2021.118460"
 HAUK_REFERENCE_CODE_URL = "https://github.com/olafhauk/FPVS_sweep"
 DEFAULT_HAUK_SOURCE_PSD_LAMBDA2 = 1.0 / 9.0
 DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS = tuple(range(-10, -1)) + tuple(range(2, 11))
+DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT = len(
+    DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS
+)
+DEFAULT_HAUK_SOURCE_PSD_RETAINED_NOISE_BIN_COUNT = (
+    DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT - 2
+)
 DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS = (0, *DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS)
 DEFAULT_BIN_POSITION_TOLERANCE = 1e-7
 DEFAULT_NEGATIVE_POWER_RELATIVE_TOLERANCE = 1e-12
@@ -129,7 +135,7 @@ class HaukSourcePsdConfig:
             "harmonic_aggregation": "sum_corresponding_source_amplitude_offsets_before_zscore",
             "aligned_offsets": [int(value) for value in DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS],
             "noise_offsets": [int(value) for value in DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS],
-            "noise_bin_count": len(DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS),
+            "noise_bin_count": DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT,
             "excluded_target_adjacent_offsets": [-1, 0, 1],
             "noise_extreme_rule": "drop_one_global_min_and_one_global_max_per_source",
             "noise_standard_deviation_ddof": 0,
@@ -756,6 +762,8 @@ __all__ = [
     "DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS",
     "DEFAULT_HAUK_SOURCE_PSD_LAMBDA2",
     "DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS",
+    "DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT",
+    "DEFAULT_HAUK_SOURCE_PSD_RETAINED_NOISE_BIN_COUNT",
     "DEFAULT_NEGATIVE_POWER_RELATIVE_TOLERANCE",
     "DEFAULT_ZERO_NOISE_SD_RELATIVE_TOLERANCE",
     "HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID",

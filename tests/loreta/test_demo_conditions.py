@@ -330,6 +330,34 @@ def test_underpowered_cluster_mask_readout_marks_exploratory_threshold_display()
     assert "not group-masked" in warning
 
 
+def test_single_participant_cluster_status_is_explicitly_exploratory() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Erotic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "none",
+            "cluster_mask_status": "insufficient_participants",
+            "participant_count": 1,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload).endswith(
+        "display: exploratory z >= 1.64"
+    )
+    warning = _underpowered_cluster_mask_status_text(payload)
+    assert warning is not None
+    assert "Only 1 eligible participant map is available" in warning
+    assert "At least two are required" in warning
+    assert "not group-masked" in warning
+
+
 def test_hauk_cluster_mask_readout_names_publication_mask() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),

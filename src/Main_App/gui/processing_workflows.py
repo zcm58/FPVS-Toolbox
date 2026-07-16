@@ -63,6 +63,9 @@ _POST_PROCESSING_SOURCE_MAPS_MESSAGE = (
     "Generating source-space maps for 3D visualization of oddball responses."
 )
 _POST_PROCESSING_PROGRESS_SETTLE_MS = 250
+_POST_PROCESSING_SOURCE_STEP_NAMES = frozenset(
+    {"l2_mne_source_psd", "eloreta_volume_source_psd"}
+)
 _POST_PROCESSING_PHASE_STATES = {
     "frequency_domain_qc": (1, _POST_PROCESSING_QC_TITLE, _POST_PROCESSING_QC_MESSAGE),
     "harmonic_selection": (
@@ -241,7 +244,29 @@ def _sync_project_tools_metadata_from_disk(project: Any) -> None:
         manifest["tools"] = tools
 
 
-def _refresh_cached_loreta_source_maps(host: Any) -> bool:
+def _post_processing_source_map_outcome(result: object) -> tuple[bool, bool]:
+    """Return whether source steps ran and whether at least one succeeded."""
+
+    if not isinstance(result, dict):
+        return False, False
+    steps = result.get("steps")
+    if not isinstance(steps, list):
+        return False, False
+
+    source_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and str(step.get("name") or "") in _POST_PROCESSING_SOURCE_STEP_NAMES
+    ]
+    return bool(source_steps), any(bool(step.get("ok")) for step in source_steps)
+
+
+def _refresh_cached_loreta_source_maps(
+    host: Any,
+    *,
+    invalidate_if_missing: bool = False,
+) -> bool:
     """Reload generated manifests when the embedded LORETA page already exists."""
 
     page = getattr(host, "_loreta_visualizer_page", None)
@@ -249,6 +274,8 @@ def _refresh_cached_loreta_source_maps(host: Any) -> bool:
     if not callable(reload_maps):
         return False
     try:
+        if invalidate_if_missing:
+            return bool(reload_maps(invalidate_if_missing=True))
         return bool(reload_maps())
     except (OSError, RuntimeError, TypeError, ValueError):
         logger.warning("loreta_cached_page_refresh_failed", exc_info=True)
@@ -585,6 +612,9 @@ def _start_post_processing_pipeline_after_processing(
     def _handle_finished(result: dict) -> None:
         pending_qc_report: dict | None = None
         try:
+            source_maps_attempted, source_maps_succeeded = (
+                _post_processing_source_map_outcome(result)
+            )
             steps = result.get("steps") if isinstance(result, dict) else []
             if isinstance(steps, list):
                 for step in steps:
@@ -620,7 +650,6 @@ def _start_post_processing_pipeline_after_processing(
                     _sync_project_tools_metadata_from_disk(project)
                 except Exception:
                     logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
-                _refresh_cached_loreta_source_maps(host)
                 if result.get("has_warnings"):
                     host.log(
                         "Post-processing completed with usable LORETA outputs and "
@@ -639,6 +668,19 @@ def _start_post_processing_pipeline_after_processing(
                     "using Stats-ready or LORETA outputs.",
                     level=logging.WARNING,
                 )
+            if source_maps_attempted:
+                source_maps_reloaded = _refresh_cached_loreta_source_maps(
+                    host,
+                    invalidate_if_missing=True,
+                )
+                if (
+                    source_maps_succeeded
+                    and not result.get("ok")
+                    and source_maps_reloaded
+                ):
+                    logger.info(
+                        "loreta_cached_page_refreshed_after_partial_pipeline_success"
+                    )
         finally:
             host._post_processing_pipeline_thread = None
             host._post_processing_pipeline_worker = None

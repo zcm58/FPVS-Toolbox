@@ -637,6 +637,77 @@ def test_loreta_reload_project_source_maps_from_disk_clears_stale_status(
     assert imports == []
 
 
+def test_loreta_pipeline_reload_invalidates_project_map_when_manifest_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    legacy_manifest = project_root / "legacy_manifest.json"
+    legacy_manifest.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.gui.default_project_source_manifest_paths",
+        lambda _root: (legacy_manifest,),
+    )
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.gui.default_project_source_psd_manifest_path",
+        lambda _root: None,
+    )
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.gui.default_project_eloreta_source_psd_manifest_path",
+        lambda _root: None,
+    )
+    invalidations: list[Path | None] = []
+    window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
+    window._refresh_project_root = lambda: project_root
+    window._invalidate_project_source_maps_after_pipeline = invalidations.append
+
+    assert (
+        window.reload_project_source_maps_from_disk(invalidate_if_missing=True)
+        is False
+    )
+    assert invalidations == [project_root]
+
+
+@pytest.mark.parametrize("project_map_loaded", [False, True])
+def test_loreta_pipeline_invalidation_preserves_manual_map_only(
+    project_map_loaded: bool,
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "Project"
+    replacements: list[tuple[object, ...]] = []
+    clear_calls: list[str] = []
+    statuses: list[tuple[str, str]] = []
+    window = LoretaVisualizerWindow.__new__(LoretaVisualizerWindow)
+    window._project_source_maps_loaded = project_map_loaded
+    window._selected_condition_id = "Erotic"
+    window._source_activation_payload = object()
+    window._current_activation_payload = object()
+    window._replace_manifest_conditions = replacements.append
+    window._clear_activation_payload = lambda: clear_calls.append("clear")
+    window._set_source_export_status = (
+        lambda message, *, variant: statuses.append((message, variant))
+    )
+
+    window._invalidate_project_source_maps_after_pipeline(project_root)
+
+    if project_map_loaded:
+        assert replacements == [()]
+        assert clear_calls == ["clear"]
+        assert window._selected_condition_id == ""
+        assert window._source_activation_payload is None
+        assert window._current_activation_payload is None
+        assert "previously loaded project map was cleared" in statuses[0][0]
+    else:
+        assert replacements == []
+        assert clear_calls == []
+        assert window._selected_condition_id == "Erotic"
+        assert window._source_activation_payload is not None
+        assert window._current_activation_payload is not None
+        assert "previously loaded project map was cleared" not in statuses[0][0]
+    assert statuses[0][1] == "warning"
+
+
 def test_loreta_project_root_resolver_reads_current_project(tmp_path) -> None:
     project_root = tmp_path / "Project"
     project_root.mkdir()

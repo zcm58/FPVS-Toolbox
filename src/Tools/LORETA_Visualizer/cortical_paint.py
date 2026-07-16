@@ -11,6 +11,7 @@ from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, So
 DEFAULT_CORTICAL_PAINT_NEIGHBORS = 4
 DEFAULT_CORTICAL_PAINT_POWER = 2.0
 DEFAULT_CORTICAL_PAINT_Z_THRESHOLD = 1.64
+CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS = "insufficient_participants"
 
 
 @dataclass(frozen=True)
@@ -90,15 +91,18 @@ def payload_cluster_mask_is_empty(payload: SourcePayload) -> bool:
 
 
 def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
-    """Return whether a saved empty cluster mask is resolution-limited.
+    """Return whether cluster inference is unavailable or resolution-limited.
 
-    Small participant counts use exact sign flips. With the producer's plus-one
+    A single participant cannot support the one-sample permutation stage.
+    Larger small samples use exact sign flips; with the producer's plus-one
     p-value correction, some exact tests cannot reach the selected alpha even
-    when the source z-score field is large. In that case, cortical paint should
-    use the exploratory display threshold instead of treating an empty mask as a
-    meaningful group-level null result.
+    when the source z-score field is large. In either case, display should use
+    the exploratory threshold instead of implying a group-level null result.
     """
     metadata = payload.metadata
+    status = str(metadata.get("cluster_mask_status", "")).strip().lower()
+    if status == CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS:
+        return True
     if not _payload_declares_cluster_mask(metadata):
         return False
     if _cluster_mask_retained_count(payload) != 0:

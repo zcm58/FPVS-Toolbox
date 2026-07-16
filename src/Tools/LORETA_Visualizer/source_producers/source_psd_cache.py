@@ -44,6 +44,39 @@ _ARRAY_NAMES = (
     "noise_std_values",
     "noise_offsets_used",
 )
+_HARMONIC_SELECTION_CACHE_BOOKKEEPING_FIELDS = frozenset(
+    {
+        "selection_cache_key",
+        "selection_cache_saved_at",
+        "selection_cache_source",
+    }
+)
+
+
+def scientific_source_psd_method_metadata(
+    method_metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return method metadata containing only scientific cache-key inputs.
+
+    Harmonic-selection cache provenance is retained in prepared manifests and
+    sidecars, but it does not change the participant source calculation.  A
+    recalculation that produces the same scientific selection should therefore
+    reuse the same participant source-PSD cache entry.
+    """
+
+    normalized = _canonical_mapping(method_metadata, label="method_metadata")
+    custom_metadata = normalized.get("custom_metadata")
+    if not isinstance(custom_metadata, dict):
+        return normalized
+    harmonic_selection = custom_metadata.get("harmonic_selection")
+    if not isinstance(harmonic_selection, dict):
+        return normalized
+    custom_metadata["harmonic_selection"] = {
+        key: value
+        for key, value in harmonic_selection.items()
+        if key not in _HARMONIC_SELECTION_CACHE_BOOKKEEPING_FIELDS
+    }
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -70,7 +103,7 @@ class SourcePsdCacheKeyInputs:
         object.__setattr__(
             self,
             "method_metadata",
-            _canonical_mapping(self.method_metadata, label="method_metadata"),
+            scientific_source_psd_method_metadata(self.method_metadata),
         )
         object.__setattr__(
             self,
@@ -533,5 +566,6 @@ __all__ = [
     "load_source_psd_cache_entry",
     "source_psd_cache_paths",
     "source_psd_cache_root",
+    "scientific_source_psd_method_metadata",
     "store_source_psd_cache_entry",
 ]

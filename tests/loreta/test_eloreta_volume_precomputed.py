@@ -11,6 +11,7 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import (
 from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
     HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE,
     METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1,
+    METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
     ELORETAVolumeForwardModel,
     ELORETAVolumeParticipantZScoreValues,
     ELORETAVolumePrecomputedParticipantGroupCondition,
@@ -86,6 +87,7 @@ def test_precomputed_eloreta_writer_keeps_volume_statistics_and_time_domain_prov
     assert metadata["participant_zscore_order"][1].startswith(
         "compute participant eLORETA volume source PSD"
     )
+    assert metadata["participant_zscore_order"][2] == "convert source power to amplitude"
     assert metadata["renderer_dependency"] == "none"
 
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
@@ -100,6 +102,92 @@ def test_precomputed_eloreta_writer_keeps_volume_statistics_and_time_domain_prov
         "P02",
         "P03",
     ]
+
+
+def test_vector_norm_eloreta_provenance_describes_complex_coefficient_order(
+    tmp_path,
+) -> None:
+    condition = ELORETAVolumePrecomputedParticipantGroupCondition(
+        condition_id="Oddball Faces",
+        label="Oddball Faces",
+        participant_values=(
+            _participant_row("P01", [1.0, 2.0, 3.0, 4.0]),
+            _participant_row("P02", [2.0, 3.0, 4.0, 5.0]),
+        ),
+    )
+
+    result = write_eloreta_volume_precomputed_participant_zscore_payloads(
+        forward_model=_volume_forward_model([]),
+        conditions=(condition,),
+        config=ELORETAVolumeZScoreConfig(
+            selected_harmonics_hz=(1.2, 2.4),
+            method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
+            cluster_mask_enabled=False,
+        ),
+        output_dir=tmp_path,
+        aggregations=(PARTICIPANT_ZSCORE_AGGREGATION_MEAN,),
+    )
+
+    payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
+    assert payload["metadata"]["participant_zscore_order"] == [
+        "load signed repetition-averaged participant EEG time series",
+        "compute exact complex periodic-Hann sensor coefficients at target and Toolbox neighboring bins",
+        "apply the participant eLORETA vector inverse to each complex coefficient",
+        "combine each source's XYZ components as sqrt(sum(abs(Cxyz)^2))",
+        "sum aligned selected-harmonic target and Toolbox neighboring-bin amplitudes",
+        "compute participant source-space z-score maps",
+        "aggregate participant z-score maps for group display",
+    ]
+
+
+def test_precomputed_eloreta_writer_keeps_descriptive_map_for_one_participant(
+    tmp_path,
+) -> None:
+    condition = ELORETAVolumePrecomputedParticipantGroupCondition(
+        condition_id="Oddball",
+        label="Oddball",
+        participant_values=(_participant_row("P01", [1.0, 2.0, 3.0, 4.0]),),
+    )
+    progress: list[str] = []
+
+    result = write_eloreta_volume_precomputed_participant_zscore_payloads(
+        forward_model=_volume_forward_model([]),
+        conditions=(condition,),
+        config=ELORETAVolumeZScoreConfig(
+            selected_harmonics_hz=(1.2,),
+            method_id=METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1,
+        ),
+        output_dir=tmp_path,
+        aggregations=(PARTICIPANT_ZSCORE_AGGREGATION_MEAN,),
+        progress_callback=progress.append,
+    )
+
+    payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
+    assert payload["values"] == pytest.approx([1.0, 2.0, 3.0, 4.0])
+    assert payload["metadata"]["participant_count"] == 1
+    assert payload["metadata"]["cluster_mask"] == "none"
+    assert payload["metadata"]["cluster_mask_status"] == "insufficient_participants"
+    assert payload["metadata"]["cluster_mask_primary_display"] is False
+    assert payload["metadata"]["cluster_mask_participant_count"] == 1
+    assert "cluster_mask_source_indices" not in payload["metadata"]
+
+    manifest = json.loads(result.producer_result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["conditions"][0]["metadata"]["cluster_mask_status"] == (
+        "insufficient_participants"
+    )
+    assert manifest["metadata"]["cluster_mask_status_by_condition"] == {
+        "oddball": "insufficient_participants"
+    }
+
+    sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["conditions"][0]["cluster_mask"]["cluster_mask_status"] == (
+        "insufficient_participants"
+    )
+    assert any(
+        message.startswith("Warning:")
+        and "no inferential cluster mask or significance claim" in message
+        for message in progress
+    )
 
 
 def test_precomputed_eloreta_writer_rejects_maps_outside_volume_source_space(tmp_path) -> None:

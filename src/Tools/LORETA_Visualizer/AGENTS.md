@@ -125,7 +125,10 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 - Participant-first cluster-permutation masks are computed only in
   `source_producers/`, stored in payload metadata, and are the primary
   publication display mask. The renderer may obey saved mask indices but never
-  calculate t statistics, sign flips, clusters, or p-values.
+  calculate t statistics, sign flips, clusters, or p-values. A condition/group
+  with only one eligible participant still writes its descriptive source-map
+  summaries, but the producer must skip permutation inference, log the reason,
+  and mark the cluster mask as unavailable due to insufficient participants.
 - Source lateralization remains a descriptive producer-side companion derived
   from already-computed participant/group maps. It writes CSV/JSON right-minus-
   left and lateralization-index rows, including whole-hemisphere summaries and
@@ -152,6 +155,10 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   orientation-basis-dependent.
 - Volume cluster masks are recomputed in volume source space with method-neutral
   `cluster_mask_source_indices`. Never reuse or mutate the L2 cortical mask.
+- Participant source-PSD cache keys contain scientific/numerical inputs only.
+  Harmonic-cache source labels, save timestamps, and cache-entry IDs remain in
+  prepared-output provenance but must not invalidate an otherwise identical
+  participant source calculation.
 - When a project has no current source-PSD manifest, the normal background
   rebuild generates both the time-domain L2-MNE and eLORETA methods. If one
   current method already exists, the GUI loads that valid partial result rather

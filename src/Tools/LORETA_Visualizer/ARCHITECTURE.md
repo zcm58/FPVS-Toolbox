@@ -291,11 +291,13 @@ compact rebuild summaries, but source-estimation math still belongs only to
   crowding the side panel. The method selector groups loaded manifests by
   source method, keeps condition/summary selection method-local, and restricts
   non-cortical volume payloads to Transparent brain mesh and MRI slices
-  displays. When Main App post-processing successfully writes both current
-  source-map manifests, an already-cached visualizer page reloads those files
-  from disk and replaces any obsolete build warning; this refresh never starts
-  source estimation and does not instantiate the page when it has not been
-  opened.
+  displays. After Main App post-processing attempts source generation, an
+  already-cached visualizer page reloads any successfully written current
+  source-map manifest even when its sibling method failed. If neither current
+  manifest survives the attempted rebuild, the page clears only a previously
+  project-loaded map and warns that no current result is available; a manually
+  imported payload is preserved. This reconciliation never starts source
+  estimation and does not instantiate the page when it has not been opened.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
@@ -540,10 +542,14 @@ combined pial mesh. For participant-first maps with producer-computed
 cluster-permutation metadata, source vertices outside the significant cluster
 mask are shown as shaded cortex and retained positive z-scores use the same
 heatmap ramp as the transparent overlay view. Older unmasked payloads fall
-back to the manual display cutoff, whose default is `z >= 1.64`. Empty masks
-also fall back to that exploratory cutoff: underpowered exact small-sample masks
-warn that the mask cannot be resolved, and adequately powered empty Hauk masks
-warn that no vertices survived the cluster mask. The viewer can also disable a
+back to the manual display cutoff, whose default is `z >= 1.64`. A
+condition/group with fewer than two participant maps cannot support the
+one-sample permutation stage; its descriptive map is still written with an
+explicit insufficient-participants mask status and shown as exploratory.
+Empty computed masks also fall back to that exploratory cutoff: underpowered
+exact small-sample masks warn that the mask cannot be resolved, and adequately
+powered empty Hauk masks warn that no vertices survived the cluster mask. The
+viewer can also disable a
 saved cluster mask for exploratory z-threshold display and figure export. These
 display fallbacks and toggles do not change the saved source values or compute
 statistics in the renderer. The
@@ -589,7 +595,11 @@ amplitude with `sqrt(sum(abs(Cxyz)^2))`. Both then sum corresponding positions
 across the canonical harmonic plan in their own source spaces and apply the
 Toolbox neighboring-bin z-score. Only compact method-specific participant
 results are cached; source amplitudes are reproducible from the durable
-time-domain derivative and are not retained in full by default.
+time-domain derivative and are not retained in full by default. Cache keys omit
+harmonic-cache bookkeeping fields (source label, save time, and saved cache ID)
+while the full prepared-output provenance retains them, so recalculating an
+identical harmonic selection does not repeat the participant inverse solely
+because the bookkeeping timestamp changed.
 
 The legacy amplitude-derived eLORETA exporter continues to write under
 `6 - Source Localization/eLORETA Volume Beta/`. Its manifest and the legacy

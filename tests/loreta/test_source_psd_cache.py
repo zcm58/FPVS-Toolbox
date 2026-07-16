@@ -29,6 +29,7 @@ from Tools.LORETA_Visualizer.source_producers.source_psd_cache import (
     cleanup_source_psd_cache_temp_files,
     load_source_psd_cache_entry,
     source_psd_cache_root,
+    scientific_source_psd_method_metadata,
     store_source_psd_cache_entry,
 )
 
@@ -63,6 +64,71 @@ def test_cache_key_is_canonical_and_tracks_all_scientific_inputs() -> None:
             **common,
             numerical_model_metadata={"invalid": np.nan},
         )
+
+
+def test_cache_key_ignores_only_harmonic_selection_cache_bookkeeping() -> None:
+    method_metadata = {
+        "method_id": "l2_mne_hauk_source_psd_cortical_normal_v1",
+        "lambda2": 1.0 / 9.0,
+        "custom_metadata": {
+            "harmonic_selection": {
+                "selected_harmonics_hz": [1.2, 2.4, 3.6],
+                "selection_z_by_harmonic": {"1.2": 3.5, "2.4": 2.1, "3.6": 1.9},
+                "selection_cache_source": "computed_this_run",
+                "selection_cache_saved_at": "2026-07-16T10:00:00Z",
+                "selection_cache_key": "first-selection-cache-key",
+            }
+        },
+    }
+    recalculated_metadata = json.loads(json.dumps(method_metadata))
+    recalculated_selection = recalculated_metadata["custom_metadata"][
+        "harmonic_selection"
+    ]
+    recalculated_selection.update(
+        {
+            "selection_cache_source": "saved_processing_metadata",
+            "selection_cache_saved_at": "2026-07-16T11:00:00Z",
+            "selection_cache_key": "second-selection-cache-key",
+        }
+    )
+
+    common = {
+        "derivative_checksum_sha256": "a" * 64,
+        "numerical_model_metadata": {"spacing": "ico3"},
+        "frequency_metadata": {"n_times": 15360, "sfreq": 256.0},
+    }
+    first = SourcePsdCacheKeyInputs(method_metadata=method_metadata, **common)
+    recalculated = SourcePsdCacheKeyInputs(
+        method_metadata=recalculated_metadata,
+        **common,
+    )
+
+    assert first.cache_key == recalculated.cache_key
+    cached_selection = first.method_metadata["custom_metadata"]["harmonic_selection"]
+    assert set(cached_selection).isdisjoint(
+        {
+            "selection_cache_source",
+            "selection_cache_saved_at",
+            "selection_cache_key",
+        }
+    )
+    assert (
+        method_metadata["custom_metadata"]["harmonic_selection"][
+            "selection_cache_source"
+        ]
+        == "computed_this_run"
+    )
+    assert scientific_source_psd_method_metadata(method_metadata) == first.method_metadata
+
+    scientifically_changed = json.loads(json.dumps(recalculated_metadata))
+    scientifically_changed["custom_metadata"]["harmonic_selection"][
+        "selected_harmonics_hz"
+    ] = [1.2, 2.4, 3.6, 4.8]
+    changed = SourcePsdCacheKeyInputs(
+        method_metadata=scientifically_changed,
+        **common,
+    )
+    assert changed.cache_key != first.cache_key
 
 
 def test_cache_root_requires_absolute_existing_project_and_stays_confined(tmp_path: Path) -> None:

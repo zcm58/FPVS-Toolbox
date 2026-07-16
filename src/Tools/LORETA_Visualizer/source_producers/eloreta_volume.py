@@ -41,6 +41,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE,
     CLUSTER_MASK_STATUS_DISABLED,
+    CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
     DEFAULT_CLUSTER_ALPHA,
     DEFAULT_CLUSTER_FORMING_P_VALUE,
     DEFAULT_CLUSTER_MASK_ENABLED,
@@ -561,7 +562,24 @@ def write_eloreta_volume_participant_zscore_payloads(
             )
         participant_rows_by_condition[condition.condition_id] = participant_rows
         cluster_result = None
-        if config.cluster_mask_enabled:
+        if config.cluster_mask_enabled and len(participant_rows) < 2:
+            warning = (
+                f"Warning: eLORETA volume cluster permutation was not run for {condition.label} "
+                f"because only {len(participant_rows)} participant map is available. "
+                "Descriptive source summaries will still be written; no inferential "
+                "cluster mask or significance claim is available."
+            )
+            _emit_progress(progress_callback, warning)
+            logger.warning(
+                "eloreta_volume_source_cluster_permutation_skipped",
+                extra={
+                    "condition_id": condition.condition_id,
+                    "condition_label": condition.label,
+                    "participant_count": len(participant_rows),
+                    "reason": CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
+                },
+            )
+        elif config.cluster_mask_enabled:
             _emit_progress(progress_callback, f"Computing eLORETA volume cluster mask for {condition.label}...")
             cluster_result = compute_eloreta_volume_source_cluster_mask(
                 participant_rows,
@@ -618,7 +636,11 @@ def write_eloreta_volume_participant_zscore_payloads(
                         "selected_harmonics_hz": list(config.selected_harmonics_hz),
                         "value_label": config.value_label,
                         "source_value_unit": "z-score",
-                        **_cluster_manifest_entry_metadata(cluster_result),
+                        **_cluster_manifest_entry_metadata(
+                            cluster_result,
+                            config=config,
+                            participant_count=len(participant_rows),
+                        ),
                     },
                 }
             )
@@ -656,6 +678,14 @@ def write_eloreta_volume_participant_zscore_payloads(
             "cluster_mask_method": (
                 _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
+            "cluster_mask_status_by_condition": {
+                condition.condition_id: _cluster_mask_status(
+                    cluster_results_by_condition.get(condition.condition_id),
+                    config=config,
+                    participant_count=len(participant_rows_by_condition.get(condition.condition_id, ())),
+                )
+                for condition in condition_list
+            },
         },
     }
     manifest_path = output_path / manifest_name
@@ -837,6 +867,35 @@ def _participant_input_domain(config: ELORETAVolumeZScoreConfig) -> str:
     return "sensor_fullfft_amplitude_topographies"
 
 
+def _participant_zscore_order(config: ELORETAVolumeZScoreConfig) -> list[str]:
+    if config.method_id == METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1:
+        return [
+            "load signed repetition-averaged participant EEG time series",
+            "compute exact complex periodic-Hann sensor coefficients at target and Toolbox neighboring bins",
+            "apply the participant eLORETA vector inverse to each complex coefficient",
+            "combine each source's XYZ components as sqrt(sum(abs(Cxyz)^2))",
+            "sum aligned selected-harmonic target and Toolbox neighboring-bin amplitudes",
+            "compute participant source-space z-score maps",
+            "aggregate participant z-score maps for group display",
+        ]
+    if _is_source_psd_config(config):
+        return [
+            "load signed repetition-averaged participant EEG time series",
+            "compute participant eLORETA volume source PSD on the exact full-duration FFT grid",
+            "convert source power to amplitude",
+            "sum aligned selected-harmonic target and Toolbox neighboring-bin amplitudes",
+            "compute participant source-space z-score maps",
+            "aggregate participant z-score maps for group display",
+        ]
+    return [
+        "read participant sensor FFT amplitude target/noise-bin topographies",
+        "sum selected significant harmonics in sensor space",
+        "estimate eLORETA volume values for each participant summed target and noise topography",
+        "compute participant source-space z-score maps",
+        "aggregate participant z-score maps for group display",
+    ]
+
+
 def _validated_precomputed_participant_rows(
     *,
     condition: L2MNEHaukParticipantGroupCondition
@@ -956,6 +1015,7 @@ def _cluster_payload_metadata(
     cluster_result: SourceSpaceClusterPermutationResult | None,
     *,
     config: ELORETAVolumeZScoreConfig,
+    participant_count: int | None = None,
 ) -> dict[str, Any]:
     if not config.cluster_mask_enabled:
         return {
@@ -964,6 +1024,20 @@ def _cluster_payload_metadata(
             "cluster_mask_method": "none",
         }
     if cluster_result is None:
+        if participant_count is not None and int(participant_count) < 2:
+            return {
+                "cluster_mask": "none",
+                "cluster_mask_status": CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
+                "cluster_mask_primary_display": False,
+                "cluster_mask_method": "none",
+                "cluster_mask_requested": True,
+                "cluster_mask_participant_count": int(participant_count),
+                "cluster_mask_minimum_participant_count": 2,
+                "cluster_mask_unavailable_reason": (
+                    "At least two participant maps are required for a one-sample "
+                    "cluster permutation test."
+                ),
+            }
         return {
             "cluster_mask": "none",
             "cluster_mask_primary_display": False,
@@ -1010,8 +1084,28 @@ def _cluster_payload_metadata(
 
 def _cluster_manifest_entry_metadata(
     cluster_result: SourceSpaceClusterPermutationResult | None,
+    *,
+    config: ELORETAVolumeZScoreConfig,
+    participant_count: int,
 ) -> dict[str, Any]:
+    if not config.cluster_mask_enabled:
+        return {
+            "cluster_mask": CLUSTER_MASK_STATUS_DISABLED,
+            "cluster_mask_status": CLUSTER_MASK_STATUS_DISABLED,
+            "cluster_mask_source_index_count": 0,
+            "cluster_significant_cluster_count": 0,
+        }
     if cluster_result is None:
+        if int(participant_count) < 2:
+            return {
+                "cluster_mask": "none",
+                "cluster_mask_status": CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
+                "cluster_mask_requested": True,
+                "cluster_mask_participant_count": int(participant_count),
+                "cluster_mask_minimum_participant_count": 2,
+                "cluster_mask_source_index_count": 0,
+                "cluster_significant_cluster_count": 0,
+            }
         return {
             "cluster_mask": "none",
             "cluster_mask_source_index_count": 0,
@@ -1031,6 +1125,21 @@ def _cluster_manifest_entry_metadata(
     }
 
 
+def _cluster_mask_status(
+    cluster_result: SourceSpaceClusterPermutationResult | None,
+    *,
+    config: ELORETAVolumeZScoreConfig,
+    participant_count: int,
+) -> str:
+    if not config.cluster_mask_enabled:
+        return CLUSTER_MASK_STATUS_DISABLED
+    if cluster_result is not None:
+        return str(cluster_result.status)
+    if int(participant_count) < 2:
+        return CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS
+    return "not_computed"
+
+
 def _participant_summary_payload_metadata(
     *,
     forward_model: ELORETAVolumeForwardModel,
@@ -1045,24 +1154,6 @@ def _participant_summary_payload_metadata(
     participant_ids = [row.participant_id for row in rows]
     common_offsets = sorted({offset for row in rows for offset in row.noise_offsets_used})
     source_psd_method = _is_source_psd_config(config)
-    participant_zscore_order = (
-        [
-            "load signed repetition-averaged participant EEG time series",
-            "compute participant eLORETA volume source PSD on the exact full-duration FFT grid",
-            "convert source power to amplitude",
-            "sum aligned selected-harmonic target and Toolbox neighboring-bin amplitudes",
-            "compute participant source-space z-score maps",
-            "aggregate participant z-score maps for group display",
-        ]
-        if source_psd_method
-        else [
-            "read participant sensor FFT amplitude target/noise-bin topographies",
-            "sum selected significant harmonics in sensor space",
-            "estimate eLORETA volume values for each participant summed target and noise topography",
-            "compute participant source-space z-score maps",
-            "aggregate participant z-score maps for group display",
-        ]
-    )
     metadata = {
         "beta": True,
         "source_method": SOURCE_METHOD_ELORETA_VOLUME,
@@ -1084,7 +1175,7 @@ def _participant_summary_payload_metadata(
             else config.harmonic_strategy
         ),
         "input_domain": _participant_input_domain(config),
-        "participant_zscore_order": participant_zscore_order,
+        "participant_zscore_order": _participant_zscore_order(config),
         "participant_zscore_aggregation": summary.aggregation,
         "participant_zscore_aggregation_label": summary.label_suffix,
         "participant_zscore_trim_fraction": summary.trim_fraction,
@@ -1143,7 +1234,13 @@ def _participant_summary_payload_metadata(
         "legacy_amplitude_topography_input": not source_psd_method,
         "renderer_dependency": "none",
     }
-    metadata.update(_cluster_payload_metadata(cluster_result, config=config))
+    metadata.update(
+        _cluster_payload_metadata(
+            cluster_result,
+            config=config,
+            participant_count=len(rows),
+        )
+    )
     metadata.update(_source_identity_metadata(forward_model))
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
@@ -1181,7 +1278,11 @@ def _participant_zscore_sidecar_payload(
                     }
                     for row in participant_rows
                 ],
-                "cluster_mask": _cluster_manifest_entry_metadata(cluster_result),
+                "cluster_mask": _cluster_manifest_entry_metadata(
+                    cluster_result,
+                    config=config,
+                    participant_count=len(participant_rows),
+                ),
             }
         )
     return {
@@ -1209,6 +1310,14 @@ def _participant_zscore_sidecar_payload(
             "cluster_mask_method": (
                 _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
+            "cluster_mask_status_by_condition": {
+                condition.condition_id: _cluster_mask_status(
+                    cluster_lookup.get(condition.condition_id),
+                    config=config,
+                    participant_count=len(participant_rows_by_condition.get(condition.condition_id, ())),
+                )
+                for condition in conditions
+            },
             "renderer_dependency": "none",
         },
     }

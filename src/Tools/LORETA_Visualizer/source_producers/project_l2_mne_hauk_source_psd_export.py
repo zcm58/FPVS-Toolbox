@@ -39,6 +39,8 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import (
 from Tools.LORETA_Visualizer.source_producers.contracts import SourceProducerRunResult
 from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
     DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS,
+    DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT,
+    DEFAULT_HAUK_SOURCE_PSD_RETAINED_NOISE_BIN_COUNT,
     HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
     HAUK_SOURCE_PSD_METHOD_ID,
     HAUK_SOURCE_PSD_METHOD_VERSION,
@@ -200,7 +202,14 @@ class _ValidationBinPlan:
     frequency_resolution_hz: float
     noise_window_bins: int = 10
     excluded_offsets: tuple[int, ...] = (-1, 0, 1)
-    min_noise_bins: int = 4
+    candidate_noise_offsets: tuple[int, ...] = DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS
+    min_noise_bins: int = DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT
+    required_candidate_noise_bin_count: int = (
+        DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT
+    )
+    retained_noise_bin_count_after_extreme_drop: int = (
+        DEFAULT_HAUK_SOURCE_PSD_RETAINED_NOISE_BIN_COUNT
+    )
 
 
 @dataclass(frozen=True)

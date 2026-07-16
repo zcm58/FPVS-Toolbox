@@ -102,6 +102,7 @@ CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP = CLUSTER_MASK_METHOD_SOURCE_SPACE_SI
 CLUSTER_MASK_STATUS_COMPUTED = "computed"
 CLUSTER_MASK_STATUS_NO_CANDIDATES = "no_candidate_clusters"
 CLUSTER_MASK_STATUS_DISABLED = "disabled"
+CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS = "insufficient_participants"
 
 
 @dataclass(frozen=True)
@@ -874,7 +875,24 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             )
         participant_rows_by_condition[condition.condition_id] = participant_rows
         cluster_result = None
-        if config.cluster_mask_enabled:
+        if config.cluster_mask_enabled and len(participant_rows) < 2:
+            warning = (
+                f"Warning: source-space cluster permutation was not run for {condition.label} "
+                f"because only {len(participant_rows)} participant map is available. "
+                "Descriptive source summaries will still be written; no inferential "
+                "cluster mask or significance claim is available."
+            )
+            _emit_progress(progress_callback, warning)
+            logger.warning(
+                "l2_mne_source_cluster_permutation_skipped",
+                extra={
+                    "condition_id": condition.condition_id,
+                    "condition_label": condition.label,
+                    "participant_count": len(participant_rows),
+                    "reason": CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
+                },
+            )
+        elif config.cluster_mask_enabled:
             _emit_progress(
                 progress_callback,
                 f"Computing source-space cluster mask for {condition.label}...",
@@ -941,7 +959,11 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                         "selected_harmonics_hz": list(config.selected_harmonics_hz),
                         "value_label": config.value_label,
                         "source_value_unit": "z-score",
-                        **_cluster_manifest_entry_metadata(cluster_result),
+                        **_cluster_manifest_entry_metadata(
+                            cluster_result,
+                            config=config,
+                            participant_count=len(participant_rows),
+                        ),
                     },
                 }
             )
@@ -1014,6 +1036,14 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             "cluster_mask_method": (
                 _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
+            "cluster_mask_status_by_condition": {
+                condition.condition_id: _cluster_mask_status(
+                    cluster_results_by_condition.get(condition.condition_id),
+                    config=config,
+                    participant_count=len(participant_rows_by_condition.get(condition.condition_id, ())),
+                )
+                for condition in condition_list
+            },
         },
     }
     manifest_path = output_path / manifest_name
@@ -1583,6 +1613,7 @@ def _cluster_payload_metadata(
     cluster_result: L2MNEHaukClusterPermutationResult | None,
     *,
     config: L2MNEHaukZScoreConfig,
+    participant_count: int | None = None,
 ) -> dict[str, Any]:
     if not config.cluster_mask_enabled:
         return {
@@ -1591,6 +1622,20 @@ def _cluster_payload_metadata(
             "cluster_mask_method": "none",
         }
     if cluster_result is None:
+        if participant_count is not None and int(participant_count) < 2:
+            return {
+                "cluster_mask": "none",
+                "cluster_mask_status": CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
+                "cluster_mask_primary_display": False,
+                "cluster_mask_method": "none",
+                "cluster_mask_requested": True,
+                "cluster_mask_participant_count": int(participant_count),
+                "cluster_mask_minimum_participant_count": 2,
+                "cluster_mask_unavailable_reason": (
+                    "At least two participant maps are required for a one-sample "
+                    "cluster permutation test."
+                ),
+            }
         return {
             "cluster_mask": "none",
             "cluster_mask_primary_display": False,
@@ -1635,8 +1680,28 @@ def _cluster_payload_metadata(
 
 def _cluster_manifest_entry_metadata(
     cluster_result: L2MNEHaukClusterPermutationResult | None,
+    *,
+    config: L2MNEHaukZScoreConfig,
+    participant_count: int,
 ) -> dict[str, Any]:
+    if not config.cluster_mask_enabled:
+        return {
+            "cluster_mask": CLUSTER_MASK_STATUS_DISABLED,
+            "cluster_mask_status": CLUSTER_MASK_STATUS_DISABLED,
+            "cluster_mask_vertex_count": 0,
+            "cluster_significant_cluster_count": 0,
+        }
     if cluster_result is None:
+        if int(participant_count) < 2:
+            return {
+                "cluster_mask": "none",
+                "cluster_mask_status": CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS,
+                "cluster_mask_requested": True,
+                "cluster_mask_participant_count": int(participant_count),
+                "cluster_mask_minimum_participant_count": 2,
+                "cluster_mask_vertex_count": 0,
+                "cluster_significant_cluster_count": 0,
+            }
         return {
             "cluster_mask": "none",
             "cluster_mask_vertex_count": 0,
@@ -1654,6 +1719,21 @@ def _cluster_manifest_entry_metadata(
         "cluster_alpha": float(cluster_result.cluster_alpha),
         "cluster_permutation_count": int(cluster_result.permutation_count),
     }
+
+
+def _cluster_mask_status(
+    cluster_result: L2MNEHaukClusterPermutationResult | None,
+    *,
+    config: L2MNEHaukZScoreConfig,
+    participant_count: int,
+) -> str:
+    if not config.cluster_mask_enabled:
+        return CLUSTER_MASK_STATUS_DISABLED
+    if cluster_result is not None:
+        return str(cluster_result.status)
+    if int(participant_count) < 2:
+        return CLUSTER_MASK_STATUS_INSUFFICIENT_PARTICIPANTS
+    return "not_computed"
 
 
 def _participant_summary_payload_metadata(
@@ -1773,7 +1853,13 @@ def _participant_summary_payload_metadata(
         "project_integration": "none",
         "renderer_dependency": "none",
     }
-    metadata.update(_cluster_payload_metadata(cluster_result, config=config))
+    metadata.update(
+        _cluster_payload_metadata(
+            cluster_result,
+            config=config,
+            participant_count=len(rows),
+        )
+    )
     metadata.update(_source_identity_metadata(forward_model))
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
@@ -1811,7 +1897,11 @@ def _participant_zscore_sidecar_payload(
                     }
                     for row in participant_rows
                 ],
-                "cluster_mask": _cluster_manifest_entry_metadata(cluster_result),
+                "cluster_mask": _cluster_manifest_entry_metadata(
+                    cluster_result,
+                    config=config,
+                    participant_count=len(participant_rows),
+                ),
             }
         )
     return {
@@ -1833,6 +1923,14 @@ def _participant_zscore_sidecar_payload(
             "cluster_mask_method": (
                 _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
+            "cluster_mask_status_by_condition": {
+                condition.condition_id: _cluster_mask_status(
+                    cluster_lookup.get(condition.condition_id),
+                    config=config,
+                    participant_count=len(participant_rows_by_condition.get(condition.condition_id, ())),
+                )
+                for condition in conditions
+            },
             "renderer_dependency": "none",
         },
     }

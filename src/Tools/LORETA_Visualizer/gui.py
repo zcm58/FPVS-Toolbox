@@ -959,12 +959,26 @@ def _activation_scale_values(
 
 
 def _underpowered_cluster_mask_status_text(payload: SourcePayload) -> str | None:
+    cluster_status = str(
+        payload.metadata.get("cluster_mask_status", "")
+    ).strip().lower()
+    insufficient_participants = cluster_status == "insufficient_participants"
     if not (
         _source_payload_uses_zscores(payload)
-        and payload_cluster_mask_is_underpowered(payload)
+        and (insufficient_participants or payload_cluster_mask_is_underpowered(payload))
     ):
         return None
     participant_count = payload.metadata.get("participant_count")
+    render_text = "Opaque cortical renders" if uses_cortical_surface_paint(payload) else "Volume renders"
+    if insufficient_participants:
+        try:
+            sample_text = f"Only {int(participant_count)} eligible participant map is available. "
+        except (TypeError, ValueError):
+            sample_text = "Fewer than two eligible participant maps are available. "
+        return (
+            f"{sample_text}At least two are required for the cluster-based permutation mask. "
+            f"{render_text} are not group-masked and should be considered exploratory."
+        )
     minimum_p = payload_cluster_mask_minimum_p(payload)
     sample_text = ""
     try:
@@ -972,7 +986,6 @@ def _underpowered_cluster_mask_status_text(payload: SourcePayload) -> str | None
     except (TypeError, ValueError):
         pass
     p_text = f"; minimum possible cluster p = {format_scalar_value(minimum_p)}" if np.isfinite(minimum_p) else ""
-    render_text = "Opaque cortical renders" if uses_cortical_surface_paint(payload) else "Volume renders"
     return (
         f"Due to the small sample size{sample_text}, the cluster-based permutation mask cannot be "
         f"applied at the selected alpha{p_text}. {render_text} are underpowered, "
@@ -1503,6 +1516,7 @@ class LoretaVisualizerWindow(QWidget):
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._manifest_method_groups: dict[str, _ManifestMethodGroup] = {}
         self._manifest_condition_groups: dict[str, _ManifestConditionGroup] = {}
+        self._project_source_maps_loaded = False
         self._selected_source_method_id = SOURCE_METHOD_L2_MNE_SOURCE_PSD
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
@@ -2642,12 +2656,28 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._build_project_source_maps_for_modes(PROJECT_SOURCE_EXPORT_DEFAULT_MODES, automatic=True)
 
-    def reload_project_source_maps_from_disk(self) -> bool:
-        """Reload completed project manifests without starting source estimation."""
+    def reload_project_source_maps_from_disk(
+        self,
+        *,
+        invalidate_if_missing: bool = False,
+    ) -> bool:
+        """Reload project manifests, optionally invalidating a failed pipeline result."""
 
         project_root = self._refresh_project_root()
-        manifest_paths = default_project_source_manifest_paths(project_root)
+        if invalidate_if_missing:
+            manifest_paths = tuple(
+                path
+                for path in (
+                    default_project_source_psd_manifest_path(project_root),
+                    default_project_eloreta_source_psd_manifest_path(project_root),
+                )
+                if path is not None
+            )
+        else:
+            manifest_paths = default_project_source_manifest_paths(project_root)
         if not manifest_paths:
+            if invalidate_if_missing:
+                self._invalidate_project_source_maps_after_pipeline(project_root)
             return False
         self._auto_project_zscore_attempted = True
         self._set_source_export_status(
@@ -2666,6 +2696,36 @@ class LoretaVisualizerWindow(QWidget):
             },
         )
         return True
+
+    def _invalidate_project_source_maps_after_pipeline(
+        self,
+        project_root: Path | None,
+    ) -> None:
+        """Clear only project-loaded maps after a pipeline leaves no manifest."""
+
+        cleared_project_map = bool(
+            getattr(self, "_project_source_maps_loaded", False)
+        )
+        if cleared_project_map:
+            self._project_source_maps_loaded = False
+            self._selected_condition_id = ""
+            self._source_activation_payload = None
+            self._current_activation_payload = None
+            self._replace_manifest_conditions(())
+            self._clear_activation_payload()
+
+        message = "Source-map regeneration did not produce a usable project manifest."
+        if cleared_project_map:
+            message += " The previously loaded project map was cleared."
+        message += " Review the processing log for details."
+        self._set_source_export_status(message, variant="warning")
+        logger.warning(
+            "loreta_project_source_maps_invalidated_after_pipeline",
+            extra={
+                "project_root": str(project_root) if project_root is not None else None,
+                "cleared_project_map": cleared_project_map,
+            },
+        )
 
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
         self._build_project_source_maps_for_modes((export_mode,), automatic=automatic)
@@ -3059,6 +3119,7 @@ class LoretaVisualizerWindow(QWidget):
             self._set_source_export_status(f"Prepared source import failed: {exc}", variant="warning")
             return
         self._last_import_dir = path.parent
+        self._project_source_maps_loaded = False
         self._set_activation_payload(payload)
         self._set_payload_display_status(payload)
 
@@ -3070,6 +3131,7 @@ class LoretaVisualizerWindow(QWidget):
             self._set_source_export_status(f"Prepared source manifest import failed: {exc}", variant="warning")
             return
         self._last_import_dir = path.parent
+        self._project_source_maps_loaded = False
         self._replace_manifest_conditions(entries)
         self._select_first_condition_if_needed()
         self._refresh_current_activation()
@@ -3098,6 +3160,7 @@ class LoretaVisualizerWindow(QWidget):
             self._clear_activation_payload()
             return
         self._last_import_dir = loaded_paths[-1].parent
+        self._project_source_maps_loaded = True
         if preferred_source_method_id:
             self._selected_source_method_id = preferred_source_method_id
         self._replace_manifest_conditions(tuple(entries))

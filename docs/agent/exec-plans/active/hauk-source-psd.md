@@ -100,7 +100,7 @@ coefficients through a vector eLORETA inverse and pools the three output
 components with `sqrt(sum(abs(Cxyz)^2))`. The shared contracts begin again at
 exact-bin source amplitudes and the subsequent harmonic/noise z-score sequence.
 
-Participant z maps then enter the existing group aggregation, clustering, ROI, lateralization, prepared-payload, and manifest stages. Renderer and importer payload schemas remain unchanged unless implementation evidence requires a versioned additive field.
+Participant z maps then enter the existing group aggregation, clustering, ROI, lateralization, prepared-payload, and manifest stages. A one-participant condition/group remains valid for descriptive aggregation but skips the unavailable one-sample permutation stage and records an explicit insufficient-participants mask status. Renderer and importer payload schemas remain unchanged unless implementation evidence requires a versioned additive field.
 Multi-group projects must create separate group-by-condition summaries and cluster inputs; canonical groups must never be silently pooled.
 
 ### Failure and migration behavior
@@ -162,6 +162,9 @@ Multi-group projects must create separate group-by-condition summaries and clust
   amplitudes have been obtained. They do not imply that real L2-MNE and
   eLORETA arrays are interchangeable.
 - Existing source aggregation/cluster/prepared-payload behavior remains covered.
+- One-participant project/group fixtures write descriptive L2-MNE and eLORETA
+  payloads while marking cluster inference unavailable rather than failing the
+  full source export.
 - The existing amplitude-derived manifests still import but are presented as legacy/exploratory.
 - No retired source-localization path, bundled fsaverage tree, MEG branch, individual-MRI workflow, or `project.json` source state is introduced.
 - Local verification remains non-GUI. A visible/manual Source Map rebuild path is documented for final handoff; pytest-qt remains CI-only.
@@ -197,6 +200,12 @@ Multi-group projects must create separate group-by-condition summaries and clust
   cache provenance prevent either result from being confused with historical
   basis-dependent outputs; existing signed derivatives can be rebuilt without
   reprocessing.
+- 2026-07-16: Hardened recent source-map edge cases. One-participant groups now
+  retain descriptive maps without fabricating a permutation mask; partial
+  method success refreshes the open viewer; failed regeneration clears only
+  obsolete project-loaded maps; eLORETA and validation-report provenance now
+  match the vector and 18-candidate/16-retained noise-bin contracts; and
+  harmonic-cache bookkeeping no longer causes participant source-cache misses.
 
 ## Deferred Work
 

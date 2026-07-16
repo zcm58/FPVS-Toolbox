@@ -126,6 +126,17 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
         METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
     )
     assert validation["input_summary"]["condition_summaries"][0]["workbook_count"] == 0
+    assert validation["input_summary"]["candidate_noise_offsets"] == [
+        *range(-10, -1),
+        *range(2, 11),
+    ]
+    assert validation["input_summary"][
+        "required_candidate_noise_bin_count"
+    ] == 18
+    assert validation["input_summary"][
+        "retained_noise_bin_count_after_extreme_drop"
+    ] == 16
+    assert validation["input_summary"]["min_noise_bins"] == 18
     assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"][
         "diagnostics"
     ]

@@ -105,6 +105,12 @@ Display choices never change the source calculation. Surface painting, volume
 smoothing, masks, camera position, and MRI slices operate on already-prepared
 values; the L2 orientation choice affects only the next source-map rebuild.
 
+Cluster-permutation masks require at least two eligible participant maps in
+each displayed condition/group. With only one eligible participant, FPVS
+Toolbox still writes and displays the descriptive source map, but labels the
+mask as unavailable and treats the unmasked display as exploratory rather than
+as an inferential group result.
+
 ## Outputs
 
 The LORETA Visualizer can export source-map figures from supported views.

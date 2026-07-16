@@ -331,6 +331,67 @@ def test_precomputed_source_psd_writer_reuses_group_output_contract(
     assert manifest["metadata"]["producer_method"] == method_id
 
 
+def test_precomputed_source_psd_writer_keeps_descriptive_map_for_one_participant(
+    tmp_path,
+) -> None:
+    participant_values = (
+        L2MNEHaukParticipantZScoreValues(
+            participant_id="P1",
+            values=np.asarray([1.0, 2.0, 3.0]),
+            target_source_values=np.asarray([4.0, 5.0, 6.0]),
+            noise_mean_values=np.asarray([1.0, 1.0, 1.0]),
+            noise_std_values=np.asarray([1.0, 1.0, 1.0]),
+            noise_offsets_used=tuple(range(-10, -1)) + tuple(range(2, 11)),
+            zero_noise_sd_source_count=0,
+        ),
+    )
+    condition = L2MNEHaukPrecomputedParticipantGroupCondition(
+        condition_id="Condition A",
+        label="Condition A",
+        participant_values=participant_values,
+    )
+    progress: list[str] = []
+
+    result = write_l2_mne_hauk_precomputed_participant_zscore_surface_payloads(
+        forward_model=_identity_forward_model(),
+        conditions=(condition,),
+        config=L2MNEHaukZScoreConfig(
+            selected_harmonics_hz=(1.0,),
+            method_id=HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID,
+        ),
+        output_dir=tmp_path,
+        aggregations=(PARTICIPANT_ZSCORE_AGGREGATION_MEAN,),
+        progress_callback=progress.append,
+    )
+
+    payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
+    assert payload["values"] == pytest.approx([1.0, 2.0, 3.0])
+    assert payload["metadata"]["participant_count"] == 1
+    assert payload["metadata"]["cluster_mask"] == "none"
+    assert payload["metadata"]["cluster_mask_status"] == "insufficient_participants"
+    assert payload["metadata"]["cluster_mask_primary_display"] is False
+    assert payload["metadata"]["cluster_mask_participant_count"] == 1
+    assert "cluster_mask_vertex_indices" not in payload["metadata"]
+
+    manifest = json.loads(result.producer_result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["conditions"][0]["metadata"]["cluster_mask_status"] == (
+        "insufficient_participants"
+    )
+    assert manifest["metadata"]["cluster_mask_status_by_condition"] == {
+        "condition_a": "insufficient_participants"
+    }
+
+    sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["conditions"][0]["cluster_mask"]["cluster_mask_status"] == (
+        "insufficient_participants"
+    )
+    assert any(
+        message.startswith("Warning:")
+        and "no inferential cluster mask or significance claim" in message
+        for message in progress
+    )
+
+
 def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:
     result = write_l2_mne_hauk_zscore_surface_payloads(
         forward_model=_identity_forward_model(),

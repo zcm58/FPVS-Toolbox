@@ -238,7 +238,20 @@ def _input_summary(project_inputs: Any) -> dict[str, Any]:
         "frequency_resolution_hz": getattr(bin_plan, "frequency_resolution_hz", None),
         "noise_window_bins": getattr(bin_plan, "noise_window_bins", None),
         "excluded_noise_offsets": list(getattr(bin_plan, "excluded_offsets", ())),
+        "candidate_noise_offsets": list(
+            getattr(bin_plan, "candidate_noise_offsets", ())
+        ),
         "min_noise_bins": getattr(bin_plan, "min_noise_bins", None),
+        "required_candidate_noise_bin_count": getattr(
+            bin_plan,
+            "required_candidate_noise_bin_count",
+            None,
+        ),
+        "retained_noise_bin_count_after_extreme_drop": getattr(
+            bin_plan,
+            "retained_noise_bin_count_after_extreme_drop",
+            None,
+        ),
         "condition_summaries": summaries,
     }
 
@@ -375,6 +388,20 @@ def _markdown_report(report: dict[str, Any]) -> str:
     input_summary = report["input_summary"]
     validation = report["validation_checks"]
     lateralization = report["lateralization_summary"]
+    noise_summary_lines: list[str] = []
+    required_noise_bins = input_summary["required_candidate_noise_bin_count"]
+    retained_noise_bins = input_summary[
+        "retained_noise_bin_count_after_extreme_drop"
+    ]
+    if required_noise_bins is not None:
+        noise_summary_lines.append(
+            f"- Required candidate noise bins: {required_noise_bins}"
+        )
+    if retained_noise_bins is not None:
+        noise_summary_lines.append(
+            "- Noise bins retained after extreme-value drop: "
+            f"{retained_noise_bins}"
+        )
     lines = [
         "# Source Localization Validation Report",
         "",
@@ -386,6 +413,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- Payloads: {validation['payload_count']}",
         f"- Cluster-masked payloads: {validation['cluster_masked_payload_count']}",
         f"- Selected harmonics: {_join_values(input_summary['selected_harmonics_hz'])}",
+        *noise_summary_lines,
         f"- Source cohort status: {input_summary['source_cohort_status']}",
         "",
         "## Source Cohort",

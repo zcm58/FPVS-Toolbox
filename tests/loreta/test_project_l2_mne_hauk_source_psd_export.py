@@ -148,6 +148,17 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert validation_report["input_summary"]["condition_summaries"][0][
         "input_file_count"
     ] == 1
+    assert validation_report["input_summary"]["candidate_noise_offsets"] == [
+        *range(-10, -1),
+        *range(2, 11),
+    ]
+    assert validation_report["input_summary"][
+        "required_candidate_noise_bin_count"
+    ] == 18
+    assert validation_report["input_summary"][
+        "retained_noise_bin_count_after_extreme_drop"
+    ] == 16
+    assert validation_report["input_summary"]["min_noise_bins"] == 18
 
     def fail_if_recomputed(**_kwargs: Any) -> Any:
         raise AssertionError("valid compact source-PSD cache entry should have been reused")
@@ -274,6 +285,9 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
                 "harmonic_policy": "group_significant",
                 "selected_harmonics_hz": [20.0],
                 "selection_z_by_harmonic": {20.0: 5.1},
+                "selection_cache_source": "saved_processing_metadata",
+                "selection_cache_saved_at": "2026-07-16T10:00:00Z",
+                "selection_cache_key": "harmonic-cache-key",
             }
 
     def fake_load_processing_harmonics(active_project: Any, **_kwargs: Any) -> _Selection:
@@ -303,9 +317,24 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
             )
         ).read_text(encoding="utf-8")
     )
-    assert cache_metadata["key_payload"]["method_metadata"]["custom_metadata"][
-        "harmonic_selection"
-    ]["selection_z_by_harmonic"] == {"20.0": 5.1}
+    cached_selection = cache_metadata["key_payload"]["method_metadata"][
+        "custom_metadata"
+    ]["harmonic_selection"]
+    assert cached_selection["selection_z_by_harmonic"] == {"20.0": 5.1}
+    assert set(cached_selection).isdisjoint(
+        {
+            "selection_cache_source",
+            "selection_cache_saved_at",
+            "selection_cache_key",
+        }
+    )
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    manifest_selection = manifest["metadata"]["source_psd_method"][
+        "custom_metadata"
+    ]["harmonic_selection"]
+    assert manifest_selection["selection_cache_source"] == "saved_processing_metadata"
+    assert manifest_selection["selection_cache_saved_at"] == "2026-07-16T10:00:00Z"
+    assert manifest_selection["selection_cache_key"] == "harmonic-cache-key"
 
 
 def test_project_source_psd_export_refuses_missing_completed_participant_derivative(

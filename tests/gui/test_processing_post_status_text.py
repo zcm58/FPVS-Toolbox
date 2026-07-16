@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from Main_App.gui import shell_status
 from Main_App.gui.processing_workflows import (
     _PostProcessingPipelineBridge,
+    _post_processing_source_map_outcome,
     _post_processing_display_state,
     _post_processing_phase_display_state,
     _refresh_cached_loreta_source_maps,
@@ -170,6 +171,37 @@ def test_post_processing_refreshes_only_an_existing_loreta_page() -> None:
         is True
     )
     assert calls == ["reload"]
+
+
+def test_partial_source_map_success_is_detected_independently_of_pipeline_failure() -> None:
+    result = {
+        "ok": False,
+        "steps": [
+            {"name": "stats_ready_summed_bca", "ok": False},
+            {"name": "l2_mne_source_psd", "ok": True},
+            {"name": "eloreta_volume_source_psd", "ok": False},
+        ],
+    }
+
+    assert _post_processing_source_map_outcome(result) == (True, True)
+
+
+def test_source_map_refresh_can_request_pipeline_only_missing_map_invalidation() -> None:
+    calls: list[bool] = []
+    page = SimpleNamespace(
+        reload_project_source_maps_from_disk=lambda *, invalidate_if_missing=False: (
+            calls.append(invalidate_if_missing) or True
+        )
+    )
+
+    assert (
+        _refresh_cached_loreta_source_maps(
+            SimpleNamespace(_loreta_visualizer_page=page),
+            invalidate_if_missing=True,
+        )
+        is True
+    )
+    assert calls == [True]
 
 
 def test_post_processing_loreta_refresh_failure_does_not_break_completion() -> None:

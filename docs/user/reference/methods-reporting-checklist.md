@@ -153,6 +153,13 @@ condition. It does not silently pool experimental groups into one source map.
 Single-group and ungrouped projects retain the condition labels used elsewhere
 in the project.
 
+A one-participant group can support a descriptive source-space summary but not
+the one-sample cluster-permutation inference used for the saved display mask.
+In that case the Toolbox exports the descriptive L2-MNE/eLORETA map, records
+the mask as unavailable because of insufficient participants, and treats the
+unmasked display as exploratory. Do not report that map as a group-level
+cluster-permutation result.
+
 ## Toolbox Neighboring-Bin Rule
 
 For every selected harmonic, the target uses offset `0`. Noise candidates use
