@@ -163,6 +163,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
             return {
                 "harmonic_policy": "group_significant",
                 "selected_harmonics_hz": [20.0],
+                "selection_z_by_harmonic": {20.0: 5.1},
             }
 
     def fake_load_processing_harmonics(active_project: Any, **_kwargs: Any) -> _Selection:
@@ -185,12 +186,29 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
 
     assert seen_projects == [project]
     assert result.selected_harmonics_hz == (20.0,)
+    cache_metadata = json.loads(
+        next(
+            (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob(
+                "*.json"
+            )
+        ).read_text(encoding="utf-8")
+    )
+    assert cache_metadata["key_payload"]["method_metadata"]["custom_metadata"][
+        "harmonic_selection"
+    ]["selection_z_by_harmonic"] == {"20.0": 5.1}
 
 
 def test_project_source_psd_export_refuses_missing_completed_participant_derivative(
     tmp_path: Path,
 ) -> None:
-    project = _project_with_ledger(tmp_path, participants=("P01", "P02"))
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01", "P02"),
+        entry_changes={
+            "P01": {"source_derivative_status": "complete"},
+            "P02": {"source_derivative_status": "complete"},
+        },
+    )
     _write_time_domain_derivative(project.project_root, participant_id="P01")
 
     with pytest.raises(ProjectTimeDomainInputError, match="missing for: P02"):
@@ -404,15 +422,6 @@ def test_project_source_psd_export_keeps_single_group_condition_identity(
             "do not share one current processing fingerprint",
         ),
         (
-            {
-                "P01": {
-                    "condition_completeness": "partial",
-                    "missing_condition_labels": ["Condition A"],
-                }
-            },
-            "incomplete condition processing",
-        ),
-        (
             {"P01": {"processing_fingerprint_version": "processing_fingerprint_v7"}},
             "current processing fingerprint version",
         ),
@@ -426,7 +435,7 @@ def test_project_source_psd_export_keeps_single_group_condition_identity(
         ),
     ],
 )
-def test_project_source_psd_export_rejects_stale_or_incomplete_ledger_sets(
+def test_project_source_psd_export_rejects_stale_or_invalid_ledger_sets(
     tmp_path: Path,
     entry_changes: dict[str, dict[str, Any]],
     match: str,
@@ -438,6 +447,130 @@ def test_project_source_psd_export_rejects_stale_or_incomplete_ledger_sets(
     )
 
     with pytest.raises(ProjectL2MNEHaukSourcePsdExportError, match=match):
+        write_project_l2_mne_hauk_source_psd_payloads(
+            project=project,
+            source_psd_model=_source_psd_model(),
+            selected_harmonics_hz=(20.0,),
+            compute_source_psd_func=_source_psd_callable([]),
+            cluster_mask_enabled=False,
+        )
+
+
+def test_project_source_psd_export_uses_complete_case_cohort_and_records_omissions(
+    tmp_path: Path,
+) -> None:
+    conditions = {"Condition A": 21, "Condition B": 22}
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01", "P02", "P03"),
+        event_map=conditions,
+        entry_changes={
+            "P01": {"source_derivative_status": "complete"},
+            "P02": {
+                "condition_completeness": "partial",
+                "missing_condition_labels": ["Condition B"],
+                "source_derivative_status": "incomplete",
+                "source_derivative_warning": "Missing source epoch condition(s): Condition B",
+            },
+            "P03": {
+                "source_derivative_status": "incomplete",
+                "source_derivative_warning": "Windows path publication failed",
+            },
+        },
+    )
+    _write_time_domain_derivative(
+        project.project_root,
+        participant_id="P01",
+        conditions=conditions,
+    )
+    calls: list[str] = []
+    progress: list[str] = []
+
+    result = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=_source_psd_model(),
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=_source_psd_callable(calls),
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+        progress_callback=progress.append,
+    )
+
+    assert result.included_participants == ("P01",)
+    assert result.excluded_subjects == ()
+    assert [record.participant_id for record in result.project_inputs.records] == [
+        "P01",
+        "P01",
+    ]
+    assert len(calls) == 1
+    assert result.cache_miss_count == 1
+    assert result.cache_hit_count == 1
+    assert [item.participant_id for item in result.source_ineligible_participants] == [
+        "P02",
+        "P03",
+    ]
+    assert result.source_ineligible_participants[0].to_metadata() == {
+        "participant_id": "P02",
+        "group_id": None,
+        "reason_code": "incomplete_condition_set",
+        "detail": "Missing canonical condition output(s): Condition B",
+        "missing_condition_labels": ["Condition B"],
+        "source_derivative_status": "incomplete",
+        "scope": "all_source_conditions",
+    }
+    assert result.source_ineligible_participants[1].reason_code == (
+        "source_derivative_incomplete"
+    )
+    assert any("omitting P02, P03 from every source condition" in item for item in progress)
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    participant_sidecar = json.loads(
+        result.participant_sidecar_path.read_text(encoding="utf-8")
+    )
+    for payload in (manifest, participant_sidecar):
+        assert payload["metadata"]["participant_eligibility_policy"] == (
+            "complete_case_all_canonical_conditions_v1"
+        )
+        assert payload["metadata"]["included_participants"] == ["P01"]
+        assert [
+            item["participant_id"]
+            for item in payload["metadata"]["source_ineligible_participants"]
+        ] == ["P02", "P03"]
+
+    validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
+    assert validation["input_summary"]["source_cohort_status"] == (
+        "complete_with_warnings"
+    )
+    assert [
+        item["participant_id"]
+        for item in validation["input_summary"]["source_ineligible_participants"]
+    ] == ["P02", "P03"]
+    validation_markdown = result.validation_report_markdown_path.read_text(
+        encoding="utf-8"
+    )
+    assert "| P02 | incomplete_condition_set |" in validation_markdown
+    assert "| P03 | source_derivative_incomplete |" in validation_markdown
+
+
+def test_project_source_psd_export_fails_when_every_participant_is_source_ineligible(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01",),
+        entry_changes={
+            "P01": {
+                "condition_completeness": "partial",
+                "missing_condition_labels": ["Condition A"],
+                "source_derivative_status": "incomplete",
+            }
+        },
+    )
+
+    with pytest.raises(
+        ProjectL2MNEHaukSourcePsdExportError,
+        match="No completed, source-eligible participants remain.*P01",
+    ):
         write_project_l2_mne_hauk_source_psd_payloads(
             project=project,
             source_psd_model=_source_psd_model(),
@@ -501,8 +634,10 @@ def _project_with_ledger(
     group_id: str | None = None,
     group_folder: str | None = None,
     participant_groups: dict[str, tuple[str, str]] | None = None,
+    event_map: dict[str, int] | None = None,
 ) -> Project:
     root.mkdir(parents=True, exist_ok=True)
+    canonical_event_map = event_map or {"Condition A": 21}
     groups: dict[str, Any] = {}
     project_participants: dict[str, Any] = {}
     if participant_groups is not None:
@@ -533,7 +668,7 @@ def _project_with_ledger(
         root,
         manifest={
             "name": "Source PSD Test",
-            "event_map": {"Condition A": 21},
+            "event_map": canonical_event_map,
             "groups": groups,
             "participants": project_participants,
         },
@@ -557,9 +692,10 @@ def _project_with_ledger(
                 str(
                     root
                     / "1 - Excel Data Files"
-                    / "Condition A"
-                    / f"{participant_id}_Condition A_Results.xlsx"
+                    / condition_label
+                    / f"{participant_id}_{condition_label}_Results.xlsx"
                 )
+                for condition_label in canonical_event_map
             ],
         }
     for participant_id, changes in (entry_changes or {}).items():
@@ -579,7 +715,9 @@ def _write_time_domain_derivative(
     participant_id: str,
     group_id: str | None = None,
     group_folder: str | None = None,
+    conditions: dict[str, int] | None = None,
 ) -> None:
+    canonical_conditions = conditions or {"Condition A": 21}
     times = np.arange(N_TIMES, dtype=float) / SFREQ
     repetitions: list[np.ndarray] = []
     for repetition in range(2):
@@ -609,15 +747,16 @@ def _write_time_domain_derivative(
         participant_id=participant_id,
         group_id=group_id,
         group_folder=group_folder,
-        condition_epochs={"Condition A": epochs},
-        condition_ids={"Condition A": 21},
+        condition_epochs={label: epochs for label in canonical_conditions},
+        condition_ids=canonical_conditions,
         crop_provenance_by_condition={
-            "Condition A": {
+            label: {
                 "crop_mode": "55_onbin",
                 "N": N_TIMES,
                 "N_step": N_TIMES,
                 "N_mod_step": 0,
             }
+            for label in canonical_conditions
         },
         processing_provenance={
             "processing_fingerprint": PROCESSING_FINGERPRINT,

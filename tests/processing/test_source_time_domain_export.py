@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import mne
@@ -244,6 +245,51 @@ def test_export_rejects_relative_root_and_unsafe_components(tmp_path: Path) -> N
             condition_epochs={"Condition A": _epochs()},
         )
     assert not (tmp_path / "outside").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-path namespace regression")
+def test_project_relative_paths_accept_equivalent_windows_extended_prefix(
+    tmp_path: Path,
+) -> None:
+    project_root = (tmp_path / "Project").resolve()
+    project_root.mkdir()
+    normal_inside = project_root / "nested" / "source.fif"
+    extended_inside = Path("\\\\?\\" + str(normal_inside))
+
+    assert export_module._canonical_resolved_path(extended_inside) == normal_inside
+    assert export_module.source_ready_project_relative_path(
+        project_root,
+        extended_inside,
+    ) == "nested/source.fif"
+    assert export_module._project_path(
+        project_root,
+        str(extended_inside.parent),
+    ) == normal_inside.parent
+
+    extended_outside = Path("\\\\?\\" + str(tmp_path / "outside" / "source.fif"))
+    with pytest.raises(ValueError, match="outside the project root"):
+        export_module.source_ready_project_relative_path(
+            project_root,
+            extended_outside,
+        )
+
+
+def test_atomic_replace_retries_a_transient_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def _flaky_replace(source: str, destination: str) -> None:
+        calls.append((source, destination))
+        if len(calls) == 1:
+            raise PermissionError("transient scanner lock")
+
+    monkeypatch.setattr(export_module.os, "replace", _flaky_replace)
+    monkeypatch.setattr(export_module.time, "sleep", lambda _seconds: None)
+
+    export_module._replace_file(Path("source.tmp"), Path("destination.json"))
+
+    assert len(calls) == 2
 
 
 def test_crop_mismatch_fails_before_any_artifact_is_committed(tmp_path: Path) -> None:

@@ -24,6 +24,11 @@ class _FakeGroupSelection:
             "oddball_frequency_hz": 1.2,
             "selected_harmonics_hz": [1.2, 2.4, 3.6],
             "detected_significant_harmonics_hz": [1.2, 3.6],
+            "highest_included_harmonic_hz": 3.6,
+            "summation_gap_guard_enabled": True,
+            "summation_gap_guard_max_intervening_nonbase_harmonics": 10,
+            "summation_gap_guard_applied": False,
+            "summation_gap_guard_intervening_nonbase_harmonic_count": 1,
             "selection_cache_source": "saved_processing_metadata",
         }
 
@@ -55,6 +60,9 @@ def test_load_project_processing_harmonics_returns_shared_fingerprint(
     assert result.exploratory is False
     assert result.fingerprint["selected_harmonics_hz"] == [1.2, 2.4, 3.6]
     assert result.fingerprint["detected_significant_harmonics_hz"] == [1.2, 3.6]
+    assert result.fingerprint["highest_included_harmonic_hz"] == 3.6
+    assert result.fingerprint["summation_gap_guard_enabled"] is True
+    assert result.fingerprint["summation_gap_guard_applied"] is False
     assert "FPVS Toolbox significant harmonics" in result.fingerprint_text
     assert "selected: 1.2, 2.4, 3.6 Hz" in result.fingerprint_text
     assert captured["project_root"] == tmp_path.resolve()

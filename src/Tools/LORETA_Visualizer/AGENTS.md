@@ -51,10 +51,20 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   computes MNE source PSD before magnitude/harmonic aggregation, converts power
   to source amplitude, sums aligned harmonic target/noise positions, and then
   z-scores each participant independently.
-- The source-PSD method intentionally supports EEG with the MNE `fsaverage`
+- `eloreta_volume_hauk_source_psd_v1` is the normal time-domain eLORETA
+  sibling. It consumes the same signed FIF derivatives, complete-case cohort,
+  saved oddball harmonics, exact FFT-bin plan, and neighboring-bin z-score
+  algorithm, but applies an independent MNE eLORETA inverse in fsaverage volume
+  source space. It must compute and cache its own participant source-power and
+  z-score arrays. Never reuse L2-MNE source arrays or the cortical cluster mask
+  as eLORETA values.
+- The source-PSD methods intentionally support EEG with the MNE `fsaverage`
   template and Toolbox BioSemi64 geometry. MEG, individual MRI,
   participant-specific coregistration, and mixed-modality fusion are out of
   scope rather than missing fallbacks.
+- Time-domain L2-MNE and eLORETA consume committed FIF derivatives directly.
+  They must not read `FullFFT Amplitude (uV)`, require the Stats-ready workbook,
+  or silently fall back to either amplitude-workbook source producer.
 - Exact project-selected oddball harmonic bins remain authoritative. Nearest-bin
   substitution is forbidden. The intentional Toolbox noise rule uses offsets
   `-10..-2` and `+2..+10`, drops one minimum and one maximum finite amplitude
@@ -65,6 +75,14 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   under `6 - Source Localization/Source-Ready Time Domain v1/`. They are EEG
   only, signed volts, exact-length, and average repetitions before any FFT.
   Main App serialization must not compute inverse solutions or source metrics.
+- Source-PSD project orchestration uses the versioned
+  `complete_case_all_canonical_conditions_v1` eligibility policy. A completed
+  participant with any missing canonical condition or an explicitly incomplete
+  derivative is omitted from every source condition and recorded as
+  source-ineligible in the prepared manifest, participant sidecar, validation
+  report, logs, and GUI status. Do not add these source-only omissions to the
+  general participant exclusion workbook. Retained derivatives remain strict;
+  corruption or incompatibility declared complete is still a hard failure.
 - The beta L2-MNE cortical-surface producer remains swappable and explicitly
   method-labeled (for example `l2_mne_cortical_surface_beta`). Project export
   reads existing flat or condition/group topography workbooks, uses the external
@@ -77,7 +95,7 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   and neighboring-bin topographies, apply the same inverse model to target and
   noise bins, and fail clearly when required bins are absent. Never derive
   source z-scores from Summed BCA or compact selected-harmonic summaries.
-- The Hauk estimator remains MNE-native with `method="MNE"`, `loose=0.2`,
+- The L2-MNE Hauk estimator remains MNE-native with `method="MNE"`, `loose=0.2`,
   `depth=None`, `fixed=False`, no dSPM/sLORETA/eLORETA normalization, and
   `lambda2 = 1 / 9`.
 - Participant-first Hauk z-scores are the default: preserve each included
@@ -106,17 +124,24 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   `source_validation_report.md`. The report summarizes already-written
   manifests, payloads, participant sidecars, and lateralization files; it must
   not recalculate sources, masks, statistics, or renderer-derived facts.
-- The eLORETA volume branch remains a beta sibling producer. It reuses the
-  participant-first FullFFT z-score contract, estimates in fsaverage/template
-  volume source space with MNE eLORETA, and writes `volume_points` under
-  `6 - Source Localization/eLORETA Volume Beta/`.
+- The amplitude-workbook eLORETA volume branch remains importable as a
+  legacy/exploratory beta. It uses the participant-first FullFFT z-score
+  contract and writes `volume_points` under
+  `6 - Source Localization/eLORETA Volume Beta/`; it is not a fallback for the
+  time-domain method and must retain its legacy method identity.
+- The time-domain eLORETA producer writes independently calculated
+  `volume_points` under
+  `6 - Source Localization/eLORETA Hauk Source PSD Beta/` with method identity
+  `eloreta_volume_hauk_source_psd_v1`.
 - Volume cluster masks are recomputed in volume source space with method-neutral
   `cluster_mask_source_indices`. Never reuse or mutate the L2 cortical mask.
 - When a project has no current source-PSD manifest, the normal background
-  rebuild generates the time-domain L2-MNE source-PSD method. Existing
+  rebuild generates both the time-domain L2-MNE and eLORETA methods. If one
+  current method already exists, the GUI loads that valid partial result rather
+  than automatically rebuilding solely because its sibling is absent. Normal
+  manual and post-processing rebuilds still target both methods. Existing
   amplitude-derived L2-MNE/eLORETA manifests remain viewable with explicit
-  legacy/exploratory labeling; eLORETA source-PSD migration is a separately
-  validated later feature. Source Map Options exposes one normal rebuild
+  legacy/exploratory labeling. Source Map Options exposes one normal rebuild
   action, not numerical controls. The GUI may switch loaded manifests for
   display; source estimation stays producer-owned.
 
@@ -206,9 +231,10 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 - Project source exports stay under the active project root and reject silent
   output escapes. Do not write visualizer settings or source outputs into
   `project.json` unless a future plan explicitly scopes that migration.
-- Missing project FullFFT/preprocessing/Stats inputs must produce a clear
-  prerequisite message. Input discovery supports both flat and
-  condition/group workbook layouts.
+- Missing source-ready FIF/preprocessing inputs must produce a clear
+  prerequisite message for current time-domain builds. Missing FullFFT/Stats
+  inputs must do so for explicitly invoked legacy amplitude-workbook builds.
+  Legacy workbook discovery supports both flat and condition/group layouts.
 
 ## GUI, Worker, And Export Rules
 

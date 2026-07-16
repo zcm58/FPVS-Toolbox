@@ -18,7 +18,7 @@ The function logs start/end status, skips conditions without data, and logs a wa
 
 ## Source-Ready Time-Domain Sibling Export
 
-The Hauk source-PSD feature does not change this Excel adapter or any workbook
+The Hauk source-PSD features do not change this Excel adapter or any workbook
 formula. After a successful Excel export, the process runner may pass the same
 resident condition Epochs to the GUI-neutral source time-domain derivative
 writer. That writer averages repetitions in signed volts, keeps EEG only, and
@@ -28,6 +28,23 @@ Artifact pairs use
 `<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.fif` and a
 sibling `_avg_raw.json`; participant commit manifests use
 `manifests/[<group>/]<participant>.json` and are published last.
+
+Downstream source-map orchestration may mark a completed participant as
+source-ineligible when any canonical condition is missing or the processing
+ledger explicitly records an incomplete source derivative. That omission is
+complete-case across all source conditions and must be reported separately
+from general project/QC exclusions. The retained manifest set remains strict;
+missing or corrupt artifacts recorded as complete are not skipped.
+
+The current L2-MNE cortical and eLORETA volume source-PSD exporters consume the
+same retained FIF/cohort/harmonic/bin contract and apply the same FPVS
+neighboring-bin z-score algorithm. They remain independent numerical
+consumers: eLORETA applies its own volume inverse and computes its own source
+power, participant z-score, cache, and volume-cluster arrays rather than reusing
+L2-MNE values. Normal manual and post-processing rebuilds target both methods.
+Neither current exporter reads FullFFT amplitude workbooks or uses them as a
+fallback; legacy amplitude-derived manifests remain importable only under
+their existing method identities.
 
 This is a sibling generated output, not an alternate `post_process()` entry
 point. It must reuse the already-validated exact `55_onbin` crop metadata and

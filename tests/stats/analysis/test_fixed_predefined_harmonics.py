@@ -248,6 +248,11 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
     assert metadata["included_harmonics_hz"] == [1.2, 2.4, 3.6, 4.8, 7.2]
     assert metadata["highest_significant_harmonic_hz"] == pytest.approx(7.2)
     assert metadata["highest_significant_harmonic_index"] == 6
+    assert metadata["highest_included_harmonic_hz"] == pytest.approx(7.2)
+    assert metadata["summation_gap_guard_enabled"] is True
+    assert metadata["summation_gap_guard_max_intervening_nonbase_harmonics"] == 10
+    assert metadata["summation_gap_guard_intervening_nonbase_harmonic_count"] == 1
+    assert metadata["summation_gap_guard_applied"] is False
     first_row = next(row for row in selection.rows if row.target_frequency_hz == pytest.approx(1.2))
     assert first_row.target_amplitude_uv == pytest.approx(20.0)
     assert first_row.noise_mean_uv is not None
@@ -393,6 +398,12 @@ def test_group_significant_policy_sums_selected_common_bca_for_every_roi(
     worker_summary = stats_workers._summarize_dv_metadata_for_export(metadata)
     assert worker_summary["highest_significant_harmonic_hz"] == pytest.approx(7.2)
     assert worker_summary["highest_significant_harmonic_index"] == 6
+    assert worker_summary["highest_included_harmonic_hz"] == pytest.approx(7.2)
+    assert worker_summary["summation_gap_guard_enabled"] is True
+    assert worker_summary[
+        "summation_gap_guard_max_intervening_nonbase_harmonics"
+    ] == 10
+    assert worker_summary["summation_gap_guard_applied"] is False
 
     for subject in subjects:
         for condition in conditions:

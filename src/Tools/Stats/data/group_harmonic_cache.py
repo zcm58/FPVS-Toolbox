@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 CACHE_SCHEMA_VERSION = 2
 CACHE_MAX_ENTRIES = 8
 CACHE_MANIFEST_PATH = ("tools", "stats", "group_significant_harmonics_cache")
-GROUP_HARMONIC_METHOD_VERSION = "group_significant_harmonics_roi_union_through_highest_v2"
+GROUP_HARMONIC_METHOD_VERSION = (
+    "group_significant_harmonics_roi_union_through_highest_gap_guard_v3"
+)
 PREPROCESSING_ORDER_VERSION_LABEL = "filter_then_optional_fft_multinotch_then_downsample_v2"
 PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v8_fft_multinotch"
 

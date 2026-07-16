@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+import Main_App.workers.post_processing_pipeline_worker as worker_module
 from Main_App.workers.post_processing_pipeline_worker import (
     PostProcessingPipelineWorker,
     PostProcessingStepResult,
@@ -52,8 +56,8 @@ class _RecordingWorker(PostProcessingPipelineWorker):
         mode: str,
     ) -> PostProcessingStepResult:
         self.calls.append(f"source_mode:{mode}:{project_root.name}")
-        assert mode == "l2_mne_source_psd"
-        return PostProcessingStepResult(mode, True, "source PSD ok", "source_psd.json")
+        assert mode in {"l2_mne_source_psd", "eloreta_volume_source_psd"}
+        return PostProcessingStepResult(mode, True, f"{mode} ok", f"{mode}.json")
 
 
 class _StatsFailureWorker(_RecordingWorker):
@@ -66,6 +70,150 @@ class _ReviewRequiredWorker(_RecordingWorker):
     def _run_frequency_domain_qc_review(self) -> dict[str, object]:
         self.calls.append("qc")
         return {"review_required": True, "review_reused": False}
+
+
+class _CohortWarningWorker(_RecordingWorker):
+    def _run_source_map_mode(
+        self,
+        project_root: Path,
+        mode: str,
+    ) -> PostProcessingStepResult:
+        result = super()._run_source_map_mode(project_root, mode)
+        if mode != "l2_mne_source_psd":
+            return result
+        return PostProcessingStepResult(
+            result.name,
+            result.ok,
+            "P09 was omitted from every source condition.",
+            result.path,
+            warning=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader_name", "output_folder"),
+    (
+        ("l2_mne_source_psd", "_load_source_psd_export_api", "l2"),
+        (
+            "eloreta_volume_source_psd",
+            "_load_eloreta_source_psd_export_api",
+            "eloreta",
+        ),
+    ),
+)
+def test_each_source_map_step_remains_successful_when_source_participants_are_omitted(
+    tmp_path,
+    monkeypatch,
+    mode: str,
+    loader_name: str,
+    output_folder: str,
+) -> None:
+    project = _Project(tmp_path)
+    worker = PostProcessingPipelineWorker(project)
+    output_dir = tmp_path / output_folder
+    manifest_path = output_dir / "manifest.json"
+
+    def _write_payloads(**_kwargs):
+        return SimpleNamespace(
+            manifest_path=manifest_path,
+            included_participants=("P01", "P02"),
+            source_ineligible_participants=(
+                SimpleNamespace(participant_id="P09"),
+            ),
+        )
+
+    monkeypatch.setattr(
+        worker_module,
+        loader_name,
+        lambda: (lambda _root: output_dir, _write_payloads),
+    )
+
+    result = worker._run_source_map_mode(tmp_path, mode)
+
+    assert result.ok is True
+    assert result.warning is True
+    assert "generated from 2 source-eligible participant(s)" in result.message
+    assert "P09" in result.message
+    assert result.as_dict()["warning"] is True
+
+
+@pytest.mark.parametrize(
+    "failing_mode",
+    ("l2_mne_source_psd", "eloreta_volume_source_psd"),
+)
+def test_source_map_modes_run_independently_after_a_partial_failure(
+    tmp_path,
+    monkeypatch,
+    failing_mode: str,
+) -> None:
+    worker = PostProcessingPipelineWorker(_Project(tmp_path))
+    calls: list[str] = []
+
+    def _writer(mode: str):
+        def write_payloads(**_kwargs):
+            calls.append(mode)
+            if mode == failing_mode:
+                raise RuntimeError(f"{mode} failed intentionally")
+            return SimpleNamespace(
+                manifest_path=tmp_path / mode / "manifest.json",
+                included_participants=("P01", "P02"),
+                source_ineligible_participants=(),
+            )
+
+        return write_payloads
+
+    monkeypatch.setattr(
+        worker_module,
+        "_load_source_psd_export_api",
+        lambda: (
+            lambda _root: tmp_path / "l2_mne_source_psd",
+            _writer("l2_mne_source_psd"),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_load_eloreta_source_psd_export_api",
+        lambda: (
+            lambda _root: tmp_path / "eloreta_volume_source_psd",
+            _writer("eloreta_volume_source_psd"),
+        ),
+    )
+
+    results = worker._run_source_maps(tmp_path)
+
+    assert calls == ["l2_mne_source_psd", "eloreta_volume_source_psd"]
+    assert [result.name for result in results] == calls
+    assert [result.ok for result in results] == [
+        mode != failing_mode for mode in calls
+    ]
+    assert failing_mode in next(result.message for result in results if not result.ok)
+
+
+def test_pipeline_reports_success_with_source_cohort_warnings(tmp_path) -> None:
+    worker = _CohortWarningWorker(_Project(tmp_path))
+    phase_progress: list[tuple[str, int, int, str]] = []
+    finished: list[dict] = []
+    worker.phase_progress.connect(
+        lambda phase_id, completed, total, message: phase_progress.append(
+            (phase_id, completed, total, message)
+        )
+    )
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert finished[0]["ok"] is True
+    assert finished[0]["has_warnings"] is True
+    source_steps = finished[0]["steps"][-2:]
+    assert [step["warning"] for step in source_steps] == [True, False]
+    assert source_steps[0]["name"] == "l2_mne_source_psd"
+    assert source_steps[1]["name"] == "eloreta_volume_source_psd"
+    assert phase_progress[-1] == (
+        "post_processing_complete",
+        5,
+        5,
+        "Post-processing is complete with source-cohort warnings.",
+    )
 
 
 def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
@@ -90,6 +238,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         f"stats:{tmp_path.name}",
         f"source:{tmp_path.name}",
         f"source_mode:l2_mne_source_psd:{tmp_path.name}",
+        f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
     ]
     assert progress == [
         "qc done",
@@ -99,23 +248,27 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
     ]
     assert [message for message, _level in logs] == progress
     assert [event[:3] for event in phase_progress] == [
-        ("frequency_domain_qc", 0, 4),
-        ("frequency_domain_qc", 1, 4),
-        ("harmonic_selection", 1, 4),
-        ("harmonic_selection", 2, 4),
-        ("stats_ready_export", 2, 4),
-        ("stats_ready_export", 3, 4),
-        ("l2_mne_source_maps", 3, 4),
-        ("l2_mne_source_maps", 4, 4),
-        ("post_processing_complete", 4, 4),
+        ("frequency_domain_qc", 0, 5),
+        ("frequency_domain_qc", 1, 5),
+        ("harmonic_selection", 1, 5),
+        ("harmonic_selection", 2, 5),
+        ("stats_ready_export", 2, 5),
+        ("stats_ready_export", 3, 5),
+        ("l2_mne_source_maps", 3, 5),
+        ("l2_mne_source_maps", 4, 5),
+        ("eloreta_source_maps", 4, 5),
+        ("eloreta_source_maps", 5, 5),
+        ("post_processing_complete", 5, 5),
     ]
     assert all(message for _phase_id, _completed, _total, message in phase_progress)
     assert finished and finished[0]["ok"] is True
+    assert finished[0]["has_warnings"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
         "frequency_domain_qc",
         "harmonic_selection",
         "stats_ready_summed_bca",
         "l2_mne_source_psd",
+        "eloreta_volume_source_psd",
     ]
 
 
@@ -137,6 +290,7 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         f"stats:{tmp_path.name}",
         f"source:{tmp_path.name}",
         f"source_mode:l2_mne_source_psd:{tmp_path.name}",
+        f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
     ]
     assert finished and finished[0]["ok"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
@@ -144,12 +298,15 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         "harmonic_selection",
         "stats_ready_summed_bca",
         "l2_mne_source_psd",
+        "eloreta_volume_source_psd",
     ]
-    assert phase_progress[-4:] == [
-        ("stats_ready_export", 3, 4),
-        ("l2_mne_source_maps", 3, 4),
-        ("l2_mne_source_maps", 4, 4),
-        ("post_processing_complete", 4, 4),
+    assert phase_progress[-6:] == [
+        ("stats_ready_export", 3, 5),
+        ("l2_mne_source_maps", 3, 5),
+        ("l2_mne_source_maps", 4, 5),
+        ("eloreta_source_maps", 4, 5),
+        ("eloreta_source_maps", 5, 5),
+        ("post_processing_complete", 5, 5),
     ]
 
 
@@ -166,8 +323,8 @@ def test_post_processing_pipeline_reports_qc_progress_before_review_pause(tmp_pa
 
     assert worker.calls == ["qc"]
     assert phase_progress == [
-        ("frequency_domain_qc", 0, 4),
-        ("frequency_domain_qc", 1, 4),
+        ("frequency_domain_qc", 0, 5),
+        ("frequency_domain_qc", 1, 5),
     ]
     assert finished[0]["requires_frequency_domain_qc_review"] is True
 

@@ -279,7 +279,9 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.recalculate_harmonics_button.text() == "Recalculate Harmonics"
     assert dlg.recalculate_harmonics_button.isEnabled() is True
     assert dlg.findChild(ActionRow, "settings_harmonic_selection_actions") is not None
-    assert dlg.harmonic_summation_method_combo.itemText(0) == "All harmonics up to highest significant"
+    assert dlg.harmonic_summation_method_combo.itemText(0) == (
+        "Up to highest significant (trim gaps >10)"
+    )
     assert dlg.harmonic_summation_method_combo.itemText(1) == "Significant harmonics only"
     assert dlg.harmonic_summation_method_combo.itemText(2) == "Fixed harmonic list"
     assert dlg.harmonic_summation_method_combo.currentData() == "through_highest_significant"

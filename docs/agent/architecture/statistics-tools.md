@@ -109,9 +109,16 @@ Rules:
   requested fixed harmonics. The default group-level significant-harmonics
   policy detects significant non-base oddball harmonics from grand-averaged
   `FullFFT Amplitude (uV)` spectra over the union of predefined ROI electrodes.
-  The default summation method then includes all non-base oddball harmonics up
-  to the highest detected significant harmonic. The resulting included harmonic
-  list is applied uniformly to every participant, selected condition, and ROI.
+  The default summation method then includes eligible non-base oddball harmonics
+  up to the highest detected significant harmonic, subject to one locked
+  isolated-highest guard. If more than 10 eligible non-base harmonics lie
+  strictly between the two highest detected significant peaks, base-rate
+  overlaps excluded from the count, the highest peak and all intervening
+  harmonics above the next-highest peak are omitted from summation. Exactly 10
+  remains allowed. The upper peak remains recorded as detected, and the guard
+  is applied only to the original highest/next-highest pair rather than
+  recursively. The resulting included harmonic list is applied uniformly to
+  every participant, selected condition, and ROI.
   The oddball frequency is locked at 1.2 Hz. The BCA harmonic upper limit is
   only the stop frequency for candidate generation: build
   `1.2, 2.4, 3.6, ...` up to that ceiling, excluding base-rate overlaps. Never
@@ -137,6 +144,12 @@ Rules:
   nearest-bin matching, inclusive `>= 1.64`, sample SD, or a different
   neighboring-bin rule unless the user explicitly requests a statistical-method
   change.
+- The project harmonic-cache fingerprint must version the isolated-highest gap
+  guard. A cache written by the earlier unguarded through-highest method must
+  miss and require `Recalculate Harmonics` or normal post-processing before it
+  can become the downstream source of truth. This recalculates harmonic
+  selection from existing FullFFT workbooks; it does not require EEG
+  preprocessing.
 - Frequency-domain QC exclusions are applied before final harmonic selection,
   Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
   Maps metric collection, and source-map input preparation. Full participant

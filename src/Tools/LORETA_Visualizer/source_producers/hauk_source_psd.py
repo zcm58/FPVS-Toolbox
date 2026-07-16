@@ -24,6 +24,7 @@ DEFAULT_HAUK_SOURCE_PSD_ALIGNED_OFFSETS = (0, *DEFAULT_HAUK_SOURCE_PSD_NOISE_OFF
 DEFAULT_BIN_POSITION_TOLERANCE = 1e-7
 DEFAULT_NEGATIVE_POWER_RELATIVE_TOLERANCE = 1e-12
 DEFAULT_ZERO_NOISE_SD_RELATIVE_TOLERANCE = 1e-12
+SUPPORTED_MNE_INVERSE_METHODS = ("MNE", "dSPM", "sLORETA", "eLORETA")
 
 ComputeSourcePsdCallable = Callable[..., Any]
 
@@ -37,6 +38,9 @@ class HaukSourcePsdConfig:
     bin_position_tolerance: float = DEFAULT_BIN_POSITION_TOLERANCE
     negative_power_relative_tolerance: float = DEFAULT_NEGATIVE_POWER_RELATIVE_TOLERANCE
     zero_noise_sd_relative_tolerance: float = DEFAULT_ZERO_NOISE_SD_RELATIVE_TOLERANCE
+    inverse_method: str = "MNE"
+    method_params: Mapping[str, Any] = field(default_factory=dict)
+    prepared: bool = False
     method_id: str = HAUK_SOURCE_PSD_METHOD_ID
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -57,6 +61,9 @@ class HaukSourcePsdConfig:
             self.zero_noise_sd_relative_tolerance,
             label="zero_noise_sd_relative_tolerance",
         )
+        inverse_method = _validated_inverse_method(self.inverse_method)
+        if not isinstance(self.method_params, Mapping):
+            raise TypeError("Hauk source-PSD method_params must be a mapping.")
         method_id = str(self.method_id).strip()
         if not method_id:
             raise ValueError("Hauk source-PSD method_id cannot be empty.")
@@ -65,6 +72,9 @@ class HaukSourcePsdConfig:
         object.__setattr__(self, "bin_position_tolerance", bin_tolerance)
         object.__setattr__(self, "negative_power_relative_tolerance", negative_tolerance)
         object.__setattr__(self, "zero_noise_sd_relative_tolerance", zero_sd_tolerance)
+        object.__setattr__(self, "inverse_method", inverse_method)
+        object.__setattr__(self, "method_params", dict(self.method_params))
+        object.__setattr__(self, "prepared", bool(self.prepared))
         object.__setattr__(self, "method_id", method_id)
         object.__setattr__(self, "metadata", dict(self.metadata))
 
@@ -80,7 +90,9 @@ class HaukSourcePsdConfig:
                 "combined EEG/MEG or individual-MRI reproduction"
             ),
             "selected_harmonics_hz": [float(value) for value in self.selected_harmonics_hz],
-            "inverse_method": "MNE",
+            "inverse_method": self.inverse_method,
+            "method_params": dict(self.method_params),
+            "prepared": bool(self.prepared),
             "lambda2": float(self.lambda2),
             "source_psd_n_fft": "averaged_raw_n_times",
             "source_psd_overlap": 0.0,
@@ -359,7 +371,7 @@ def compute_hauk_source_psd(
         raw=averaged_raw,
         inverse_operator=inverse_operator,
         lambda2=float(config.lambda2),
-        method="MNE",
+        method=config.inverse_method,
         tmin=0.0,
         tmax=None,
         fmin=float(plan.fmin_hz),
@@ -369,6 +381,8 @@ def compute_hauk_source_psd(
         pick_ori=None,
         nave=1,
         pca=True,
+        prepared=bool(config.prepared),
+        method_params=dict(config.method_params) or None,
         bandwidth="hann",
         adaptive=False,
         low_bias=True,
@@ -481,6 +495,20 @@ def _validated_harmonics(values: Sequence[float]) -> tuple[float, ...]:
     return harmonics
 
 
+def _validated_inverse_method(value: Any) -> str:
+    method = str(value).strip()
+    canonical_by_casefold = {
+        candidate.casefold(): candidate for candidate in SUPPORTED_MNE_INVERSE_METHODS
+    }
+    try:
+        return canonical_by_casefold[method.casefold()]
+    except KeyError as exc:
+        supported = ", ".join(SUPPORTED_MNE_INVERSE_METHODS)
+        raise ValueError(
+            f"Unsupported Hauk source-PSD inverse_method {value!r}; expected one of: {supported}."
+        ) from exc
+
+
 def _positive_finite(value: Any, *, label: str) -> float:
     number = float(value)
     if not np.isfinite(number) or number <= 0.0:
@@ -506,6 +534,7 @@ __all__ = [
     "HAUK_SOURCE_PSD_METHOD_VERSION",
     "HAUK_2021_REFERENCE_DOI",
     "HAUK_REFERENCE_CODE_URL",
+    "SUPPORTED_MNE_INVERSE_METHODS",
     "HaukSourcePsdConfig",
     "HaukSourcePsdFrequencyPlan",
     "HaukSourcePsdResult",

@@ -202,6 +202,7 @@ def _lateralization_row_summary(row: dict[str, Any]) -> dict[str, Any]:
 
 def _input_summary(project_inputs: Any) -> dict[str, Any]:
     bin_plan = getattr(project_inputs, "bin_plan", None)
+    source_ineligible = _source_ineligible_participants(project_inputs)
     summaries = []
     for summary in getattr(project_inputs, "summaries", ()):
         summaries.append(
@@ -226,6 +227,13 @@ def _input_summary(project_inputs: Any) -> dict[str, Any]:
         "condition_count": len(getattr(project_inputs, "conditions", ())),
         "excluded_subjects": list(getattr(project_inputs, "excluded_subjects", ())),
         "flagged_subjects": list(getattr(project_inputs, "flagged_subjects", ())),
+        "participant_eligibility_policy": str(
+            getattr(project_inputs, "participant_eligibility_policy", "")
+        ),
+        "source_cohort_status": (
+            "complete_with_warnings" if source_ineligible else "complete"
+        ),
+        "source_ineligible_participants": source_ineligible,
         "diagnostics": list(getattr(project_inputs, "diagnostics", ())),
         "frequency_resolution_hz": getattr(bin_plan, "frequency_resolution_hz", None),
         "noise_window_bins": getattr(bin_plan, "noise_window_bins", None),
@@ -233,6 +241,43 @@ def _input_summary(project_inputs: Any) -> dict[str, Any]:
         "min_noise_bins": getattr(bin_plan, "min_noise_bins", None),
         "condition_summaries": summaries,
     }
+
+
+def _source_ineligible_participants(project_inputs: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for value in getattr(project_inputs, "source_ineligible_participants", ()):
+        if isinstance(value, dict):
+            item = value
+        else:
+            item = {
+                "participant_id": getattr(value, "participant_id", ""),
+                "group_id": getattr(value, "group_id", None),
+                "reason_code": getattr(value, "reason_code", ""),
+                "detail": getattr(value, "detail", ""),
+                "missing_condition_labels": getattr(
+                    value, "missing_condition_labels", ()
+                ),
+                "source_derivative_status": getattr(
+                    value, "source_derivative_status", ""
+                ),
+                "scope": "all_source_conditions",
+            }
+        rows.append(
+            {
+                "participant_id": str(item.get("participant_id") or ""),
+                "group_id": item.get("group_id"),
+                "reason_code": str(item.get("reason_code") or ""),
+                "detail": str(item.get("detail") or ""),
+                "missing_condition_labels": list(
+                    item.get("missing_condition_labels") or ()
+                ),
+                "source_derivative_status": str(
+                    item.get("source_derivative_status") or ""
+                ),
+                "scope": str(item.get("scope") or "all_source_conditions"),
+            }
+        )
+    return rows
 
 
 def _generated_files(
@@ -341,21 +386,56 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- Payloads: {validation['payload_count']}",
         f"- Cluster-masked payloads: {validation['cluster_masked_payload_count']}",
         f"- Selected harmonics: {_join_values(input_summary['selected_harmonics_hz'])}",
+        f"- Source cohort status: {input_summary['source_cohort_status']}",
         "",
-        "## Intended Scope",
+        "## Source Cohort",
         "",
-        *(f"- {item}" for item in report["intended_scope"]),
-        "",
-        "## Validation Checks",
-        "",
-        f"- Manifest validated: {_yes_no(validation['manifest_validated'])}",
-        f"- All payloads validated: {_yes_no(validation['all_payloads_validated'])}",
-        f"- Participant sidecar available: {_yes_no(validation['participant_sidecar_available'])}",
-        f"- Lateralization summary available: {_yes_no(validation['lateralization_summary_available'])}",
-        "",
-        "## Lateralization Highlights",
+        (
+            "- Eligibility policy: "
+            + (input_summary["participant_eligibility_policy"] or "not recorded")
+        ),
+        f"- Project/QC exclusions: {len(input_summary['excluded_subjects'])}",
+        f"- Source-ineligible participants: {len(input_summary['source_ineligible_participants'])}",
         "",
     ]
+    source_ineligible = input_summary["source_ineligible_participants"]
+    if source_ineligible:
+        lines.extend(
+            (
+                "Source-ineligible participants were omitted from every source condition; "
+                "the retained maps use one complete-case cohort.",
+                "",
+                "| Participant | Reason | Detail |",
+                "| --- | --- | --- |",
+            )
+        )
+        for item in source_ineligible:
+            lines.append(
+                "| "
+                f"{_markdown_cell(item['participant_id'])} | "
+                f"{_markdown_cell(item['reason_code'])} | "
+                f"{_markdown_cell(item['detail'])} |"
+            )
+        lines.append("")
+    else:
+        lines.extend(("- No source-only participant omissions were recorded.", ""))
+    lines.extend(
+        (
+            "## Intended Scope",
+            "",
+            *(f"- {item}" for item in report["intended_scope"]),
+            "",
+            "## Validation Checks",
+            "",
+            f"- Manifest validated: {_yes_no(validation['manifest_validated'])}",
+            f"- All payloads validated: {_yes_no(validation['all_payloads_validated'])}",
+            f"- Participant sidecar available: {_yes_no(validation['participant_sidecar_available'])}",
+            f"- Lateralization summary available: {_yes_no(validation['lateralization_summary_available'])}",
+            "",
+            "## Lateralization Highlights",
+            "",
+        )
+    )
     primary_rows = lateralization.get("primary_group_rows", []) if lateralization.get("available") else []
     if primary_rows:
         lines.extend(
@@ -455,6 +535,10 @@ def _format_number(value: Any) -> str:
     except (TypeError, ValueError):
         return str(value)
     return f"{numeric:.4g}"
+
+
+def _markdown_cell(value: Any) -> str:
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def _json_safe(value: Any) -> Any:

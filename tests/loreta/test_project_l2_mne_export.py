@@ -13,6 +13,7 @@ from Tools.LORETA_Visualizer.gui import (
     DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE,
     PROJECT_SOURCE_EXPORT_ALL_ZSCORE,
     PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
+    PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
     PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
     PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
@@ -22,6 +23,7 @@ from Tools.LORETA_Visualizer.gui import (
     ProjectSourceMapExportWorker,
     ProjectStatsReadyExportWorker,
     SOURCE_METHOD_ELORETA_VOLUME,
+    SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD,
     SOURCE_METHOD_L2_MNE_SOURCE_PSD,
     SOURCE_METHOD_L2_MNE_SURFACE,
     SOURCE_SUMMARY_MEDIAN,
@@ -41,6 +43,7 @@ from Tools.LORETA_Visualizer.gui import (
     default_stacked_split_figure_export_path,
     default_split_figure_export_path,
     default_project_source_manifest_paths,
+    default_project_eloreta_source_psd_manifest_path,
     default_project_source_psd_manifest_path,
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
@@ -78,6 +81,10 @@ from Tools.LORETA_Visualizer.source_payloads import (
 from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
     DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME,
     default_project_eloreta_volume_output_dir,
+)
+from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
+    DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME,
+    default_project_eloreta_volume_hauk_source_psd_output_dir,
 )
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
@@ -254,9 +261,13 @@ def test_loreta_import_dialog_prefers_last_dir_then_project_source_dir(tmp_path)
     project_root = tmp_path / "Project"
     project_root.mkdir()
     source_psd_dir = default_project_l2_mne_hauk_source_psd_output_dir(project_root)
+    eloreta_source_psd_dir = default_project_eloreta_volume_hauk_source_psd_output_dir(
+        project_root
+    )
     zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
     eloreta_dir = default_project_eloreta_volume_output_dir(project_root)
     source_psd_dir.mkdir(parents=True)
+    eloreta_source_psd_dir.mkdir(parents=True)
     zscore_dir.mkdir(parents=True)
     eloreta_dir.mkdir(parents=True)
     amplitude_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_BETA_OUTPUT_FOLDER
@@ -268,6 +279,10 @@ def test_loreta_import_dialog_prefers_last_dir_then_project_source_dir(tmp_path)
     assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(source_psd_dir)
 
     source_psd_dir.rmdir()
+    assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(
+        eloreta_source_psd_dir
+    )
+    eloreta_source_psd_dir.rmdir()
     assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(zscore_dir)
     zscore_dir.rmdir()
     assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(eloreta_dir)
@@ -431,6 +446,17 @@ def test_loreta_manifest_methods_group_source_psd_and_legacy_entries_separately(
         ),
         PreparedSourceManifestEntry(
             condition_id="manifest:1:color_response_mean",
+            label="Color Response eLORETA source PSD Raw mean z-score",
+            payload_path=tmp_path / "color_eloreta_source_psd_mean.json",
+            metadata={
+                "source_method": "eloreta_volume",
+                "producer_method": "eloreta_volume_hauk_source_psd_v1_mean",
+                "base_producer_method": "eloreta_volume_hauk_source_psd_v1",
+                "participant_zscore_aggregation": "mean",
+            },
+        ),
+        PreparedSourceManifestEntry(
+            condition_id="manifest:1:color_response_mean",
             label="Color Response eLORETA volume Raw mean z-score",
             payload_path=tmp_path / "color_eloreta_mean.json",
             metadata={
@@ -446,11 +472,17 @@ def test_loreta_manifest_methods_group_source_psd_and_legacy_entries_separately(
     assert set(groups) == {
         SOURCE_METHOD_L2_MNE_SOURCE_PSD,
         SOURCE_METHOD_L2_MNE_SURFACE,
+        SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD,
         SOURCE_METHOD_ELORETA_VOLUME,
     }
     assert list(groups[SOURCE_METHOD_L2_MNE_SOURCE_PSD].condition_groups) == ["color_response"]
     assert list(groups[SOURCE_METHOD_L2_MNE_SURFACE].condition_groups) == ["color_response"]
+    assert list(groups[SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD].condition_groups) == [
+        "color_response"
+    ]
+    assert groups[SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD].label == "eLORETA volume source PSD"
     assert list(groups[SOURCE_METHOD_ELORETA_VOLUME].condition_groups) == ["color_response"]
+    assert groups[SOURCE_METHOD_ELORETA_VOLUME].label == "Legacy amplitude-derived eLORETA"
 
 
 def test_volume_display_payload_uses_source_cluster_mask_then_positive_exploratory_values() -> None:
@@ -502,25 +534,54 @@ def test_default_project_source_psd_manifest_path_requires_existing_manifest(tmp
     assert default_project_source_psd_manifest_path(project_root) == manifest_path
 
 
-def test_default_project_source_manifest_paths_prefers_source_psd_then_falls_back_to_legacy(tmp_path) -> None:
+def test_default_project_eloreta_source_psd_manifest_path_requires_existing_manifest(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    source_psd_dir = default_project_eloreta_volume_hauk_source_psd_output_dir(project_root)
+    source_psd_dir.mkdir(parents=True)
+    manifest_path = (
+        source_psd_dir / DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME
+    )
+
+    assert default_project_eloreta_source_psd_manifest_path(project_root) is None
+
+    manifest_path.write_text("{}", encoding="utf-8")
+    assert default_project_eloreta_source_psd_manifest_path(project_root) == manifest_path
+
+
+def test_default_project_source_manifest_paths_returns_current_pair_then_legacy(tmp_path) -> None:
     project_root = tmp_path / "Project"
     source_psd_dir = default_project_l2_mne_hauk_source_psd_output_dir(project_root)
+    eloreta_source_psd_dir = default_project_eloreta_volume_hauk_source_psd_output_dir(
+        project_root
+    )
     zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
     eloreta_dir = default_project_eloreta_volume_output_dir(project_root)
     source_psd_dir.mkdir(parents=True)
+    eloreta_source_psd_dir.mkdir(parents=True)
     zscore_dir.mkdir(parents=True)
     eloreta_dir.mkdir(parents=True)
     source_psd_manifest = source_psd_dir / DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME
+    eloreta_source_psd_manifest = (
+        eloreta_source_psd_dir
+        / DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME
+    )
     zscore_manifest = zscore_dir / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
     eloreta_manifest = eloreta_dir / DEFAULT_PROJECT_ELORETA_VOLUME_MANIFEST_NAME
 
     source_psd_manifest.write_text("{}", encoding="utf-8")
+    eloreta_source_psd_manifest.write_text("{}", encoding="utf-8")
     zscore_manifest.write_text("{}", encoding="utf-8")
     eloreta_manifest.write_text("{}", encoding="utf-8")
 
-    assert default_project_source_manifest_paths(project_root) == (source_psd_manifest,)
+    assert default_project_source_manifest_paths(project_root) == (
+        source_psd_manifest,
+        eloreta_source_psd_manifest,
+    )
 
     source_psd_manifest.unlink()
+    assert default_project_source_manifest_paths(project_root) == (eloreta_source_psd_manifest,)
+
+    eloreta_source_psd_manifest.unlink()
     assert default_project_source_manifest_paths(project_root) == (zscore_manifest, eloreta_manifest)
 
 
@@ -546,7 +607,10 @@ def test_loreta_project_root_resolver_ignores_empty_string() -> None:
 def test_source_export_status_text_uses_user_facing_source_map_message() -> None:
     expected = "Generating source-space maps for 3D visualization of oddball responses."
 
-    assert PROJECT_SOURCE_EXPORT_DEFAULT_MODES == (PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,)
+    assert PROJECT_SOURCE_EXPORT_DEFAULT_MODES == (
+        PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
+        PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
+    )
 
     assert (
         _source_export_status_text(
@@ -569,6 +633,15 @@ def test_source_export_status_text_uses_user_facing_source_map_message() -> None
     assert (
         _source_export_status_text(
             PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
+            automatic=True,
+            include_flagged_subjects=False,
+        )
+        == expected
+    )
+
+    assert (
+        _source_export_status_text(
+            PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
             automatic=True,
             include_flagged_subjects=False,
         )
@@ -625,25 +698,46 @@ def _fake_source_export_result(output_dir: Path, *, method_id: str, payload_coun
     )
 
 
-def test_project_source_export_worker_rebuilds_source_psd_by_default(tmp_path, monkeypatch) -> None:
+def test_project_source_export_worker_rebuilds_both_source_psd_methods_by_default(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from Tools.LORETA_Visualizer.source_producers import (
+        project_eloreta_volume_hauk_source_psd_export,
+    )
     from Tools.LORETA_Visualizer.source_producers import project_l2_mne_hauk_source_psd_export
 
     project = SimpleNamespace(project_root=tmp_path)
-    calls: list[dict[str, object]] = []
+    l2_calls: list[dict[str, object]] = []
+    eloreta_calls: list[dict[str, object]] = []
 
     def fake_source_psd_export(**kwargs):
-        calls.append(kwargs)
-        kwargs["progress_callback"]("source PSD done")
+        l2_calls.append(kwargs)
+        kwargs["progress_callback"]("L2 source PSD done")
         return _fake_source_export_result(
             tmp_path / "source_psd",
             method_id="l2_mne_hauk_source_psd_v1",
             payload_count=2,
         )
 
+    def fake_eloreta_source_psd_export(**kwargs):
+        eloreta_calls.append(kwargs)
+        kwargs["progress_callback"]("eLORETA source PSD done")
+        return _fake_source_export_result(
+            tmp_path / "eloreta_source_psd",
+            method_id="eloreta_volume_hauk_source_psd_v1",
+            payload_count=3,
+        )
+
     monkeypatch.setattr(
         project_l2_mne_hauk_source_psd_export,
         "write_project_l2_mne_hauk_source_psd_payloads",
         fake_source_psd_export,
+    )
+    monkeypatch.setattr(
+        project_eloreta_volume_hauk_source_psd_export,
+        "write_project_eloreta_volume_hauk_source_psd_payloads",
+        fake_eloreta_source_psd_export,
     )
     worker = ProjectSourceMapExportWorker(
         project_root=tmp_path,
@@ -662,43 +756,64 @@ def test_project_source_export_worker_rebuilds_source_psd_by_default(tmp_path, m
     worker.run()
 
     assert failed == []
-    assert len(calls) == 1
-    assert calls[0]["project"] is project
-    assert calls[0]["project_root"] == tmp_path
-    assert calls[0]["include_flagged_subjects"] is True
-    assert "zscore_model" not in calls[0]
+    assert len(l2_calls) == 1
+    assert len(eloreta_calls) == 1
+    for call in (l2_calls[0], eloreta_calls[0]):
+        assert call["project"] is project
+        assert call["project_root"] == tmp_path
+        assert call["include_flagged_subjects"] is True
+        assert call["allow_fetch_fsaverage"] is True
+        assert "zscore_model" not in call
     assert len(exported) == 1
     result = exported[0]
     assert isinstance(result, ProjectSourceMapExportBatchResult)
     assert result.requested_modes == PROJECT_SOURCE_EXPORT_DEFAULT_MODES
-    assert len(result.results) == 1
+    assert len(result.results) == 2
     assert result.failures == ()
-    assert "Building Hauk-informed time-domain L2-MNE source maps (1/1)" in progress_messages[0]
+    assert "Building Hauk-informed time-domain L2-MNE source maps (1/2)" in progress_messages[0]
+    assert any(
+        "Building Hauk-informed time-domain eLORETA volume source maps (2/2)" in message
+        for message in progress_messages
+    )
     assert "Starting Hauk-informed time-domain L2-MNE source-PSD rebuild..." in progress_messages
-    assert "source PSD done" in progress_messages
+    assert (
+        "Starting Hauk-informed time-domain eLORETA volume source-PSD rebuild..."
+        in progress_messages
+    )
+    assert "L2 source PSD done" in progress_messages
+    assert "eLORETA source PSD done" in progress_messages
 
 
 def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, monkeypatch) -> None:
-    from Tools.LORETA_Visualizer.source_producers import project_eloreta_volume_export
-    from Tools.LORETA_Visualizer.source_producers import project_l2_mne_hauk_zscore_export
+    from Tools.LORETA_Visualizer.source_producers import (
+        project_eloreta_volume_hauk_source_psd_export,
+        project_l2_mne_hauk_source_psd_export,
+    )
 
     def fake_l2_export(**kwargs):
-        return _fake_source_export_result(tmp_path / "l2", method_id="l2_mne_fsaverage_participant_zscore")
+        kwargs["progress_callback"]("L2 current map complete")
+        return _fake_source_export_result(
+            tmp_path / "l2",
+            method_id="l2_mne_hauk_source_psd_v1",
+        )
 
-    def fake_eloreta_export(**_kwargs):
+    def fake_eloreta_export(**kwargs):
+        kwargs["progress_callback"]("eLORETA current map started")
         raise RuntimeError("missing volume model")
 
-    monkeypatch.setattr(project_l2_mne_hauk_zscore_export, "write_project_l2_mne_hauk_zscore_payloads", fake_l2_export)
     monkeypatch.setattr(
-        project_eloreta_volume_export, "write_project_eloreta_volume_hauk_zscore_payloads", fake_eloreta_export
+        project_l2_mne_hauk_source_psd_export,
+        "write_project_l2_mne_hauk_source_psd_payloads",
+        fake_l2_export,
     )
-    legacy_modes = (
-        PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
-        PROJECT_SOURCE_EXPORT_ELORETA_VOLUME,
+    monkeypatch.setattr(
+        project_eloreta_volume_hauk_source_psd_export,
+        "write_project_eloreta_volume_hauk_source_psd_payloads",
+        fake_eloreta_export,
     )
     worker = ProjectSourceMapExportWorker(
         project_root=tmp_path,
-        export_modes=legacy_modes,
+        export_modes=PROJECT_SOURCE_EXPORT_DEFAULT_MODES,
         include_flagged_subjects=False,
         zscore_model=PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
         project=SimpleNamespace(project_root=tmp_path),
@@ -716,13 +831,18 @@ def test_project_source_export_worker_reports_partial_batch_failure(tmp_path, mo
     assert len(exported) == 1
     result = exported[0]
     assert isinstance(result, ProjectSourceMapExportBatchResult)
-    assert result.requested_modes == legacy_modes
+    assert result.requested_modes == PROJECT_SOURCE_EXPORT_DEFAULT_MODES
     assert len(result.results) == 1
     assert len(result.failures) == 1
-    assert result.failures[0].export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME
+    assert result.failures[0].export_mode == PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD
     assert result.failures[0].message == "missing volume model"
-    assert "Building legacy amplitude-derived L2-MNE source maps (1/2)" in progress_messages[0]
-    assert any("legacy amplitude-derived eLORETA volume source maps" in message for message in progress_messages)
+    assert "Building Hauk-informed time-domain L2-MNE source maps (1/2)" in progress_messages[0]
+    assert "L2 current map complete" in progress_messages
+    assert "eLORETA current map started" in progress_messages
+    assert any(
+        "Hauk-informed time-domain eLORETA volume source maps (2/2)" in message
+        for message in progress_messages
+    )
 
 
 def test_loreta_stats_ready_workbook_path_uses_source_map_prerequisite_location(tmp_path) -> None:

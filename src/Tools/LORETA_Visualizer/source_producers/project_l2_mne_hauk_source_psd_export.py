@@ -16,6 +16,9 @@ import hashlib
 import json
 import logging
 import math
+import os
+import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,10 +94,36 @@ PROJECT_L2_MNE_HAUK_SOURCE_PSD_OUTPUT_FOLDER = "L2-MNE Hauk Source PSD Beta"
 DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME = (
     "project_l2_mne_hauk_source_psd_manifest.json"
 )
+SOURCE_PARTICIPANT_ELIGIBILITY_POLICY = "complete_case_all_canonical_conditions_v1"
 
 
 class ProjectL2MNEHaukSourcePsdExportError(RuntimeError):
     """Raised when a strict project source-PSD export cannot proceed."""
+
+
+@dataclass(frozen=True)
+class ProjectSourceIneligibleParticipant:
+    """One participant omitted from every source condition with provenance."""
+
+    participant_id: str
+    group_id: str | None
+    reason_code: str
+    detail: str
+    missing_condition_labels: tuple[str, ...] = ()
+    source_derivative_status: str = ""
+
+    def to_metadata(self) -> dict[str, Any]:
+        """Return the durable complete-case omission record."""
+
+        return {
+            "participant_id": self.participant_id,
+            "group_id": self.group_id,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "missing_condition_labels": list(self.missing_condition_labels),
+            "source_derivative_status": self.source_derivative_status,
+            "scope": "all_source_conditions",
+        }
 
 
 @dataclass(frozen=True)
@@ -110,6 +139,7 @@ class ProjectL2MNEHaukSourcePsdExportResult:
     included_participants: tuple[str, ...]
     excluded_subjects: tuple[str, ...]
     flagged_subjects: tuple[str, ...]
+    source_ineligible_participants: tuple[ProjectSourceIneligibleParticipant, ...]
     cache_hit_count: int
     cache_miss_count: int
     participant_sidecar_path: Path
@@ -157,6 +187,7 @@ class _ProjectInputPlan:
     processing_fingerprint: str
     processing_fingerprint_version: str
     participant_selection: ProjectSourceParticipantSelection
+    source_ineligible_participants: tuple[ProjectSourceIneligibleParticipant, ...]
 
 
 @dataclass(frozen=True)
@@ -174,8 +205,10 @@ class _ValidationReportInputs:
     conditions: tuple[L2MNEHaukPrecomputedParticipantGroupCondition, ...]
     excluded_subjects: tuple[str, ...]
     flagged_subjects: tuple[str, ...]
+    source_ineligible_participants: tuple[Mapping[str, Any], ...]
     diagnostics: tuple[str, ...]
     bin_plan: _ValidationBinPlan
+    participant_eligibility_policy: str = SOURCE_PARTICIPANT_ELIGIBILITY_POLICY
     sheet_name: str = "source-ready signed time-domain FIF"
     summaries: tuple["_ValidationConditionSummary", ...] = ()
 
@@ -238,6 +271,25 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         root=root,
         include_flagged_subjects=include_flagged_subjects,
     )
+    if input_plan.source_ineligible_participants:
+        skipped_ids = ", ".join(
+            item.participant_id for item in input_plan.source_ineligible_participants
+        )
+        _emit_progress(
+            progress_callback,
+            (
+                f"Source cohort warning: using {len(input_plan.participants)} eligible "
+                f"participant(s); omitting {skipped_ids} from every source condition."
+            ),
+        )
+        for item in input_plan.source_ineligible_participants:
+            logger.warning(
+                "project_l2_mne_hauk_source_participant_ineligible "
+                "participant=%s reason=%s detail=%s",
+                item.participant_id,
+                item.reason_code,
+                item.detail,
+            )
 
     _emit_progress(progress_callback, "Validating signed source-ready time-domain derivatives...")
     project_inputs = load_project_time_domain_inputs(
@@ -374,9 +426,14 @@ def write_project_l2_mne_hauk_source_psd_payloads(
             "harmonic_selection": harmonic_metadata,
             "source_psd_method_metadata": method_metadata,
             "include_flagged_subjects": bool(include_flagged_subjects),
+            "participant_eligibility_policy": SOURCE_PARTICIPANT_ELIGIBILITY_POLICY,
             "included_participants": list(input_plan.participants),
             "excluded_subjects": list(input_plan.participant_selection.excluded_subjects),
             "flagged_subjects": list(input_plan.participant_selection.flagged_subjects),
+            "source_ineligible_participants": [
+                item.to_metadata()
+                for item in input_plan.source_ineligible_participants
+            ],
             "group_summary_policy": (
                 "separate_canonical_project_groups"
                 if input_plan.split_group_summaries
@@ -415,6 +472,10 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         output_dir=participant_result.producer_result.output_dir,
         method_metadata=method_metadata,
         conditions=prepared_conditions,
+        included_participants=input_plan.participants,
+        excluded_subjects=input_plan.participant_selection.excluded_subjects,
+        flagged_subjects=input_plan.participant_selection.flagged_subjects,
+        source_ineligible_participants=input_plan.source_ineligible_participants,
     )
     producer_result = SourceProducerRunResult(
         method_id=participant_result.producer_result.method_id,
@@ -433,9 +494,14 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         conditions=prepared_conditions,
         excluded_subjects=input_plan.participant_selection.excluded_subjects,
         flagged_subjects=input_plan.participant_selection.flagged_subjects,
+        source_ineligible_participants=tuple(
+            item.to_metadata()
+            for item in input_plan.source_ineligible_participants
+        ),
         diagnostics=(
             f"validated_time_domain_derivatives={len(project_inputs.records)}",
             f"included_participants={len(input_plan.participants)}",
+            f"source_ineligible_participants={len(input_plan.source_ineligible_participants)}",
             f"prepared_group_conditions={len(prepared_conditions)}",
             "group_summary_policy="
             + (
@@ -489,6 +555,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         included_participants=input_plan.participants,
         excluded_subjects=input_plan.participant_selection.excluded_subjects,
         flagged_subjects=input_plan.participant_selection.flagged_subjects,
+        source_ineligible_participants=input_plan.source_ineligible_participants,
         cache_hit_count=cache_hit_count,
         cache_miss_count=cache_miss_count,
         participant_sidecar_path=participant_result.participant_sidecar_path,
@@ -504,6 +571,9 @@ def write_project_l2_mne_hauk_source_psd_payloads(
             "output_dir": str(result.output_dir),
             "manifest_path": str(result.manifest_path),
             "participant_count": len(result.included_participants),
+            "source_ineligible_participant_count": len(
+                result.source_ineligible_participants
+            ),
             "condition_count": len(prepared_conditions),
             "cache_hit_count": cache_hit_count,
             "cache_miss_count": cache_miss_count,
@@ -570,6 +640,7 @@ def _build_project_input_plan(
 
     included: list[tuple[str, str | None, str | None, Mapping[str, Any]]] = []
     ledger_excluded: list[str] = []
+    source_ineligible: list[ProjectSourceIneligibleParticipant] = []
     for ledger_key, entry_value in sorted(entries.items(), key=lambda item: str(item[0]).casefold()):
         if not isinstance(entry_value, Mapping):
             continue
@@ -591,14 +662,50 @@ def _build_project_input_plan(
             raise ProjectL2MNEHaukSourcePsdExportError(
                 f"Processing-ledger participant identity mismatch for {ledger_key!r}."
             )
+        group_id = _optional_text(entry_value.get("group_id"))
         missing_conditions = _string_sequence(entry_value.get("missing_condition_labels"))
         completeness = str(entry_value.get("condition_completeness") or "complete").casefold()
         if completeness != "complete" or missing_conditions:
-            detail = ", ".join(missing_conditions) or completeness
-            raise ProjectL2MNEHaukSourcePsdExportError(
-                f"Completed participant {participant_id} has incomplete condition processing ({detail}). "
-                "Reprocess the missing conditions before source-map generation."
+            detail = (
+                "Missing canonical condition output(s): "
+                + ", ".join(missing_conditions)
+                if missing_conditions
+                else f"Condition completeness is {completeness!r}."
             )
+            source_ineligible.append(
+                ProjectSourceIneligibleParticipant(
+                    participant_id=participant_id,
+                    group_id=group_id,
+                    reason_code="incomplete_condition_set",
+                    detail=detail,
+                    missing_condition_labels=missing_conditions,
+                    source_derivative_status=str(
+                        entry_value.get("source_derivative_status") or ""
+                    ).strip(),
+                )
+            )
+            continue
+        source_derivative_status = str(
+            entry_value.get("source_derivative_status") or ""
+        ).strip().casefold()
+        if source_derivative_status and source_derivative_status != "complete":
+            source_warning = str(
+                entry_value.get("source_derivative_warning") or ""
+            ).strip()
+            detail = source_warning or (
+                "Source-ready time-domain derivative status is "
+                f"{source_derivative_status!r}, not complete."
+            )
+            source_ineligible.append(
+                ProjectSourceIneligibleParticipant(
+                    participant_id=participant_id,
+                    group_id=group_id,
+                    reason_code="source_derivative_incomplete",
+                    detail=detail,
+                    source_derivative_status=source_derivative_status,
+                )
+            )
+            continue
         expected_outputs = entry_value.get("expected_outputs")
         if (
             not isinstance(expected_outputs, Sequence)
@@ -609,7 +716,6 @@ def _build_project_input_plan(
                 f"Processing-ledger condition expectations for {participant_id} do not match the active project. "
                 "Reprocess the project before source-map generation."
             )
-        group_id = _optional_text(entry_value.get("group_id"))
         try:
             group_folder = _canonical_group_folder(
                 group_context,
@@ -623,8 +729,14 @@ def _build_project_input_plan(
         included.append((participant_id, group_id, group_folder, entry_value))
 
     if not included:
+        skipped_detail = "; ".join(
+            f"{item.participant_id}: {item.detail}"
+            for item in source_ineligible
+        )
+        suffix = f" Source-ineligible participants: {skipped_detail}" if skipped_detail else ""
         raise ProjectL2MNEHaukSourcePsdExportError(
             "No completed, source-eligible participants remain after project exclusions."
+            + suffix
         )
     if ledger_excluded:
         selection = ProjectSourceParticipantSelection(
@@ -698,6 +810,7 @@ def _build_project_input_plan(
         processing_fingerprint=fingerprint,
         processing_fingerprint_version=version,
         participant_selection=selection,
+        source_ineligible_participants=tuple(source_ineligible),
     )
 
 
@@ -786,6 +899,17 @@ def _resolve_selected_harmonics(
         ),
     )
     metadata = dict(selection.to_metadata())
+    selection_z_by_harmonic = metadata.get("selection_z_by_harmonic")
+    if isinstance(selection_z_by_harmonic, Mapping):
+        normalized_z_by_harmonic: dict[str, Any] = {}
+        for frequency, z_score in selection_z_by_harmonic.items():
+            frequency_key = str(frequency)
+            if frequency_key in normalized_z_by_harmonic:
+                raise ProjectL2MNEHaukSourcePsdExportError(
+                    "Saved harmonic-selection metadata contains ambiguous frequency keys."
+                )
+            normalized_z_by_harmonic[frequency_key] = z_score
+        metadata["selection_z_by_harmonic"] = normalized_z_by_harmonic
     harmonics = HaukSourcePsdConfig(
         selected_harmonics_hz=tuple(selection.selected_harmonics_hz)
     ).selected_harmonics_hz
@@ -930,6 +1054,10 @@ def _enrich_source_psd_provenance(
     output_dir: Path,
     method_metadata: Mapping[str, Any],
     conditions: Sequence[L2MNEHaukPrecomputedParticipantGroupCondition],
+    included_participants: Sequence[str],
+    excluded_subjects: Sequence[str],
+    flagged_subjects: Sequence[str],
+    source_ineligible_participants: Sequence[ProjectSourceIneligibleParticipant],
 ) -> None:
     condition_provenance = {
         condition.condition_id: _condition_group_provenance(condition)
@@ -949,6 +1077,14 @@ def _enrich_source_psd_provenance(
             if split_group_summaries
             else "single_project_cohort"
         ),
+        "participant_eligibility_policy": SOURCE_PARTICIPANT_ELIGIBILITY_POLICY,
+        "included_participants": list(included_participants),
+        "excluded_subjects": list(excluded_subjects),
+        "flagged_subjects": list(flagged_subjects),
+        "source_ineligible_participants": [
+            item.to_metadata()
+            for item in source_ineligible_participants
+        ],
     }
     for path in (manifest_path, participant_sidecar_path):
         target = Path(path).resolve()
@@ -997,7 +1133,7 @@ def _enrich_source_psd_provenance(
                 json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
                 encoding="utf-8",
             )
-            temporary.replace(target)
+            _replace_file(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -1150,11 +1286,125 @@ def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> 
         progress_callback(str(message))
 
 
+def _windows_filesystem_path(path: str | Path) -> str:
+    """Return an absolute path suitable for long Windows filesystem calls."""
+
+    value = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    if value.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + value[2:]
+    if re.match(r"^[A-Za-z]:[\\\\/]", value):
+        return "\\\\?\\" + value
+    return value
+
+
+def _replace_file(source: str | Path, destination: str | Path) -> None:
+    """Atomically replace a file, tolerating brief Windows scanner locks."""
+
+    for attempt in range(5):  # noqa: PERF203 - replacement failures are transient on Windows.
+        try:
+            os.replace(
+                _windows_filesystem_path(source),
+                _windows_filesystem_path(destination),
+            )
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
+# Public, method-neutral project-planning seams.  The L2-MNE exporter remains
+# the historical owner for now, but sibling source-PSD methods must consume the
+# exact same complete-case ledger plan and saved harmonic selection rather than
+# reimplementing cohort eligibility independently.
+ProjectHaukSourcePsdConditionSpec = _ConditionSpec
+ProjectHaukSourcePsdGroupSpec = _ProjectGroupSpec
+ProjectHaukSourcePsdInputPlan = _ProjectInputPlan
+
+
+def active_project_hauk_source_psd_root(
+    project: Any,
+    *,
+    project_root: str | Path | None = None,
+) -> Path:
+    """Return the canonical active-project root shared by source-PSD methods."""
+
+    return _active_project_root(project, project_root=project_root)
+
+
+def build_project_hauk_source_psd_input_plan(
+    project: Any,
+    *,
+    root: Path,
+    include_flagged_subjects: bool,
+) -> ProjectHaukSourcePsdInputPlan:
+    """Build the shared complete-case ledger/condition plan."""
+
+    return _build_project_input_plan(
+        project,
+        root=root,
+        include_flagged_subjects=include_flagged_subjects,
+    )
+
+
+def resolve_project_hauk_source_psd_harmonics(
+    project: Any,
+    *,
+    selected_harmonics_hz: Sequence[float] | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[tuple[float, ...], dict[str, Any]]:
+    """Resolve the same saved oddball-harmonic selection for every inverse."""
+
+    return _resolve_selected_harmonics(
+        project,
+        selected_harmonics_hz=selected_harmonics_hz,
+        progress_callback=progress_callback,
+    )
+
+
+def enrich_project_hauk_source_psd_provenance(
+    *,
+    manifest_path: Path,
+    participant_sidecar_path: Path,
+    output_dir: Path,
+    method_metadata: Mapping[str, Any],
+    conditions: Sequence[Any],
+    included_participants: Sequence[str],
+    excluded_subjects: Sequence[str],
+    flagged_subjects: Sequence[str],
+    source_ineligible_participants: Sequence[ProjectSourceIneligibleParticipant],
+) -> None:
+    """Add shared cohort/method provenance to a source-PSD manifest and sidecar."""
+
+    _enrich_source_psd_provenance(
+        manifest_path=manifest_path,
+        participant_sidecar_path=participant_sidecar_path,
+        output_dir=output_dir,
+        method_metadata=method_metadata,
+        conditions=conditions,
+        included_participants=included_participants,
+        excluded_subjects=excluded_subjects,
+        flagged_subjects=flagged_subjects,
+        source_ineligible_participants=source_ineligible_participants,
+    )
+
+
 __all__ = [
     "DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME",
     "PROJECT_L2_MNE_HAUK_SOURCE_PSD_OUTPUT_FOLDER",
+    "SOURCE_PARTICIPANT_ELIGIBILITY_POLICY",
     "ProjectL2MNEHaukSourcePsdExportError",
     "ProjectL2MNEHaukSourcePsdExportResult",
+    "ProjectHaukSourcePsdConditionSpec",
+    "ProjectHaukSourcePsdGroupSpec",
+    "ProjectHaukSourcePsdInputPlan",
+    "ProjectSourceIneligibleParticipant",
+    "active_project_hauk_source_psd_root",
+    "build_project_hauk_source_psd_input_plan",
     "default_project_l2_mne_hauk_source_psd_output_dir",
+    "enrich_project_hauk_source_psd_provenance",
+    "resolve_project_hauk_source_psd_harmonics",
     "write_project_l2_mne_hauk_source_psd_payloads",
 ]

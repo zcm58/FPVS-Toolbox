@@ -20,7 +20,10 @@ PIPELINE_STEP_EXCEPTIONS = (
     KeyError,
     TypeError,
 )
-SOURCE_OUTPUT_MODES = ("l2_mne_source_psd",)
+SOURCE_OUTPUT_MODES = (
+    "l2_mne_source_psd",
+    "eloreta_volume_source_psd",
+)
 POST_PROCESSING_PHASE_COUNT = 3 + len(SOURCE_OUTPUT_MODES)
 
 _PHASE_FREQUENCY_DOMAIN_QC = "frequency_domain_qc"
@@ -29,10 +32,14 @@ _PHASE_STATS_READY_EXPORT = "stats_ready_export"
 _PHASE_COMPLETE = "post_processing_complete"
 _SOURCE_PHASE_BY_MODE = {
     "l2_mne_source_psd": "l2_mne_source_maps",
+    "eloreta_volume_source_psd": "eloreta_source_maps",
 }
 _SOURCE_PHASE_MESSAGE_BY_MODE = {
     "l2_mne_source_psd": (
         "Generating Hauk-informed time-domain L2-MNE source maps for 3D visualization of oddball responses."
+    ),
+    "eloreta_volume_source_psd": (
+        "Generating Hauk-informed time-domain eLORETA volume maps for 3D visualization of oddball responses."
     ),
 }
 
@@ -45,6 +52,7 @@ class PostProcessingStepResult:
     ok: bool
     message: str
     path: str = ""
+    warning: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -52,6 +60,7 @@ class PostProcessingStepResult:
             "ok": self.ok,
             "message": self.message,
             "path": self.path,
+            "warning": self.warning,
         }
 
 
@@ -157,8 +166,11 @@ class PostProcessingPipelineWorker(QObject):
                 )
             )
         ok = all(step.ok for step in steps)
+        has_warnings = any(step.warning for step in steps)
         completion_message = (
             "Post-processing is complete."
+            if ok and not has_warnings
+            else "Post-processing is complete with source-cohort warnings."
             if ok
             else "Post-processing finished with warnings; review the processing log for details."
         )
@@ -170,6 +182,7 @@ class PostProcessingPipelineWorker(QObject):
         self.finished.emit(
             {
                 "ok": ok,
+                "has_warnings": has_warnings,
                 "steps": [step.as_dict() for step in steps],
             }
         )
@@ -289,6 +302,75 @@ class PostProcessingPipelineWorker(QObject):
             except PIPELINE_STEP_EXCEPTIONS as exc:
                 logger.exception("post_processing_l2_mne_source_psd_maps_failed")
                 return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
+            source_ineligible = tuple(
+                getattr(result, "source_ineligible_participants", ()) or ()
+            )
+            if source_ineligible:
+                skipped_ids = ", ".join(
+                    str(getattr(item, "participant_id", "")).strip()
+                    for item in source_ineligible
+                    if str(getattr(item, "participant_id", "")).strip()
+                )
+                return PostProcessingStepResult(
+                    mode,
+                    True,
+                    (
+                        f"{label} generated from "
+                        f"{len(tuple(getattr(result, 'included_participants', ()) or ()))} "
+                        "source-eligible participant(s); source-ineligible participant(s) "
+                        f"were omitted from every condition: {skipped_ids}."
+                    ),
+                    str(result.manifest_path),
+                    warning=True,
+                )
+            return PostProcessingStepResult(
+                mode,
+                True,
+                f"{label} generated.",
+                str(result.manifest_path),
+            )
+
+        if mode == "eloreta_volume_source_psd":
+            label = "Hauk-informed time-domain eLORETA volume source maps"
+            try:
+                default_output_dir, write_payloads = _load_eloreta_source_psd_export_api()
+
+                self._clear_output_dir(
+                    default_output_dir(project_root),
+                    project_root=project_root,
+                    label=label,
+                )
+                result = write_payloads(
+                    project=self._project,
+                    project_root=project_root,
+                    include_flagged_subjects=False,
+                    allow_fetch_fsaverage=True,
+                    progress_callback=self._emit_progress,
+                )
+            except PIPELINE_STEP_EXCEPTIONS as exc:
+                logger.exception("post_processing_eloreta_volume_source_psd_maps_failed")
+                return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
+            source_ineligible = tuple(
+                getattr(result, "source_ineligible_participants", ()) or ()
+            )
+            if source_ineligible:
+                skipped_ids = ", ".join(
+                    str(getattr(item, "participant_id", "")).strip()
+                    for item in source_ineligible
+                    if str(getattr(item, "participant_id", "")).strip()
+                )
+                return PostProcessingStepResult(
+                    mode,
+                    True,
+                    (
+                        f"{label} generated from "
+                        f"{len(tuple(getattr(result, 'included_participants', ()) or ()))} "
+                        "source-eligible participant(s); source-ineligible participant(s) "
+                        f"were omitted from every condition: {skipped_ids}."
+                    ),
+                    str(result.manifest_path),
+                    warning=True,
+                )
             return PostProcessingStepResult(
                 mode,
                 True,
@@ -372,6 +454,20 @@ def _load_source_psd_export_api():  # noqa: ANN202
     return (
         default_project_l2_mne_hauk_source_psd_output_dir,
         write_project_l2_mne_hauk_source_psd_payloads,
+    )
+
+
+def _load_eloreta_source_psd_export_api():  # noqa: ANN202
+    """Import the time-domain eLORETA exporter through one integration seam."""
+
+    from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
+        default_project_eloreta_volume_hauk_source_psd_output_dir,
+        write_project_eloreta_volume_hauk_source_psd_payloads,
+    )
+
+    return (
+        default_project_eloreta_volume_hauk_source_psd_output_dir,
+        write_project_eloreta_volume_hauk_source_psd_payloads,
     )
 
 

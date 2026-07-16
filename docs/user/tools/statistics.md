@@ -37,11 +37,18 @@ target. The target bin and its immediately adjacent bins are excluded, then the
 single lowest and single highest finite noise values are removed before the
 mean and population standard deviation are calculated.
 
-Summed BCA then includes every non-base oddball harmonic through the highest
-detected significant harmonic, even if an intervening harmonic was not itself
-significant. The same included list is applied to every participant, condition,
-and ROI. A fixed predefined list remains available when the study protocol
-requires one.
+Summed BCA then includes every eligible non-base oddball harmonic through the
+highest detected significant harmonic, even if an intervening harmonic was not
+itself significant. A one-pass gap guard prevents a lone high-frequency peak
+from filling a very long empty interval: if more than 10 eligible non-base
+harmonics lie strictly between the two highest detected significant peaks, the
+highest peak and all harmonics above the next-highest peak are excluded from
+summation. Base-rate overlaps do not count toward the gap, and exactly 10
+intervening eligible harmonics remains allowed. The excluded upper peak remains
+listed as detected for transparency. The same included list is applied to every
+participant, condition, and ROI. The alternate “significant harmonics only”
+method is unchanged, and a fixed predefined list remains available when the
+study protocol requires one.
 
 The processing workflow records the selection in
 `Quality Check/Harmonic_Selection_Summary.xlsx`, including the harmonics that

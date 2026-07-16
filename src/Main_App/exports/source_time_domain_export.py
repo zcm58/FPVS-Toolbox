@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
 from typing import Any, Mapping, Sequence
 
 import mne
@@ -230,7 +231,7 @@ def _active_project_root(project_root: str | Path) -> Path:
     supplied = Path(project_root)
     if not supplied.is_absolute():
         raise ValueError("project_root must be an explicit absolute path")
-    root = supplied.resolve()
+    root = _canonical_resolved_path(supplied)
     if not root.is_dir():
         raise ValueError(f"project_root must be an existing directory: {root}")
     return root
@@ -496,7 +497,7 @@ def _atomic_write_raw_fif(destination: Path, raw: Any) -> None:
         )
         with temporary_path.open("r+b") as stream:
             os.fsync(stream.fileno())
-        os.replace(temporary_path, destination)
+        _replace_file(temporary_path, destination)
     finally:
         temporary_path.unlink(missing_ok=True)
 
@@ -521,7 +522,7 @@ def _atomic_write_json(destination: Path, payload: Mapping[str, Any]) -> None:
             stream.write(serialized)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary_path, destination)
+        _replace_file(temporary_path, destination)
     finally:
         temporary_path.unlink(missing_ok=True)
 
@@ -535,20 +536,84 @@ def _sha256_file(path: Path) -> str:
 
 
 def _project_path(root: Path, *parts: str) -> Path:
-    target = root.joinpath(*parts).resolve()
+    canonical_root = _canonical_resolved_path(root)
+    target = _canonical_resolved_path(canonical_root.joinpath(*parts))
     try:
-        target.relative_to(root)
+        target.relative_to(canonical_root)
     except ValueError as exc:
         raise ValueError(f"Refusing source-ready output outside the project root: {target}") from exc
     return target
 
 
 def _relative_project_path(root: Path, path: Path) -> str:
-    resolved = path.resolve()
+    canonical_root = _canonical_resolved_path(root)
+    resolved = _canonical_resolved_path(path)
     try:
-        return resolved.relative_to(root).as_posix()
+        return resolved.relative_to(canonical_root).as_posix()
     except ValueError as exc:
         raise ValueError(f"Refusing source-ready output outside the project root: {resolved}") from exc
+
+
+def source_ready_project_relative_path(
+    project_root: str | Path,
+    path: str | Path,
+) -> str:
+    """Return a confined project-relative source-ready path.
+
+    Windows may expose the same long path either as ``D:\\...`` or with the
+    extended-length ``\\\\?\\D:\\...`` prefix. Both inputs are canonicalized
+    before the structural containment check so equivalent path spellings do
+    not create false outside-project failures.
+    """
+
+    return _relative_project_path(Path(project_root), Path(path))
+
+
+def _canonical_resolved_path(path: str | Path) -> Path:
+    """Resolve a path and normalize ordinary Windows extended namespaces."""
+
+    resolved = Path(path).resolve()
+    if os.name != "nt":
+        return resolved
+    value = os.fspath(resolved)
+    extended_unc_prefix = "\\\\?\\UNC\\"
+    extended_path_prefix = "\\\\?\\"
+    if value.casefold().startswith(extended_unc_prefix.casefold()):
+        value = "\\\\" + value[len(extended_unc_prefix) :]
+    elif value.startswith(extended_path_prefix):
+        ordinary_path = value[len(extended_path_prefix) :]
+        if re.match(r"^[A-Za-z]:[\\\\/]", ordinary_path):
+            value = ordinary_path
+    return Path(value)
+
+
+def _windows_filesystem_path(path: str | Path) -> str:
+    """Return an absolute path suitable for long Windows filesystem calls."""
+
+    value = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    if value.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + value[2:]
+    if re.match(r"^[A-Za-z]:[\\\\/]", value):
+        return "\\\\?\\" + value
+    return value
+
+
+def _replace_file(source: str | Path, destination: str | Path) -> None:
+    """Atomically replace a file, tolerating brief Windows scanner locks."""
+
+    for attempt in range(5):  # noqa: PERF203 - replacement failures are transient on Windows.
+        try:
+            os.replace(
+                _windows_filesystem_path(source),
+                _windows_filesystem_path(destination),
+            )
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _path_component(value: Any, *, field: str) -> str:
@@ -609,5 +674,6 @@ __all__ = [
     "SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT",
     "SourceReadyTimeDomainArtifact",
     "SourceReadyTimeDomainExportResult",
+    "source_ready_project_relative_path",
     "write_source_ready_time_domain_derivatives",
 ]

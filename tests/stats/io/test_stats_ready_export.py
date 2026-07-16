@@ -242,6 +242,12 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
         "selected_harmonics_hz": [1.2, 3.6, 7.2],
         "highest_significant_harmonic_hz": 7.2,
         "highest_significant_harmonic_index": 6,
+        "highest_included_harmonic_hz": 7.2,
+        "summation_gap_guard_enabled": True,
+        "summation_gap_guard_max_intervening_nonbase_harmonics": 10,
+        "summation_gap_guard_intervening_nonbase_harmonic_count": 1,
+        "summation_gap_guard_applied": False,
+        "summation_gap_guard_dropped_highest_significant_harmonic_hz": None,
         "selection_z_by_harmonic": {1.2: 5.1, 2.4: 0.4, 3.6: 4.2, 6.0: 9.0, 7.2: 3.1},
         "excluded_base_harmonics_hz": [6.0],
         "selection_scope": "group_level_all_scalp_electrodes_all_selected_conditions",
@@ -332,6 +338,13 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     assert summary["Significant harmonic frequencies (Hz)"] == "1.2; 3.6; 7.2"
     assert summary["Highest significant harmonic (Hz)"] == pytest.approx(7.2)
     assert summary["Highest significant harmonic index"] == 6
+    assert summary["Highest included harmonic (Hz)"] == pytest.approx(7.2)
+    assert summary["Highest-harmonic gap guard enabled?"] == "Yes"
+    assert summary["Maximum intervening eligible non-base harmonics"] == 10
+    assert summary[
+        "Intervening eligible non-base harmonics between top peaks"
+    ] == 1
+    assert summary["Highest-harmonic gap guard applied?"] == "No"
     assert summary["Harmonic 1 (1.2 Hz) significant?"] == "Yes"
     assert summary["All harmonics 1 through highest index significant?"] == "No"
     assert summary["Non-significant harmonic indices within 1..highest"] == "2; 4; 5"
@@ -349,6 +362,36 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     assert bool(excluded_row["included_in_summation"]) is False
     assert bool(excluded_row["excluded_base_rate"]) is True
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
+
+
+def test_group_significant_summary_reports_an_applied_highest_gap_guard() -> None:
+    summary = _summary_map(
+        pd.DataFrame(
+            export_mod._group_significant_summary_rows(
+                {
+                    "selected_harmonics_hz": [1.2, 2.4, 3.6, 20.4],
+                    "detected_significant_harmonics_hz": [1.2, 20.4, 46.8],
+                    "oddball_frequency_hz": 1.2,
+                    "highest_significant_harmonic_hz": 46.8,
+                    "highest_significant_harmonic_index": 39,
+                    "highest_included_harmonic_hz": 20.4,
+                    "summation_gap_guard_enabled": True,
+                    "summation_gap_guard_max_intervening_nonbase_harmonics": 10,
+                    "summation_gap_guard_intervening_nonbase_harmonic_count": 17,
+                    "summation_gap_guard_applied": True,
+                    "summation_gap_guard_dropped_highest_significant_harmonic_hz": 46.8,
+                }
+            )
+        )
+    )
+
+    assert summary["Highest significant harmonic (Hz)"] == pytest.approx(46.8)
+    assert summary["Highest included harmonic (Hz)"] == pytest.approx(20.4)
+    assert summary["Highest-harmonic gap guard applied?"] == "Yes"
+    assert summary[
+        "Intervening eligible non-base harmonics between top peaks"
+    ] == 17
+    assert summary["Gap-guard excluded highest harmonic (Hz)"] == pytest.approx(46.8)
 
 
 def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook(

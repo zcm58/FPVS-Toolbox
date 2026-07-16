@@ -73,6 +73,7 @@ ProgressCallback = Callable[[str], None]
 
 METHOD_ID_ELORETA_VOLUME_HAUK_ZSCORE_BETA = "eloreta_volume_hauk_zscore_beta"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE = "eloreta_volume_participant_zscore"
+METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1 = "eloreta_volume_hauk_source_psd_v1"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEAN = "eloreta_volume_participant_zscore_mean"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEDIAN = "eloreta_volume_participant_zscore_median"
 METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_TRIMMED_MEAN = (
@@ -83,6 +84,13 @@ ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS = {
     PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN: METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_MEDIAN,
     PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN: METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE_TRIMMED_MEAN,
 }
+ELORETA_SOURCE_PSD_AGGREGATION_METHOD_IDS = {
+    aggregation: f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1}_{aggregation}"
+    for aggregation in PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS
+}
+HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE = (
+    "sum_corresponding_source_psd_amplitude_offsets_before_zscore"
+)
 COORDINATE_SPACE_FSAVERAGE_VOLUME = "fsaverage_volume"
 SOURCE_KIND_VOLUME_POINTS = "volume_points"
 SOURCE_METHOD_ELORETA_VOLUME = "eloreta_volume"
@@ -119,8 +127,20 @@ class ELORETAVolumeZScoreConfig:
         lambda2 = float(self.lambda2)
         if not np.isfinite(lambda2) or lambda2 <= 0.0:
             raise ValueError("eLORETA volume lambda2 must be positive and finite.")
-        if self.harmonic_strategy != HARMONIC_STRATEGY_SUM_SENSOR_TOPOGRAPHIES_THEN_INVERT:
-            raise ValueError("eLORETA volume currently supports summed sensor topographies before inversion only.")
+        if self.method_id == METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1:
+            harmonic_strategy = (
+                HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE
+            )
+        else:
+            harmonic_strategy = str(self.harmonic_strategy).strip()
+            if (
+                harmonic_strategy
+                != HARMONIC_STRATEGY_SUM_SENSOR_TOPOGRAPHIES_THEN_INVERT
+            ):
+                raise ValueError(
+                    "Legacy eLORETA volume currently supports summed sensor "
+                    "topographies before inversion only."
+                )
         noise_window_bins = int(self.noise_window_bins)
         min_noise_bins = int(self.min_noise_bins)
         if noise_window_bins < 2:
@@ -140,6 +160,7 @@ class ELORETAVolumeZScoreConfig:
             raise ValueError("Hauk-style source-space cluster masking uses positive-tail testing only.")
         object.__setattr__(self, "selected_harmonics_hz", selected)
         object.__setattr__(self, "lambda2", lambda2)
+        object.__setattr__(self, "harmonic_strategy", harmonic_strategy)
         object.__setattr__(self, "noise_window_bins", noise_window_bins)
         object.__setattr__(self, "min_noise_bins", min_noise_bins)
         object.__setattr__(self, "excluded_noise_offsets", excluded)
@@ -217,6 +238,51 @@ class ELORETAVolumeParticipantZScoreValues:
     noise_std_values: np.ndarray
     noise_offsets_used: tuple[int, ...]
     zero_noise_sd_source_count: int
+
+
+@dataclass(frozen=True)
+class ELORETAVolumePrecomputedParticipantGroupCondition:
+    """One condition whose time-domain eLORETA source z maps already exist."""
+
+    condition_id: str
+    label: str
+    participant_values: Sequence[ELORETAVolumeParticipantZScoreValues]
+    sensor_value_unit: str = "source PSD amplitude"
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        condition_id = _slug(_validate_label(self.condition_id, "condition_id"))
+        label = _validate_label(self.label, "label")
+        rows = tuple(self.participant_values)
+        if not rows:
+            raise ValueError("Precomputed eLORETA volume condition requires at least one map.")
+        participant_ids: list[str] = []
+        source_count: int | None = None
+        for row in rows:
+            if not isinstance(row, ELORETAVolumeParticipantZScoreValues):
+                raise TypeError(
+                    "participant_values must contain "
+                    "ELORETAVolumeParticipantZScoreValues."
+                )
+            participant_ids.append(_validate_label(row.participant_id, "participant_id"))
+            values = np.asarray(row.values, dtype=float).reshape(-1)
+            if source_count is None:
+                source_count = len(values)
+            elif len(values) != source_count:
+                raise ValueError(
+                    "Precomputed eLORETA participant source maps must share one source count."
+                )
+        if len(set(participant_ids)) != len(participant_ids):
+            raise ValueError(f"Duplicate precomputed eLORETA participant maps for {label}.")
+        object.__setattr__(self, "condition_id", condition_id)
+        object.__setattr__(self, "label", label)
+        object.__setattr__(self, "participant_values", rows)
+        object.__setattr__(
+            self,
+            "sensor_value_unit",
+            _validate_label(self.sensor_value_unit, "sensor_value_unit"),
+        )
+        object.__setattr__(self, "metadata", dict(self.metadata))
 
 
 @dataclass(frozen=True)
@@ -332,6 +398,7 @@ def summarize_eloreta_volume_participant_zscores(
     *,
     aggregation: str,
     trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
+    method_id: str | None = None,
 ) -> ELORETAVolumeParticipantZScoreSummary:
     """Summarize participant eLORETA z-score maps with a deterministic aggregator."""
     aggregation_id = _validate_participant_zscore_aggregation(aggregation)
@@ -357,7 +424,11 @@ def summarize_eloreta_volume_participant_zscores(
     return ELORETAVolumeParticipantZScoreSummary(
         aggregation=aggregation_id,
         label_suffix=label_suffix,
-        method_id=ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id],
+        method_id=(
+            _validate_label(method_id, "method_id")
+            if method_id is not None
+            else ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id]
+        ),
         values=np.asarray(values, dtype=float),
         participant_count=len(rows),
         trim_fraction=summary_trim_fraction,
@@ -385,7 +456,8 @@ def compute_eloreta_volume_source_cluster_mask(
 def build_eloreta_volume_participant_zscore_summary_payload(
     *,
     forward_model: ELORETAVolumeForwardModel,
-    condition: L2MNEHaukParticipantGroupCondition,
+    condition: L2MNEHaukParticipantGroupCondition
+    | ELORETAVolumePrecomputedParticipantGroupCondition,
     config: ELORETAVolumeZScoreConfig,
     participant_values: Sequence[ELORETAVolumeParticipantZScoreValues],
     summary: ELORETAVolumeParticipantZScoreSummary,
@@ -423,7 +495,10 @@ def build_eloreta_volume_participant_zscore_summary_payload(
 def write_eloreta_volume_participant_zscore_payloads(
     *,
     forward_model: ELORETAVolumeForwardModel,
-    conditions: Sequence[L2MNEHaukParticipantGroupCondition],
+    conditions: Sequence[
+        L2MNEHaukParticipantGroupCondition
+        | ELORETAVolumePrecomputedParticipantGroupCondition
+    ],
     config: ELORETAVolumeZScoreConfig,
     output_dir: str | Path,
     manifest_name: str = "eloreta_volume_participant_zscore_manifest.json",
@@ -431,6 +506,10 @@ def write_eloreta_volume_participant_zscore_payloads(
     trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
     participant_sidecar_name: str = "participant_eloreta_volume_hauk_zscore_maps.json",
     progress_callback: ProgressCallback | None = None,
+    precomputed_participant_rows_by_condition: Mapping[
+        str, Sequence[ELORETAVolumeParticipantZScoreValues]
+    ]
+    | None = None,
 ) -> ELORETAVolumeParticipantZScoreWriteResult:
     """Write participant-first eLORETA volume summaries and sidecar JSON."""
     output_path = Path(output_dir)
@@ -456,11 +535,25 @@ def write_eloreta_volume_participant_zscore_payloads(
                 f"{condition_index}/{len(condition_list)}: {condition.label}..."
             ),
         )
-        participant_rows = compute_eloreta_volume_participant_zscore_source_values(
-            forward_model=forward_model,
-            condition=condition,
-            config=config,
-        )
+        if precomputed_participant_rows_by_condition is None:
+            if not isinstance(condition, L2MNEHaukParticipantGroupCondition):
+                raise TypeError(
+                    "Precomputed eLORETA conditions require explicit participant source rows."
+                )
+            participant_rows = compute_eloreta_volume_participant_zscore_source_values(
+                forward_model=forward_model,
+                condition=condition,
+                config=config,
+            )
+        else:
+            participant_rows = _validated_precomputed_participant_rows(
+                condition=condition,
+                rows=precomputed_participant_rows_by_condition.get(
+                    condition.condition_id,
+                    (),
+                ),
+                source_count=len(forward_model.source_points),
+            )
         participant_rows_by_condition[condition.condition_id] = participant_rows
         cluster_result = None
         if config.cluster_mask_enabled:
@@ -483,6 +576,7 @@ def write_eloreta_volume_participant_zscore_payloads(
                 participant_rows,
                 aggregation=aggregation,
                 trim_fraction=trim_fraction,
+                method_id=_participant_aggregation_method_id(config, aggregation),
             )
             _emit_progress(progress_callback, f"Writing {condition.label} eLORETA {summary.label_suffix} JSON...")
             payload = build_eloreta_volume_participant_zscore_summary_payload(
@@ -514,7 +608,7 @@ def write_eloreta_volume_participant_zscore_payloads(
                     "metadata": {
                         "source_method": SOURCE_METHOD_ELORETA_VOLUME,
                         "producer_method": summary.method_id,
-                        "base_producer_method": METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE,
+                        "base_producer_method": _participant_base_method_id(config),
                         "participant_zscore_aggregation": summary.aggregation,
                         "selected_harmonics_hz": list(config.selected_harmonics_hz),
                         "value_label": config.value_label,
@@ -539,11 +633,16 @@ def write_eloreta_volume_participant_zscore_payloads(
 
     manifest = {
         "format": PREPARED_SOURCE_MANIFEST_FORMAT,
-        "label": "eLORETA volume participant-first source-space z-score maps",
+        "label": (
+            "eLORETA volume Hauk-informed source-PSD participant z-score maps"
+            if _is_source_psd_config(config)
+            else "eLORETA volume participant-first source-space z-score maps"
+        ),
         "conditions": manifest_conditions,
         "metadata": {
             "source_method": SOURCE_METHOD_ELORETA_VOLUME,
-            "producer_method": METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE,
+            "producer_method": _participant_base_method_id(config),
+            "input_domain": _participant_input_domain(config),
             "aggregation_methods": list(aggregation_list),
             "participant_sidecar_file": sidecar_path.name,
             "cluster_mask": (
@@ -570,13 +669,57 @@ def write_eloreta_volume_participant_zscore_payloads(
     )
     return ELORETAVolumeParticipantZScoreWriteResult(
         producer_result=SourceProducerRunResult(
-            method_id=METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE,
+            method_id=_participant_base_method_id(config),
             output_dir=output_path,
             manifest_path=manifest_path,
             payloads=tuple(emitted),
             manifest_validation=manifest_validation,
         ),
         participant_sidecar_path=sidecar_path,
+    )
+
+
+def write_eloreta_volume_precomputed_participant_zscore_payloads(
+    *,
+    forward_model: ELORETAVolumeForwardModel,
+    conditions: Sequence[ELORETAVolumePrecomputedParticipantGroupCondition],
+    config: ELORETAVolumeZScoreConfig,
+    output_dir: str | Path,
+    manifest_name: str = "project_eloreta_volume_hauk_source_psd_manifest.json",
+    aggregations: Sequence[str] = DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS,
+    trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
+    participant_sidecar_name: str = "participant_eloreta_volume_hauk_source_psd_maps.json",
+    progress_callback: ProgressCallback | None = None,
+) -> ELORETAVolumeParticipantZScoreWriteResult:
+    """Write volume payloads from already-computed eLORETA source-PSD z maps.
+
+    The time-domain inverse, source PSD, harmonic alignment, and participant
+    z-scoring have already happened. This calculation-side adapter retains the
+    established participant aggregation and volume-adjacency cluster stages;
+    it never calls the legacy sensor-topography estimator.
+    """
+
+    if not _is_source_psd_config(config):
+        raise ValueError(
+            "Precomputed time-domain eLORETA maps require method_id "
+            f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1!r}."
+        )
+    condition_list = tuple(conditions)
+    rows_by_condition = {
+        condition.condition_id: tuple(condition.participant_values)
+        for condition in condition_list
+    }
+    return write_eloreta_volume_participant_zscore_payloads(
+        forward_model=forward_model,
+        conditions=condition_list,
+        config=config,
+        output_dir=output_dir,
+        manifest_name=manifest_name,
+        aggregations=aggregations,
+        trim_fraction=trim_fraction,
+        participant_sidecar_name=participant_sidecar_name,
+        progress_callback=progress_callback,
+        precomputed_participant_rows_by_condition=rows_by_condition,
     )
 
 
@@ -661,6 +804,90 @@ def _drop_extreme_noise_rows(noise_source_values: np.ndarray) -> np.ndarray:
     if noise_source_values.shape[0] <= 2:
         return noise_source_values
     return np.sort(noise_source_values, axis=0)[1:-1, :]
+
+
+def _is_source_psd_config(config: ELORETAVolumeZScoreConfig) -> bool:
+    return config.method_id == METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+
+
+def _participant_base_method_id(config: ELORETAVolumeZScoreConfig) -> str:
+    if _is_source_psd_config(config):
+        return METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_V1
+    return METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE
+
+
+def _participant_aggregation_method_id(
+    config: ELORETAVolumeZScoreConfig,
+    aggregation: str,
+) -> str:
+    aggregation_id = _validate_participant_zscore_aggregation(aggregation)
+    if _is_source_psd_config(config):
+        return ELORETA_SOURCE_PSD_AGGREGATION_METHOD_IDS[aggregation_id]
+    return ELORETA_PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id]
+
+
+def _participant_input_domain(config: ELORETAVolumeZScoreConfig) -> str:
+    if _is_source_psd_config(config):
+        return "signed_repetition_averaged_eeg_time_series"
+    return "sensor_fullfft_amplitude_topographies"
+
+
+def _validated_precomputed_participant_rows(
+    *,
+    condition: L2MNEHaukParticipantGroupCondition
+    | ELORETAVolumePrecomputedParticipantGroupCondition,
+    rows: Sequence[ELORETAVolumeParticipantZScoreValues],
+    source_count: int,
+) -> tuple[ELORETAVolumeParticipantZScoreValues, ...]:
+    participant_rows = tuple(rows)
+    if not participant_rows:
+        raise ValueError(
+            f"{condition.label} has no precomputed eLORETA participant source z-score maps."
+        )
+    participant_ids: list[str] = []
+    for row in participant_rows:
+        if not isinstance(row, ELORETAVolumeParticipantZScoreValues):
+            raise TypeError(
+                "Precomputed eLORETA rows must contain "
+                "ELORETAVolumeParticipantZScoreValues."
+            )
+        participant_id = _validate_label(row.participant_id, "participant_id")
+        participant_ids.append(participant_id)
+        for label, values in (
+            ("z-score", row.values),
+            ("target", row.target_source_values),
+            ("noise mean", row.noise_mean_values),
+            ("noise SD", row.noise_std_values),
+        ):
+            vector = np.asarray(values, dtype=float).reshape(-1)
+            if len(vector) != int(source_count):
+                raise ValueError(
+                    f"{condition.label} participant {participant_id} {label} map "
+                    f"has {len(vector)} sources; {source_count} expected."
+                )
+            if not np.all(np.isfinite(vector)):
+                raise ValueError(
+                    f"{condition.label} participant {participant_id} {label} map "
+                    "contains non-finite values."
+                )
+        offsets = tuple(int(value) for value in row.noise_offsets_used)
+        if not offsets or len(set(offsets)) != len(offsets):
+            raise ValueError(
+                f"{condition.label} participant {participant_id} has invalid noise offsets."
+            )
+        zero_count = int(row.zero_noise_sd_source_count)
+        if (
+            zero_count != row.zero_noise_sd_source_count
+            or zero_count < 0
+            or zero_count > int(source_count)
+        ):
+            raise ValueError(
+                f"{condition.label} participant {participant_id} has an invalid "
+                "zero-noise-SD source count."
+            )
+    if len(set(participant_ids)) != len(participant_ids):
+        raise ValueError(f"Duplicate precomputed eLORETA participant maps for {condition.label}.")
+    return participant_rows
 
 
 def _validate_participant_zscore_aggregation(value: str) -> str:
@@ -802,7 +1029,8 @@ def _cluster_manifest_entry_metadata(
 def _participant_summary_payload_metadata(
     *,
     forward_model: ELORETAVolumeForwardModel,
-    condition: L2MNEHaukParticipantGroupCondition,
+    condition: L2MNEHaukParticipantGroupCondition
+    | ELORETAVolumePrecomputedParticipantGroupCondition,
     config: ELORETAVolumeZScoreConfig,
     participant_values: Sequence[ELORETAVolumeParticipantZScoreValues],
     summary: ELORETAVolumeParticipantZScoreSummary,
@@ -811,11 +1039,30 @@ def _participant_summary_payload_metadata(
     rows = tuple(participant_values)
     participant_ids = [row.participant_id for row in rows]
     common_offsets = sorted({offset for row in rows for offset in row.noise_offsets_used})
+    source_psd_method = _is_source_psd_config(config)
+    participant_zscore_order = (
+        [
+            "load signed repetition-averaged participant EEG time series",
+            "compute participant eLORETA volume source PSD on the exact full-duration FFT grid",
+            "convert source power to amplitude",
+            "sum aligned selected-harmonic target and Toolbox neighboring-bin amplitudes",
+            "compute participant source-space z-score maps",
+            "aggregate participant z-score maps for group display",
+        ]
+        if source_psd_method
+        else [
+            "read participant sensor FFT amplitude target/noise-bin topographies",
+            "sum selected significant harmonics in sensor space",
+            "estimate eLORETA volume values for each participant summed target and noise topography",
+            "compute participant source-space z-score maps",
+            "aggregate participant z-score maps for group display",
+        ]
+    )
     metadata = {
         "beta": True,
         "source_method": SOURCE_METHOD_ELORETA_VOLUME,
         "producer_method": summary.method_id,
-        "base_producer_method": METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE,
+        "base_producer_method": _participant_base_method_id(config),
         "inverse_method": "eLORETA",
         "source_space": "volume",
         "source_model": "eloreta_volume",
@@ -826,14 +1073,13 @@ def _participant_summary_payload_metadata(
         "forward_model_label": forward_model.label,
         "harmonic_policy_id": config.harmonic_policy_id,
         "selected_harmonics_hz": list(config.selected_harmonics_hz),
-        "harmonic_strategy": config.harmonic_strategy,
-        "participant_zscore_order": [
-            "read participant sensor FFT amplitude target/noise-bin topographies",
-            "sum selected significant harmonics in sensor space",
-            "estimate eLORETA volume values for each participant summed target and noise topography",
-            "compute participant source-space z-score maps",
-            "aggregate participant z-score maps for group display",
-        ],
+        "harmonic_strategy": (
+            HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE
+            if source_psd_method
+            else config.harmonic_strategy
+        ),
+        "input_domain": _participant_input_domain(config),
+        "participant_zscore_order": participant_zscore_order,
         "participant_zscore_aggregation": summary.aggregation,
         "participant_zscore_aggregation_label": summary.label_suffix,
         "participant_zscore_trim_fraction": summary.trim_fraction,
@@ -872,7 +1118,13 @@ def _participant_summary_payload_metadata(
         "source_count": int(len(forward_model.source_points)),
         "channel_names": list(forward_model.channel_names),
         "hauk_2021_frequency_domain_zscore_aligned": True,
-        "hauk_alignment_target": "participant-first frequency-domain eLORETA volume source-space baseline correction and z-scoring",
+        "hauk_alignment_target": (
+            "participant-first time-domain eLORETA volume source-PSD harmonic "
+            "aggregation, baseline correction, and z-scoring"
+            if source_psd_method
+            else "participant-first frequency-domain eLORETA volume source-space "
+            "baseline correction and z-scoring"
+        ),
         "hauk_alignment_limitations": [
             "EEG only; Hauk 2021 used combined EEG and MEG.",
             "Template fsaverage head/source model; Hauk 2021 and 2025 used individual MRIs.",
@@ -883,6 +1135,7 @@ def _participant_summary_payload_metadata(
         "subject_mri": "none",
         "deep_source_claim": "template beta eLORETA volume visualization only; not precise subject-specific localization",
         "project_integration": "none",
+        "legacy_amplitude_topography_input": not source_psd_method,
         "renderer_dependency": "none",
     }
     metadata.update(_cluster_payload_metadata(cluster_result, config=config))
@@ -896,7 +1149,10 @@ def _participant_summary_payload_metadata(
 def _participant_zscore_sidecar_payload(
     *,
     forward_model: ELORETAVolumeForwardModel,
-    conditions: Sequence[L2MNEHaukParticipantGroupCondition],
+    conditions: Sequence[
+        L2MNEHaukParticipantGroupCondition
+        | ELORETAVolumePrecomputedParticipantGroupCondition
+    ],
     config: ELORETAVolumeZScoreConfig,
     participant_rows_by_condition: Mapping[str, Sequence[ELORETAVolumeParticipantZScoreValues]],
     cluster_results_by_condition: Mapping[str, SourceSpaceClusterPermutationResult | None] | None = None,
@@ -925,7 +1181,7 @@ def _participant_zscore_sidecar_payload(
         )
     return {
         "format": PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT,
-        "source_model": METHOD_ID_ELORETA_VOLUME_PARTICIPANT_ZSCORE,
+        "source_model": _participant_base_method_id(config),
         "source_method": SOURCE_METHOD_ELORETA_VOLUME,
         "value_label": config.value_label,
         "source_value_unit": "z-score",
@@ -935,6 +1191,12 @@ def _participant_zscore_sidecar_payload(
         "metadata": {
             "selected_harmonics_hz": list(config.selected_harmonics_hz),
             "participant_level_values": True,
+            "input_domain": _participant_input_domain(config),
+            "harmonic_strategy": (
+                HARMONIC_STRATEGY_SUM_SOURCE_PSD_AMPLITUDES_THEN_ZSCORE
+                if _is_source_psd_config(config)
+                else config.harmonic_strategy
+            ),
             **_source_identity_metadata(forward_model),
             "cluster_mask": (
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED

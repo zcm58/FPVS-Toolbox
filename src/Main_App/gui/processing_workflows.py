@@ -580,7 +580,11 @@ def _start_post_processing_pipeline_after_processing(
                     path = str(step.get("path") or "").strip()
                     if not message and not path:
                         continue
-                    level = logging.INFO if step.get("ok") else logging.WARNING
+                    level = (
+                        logging.INFO
+                        if step.get("ok") and not step.get("warning")
+                        else logging.WARNING
+                    )
                     suffix = f" ({path})" if path else ""
                     host.log(f"Post-processing: {message}{suffix}", level=level)
             if result.get("requires_frequency_domain_qc_review"):
@@ -602,11 +606,18 @@ def _start_post_processing_pipeline_after_processing(
                     _sync_project_tools_metadata_from_disk(project)
                 except Exception:
                     logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
-                host.log(
-                    "Post-processing pipeline finished: harmonics, Stats-ready Summed BCA, "
-                    "and LORETA source-map generation steps completed.",
-                    level=logging.INFO,
-                )
+                if result.get("has_warnings"):
+                    host.log(
+                        "Post-processing completed with usable LORETA outputs and "
+                        "source-cohort warnings. Review the logged participant omissions.",
+                        level=logging.WARNING,
+                    )
+                else:
+                    host.log(
+                        "Post-processing pipeline finished: harmonics, Stats-ready Summed BCA, "
+                        "and LORETA source-map generation steps completed.",
+                        level=logging.INFO,
+                    )
             else:
                 host.log(
                     "Post-processing pipeline finished with warnings. Review the log before "

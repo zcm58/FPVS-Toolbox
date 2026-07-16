@@ -45,6 +45,10 @@ GROUP_SIGNIFICANT_FULLFFT_PROGRESS_INTERVAL = 5
 GROUP_SIGNIFICANT_BCA_PROGRESS_INTERVAL = 10
 GROUP_SIGNIFICANT_SELECTION_CACHE_MAX_ENTRIES = 8
 GROUP_SIGNIFICANT_FREQUENCY_DECIMALS = 10
+GROUP_SIGNIFICANT_MAX_INTERVENING_NONBASE_HARMONICS = 10
+GROUP_SIGNIFICANT_SUMMATION_GAP_GUARD_RULE = (
+    "exclude_isolated_highest_when_more_than_10_intervening_nonbase_harmonics_v1"
+)
 _GROUP_SELECTION_CACHE_LOCK = threading.Lock()
 _GROUP_SELECTION_CACHE: dict[
     "GroupSignificantSelectionCacheKey",
@@ -82,6 +86,16 @@ class GroupSignificantNoiseStats:
     std_uv: float
     candidate_bin_indices: tuple[int, ...]
     used_bin_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _SummationGapGuardDecision:
+    enabled: bool
+    applied: bool
+    intervening_nonbase_harmonic_count: int
+    lower_significant_harmonic_hz: float | None
+    highest_significant_harmonic_hz: float | None
+    retained_cutoff_harmonic_index: int | None
 
 
 @dataclass(frozen=True)
@@ -131,6 +145,11 @@ class GroupSignificantHarmonicSelection:
             oddball_hz=self.oddball_frequency_hz,
             prefix="highest_included_harmonic",
         )
+        gap_guard = _summation_gap_guard_decision(
+            rows=self.rows,
+            detected_freqs=detected_harmonics,
+            summation_method=self.summation_method,
+        )
         return {
             "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
             "harmonic_policy_label": GROUP_SIGNIFICANT_POLICY_LABEL,
@@ -144,6 +163,23 @@ class GroupSignificantHarmonicSelection:
             "selection_electrode_count": int(self.selection_electrode_count),
             "electrode_scope": self.electrode_scope,
             "summation_method": self.summation_method,
+            "summation_gap_guard_rule": GROUP_SIGNIFICANT_SUMMATION_GAP_GUARD_RULE,
+            "summation_gap_guard_enabled": gap_guard.enabled,
+            "summation_gap_guard_max_intervening_nonbase_harmonics": (
+                GROUP_SIGNIFICANT_MAX_INTERVENING_NONBASE_HARMONICS
+            ),
+            "summation_gap_guard_applied": gap_guard.applied,
+            "summation_gap_guard_intervening_nonbase_harmonic_count": (
+                gap_guard.intervening_nonbase_harmonic_count
+            ),
+            "summation_gap_guard_lower_significant_harmonic_hz": (
+                gap_guard.lower_significant_harmonic_hz
+            ),
+            "summation_gap_guard_dropped_highest_significant_harmonic_hz": (
+                gap_guard.highest_significant_harmonic_hz
+                if gap_guard.applied
+                else None
+            ),
             "z_threshold": float(self.z_threshold),
             "z_score_source": "computed_from_grand_averaged_amplitude_spectrum",
             "noise_window_bins": int(self.noise_window_bins),
@@ -1043,6 +1079,19 @@ def build_group_significant_harmonic_selection(
         detected_freqs=detected_freqs,
         summation_method=settings.group_significant_summation_method,
     )
+    gap_guard = _summation_gap_guard_decision(
+        rows=rows,
+        detected_freqs=detected_freqs,
+        summation_method=settings.group_significant_summation_method,
+    )
+    if gap_guard.applied:
+        log_func(
+            "Highest-harmonic gap guard applied: excluded the isolated "
+            f"{gap_guard.highest_significant_harmonic_hz:g} Hz detection and stopped "
+            f"summation at {gap_guard.lower_significant_harmonic_hz:g} Hz because "
+            f"{gap_guard.intervening_nonbase_harmonic_count} eligible non-base "
+            "harmonics lay between them."
+        )
     elapsed = perf_counter() - started
     log_func(
         "[PERF] Group harmonic selection finished: "
@@ -1058,6 +1107,15 @@ def build_group_significant_harmonic_selection(
             "selected_harmonics": _format_harmonic_frequency_list(selected_freqs),
             "detected_significant_harmonics": _format_harmonic_frequency_list(
                 detected_freqs
+            ),
+            "summation_gap_guard_applied": gap_guard.applied,
+            "summation_gap_guard_intervening_nonbase_harmonic_count": (
+                gap_guard.intervening_nonbase_harmonic_count
+            ),
+            "summation_gap_guard_dropped_highest_significant_harmonic_hz": (
+                gap_guard.highest_significant_harmonic_hz
+                if gap_guard.applied
+                else None
             ),
         },
     )
@@ -1110,14 +1168,18 @@ def _resolve_summation_harmonics(
     if summation_method == GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY:
         included_set = set(detected_set)
     else:
-        highest = max(float(freq) for freq in detected_freqs)
+        gap_guard = _summation_gap_guard_decision(
+            rows=rows,
+            detected_freqs=detected_freqs,
+            summation_method=summation_method,
+        )
+        cutoff_index = gap_guard.retained_cutoff_harmonic_index
         included_set = {
             _canonical_harmonic_frequency(row.target_frequency_hz)
             for row in rows
-            if not row.excluded_base_rate
-            and row.matched_column
-            and row.matched_bin_index is not None
-            and float(row.target_frequency_hz) <= highest + GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ
+            if _is_summation_eligible(row)
+            and cutoff_index is not None
+            and row.harmonic_index <= cutoff_index
         }
 
     updated_rows = [
@@ -1144,6 +1206,88 @@ def _resolve_summation_harmonics(
     ]
     included_indices = [int(row.matched_bin_index) for row in included_rows]
     return included_freqs, included_columns, included_indices, updated_rows
+
+
+def _summation_gap_guard_decision(
+    *,
+    rows: Sequence[GroupSignificantHarmonicRow],
+    detected_freqs: Sequence[float],
+    summation_method: str,
+) -> _SummationGapGuardDecision:
+    """Apply the one-pass isolated-highest guard to the through-highest rule."""
+
+    enabled = summation_method == GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
+    detected_set = {
+        _canonical_harmonic_frequency(freq)
+        for freq in detected_freqs
+    }
+    detected_rows_by_index = {
+        int(row.harmonic_index): row
+        for row in rows
+        if _is_summation_eligible(row)
+        and _canonical_harmonic_frequency(row.target_frequency_hz) in detected_set
+    }
+    detected_rows = [
+        detected_rows_by_index[index]
+        for index in sorted(detected_rows_by_index)
+    ]
+    if not detected_rows:
+        return _SummationGapGuardDecision(
+            enabled=enabled,
+            applied=False,
+            intervening_nonbase_harmonic_count=0,
+            lower_significant_harmonic_hz=None,
+            highest_significant_harmonic_hz=None,
+            retained_cutoff_harmonic_index=None,
+        )
+
+    highest = detected_rows[-1]
+    if len(detected_rows) < 2:
+        return _SummationGapGuardDecision(
+            enabled=enabled,
+            applied=False,
+            intervening_nonbase_harmonic_count=0,
+            lower_significant_harmonic_hz=None,
+            highest_significant_harmonic_hz=_canonical_harmonic_frequency(
+                highest.target_frequency_hz
+            ),
+            retained_cutoff_harmonic_index=int(highest.harmonic_index),
+        )
+
+    lower = detected_rows[-2]
+    intervening_indices = {
+        int(row.harmonic_index)
+        for row in rows
+        if _is_summation_eligible(row)
+        and int(lower.harmonic_index) < int(row.harmonic_index) < int(highest.harmonic_index)
+    }
+    intervening_count = len(intervening_indices)
+    applied = bool(
+        enabled
+        and intervening_count > GROUP_SIGNIFICANT_MAX_INTERVENING_NONBASE_HARMONICS
+    )
+    return _SummationGapGuardDecision(
+        enabled=enabled,
+        applied=applied,
+        intervening_nonbase_harmonic_count=intervening_count,
+        lower_significant_harmonic_hz=_canonical_harmonic_frequency(
+            lower.target_frequency_hz
+        ),
+        highest_significant_harmonic_hz=_canonical_harmonic_frequency(
+            highest.target_frequency_hz
+        ),
+        retained_cutoff_harmonic_index=int(
+            lower.harmonic_index if applied else highest.harmonic_index
+        ),
+    )
+
+
+def _is_summation_eligible(row: GroupSignificantHarmonicRow) -> bool:
+    return bool(
+        not row.excluded_base_rate
+        and row.matched_column
+        and row.matched_bin_index is not None
+    )
 
 
 def _prepare_group_significant_bca_data(
@@ -2235,10 +2379,32 @@ def _methods_summary(selection: GroupSignificantHarmonicSelection) -> str:
         else "all scalp electrodes"
     )
     if selection.summation_method == GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST:
-        summation_text = (
-            "All non-base oddball harmonics up to the highest significant "
-            f"harmonic were included in the Summed BCA ({included} Hz)."
+        gap_guard = _summation_gap_guard_decision(
+            rows=selection.rows,
+            detected_freqs=selection.detected_significant_harmonics_hz,
+            summation_method=selection.summation_method,
         )
+        if gap_guard.applied:
+            summation_text = (
+                "The isolated highest significant harmonic "
+                f"({gap_guard.highest_significant_harmonic_hz:g} Hz) and all "
+                "intervening harmonics above the next-highest significant harmonic "
+                f"({gap_guard.lower_significant_harmonic_hz:g} Hz) were excluded "
+                f"because the gap contained {gap_guard.intervening_nonbase_harmonic_count} "
+                "eligible non-base harmonics, exceeding the locked maximum of "
+                f"{GROUP_SIGNIFICANT_MAX_INTERVENING_NONBASE_HARMONICS}. All eligible "
+                "non-base oddball harmonics through the retained cutoff were included "
+                f"in the Summed BCA ({included} Hz)."
+            )
+        else:
+            summation_text = (
+                "All eligible non-base oddball harmonics up to the highest significant "
+                f"harmonic were included in the Summed BCA ({included} Hz). The "
+                "isolated-highest gap guard excludes the upper peak only when more than "
+                f"{GROUP_SIGNIFICANT_MAX_INTERVENING_NONBASE_HARMONICS} eligible "
+                "non-base harmonics lie between the two highest significant peaks; "
+                "the guard was not triggered."
+            )
     else:
         summation_text = (
             f"Only z-significant oddball harmonics were included in the Summed BCA ({included} Hz)."

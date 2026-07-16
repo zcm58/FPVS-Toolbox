@@ -103,11 +103,13 @@ MRI_SLICE_PREVIEW_MIN_PIXELS = (1800, 1050)
 MRI_SLICE_PREVIEW_MAX_PIXELS = (3600, 2200)
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
 PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD = "l2_mne_source_psd"
+PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD = "eloreta_volume_source_psd"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 PROJECT_SOURCE_EXPORT_ELORETA_VOLUME = "eloreta_volume_hauk_zscore"
 PROJECT_SOURCE_EXPORT_ALL_ZSCORE = "all_zscore"
 PROJECT_SOURCE_EXPORT_DEFAULT_MODES = (
     PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
+    PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
 )
 LORETA_SUMMARY_REPORT_STATUS = "FPVS Toolbox is preparing the LORETA summary report."
 LORETA_SOURCE_MAP_BUILD_STATUS = "Generating source-space maps for 3D visualization of oddball responses."
@@ -148,15 +150,18 @@ DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 SOURCE_METHOD_L2_MNE_SOURCE_PSD = "l2_mne_source_psd"
 SOURCE_METHOD_L2_MNE_SURFACE = "l2_mne_surface"
+SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD = "eloreta_volume_source_psd"
 SOURCE_METHOD_ELORETA_VOLUME = "eloreta_volume"
 SOURCE_METHOD_PREPARED = "prepared_source"
 SOURCE_METHOD_OPTIONS: tuple[tuple[str, str], ...] = (
     ("L2-MNE source PSD", SOURCE_METHOD_L2_MNE_SOURCE_PSD),
+    ("eLORETA volume source PSD", SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD),
     ("Legacy amplitude-derived L2-MNE", SOURCE_METHOD_L2_MNE_SURFACE),
     ("Legacy amplitude-derived eLORETA", SOURCE_METHOD_ELORETA_VOLUME),
 )
 SOURCE_METHOD_DEFAULT_DISPLAY_MODE = {
     SOURCE_METHOD_L2_MNE_SOURCE_PSD: DISPLAY_MODE_SPLIT_HEMISPHERE,
+    SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD: DISPLAY_MODE_TRANSPARENT_MESH,
     SOURCE_METHOD_L2_MNE_SURFACE: DISPLAY_MODE_SPLIT_HEMISPHERE,
     SOURCE_METHOD_ELORETA_VOLUME: DISPLAY_MODE_TRANSPARENT_MESH,
     SOURCE_METHOD_PREPARED: DEFAULT_DISPLAY_MODE,
@@ -388,6 +393,25 @@ class ProjectSourceMapExportWorker(QObject):
                 allow_fetch_fsaverage=True,
                 progress_callback=self.progress.emit,
             )
+        if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD:
+            from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
+                write_project_eloreta_volume_hauk_source_psd_payloads,
+            )
+
+            if self._project is None:
+                raise RuntimeError(
+                    "Open the active FPVS project before rebuilding time-domain source maps."
+                )
+            self.progress.emit(
+                "Starting Hauk-informed time-domain eLORETA volume source-PSD rebuild..."
+            )
+            return write_project_eloreta_volume_hauk_source_psd_payloads(
+                project=self._project,
+                project_root=self._project_root,
+                include_flagged_subjects=self._include_flagged_subjects,
+                allow_fetch_fsaverage=True,
+                progress_callback=self.progress.emit,
+            )
         if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
             from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
                 write_project_l2_mne_hauk_zscore_payloads,
@@ -456,6 +480,9 @@ def resolve_loreta_import_start_dir(
         from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
             default_project_l2_mne_hauk_source_psd_output_dir,
         )
+        from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
+            default_project_eloreta_volume_hauk_source_psd_output_dir,
+        )
         from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_export import (
             default_project_eloreta_volume_output_dir,
         )
@@ -468,6 +495,7 @@ def resolve_loreta_import_start_dir(
 
         for source_dir in (
             default_project_l2_mne_hauk_source_psd_output_dir(project_root),
+            default_project_eloreta_volume_hauk_source_psd_output_dir(project_root),
             default_project_l2_mne_hauk_zscore_output_dir(project_root),
             default_project_eloreta_volume_output_dir(project_root),
             default_project_l2_mne_output_dir(project_root),
@@ -512,14 +540,40 @@ def default_project_source_psd_manifest_path(
     return manifest_path if manifest_path.is_file() else None
 
 
+def default_project_eloreta_source_psd_manifest_path(
+    project_root: Path | None,
+) -> Path | None:
+    """Return the current time-domain eLORETA manifest when it exists."""
+
+    if project_root is None or not project_root.is_dir():
+        return None
+    from Tools.LORETA_Visualizer.source_producers.project_eloreta_volume_hauk_source_psd_export import (
+        DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME,
+        default_project_eloreta_volume_hauk_source_psd_output_dir,
+    )
+
+    manifest_path = (
+        default_project_eloreta_volume_hauk_source_psd_output_dir(project_root)
+        / DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME
+    )
+    return manifest_path if manifest_path.is_file() else None
+
+
 def default_project_source_manifest_paths(project_root: Path | None) -> tuple[Path, ...]:
     """Return existing default project source manifests in preferred display order."""
     if project_root is None or not project_root.is_dir():
         return ()
     paths: list[Path] = []
-    source_psd_manifest = default_project_source_psd_manifest_path(project_root)
-    if source_psd_manifest is not None:
-        return (source_psd_manifest,)
+    current_manifests = tuple(
+        path
+        for path in (
+            default_project_source_psd_manifest_path(project_root),
+            default_project_eloreta_source_psd_manifest_path(project_root),
+        )
+        if path is not None
+    )
+    if current_manifests:
+        return current_manifests
     zscore_manifest = default_project_zscore_manifest_path(project_root)
     if zscore_manifest is not None:
         paths.append(zscore_manifest)
@@ -643,6 +697,10 @@ def _manifest_entry_source_method_id(entry: PreparedSourceManifestEntry) -> str:
         entry.condition_id,
     )
     joined = " ".join(str(value).lower() for value in identifiers if value is not None)
+    if "eloreta_volume_hauk_source_psd" in joined or (
+        "eloreta" in joined and "source_psd" in joined
+    ):
+        return SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD
     if "eloreta" in joined or "eloreta_volume" in joined:
         return SOURCE_METHOD_ELORETA_VOLUME
     if "l2_mne_hauk_source_psd" in joined or "source_psd" in joined:
@@ -972,6 +1030,8 @@ def _source_export_status_text(
         return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
         return LORETA_SOURCE_MAP_BUILD_STATUS
+    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD:
+        return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
         return LORETA_SOURCE_MAP_BUILD_STATUS
     if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
@@ -982,6 +1042,8 @@ def _source_export_status_text(
 def _source_export_mode_label(export_mode: str) -> str:
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
         return "Hauk-informed time-domain L2-MNE source maps"
+    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD:
+        return "Hauk-informed time-domain eLORETA volume source maps"
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
         return "legacy amplitude-derived L2-MNE source maps"
     if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
@@ -1039,8 +1101,9 @@ class SourceMapOptionsDialog(AppDialog):
 
         method_label = QLabel(
             "New project maps average signed FPVS repetitions in the time domain, estimate an EEG-only "
-            "L2-MNE spectrum on the fsaverage template, and use the project's selected oddball harmonics "
-            "with the FPVS Toolbox exact-bin noise rule.",
+            "L2-MNE surface spectrum and an independent eLORETA volume spectrum on the fsaverage "
+            "template, and use the project's selected oddball harmonics with the FPVS Toolbox "
+            "exact-bin noise rule.",
             self,
         )
         method_label.setObjectName("loreta_source_options_method_label")
@@ -1123,8 +1186,9 @@ class SourceMapOptionsDialog(AppDialog):
         tabs.addTab(data_tab, "Data")
 
         data_note = QLabel(
-            "Project rebuilds generate the Hauk-informed time-domain L2-MNE surface workflow. Older "
-            "amplitude-derived L2-MNE and eLORETA manifests remain available through Load manifest.",
+            "Project rebuilds generate Hauk-informed time-domain L2-MNE surface and eLORETA volume "
+            "workflows. Older amplitude-derived L2-MNE and eLORETA manifests remain available "
+            "through Load manifest.",
             data_tab,
         )
         data_note.setObjectName("loreta_source_options_data_note")
@@ -2588,7 +2652,13 @@ class LoretaVisualizerWindow(QWidget):
                 automatic=automatic,
             )
             return
-        if PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD in modes and self._project is None:
+        if any(
+            mode in {
+                PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD,
+                PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD,
+            }
+            for mode in modes
+        ) and self._project is None:
             self._set_source_export_status(
                 "Open the active FPVS project before rebuilding time-domain source maps.",
                 variant="warning",
@@ -2753,6 +2823,8 @@ class LoretaVisualizerWindow(QWidget):
         total_payload_count = 0
         last_output_dir: Path | None = None
         method_ids: list[str] = []
+        included_participant_ids: set[str] = set()
+        source_ineligible_by_id: dict[str, object] = {}
         for export_result in export_results:
             output_dir = getattr(export_result, "output_dir", None)
             manifest_path = getattr(export_result, "manifest_path", None)
@@ -2768,8 +2840,39 @@ class LoretaVisualizerWindow(QWidget):
                 method_ids.append(method_id)
             project_inputs = getattr(export_result, "project_inputs", None)
             export_model = str(getattr(export_result, "export_model", PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST))
-            flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
-            excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
+            flagged_subjects = tuple(
+                getattr(
+                    export_result,
+                    "flagged_subjects",
+                    getattr(project_inputs, "flagged_subjects", ()),
+                )
+                or ()
+            )
+            excluded_subjects = tuple(
+                getattr(
+                    export_result,
+                    "excluded_subjects",
+                    getattr(project_inputs, "excluded_subjects", ()),
+                )
+                or ()
+            )
+            included_participants = tuple(
+                getattr(export_result, "included_participants", ()) or ()
+            )
+            source_ineligible = tuple(
+                getattr(export_result, "source_ineligible_participants", ()) or ()
+            )
+            included_participant_ids.update(
+                str(participant_id).strip()
+                for participant_id in included_participants
+                if str(participant_id).strip()
+            )
+            for item in source_ineligible:
+                participant_id = str(
+                    getattr(item, "participant_id", "")
+                ).strip()
+                if participant_id:
+                    source_ineligible_by_id[participant_id] = item
             logger.info(
                 "loreta_project_source_maps_export_complete",
                 extra={
@@ -2780,6 +2883,7 @@ class LoretaVisualizerWindow(QWidget):
                     "zscore_model": export_model,
                     "flagged_subject_count": len(flagged_subjects),
                     "excluded_subject_count": len(excluded_subjects),
+                    "source_ineligible_participant_count": len(source_ineligible),
                 },
             )
         if not valid_manifest_paths or last_output_dir is None:
@@ -2796,10 +2900,23 @@ class LoretaVisualizerWindow(QWidget):
                 f"Prepared {total_payload_count} source-map condition summaries, but {failure_labels} failed. "
                 "Loaded available regenerated maps."
             )
+        elif source_ineligible_by_id:
+            status_variant = "warning"
+            skipped_ids = ", ".join(sorted(source_ineligible_by_id))
+            eligible_text = (
+                f" from {len(included_participant_ids)} complete-case participant(s)"
+                if included_participant_ids
+                else ""
+            )
+            status_text = (
+                f"Prepared {total_payload_count} source-map condition summaries{eligible_text}. "
+                f"Omitted {skipped_ids} from every source condition; see the validation report. "
+                "Loaded regenerated maps."
+            )
         else:
             status_variant = "success"
             status_text = (
-                f"Prepared Hauk-informed time-domain L2-MNE source-space z-score maps for "
+                f"Prepared Hauk-informed time-domain source-space z-score maps for "
                 f"{total_payload_count} condition summaries. Loaded regenerated maps."
             )
         self._set_source_export_status(status_text, variant=status_variant)
@@ -2808,12 +2925,18 @@ class LoretaVisualizerWindow(QWidget):
         preferred_method = self._selected_source_method_id
         if preferred_method not in {
             SOURCE_METHOD_L2_MNE_SOURCE_PSD,
+            SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD,
             SOURCE_METHOD_L2_MNE_SURFACE,
             SOURCE_METHOD_ELORETA_VOLUME,
         }:
             preferred_method = SOURCE_METHOD_L2_MNE_SOURCE_PSD
         if len(valid_manifest_paths) == 1:
-            if "eloreta" in joined_methods or "eloreta" in joined_manifests:
+            if (
+                "eloreta_volume_hauk_source_psd" in joined_methods
+                or "eloreta_volume_hauk_source_psd" in joined_manifests
+            ):
+                preferred_method = SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD
+            elif "eloreta" in joined_methods or "eloreta" in joined_manifests:
                 preferred_method = SOURCE_METHOD_ELORETA_VOLUME
             elif "source_psd" in joined_methods or "source psd" in joined_methods:
                 preferred_method = SOURCE_METHOD_L2_MNE_SOURCE_PSD

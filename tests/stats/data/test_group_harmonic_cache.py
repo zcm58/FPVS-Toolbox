@@ -9,6 +9,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     normalize_dv_policy,
 )
 from Tools.Stats.data.group_harmonic_cache import (
+    GROUP_HARMONIC_METHOD_VERSION,
     PREPROCESSING_ORDER_VERSION_LABEL,
     PROCESSING_FINGERPRINT_VERSION_LABEL,
     build_group_harmonic_cache_request,
@@ -102,6 +103,10 @@ def test_group_harmonic_cache_roundtrip_and_settings_invalidation(tmp_path: Path
 
     request = _request(project_root, workbook)
     assert request is not None
+    assert request.fingerprint["method_version"] == (
+        "group_significant_harmonics_roi_union_through_highest_gap_guard_v3"
+    )
+    assert request.fingerprint["method_version"] == GROUP_HARMONIC_METHOD_VERSION
     saved_at = save_cached_group_harmonic_selection(request, _selection_metadata())
     assert saved_at
 

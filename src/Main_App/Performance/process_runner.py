@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
 from Main_App.exports.source_time_domain_export import (
+    source_ready_project_relative_path,
     write_source_ready_time_domain_derivatives,
 )
 from Main_App.io.load_utils import (
@@ -1621,14 +1622,12 @@ def _run_full_pipeline_for_file(
                 },
             )
             source_derivative_status = "complete"
-            resolved_project_root = project_root.resolve()
-            source_derivative_manifest = (
-                source_result.manifest_path.resolve()
-                .relative_to(resolved_project_root)
-                .as_posix()
+            source_derivative_manifest = source_ready_project_relative_path(
+                project_root,
+                source_result.manifest_path,
             )
             source_derivative_outputs = [
-                path.resolve().relative_to(resolved_project_root).as_posix()
+                source_ready_project_relative_path(project_root, path)
                 for artifact in source_result.artifacts
                 for path in (artifact.fif_path, artifact.sidecar_path)
             ]

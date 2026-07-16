@@ -408,6 +408,42 @@ def _group_significant_summary_rows(group_meta: Mapping[str, object]) -> list[di
         _summary_row("Summation method", group_meta.get("summation_method", "")),
         _summary_row("Highest significant harmonic (Hz)", _format_number(highest_hz)),
         _summary_row("Highest significant harmonic index", _format_number(highest_index)),
+        _summary_row(
+            "Highest included harmonic (Hz)",
+            _format_number(group_meta.get("highest_included_harmonic_hz")),
+        ),
+        _summary_row(
+            "Highest-harmonic gap guard enabled?",
+            _yes_no(bool(group_meta.get("summation_gap_guard_enabled"))),
+        ),
+        _summary_row(
+            "Maximum intervening eligible non-base harmonics",
+            _format_number(
+                group_meta.get(
+                    "summation_gap_guard_max_intervening_nonbase_harmonics"
+                )
+            ),
+        ),
+        _summary_row(
+            "Intervening eligible non-base harmonics between top peaks",
+            _format_number(
+                group_meta.get(
+                    "summation_gap_guard_intervening_nonbase_harmonic_count"
+                )
+            ),
+        ),
+        _summary_row(
+            "Highest-harmonic gap guard applied?",
+            _yes_no(bool(group_meta.get("summation_gap_guard_applied"))),
+        ),
+        _summary_row(
+            "Gap-guard excluded highest harmonic (Hz)",
+            _format_number(
+                group_meta.get(
+                    "summation_gap_guard_dropped_highest_significant_harmonic_hz"
+                )
+            ),
+        ),
         _summary_row(harmonic_one_label, _yes_no(1 in detected_indices)),
         _summary_row(
             "All harmonics 1 through highest index significant?",

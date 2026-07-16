@@ -190,6 +190,8 @@ def test_compute_source_psd_calls_mne_contract_then_sums_in_source_space() -> No
     assert call["raw"] is raw
     assert call["inverse_operator"] is inverse_operator
     assert call["method"] == "MNE"
+    assert call["method_params"] is None
+    assert call["prepared"] is False
     assert call["lambda2"] == pytest.approx(DEFAULT_HAUK_SOURCE_PSD_LAMBDA2)
     assert call["n_fft"] == raw.n_times
     assert call["overlap"] == 0.0
@@ -210,10 +212,68 @@ def test_compute_source_psd_calls_mne_contract_then_sums_in_source_space() -> No
 
     fingerprint = result.cache_fingerprint_payload()
     assert fingerprint["method"]["method_version"] == HAUK_SOURCE_PSD_METHOD_VERSION
+    assert fingerprint["method"]["inverse_method"] == "MNE"
+    assert fingerprint["method"]["method_params"] == {}
+    assert fingerprint["method"]["prepared"] is False
     assert fingerprint["method"]["noise_offsets"] == list(DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS)
     assert fingerprint["method"]["noise_standard_deviation_ddof"] == 0
     assert fingerprint["method"]["nearest_fft_bin_substitution"] == "forbidden"
     assert fingerprint["frequency_plan"]["harmonic_bin_indices"] == [20, 60]
+
+
+def test_compute_source_psd_supports_explicit_eloreta_method_contract() -> None:
+    raw = _AveragedRaw(sfreq=100.0, n_times=100)
+    inverse_operator = object()
+    method_params = {"eps": 1e-6, "max_iter": 50}
+    config = HaukSourcePsdConfig(
+        selected_harmonics_hz=(20.0,),
+        inverse_method="eloreta",
+        method_params=method_params,
+        prepared=True,
+        method_id="eloreta_volume_hauk_source_psd_v1",
+    )
+    frequencies = np.arange(10.0, 31.0)
+    source_amplitudes = np.arange(1.0, len(frequencies) + 1.0).reshape(1, -1)
+    calls: list[dict[str, object]] = []
+
+    def fake_compute_source_psd(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(kwargs)
+        return SimpleNamespace(data=source_amplitudes**2, times=frequencies)
+
+    result = compute_hauk_source_psd(
+        averaged_raw=raw,
+        inverse_operator=inverse_operator,
+        config=config,
+        compute_source_psd_func=fake_compute_source_psd,
+    )
+
+    assert result.source_count == 1
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["method"] == "eLORETA"
+    assert call["method_params"] == method_params
+    assert call["method_params"] is not method_params
+    assert call["prepared"] is True
+
+    fingerprint = result.cache_fingerprint_payload()["method"]
+    assert fingerprint["method_id"] == "eloreta_volume_hauk_source_psd_v1"
+    assert fingerprint["inverse_method"] == "eLORETA"
+    assert fingerprint["method_params"] == method_params
+    assert fingerprint["prepared"] is True
+
+
+def test_source_psd_config_rejects_unsupported_inverse_contracts() -> None:
+    with pytest.raises(ValueError, match="Unsupported Hauk source-PSD inverse_method"):
+        HaukSourcePsdConfig(
+            selected_harmonics_hz=(20.0,),
+            inverse_method="LCMV",
+        )
+
+    with pytest.raises(TypeError, match="method_params must be a mapping"):
+        HaukSourcePsdConfig(
+            selected_harmonics_hz=(20.0,),
+            method_params=("not", "a", "mapping"),  # type: ignore[arg-type]
+        )
 
 
 def test_compute_source_psd_requires_raw_frequency_metadata() -> None:

@@ -566,6 +566,28 @@ def _summarize_dv_metadata_for_export(dv_metadata: dict[str, object]) -> dict[st
                     "highest_significant_harmonic_index",
                     "",
                 ),
+                "highest_included_harmonic_hz": group_meta.get(
+                    "highest_included_harmonic_hz",
+                    "",
+                ),
+                "summation_gap_guard_enabled": bool(
+                    group_meta.get("summation_gap_guard_enabled", False)
+                ),
+                "summation_gap_guard_max_intervening_nonbase_harmonics": group_meta.get(
+                    "summation_gap_guard_max_intervening_nonbase_harmonics",
+                    "",
+                ),
+                "summation_gap_guard_applied": bool(
+                    group_meta.get("summation_gap_guard_applied", False)
+                ),
+                "summation_gap_guard_intervening_nonbase_harmonic_count": group_meta.get(
+                    "summation_gap_guard_intervening_nonbase_harmonic_count",
+                    "",
+                ),
+                "summation_gap_guard_dropped_highest_significant_harmonic_hz": group_meta.get(
+                    "summation_gap_guard_dropped_highest_significant_harmonic_hz",
+                    "",
+                ),
                 "selection_cache_source": group_meta.get("selection_cache_source", ""),
                 "selection_cache_saved_at": group_meta.get("selection_cache_saved_at", ""),
                 "selection_cache_key": group_meta.get("selection_cache_key", ""),

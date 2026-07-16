@@ -420,7 +420,7 @@ class SettingsDialog(QDialog):
             "settings_harmonic_summation_method"
         )
         self.harmonic_summation_method_combo.addItem(
-            "All harmonics up to highest significant",
+            "Up to highest significant (trim gaps >10)",
             GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
         )
         self.harmonic_summation_method_combo.addItem(
@@ -439,7 +439,10 @@ class SettingsDialog(QDialog):
         method_index = self.harmonic_summation_method_combo.findData(selected_method)
         self.harmonic_summation_method_combo.setCurrentIndex(max(0, method_index))
         self.harmonic_summation_method_combo.setToolTip(
-            "Choose which oddball harmonics are included in Summed BCA after processing."
+            "Choose which oddball harmonics are included in Summed BCA after processing. "
+            "The default fills through the highest significant harmonic, but excludes an "
+            "isolated highest peak when more than 10 eligible non-base harmonics lie "
+            "between the two highest significant peaks."
         )
         harmonic_form.addRow(
             QLabel("Summation method:", harmonic_group),

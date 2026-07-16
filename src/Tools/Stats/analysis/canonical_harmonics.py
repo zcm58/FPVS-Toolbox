@@ -197,6 +197,23 @@ def harmonic_selection_fingerprint(
         "max_frequency_hz": max_freq,
         "selected_harmonics_hz": list(selected),
         "detected_significant_harmonics_hz": list(detected),
+        "highest_included_harmonic_hz": metadata.get("highest_included_harmonic_hz"),
+        "summation_gap_guard_rule": metadata.get("summation_gap_guard_rule"),
+        "summation_gap_guard_enabled": bool(
+            metadata.get("summation_gap_guard_enabled", False)
+        ),
+        "summation_gap_guard_max_intervening_nonbase_harmonics": metadata.get(
+            "summation_gap_guard_max_intervening_nonbase_harmonics"
+        ),
+        "summation_gap_guard_applied": bool(
+            metadata.get("summation_gap_guard_applied", False)
+        ),
+        "summation_gap_guard_intervening_nonbase_harmonic_count": metadata.get(
+            "summation_gap_guard_intervening_nonbase_harmonic_count"
+        ),
+        "summation_gap_guard_dropped_highest_significant_harmonic_hz": metadata.get(
+            "summation_gap_guard_dropped_highest_significant_harmonic_hz"
+        ),
         "selection_cache_source": str(metadata.get("selection_cache_source") or ""),
         "selection_cache_saved_at": str(metadata.get("selection_cache_saved_at") or ""),
         "project_root": str(project_root) if project_root not in (None, "") else "",
@@ -222,12 +239,26 @@ def format_harmonic_selection_fingerprint(fingerprint: Mapping[str, object]) -> 
     z_threshold = fingerprint.get("z_threshold")
     z_text = f"z > {float(z_threshold):g}" if _is_number(z_threshold) else "z threshold not recorded"
     method = str(fingerprint.get("summation_method") or "not recorded")
+    gap_text = ""
+    if bool(fingerprint.get("summation_gap_guard_applied")):
+        dropped = fingerprint.get(
+            "summation_gap_guard_dropped_highest_significant_harmonic_hz"
+        )
+        count = fingerprint.get(
+            "summation_gap_guard_intervening_nonbase_harmonic_count"
+        )
+        if _is_number(dropped) and _is_number(count):
+            gap_text = (
+                f" | gap guard: excluded {float(dropped):g} Hz "
+                f"({int(float(count))} intervening eligible non-base harmonics)"
+            )
     return (
         "FPVS Toolbox significant harmonics | "
         f"participants: {fingerprint.get('participant_count', 0)} | "
         f"conditions: {condition_text} | "
         f"scope: {fingerprint.get('electrode_scope') or 'not recorded'} ({roi_text}) | "
         f"{z_text} | method: {method} | selected: {harmonics} Hz"
+        f"{gap_text}"
     )
 
 

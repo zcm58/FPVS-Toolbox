@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -30,6 +30,9 @@ from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
     ELORETAVolumeForwardModel,
     ELORETAVolumeZScoreConfig,
     write_eloreta_volume_participant_zscore_payloads,
+)
+from Tools.LORETA_Visualizer.source_producers.hauk_source_psd import (
+    DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
 )
 from Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs import (
     ProjectParticipantSourceFrequencyBinInputSet,
@@ -64,6 +67,63 @@ DEFAULT_MNE_ELORETA_LOOSE_ORIENTATION = 1.0
 
 class ProjectELORETAVolumeExportError(RuntimeError):
     """Raised when project-level eLORETA volume maps cannot be written."""
+
+
+@dataclass(frozen=True)
+class MneFsaverageELORETAVolumeSourcePsdModel:
+    """Opaque native MNE resources for time-domain eLORETA source PSD.
+
+    The prepared-payload and display layers receive only ``forward_model``.
+    The sampling-rate-specific ``info`` and native inverse operator remain in
+    source-producer orchestration so signed time-domain data can be projected
+    before source power, harmonic aggregation, and z-scoring are calculated.
+    """
+
+    forward_model: ELORETAVolumeForwardModel
+    info: Any
+    inverse_operator: Any
+    prepared: bool = False
+    lambda2: float = DEFAULT_HAUK_SOURCE_PSD_LAMBDA2
+    method_params: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.forward_model, ELORETAVolumeForwardModel):
+            raise TypeError("forward_model must be ELORETAVolumeForwardModel.")
+        try:
+            info_channel_names = tuple(str(name) for name in self.info.ch_names)
+            sfreq = float(self.info["sfreq"])
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise TypeError(
+                "eLORETA source-PSD model info must expose ch_names and sfreq."
+            ) from exc
+        if info_channel_names != self.forward_model.channel_names:
+            raise ValueError(
+                "eLORETA source-PSD model Info channel order must match the forward model."
+            )
+        if not np.isfinite(sfreq) or sfreq <= 0.0:
+            raise ValueError("eLORETA source-PSD model sampling frequency must be positive and finite.")
+        lambda2 = float(self.lambda2)
+        if not np.isfinite(lambda2) or lambda2 <= 0.0:
+            raise ValueError("eLORETA source-PSD lambda2 must be positive and finite.")
+        object.__setattr__(self, "prepared", bool(self.prepared))
+        object.__setattr__(self, "lambda2", lambda2)
+        object.__setattr__(self, "method_params", dict(self.method_params))
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Return numerical-model metadata suitable for provenance/cache keys."""
+
+        metadata = dict(self.forward_model.metadata)
+        metadata.update(
+            {
+                "model_sfreq_hz": float(self.info["sfreq"]),
+                "source_psd_inverse_method": "eLORETA",
+                "source_psd_inverse_prepared": bool(self.prepared),
+                "source_psd_lambda2": float(self.lambda2),
+                "source_psd_method_params": dict(self.method_params),
+            }
+        )
+        return metadata
 
 
 @dataclass(frozen=True)
@@ -234,12 +294,72 @@ def build_mne_fsaverage_eloreta_volume_forward_model(
     mindist_mm: float = DEFAULT_MNE_MINDIST_MM,
     loose_orientation: float = DEFAULT_MNE_ELORETA_LOOSE_ORIENTATION,
 ) -> ELORETAVolumeForwardModel:
-    """Build a beta BioSemi64/fsaverage eLORETA volume inverse model with MNE."""
+    """Build the legacy FullFFT eLORETA descriptor and topography estimator."""
+
+    from config import DEFAULT_ELECTRODE_NAMES_64
+
+    return build_mne_fsaverage_eloreta_volume_source_psd_model(
+        sfreq=100.0,
+        channel_names=tuple(DEFAULT_ELECTRODE_NAMES_64),
+        volume_pos_mm=volume_pos_mm,
+        allow_fetch_fsaverage=allow_fetch_fsaverage,
+        mindist_mm=mindist_mm,
+        loose_orientation=loose_orientation,
+        prepare_inverse=False,
+    ).forward_model
+
+
+def build_mne_fsaverage_eloreta_volume_source_psd_model(
+    *,
+    sfreq: float,
+    channel_names: Sequence[str],
+    volume_pos_mm: float = DEFAULT_MNE_FSAVERAGE_VOLUME_POS_MM,
+    allow_fetch_fsaverage: bool = False,
+    mindist_mm: float = DEFAULT_MNE_MINDIST_MM,
+    loose_orientation: float = DEFAULT_MNE_ELORETA_LOOSE_ORIENTATION,
+    prepare_inverse: bool = True,
+    lambda2: float = DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
+    method_params: Mapping[str, Any] | None = None,
+) -> MneFsaverageELORETAVolumeSourcePsdModel:
+    """Build the sampling-rate-specific fsaverage eLORETA source-PSD model.
+
+    ``prepare_inverse=True`` performs MNE's iterative eLORETA normalization
+    once so repeated participant/condition PSD calls can pass
+    ``prepared=True`` without recalculating those weights. The legacy FullFFT
+    builder delegates here with preparation disabled because its estimator may
+    receive caller-selected method parameters for each topography batch.
+    """
+
     try:
         import mne
-        from mne.minimum_norm import apply_inverse, make_inverse_operator
+        from mne.minimum_norm import (
+            apply_inverse,
+            make_inverse_operator,
+            prepare_inverse_operator,
+        )
     except (ImportError, ModuleNotFoundError) as exc:
         raise ProjectELORETAVolumeExportError(f"MNE is required for the eLORETA volume model: {exc}") from exc
+
+    from config import DEFAULT_ELECTRODE_NAMES_64
+
+    expected_channels = tuple(DEFAULT_ELECTRODE_NAMES_64)
+    resolved_channels = tuple(str(name).strip() for name in channel_names)
+    if resolved_channels != expected_channels:
+        raise ProjectELORETAVolumeExportError(
+            "The EEG-only fsaverage eLORETA source model requires the canonical "
+            "BioSemi64 channel order."
+        )
+    resolved_sfreq = float(sfreq)
+    if not np.isfinite(resolved_sfreq) or resolved_sfreq <= 0.0:
+        raise ProjectELORETAVolumeExportError(
+            "eLORETA source-PSD model sampling frequency must be positive and finite."
+        )
+    resolved_lambda2 = float(lambda2)
+    if not np.isfinite(resolved_lambda2) or resolved_lambda2 <= 0.0:
+        raise ProjectELORETAVolumeExportError(
+            "eLORETA source-PSD lambda2 must be positive and finite."
+        )
+    resolved_method_params = dict(method_params or {})
 
     subjects_dir = _resolve_fsaverage_subjects_dir(mne, allow_fetch=allow_fetch_fsaverage)
     subject_dir = subjects_dir / FSAVERAGE_SUBJECT
@@ -248,10 +368,7 @@ def build_mne_fsaverage_eloreta_volume_forward_model(
     _require_file(bem_path, description="fsaverage BEM solution")
     _require_file(trans_path, description="fsaverage transform")
 
-    from config import DEFAULT_ELECTRODE_NAMES_64
-
-    channel_names = tuple(DEFAULT_ELECTRODE_NAMES_64)
-    info = _biosemi64_info(mne, channel_names)
+    info = _biosemi64_info(mne, resolved_channels, sfreq=resolved_sfreq)
     info = _with_eeg_average_reference_projection(mne, info)
     try:
         src = mne.setup_volume_source_space(
@@ -284,13 +401,24 @@ def build_mne_fsaverage_eloreta_volume_forward_model(
             fixed=False,
             verbose=False,
         )
+        inverse_prepared = bool(prepare_inverse)
+        if inverse_prepared:
+            inverse_operator = prepare_inverse_operator(
+                inverse_operator,
+                nave=1,
+                lambda2=resolved_lambda2,
+                method="eLORETA",
+                method_params=resolved_method_params or None,
+                copy=True,
+                verbose=False,
+            )
         adjacency_matrix = mne.spatial_src_adjacency(src, verbose=False)
     except (OSError, RuntimeError, ValueError) as exc:
         raise ProjectELORETAVolumeExportError(f"Unable to build MNE/fsaverage eLORETA volume model: {exc}") from exc
 
     leadfield = np.asarray(forward["sol"]["data"], dtype=float)
     row_names = tuple(str(name) for name in forward["sol"]["row_names"])
-    if row_names != channel_names:
+    if row_names != resolved_channels:
         raise ProjectELORETAVolumeExportError(
             "MNE eLORETA volume forward model channel order did not match the expected BioSemi64 order."
         )
@@ -306,10 +434,11 @@ def build_mne_fsaverage_eloreta_volume_forward_model(
         apply_inverse_func=apply_inverse,
         inverse_operator=inverse_operator,
         source_count=len(source_points),
+        inverse_operator_prepared=inverse_prepared,
     )
 
-    return ELORETAVolumeForwardModel(
-        channel_names=channel_names,
+    forward_model = ELORETAVolumeForwardModel(
+        channel_names=resolved_channels,
         source_points=source_points,
         leadfield=leadfield,
         source_adjacency=source_adjacency,
@@ -326,12 +455,19 @@ def build_mne_fsaverage_eloreta_volume_forward_model(
             "noise_covariance": "mne_ad_hoc_diagonal_eeg",
             "average_reference_projection": True,
             "regularization": "MNE inverse lambda2 with SNR=3 default",
-            "input_unit_conversion": "uV topographies converted to V before MNE apply_inverse",
+            "input_unit_conversion": (
+                "signed EEG Raw in V for source PSD; legacy uV topographies are "
+                "converted to V before MNE apply_inverse"
+            ),
             "mne_version": str(mne.__version__),
             "fsaverage_subjects_dir": str(subjects_dir),
             "fsaverage_subject": FSAVERAGE_SUBJECT,
             "volume_pos_mm": float(volume_pos_mm),
             "mindist_mm": float(mindist_mm),
+            "model_sfreq_hz": resolved_sfreq,
+            "source_psd_inverse_prepared": inverse_prepared,
+            "source_psd_lambda2": resolved_lambda2,
+            "source_psd_method_params": resolved_method_params,
             "source_points_unit": "FreeSurfer volume millimeters",
             "leadfield_shape": [int(leadfield.shape[0]), int(leadfield.shape[1])],
             "source_count": int(len(source_points)),
@@ -342,6 +478,14 @@ def build_mne_fsaverage_eloreta_volume_forward_model(
         source_estimator=source_estimator,
         source_indices=source_indices,
     )
+    return MneFsaverageELORETAVolumeSourcePsdModel(
+        forward_model=forward_model,
+        info=info,
+        inverse_operator=inverse_operator,
+        prepared=inverse_prepared,
+        lambda2=resolved_lambda2,
+        method_params=resolved_method_params,
+    )
 
 
 def _make_mne_eloreta_volume_source_estimator(  # noqa: ANN001
@@ -351,6 +495,7 @@ def _make_mne_eloreta_volume_source_estimator(  # noqa: ANN001
     apply_inverse_func,
     inverse_operator,
     source_count: int,
+    inverse_operator_prepared: bool = False,
 ):
     channel_names = tuple(info.ch_names)
 
@@ -389,6 +534,7 @@ def _make_mne_eloreta_volume_source_estimator(  # noqa: ANN001
             lambda2=float(lambda2),
             method="eLORETA",
             pick_ori=None,
+            prepared=bool(inverse_operator_prepared),
             method_params=dict(method_params or {}) or None,
             verbose=False,
         )
