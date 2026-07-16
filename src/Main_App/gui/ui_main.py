@@ -234,7 +234,7 @@ def init_ui(self) -> None:
     mode_layout.addWidget(self.rb_batch)
     mode_layout.addStretch(1)
 
-    form.addRow(QLabel("Mode", grp_proc), mode_field)
+    form.addRow(mode_field)
 
     self.lbl_single_file = QLabel("EEG File (.bdf)", grp_proc)
     self.row_single_file = QWidget(grp_proc)
