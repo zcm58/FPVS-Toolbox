@@ -177,6 +177,27 @@ def test_v2_metrics_preserve_explicit_float64_coercion() -> None:
     )
 
 
+def test_v2_metrics_preserve_vector_percentile_signed_zero_bits() -> None:
+    values = np.array(
+        [0.0, 0.0, 0.0, 0.0, -0.0, -0.0],
+        dtype=np.float64,
+    )
+    metrics = raw_channel_qc._v2_channel_metrics("Fp1", values)
+    actual = (
+        metrics.std_uv,
+        metrics.p2p_99_uv,
+        metrics.p2p_999_uv,
+        metrics.full_p2p_uv,
+    )
+
+    assert tuple(np.float64(value).tobytes() for value in actual) == (
+        np.float64(0.0).tobytes(),
+        np.float64(-0.0).tobytes(),
+        np.float64(-0.0).tobytes(),
+        np.float64(0.0).tobytes(),
+    )
+
+
 def test_shared_condition_buffer_avoids_full_concatenation(monkeypatch) -> None:
     data = _noise(43, 45)
     blocks = [

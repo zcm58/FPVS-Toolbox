@@ -230,22 +230,30 @@ def _channel_metric_values(
     """Return the v1 metrics while sharing percentile work."""
 
     metric_values = np.asarray(values)
-    finite_float64 = (
-        metric_values.dtype == np.dtype(np.float64)
+    is_float64 = metric_values.dtype == np.dtype(np.float64)
+    # Multi-quantile percentile calls can preserve a different zero sign than
+    # separate scalar calls. Keep the established scalar formulas whenever a
+    # signed-zero-sensitive value is present.
+    vector_candidate = (
+        is_float64
         and metric_values.size > 0
-        and bool(np.isfinite(metric_values).all())
+        and not bool(np.equal(metric_values, 0.0).any())
     )
+    finite_float64 = vector_candidate and bool(
+        np.isfinite(metric_values).all()
+    )
+    safe_vector_float64 = False
     if finite_float64:
+        max_abs = float(np.max(np.abs(metric_values)))
+        safe_limit = float(
+            np.sqrt(
+                np.finfo(np.float64).max
+                / max(metric_values.size * 8, 1)
+            )
+        )
+        safe_vector_float64 = max_abs <= safe_limit
+    if safe_vector_float64:
         percentiles = np.percentile(
-            metric_values,
-            [0.05, 0.5, 99.5, 99.95],
-        )
-        std_uv = float(np.std(metric_values) * 1e6)
-        full_p2p_uv = float(
-            (np.max(metric_values) - np.min(metric_values)) * 1e6
-        )
-    elif metric_values.dtype == np.dtype(np.float64):
-        percentiles = np.nanpercentile(
             metric_values,
             [0.05, 0.5, 99.5, 99.95],
         )
@@ -1387,15 +1395,15 @@ def _v2_channel_metrics(channel: str, values: np.ndarray) -> RawChannelMetricSet
     """Apply the v1 float64 formulas with one vectorized percentile call."""
 
     values64 = np.asarray(values, dtype=np.float64)
-    std_uv, p2p_99_uv, p2p_999_uv, full_p2p_uv = _channel_metric_values(
-        values64
-    )
+    percentiles = np.nanpercentile(values64, [0.05, 0.5, 99.5, 99.95])
     return RawChannelMetricSet(
         channel=channel,
-        std_uv=std_uv,
-        p2p_99_uv=p2p_99_uv,
-        p2p_999_uv=p2p_999_uv,
-        full_p2p_uv=full_p2p_uv,
+        std_uv=float(np.nanstd(values64) * 1e6),
+        p2p_99_uv=float((percentiles[2] - percentiles[1]) * 1e6),
+        p2p_999_uv=float((percentiles[3] - percentiles[0]) * 1e6),
+        full_p2p_uv=float(
+            (np.nanmax(values64) - np.nanmin(values64)) * 1e6
+        ),
     )
 
 

@@ -38,9 +38,9 @@ stored on a rotational, removable, or otherwise slow drive.
 | 2 | Reuse identical selected XLSX reads during one post-processing worker run | High; avoids repeated ZIP/XML passes in provisional QC, harmonic selection, and Stats-ready export | Low when scoped to one immutable run and keyed by path/size/mtime | Implemented; a synthetic 4.0 MiB wide workbook improved a two-read sequence by 1.84x |
 | 3 | Replace per-participant full cache-directory scans with one indexed scan; restrict stale-cache pruning to the source stem | High for large projects on HDD; removes quadratic metadata reads | Very low | Implemented; 100 participants reduced 10,000 JSON reads to 100 and measured 55x faster locally |
 | 4 | Build cross-drive workbooks on the system drive, then publish with one sequential copy and atomic replace | High on external/rotational project drives | Low to moderate; requires cleanup and publish-failure coverage | Implement |
-| 5 | Combine QC percentiles and use finite-data NumPy operations while retaining the original NaN-aware fallback | Moderate QC-stage gain; measured exact for finite and non-finite inputs | Low with byte-level regression tests | Implemented; representative per-channel helpers measured 1.19-1.81x faster |
+| 5 | Combine QC percentiles for safe finite native-float64 inputs while retaining the exact scalar fallback for zeros, non-finite values, extreme magnitudes, and other dtypes | Moderate QC-stage gain | Low with byte-, exception-, and warning-exact regression tests | Implemented; representative 64-channel QC bundle measured 23.34% less time |
 | 6 | Compute identical Excel column widths in column blocks instead of one pandas conversion per column | Moderate export CPU gain | Very low | Implemented; 64 x 12,000 benchmark measured 2.83x faster |
-| 7 | Avoid an unconditional float64 epoch-array copy before the unchanged mean | Low to moderate memory-bandwidth and peak-RAM gain | Very low | Implemented with byte-exact float64, float32, and non-contiguous coverage |
+| 7 | Avoid an unconditional float64 epoch-array copy before the unchanged mean | Low to moderate memory-bandwidth and peak-RAM gain | Very low | Implemented for native-float64 C/F-contiguous arrays; every other layout retains the established copy |
 | 8 | Batch FFT multi-notch transforms over a memory-bounded channel block | Moderate; measured about 1.4-1.7x for that stage | Moderate memory/oversubscription risk in multi-process runs | Deferred pending representative recording-length profiling |
 | 9 | Serialize or pipeline main-run BDF reads per physical rotational device | Potentially very high on HDD cold runs | Moderate; hardware detection and workload interaction need real-drive measurements | Deferred for device benchmarking |
 | 10 | Reuse condition epoch means between workbook and source-ready export | Moderate | Moderate; current bad-channel pick semantics differ | Deferred |
@@ -81,9 +81,20 @@ stored on a rotational, removable, or otherwise slow drive.
 - Block column-width calculation preserved the scalar width tuple and improved
   from 1.718 s to 0.607 s for a 64 by 12,000 mixed-width frame (2.83x).
 - Representative finite per-channel QC metric calls measured 1.19-1.81x
-  faster depending on condition length; exact float64 result bytes were
-  checked against the prior scalar formulas. NaN/Inf data retains the original
-  NaN-aware operations and is covered separately.
+  faster before the exhaustive edge-layout audit. With the final signed-zero,
+  warning, and overflow guards, the representative 64-channel QC bundle
+  measured 0.0935 s to 0.0717 s (23.34% less time, 1.304x). Inputs outside the
+  safe vector path retain the prior scalar operations exactly.
+- A representative affected-stage bundle used 48 participants across three
+  groups, a 64 by 5,001 FullFFT workbook read twice, the 64-channel QC bundle,
+  a 64 by 12,000 width frame, and a 96.5 MB contiguous float64 epoch array.
+  Component medians totaled 3.5737 s before and 1.3668 s after: 61.75% less
+  elapsed time, or 2.615x faster. This is not a universal end-to-end pipeline
+  claim: unchanged BDF loading, filtering, FFT work, and most workbook
+  serialization were outside the bundle. By Amdahl's law, if these affected
+  stages were 10%, 25%, 50%, or 75% of an actual baseline run, the whole-run
+  elapsed-time reductions would be 6.18%, 15.44%, 30.88%, or 46.31%,
+  respectively.
 - A representative 4.16 MiB workbook assembly issued 189 non-empty writes
   before publication. Cross-volume staging turns those destination-volume
   writes into one final sequential copy. No rotational/external drive was
@@ -95,17 +106,19 @@ stored on a rotational, removable, or otherwise slow drive.
 - Use the pinned `.venv1` environment when present.
 - Preserve current timing records and add cache/staging timing visibility where
   useful.
-- Directly affected equivalence/cache/lifecycle bundle: 91 passed.
+- Directly affected equivalence/cache/lifecycle bundle: 98 passed.
+- Cross-commit numerical fuzzing matched raw QC v1 on 1,011/1,011 arrays, raw
+  QC v2 on 1,011/1,011 arrays, and epoch averaging on 263/263 layouts. Result
+  bytes, exception identity, and warning category/message/order were exact.
+  Layouts included C/F order, slices, zero-stride broadcasts, endian variants,
+  unaligned arrays, and memmaps.
 - Post-processing worker behavior/static bundle: 17 passed.
 - Stats focused gate: 48 passed. Project-I/O focused gate: 71 passed.
 - Full agent, GUI, project-path, protected-boundary, and source-localization
   audits passed. Ruff, bytecode compilation, and `git diff --check` passed.
-- The repo precommit gate completed 1,014 passing and two skipped tests. Its
-  only three failures are unchanged condition-QC memmap tests blocked by this
-  Windows sandbox with `PermissionError`/`WinError 5`; the same three failures
-  occurred before the final changes in the processing focused gate. All three
-  passed when rerun outside the filesystem sandbox (`3 passed`), so the
-  combined precommit result is green.
+- The final repo precommit gate ran outside the filesystem sandbox so the
+  condition-QC memmap tests could execute normally: 1,028 passed and two
+  skipped. The processing-focused gate passed 298 with one skipped.
 - No local Qt/offscreen execution was used. Visible smoke: process a
   representative multi-group project from an internal drive and an external
   drive, run the post-processing continuation, confirm progress and completion

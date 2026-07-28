@@ -39,9 +39,18 @@ def _elapsed_ms(started_at: float) -> int:
 
 
 def _mean_epochs_float64(epoch_data: np.ndarray) -> np.ndarray:
-    """Average epoch data in float64 without copying an existing float64 array."""
+    """Average epochs without copying a contiguous native-float64 array."""
 
-    return np.mean(np.asarray(epoch_data, dtype=np.float64), axis=0)
+    epoch_array = np.asarray(epoch_data)
+    if epoch_array.dtype == np.dtype(np.float64) and (
+        epoch_array.flags.c_contiguous or epoch_array.flags.f_contiguous
+    ):
+        averaging_data = epoch_array
+    else:
+        # Preserve the established copy/layout for strided and broadcast
+        # arrays, whose reduction can otherwise differ at the final bit.
+        averaging_data = epoch_array.astype(np.float64)
+    return np.mean(averaging_data, axis=0)
 
 
 def _create_output_subfolder(

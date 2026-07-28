@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import product
 import warnings
 
 import mne
@@ -88,6 +89,76 @@ def test_channel_metric_values_match_v1_formulas_byte_exact(
     expected = _reference_channel_metric_values(values)
 
     assert _metric_bytes(actual) == _metric_bytes(expected)
+
+
+def test_channel_metric_values_preserve_every_short_signed_zero_permutation() -> None:
+    for length in range(1, 9):
+        for values in product((-0.0, 0.0), repeat=length):
+            array = np.asarray(values, dtype=np.float64)
+            actual = _channel_metric_values(array)
+            expected = _reference_channel_metric_values(array)
+            assert _metric_bytes(actual) == _metric_bytes(expected), (
+                length,
+                np.signbit(array).tolist(),
+            )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        np.array([], dtype=np.float64),
+        np.full(8, np.nan, dtype=np.float64),
+        np.array([np.inf, -np.inf, 1.0], dtype=np.float64),
+        np.array(
+            [np.finfo(np.float64).max, -np.finfo(np.float64).max],
+            dtype=np.float64,
+        ),
+    ],
+    ids=["empty", "all-nan", "infinities", "overflow-scale"],
+)
+def test_channel_metric_values_preserve_pathological_outcome_and_warnings(
+    values: np.ndarray,
+) -> None:
+    def warning_reference(metric_values: np.ndarray):
+        return (
+            float(np.nanstd(metric_values) * 1e6),
+            float(
+                (
+                    np.nanpercentile(metric_values, 99.5)
+                    - np.nanpercentile(metric_values, 0.5)
+                )
+                * 1e6
+            ),
+            float(
+                (
+                    np.nanpercentile(metric_values, 99.95)
+                    - np.nanpercentile(metric_values, 0.05)
+                )
+                * 1e6
+            ),
+            float(
+                (
+                    np.nanmax(metric_values)
+                    - np.nanmin(metric_values)
+                )
+                * 1e6
+            ),
+        )
+
+    def capture(function):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                outcome = ("return", _metric_bytes(function(values)))
+            except Exception as exc:  # noqa: BLE001
+                outcome = ("raise", type(exc), str(exc))
+        warning_details = [
+            (item.category, str(item.message))
+            for item in caught
+        ]
+        return outcome, warning_details
+
+    assert capture(_channel_metric_values) == capture(warning_reference)
 
 
 def _raw_with_left_failure() -> mne.io.RawArray:

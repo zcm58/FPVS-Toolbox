@@ -36,6 +36,25 @@ def test_mean_epochs_float64_matches_copying_expression_byte_exact(
     assert actual.tobytes() == expected.tobytes()
 
 
+def test_mean_epochs_float64_preserves_broadcast_layout_result_bytes() -> None:
+    base = np.array(
+        [
+            [-1.4238250364546312, 1.2637284581291104, -0.8706617379590857],
+            [-0.2591732349343976, -0.07534330701052097, -0.740884652085609],
+        ],
+        dtype=np.float64,
+    )
+    epoch_data = np.broadcast_to(base, (9, *base.shape))
+    assert epoch_data.strides[0] == 0
+    assert not epoch_data.flags.c_contiguous
+    assert not epoch_data.flags.f_contiguous
+
+    expected = np.mean(epoch_data.astype(np.float64), axis=0)
+    actual = _mean_epochs_float64(epoch_data)
+
+    assert actual.tobytes() == expected.tobytes()
+
+
 def test_resolve_target_frequencies_from_nested_analysis_dict() -> None:
     app = SimpleNamespace(
         settings={"analysis": {"oddball_freq": 1.2, "bca_upper_limit": 24.0}}
