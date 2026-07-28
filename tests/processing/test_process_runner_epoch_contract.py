@@ -17,17 +17,15 @@ from Main_App.processing.raw_channel_qc import (
 from Main_App.workers import process_runner
 
 
-def test_source_epoch_set_requires_every_configured_condition() -> None:
-    with pytest.raises(
-        process_runner._SourceEpochSetIncompleteError,
-        match="every configured condition; missing: B",
-    ) as exc_info:
-        process_runner._complete_source_epoch_set(
-            {"A": [object()], "B": []},
-            {"A": 21, "B": 22},
-        )
+def test_source_epoch_set_keeps_available_configured_conditions() -> None:
+    available = [object()]
 
-    assert exc_info.value.missing_conditions == ("B",)
+    result = process_runner._available_source_epoch_set(
+        {"A": available, "B": []},
+        {"A": 21, "B": 22},
+    )
+
+    assert result == {"A": available}
 
 
 def test_skipped_conditions_are_logged_once_per_file(caplog) -> None:
@@ -56,8 +54,8 @@ def test_skipped_conditions_are_logged_once_per_file(caplog) -> None:
 def test_expected_source_epoch_gap_logs_without_traceback(caplog) -> None:
     with caplog.at_level(logging.DEBUG, logger=process_runner.__name__):
         try:
-            process_runner._complete_source_epoch_set(
-                {"A": [object()], "B": []},
+            process_runner._available_source_epoch_set(
+                {"A": [], "B": []},
                 {"A": 21, "B": 22},
             )
         except RuntimeError as exc:
@@ -71,7 +69,7 @@ def test_expected_source_epoch_gap_logs_without_traceback(caplog) -> None:
     assert len(records) == 1
     assert records[0].levelno == logging.DEBUG
     assert records[0].exc_info is None
-    assert "missing_conditions=['B']" in records[0].getMessage()
+    assert "missing_conditions=['A', 'B']" in records[0].getMessage()
 
 
 def test_unexpected_source_derivative_issue_keeps_traceback(caplog) -> None:
@@ -95,7 +93,7 @@ def test_source_epoch_set_preserves_configured_condition_order() -> None:
     first = [object()]
     second = [object()]
 
-    result = process_runner._complete_source_epoch_set(
+    result = process_runner._available_source_epoch_set(
         {"B": second, "A": first},
         {"A": 21, "B": 22},
     )
@@ -525,7 +523,10 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
     assert captured["low_variance_channels"] == ["P9"]
 
 
-def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp_path: Path) -> None:
+def test_run_full_pipeline_publishes_available_source_conditions(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=8.0, ch_types=["eeg", "eeg", "stim"])
     raw = mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
     events = np.asarray([[8, 0, 21], [32, 0, 21]], dtype=int)
@@ -637,7 +638,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
             "_fpvs_processing_fingerprint": "fixture-fingerprint",
             "_fpvs_processing_fingerprint_version": "fixture-version",
         },
-        event_map={"A": 21},
+        event_map={"A": 21, "B": 22},
         save_folder=tmp_path / "out",
 
         project_root=tmp_path / "project",
@@ -645,6 +646,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
 
     assert result["status"] == "ok"
     assert "epochs_dict" in captured
+    assert captured["epochs_dict"]["B"] == []
     epochs = captured["epochs_dict"]["A"][0]
     assert epochs.get_data().shape == (2, 3, 4)
     assert epochs.metadata["crop_mode"].tolist() == ["55_onbin", "55_onbin"]

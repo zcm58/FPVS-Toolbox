@@ -764,6 +764,7 @@ def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_pa
     missing_output = plan.states[0].expected_outputs[1]
     partial_output.parent.mkdir(parents=True, exist_ok=True)
     partial_output.write_text("partial", encoding="utf-8")
+    source_result = _write_source_derivative_result(project, "P01")
 
     record_processing_results(
         project,
@@ -778,6 +779,7 @@ def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_pa
                     "kurtosis_bad_channels": ["P8"],
                     "interpolated_channels": ["P9", "P8"],
                 },
+                **source_result,
             }
         ],
         run_mode="Batch",
@@ -800,6 +802,10 @@ def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_pa
     assert entry["raw_qc_bad_channels"] == ["P9"]
     assert entry["interpolated_channels"] == ["P9", "P8"]
     assert entry["n_rejected"] == 2
+    assert entry["source_derivative_status"] == "complete"
+    assert entry["source_derivative_manifest"] == source_result[
+        "source_derivative_manifest"
+    ]
     assert partial_output.exists()
 
     follow_up_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)

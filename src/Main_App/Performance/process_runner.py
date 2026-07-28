@@ -88,13 +88,13 @@ REMOVED_ELECTRODE_REVIEW_KEYS = (
 
 
 class _SourceEpochSetIncompleteError(RuntimeError):
-    """Expected source-export omission when configured conditions are unavailable."""
+    """Expected source-export omission when no configured condition is available."""
 
     def __init__(self, missing_conditions: list[str]) -> None:
         self.missing_conditions = tuple(missing_conditions)
         super().__init__(
-            "Source-ready time-domain derivatives require every configured "
-            "condition; missing: " + ", ".join(self.missing_conditions)
+            "Source-ready time-domain derivatives require at least one configured "
+            "condition with epochs; unavailable: " + ", ".join(self.missing_conditions)
         )
 
 
@@ -178,16 +178,20 @@ def _group_id_for_file(
     return None
 
 
-def _complete_source_epoch_set(
+def _available_source_epoch_set(
     epochs_by_condition: Mapping[str, object],
     event_map: Mapping[str, int],
 ) -> dict[str, object]:
-    """Return the full configured condition set or refuse a false commit."""
+    """Return available configured conditions without fabricating missing inputs."""
 
-    missing = [label for label in event_map if not epochs_by_condition.get(label)]
-    if missing:
-        raise _SourceEpochSetIncompleteError(missing)
-    return {label: epochs_by_condition[label] for label in event_map}
+    available = {
+        label: epochs_by_condition[label]
+        for label in event_map
+        if epochs_by_condition.get(label)
+    }
+    if available:
+        return available
+    raise _SourceEpochSetIncompleteError(list(event_map))
 
 
 def _log_skipped_condition_summary(
@@ -1631,7 +1635,7 @@ def _run_full_pipeline_for_file(
                     "The canonical processing fingerprint was not supplied; "
                     "source-ready time-domain derivatives were not published."
                 )
-            source_epochs = _complete_source_epoch_set(epochs_dict, event_map)
+            source_epochs = _available_source_epoch_set(epochs_dict, event_map)
             source_stat = file_path.stat()
             source_result = write_source_ready_time_domain_derivatives(
                 project_root=project_root,
