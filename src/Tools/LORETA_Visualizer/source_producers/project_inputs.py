@@ -19,8 +19,11 @@ import openpyxl
 import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
-from Main_App.Shared.file_filters import is_excel_workbook_file
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
+from Main_App.projects import (
+    GroupInfo,
+    load_project_dataset_index,
+)
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNEFPVSCondition
 
 SOURCE_TOPOGRAPHY_METRIC_BCA = "bca"
@@ -41,6 +44,8 @@ class ProjectConditionTopographySummary:
     included_subject_count: int
     included_subjects: tuple[str, ...]
     flagged_subjects: tuple[str, ...]
+    group_id: str | None = None
+    group_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -110,9 +115,10 @@ def build_l2_mne_conditions_from_project(
     beta L2-MNE producer. Each harmonic topography is a 64-channel group mean
     over included participants.
     """
-    root = Path(project_root)
+    root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
+    dataset_index = load_project_dataset_index(root)
     sheet_name = _sheet_for_metric(metric)
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     selected_harmonics = _read_selected_harmonics(stats_ready)
@@ -125,71 +131,104 @@ def build_l2_mne_conditions_from_project(
     flagged_subjects = participant_selection.flagged_subjects
 
     expected_electrodes = tuple(name.upper() for name in DEFAULT_ELECTRODE_NAMES_64)
-    diagnostics: list[str] = []
+    diagnostics = [item.message for item in dataset_index.diagnostics]
+    dataset_index.require_group_assignments()
     source_conditions: list[L2MNEFPVSCondition] = []
     summaries: list[ProjectConditionTopographySummary] = []
     for condition in requested_conditions:
-        condition_dir = root / "1 - Excel Data Files" / condition
-        if not condition_dir.is_dir():
+        condition_records = dataset_index.select(conditions=(condition,))
+        if not condition_records:
             diagnostics.append(f"Missing condition workbook folder: {condition}")
             continue
-        workbooks = _condition_workbook_paths(condition_dir)
-        harmonic_vectors: dict[float, list[np.ndarray]] = {harmonic: [] for harmonic in selected_harmonics}
-        included_subjects: list[str] = []
-        for workbook_path in workbooks:
-            subject_id = _subject_from_workbook_name(workbook_path.name)
-            if subject_id in excluded_lookup:
+        for group, workbooks in dataset_index.partition_by_group(
+            conditions=(condition,),
+            require_nonempty_groups=dataset_index.is_multi_group,
+        ):
+            harmonic_vectors: dict[float, list[np.ndarray]] = {
+                harmonic: [] for harmonic in selected_harmonics
+            }
+            included_subjects: list[str] = []
+            for workbook in workbooks:
+                subject_id = workbook.participant_id
+                if _subject_in_ids(subject_id, excluded_lookup):
+                    continue
+                sheet_values = _read_metric_sheet(
+                    workbook.path,
+                    sheet_name=sheet_name,
+                    selected_harmonics=selected_harmonics,
+                    expected_electrodes=expected_electrodes,
+                )
+                included_subjects.append(subject_id)
+                for harmonic, vector in sheet_values.items():
+                    harmonic_vectors[harmonic].append(vector)
+            if not included_subjects:
+                diagnostics.append(
+                    f"No included workbooks for condition: "
+                    f"{_condition_display_label(condition, group, split=dataset_index.is_multi_group)}"
+                )
                 continue
-            sheet_values = _read_metric_sheet(
-                workbook_path,
-                sheet_name=sheet_name,
-                selected_harmonics=selected_harmonics,
-                expected_electrodes=expected_electrodes,
+            harmonic_topographies = {
+                harmonic: np.mean(np.vstack(vectors), axis=0).astype(float)
+                for harmonic, vectors in harmonic_vectors.items()
+                if vectors
+            }
+            if set(harmonic_topographies) != set(selected_harmonics):
+                missing = sorted(
+                    set(selected_harmonics) - set(harmonic_topographies)
+                )
+                diagnostics.append(
+                    f"Condition {condition!r} is missing harmonic topographies: {missing}"
+                )
+                continue
+            condition_flagged = tuple(
+                subject
+                for subject in included_subjects
+                if _subject_in_ids(subject, flagged_subjects)
             )
-            included_subjects.append(subject_id)
-            for harmonic, vector in sheet_values.items():
-                harmonic_vectors[harmonic].append(vector)
-        if not included_subjects:
-            diagnostics.append(f"No included workbooks for condition: {condition}")
-            continue
-        harmonic_topographies = {
-            harmonic: np.mean(np.vstack(vectors), axis=0).astype(float)
-            for harmonic, vectors in harmonic_vectors.items()
-            if vectors
-        }
-        if set(harmonic_topographies) != set(selected_harmonics):
-            missing = sorted(set(selected_harmonics) - set(harmonic_topographies))
-            diagnostics.append(f"Condition {condition!r} is missing harmonic topographies: {missing}")
-            continue
-        condition_flagged = tuple(subject for subject in included_subjects if subject in flagged_subjects)
-        source_conditions.append(
-            L2MNEFPVSCondition(
-                condition_id=condition,
-                label=condition,
-                harmonic_topographies=harmonic_topographies,
-                sensor_value_unit=_sensor_value_unit(metric),
-                metadata={
-                    "project_root_name": root.name,
-                    "metric": metric,
-                    "source_sheet": sheet_name,
-                    "selected_harmonics_hz": list(selected_harmonics),
-                    "included_subject_count": len(included_subjects),
-                    "include_flagged_subjects": include_flagged_subjects,
-                    "flagged_subjects_included": list(condition_flagged),
-                    "source_ready_input": True,
-                    "project_input_assembly": "phase_6b_read_only",
-                },
+            source_condition_id = _condition_output_id(
+                condition,
+                group,
+                split=dataset_index.is_multi_group,
             )
-        )
-        summaries.append(
-            ProjectConditionTopographySummary(
-                condition=condition,
-                workbook_count=len(workbooks),
-                included_subject_count=len(included_subjects),
-                included_subjects=tuple(included_subjects),
-                flagged_subjects=condition_flagged,
+            source_condition_label = _condition_display_label(
+                condition,
+                group,
+                split=dataset_index.is_multi_group,
             )
-        )
+            source_conditions.append(
+                L2MNEFPVSCondition(
+                    condition_id=source_condition_id,
+                    label=source_condition_label,
+                    harmonic_topographies=harmonic_topographies,
+                    sensor_value_unit=_sensor_value_unit(metric),
+                    metadata={
+                        "project_root_name": root.name,
+                        "metric": metric,
+                        "source_sheet": sheet_name,
+                        "selected_harmonics_hz": list(selected_harmonics),
+                        "included_subject_count": len(included_subjects),
+                        "include_flagged_subjects": include_flagged_subjects,
+                        "flagged_subjects_included": list(condition_flagged),
+                        "source_ready_input": True,
+                        "project_input_assembly": "phase_6b_read_only",
+                        "canonical_condition": condition,
+                        "group_id": None if group is None else group.group_id,
+                        "group_label": None if group is None else group.label,
+                        "group_split_applied": dataset_index.is_multi_group,
+                    },
+                )
+            )
+            summaries.append(
+                ProjectConditionTopographySummary(
+                    condition=source_condition_label,
+                    workbook_count=len(workbooks),
+                    included_subject_count=len(included_subjects),
+                    included_subjects=tuple(included_subjects),
+                    flagged_subjects=condition_flagged,
+                    group_id=None if group is None else group.group_id,
+                    group_label=None if group is None else group.label,
+                )
+            )
 
     return ProjectSourceTopographyInputSet(
         project_root=root,
@@ -218,15 +257,26 @@ def _sensor_value_unit(metric: str) -> str:
     return "summed FFT amplitude uV"
 
 
-def _condition_workbook_paths(condition_dir: Path) -> tuple[Path, ...]:
-    """Return flat and condition/group participant workbook paths."""
-    paths = [
-        path
-        for pattern in ("*.xlsx", "*/*.xlsx")
-        for path in condition_dir.glob(pattern)
-        if path.is_file() and is_excel_workbook_file(path)
-    ]
-    return tuple(sorted(paths))
+def _condition_output_id(
+    condition: str,
+    group: GroupInfo | None,
+    *,
+    split: bool,
+) -> str:
+    if split and group is not None:
+        return f"{group.group_id}_{condition}"
+    return condition
+
+
+def _condition_display_label(
+    condition: str,
+    group: GroupInfo | None,
+    *,
+    split: bool,
+) -> str:
+    if split and group is not None:
+        return f"{group.label} - {condition}"
+    return condition
 
 
 def _column_by_name(frame: pd.DataFrame, name: str) -> str | None:
@@ -356,11 +406,6 @@ def _column_indexes(
     return indexes
 
 
-def _subject_from_workbook_name(file_name: str) -> str:
-    prefix = file_name.split("_", 1)[0]
-    return _normalize_subject_id(prefix)
-
-
 def _normalize_subject_id(value: object) -> str:
     text = str(value).strip().upper()
     if not text:
@@ -369,3 +414,14 @@ def _normalize_subject_id(value: object) -> str:
     if match:
         return f"P{int(match.group(1))}"
     return text
+
+
+def _subject_in_ids(
+    participant_id: str,
+    participant_ids: Sequence[str] | set[str],
+) -> bool:
+    lookup = set(participant_ids)
+    return (
+        participant_id in lookup
+        or _normalize_subject_id(participant_id) in lookup
+    )

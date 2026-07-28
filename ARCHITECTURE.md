@@ -40,7 +40,13 @@ Primary areas:
 - `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling.
 - `src/Main_App/processing/`: canonical Main App processing package. It owns active EEG preprocessing, the stable `process_data` entry point, and processing-controller helpers.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
-- `src/Main_App/projects/`: canonical Main App project import surface. It owns the project model, project manager workflows, project metadata scanning, projects-root helpers, preprocessing-settings normalization, and the GUI-neutral canonical group/participant context used by processing and future downstream dataset indexing.
+- `src/Main_App/projects/`: canonical Main App project import surface. It owns
+  the project model, project manager workflows, project metadata scanning,
+  projects-root helpers, preprocessing-settings normalization, canonical
+  group/participant context, and the GUI-neutral processed-workbook dataset
+  index used by downstream tools. Generated group folders are validation
+  provenance only; canonical participant-group membership comes from
+  `project.json`.
 - `src/Main_App/workers/`: canonical Main App worker package for Qt workers, process-runner wrappers, and multiprocessing environment helpers.
 - `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics package for preprocessing audit helpers, event-time lock reporting, and runtime log routing. Repo-evaluation scripts stay in `scripts/` and `.agents/skills/`.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.

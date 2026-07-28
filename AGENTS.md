@@ -28,6 +28,11 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Publication-oriented figure generation must follow [docs/agent/quality/figure-generation.md](docs/agent/quality/figure-generation.md): matching `.pdf`/`.png` outputs, 600 dpi, Arial figure typography, and figure typography separated from GUI typography.
 - Active worker/process-runner imports should use `src/Main_App/workers/`.
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
+- Processed-workbook discovery and downstream group identity must use
+  `Main_App.projects.dataset_index` through the public `Main_App.projects`
+  import surface. Canonical group IDs come from participant metadata in
+  `project.json`; tool packages must not infer membership from output folders
+  or maintain independent participant/group detection logic.
 - Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
 - Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, quarantine-tree dependencies, or bundled `fsaverage` MRI template data unless the user explicitly scopes a restoration feature.
 - The new LORETA Visualizer work is a separate source-localization visualization branch under `src/Tools/LORETA_Visualizer/`, not a revival of `src/Tools/SourceLocalization/**`. Keep visualizer rendering, mesh helpers, payload adapters, demo data, and tool-local docs in that directory; preserve the boundary where future source-localization calculations produce prepared values and visualizer helpers bridge them into renderer payloads.

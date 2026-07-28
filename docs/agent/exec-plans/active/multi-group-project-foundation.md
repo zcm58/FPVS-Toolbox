@@ -2,12 +2,13 @@
 
 ## Status
 
-Active. The processing foundation is implemented and covered by focused tests.
-The remaining work is to consolidate processed-workbook discovery and group
-selection under a GUI-neutral `Main_App.projects` API, then migrate downstream
-tools without changing their scientific calculations or existing exports.
+Active. The processing foundation and shared processed-workbook index are
+implemented and covered by focused tests. Current group-aware consumers are
+being migrated to the `Main_App.projects` API; remaining figure/summary tools
+still need explicit group selection without changes to their scientific
+calculations or existing exports.
 
-Last reviewed against the repository on 2026-07-13.
+Last reviewed against the repository on 2026-07-28.
 
 ## Goal
 
@@ -118,6 +119,13 @@ of tool-specific special cases:
 - `Main_App.projects.project.Project` consumes that same normalizer and owns
   manifest persistence, grouped `input_folder = None`, and locked group
   fingerprint enforcement.
+- `Main_App.projects.dataset_index` owns non-mutating processed-workbook and
+  condition discovery, exact manifest-first participant matching, canonical
+  group assignment, stable-ID selection, legacy adapter shapes, duplicate
+  preference, and discovery diagnostics.
+- Generated group folders are observed routing provenance only. The shared
+  index always derives group IDs and labels from canonical participant
+  metadata.
 - `Main_App.processing.processing_controller.RawFileInfo` carries the raw file,
   participant ID, and stable group ID through discovery and review.
 - `discover_raw_files(...)` and `prepare_batch_file_infos(...)` enumerate all
@@ -133,12 +141,14 @@ of tool-specific special cases:
   labels in live status, all participant/file review tables, detail dialogs,
   and saved review flags. The processing-end frequency-domain QC dialog also
   shows manifest labels in its summary and flagged-value tables. Its numeric
-  workbook discovery remains project-pooled until the shared index migration.
+  workbook discovery now comes from the shared project dataset index while the
+  scientific calculation remains intentionally project-pooled.
 
 Focused coverage lives in:
 
 - `tests/project_io/test_project_v2_group_schema.py`
 - `tests/project_io/test_project_group_context.py`
+- `tests/project_io/test_project_dataset_index.py`
 - `tests/processing/test_processing_discovery_v2.py`
 - `tests/processing/test_processing_ledger.py`
 - `tests/processing/test_process_runner_epoch_contract.py`
@@ -147,15 +157,15 @@ Focused coverage lives in:
 - `tests/processing/test_preprocessing_qc_workflow_helpers.py`
 - `tests/gui/test_qc_group_membership.py` (CI Qt smoke)
 
-## Remaining Architecture Work
+## Shared Index and Remaining Architecture Work
 
 ### Shared processed-workbook index
 
-Extend the landed pure, read-only project group context with a module such as
-`src/Main_App/projects/dataset_index.py`. It must not import PySide6, pandas,
-Stats, Plot Generator, or another tool package.
+The landed `src/Main_App/projects/dataset_index.py` extends the pure,
+read-only project group context. It does not import PySide6, pandas, Stats,
+Plot Generator, or another tool package.
 
-The target model should preserve both stable identity and presentation values:
+The landed model preserves both stable identity and presentation values:
 
 ```python
 @dataclass(frozen=True)
@@ -178,6 +188,8 @@ class DatasetDiagnostic:
 class ProjectDatasetIndex:
     project_root: Path
     excel_root: Path
+    scan_root: Path
+    manifest: Mapping[str, Any] | None
     groups: Mapping[str, GroupInfo]
     participants: Mapping[str, ParticipantInfo]
     workbooks: tuple[WorkbookRecord, ...]
@@ -205,25 +217,25 @@ the manifest assignment.
 
 ### Downstream migration order
 
-1. Add workbook records and indexing to the shared context, cover them with
+1. [x] Add workbook records and indexing to the shared context, cover them with
    project-I/O tests, then export the new public names from `Main_App.projects`.
-2. Keep thin compatibility wrappers in
+2. [x] Keep thin compatibility wrappers in
    `Tools.Stats.data.stats_data_loader`, but move manifest lookup, group
    normalization, participant matching, and workbook indexing to the shared
    owner.
-3. Change processing-end harmonic and frequency-domain QC to import the shared
+3. [x] Change processing-end harmonic and frequency-domain QC to import the shared
    index directly instead of importing the Stats scanner.
-4. Change the LORETA Visualizer Stats-ready bridge to use the shared index
+4. [x] Change the LORETA Visualizer Stats-ready bridge to use the shared index
    rather than Stats data-loader internals. Migrate its independent
    `source_producers.project_inputs` workbook aggregator in the same step so it
    filters by canonical group before computing participant means.
-5. Change Plot Generator manifest/path/discovery helpers to shared adapters
+5. [x] Change Plot Generator manifest/path/discovery helpers to shared adapters
    while preserving its canonical-Excel-root and manifest-membership policies.
-6. Add group-aware selection to Publication Maps without changing map
+6. [ ] Add group-aware selection to Publication Maps without changing map
    calculations.
-7. Migrate Ratio Calculator and Individual Detectability from flat-folder
+7. [ ] Migrate Ratio Calculator and Individual Detectability from flat-folder
    globbing to indexed records before offering per-group output controls.
-8. Give the beta Epoch Averaging tool an explicit group-aware input contract;
+8. [ ] Give the beta Epoch Averaging tool an explicit group-aware input contract;
    until then it hard-fails for grouped projects instead of substituting the
    removed project-level input folder.
 
@@ -272,10 +284,10 @@ selection, and diagnostics only.
       tests.
 - [x] Preprocessing and frequency-domain QC GUI reviews display canonical group
       membership without changing participant-keyed exclusion behavior.
-- [ ] Processed-workbook records/index added to the shared project context.
-- [ ] Stats compatibility wrapper migrated to the shared index.
-- [ ] Processing QC and LORETA cross-tool Stats dependencies removed.
-- [ ] Plot Generator discovery migrated to the shared index.
+- [x] Processed-workbook records/index added to the shared project context.
+- [x] Stats compatibility wrapper migrated to the shared index.
+- [x] Processing QC and LORETA cross-tool Stats dependencies removed.
+- [x] Plot Generator discovery migrated to the shared index.
 - [ ] Remaining figure/summary tools migrated and given explicit group
       selection where appropriate.
 

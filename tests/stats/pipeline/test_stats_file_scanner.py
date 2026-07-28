@@ -9,7 +9,8 @@ def _write_project_manifest(project_root):
   "groups": {
     "default": {
       "label": "Default",
-      "folder_name": "Default"
+      "folder_name": "Default",
+      "raw_input_folder": "Raw/Default"
     }
   },
   "subfolders": {

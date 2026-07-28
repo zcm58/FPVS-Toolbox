@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -76,6 +78,89 @@ def test_project_input_assembler_reads_group_subfolder_workbooks(tmp_path) -> No
     assert [condition.label for condition in result.conditions] == ["Condition A", "Condition B"]
     assert result.summaries[0].workbook_count == 2
     assert result.conditions[0].metadata["included_subject_count"] == 1
+
+
+def test_project_input_assembler_splits_canonical_groups_before_aggregation(
+    tmp_path,
+) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    _convert_fixture_to_multi_group(project_root, keep_stale_flat_copy=True)
+
+    result = build_l2_mne_conditions_from_project(
+        project_root,
+        include_flagged_subjects=True,
+    )
+
+    assert [condition.label for condition in result.conditions] == [
+        "Control Group - Condition A",
+        "Patient Group - Condition A",
+        "Control Group - Condition B",
+        "Patient Group - Condition B",
+    ]
+    assert [
+        condition.metadata["group_id"] for condition in result.conditions
+    ] == ["control", "patient", "control", "patient"]
+    assert all(
+        condition.metadata["group_split_applied"]
+        for condition in result.conditions
+    )
+    assert result.conditions[0].metadata["included_subject_count"] == 1
+    assert result.conditions[1].metadata["included_subject_count"] == 1
+    assert np.isclose(result.conditions[0].harmonic_topographies[2.4][0], 10.0)
+    assert np.isclose(result.conditions[1].harmonic_topographies[2.4][0], 11.0)
+
+
+def test_project_input_assembler_keeps_one_group_condition_identity(
+    tmp_path,
+) -> None:
+    project_root = _build_project_fixture(tmp_path, group_subfolders=True)
+    _write_single_group_manifest(project_root)
+
+    result = build_l2_mne_conditions_from_project(
+        project_root,
+        include_flagged_subjects=True,
+    )
+
+    assert [condition.condition_id for condition in result.conditions] == [
+        "condition_a",
+        "condition_b",
+    ]
+    assert [condition.label for condition in result.conditions] == [
+        "Condition A",
+        "Condition B",
+    ]
+    assert all(
+        not condition.metadata["group_split_applied"]
+        for condition in result.conditions
+    )
+    assert all(
+        condition.metadata["group_id"] == "default"
+        for condition in result.conditions
+    )
+
+
+def test_project_input_assembler_rejects_unregistered_group_workbook(
+    tmp_path,
+) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    _convert_fixture_to_multi_group(project_root, keep_stale_flat_copy=False)
+    source = (
+        project_root
+        / "1 - Excel Data Files"
+        / "Condition A"
+        / "Control Group"
+        / "SCP1_Condition A_Results.xlsx"
+    )
+    shutil.copy2(
+        source,
+        source.with_name("SCP3_Condition A_Results.xlsx"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="workbook identity is incomplete in project.json",
+    ):
+        build_l2_mne_conditions_from_project(project_root)
 
 
 def test_project_input_assembler_rejects_missing_selected_column(tmp_path) -> None:
@@ -191,3 +276,75 @@ def _write_participant_workbook(
     with pd.ExcelWriter(path) as writer:
         bca.to_excel(writer, sheet_name="BCA (uV)", index=False)
         fft.to_excel(writer, sheet_name="FFT Amplitude (uV)", index=False)
+
+
+def _convert_fixture_to_multi_group(
+    project_root: Path,
+    *,
+    keep_stale_flat_copy: bool,
+) -> None:
+    excel_root = project_root / "1 - Excel Data Files"
+    for condition in ("Condition A", "Condition B"):
+        condition_dir = excel_root / condition
+        control_dir = condition_dir / "Control Group"
+        patient_dir = condition_dir / "Patient Group"
+        control_dir.mkdir()
+        patient_dir.mkdir()
+        control_source = condition_dir / f"SCP1_{condition}_Results.xlsx"
+        patient_source = condition_dir / f"SCP2_{condition}_Results.xlsx"
+        control_target = control_dir / control_source.name
+        patient_target = patient_dir / patient_source.name
+        shutil.move(control_source, control_target)
+        shutil.move(patient_source, patient_target)
+        if keep_stale_flat_copy:
+            shutil.copy2(control_target, control_source)
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "name": "Multi-group source input fixture",
+                "results_folder": ".",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "groups": {
+                    "control": {
+                        "label": "Control Group",
+                        "folder_name": "Control Group",
+                        "raw_input_folder": "Raw/Control",
+                    },
+                    "patient": {
+                        "label": "Patient Group",
+                        "folder_name": "Patient Group",
+                        "raw_input_folder": "Raw/Patient",
+                    },
+                },
+                "participants": {
+                    "SCP1": {"group_id": "control"},
+                    "SCP2": {"group_id": "patient"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_single_group_manifest(project_root: Path) -> None:
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "name": "Single-group source input fixture",
+                "results_folder": ".",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "groups": {
+                    "default": {
+                        "label": "Default",
+                        "folder_name": "Default",
+                        "raw_input_folder": "Raw/Default",
+                    }
+                },
+                "participants": {
+                    "SCP1": {"group_id": "default"},
+                    "SCP2": {"group_id": "default"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )

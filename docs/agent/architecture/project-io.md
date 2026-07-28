@@ -161,13 +161,21 @@ The processing contract is deliberately strict:
   direct model or manifest changes to locked group definitions hard-fail.
 
 The shared read-only group/participant context is now available from
-`Main_App.projects`. The current downstream workbook scanners are compatibility
-implementations, not the intended long-term ownership boundary. The remaining
-target is a processed-workbook index under `Main_App.projects` that adds
-conditions and workbook records to that context for all tools. New code should
-not add another manifest normalizer or import a scanner from Stats or Plot
-Generator. Until the shared index lands, preserve existing adapters and output
-behavior. See
+`Main_App.projects`. `Main_App.projects.dataset_index` is the single
+GUI-neutral owner for processed-workbook discovery, condition and participant
+identity, canonical group IDs/labels, duplicate selection, and discovery
+diagnostics. It accepts the project root, configured Excel root, condition
+folder, or group folder without creating directories. Exact manifest
+participant IDs take precedence over legacy filename matching; canonical
+grouped copies take precedence over stale flat copies.
+
+Group membership always comes from the normalized participant metadata in
+`project.json`. A generated group folder is retained on `WorkbookRecord` only
+to validate routing and report mismatches; it must never assign or override a
+group. Downstream tools may retain thin compatibility adapters for established
+return shapes, but they must query `load_project_dataset_index(...)` rather
+than implement manifest-group normalization, participant-ID parsing, or
+workbook/group discovery themselves. See
 `docs/agent/exec-plans/active/multi-group-project-foundation.md`.
 
 Rules:

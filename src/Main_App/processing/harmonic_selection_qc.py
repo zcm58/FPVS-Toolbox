@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from Main_App.projects import load_project_dataset_index
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.frequency_domain_qc import filter_frequency_domain_subjects
 from Tools.Stats.analysis.dv_policy_group_significant import (
@@ -26,7 +27,6 @@ from Tools.Stats.data.group_harmonic_cache import (
     build_group_harmonic_cache_request,
     lookup_cached_group_harmonic_selection,
 )
-from Tools.Stats.data.stats_data_loader import scan_folder_simple
 from Tools.Stats.io.harmonic_selection_export import (
     HARMONIC_SELECTION_QC_WORKBOOK_NAME,
     write_harmonic_selection_workbook,
@@ -210,13 +210,10 @@ def _processing_harmonic_selection_inputs(
     """Resolve the canonical project-wide inputs used during processing."""
 
     project_root = Path(project.project_root).resolve()
-    subfolders = getattr(project, "subfolders", {}) or {}
-    excel_root = _project_subfolder_path(
-        project_root,
-        subfolders.get("excel") if isinstance(subfolders, Mapping) else None,
-        "1 - Excel Data Files",
-    )
-    subjects, conditions, subject_data = scan_folder_simple(str(excel_root))
+    dataset_index = load_project_dataset_index(project_root)
+    subjects = list(dataset_index.participant_ids)
+    conditions = list(dataset_index.conditions)
+    subject_data = dataset_index.subject_data(require_group_assignment=True)
     subjects, subject_data = _filter_to_completed_subjects(
         project_root=project_root,
         subjects=subjects,
@@ -330,17 +327,6 @@ def _filter_to_completed_subjects(
     return filtered_subjects, {
         subject: dict(subject_data.get(subject, {})) for subject in filtered_subjects
     }
-
-
-def _project_subfolder_path(
-    project_root: Path,
-    configured: object,
-    default_name: str,
-) -> Path:
-    raw_path = Path(str(configured or default_name))
-    if raw_path.is_absolute():
-        return raw_path
-    return project_root / raw_path
 
 
 def _ordered_conditions(project: Any, scanned_conditions: list[str]) -> list[str]:

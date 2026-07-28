@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 import zipfile
@@ -11,7 +10,12 @@ from xml.etree import ElementTree
 import numpy as np
 import pandas as pd
 
-from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.projects import (
+    DatasetIndexError,
+    ProjectDatasetIndex,
+    WorkbookRecord,
+    load_project_dataset_index,
+)
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.Plot_Generator.excel_inputs import (
     _infer_subject_id_from_path,
@@ -36,23 +40,118 @@ from Tools.Plot_Generator.spectral_qc_report import (
 class PlotDataCollectionMixin:
     """Worker-state helpers for Excel discovery and FullSNR data collection."""
 
+    def _load_dataset_index(self) -> ProjectDatasetIndex:
+        """Load the shared read-only workbook index once in the worker thread."""
+
+        if getattr(self, "_dataset_index_loaded", False):
+            return self._dataset_index
+        dataset_source = (
+            self.project_root
+            if self.multi_group_mode and self.project_root
+            else self.folder
+        )
+        try:
+            index = load_project_dataset_index(dataset_source)
+        except DatasetIndexError as exc:
+            raise RuntimeError(
+                f"Unable to index processed workbooks under {dataset_source}: {exc}"
+            ) from exc
+        for diagnostic in index.diagnostics:
+            if (
+                diagnostic.code == "unresolved_participant"
+                and index.manifest is None
+            ):
+                continue
+            self._emit(
+                f"Dataset index warning [{diagnostic.code}]: "
+                f"{diagnostic.message}"
+            )
+        self._dataset_index = index
+        self._dataset_index_loaded = True
+        self._workbook_records_by_path = {
+            record.path.resolve(strict=False): record
+            for record in index.workbooks
+        }
+        if index.manifest is not None:
+            canonical_groups = index.participant_group_label_map(
+                uppercase_keys=True,
+                include_legacy_aliases=False,
+            )
+            if self.enable_group_overlay:
+                canonical_labels = {
+                    group.label.casefold(): group.label
+                    for group in index.ordered_groups
+                }
+                missing_labels = [
+                    label
+                    for label in self.selected_groups
+                    if label.casefold() not in canonical_labels
+                ]
+                if missing_labels:
+                    raise RuntimeError(
+                        "Selected project group label(s) changed or no longer "
+                        "exist: "
+                        + ", ".join(missing_labels)
+                        + ". Reopen the Plot Generator and reselect groups."
+                    )
+                self.selected_groups = [
+                    canonical_labels[label.casefold()]
+                    for label in self.selected_groups
+                ]
+                self._selected_group_set = set(self.selected_groups)
+            if self.subject_groups and self.subject_groups != canonical_groups:
+                self._emit(
+                    "Group assignments changed since the plot was configured; "
+                    "using the current canonical project assignments."
+                )
+            self.subject_groups = canonical_groups
+        return index
+
     def _count_excel_files(self, condition: str) -> int:
         """Return the number of Excel files for a condition."""
         return len(self._list_excel_files(condition))
 
     def _list_excel_files(self, condition: str) -> list[Path]:
-        """Return sorted Excel files under a condition folder (recursive)."""
+        """Return shared indexed workbook paths for one condition."""
+
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             return []
-        files = [
-            Path(root) / name
-            for root, _, names in os.walk(cond_folder)
-            for name in names
-            if is_excel_workbook_file(name)
-        ]
-        files.sort()
-        return files
+        index = self._load_dataset_index()
+        records = index.select(conditions=(condition,))
+        if not records:
+            resolved_condition = cond_folder.resolve(strict=False)
+            records = tuple(
+                record
+                for record in index.workbooks
+                if _is_relative_to(record.path, resolved_condition)
+            )
+        paths = {record.path for record in records}
+        if index.manifest is None:
+            for diagnostic in index.diagnostics:
+                if diagnostic.code != "unresolved_participant":
+                    continue
+                paths.update(
+                    path
+                    for path in diagnostic.paths
+                    if _is_relative_to(path, cond_folder)
+                )
+        return sorted(paths)
+
+    def _workbook_record(self, excel_path: Path) -> WorkbookRecord | None:
+        self._load_dataset_index()
+        return self._workbook_records_by_path.get(excel_path.resolve(strict=False))
+
+    def _subject_id_for_workbook(self, excel_path: Path) -> str | None:
+        """Return the shared canonical identity for an indexed workbook."""
+
+        record = self._workbook_record(excel_path)
+        if record is not None and self._dataset_index.manifest is not None:
+            return record.participant_id.upper()
+        return _infer_subject_id_from_path(
+            excel_path,
+            self.subject_groups.keys() if self.subject_groups else None,
+        )
 
     def _read_full_snr_direct(
         self,
@@ -196,10 +295,7 @@ class PlotDataCollectionMixin:
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return [], {}
-            subject_id = _infer_subject_id_from_path(
-                excel_path,
-                self.subject_groups.keys() if self.subject_groups else None,
-            )
+            subject_id = self._subject_id_for_workbook(excel_path)
             if not subject_id:
                 self._emit(
                     f"Skipping {excel_path.name}: unable to determine subject ID.",
@@ -369,3 +465,11 @@ class PlotDataCollectionMixin:
             source_workbooks,
         )
         return freq_list, subject_roi_data
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+    except ValueError:
+        return False
+    return True

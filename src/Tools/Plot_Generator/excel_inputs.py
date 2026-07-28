@@ -2,41 +2,23 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Iterable, Sequence
 
-_PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
+from Main_App.projects import infer_workbook_participant_id
 
 
 def _infer_subject_id_from_path(
     excel_path: Path,
     known_subjects: Iterable[str] | None = None,
 ) -> str | None:
-    """Return a best-effort subject identifier inferred from the file name."""
+    """Delegate legacy subject matching to the shared dataset identity owner."""
 
-    cleaned = excel_path.stem.strip()
-    if not cleaned:
-        return None
-    stem_upper = cleaned.upper()
-    if known_subjects is not None:
-        candidates = sorted(
-            {
-                str(subject).strip().upper()
-                for subject in known_subjects
-                if str(subject).strip()
-            },
-            key=len,
-            reverse=True,
-        )
-        for candidate in candidates:
-            if stem_upper == candidate or stem_upper.startswith(f"{candidate}_"):
-                return candidate
-
-    match = _PID_PATTERN.search(excel_path.stem)
-    if match:
-        return match.group(1).upper()
-    return stem_upper
+    return infer_workbook_participant_id(
+        excel_path,
+        known_participant_ids=known_subjects or (),
+        fallback_to_stem=True,
+    )
 
 
 def _frequency_pairs_from_columns(columns: Iterable[object]) -> list[tuple[float, str]]:

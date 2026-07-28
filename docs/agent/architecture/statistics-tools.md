@@ -69,7 +69,11 @@ Stats grouping:
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, pipeline state, and worker scheduling.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
-- `data/`: project scans, manifest lookup, project-root context, subject IDs, and missing input detection.
+- `data/`: Stats-facing project scan adapters, project-root context, subject
+  IDs, and missing input detection. Processed-workbook discovery, manifest
+  group identity, and participant/group matching are owned by
+  `Main_App.projects.dataset_index`; `stats_data_loader` preserves legacy
+  return shapes only.
 - `analysis/`: Summed BCA DV policy facade and helpers, statistical engines, and vectorized FullSNR/SNR/noise helpers.
 - `analysis/canonical_harmonics.py`: thin shared API for resolving the
   saved processing-time FPVS Toolbox significant-harmonic list and readable
@@ -157,7 +161,8 @@ Rules:
   report a recalculation failure instead of allowing a later source-map cache
   error; an eligible in-memory hit may first repair the missing durable entry.
 - Harmonic-cache identity includes the frequency-domain QC method, thresholds,
-  and participant/electrode exclusions, but not
+  participant/electrode exclusions, and the normalized
+  participant-condition exclusion cohort, but not
   `frequency_domain_qc.downstream_outputs_stale`. That field is workflow status
   toggled around downstream regeneration, not a scientific input. Cache lookup
   may accept an older entry that differs only by this retired status bit; every
@@ -175,11 +180,19 @@ Rules:
   preflight happens in the Stats worker before QC screening, grand-average
   amplitude row loading, and `BCA (uV)` aggregation, so an off-grid FullFFT
   workbook should not trigger expensive downstream sheet reads.
+- Managed project participant-condition exclusions are applied by the shared
+  dataset index before that header preflight, so an explicitly excluded
+  workbook cannot block harmonic selection while its file remains on disk for
+  audit. The Settings review reads only FullFFT headers, identifies each grid
+  by the exact 1.2-Hz bin index (the integer oddball-cycle count), and flags
+  shorter or longer grids that differ from a unique strict project majority;
+  it does not change Stats' exact-column or neighboring-noise rules.
 - After group-level harmonics are selected, the `BCA (uV)` sheet must also
   contain exact included harmonic columns such as `1.2000_Hz`. Do not use
   tolerance matching, nearest-column matching, or policy fallbacks for selected
   group harmonics; missing exact selected columns are hard failures.
-- Stats folder scans may rebind the window to the manifest-owning project root
+- Stats folder scans consume the shared project dataset index and may rebind
+  the window to the manifest-owning project root
   only when the selected Excel folder belongs to that manifest-defined Excel
   subfolder. When rebinding, clear project-bound scan/results/export state so
   stale subjects, conditions, groups, and output paths do not survive.

@@ -16,12 +16,12 @@ import numpy as np
 import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.projects import load_project_dataset_index
 from Tools.Stats.io.xlsx_selected_reader import (
     MissingXlsxColumnsError,
     read_xlsx_sheet_header,
     read_xlsx_sheet_selected_columns,
 )
-from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS,
     DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
@@ -33,11 +33,12 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
 )
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     ProjectConditionTopographySummary,
-    _condition_workbook_paths,
+    _condition_display_label,
+    _condition_output_id,
     _read_selected_harmonics,
-    _read_subject_list,
     _resolve_conditions,
-    _subject_from_workbook_name,
+    _subject_in_ids,
+    project_source_participant_selection,
 )
 
 FULL_FFT_AMPLITUDE_SHEET_NAME = "FullFFT Amplitude (uV)"
@@ -146,128 +147,182 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
     min_noise_bins: int = DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
 ) -> ProjectSourceFrequencyBinInputSet:
     """Build deprecated group-level target/noise FullFFT topographies."""
-    root = Path(project_root)
+    root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
+    dataset_index = load_project_dataset_index(root)
+    dataset_index.require_group_assignments()
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
-    excluded_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Excluded Participants.xlsx")
-    flagged_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Flagged Participants.xlsx")
-    frequency_exclusions = active_frequency_domain_exclusions(root)
-    source_electrode_excluded_subjects = {
-        participant
-        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
-        if electrodes
-    }
-    excluded_lookup = set(excluded_subjects)
-    excluded_lookup.update(frequency_exclusions.excluded_participants)
-    excluded_lookup.update(source_electrode_excluded_subjects)
-    if not include_flagged_subjects:
-        excluded_lookup.update(flagged_subjects)
+    selection = project_source_participant_selection(
+        root,
+        include_flagged_subjects=include_flagged_subjects,
+    )
+    excluded_lookup = set(selection.excluded_subjects)
+    flagged_subjects = selection.flagged_subjects
 
     expected_electrodes = tuple(name.upper() for name in DEFAULT_ELECTRODE_NAMES_64)
-    diagnostics: list[str] = []
+    diagnostics = [item.message for item in dataset_index.diagnostics]
     source_conditions: list[L2MNEHaukZScoreCondition] = []
     summaries: list[ProjectConditionTopographySummary] = []
     shared_plan: ProjectFullFftBinPlan | None = None
     excluded_offsets_tuple = tuple(sorted({int(offset) for offset in excluded_offsets}))
 
     for condition in requested_conditions:
-        condition_dir = root / "1 - Excel Data Files" / condition
-        if not condition_dir.is_dir():
+        condition_records = dataset_index.select(conditions=(condition,))
+        if not condition_records:
             diagnostics.append(f"Missing condition workbook folder: {condition}")
             continue
-        workbooks = _condition_workbook_paths(condition_dir)
-        target_vectors: dict[float, list[np.ndarray]] = {harmonic: [] for harmonic in selected_harmonics}
-        noise_vectors: dict[float, dict[int, list[np.ndarray]]] = {harmonic: {} for harmonic in selected_harmonics}
-        included_subjects: list[str] = []
-        condition_plan: ProjectFullFftBinPlan | None = None
-        for workbook_path in workbooks:
-            subject_id = _subject_from_workbook_name(workbook_path.name)
-            if subject_id in excluded_lookup:
-                continue
-            workbook_values = _read_fullfft_topographies(
-                workbook_path,
-                selected_harmonics=selected_harmonics,
-                expected_electrodes=expected_electrodes,
-                plan=shared_plan,
-                noise_window_bins=int(noise_window_bins),
-                excluded_offsets=excluded_offsets_tuple,
-                min_noise_bins=int(min_noise_bins),
-            )
-            if shared_plan is None:
-                shared_plan = workbook_values.plan
-            if condition_plan is None:
-                condition_plan = workbook_values.plan
-            elif condition_plan != workbook_values.plan:
-                raise ProjectFullFftInputError(
-                    f"{workbook_path.name} has a different FullFFT target/noise-bin plan."
+        for group, workbooks in dataset_index.partition_by_group(
+            conditions=(condition,),
+            require_nonempty_groups=dataset_index.is_multi_group,
+        ):
+            target_vectors: dict[float, list[np.ndarray]] = {
+                harmonic: [] for harmonic in selected_harmonics
+            }
+            noise_vectors: dict[float, dict[int, list[np.ndarray]]] = {
+                harmonic: {} for harmonic in selected_harmonics
+            }
+            included_subjects: list[str] = []
+            condition_plan: ProjectFullFftBinPlan | None = None
+            for workbook in workbooks:
+                subject_id = workbook.participant_id
+                if _subject_in_ids(subject_id, excluded_lookup):
+                    continue
+                workbook_values = _read_fullfft_topographies(
+                    workbook.path,
+                    selected_harmonics=selected_harmonics,
+                    expected_electrodes=expected_electrodes,
+                    plan=shared_plan,
+                    noise_window_bins=int(noise_window_bins),
+                    excluded_offsets=excluded_offsets_tuple,
+                    min_noise_bins=int(min_noise_bins),
                 )
-            included_subjects.append(subject_id)
-            for harmonic in selected_harmonics:
-                target_vectors[harmonic].append(workbook_values.target_by_harmonic[harmonic])
-                for offset, vector in workbook_values.noise_by_harmonic_offset[harmonic].items():
-                    noise_vectors[harmonic].setdefault(offset, []).append(vector)
-        if not included_subjects:
-            diagnostics.append(f"No included workbooks for condition: {condition}")
-            continue
-        if condition_plan is None:
-            raise ProjectFullFftInputError(f"No FullFFT bin plan was assembled for condition: {condition}")
-
-        harmonic_bins: dict[float, L2MNEHaukHarmonicBins] = {}
-        plan_by_harmonic = {plan.harmonic_hz: plan for plan in condition_plan.harmonic_plans}
-        for harmonic in selected_harmonics:
-            plan = plan_by_harmonic[harmonic]
-            noise_means: dict[int, np.ndarray] = {}
-            for noise in plan.noise_bins:
-                vectors = noise_vectors[harmonic].get(noise.offset, [])
-                if len(vectors) != len(included_subjects):
+                if shared_plan is None:
+                    shared_plan = workbook_values.plan
+                if condition_plan is None:
+                    condition_plan = workbook_values.plan
+                elif condition_plan != workbook_values.plan:
                     raise ProjectFullFftInputError(
-                        f"Condition {condition!r} harmonic {harmonic:g} Hz offset {noise.offset} "
-                        "is missing participant topographies."
+                        f"{workbook.path.name} has a different FullFFT "
+                        "target/noise-bin plan."
                     )
-                noise_means[noise.offset] = np.mean(np.vstack(vectors), axis=0).astype(float)
-            harmonic_bins[harmonic] = L2MNEHaukHarmonicBins(
-                harmonic_hz=harmonic,
-                target_topography=np.mean(np.vstack(target_vectors[harmonic]), axis=0).astype(float),
-                target_frequency_hz=plan.target_frequency_hz,
-                target_bin_index=plan.target_bin_index,
-                target_column=plan.target_column,
-                noise_topographies_by_offset=noise_means,
-                noise_frequencies_hz_by_offset={noise.offset: noise.frequency_hz for noise in plan.noise_bins},
-                noise_bin_indices_by_offset={noise.offset: noise.bin_index for noise in plan.noise_bins},
-                noise_columns_by_offset={noise.offset: noise.column for noise in plan.noise_bins},
+                included_subjects.append(subject_id)
+                for harmonic in selected_harmonics:
+                    target_vectors[harmonic].append(
+                        workbook_values.target_by_harmonic[harmonic]
+                    )
+                    for offset, vector in workbook_values.noise_by_harmonic_offset[
+                        harmonic
+                    ].items():
+                        noise_vectors[harmonic].setdefault(offset, []).append(
+                            vector
+                        )
+            source_condition_label = _condition_display_label(
+                condition,
+                group,
+                split=dataset_index.is_multi_group,
             )
+            if not included_subjects:
+                diagnostics.append(
+                    f"No included workbooks for condition: {source_condition_label}"
+                )
+                continue
+            if condition_plan is None:
+                raise ProjectFullFftInputError(
+                    f"No FullFFT bin plan was assembled for condition: "
+                    f"{source_condition_label}"
+                )
 
-        condition_flagged = tuple(subject for subject in included_subjects if subject in flagged_subjects)
-        source_conditions.append(
-            L2MNEHaukZScoreCondition(
-                condition_id=condition,
-                label=condition,
-                harmonic_bins=harmonic_bins,
-                sensor_value_unit="raw FFT amplitude uV",
-                metadata={
-                    "project_root_name": root.name,
-                    "source_sheet": FULL_FFT_AMPLITUDE_SHEET_NAME,
-                    "selected_harmonics_hz": list(selected_harmonics),
-                    "included_subject_count": len(included_subjects),
-                    "include_flagged_subjects": include_flagged_subjects,
-                    "flagged_subjects_included": list(condition_flagged),
-                    "source_ready_input": True,
-                    "project_input_assembly": "phase_6d_fullfft_neighbor_bins_read_only",
-                },
+            harmonic_bins: dict[float, L2MNEHaukHarmonicBins] = {}
+            plan_by_harmonic = {
+                plan.harmonic_hz: plan
+                for plan in condition_plan.harmonic_plans
+            }
+            for harmonic in selected_harmonics:
+                plan = plan_by_harmonic[harmonic]
+                noise_means: dict[int, np.ndarray] = {}
+                for noise in plan.noise_bins:
+                    vectors = noise_vectors[harmonic].get(noise.offset, [])
+                    if len(vectors) != len(included_subjects):
+                        raise ProjectFullFftInputError(
+                            f"Condition {source_condition_label!r} harmonic "
+                            f"{harmonic:g} Hz offset {noise.offset} is missing "
+                            "participant topographies."
+                        )
+                    noise_means[noise.offset] = np.mean(
+                        np.vstack(vectors),
+                        axis=0,
+                    ).astype(float)
+                harmonic_bins[harmonic] = L2MNEHaukHarmonicBins(
+                    harmonic_hz=harmonic,
+                    target_topography=np.mean(
+                        np.vstack(target_vectors[harmonic]),
+                        axis=0,
+                    ).astype(float),
+                    target_frequency_hz=plan.target_frequency_hz,
+                    target_bin_index=plan.target_bin_index,
+                    target_column=plan.target_column,
+                    noise_topographies_by_offset=noise_means,
+                    noise_frequencies_hz_by_offset={
+                        noise.offset: noise.frequency_hz
+                        for noise in plan.noise_bins
+                    },
+                    noise_bin_indices_by_offset={
+                        noise.offset: noise.bin_index
+                        for noise in plan.noise_bins
+                    },
+                    noise_columns_by_offset={
+                        noise.offset: noise.column for noise in plan.noise_bins
+                    },
+                )
+
+            condition_flagged = tuple(
+                subject
+                for subject in included_subjects
+                if _subject_in_ids(subject, flagged_subjects)
             )
-        )
-        summaries.append(
-            ProjectConditionTopographySummary(
-                condition=condition,
-                workbook_count=len(workbooks),
-                included_subject_count=len(included_subjects),
-                included_subjects=tuple(included_subjects),
-                flagged_subjects=condition_flagged,
+            source_condition_id = _condition_output_id(
+                condition,
+                group,
+                split=dataset_index.is_multi_group,
             )
-        )
+            source_conditions.append(
+                L2MNEHaukZScoreCondition(
+                    condition_id=source_condition_id,
+                    label=source_condition_label,
+                    harmonic_bins=harmonic_bins,
+                    sensor_value_unit="raw FFT amplitude uV",
+                    metadata={
+                        "project_root_name": root.name,
+                        "source_sheet": FULL_FFT_AMPLITUDE_SHEET_NAME,
+                        "selected_harmonics_hz": list(selected_harmonics),
+                        "included_subject_count": len(included_subjects),
+                        "include_flagged_subjects": include_flagged_subjects,
+                        "flagged_subjects_included": list(condition_flagged),
+                        "source_ready_input": True,
+                        "project_input_assembly": (
+                            "phase_6d_fullfft_neighbor_bins_read_only"
+                        ),
+                        "canonical_condition": condition,
+                        "group_id": None if group is None else group.group_id,
+                        "group_label": None if group is None else group.label,
+                        "group_split_applied": dataset_index.is_multi_group,
+                    },
+                )
+            )
+            summaries.append(
+                ProjectConditionTopographySummary(
+                    condition=source_condition_label,
+                    workbook_count=len(workbooks),
+                    included_subject_count=len(included_subjects),
+                    included_subjects=tuple(included_subjects),
+                    flagged_subjects=condition_flagged,
+                    group_id=None if group is None else group.group_id,
+                    group_label=None if group is None else group.label,
+                )
+            )
 
     if shared_plan is None:
         raise ProjectFullFftInputError("No included FullFFT workbooks were found for source-space z-score assembly.")
@@ -296,112 +351,143 @@ def build_l2_mne_hauk_participant_zscore_conditions_from_project(
     min_noise_bins: int = DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
 ) -> ProjectParticipantSourceFrequencyBinInputSet:
     """Build participant-level target/noise FullFFT topographies."""
-    root = Path(project_root)
+    root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Project root does not exist: {root}")
+    dataset_index = load_project_dataset_index(root)
+    dataset_index.require_group_assignments()
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
-    excluded_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Excluded Participants.xlsx")
-    flagged_subjects = _read_subject_list(root / "3 - Statistical Analysis Results" / "Flagged Participants.xlsx")
-    frequency_exclusions = active_frequency_domain_exclusions(root)
-    source_electrode_excluded_subjects = {
-        participant
-        for participant, electrodes in frequency_exclusions.auto_excluded_electrodes_by_participant.items()
-        if electrodes
-    }
-    excluded_lookup = set(excluded_subjects)
-    excluded_lookup.update(frequency_exclusions.excluded_participants)
-    excluded_lookup.update(source_electrode_excluded_subjects)
-    if not include_flagged_subjects:
-        excluded_lookup.update(flagged_subjects)
+    selection = project_source_participant_selection(
+        root,
+        include_flagged_subjects=include_flagged_subjects,
+    )
+    excluded_lookup = set(selection.excluded_subjects)
+    flagged_subjects = selection.flagged_subjects
 
     expected_electrodes = tuple(name.upper() for name in DEFAULT_ELECTRODE_NAMES_64)
-    diagnostics: list[str] = []
+    diagnostics = [item.message for item in dataset_index.diagnostics]
     source_conditions: list[L2MNEHaukParticipantGroupCondition] = []
     summaries: list[ProjectConditionTopographySummary] = []
     shared_plan: ProjectFullFftBinPlan | None = None
     excluded_offsets_tuple = tuple(sorted({int(offset) for offset in excluded_offsets}))
 
     for condition in requested_conditions:
-        condition_dir = root / "1 - Excel Data Files" / condition
-        if not condition_dir.is_dir():
+        condition_records = dataset_index.select(conditions=(condition,))
+        if not condition_records:
             diagnostics.append(f"Missing condition workbook folder: {condition}")
             continue
-        workbooks = _condition_workbook_paths(condition_dir)
-        participants: list[L2MNEHaukParticipantSourceInput] = []
-        included_subjects: list[str] = []
-        condition_plan: ProjectFullFftBinPlan | None = None
-        for workbook_path in workbooks:
-            subject_id = _subject_from_workbook_name(workbook_path.name)
-            if subject_id in excluded_lookup:
-                continue
-            workbook_values = _read_fullfft_topographies(
-                workbook_path,
-                selected_harmonics=selected_harmonics,
-                expected_electrodes=expected_electrodes,
-                plan=shared_plan,
-                noise_window_bins=int(noise_window_bins),
-                excluded_offsets=excluded_offsets_tuple,
-                min_noise_bins=int(min_noise_bins),
+        for group, workbooks in dataset_index.partition_by_group(
+            conditions=(condition,),
+            require_nonempty_groups=dataset_index.is_multi_group,
+        ):
+            participants: list[L2MNEHaukParticipantSourceInput] = []
+            included_subjects: list[str] = []
+            condition_plan: ProjectFullFftBinPlan | None = None
+            source_condition_id = _condition_output_id(
+                condition,
+                group,
+                split=dataset_index.is_multi_group,
             )
-            if shared_plan is None:
-                shared_plan = workbook_values.plan
-            if condition_plan is None:
-                condition_plan = workbook_values.plan
-            elif condition_plan != workbook_values.plan:
-                raise ProjectFullFftInputError(
-                    f"{workbook_path.name} has a different FullFFT target/noise-bin plan."
+            source_condition_label = _condition_display_label(
+                condition,
+                group,
+                split=dataset_index.is_multi_group,
+            )
+            for workbook in workbooks:
+                subject_id = workbook.participant_id
+                if _subject_in_ids(subject_id, excluded_lookup):
+                    continue
+                workbook_values = _read_fullfft_topographies(
+                    workbook.path,
+                    selected_harmonics=selected_harmonics,
+                    expected_electrodes=expected_electrodes,
+                    plan=shared_plan,
+                    noise_window_bins=int(noise_window_bins),
+                    excluded_offsets=excluded_offsets_tuple,
+                    min_noise_bins=int(min_noise_bins),
                 )
-            included_subjects.append(subject_id)
-            participants.append(
-                L2MNEHaukParticipantSourceInput(
-                    participant_id=subject_id,
-                    condition=_participant_hauk_condition(
-                        condition=condition,
+                if shared_plan is None:
+                    shared_plan = workbook_values.plan
+                if condition_plan is None:
+                    condition_plan = workbook_values.plan
+                elif condition_plan != workbook_values.plan:
+                    raise ProjectFullFftInputError(
+                        f"{workbook.path.name} has a different FullFFT "
+                        "target/noise-bin plan."
+                    )
+                included_subjects.append(subject_id)
+                participants.append(
+                    L2MNEHaukParticipantSourceInput(
                         participant_id=subject_id,
-                        root=root,
-                        selected_harmonics=selected_harmonics,
-                        workbook_values=workbook_values,
-                        include_flagged_subjects=include_flagged_subjects,
-                        flagged_subjects=flagged_subjects,
-                    ),
+                        condition=_participant_hauk_condition(
+                            condition_id=source_condition_id,
+                            condition_label=source_condition_label,
+                            canonical_condition=condition,
+                            participant_id=subject_id,
+                            root=root,
+                            selected_harmonics=selected_harmonics,
+                            workbook_values=workbook_values,
+                            include_flagged_subjects=include_flagged_subjects,
+                            flagged_subjects=flagged_subjects,
+                            group_id=None if group is None else group.group_id,
+                            group_label=None if group is None else group.label,
+                            group_split_applied=dataset_index.is_multi_group,
+                        ),
+                    )
+                )
+            if not included_subjects:
+                diagnostics.append(
+                    f"No included workbooks for condition: {source_condition_label}"
+                )
+                continue
+            if condition_plan is None:
+                raise ProjectFullFftInputError(
+                    f"No FullFFT bin plan was assembled for condition: "
+                    f"{source_condition_label}"
+                )
+
+            condition_flagged = tuple(
+                subject
+                for subject in included_subjects
+                if _subject_in_ids(subject, flagged_subjects)
+            )
+            source_conditions.append(
+                L2MNEHaukParticipantGroupCondition(
+                    condition_id=source_condition_id,
+                    label=source_condition_label,
+                    participants=tuple(participants),
+                    sensor_value_unit="raw FFT amplitude uV",
+                    metadata={
+                        "project_root_name": root.name,
+                        "source_sheet": FULL_FFT_AMPLITUDE_SHEET_NAME,
+                        "selected_harmonics_hz": list(selected_harmonics),
+                        "included_subject_count": len(included_subjects),
+                        "include_flagged_subjects": include_flagged_subjects,
+                        "flagged_subjects_included": list(condition_flagged),
+                        "source_ready_input": True,
+                        "project_input_assembly": (
+                            "phase_6h_a2_fullfft_participant_neighbor_bins_read_only"
+                        ),
+                        "canonical_condition": condition,
+                        "group_id": None if group is None else group.group_id,
+                        "group_label": None if group is None else group.label,
+                        "group_split_applied": dataset_index.is_multi_group,
+                    },
                 )
             )
-        if not included_subjects:
-            diagnostics.append(f"No included workbooks for condition: {condition}")
-            continue
-        if condition_plan is None:
-            raise ProjectFullFftInputError(f"No FullFFT bin plan was assembled for condition: {condition}")
-
-        condition_flagged = tuple(subject for subject in included_subjects if subject in flagged_subjects)
-        source_conditions.append(
-            L2MNEHaukParticipantGroupCondition(
-                condition_id=condition,
-                label=condition,
-                participants=tuple(participants),
-                sensor_value_unit="raw FFT amplitude uV",
-                metadata={
-                    "project_root_name": root.name,
-                    "source_sheet": FULL_FFT_AMPLITUDE_SHEET_NAME,
-                    "selected_harmonics_hz": list(selected_harmonics),
-                    "included_subject_count": len(included_subjects),
-                    "include_flagged_subjects": include_flagged_subjects,
-                    "flagged_subjects_included": list(condition_flagged),
-                    "source_ready_input": True,
-                    "project_input_assembly": "phase_6h_a2_fullfft_participant_neighbor_bins_read_only",
-                },
+            summaries.append(
+                ProjectConditionTopographySummary(
+                    condition=source_condition_label,
+                    workbook_count=len(workbooks),
+                    included_subject_count=len(included_subjects),
+                    included_subjects=tuple(included_subjects),
+                    flagged_subjects=condition_flagged,
+                    group_id=None if group is None else group.group_id,
+                    group_label=None if group is None else group.label,
+                )
             )
-        )
-        summaries.append(
-            ProjectConditionTopographySummary(
-                condition=condition,
-                workbook_count=len(workbooks),
-                included_subject_count=len(included_subjects),
-                included_subjects=tuple(included_subjects),
-                flagged_subjects=condition_flagged,
-            )
-        )
 
     if shared_plan is None:
         raise ProjectFullFftInputError("No included FullFFT workbooks were found for source-space z-score assembly.")
@@ -422,13 +508,18 @@ def build_l2_mne_hauk_participant_zscore_conditions_from_project(
 
 def _participant_hauk_condition(
     *,
-    condition: str,
+    condition_id: str,
+    condition_label: str,
+    canonical_condition: str,
     participant_id: str,
     root: Path,
     selected_harmonics: tuple[float, ...],
     workbook_values: _WorkbookFullFftTopographies,
     include_flagged_subjects: bool,
     flagged_subjects: tuple[str, ...],
+    group_id: str | None,
+    group_label: str | None,
+    group_split_applied: bool,
 ) -> L2MNEHaukZScoreCondition:
     harmonic_bins: dict[float, L2MNEHaukHarmonicBins] = {}
     plan_by_harmonic = {plan.harmonic_hz: plan for plan in workbook_values.plan.harmonic_plans}
@@ -446,8 +537,8 @@ def _participant_hauk_condition(
             noise_columns_by_offset={noise.offset: noise.column for noise in plan.noise_bins},
         )
     return L2MNEHaukZScoreCondition(
-        condition_id=condition,
-        label=condition,
+        condition_id=condition_id,
+        label=condition_label,
         harmonic_bins=harmonic_bins,
         sensor_value_unit="raw FFT amplitude uV",
         metadata={
@@ -456,9 +547,16 @@ def _participant_hauk_condition(
             "source_sheet": FULL_FFT_AMPLITUDE_SHEET_NAME,
             "selected_harmonics_hz": list(selected_harmonics),
             "include_flagged_subjects": include_flagged_subjects,
-            "participant_flagged": participant_id in flagged_subjects,
+            "participant_flagged": _subject_in_ids(
+                participant_id,
+                flagged_subjects,
+            ),
             "source_ready_input": True,
             "project_input_assembly": "phase_6h_a2_fullfft_participant_neighbor_bins_read_only",
+            "canonical_condition": canonical_condition,
+            "group_id": group_id,
+            "group_label": group_label,
+            "group_split_applied": group_split_applied,
         },
     )
 

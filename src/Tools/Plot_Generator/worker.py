@@ -167,6 +167,8 @@ class _Worker(
         self.legend_b_peaks = self.config.legend_b_peaks
         self.project_root = self.config.project_root
         self.spectral_qc_enabled = self.config.spectral_qc_enabled
+        self._dataset_index_loaded = False
+        self._workbook_records_by_path = {}
         self.generated_paths: list[str] = []
         self.qc_report_paths: list[str] = []
         self.spectral_qc_flags: list[dict[str, object]] = []

@@ -140,6 +140,52 @@ def test_excel_discovery_ignores_sidecar_and_temp_workbooks(tmp_path, monkeypatc
     assert worker.failed_items == []
 
 
+def test_unmanaged_index_preserves_legacy_full_stem_participant(tmp_path, monkeypatch):
+    module = _import_module()
+    cond_dir = tmp_path / "Cond"
+    cond_dir.mkdir()
+    frame = pd.DataFrame(
+        {
+            "Electrode": ["Cz"],
+            "1.0000_Hz": [2.0],
+            "2.0000_Hz": [4.0],
+        }
+    )
+    with pd.ExcelWriter(cond_dir / "control group.xlsx") as writer:
+        frame.to_excel(writer, sheet_name="FullSNR", index=False)
+
+    captured = {}
+    monkeypatch.setattr(module._Worker, "_emit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        module._Worker,
+        "_plot",
+        lambda self, freqs, roi_data: captured.update(
+            {"freqs": freqs, "roi_data": roi_data}
+        ),
+    )
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Central": ["Cz"]},
+        selected_roi="Central",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=2.0,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path / "plots"),
+    )
+
+    worker._run()
+
+    assert captured == {
+        "freqs": [1.0, 2.0],
+        "roi_data": {"Central": [2.0, 4.0]},
+    }
+
+
 def test_full_snr_all_roi_and_group_aggregation(tmp_path, monkeypatch):
     module = _import_module()
 

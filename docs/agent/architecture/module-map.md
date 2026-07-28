@@ -27,7 +27,10 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
   incremental cleanup to ledger-recorded files under the versioned derivative
   root.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
-- `src/Main_App/projects/`: canonical owner for project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing settings normalization.
+- `src/Main_App/projects/`: canonical owner for project model, project manager
+  workflows, project metadata scanning, projects-root helpers, preprocessing
+  settings normalization, canonical group/participant metadata, and the
+  GUI-neutral processed-workbook dataset index consumed by downstream tools.
 - `src/Main_App/updates/`: canonical non-GUI updater backend for typed release
   contracts, GitHub Releases selection, installer downloads, and installer
   launch. GUI scheduling and presentation remain in `src/Main_App/gui/update_manager.py`

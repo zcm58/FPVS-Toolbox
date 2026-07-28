@@ -15,17 +15,18 @@ Current ownership map:
   progress aggregation, and completion handling.
 - `ui_sections.py`, `settings_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
-  GUI, settings, selection, and project/manifest helpers.
+  GUI, settings, selection, and thin shared-project adapters.
 - `worker.py`: `_Worker` QObject shell, signals, stop state, timing, run
   orchestration, finished payload emission, and compatibility re-exports for
   older imports.
 - `worker_config.py`: `_Worker` constructor payload dataclass.
-- `excel_inputs.py`: subject ID and frequency-column helpers.
+- `excel_inputs.py`: thin shared participant-identity adapter plus
+  frequency-column helpers.
 - `full_snr_reader.py`: direct `.xlsx` XML reader for the FullSNR fast path,
   including selected-frequency parsing, selected-ROI electrode
   filtering, and FullSNR load subtimings.
-- `data_collection.py`: Excel discovery/loading, FullSNR-only source data
-  collection, and required-sheet failure handling.
+- `data_collection.py`: shared dataset-index consumption, FullSNR-only source
+  data collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
   unknown-subject warnings.
 - `spectral_qc.py`: post-processing, report-only electrode-level spectral
@@ -39,6 +40,10 @@ Current ownership map:
 
 v2.1 project contract:
 
+- `Main_App.projects.dataset_index` is the sole owner of processed-workbook
+  discovery and participant/group identity. Plot Generator may keep thin
+  compatibility wrappers, but it must not parse `project.json`, infer group
+  membership from paths, or maintain a separate workbook scanner.
 - `project.json` is canonical for group assignments. Prefer participant
   `group_id` and resolve labels/folder names through `project.groups`; legacy
   participant `group` values are compatibility input only.

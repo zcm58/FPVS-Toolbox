@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 
+from Main_App.projects import group_labels_from_manifest
 from Main_App.projects.project import Project
 from Main_App.projects.project_metadata import read_project_metadata
 
@@ -24,10 +25,7 @@ def _project_has_groups(project: Project | None) -> bool:
     if isinstance(groups, dict) and groups:
         return True
     manifest = getattr(project, "manifest", None)
-    if isinstance(manifest, dict):
-        raw_groups = manifest.get("groups")
-        return isinstance(raw_groups, dict) and bool(raw_groups)
-    return False
+    return bool(group_labels_from_manifest(manifest))
 
 
 def _project_plot_input_folder(

@@ -1013,8 +1013,21 @@ def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, 
     monkeypatch.setattr(workbook_mod, "SettingsManager", FakeSettings)
     monkeypatch.setattr(
         workbook_mod,
-        "scan_folder_simple",
-        lambda folder: (["P1", "P2"], ["Color", "Semantic"], {"P1": {"Color": "p1.xlsx"}}),
+        "load_project_dataset_index",
+        lambda _root: SimpleNamespace(
+            diagnostics=(),
+            require_group_assignments=lambda: captured.setdefault(
+                "required_group_assignments",
+                True,
+            ),
+            participant_ids=("P1", "P2"),
+            conditions=("Color", "Semantic"),
+            subject_data=lambda: {"P1": {"Color": "p1.xlsx"}},
+            participant_group_label_map=lambda **_kwargs: {
+                "P1": "Control",
+                "P2": "Patient",
+            },
+        ),
     )
     monkeypatch.setattr(workbook_mod, "load_rois_from_settings", lambda _manager: {"LOT": ["P7", "PO7"]})
     monkeypatch.setattr(workbook_mod, "prepare_stats_ready_export", fake_prepare_stats_ready_export)
@@ -1034,6 +1047,8 @@ def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, 
     assert captured["max_freq"] == 16.8
     assert captured["rois"] == {"LOT": ["P7", "PO7"]}
     assert captured["selection_conditions"] == ["Color", "Semantic"]
+    assert captured["group_map"] == {"P1": "Control", "P2": "Patient"}
+    assert captured["required_group_assignments"] is True
     assert captured["save_path"] == expected_path
     assert captured["project_root"] == str(tmp_path.resolve())
     assert captured["dv_policy"]["name"].startswith("Group-level significant harmonics")

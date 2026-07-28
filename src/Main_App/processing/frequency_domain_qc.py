@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from Main_App.projects import load_project_dataset_index
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
     normalize_preprocessing_settings,
@@ -86,15 +87,11 @@ def run_frequency_domain_qc_review(
     project_root = Path(project.project_root).resolve()
     thresholds = DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS
     from Tools.Stats.data.shared_rois import load_rois_from_settings
-    from Tools.Stats.data.stats_data_loader import scan_folder_simple
 
-    subfolders = getattr(project, "subfolders", {}) or {}
-    excel_root = _project_subfolder_path(
-        project_root,
-        subfolders.get("excel") if isinstance(subfolders, Mapping) else None,
-        "1 - Excel Data Files",
-    )
-    subjects, conditions, subject_data = scan_folder_simple(str(excel_root))
+    dataset_index = load_project_dataset_index(project_root)
+    subjects = list(dataset_index.participant_ids)
+    conditions = list(dataset_index.conditions)
+    subject_data = dataset_index.subject_data(require_group_assignment=True)
     subjects, subject_data = _filter_to_completed_subjects(
         project_root=project_root,
         subjects=subjects,
@@ -1001,17 +998,6 @@ def _filter_subject_data(
         }
         for subject, condition_map in subject_data.items()
     }
-
-
-def _project_subfolder_path(
-    project_root: Path,
-    configured: object,
-    default_name: str,
-) -> Path:
-    raw_path = Path(str(configured or default_name))
-    if raw_path.is_absolute():
-        return raw_path
-    return project_root / raw_path
 
 
 def _analysis_base_frequency_hz() -> float:

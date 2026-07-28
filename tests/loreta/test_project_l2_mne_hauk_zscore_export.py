@@ -254,6 +254,51 @@ def test_project_hauk_zscore_export_reads_group_subfolder_workbooks(tmp_path) ->
     assert result.project_inputs.summaries[0].workbook_count == 2
 
 
+def test_project_fullfft_assemblers_split_canonical_groups_before_aggregation(
+    tmp_path,
+) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    _convert_fixture_to_multi_group(project_root)
+
+    participant_first = (
+        build_l2_mne_hauk_participant_zscore_conditions_from_project(
+            project_root,
+            noise_window_bins=3,
+            min_noise_bins=4,
+        )
+    )
+    group_first = build_l2_mne_hauk_zscore_conditions_from_project(
+        project_root,
+        noise_window_bins=3,
+        min_noise_bins=4,
+    )
+
+    expected_labels = [
+        "Control Group - Condition A",
+        "Patient Group - Condition A",
+        "Control Group - Condition B",
+        "Patient Group - Condition B",
+    ]
+    assert [condition.label for condition in participant_first.conditions] == (
+        expected_labels
+    )
+    assert [condition.label for condition in group_first.conditions] == (
+        expected_labels
+    )
+    assert [
+        condition.metadata["group_id"]
+        for condition in participant_first.conditions
+    ] == ["control", "patient", "control", "patient"]
+    assert [
+        [row.participant_id for row in condition.participants]
+        for condition in participant_first.conditions
+    ] == [["SCP1"], ["SCP2"], ["SCP1"], ["SCP2"]]
+    assert all(
+        condition.metadata["included_subject_count"] == 1
+        for condition in group_first.conditions
+    )
+
+
 def test_project_hauk_zscore_rejects_outputs_outside_project_root(tmp_path) -> None:
     project_root = _build_project_fixture(tmp_path)
 
@@ -381,6 +426,46 @@ def _write_participant_workbook(
                     subject_mean=float(subject_offset),
                 )
             fullfft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+
+
+def _convert_fixture_to_multi_group(project_root: Path) -> None:
+    excel_root = project_root / "1 - Excel Data Files"
+    for condition in ("Condition A", "Condition B"):
+        condition_dir = excel_root / condition
+        control_dir = condition_dir / "Control Group"
+        patient_dir = condition_dir / "Patient Group"
+        control_dir.mkdir()
+        patient_dir.mkdir()
+        control_source = condition_dir / f"SCP1_{condition}_Results.xlsx"
+        patient_source = condition_dir / f"SCP2_{condition}_Results.xlsx"
+        control_source.replace(control_dir / control_source.name)
+        patient_source.replace(patient_dir / patient_source.name)
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "name": "Multi-group FullFFT fixture",
+                "results_folder": ".",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "groups": {
+                    "control": {
+                        "label": "Control Group",
+                        "folder_name": "Control Group",
+                        "raw_input_folder": "Raw/Control",
+                    },
+                    "patient": {
+                        "label": "Patient Group",
+                        "folder_name": "Patient Group",
+                        "raw_input_folder": "Raw/Patient",
+                    },
+                },
+                "participants": {
+                    "SCP1": {"group_id": "control"},
+                    "SCP2": {"group_id": "patient"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _expected_fullfft_values(

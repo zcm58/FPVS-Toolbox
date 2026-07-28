@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from Main_App import SettingsManager
-from Main_App.projects.project import STATS_SUBFOLDER_NAME
+from Main_App.projects import (
+    STATS_SUBFOLDER_NAME,
+    load_project_dataset_index,
+)
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
     GROUP_SIGNIFICANT_POLICY_NAME,
 )
 from Tools.Stats.data.shared_rois import load_rois_from_settings
-from Tools.Stats.data.stats_data_loader import (
-    map_subjects_to_groups,
-    normalize_participants_map,
-    scan_folder_simple,
-)
 from Tools.Stats.io.stats_ready_export import STATS_READY_WORKBOOK_NAME, prepare_stats_ready_export
 
 
@@ -58,7 +55,13 @@ def write_loreta_stats_ready_workbook(
 
     log = log_callback or (lambda _message: None)
     log("Scanning processed project workbooks for the LORETA summary report...")
-    subjects, conditions, subject_data = scan_folder_simple(str(root))
+    dataset_index = load_project_dataset_index(root)
+    for diagnostic in dataset_index.diagnostics:
+        log(f"Dataset index: {diagnostic.message}")
+    dataset_index.require_group_assignments()
+    subjects = list(dataset_index.participant_ids)
+    conditions = list(dataset_index.conditions)
+    subject_data = dataset_index.subject_data()
     if not subjects or not conditions:
         raise RuntimeError(
             "No processed participant workbooks were found. Process the project data before generating the "
@@ -72,8 +75,14 @@ def write_loreta_stats_ready_workbook(
 
     base_freq = _settings_float(manager, "analysis", "base_freq", default=6.0)
     max_freq = _settings_float(manager, "analysis", "bca_upper_limit", default=None)
-    manifest = _load_project_manifest(root)
-    group_map = map_subjects_to_groups(subjects, normalize_participants_map(manifest))
+    group_labels = dataset_index.participant_group_label_map(
+        uppercase_keys=True,
+        include_legacy_aliases=True,
+    )
+    group_map = {
+        subject: group_labels.get(subject.upper())
+        for subject in subjects
+    }
     workbook_path = default_loreta_stats_ready_workbook_path(root)
     workbook_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -105,13 +114,6 @@ def write_loreta_stats_ready_workbook(
         subject_count=len(subjects),
         condition_count=len(conditions),
     )
-
-
-def _load_project_manifest(project_root: Path) -> dict | None:
-    manifest_path = project_root / "project.json"
-    if not manifest_path.is_file():
-        return None
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
 def _settings_float(

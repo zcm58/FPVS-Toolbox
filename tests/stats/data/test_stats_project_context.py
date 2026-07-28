@@ -110,8 +110,16 @@ def test_project_scan_marks_multi_group_manifest(tmp_path):
                     "stats": "3 - Statistical Analysis Results",
                 },
                 "groups": {
-                    "control": {"label": "Control", "folder_name": "Control"},
-                    "clinical": {"label": "Clinical", "folder_name": "Clinical"},
+                    "control": {
+                        "label": "Control",
+                        "folder_name": "Control",
+                        "raw_input_folder": "Raw/Control",
+                    },
+                    "clinical": {
+                        "label": "Clinical",
+                        "folder_name": "Clinical",
+                        "raw_input_folder": "Raw/Clinical",
+                    },
                 },
                 "participants": {"P1": {"group_id": "control"}},
             }

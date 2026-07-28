@@ -34,12 +34,14 @@ v2.1 project contract:
 - `project.json` is canonical for group assignments. Prefer participant
   `group_id` and resolve labels/folder names through `project.groups`; legacy
   participant `group` values are compatibility input only.
-- Excel scanning should treat top-level folders under `1 - Excel Data Files/`
-  as conditions. Multi-group output may add a group folder inside each
-  condition; scan those files recursively while keeping the condition name from
-  the top-level folder.
-- Do not infer a participant's group assignment from the Excel folder name when
-  a manifest is available.
+- Stats workbook discovery must consume
+  `Main_App.projects.load_project_dataset_index`. Keep
+  `stats_data_loader` functions only as thin compatibility adapters for
+  established Stats return shapes; do not add a second scanner, participant-ID
+  parser, or group normalizer in this package.
+- Do not infer a participant's group assignment from an Excel folder name.
+  The shared index supplies the canonical manifest-owned group ID and retains
+  the observed folder only for routing diagnostics.
 
 
 IMPORTANT RULES for Codex:

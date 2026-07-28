@@ -1,11 +1,10 @@
 """Project path helpers for the Plot Generator GUI."""
 from __future__ import annotations
 
-import json
-from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
+from Main_App.projects import DatasetIndexError, load_project_manifest_for_dataset_path
 from Main_App.projects.project import EXCEL_SUBFOLDER_NAME, SNR_SUBFOLDER_NAME
 
 
@@ -20,12 +19,11 @@ def _auto_detect_project_dir() -> Path:
 
 
 def _load_manifest(root: Path) -> tuple[str | None, dict[str, str]]:
-    manifest = root / "project.json"
-    if not manifest.is_file():
-        return None, {}
     try:
-        cfg = json.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, JSONDecodeError):
+        cfg = load_project_manifest_for_dataset_path(root)
+    except DatasetIndexError:
+        return None, {}
+    if not isinstance(cfg, dict):
         return None, {}
     results_folder = cfg.get("results_folder")
     if not isinstance(results_folder, str):

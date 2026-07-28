@@ -53,9 +53,12 @@ projects-root helpers, and preprocessing settings normalization while project
 I/O tests protect behavior during the package-layout migration. It also owns
 canonical group and participant manifest normalization, immutable read-only
 project group context, and safe group/output-folder helpers in
-`projects/grouping.py`. The next project-layer addition extends that context
-with a processed-workbook index so Stats, plotting, QC, and export tools can
-share workbook discovery and group selection without cross-tool imports.
+`projects/grouping.py`. `projects/dataset_index.py` owns the shared read-only
+processed-workbook index, including workbook/condition discovery, participant
+identity matching, canonical group assignment, duplicate preference, and
+diagnostics. Stats, plotting, QC, and export tools consume that public project
+API instead of importing another tool's scanner or detecting group IDs from
+output folders.
 
 `src/Main_App/gui/` is now the canonical Main App GUI import surface. It
 owns project workflow orchestration, processing run start/stop/finalization
