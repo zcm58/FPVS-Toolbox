@@ -452,6 +452,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
             "cluster_mask": "source_space_cluster_permutation",
             "cluster_mask_vertex_indices": [1],
             "cluster_mask_vertex_count": 1,
+            "participant_count": 24,
         },
         normalize_values=False,
     )
@@ -468,6 +469,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
             "cluster_mask": "source_space_cluster_permutation",
             "cluster_mask_vertex_indices": [],
             "cluster_mask_vertex_count": 0,
+            "participant_count": 24,
             "cluster_permutation_count": 10000,
             "cluster_alpha": 0.05,
         },
@@ -480,6 +482,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     window._set_payload_display_status(valid_payload)
     assert status.variant == "info"
     assert status.text == (
+        "Map cohort: 24 participants. "
         "The vertices displayed here were significant across the group after "
         "the cluster-based permutation test."
     )
@@ -487,6 +490,7 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     window._set_payload_display_status(empty_payload)
     assert status.variant == "warning"
     assert status.text == (
+        "Map cohort: 24 participants. "
         "Warning: no vertices survived the group-level permutation mask. "
         "The current view is uncorrected."
     )
@@ -496,9 +500,24 @@ def test_hauk_cluster_mask_load_status_messages() -> None:
     window._set_payload_display_status(valid_payload)
     assert status.variant == "warning"
     assert status.text == (
+        "Map cohort: 24 participants. "
         "Warning: disabling the cluster-based permutation mask will likely show "
         "vertices that were not significant at the group level."
     )
+
+    descriptive_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([1.2], dtype=float),
+        label="Descriptive",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="descriptive_source_map",
+        value_label="source amplitude",
+        metadata={"participant_count": 3},
+        normalize_values=False,
+    )
+    window._set_payload_display_status(descriptive_payload)
+    assert status.variant == "success"
+    assert status.text == "Loaded source map. Map cohort: 3 participants."
 
 
 class _StatusProbe:

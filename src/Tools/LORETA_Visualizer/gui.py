@@ -958,6 +958,22 @@ def _activation_scale_values(
     return values
 
 
+def _participant_cohort_status_text(payload: SourcePayload) -> str | None:
+    """Return the per-map participant count shown in the status banner."""
+
+    participant_count = payload.metadata.get("participant_count")
+    if isinstance(participant_count, bool):
+        return None
+    try:
+        count = int(participant_count)
+    except (TypeError, ValueError):
+        return None
+    if count < 0:
+        return None
+    noun = "participant" if count == 1 else "participants"
+    return f"Map cohort: {count} {noun}."
+
+
 def _underpowered_cluster_mask_status_text(payload: SourcePayload) -> str | None:
     cluster_status = str(
         payload.metadata.get("cluster_mask_status", "")
@@ -2954,6 +2970,7 @@ class LoretaVisualizerWindow(QWidget):
         method_ids: list[str] = []
         included_participant_ids: set[str] = set()
         source_ineligible_by_id: dict[str, object] = {}
+        source_condition_omissions_by_key: dict[tuple[str, str], object] = {}
         for export_result in export_results:
             output_dir = getattr(export_result, "output_dir", None)
             manifest_path = getattr(export_result, "manifest_path", None)
@@ -2991,6 +3008,14 @@ class LoretaVisualizerWindow(QWidget):
             source_ineligible = tuple(
                 getattr(export_result, "source_ineligible_participants", ()) or ()
             )
+            source_condition_omissions = tuple(
+                getattr(
+                    export_result,
+                    "source_condition_omissions",
+                    getattr(project_inputs, "source_condition_omissions", ()),
+                )
+                or ()
+            )
             included_participant_ids.update(
                 str(participant_id).strip()
                 for participant_id in included_participants
@@ -3002,6 +3027,17 @@ class LoretaVisualizerWindow(QWidget):
                 ).strip()
                 if participant_id:
                     source_ineligible_by_id[participant_id] = item
+            for item in source_condition_omissions:
+                participant_id = str(
+                    getattr(item, "participant_id", "")
+                ).strip()
+                condition_id = str(
+                    getattr(item, "condition_id", "")
+                ).strip()
+                if participant_id and condition_id:
+                    source_condition_omissions_by_key[
+                        (participant_id, condition_id)
+                    ] = item
             logger.info(
                 "loreta_project_source_maps_export_complete",
                 extra={
@@ -3013,6 +3049,9 @@ class LoretaVisualizerWindow(QWidget):
                     "flagged_subject_count": len(flagged_subjects),
                     "excluded_subject_count": len(excluded_subjects),
                     "source_ineligible_participant_count": len(source_ineligible),
+                    "source_condition_omission_count": len(
+                        source_condition_omissions
+                    ),
                 },
             )
         if not valid_manifest_paths or last_output_dir is None:
@@ -3029,17 +3068,30 @@ class LoretaVisualizerWindow(QWidget):
                 f"Prepared {total_payload_count} source-map condition summaries, but {failure_labels} failed. "
                 "Loaded available regenerated maps."
             )
-        elif source_ineligible_by_id:
+        elif source_condition_omissions_by_key or source_ineligible_by_id:
             status_variant = "warning"
-            skipped_ids = ", ".join(sorted(source_ineligible_by_id))
             eligible_text = (
-                f" from {len(included_participant_ids)} complete-case participant(s)"
+                " using condition-specific cohorts from "
+                f"{len(included_participant_ids)} participant(s)"
                 if included_participant_ids
                 else ""
             )
+            omission_parts: list[str] = []
+            if source_condition_omissions_by_key:
+                omission_parts.append(
+                    f"Omitted {len(source_condition_omissions_by_key)} unavailable "
+                    "participant-condition input(s)"
+                )
+            if source_ineligible_by_id:
+                omission_parts.append(
+                    f"excluded {len(source_ineligible_by_id)} participant(s) "
+                    "from every source condition"
+                )
             status_text = (
-                f"Prepared {total_payload_count} source-map condition summaries{eligible_text}. "
-                f"Omitted {skipped_ids} from every source condition; see the validation report. "
+                f"Prepared {total_payload_count} source-map condition summaries"
+                f"{eligible_text}. "
+                + "; ".join(omission_parts)
+                + ". See the validation report. "
                 "Loaded regenerated maps."
             )
         else:
@@ -3422,6 +3474,7 @@ class LoretaVisualizerWindow(QWidget):
         if underpowered_text is not None:
             self._set_source_export_status(underpowered_text, variant="warning")
             return
+        cohort_text = _participant_cohort_status_text(payload)
         if _source_payload_uses_zscores(payload):
             status = _cluster_mask_display_status_text(
                 payload,
@@ -3429,13 +3482,25 @@ class LoretaVisualizerWindow(QWidget):
             )
             if status is not None:
                 message, variant = status
+                if cohort_text is not None:
+                    message = f"{cohort_text} {message}"
                 self._set_source_export_status(message, variant=variant)
                 return
         if _source_payload_uses_zscores(payload) and not payload_has_cluster_mask(payload):
+            message = "Loaded unmasked source map. Rebuild z-score maps to add cluster masks."
+            if cohort_text is not None:
+                message = f"{cohort_text} {message}"
             self._set_source_export_status(
-                "Loaded unmasked source map. Rebuild z-score maps to add cluster masks.",
+                message,
                 variant="warning",
             )
+            return
+        message = "Loaded source map."
+        if cohort_text is not None:
+            message = f"{message} {cohort_text}"
+        else:
+            message = f"{message} Participant count is unavailable."
+        self._set_source_export_status(message, variant="success")
 
     def _clear_activation_payload(self) -> None:
         renderer = self.renderer

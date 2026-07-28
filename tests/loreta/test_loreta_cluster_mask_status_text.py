@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from Tools.LORETA_Visualizer.gui import _cluster_mask_display_status_text
+from Tools.LORETA_Visualizer.gui import (
+    _cluster_mask_display_status_text,
+    _participant_cohort_status_text,
+)
 from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, make_source_payload
 
 
@@ -54,3 +57,25 @@ def test_cluster_mask_status_warns_empty_mask_is_uncorrected() -> None:
         "Warning: no vertices survived the group-level permutation mask. The current view is uncorrected.",
         "warning",
     )
+
+
+def test_participant_cohort_status_reports_each_map_sample_size() -> None:
+    assert (
+        _participant_cohort_status_text(
+            _surface_payload(mask_indices=[1], participant_count=1)
+        )
+        == "Map cohort: 1 participant."
+    )
+    assert (
+        _participant_cohort_status_text(
+            _surface_payload(mask_indices=[1], participant_count=24)
+        )
+        == "Map cohort: 24 participants."
+    )
+
+
+def test_participant_cohort_status_ignores_missing_count() -> None:
+    payload = _surface_payload(mask_indices=[1])
+    payload.metadata.pop("participant_count")
+
+    assert _participant_cohort_status_text(payload) is None

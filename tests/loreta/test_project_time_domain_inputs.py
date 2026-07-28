@@ -257,7 +257,104 @@ def test_load_project_time_domain_inputs_checks_fif_header_against_sidecar(tmp_p
         _load(fixture.project_root, [_expected()])
 
 
-def test_load_project_time_domain_inputs_rejects_cross_record_sampling_incompatibility(tmp_path: Path) -> None:
+def test_load_project_time_domain_inputs_omits_unique_nonmodal_sample_count(
+    tmp_path: Path,
+) -> None:
+    canonical_conditions = (("condition_a", "Condition A", N_TIMES * 2),)
+    _write_derivative_fixture(
+        tmp_path,
+        participant_id="P01",
+        conditions=canonical_conditions,
+    )
+    _write_derivative_fixture(
+        tmp_path,
+        participant_id="P02",
+        conditions=canonical_conditions,
+    )
+    short_fixture = _write_derivative_fixture(
+        tmp_path,
+        participant_id="P03",
+    )
+    short_checksum = _sha256(short_fixture.fif_paths["condition_a"])
+
+    result = _load(
+        tmp_path,
+        [
+            ExpectedProjectTimeDomainInput(
+                participant_id=participant_id,
+                condition_id="condition_a",
+                condition_label="Condition A",
+            )
+            for participant_id in ("P01", "P02", "P03")
+        ],
+    )
+
+    assert result.n_times == N_TIMES * 2
+    assert [record.participant_id for record in result.records] == ["P01", "P02"]
+    assert [
+        (record.participant_id, record.condition_id, record.n_times)
+        for record in result.sampling_contract_omissions
+    ] == [("P03", "condition_a", N_TIMES)]
+    assert _sha256(short_fixture.fif_paths["condition_a"]) == short_checksum
+
+
+def test_canonical_sample_count_uses_participant_support_not_record_count(
+    tmp_path: Path,
+) -> None:
+    short_conditions = (
+        ("condition_a", "Condition A", N_TIMES),
+        ("condition_b", "Condition B", N_TIMES),
+        ("condition_c", "Condition C", N_TIMES),
+    )
+    _write_derivative_fixture(
+        tmp_path,
+        participant_id="P01",
+        conditions=short_conditions,
+    )
+    for participant_id in ("P02", "P03"):
+        _write_derivative_fixture(
+            tmp_path,
+            participant_id=participant_id,
+            conditions=(("condition_a", "Condition A", N_TIMES * 2),),
+        )
+
+    result = _load(
+        tmp_path,
+        [
+            *(
+                ExpectedProjectTimeDomainInput(
+                    participant_id="P01",
+                    condition_id=condition_id,
+                    condition_label=condition_label,
+                )
+                for condition_id, condition_label, _n_times in short_conditions
+            ),
+            *(
+                ExpectedProjectTimeDomainInput(
+                    participant_id=participant_id,
+                    condition_id="condition_a",
+                    condition_label="Condition A",
+                )
+                for participant_id in ("P02", "P03")
+            ),
+        ],
+    )
+
+    assert result.n_times == N_TIMES * 2
+    assert [record.participant_id for record in result.records] == ["P02", "P03"]
+    assert {
+        (record.participant_id, record.condition_id)
+        for record in result.sampling_contract_omissions
+    } == {
+        ("P01", "condition_a"),
+        ("P01", "condition_b"),
+        ("P01", "condition_c"),
+    }
+
+
+def test_load_project_time_domain_inputs_rejects_ambiguous_sample_count_mode(
+    tmp_path: Path,
+) -> None:
     fixture = _write_derivative_fixture(
         tmp_path,
         conditions=(
@@ -266,7 +363,10 @@ def test_load_project_time_domain_inputs_rejects_cross_record_sampling_incompati
         ),
     )
 
-    with pytest.raises(ProjectTimeDomainInputError, match="same exact sample count N"):
+    with pytest.raises(
+        ProjectTimeDomainInputError,
+        match="do not have one unique modal sample count N",
+    ):
         _load(
             fixture.project_root,
             [

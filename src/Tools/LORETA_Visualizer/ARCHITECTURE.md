@@ -37,10 +37,13 @@ project condition topographies, an external MNE/fsaverage BioSemi64 template
 EEG forward model, and the existing prepared payload/manifest bridge so real
 project data can be viewed without changing renderer internals.
 
-Current amplitude-derived project source-map readers support both flat
-condition workbook folders and condition/group workbook subfolders. Those
+Current amplitude-derived project source-map readers consume the shared
+`Main_App.projects.dataset_index` records for both flat condition workbook
+folders and condition/group workbook subfolders. Canonical participant and
+group identity comes only from project metadata through that index. Those
 legacy/exploratory routes require the Stats-ready workbook and, for z-scores,
-`FullFFT Amplitude (uV)` target and neighboring-bin columns.
+`FullFFT Amplitude (uV)` target and neighboring-bin columns; true multi-group
+projects are partitioned before source-input aggregation.
 
 The normal Hauk-informed source-PSD routes instead read the processing-time
 harmonic selection and durable, signed time-domain derivatives written while
@@ -62,7 +65,7 @@ Toolbox adaptation rather than an exact reproduction.
 
 The current eLORETA volume method,
 `eloreta_volume_hauk_source_psd_vector_norm_v1`, shares the L2 route's signed
-FIF inputs, complete-case cohort, selected harmonics, exact frequency-bin plan,
+FIF inputs, condition-specific cohorts, selected harmonics, exact frequency-bin plan,
 and neighboring-bin z-score algorithm. It nevertheless forms complex
 periodic-Hann coefficients at the exact required bins, applies an independent
 MNE eLORETA inverse with `pick_ori="vector"` in fsaverage volume source space,
@@ -202,7 +205,7 @@ method/summary/mask state, and interpolates values onto axial, coronal, and
 sagittal slices for visualization and publication figure export only.
 
 Phase 6C adds `project_l2_mne_export.py` as calculation-side orchestration. It
-is allowed to read existing project workbooks through `project_inputs.py`, use
+is allowed to read shared indexed project workbooks through `project_inputs.py`, use
 MNE to build an fsaverage/BioSemi64 template forward model, and write generated
 payload/manifest JSON under the active project root. It must not update
 `project.json`, change Stats outputs, modify preprocessing data, or teach the
@@ -223,9 +226,16 @@ The Hauk source-PSD feature adds `project_time_domain_inputs.py`,
 Main App processing publishes one signed,
 repetition-averaged EEG Raw FIF per participant/condition plus provenance and a
 participant commit manifest. Project orchestration derives one explicit
-complete-case source cohort, and the read-only adapter strictly validates the
-complete retained participant/condition set. Each producer applies its own
-EEG-only fsaverage BioSemi64 inverse. Default L2-MNE calls MNE source PSD with
+available-case cohort for each group-condition cell, and the read-only adapter
+strictly validates every retained participant/condition input. Before either
+inverse runs, the adapter selects the exact sample count `N` supported by a
+unique modal number of participants. Nonmodal participant-condition derivatives are recorded as
+condition-specific omissions with their actual and canonical `N`, duration,
+and frequency resolution. This keeps all retained participant z-scores on one
+FFT resolution and neighboring-noise-bin contract without shortening the
+project to an anomalously brief record. A tied modal distribution fails
+actionably rather than choosing a scientific contract arbitrarily. Each producer
+applies its own EEG-only fsaverage BioSemi64 inverse. Default L2-MNE calls MNE source PSD with
 the cortical-normal orientation before amplitude/harmonic aggregation; current
 eLORETA applies its inverse to complex exact-bin Hann coefficients and performs
 rotation-invariant vector pooling afterward. Each sends its own participant
@@ -236,7 +246,9 @@ lateralization rows.
 When a project has multiple canonical participant groups, the exporter creates
 separate group-by-condition aggregation and cluster inputs. Group identity is
 preserved in prepared condition metadata; experimental groups are not pooled
-silently.
+silently. A group-condition cell with no retained participants is omitted. A
+one-participant cell remains available as a descriptive map and records an
+insufficient-participants cluster-mask status.
 
 This method is deliberately Toolbox-specific where appropriate: project-selected
 significant oddball harmonics remain authoritative, exact FPVS bins are
@@ -373,8 +385,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
   lets real project exports attach an MNE-native loose-orientation estimator
   while preserving the same payload contract.
   Phase 6B includes `project_inputs.py`, a read-only adapter that assembles
-  source-ready condition topographies from existing flat or condition/group
-  project workbooks. Phase 6C includes `project_l2_mne_export.py`, a
+  source-ready condition topographies from shared dataset-index records for
+  existing flat or condition/group project workbooks. It does not infer
+  participant or group identity locally. Phase 6C includes
+  `project_l2_mne_export.py`, a
   project-local beta export that combines
   those topographies with an external MNE/fsaverage BioSemi64 template forward
   model and writes prepared source-map JSON. Phase 6D includes
@@ -504,17 +518,18 @@ The current beta L2-MNE producer accepts source-ready arrays: channel names,
 selected harmonic topographies, cortical source coordinates/faces, and a
 channel-by-source leadfield. It writes payloads and manifests after validation.
 `project_inputs.py` can assemble the selected harmonic topographies from
-existing flat condition workbooks or condition/group workbooks, but it still
+shared indexed flat condition workbooks or condition/group workbooks, but it still
 does not compute Stats harmonic selections, export preprocessing data, write
 project files, or build
 subject-specific MRI forward models.
 
 The project-input adapter reads the all-condition selected harmonics from the
-Stats-ready workbook, reads compact per-participant electrode-level sheets
-(`BCA (uV)` or `FFT Amplitude (uV)`) from either flat condition folders or
-condition/group subfolders, applies existing exclusion files, records flagged
-participant status, and returns `L2MNEFPVSCondition` objects for calculation
-producers.
+Stats-ready workbook, consumes canonical workbook/participant/group records
+from `Main_App.projects.dataset_index`, reads compact per-participant
+electrode-level sheets (`BCA (uV)` or `FFT Amplitude (uV)`), applies existing
+exclusion files, records flagged participant status, partitions true
+multi-group projects before aggregation, and returns `L2MNEFPVSCondition`
+objects for calculation producers.
 
 The project L2-MNE exporter writes generated files under
 `6 - Source Localization/L2-MNE Cortical Surface Beta/` by default. The manifest
@@ -576,13 +591,19 @@ participant commit manifests are
 all expected condition FIF/sidecar pairs succeed. Readers reject missing,
 stale, checksum-mismatched, incompatible-channel, or off-bin retained sets
 rather than falling back to amplitude workbooks. Before that strict load, the
-project exporter applies `complete_case_all_canonical_conditions_v1`: completed
-participants with a partial canonical condition set or explicitly incomplete
-source derivative are omitted from every source condition. Each source-only
-omission and reason is written to the prepared manifest, participant sidecar,
-validation report, structured log, and GUI warning status. Participants are
-never dropped condition-by-condition, and a derivative that claims to be
-complete but is missing or corrupt still stops the build. The FIF
+project exporter applies `available_case_by_group_condition_v1`: each completed
+participant contributes to every canonical condition with a committed
+derivative, while an explicitly missing condition omits only that
+participant-condition input. Each prepared map records its own participant
+count and identities. Empty group-condition cells are omitted; one-participant
+cells remain descriptive without an inferential cluster mask. Participants
+with unknown availability or no available canonical conditions are omitted
+globally. Both omission scopes and reasons are written to the prepared
+manifest, participant sidecar, validation report, structured log, and GUI
+warning status. A derivative with a nonmodal sample count is a condition-level
+source omission; a tied sample-count distribution, or a retained derivative
+that is missing, corrupt, stale, or otherwise incompatible, still stops the
+build. The FIF
 contains signed EEG volts, exact processed `N` and sampling rate,
 montage/reference state, and no FFT or source values.
 

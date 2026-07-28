@@ -66,6 +66,13 @@ _POST_PROCESSING_PROGRESS_SETTLE_MS = 250
 _POST_PROCESSING_SOURCE_STEP_NAMES = frozenset(
     {"l2_mne_source_psd", "eloreta_volume_source_psd"}
 )
+_POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES = frozenset(
+    {
+        "frequency_domain_qc",
+        "harmonic_selection",
+        "stats_ready_summed_bca",
+    }
+)
 _POST_PROCESSING_PHASE_STATES = {
     "frequency_domain_qc": (1, _POST_PROCESSING_QC_TITLE, _POST_PROCESSING_QC_MESSAGE),
     "harmonic_selection": (
@@ -260,6 +267,25 @@ def _post_processing_source_map_outcome(result: object) -> tuple[bool, bool]:
         and str(step.get("name") or "") in _POST_PROCESSING_SOURCE_STEP_NAMES
     ]
     return bool(source_steps), any(bool(step.get("ok")) for step in source_steps)
+
+
+def _post_processing_frequency_domain_outputs_ready(result: object) -> bool:
+    """Return whether every SNR/Stats prerequisite completed successfully."""
+
+    if not isinstance(result, dict):
+        return False
+    steps = result.get("steps")
+    if not isinstance(steps, list):
+        return False
+    outcomes = {
+        str(step.get("name") or ""): bool(step.get("ok"))
+        for step in steps
+        if isinstance(step, dict)
+    }
+    return all(
+        outcomes.get(step_name) is True
+        for step_name in _POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES
+    )
 
 
 def _refresh_cached_loreta_source_maps(
@@ -615,6 +641,9 @@ def _start_post_processing_pipeline_after_processing(
             source_maps_attempted, source_maps_succeeded = (
                 _post_processing_source_map_outcome(result)
             )
+            frequency_domain_outputs_ready = (
+                _post_processing_frequency_domain_outputs_ready(result)
+            )
             steps = result.get("steps") if isinstance(result, dict) else []
             if isinstance(steps, list):
                 for step in steps:
@@ -639,7 +668,7 @@ def _start_post_processing_pipeline_after_processing(
                     level=logging.WARNING,
                 )
                 return
-            if result.get("ok"):
+            if frequency_domain_outputs_ready:
                 _sync_project_tools_metadata_from_disk(project)
                 try:
                     from Main_App.processing.frequency_domain_qc import (
@@ -650,6 +679,7 @@ def _start_post_processing_pipeline_after_processing(
                     _sync_project_tools_metadata_from_disk(project)
                 except Exception:
                     logger.debug("frequency_domain_qc_mark_current_failed", exc_info=True)
+            if result.get("ok"):
                 if result.get("has_warnings"):
                     host.log(
                         "Post-processing completed with usable LORETA outputs and "
@@ -662,6 +692,13 @@ def _start_post_processing_pipeline_after_processing(
                         "and LORETA source-map generation steps completed.",
                         level=logging.INFO,
                     )
+            elif frequency_domain_outputs_ready:
+                host.log(
+                    "Frequency-domain post-processing completed; SNR and Stats "
+                    "outputs are ready. One or more LORETA source-map exports "
+                    "failed and remain unavailable; review the logged source error.",
+                    level=logging.WARNING,
+                )
             else:
                 host.log(
                     "Post-processing pipeline finished with warnings. Review the log before "

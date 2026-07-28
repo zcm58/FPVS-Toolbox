@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import re
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -116,7 +117,7 @@ class LoadedProjectTimeDomainRaw:
 
 @dataclass(frozen=True)
 class ProjectTimeDomainInputSet:
-    """Complete canonical project input set for one source-producer run."""
+    """Canonical compatible project input set for one source-producer run."""
 
     project_root: Path
     input_root: Path
@@ -126,6 +127,7 @@ class ProjectTimeDomainInputSet:
     sfreq_hz: float
     n_times: int
     frequency_resolution_hz: float
+    sampling_contract_omissions: tuple[ProjectTimeDomainInputRecord, ...] = ()
 
     def iter_loaded_raws(self) -> Iterator[LoadedProjectTimeDomainRaw]:
         """Yield one preloaded Raw at a time and close it before loading the next."""
@@ -276,8 +278,11 @@ def load_project_time_domain_inputs(
             f"{missing_text}. Reprocess the missing inputs; amplitude workbooks are not a fallback."
         )
 
-    records = tuple(records_by_key[item.key] for item in expected)
-    _validate_record_compatibility(records)
+    requested_records = tuple(records_by_key[item.key] for item in expected)
+    _validate_record_compatibility(requested_records)
+    records, sampling_contract_omissions = _select_canonical_sample_count(
+        requested_records
+    )
     for record in records:
         raw = _read_and_validate_raw(record, preload=False, require_finite=False)
         close = getattr(raw, "close", None)
@@ -293,6 +298,7 @@ def load_project_time_domain_inputs(
         sfreq_hz=first.sfreq_hz,
         n_times=first.n_times,
         frequency_resolution_hz=first.frequency_resolution_hz,
+        sampling_contract_omissions=sampling_contract_omissions,
     )
 
 
@@ -481,15 +487,66 @@ def _validate_record_compatibility(records: Sequence[ProjectTimeDomainInputRecor
         if record.reference_signature != first.reference_signature:
             raise ProjectTimeDomainInputError("Source-ready derivatives do not share one compatible EEG reference state.")
         _require_close(record.sfreq_hz, first.sfreq_hz, "Source-ready sampling frequencies are incompatible")
-        if record.n_times != first.n_times:
-            raise ProjectTimeDomainInputError("Source-ready derivatives do not share the same exact sample count N.")
-        _require_close(
-            record.frequency_resolution_hz,
-            first.frequency_resolution_hz,
-            "Source-ready frequency resolutions are incompatible",
-        )
         if record.n_step != first.n_step or record.n_mod_step != first.n_mod_step:
             raise ProjectTimeDomainInputError("Source-ready derivatives do not share one on-bin crop contract.")
+
+
+def _select_canonical_sample_count(
+    records: Sequence[ProjectTimeDomainInputRecord],
+) -> tuple[
+    tuple[ProjectTimeDomainInputRecord, ...],
+    tuple[ProjectTimeDomainInputRecord, ...],
+]:
+    """Retain the unique modal N so every source z-score uses one FFT contract."""
+
+    counts = Counter(record.n_times for record in records)
+    participants_by_sample_count = {
+        n_times: {
+            (record.group_id, record.participant_id)
+            for record in records
+            if record.n_times == n_times
+        }
+        for n_times in counts
+    }
+    highest_participant_count = max(
+        len(participants)
+        for participants in participants_by_sample_count.values()
+    )
+    modal_counts = tuple(
+        sorted(
+            n_times
+            for n_times, participants in participants_by_sample_count.items()
+            if len(participants) == highest_participant_count
+        )
+    )
+    if len(modal_counts) != 1:
+        distribution_parts: list[str] = []
+        for n_times in sorted(counts):
+            identities = ", ".join(
+                f"{record.participant_id}/{record.condition_id}"
+                for record in records
+                if record.n_times == n_times
+            )
+            distribution_parts.append(
+                f"N={n_times}: {counts[n_times]} record(s), "
+                f"{len(participants_by_sample_count[n_times])} participant(s) "
+                f"[{identities}]"
+            )
+        distribution = "; ".join(distribution_parts)
+        raise ProjectTimeDomainInputError(
+            "Source-ready derivatives do not have one unique modal sample count "
+            "N, so FPVS Toolbox cannot choose a comparable FFT/noise-bin contract "
+            f"automatically. Sample-count distribution: {distribution}."
+        )
+
+    canonical_n_times = modal_counts[0]
+    retained = tuple(
+        record for record in records if record.n_times == canonical_n_times
+    )
+    omitted = tuple(
+        record for record in records if record.n_times != canonical_n_times
+    )
+    return retained, omitted
 
 
 def _read_and_validate_raw(

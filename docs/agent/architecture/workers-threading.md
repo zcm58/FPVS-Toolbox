@@ -33,6 +33,11 @@ Common long-running work:
   harmonic selection, Summed BCA export, and source-estimation logic remain
   owned by their existing processing, Stats, and LORETA source-producer
   modules.
+- The GUI marks frequency-domain outputs current when frequency-domain QC,
+  harmonic selection, and Stats-ready Summed BCA export all succeed. Optional
+  L2-MNE/eLORETA source-map failures remain logged warnings and keep those
+  source outputs unavailable, but they must not leave SNR or Stats locked
+  behind a stale-frequency-domain gate.
 - Downstream post-processing starts only after the processing ledger update
   succeeds. A ledger-write failure skips source generation so the exporter
   cannot infer a participant cohort from stale or partial state.

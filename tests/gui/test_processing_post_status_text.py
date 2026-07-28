@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from Main_App.gui import shell_status
 from Main_App.gui.processing_workflows import (
     _PostProcessingPipelineBridge,
+    _post_processing_frequency_domain_outputs_ready,
     _post_processing_source_map_outcome,
     _post_processing_display_state,
     _post_processing_phase_display_state,
@@ -184,6 +185,35 @@ def test_partial_source_map_success_is_detected_independently_of_pipeline_failur
     }
 
     assert _post_processing_source_map_outcome(result) == (True, True)
+
+
+def test_frequency_domain_readiness_ignores_optional_loreta_failures() -> None:
+    result = {
+        "ok": False,
+        "steps": [
+            {"name": "frequency_domain_qc", "ok": True},
+            {"name": "harmonic_selection", "ok": True},
+            {"name": "stats_ready_summed_bca", "ok": True},
+            {"name": "l2_mne_source_psd", "ok": False},
+            {"name": "eloreta_volume_source_psd", "ok": False},
+        ],
+    }
+
+    assert _post_processing_frequency_domain_outputs_ready(result) is True
+
+
+def test_frequency_domain_readiness_requires_every_core_step() -> None:
+    result = {
+        "ok": False,
+        "steps": [
+            {"name": "frequency_domain_qc", "ok": True},
+            {"name": "harmonic_selection", "ok": True},
+            {"name": "stats_ready_summed_bca", "ok": False},
+            {"name": "l2_mne_source_psd", "ok": True},
+        ],
+    }
+
+    assert _post_processing_frequency_domain_outputs_ready(result) is False
 
 
 def test_source_map_refresh_can_request_pipeline_only_missing_map_invalidation() -> None:

@@ -59,11 +59,15 @@ This is a Toolbox adaptation of the source-analysis sequence described by Hauk a
   renderer and display selectors consume prepared values without recomputing or
   reinterpreting them.
 - Source settings and generated-output state do not expand `project.json` in this phase.
-- Project source inference uses one explicit complete-case cohort. A completed
-  participant with any missing canonical condition or an explicitly incomplete
-  source derivative is omitted from every source condition, with durable
-  source-only provenance and a visible warning; it is never dropped
-  condition-by-condition or added to the general project exclusion workbook.
+- Project source inference uses explicit available-case cohorts per
+  group-condition cell. A completed participant contributes to every canonical
+  condition with a committed derivative; a declared missing condition omits
+  only that participant-condition input. Empty group-condition cells are
+  omitted, one-participant cells remain descriptive without inferential cluster
+  masking, and every map records its participant count and identities. Unknown
+  availability or no available canonical condition remains a global
+  source-ineligibility. Neither omission scope is added to the general project
+  exclusion workbook.
 
 ## Architecture Contract
 
@@ -91,7 +95,7 @@ The sidecar records schema/method version, participant/group/condition/event ide
 
 ### Source producer
 
-All inverse and source-spectrum math stays in `src/Tools/LORETA_Visualizer/source_producers/`. Project orchestration first derives the explicit source-eligible complete-case cohort. A read-only project adapter then strictly validates a complete participant manifest for every retained participant and loads one participant-condition derivative at a time. Each producer uses its own EEG-only fsaverage inverse model, obtains source amplitudes at the same exact required bins, sums aligned target/noise positions across selected harmonics in its own source space, and applies the same Toolbox neighboring-bin z-score rule. L2-MNE cortical values, eLORETA volume values, caches, and cluster arrays remain method-specific.
+All inverse and source-spectrum math stays in `src/Tools/LORETA_Visualizer/source_producers/`. Project orchestration first derives the explicit source-eligible participant set and available participant membership for each canonical condition. A read-only project adapter then strictly validates every retained participant-condition derivative and loads one at a time. Each producer uses its own EEG-only fsaverage inverse model, obtains source amplitudes at the same exact required bins, sums aligned target/noise positions across selected harmonics in its own source space, and applies the same Toolbox neighboring-bin z-score rule. L2-MNE cortical values, eLORETA volume values, caches, and cluster arrays remain method-specific.
 
 More specifically, default L2-MNE obtains cortical-normal PSD with
 `pick_ori="normal"` and then converts power to amplitude. Current eLORETA does
@@ -106,13 +110,21 @@ Multi-group projects must create separate group-by-condition summaries and clust
 ### Failure and migration behavior
 
 - Failure to write a source-ready derivative does not invalidate an otherwise successful Excel export; it produces explicit source-readiness status.
-- Participants with partial canonical conditions or an explicitly incomplete
-  source derivative are source-ineligible and omitted from every source
-  condition. The prepared manifest, participant sidecar, validation report,
-  progress status, and structured log record each omission and reason.
-- The retained source cohort remains strict: missing/corrupt derivatives that
-  claim to be complete, mixed fingerprints, invalid groups, incompatible
-  channels/bins, or zero eligible participants still stop generation.
+- Explicitly missing participant-condition inputs are omitted only from the
+  affected source condition. Participants with unknown condition availability
+  or no retained canonical conditions are omitted from every source condition.
+  The prepared manifest, participant sidecar, validation report, progress
+  status, and structured log distinguish both omission scopes and reasons.
+- The shared source-input adapter selects the exact sample count `N` supported
+  by a unique modal number of participants before either inverse runs.
+  Nonmodal participant-condition derivatives
+  are condition-specific source omissions with actual/canonical `N`, duration,
+  and frequency resolution in provenance. Tied modal distributions remain hard
+  failures; the exporter does not mix FFT resolutions, resample, zero-pad, or
+  shorten every valid derivative to an anomalously short record.
+- Every retained source input remains strict: missing/corrupt derivatives,
+  mixed fingerprints, invalid groups, incompatible channels/bins, or zero
+  prepared group-condition maps still stop generation.
 - Source generation depends on frequency QC/harmonic selection and valid time-domain derivatives, not on successful Stats-ready workbook creation alone.
 - Older projects may later receive an explicit backfill action from a valid preprocessed-Raw cache. In this phase, missing derivatives prompt normal reprocessing; amplitude workbooks are never an implicit fallback.
 - Projects that already contain valid signed source-ready FIF/JSON derivatives
@@ -146,9 +158,11 @@ Multi-group projects must create separate group-by-condition summaries and clust
 - Exported FIF values equal the arithmetic mean of signed repetition epochs after reload.
 - Phase/polarity, volts, EEG ordering, sample frequency, exact `N`, digitization, and reference state survive round trip.
 - Every derivative and manifest path remains under the active project root; interrupted publication is not accepted as complete.
-- After explicit complete-case eligibility filtering, the producer rejects
+- After explicit group-condition available-case eligibility filtering, the
+  producer converts uniquely nonmodal sample-count records into explicit
+  condition omissions, while rejecting tied sample-count distributions,
   missing/nonfinite retained inputs, incompatible channel/bin contracts,
-  nearest-bin substitutions, mismatched retained participant sets, and
+  nearest-bin substitutions, mismatched per-condition participant sets, and
   stale/corrupt checksums with actionable errors.
 - Frozen-array tests lock harmonic alignment, sum-before-z-score, Toolbox offsets, min/max removal, and population SD.
 - Direct-MNE fixtures verify that L2 calls `compute_source_psd` with
@@ -181,7 +195,7 @@ Multi-group projects must create separate group-by-condition summaries and clust
 - 2026-07-15: Hardened cohort handling so stale ledgers, failed participants, partial condition sets, and mixed project groups cannot silently alter source inference.
 - 2026-07-15: Completed focused numerical, processing, project-I/O, static GUI-worker, documentation, boundary, and repository audits; the repository precommit gate passed with 859 tests and 2 skips. Local interactive Qt smoke testing remains deferred to the visible/manual path.
 - 2026-07-16: Reconciled processing partial-condition behavior with source
-  orchestration: source-ineligible participants are now omitted complete-case
+  orchestration: source-ineligible participants were then omitted complete-case
   from all conditions with durable warnings, while the retained derivative
   matrix stays strict. Hardened Windows long-path containment so equivalent
   `D:\...` and `\\?\D:\...` spellings do not falsely reject project-local
@@ -206,6 +220,17 @@ Multi-group projects must create separate group-by-condition summaries and clust
   obsolete project-loaded maps; eLORETA and validation-report provenance now
   match the vector and 18-candidate/16-retained noise-bin contracts; and
   harmonic-cache bookkeeping no longer causes participant source-cache misses.
+- 2026-07-28: Replaced global complete-case source filtering with
+  `available_case_by_group_condition_v1`. Completed participant-condition
+  derivatives now contribute wherever available; empty group-condition cells
+  are omitted, one-participant cells remain descriptive, and condition-level
+  omissions plus per-map participant counts are carried through manifests,
+  sidecars, validation reports, logs, and GUI status.
+- 2026-07-28: Added a shared unique-modal sample-count contract for both
+  source inverses. Nonmodal participant-condition records are now flagged and
+  omitted without blocking other conditions; ambiguous ties still fail. The
+  ACR diagnostic retains 242 derivatives at `N=30720` and identifies only
+  two participant-condition records (`N=4480`) as nonmodal.
 
 ## Deferred Work
 

@@ -69,15 +69,9 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert sensor_coefficients.shape == (len(DEFAULT_ELECTRODE_NAMES_64), 19)
     assert np.iscomplexobj(sensor_coefficients)
 
-    assert first.manifest_path.name == (
-        DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME
-    )
-    assert first.output_dir == default_project_eloreta_volume_hauk_source_psd_output_dir(
-        project.project_root
-    )
-    assert first.producer_result.method_id == (
-        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
-    )
+    assert first.manifest_path.name == (DEFAULT_PROJECT_ELORETA_VOLUME_HAUK_SOURCE_PSD_MANIFEST_NAME)
+    assert first.output_dir == default_project_eloreta_volume_hauk_source_psd_output_dir(project.project_root)
+    assert first.producer_result.method_id == (METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1)
     assert first.included_participants == ("P01",)
     assert first.cache_hit_count == 0
     assert first.cache_miss_count == 1
@@ -87,59 +81,35 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert not tuple(project.project_root.rglob("*.xlsx"))
 
     manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["metadata"]["producer_method"] == (
-        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
-    )
-    assert manifest["metadata"]["input_domain"] == (
-        "signed_repetition_averaged_eeg_time_series"
-    )
+    assert manifest["metadata"]["producer_method"] == (METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1)
+    assert manifest["metadata"]["input_domain"] == ("signed_repetition_averaged_eeg_time_series")
     method_metadata = manifest["metadata"]["source_psd_method"]
     assert method_metadata["inverse_method"] == "eLORETA"
-    assert method_metadata["method_params"] == dict(
-        DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS
-    )
+    assert method_metadata["method_params"] == dict(DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS)
     assert method_metadata["prepared"] is True
     assert method_metadata["source_orientation_mode"] == "vector_norm"
     assert method_metadata["source_orientation_contract"]["rotation_invariant_amplitude"] is True
 
-    payload = json.loads(
-        (first.output_dir / manifest["conditions"][0]["file"]).read_text(
-            encoding="utf-8"
-        )
-    )
+    payload = json.loads((first.output_dir / manifest["conditions"][0]["file"]).read_text(encoding="utf-8"))
     assert payload["kind"] == "volume_points"
-    assert payload["source_model"] == (
-        f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1}_mean"
-    )
-    assert payload["metadata"]["input_domain"] == (
-        "signed_repetition_averaged_eeg_time_series"
-    )
+    assert payload["source_model"] == (f"{METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1}_mean")
+    assert payload["metadata"]["input_domain"] == ("signed_repetition_averaged_eeg_time_series")
     assert payload["metadata"]["inverse_method"] == "eLORETA"
     assert payload["metadata"]["legacy_amplitude_topography_input"] is False
-    assert payload["metadata"]["condition_source_input"] == (
-        "signed_time_domain_derivative"
-    )
+    assert payload["metadata"]["condition_source_input"] == ("signed_time_domain_derivative")
     assert payload["metadata"]["renderer_dependency"] == "none"
 
     validation = json.loads(first.validation_report_path.read_text(encoding="utf-8"))
-    assert validation["export_model"] == (
-        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
-    )
+    assert validation["export_model"] == (METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1)
     assert validation["input_summary"]["condition_summaries"][0]["workbook_count"] == 0
     assert validation["input_summary"]["candidate_noise_offsets"] == [
         *range(-10, -1),
         *range(2, 11),
     ]
-    assert validation["input_summary"][
-        "required_candidate_noise_bin_count"
-    ] == 18
-    assert validation["input_summary"][
-        "retained_noise_bin_count_after_extreme_drop"
-    ] == 16
+    assert validation["input_summary"]["required_candidate_noise_bin_count"] == 18
+    assert validation["input_summary"]["retained_noise_bin_count_after_extreme_drop"] == 16
     assert validation["input_summary"]["min_noise_bins"] == 18
-    assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"][
-        "diagnostics"
-    ]
+    assert "legacy_fullfft_fallback=forbidden" in validation["input_summary"]["diagnostics"]
 
     def fail_if_recomputed(**_kwargs: Any) -> Any:
         raise AssertionError("valid eLORETA source-PSD cache entry should be reused")
@@ -170,33 +140,79 @@ def test_project_eloreta_source_psd_uses_signed_fif_exact_method_and_cache(
     assert len(alternate_calls) == 1
     assert alternate_calls[0]["method_params"] == alternate_params
     cache_metadata_files = tuple(
-        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").rglob(
-            "*.json"
-        )
+        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").rglob("*.json")
     )
     assert len(cache_metadata_files) == 2
-    cache_metadata = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in cache_metadata_files
+    cache_metadata = [json.loads(path.read_text(encoding="utf-8")) for path in cache_metadata_files]
+    assert {payload["key_payload"]["numerical_model_metadata"]["model_kind"] for payload in cache_metadata} == {
+        "mne_fsaverage_biosemi64_eloreta_volume_source_psd"
+    }
+    assert {payload["key_payload"]["method_metadata"]["inverse_method"] for payload in cache_metadata} == {"eLORETA"}
+    assert {payload["key_payload"]["method_metadata"]["method_params"]["eps"] for payload in cache_metadata} == {
+        1e-6,
+        2e-6,
+    }
+    assert {payload["result_metadata"]["method_id"] for payload in cache_metadata} == {
+        METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1
+    }
+
+
+def test_project_eloreta_source_psd_uses_canonical_sample_count_cohort(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01", "P02", "P03"),
+    )
+    for participant_id in ("P01", "P02"):
+        _write_time_domain_derivative(
+            project.project_root,
+            participant_id=participant_id,
+            n_times=N_TIMES,
+            n_step=N_TIMES // 2,
+        )
+    _write_time_domain_derivative(
+        project.project_root,
+        participant_id="P03",
+        n_times=N_TIMES // 2,
+        n_step=N_TIMES // 2,
+    )
+    calls: list[dict[str, Any]] = []
+
+    result = write_project_eloreta_volume_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=_source_psd_model(),
+        selected_harmonics_hz=(20.0,),
+        apply_inverse_func=_apply_inverse_callable(calls),
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+    )
+
+    assert result.included_participants == ("P01", "P02")
+    assert result.cache_hit_count + result.cache_miss_count == 2
+    assert len(calls) == result.cache_miss_count
+    assert [record.participant_id for record in result.project_inputs.records] == [
+        "P01",
+        "P02",
     ]
-    assert {
-        payload["key_payload"]["numerical_model_metadata"]["model_kind"]
-        for payload in cache_metadata
-    } == {"mne_fsaverage_biosemi64_eloreta_volume_source_psd"}
-    assert {
-        payload["key_payload"]["method_metadata"]["inverse_method"]
-        for payload in cache_metadata
-    } == {"eLORETA"}
-    assert {
-        payload["key_payload"]["method_metadata"]["method_params"]["eps"]
-        for payload in cache_metadata
-    } == {1e-6, 2e-6}
-    assert {
-        payload["result_metadata"]["method_id"] for payload in cache_metadata
-    } == {METHOD_ID_ELORETA_VOLUME_HAUK_SOURCE_PSD_VECTOR_NORM_V1}
+    assert [
+        (item.participant_id, item.condition_id, item.reason_code) for item in result.source_condition_omissions
+    ] == [("P03", "21", "noncanonical_source_sample_count")]
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["metadata"]["source_sample_count_selection_policy"] == (
+        "unique_participant_supported_modal_sample_count_v1"
+    )
+    assert manifest["metadata"]["source_sample_count_n_times"] == N_TIMES
+    assert manifest["metadata"]["source_sample_count_omission_count"] == 1
+    omission = manifest["metadata"]["source_condition_omissions"][0]
+    assert omission["sampling_contract"]["selection_policy"] == ("unique_participant_supported_modal_sample_count_v1")
+    assert omission["sampling_contract"]["actual"]["n_times"] == N_TIMES // 2
+    assert omission["sampling_contract"]["canonical"]["n_times"] == N_TIMES
+    assert manifest["conditions"][0]["metadata"]["project_group"]["participant_ids"] == ["P01", "P02"]
 
 
-def test_project_eloreta_source_psd_uses_complete_case_group_splits(
+def test_project_eloreta_source_psd_uses_available_group_condition_cells(
     tmp_path: Path,
 ) -> None:
     conditions = {"Condition A": 21, "Condition B": 22}
@@ -211,7 +227,12 @@ def test_project_eloreta_source_psd_uses_complete_case_group_splits(
         participant_groups=participant_groups,
         event_map=conditions,
         entry_changes={
-            "P01": {"source_derivative_status": "complete"},
+            "P01": {
+                "condition_completeness": "partial",
+                "missing_condition_labels": ["Condition B"],
+                "source_derivative_status": "incomplete",
+                "source_derivative_warning": "Missing source epoch condition(s): Condition B",
+            },
             "P02": {"source_derivative_status": "complete"},
             "P03": {
                 "condition_completeness": "partial",
@@ -221,15 +242,22 @@ def test_project_eloreta_source_psd_uses_complete_case_group_splits(
             },
         },
     )
-    for participant_id in ("P01", "P02"):
+    for participant_id in ("P01", "P03"):
         group_id, group_folder = participant_groups[participant_id]
         _write_time_domain_derivative(
             project.project_root,
             participant_id=participant_id,
             group_id=group_id,
             group_folder=group_folder,
-            conditions=conditions,
+            conditions={"Condition A": 21},
         )
+    _write_time_domain_derivative(
+        project.project_root,
+        participant_id="P02",
+        group_id="patient",
+        group_folder="Patient Group",
+        conditions=conditions,
+    )
     progress: list[str] = []
 
     result = write_project_eloreta_volume_hauk_source_psd_payloads(
@@ -242,66 +270,59 @@ def test_project_eloreta_source_psd_uses_complete_case_group_splits(
         progress_callback=progress.append,
     )
 
-    assert result.included_participants == ("P01", "P02")
-    assert [item.participant_id for item in result.source_ineligible_participants] == [
-        "P03"
+    assert result.included_participants == ("P01", "P02", "P03")
+    assert result.source_ineligible_participants == ()
+    assert [(item.participant_id, item.condition_id) for item in result.source_condition_omissions] == [
+        ("P01", "22"),
+        ("P03", "22"),
     ]
-    assert result.source_ineligible_participants[0].reason_code == (
-        "incomplete_condition_set"
-    )
     assert [record.participant_id for record in result.project_inputs.records] == [
         "P01",
-        "P01",
         "P02",
         "P02",
+        "P03",
     ]
-    assert any("omitting P03 from every source condition" in item for item in progress)
+    assert any(
+        "omitting 2 unavailable participant-condition input(s) across 2 participant(s)" in item for item in progress
+    )
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["metadata"]["group_summary_policy"] == (
-        "separate_canonical_project_groups"
-    )
+    assert manifest["metadata"]["participant_eligibility_policy"] == ("available_case_by_group_condition_v1")
+    assert manifest["metadata"]["group_summary_policy"] == ("separate_canonical_project_groups")
     assert [condition["id"] for condition in manifest["conditions"]] == [
         "control_21_mean",
         "patient_21_mean",
-        "control_22_mean",
         "patient_22_mean",
     ]
-    expected_participants = {"control": ["P01"], "patient": ["P02"]}
+    expected_participants = {"control": ["P01", "P03"], "patient": ["P02"]}
     for condition in manifest["conditions"]:
         group = condition["metadata"]["project_group"]
         assert group["group_split_applied"] is True
         assert group["participant_ids"] == expected_participants[group["group_id"]]
-        payload = json.loads(
-            (result.output_dir / condition["file"]).read_text(encoding="utf-8")
-        )
-        assert payload["metadata"]["participant_ids"] == expected_participants[
-            group["group_id"]
-        ]
+        payload = json.loads((result.output_dir / condition["file"]).read_text(encoding="utf-8"))
+        assert payload["metadata"]["participant_ids"] == expected_participants[group["group_id"]]
         assert payload["metadata"]["condition_group_id"] == group["group_id"]
 
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert [row["condition_id"] for row in sidecar["conditions"]] == [
         "control_21",
         "patient_21",
-        "control_22",
         "patient_22",
     ]
-    assert sidecar["metadata"]["included_participants"] == ["P01", "P02"]
+    assert sidecar["metadata"]["included_participants"] == ["P01", "P02", "P03"]
+    assert sidecar["metadata"]["source_ineligible_participants"] == []
     assert [
-        item["participant_id"]
-        for item in sidecar["metadata"]["source_ineligible_participants"]
-    ] == ["P03"]
+        (item["participant_id"], item["condition_id"]) for item in sidecar["metadata"]["source_condition_omissions"]
+    ] == [("P01", "22"), ("P03", "22")]
 
     validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
-    assert validation["input_summary"]["source_cohort_status"] == (
-        "complete_with_warnings"
-    )
-    assert validation["input_summary"]["condition_count"] == 4
+    assert validation["input_summary"]["source_cohort_status"] == ("complete_with_warnings")
+    assert validation["input_summary"]["condition_count"] == 3
+    assert validation["input_summary"]["source_ineligible_participants"] == []
     assert [
-        item["participant_id"]
-        for item in validation["input_summary"]["source_ineligible_participants"]
-    ] == ["P03"]
+        (item["participant_id"], item["condition_id"])
+        for item in validation["input_summary"]["source_condition_omissions"]
+    ] == [("P01", "22"), ("P03", "22")]
 
 
 def test_project_eloreta_source_psd_confines_root_and_output(tmp_path: Path) -> None:
@@ -322,9 +343,7 @@ def test_project_eloreta_source_psd_confines_root_and_output(tmp_path: Path) -> 
             selected_harmonics_hz=(20.0,),
         )
 
-    default_output = default_project_eloreta_volume_hauk_source_psd_output_dir(
-        project.project_root
-    )
+    default_output = default_project_eloreta_volume_hauk_source_psd_output_dir(project.project_root)
     assert default_output.is_relative_to(project.project_root)
     assert "eLORETA Hauk Source PSD" in default_output.name
 
@@ -364,11 +383,7 @@ def _project_with_ledger(
     )
     entries: dict[str, dict[str, Any]] = {}
     for participant_id in participants:
-        group_id = (
-            participant_groups[participant_id][0]
-            if participant_groups is not None
-            else None
-        )
+        group_id = participant_groups[participant_id][0] if participant_groups is not None else None
         entries[participant_id] = {
             "participant_id": participant_id,
             "group_id": group_id,
@@ -379,10 +394,7 @@ def _project_with_ledger(
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "expected_outputs": [
                 str(
-                    root
-                    / "1 - Excel Data Files"
-                    / condition_label
-                    / f"{participant_id}_{condition_label}_Results.xlsx"
+                    root / "1 - Excel Data Files" / condition_label / f"{participant_id}_{condition_label}_Results.xlsx"
                 )
                 for condition_label in canonical_event_map
             ],
@@ -405,20 +417,16 @@ def _write_time_domain_derivative(
     group_id: str | None = None,
     group_folder: str | None = None,
     conditions: dict[str, int] | None = None,
+    n_times: int = N_TIMES,
+    n_step: int | None = None,
 ) -> None:
     canonical_conditions = conditions or {"Condition A": 21}
-    times = np.arange(N_TIMES, dtype=float) / SFREQ
+    times = np.arange(n_times, dtype=float) / SFREQ
     repetitions = np.stack(
         [
             np.vstack(
                 [
-                    (channel + 1)
-                    * 1e-8
-                    * np.sin(
-                        2.0 * np.pi * 5.0 * times
-                        + channel * 0.03
-                        + repetition * 0.1
-                    )
+                    (channel + 1) * 1e-8 * np.sin(2.0 * np.pi * 5.0 * times + channel * 0.03 + repetition * 0.1)
                     for channel in range(len(DEFAULT_ELECTRODE_NAMES_64))
                 ]
             )
@@ -440,6 +448,7 @@ def _write_time_domain_derivative(
     )
     epochs.set_eeg_reference(ref_channels="average", projection=True, verbose=False)
     epochs.apply_proj(verbose=False)
+    resolved_n_step = n_times if n_step is None else n_step
     write_source_ready_time_domain_derivatives(
         project_root=root,
         participant_id=participant_id,
@@ -450,8 +459,8 @@ def _write_time_domain_derivative(
         crop_provenance_by_condition={
             label: {
                 "crop_mode": "55_onbin",
-                "N": N_TIMES,
-                "N_step": N_TIMES,
+                "N": n_times,
+                "N_step": resolved_n_step,
                 "N_mod_step": 0,
             }
             for label in canonical_conditions
@@ -479,9 +488,7 @@ def _source_psd_model(
     leadfield = np.arange(64 * 4, dtype=float).reshape(64, 4) / 1000.0 + 0.01
 
     def legacy_topography_estimator(*_args: Any, **_kwargs: Any) -> np.ndarray:
-        raise AssertionError(
-            "time-domain eLORETA export must not call the legacy FullFFT estimator"
-        )
+        raise AssertionError("time-domain eLORETA export must not call the legacy FullFFT estimator")
 
     forward_model = ELORETAVolumeForwardModel(
         channel_names=tuple(DEFAULT_ELECTRODE_NAMES_64),
@@ -515,9 +522,7 @@ def _source_psd_model(
         prepared=True,
         lambda2=DEFAULT_HAUK_SOURCE_PSD_LAMBDA2,
         method_params=(
-            dict(DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS)
-            if method_params is None
-            else dict(method_params)
+            dict(DEFAULT_ELORETA_SOURCE_PSD_METHOD_PARAMS) if method_params is None else dict(method_params)
         ),
     )
 

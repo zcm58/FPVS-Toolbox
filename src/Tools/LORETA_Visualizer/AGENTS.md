@@ -59,9 +59,10 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   maps that used MNE's pooled free-orientation source-PSD output. The two modes
   keep distinct method identities, provenance, and cache entries.
 - `eloreta_volume_hauk_source_psd_vector_norm_v1` is the current time-domain
-  eLORETA sibling. It consumes the same signed FIF derivatives, complete-case
-  cohort, saved oddball harmonics, exact FFT-bin plan, and neighboring-bin
-  z-score algorithm, but forms complex periodic-Hann coefficients only at the
+  eLORETA sibling. It consumes the same signed FIF derivatives,
+  condition-specific cohorts, saved oddball harmonics, exact FFT-bin plan, and
+  neighboring-bin z-score algorithm, but forms complex periodic-Hann
+  coefficients only at the
   exact required bins, calls MNE `apply_inverse(..., pick_ori="vector")`, and
   reduces each three-component source coefficient as
   `sqrt(sum(abs(Cxyz)^2))`. It must compute and cache its own participant source
@@ -91,13 +92,27 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   L2 orientation mode or rebuilding corrected eLORETA maps; reprocessing the
   sensor data is not required merely to regenerate source maps.
 - Source-PSD project orchestration uses the versioned
-  `complete_case_all_canonical_conditions_v1` eligibility policy. A completed
-  participant with any missing canonical condition or an explicitly incomplete
-  derivative is omitted from every source condition and recorded as
-  source-ineligible in the prepared manifest, participant sidecar, validation
-  report, logs, and GUI status. Do not add these source-only omissions to the
-  general participant exclusion workbook. Retained derivatives remain strict;
-  corruption or incompatibility declared complete is still a hard failure.
+  `available_case_by_group_condition_v1` eligibility policy. A completed
+  participant contributes to every canonical condition with a committed
+  derivative; an explicitly missing condition omits only that
+  participant-condition input. Every prepared group-condition map records its
+  own participant count and identities. Group-condition cells with no retained
+  participants are omitted, while one-participant cells remain descriptive and
+  skip inferential cluster masking. Participants whose available conditions
+  cannot be determined, or who have no available canonical condition, remain
+  globally source-ineligible. Record both omission scopes in the prepared
+  manifest, participant sidecar, validation report, logs, and GUI status; do not
+  add source-only omissions to the general participant exclusion workbook.
+  Before either inverse runs, the shared input adapter selects the exact sample
+  count `N` supported by a unique modal number of participants.
+  Participant-condition derivatives with another `N`
+  become condition-specific source omissions so retained z-scores keep one FFT
+  resolution and neighboring-noise-bin contract. Record actual and canonical
+  `N`, duration, and frequency resolution in omission provenance. A tied sample-
+  count distribution remains an actionable hard failure; do not choose
+  arbitrarily, mix resolutions, resample, zero-pad, or crop every valid record
+  to the shortest outlier. Other retained-derivative corruption or
+  incompatibility still fails the build.
 - The beta L2-MNE cortical-surface producer remains swappable and explicitly
   method-labeled (for example `l2_mne_cortical_surface_beta`). Project export
   reads existing flat or condition/group topography workbooks, uses the external
@@ -236,7 +251,9 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   `transforms.py`, or `scalar_fields.py`.
 - Project input adapters are read-only. They may read existing workbooks and QC
   summaries but must not update Stats metadata, alter workbooks/exclusions, or
-  use local real-project paths in tests.
+  use local real-project paths in tests. Workbook, participant, condition, and
+  canonical group discovery must come from `Main_App.projects.dataset_index`;
+  tool-local adapters retain only sheet reading and numerical assembly.
 
 ## Cache And Project I/O
 
@@ -260,7 +277,9 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 - Missing source-ready FIF/preprocessing inputs must produce a clear
   prerequisite message for current time-domain builds. Missing FullFFT/Stats
   inputs must do so for explicitly invoked legacy amplitude-workbook builds.
-  Legacy workbook discovery supports both flat and condition/group layouts.
+  Legacy workbook inputs support both flat and condition/group layouts through
+  the shared project dataset index. In true multi-group projects, adapters must
+  partition canonical groups before participant or group aggregation.
 
 ## GUI, Worker, And Export Rules
 

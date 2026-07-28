@@ -29,11 +29,15 @@ orientation methods remain importable with explicit legacy labels.
 <p>
 During processing, FPVS Toolbox averages each participant's repetitions while
 the EEG waveform is still signed and saves the same source-ready FIF inputs for
-both methods. Both builds use the same complete-case participant cohort,
-project-selected oddball harmonics, exact FFT bins, harmonic alignment, and
-neighboring-bin z-score algorithm. Their orientation and source-amplitude
-calculations differ as described below. Starting from signed waveforms avoids
-projecting a scalp magnitude map that has already discarded phase and polarity.
+both methods. Each participant contributes to every canonical condition they
+completed. A missing condition omits only that participant-condition input; it
+does not remove the participant's completed conditions. Every group-condition
+map records its own participant count and participant identities. Both builds
+use the same project-selected oddball harmonics, exact FFT bins, harmonic
+alignment, and neighboring-bin z-score algorithm. Their orientation and
+source-amplitude calculations differ as described below. Starting from signed
+waveforms avoids projecting a scalp magnitude map that has already discarded
+phase and polarity.
 </p>
 <p>
 The two maps are independent source calculations. Default L2-MNE asks MNE for

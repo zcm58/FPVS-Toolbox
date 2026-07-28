@@ -105,10 +105,7 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert first.manifest_path.is_file()
     assert first.participant_sidecar_path.is_file()
     assert first.validation_report_path is not None and first.validation_report_path.is_file()
-    assert (
-        first.validation_report_markdown_path is not None
-        and first.validation_report_markdown_path.is_file()
-    )
+    assert first.validation_report_markdown_path is not None and first.validation_report_markdown_path.is_file()
     assert first.producer_result.method_id == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
     assert first.method_id == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
     assert first.source_orientation_mode == SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
@@ -119,10 +116,7 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert calls == ["P01"]
     assert pick_ori_calls == ["normal"]
     manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
-    assert (
-        manifest["metadata"]["producer_method"]
-        == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
-    )
+    assert manifest["metadata"]["producer_method"] == HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
     assert manifest["metadata"]["source_psd_method"]["source_orientation_mode"] == (
         SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
     )
@@ -130,34 +124,22 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert manifest["metadata"]["reference_code_repository"] == HAUK_REFERENCE_CODE_URL
     participant_sidecar = json.loads(first.participant_sidecar_path.read_text(encoding="utf-8"))
     assert participant_sidecar["metadata"]["reference_publication_doi"] == HAUK_2021_REFERENCE_DOI
-    payload = json.loads(
-        (first.output_dir / manifest["conditions"][0]["file"]).read_text(encoding="utf-8")
+    payload = json.loads((first.output_dir / manifest["conditions"][0]["file"]).read_text(encoding="utf-8"))
+    assert (
+        payload["metadata"]["config_source_psd_method_metadata"]["reference_publication_doi"] == HAUK_2021_REFERENCE_DOI
     )
-    assert payload["metadata"]["config_source_psd_method_metadata"][
-        "reference_publication_doi"
-    ] == HAUK_2021_REFERENCE_DOI
-    assert payload["metadata"]["config_source_orientation_mode"] == (
-        SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL
-    )
+    assert payload["metadata"]["config_source_orientation_mode"] == (SOURCE_ORIENTATION_MODE_CORTICAL_NORMAL)
     validation_report = json.loads(first.validation_report_path.read_text(encoding="utf-8"))
     assert validation_report["input_summary"]["selected_harmonics_hz"] == [20.0]
     assert validation_report["input_summary"]["condition_count"] == 1
-    assert validation_report["input_summary"]["condition_summaries"][0][
-        "included_subject_count"
-    ] == 1
-    assert validation_report["input_summary"]["condition_summaries"][0][
-        "input_file_count"
-    ] == 1
+    assert validation_report["input_summary"]["condition_summaries"][0]["included_subject_count"] == 1
+    assert validation_report["input_summary"]["condition_summaries"][0]["input_file_count"] == 1
     assert validation_report["input_summary"]["candidate_noise_offsets"] == [
         *range(-10, -1),
         *range(2, 11),
     ]
-    assert validation_report["input_summary"][
-        "required_candidate_noise_bin_count"
-    ] == 18
-    assert validation_report["input_summary"][
-        "retained_noise_bin_count_after_extreme_drop"
-    ] == 16
+    assert validation_report["input_summary"]["required_candidate_noise_bin_count"] == 18
+    assert validation_report["input_summary"]["retained_noise_bin_count_after_extreme_drop"] == 16
     assert validation_report["input_summary"]["min_noise_bins"] == 18
 
     def fail_if_recomputed(**_kwargs: Any) -> Any:
@@ -175,6 +157,86 @@ def test_project_source_psd_export_streams_inputs_writes_payloads_and_reuses_cac
     assert second.cache_hit_count == 1
     assert second.cache_miss_count == 0
     assert second.manifest_path == first.manifest_path
+
+
+def test_project_source_psd_export_omits_noncanonical_sample_count_only(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01", "P02", "P03"),
+    )
+    for participant_id in ("P01", "P02"):
+        _write_time_domain_derivative(
+            project.project_root,
+            participant_id=participant_id,
+            n_times=N_TIMES,
+            n_step=N_TIMES // 2,
+        )
+    _write_time_domain_derivative(
+        project.project_root,
+        participant_id="P03",
+        n_times=N_TIMES // 2,
+        n_step=N_TIMES // 2,
+    )
+    calls: list[str] = []
+    progress: list[str] = []
+
+    result = write_project_l2_mne_hauk_source_psd_payloads(
+        project=project,
+        source_psd_model=_source_psd_model(),
+        selected_harmonics_hz=(20.0,),
+        compute_source_psd_func=_source_psd_callable(calls),
+        aggregations=("mean",),
+        cluster_mask_enabled=False,
+        progress_callback=progress.append,
+    )
+
+    assert result.included_participants == ("P01", "P02")
+    assert result.cache_hit_count + result.cache_miss_count == 2
+    assert len(calls) == result.cache_miss_count
+    assert [record.participant_id for record in result.project_inputs.records] == [
+        "P01",
+        "P02",
+    ]
+    assert [record.participant_id for record in result.project_inputs.sampling_contract_omissions] == ["P03"]
+    assert len(result.source_condition_omissions) == 1
+    omission = result.source_condition_omissions[0].to_metadata()
+    assert omission["participant_id"] == "P03"
+    assert omission["condition_id"] == "21"
+    assert omission["reason_code"] == "noncanonical_source_sample_count"
+    assert omission["sampling_contract"] == {
+        "selection_policy": "unique_participant_supported_modal_sample_count_v1",
+        "actual": {
+            "n_times": N_TIMES // 2,
+            "duration_sec": (N_TIMES // 2) / SFREQ,
+            "frequency_resolution_hz": SFREQ / (N_TIMES // 2),
+        },
+        "canonical": {
+            "n_times": N_TIMES,
+            "duration_sec": N_TIMES / SFREQ,
+            "frequency_resolution_hz": SFREQ / N_TIMES,
+        },
+    }
+    assert any("unique modal sample-count contract" in item for item in progress)
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["metadata"]["source_sample_count_selection_policy"] == (
+        "unique_participant_supported_modal_sample_count_v1"
+    )
+    assert manifest["metadata"]["source_sample_count_n_times"] == N_TIMES
+    assert manifest["metadata"]["source_sample_count_omission_count"] == 1
+    condition = manifest["conditions"][0]
+    assert condition["metadata"]["project_group"]["participant_ids"] == [
+        "P01",
+        "P02",
+    ]
+    assert manifest["metadata"]["source_condition_omissions"][0]["sampling_contract"] == omission["sampling_contract"]
+    validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
+    assert (
+        validation["input_summary"]["source_condition_omissions"][0]["sampling_contract"]
+        == omission["sampling_contract"]
+    )
 
 
 def test_project_source_psd_orientation_modes_have_distinct_methods_and_caches(
@@ -217,9 +279,7 @@ def test_project_source_psd_orientation_modes_have_distinct_methods_and_caches(
     assert pick_ori_calls == ["normal", None]
 
     cache_metadata_paths = sorted(
-        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob(
-            "*.json"
-        )
+        (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob("*.json")
     )
     assert len(cache_metadata_paths) == 2
     cached_methods = {
@@ -227,10 +287,7 @@ def test_project_source_psd_orientation_modes_have_distinct_methods_and_caches(
             metadata["key_payload"]["method_metadata"]["method_id"],
             metadata["key_payload"]["method_metadata"]["source_orientation_mode"],
         )
-        for metadata in (
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in cache_metadata_paths
-        )
+        for metadata in (json.loads(path.read_text(encoding="utf-8")) for path in cache_metadata_paths)
     }
     assert cached_methods == {
         (
@@ -311,15 +368,11 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
     assert seen_projects == [project]
     assert result.selected_harmonics_hz == (20.0,)
     cache_metadata = json.loads(
-        next(
-            (project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob(
-                "*.json"
-            )
-        ).read_text(encoding="utf-8")
+        next((project.project_root / ".fpvs_processing" / "source_psd_cache" / "v1").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
     )
-    cached_selection = cache_metadata["key_payload"]["method_metadata"][
-        "custom_metadata"
-    ]["harmonic_selection"]
+    cached_selection = cache_metadata["key_payload"]["method_metadata"]["custom_metadata"]["harmonic_selection"]
     assert cached_selection["selection_z_by_harmonic"] == {"20.0": 5.1}
     assert set(cached_selection).isdisjoint(
         {
@@ -329,9 +382,7 @@ def test_project_source_psd_export_loads_harmonics_from_the_active_project(
         }
     )
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    manifest_selection = manifest["metadata"]["source_psd_method"][
-        "custom_metadata"
-    ]["harmonic_selection"]
+    manifest_selection = manifest["metadata"]["source_psd_method"]["custom_metadata"]["harmonic_selection"]
     assert manifest_selection["selection_cache_source"] == "saved_processing_metadata"
     assert manifest_selection["selection_cache_saved_at"] == "2026-07-16T10:00:00Z"
     assert manifest_selection["selection_cache_key"] == "harmonic-cache-key"
@@ -419,6 +470,56 @@ def test_project_source_psd_export_validates_canonical_group_manifest_folder(
     assert result.project_inputs.records[0].group_folder == "Control Group"
 
 
+def test_project_source_psd_export_rejects_ledger_group_mismatch(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01",),
+        group_id="control",
+        group_folder="Control Group",
+        entry_changes={"P01": {"group_id": "patient"}},
+    )
+
+    with pytest.raises(
+        ProjectL2MNEHaukSourcePsdExportError,
+        match="does not match canonical project.json group_id",
+    ):
+        write_project_l2_mne_hauk_source_psd_payloads(
+            project=project,
+            source_psd_model=_source_psd_model(),
+            selected_harmonics_hz=(20.0,),
+            compute_source_psd_func=_source_psd_callable([]),
+            aggregations=("mean",),
+            cluster_mask_enabled=False,
+        )
+
+
+def test_project_source_psd_export_rejects_unregistered_group_participant(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01",),
+        group_id="control",
+        group_folder="Control Group",
+    )
+    project.participants = {}
+
+    with pytest.raises(
+        ProjectL2MNEHaukSourcePsdExportError,
+        match="must be registered in project.json",
+    ):
+        write_project_l2_mne_hauk_source_psd_payloads(
+            project=project,
+            source_psd_model=_source_psd_model(),
+            selected_harmonics_hz=(20.0,),
+            compute_source_psd_func=_source_psd_callable([]),
+            aggregations=("mean",),
+            cluster_mask_enabled=False,
+        )
+
+
 def test_project_source_psd_export_splits_multi_group_summaries_and_validation(
     tmp_path: Path,
 ) -> None:
@@ -449,9 +550,7 @@ def test_project_source_psd_export_splits_multi_group_summaries_and_validation(
     )
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["metadata"]["group_summary_policy"] == (
-        "separate_canonical_project_groups"
-    )
+    assert manifest["metadata"]["group_summary_policy"] == ("separate_canonical_project_groups")
     assert [condition["id"] for condition in manifest["conditions"]] == [
         "control_21_mean",
         "patient_21_mean",
@@ -471,9 +570,7 @@ def test_project_source_psd_export_splits_multi_group_summaries_and_validation(
         assert group_provenance["canonical_condition_id"] == "21"
         assert group_provenance["canonical_condition_label"] == "Condition A"
         assert group_provenance["participant_ids"] == expected_participants[group_id]
-        payload = json.loads(
-            (result.output_dir / manifest_condition["file"]).read_text(encoding="utf-8")
-        )
+        payload = json.loads((result.output_dir / manifest_condition["file"]).read_text(encoding="utf-8"))
         assert payload["metadata"]["participant_count"] == 1
         assert payload["metadata"]["participant_ids"] == expected_participants[group_id]
         assert payload["metadata"]["condition_group_id"] == group_id
@@ -485,13 +582,9 @@ def test_project_source_psd_export_splits_multi_group_summaries_and_validation(
         "patient_21",
     ]
     assert [
-        [participant["participant_id"] for participant in row["participants"]]
-        for row in sidecar["conditions"]
+        [participant["participant_id"] for participant in row["participants"]] for row in sidecar["conditions"]
     ] == [["P01"], ["P02"]]
-    assert [
-        row["metadata"]["project_group"]["group_id"]
-        for row in sidecar["conditions"]
-    ] == ["control", "patient"]
+    assert [row["metadata"]["project_group"]["group_id"] for row in sidecar["conditions"]] == ["control", "patient"]
 
     assert result.validation_report_path is not None
     validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
@@ -545,12 +638,8 @@ def test_project_source_psd_export_keeps_single_group_condition_identity(
     assert manifest["metadata"]["group_summary_policy"] == "single_project_cohort"
     assert manifest["conditions"][0]["id"] == "21_mean"
     assert manifest["conditions"][0]["label"] == "Condition A Raw mean z-score"
-    assert manifest["conditions"][0]["metadata"]["project_group"]["group_id"] == (
-        "control"
-    )
-    assert manifest["conditions"][0]["metadata"]["project_group"][
-        "group_split_applied"
-    ] is False
+    assert manifest["conditions"][0]["metadata"]["project_group"]["group_id"] == ("control")
+    assert manifest["conditions"][0]["metadata"]["project_group"]["group_split_applied"] is False
 
 
 @pytest.mark.parametrize(
@@ -571,6 +660,15 @@ def test_project_source_psd_export_keeps_single_group_condition_identity(
         (
             {"P02": {"status": "failed"}},
             "Source participant P02 is not completed",
+        ),
+        (
+            {
+                "P01": {
+                    "condition_completeness": "partial",
+                    "missing_condition_labels": ["Unknown Condition"],
+                }
+            },
+            "unknown canonical condition label",
         ),
     ],
 )
@@ -595,7 +693,7 @@ def test_project_source_psd_export_rejects_stale_or_invalid_ledger_sets(
         )
 
 
-def test_project_source_psd_export_uses_complete_case_cohort_and_records_omissions(
+def test_project_source_psd_export_uses_condition_specific_cohorts_and_records_omissions(
     tmp_path: Path,
 ) -> None:
     conditions = {"Condition A": 21, "Condition B": 22}
@@ -622,6 +720,11 @@ def test_project_source_psd_export_uses_complete_case_cohort_and_records_omissio
         participant_id="P01",
         conditions=conditions,
     )
+    _write_time_domain_derivative(
+        project.project_root,
+        participant_id="P02",
+        conditions={"Condition A": 21},
+    )
     calls: list[str] = []
     progress: list[str] = []
 
@@ -635,60 +738,69 @@ def test_project_source_psd_export_uses_complete_case_cohort_and_records_omissio
         progress_callback=progress.append,
     )
 
-    assert result.included_participants == ("P01",)
+    assert result.included_participants == ("P01", "P02")
     assert result.excluded_subjects == ()
     assert [record.participant_id for record in result.project_inputs.records] == [
         "P01",
         "P01",
-    ]
-    assert len(calls) == 1
-    assert result.cache_miss_count == 1
-    assert result.cache_hit_count == 1
-    assert [item.participant_id for item in result.source_ineligible_participants] == [
         "P02",
+    ]
+    assert result.cache_hit_count + result.cache_miss_count == 3
+    assert len(calls) == result.cache_miss_count
+    assert [item.participant_id for item in result.source_ineligible_participants] == [
         "P03",
     ]
-    assert result.source_ineligible_participants[0].to_metadata() == {
+    assert result.source_ineligible_participants[0].reason_code == ("source_derivative_incomplete")
+    assert len(result.source_condition_omissions) == 1
+    assert result.source_condition_omissions[0].to_metadata() == {
         "participant_id": "P02",
         "group_id": None,
-        "reason_code": "incomplete_condition_set",
-        "detail": "Missing canonical condition output(s): Condition B",
-        "missing_condition_labels": ["Condition B"],
+        "condition_id": "22",
+        "condition_label": "Condition B",
+        "reason_code": "missing_canonical_condition_output",
+        "detail": "Missing source epoch condition(s): Condition B",
         "source_derivative_status": "incomplete",
-        "scope": "all_source_conditions",
+        "scope": "source_condition",
     }
-    assert result.source_ineligible_participants[1].reason_code == (
-        "source_derivative_incomplete"
-    )
-    assert any("omitting P02, P03 from every source condition" in item for item in progress)
+    assert any("omitting 1 unavailable participant-condition input" in item for item in progress)
+    assert any("omitting P03 from every source condition" in item for item in progress)
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    participant_sidecar = json.loads(
-        result.participant_sidecar_path.read_text(encoding="utf-8")
-    )
+    participant_sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     for payload in (manifest, participant_sidecar):
-        assert payload["metadata"]["participant_eligibility_policy"] == (
-            "complete_case_all_canonical_conditions_v1"
-        )
-        assert payload["metadata"]["included_participants"] == ["P01"]
+        assert payload["metadata"]["participant_eligibility_policy"] == ("available_case_by_group_condition_v1")
+        assert payload["metadata"]["included_participants"] == ["P01", "P02"]
+        assert [item["participant_id"] for item in payload["metadata"]["source_ineligible_participants"]] == ["P03"]
         assert [
-            item["participant_id"]
-            for item in payload["metadata"]["source_ineligible_participants"]
-        ] == ["P02", "P03"]
+            (item["participant_id"], item["condition_id"]) for item in payload["metadata"]["source_condition_omissions"]
+        ] == [("P02", "22")]
+
+    condition_cohorts = {
+        condition["metadata"]["project_group"]["canonical_condition_id"]: condition["metadata"]["project_group"][
+            "participant_ids"
+        ]
+        for condition in manifest["conditions"]
+    }
+    assert condition_cohorts == {
+        "21": ["P01", "P02"],
+        "22": ["P01"],
+    }
+    for condition in manifest["conditions"]:
+        payload = json.loads((result.output_dir / condition["file"]).read_text(encoding="utf-8"))
+        canonical_id = condition["metadata"]["project_group"]["canonical_condition_id"]
+        assert payload["metadata"]["participant_count"] == len(condition_cohorts[canonical_id])
 
     validation = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
-    assert validation["input_summary"]["source_cohort_status"] == (
-        "complete_with_warnings"
-    )
+    assert validation["input_summary"]["source_cohort_status"] == ("complete_with_warnings")
+    assert [item["participant_id"] for item in validation["input_summary"]["source_ineligible_participants"]] == ["P03"]
     assert [
-        item["participant_id"]
-        for item in validation["input_summary"]["source_ineligible_participants"]
-    ] == ["P02", "P03"]
-    validation_markdown = result.validation_report_markdown_path.read_text(
-        encoding="utf-8"
-    )
-    assert "| P02 | incomplete_condition_set |" in validation_markdown
+        (item["participant_id"], item["condition_id"])
+        for item in validation["input_summary"]["source_condition_omissions"]
+    ] == [("P02", "22")]
+    validation_markdown = result.validation_report_markdown_path.read_text(encoding="utf-8")
     assert "| P03 | source_derivative_incomplete |" in validation_markdown
+    assert "| P02 | Condition B | missing_canonical_condition_output |" in validation_markdown
+    assert "| Payload | Source model | Aggregation | N |" in validation_markdown
 
 
 def test_project_source_psd_export_fails_when_every_participant_is_source_ineligible(
@@ -760,9 +872,7 @@ def test_project_source_psd_export_confines_root_and_output(tmp_path: Path) -> N
             selected_harmonics_hz=(20.0,),
         )
 
-    assert default_project_l2_mne_hauk_source_psd_output_dir(project.project_root).is_relative_to(
-        project.project_root
-    )
+    assert default_project_l2_mne_hauk_source_psd_output_dir(project.project_root).is_relative_to(project.project_root)
 
 
 def _project_with_ledger(
@@ -799,10 +909,7 @@ def _project_with_ledger(
             "folder_name": group_folder or group_id,
             "raw_input_folder": str(root / "Raw" / group_id),
         }
-        project_participants = {
-            participant_id: {"group_id": group_id}
-            for participant_id in participants
-        }
+        project_participants = {participant_id: {"group_id": group_id} for participant_id in participants}
     project = Project.load(
         root,
         manifest={
@@ -814,11 +921,7 @@ def _project_with_ledger(
     )
     entries: dict[str, dict[str, Any]] = {}
     for participant_id in participants:
-        participant_group_id = (
-            participant_groups[participant_id][0]
-            if participant_groups is not None
-            else group_id
-        )
+        participant_group_id = participant_groups[participant_id][0] if participant_groups is not None else group_id
         entries[participant_id] = {
             "participant_id": participant_id,
             "group_id": participant_group_id,
@@ -829,10 +932,7 @@ def _project_with_ledger(
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "expected_outputs": [
                 str(
-                    root
-                    / "1 - Excel Data Files"
-                    / condition_label
-                    / f"{participant_id}_{condition_label}_Results.xlsx"
+                    root / "1 - Excel Data Files" / condition_label / f"{participant_id}_{condition_label}_Results.xlsx"
                 )
                 for condition_label in canonical_event_map
             ],
@@ -855,17 +955,17 @@ def _write_time_domain_derivative(
     group_id: str | None = None,
     group_folder: str | None = None,
     conditions: dict[str, int] | None = None,
+    n_times: int = N_TIMES,
+    n_step: int | None = None,
 ) -> None:
     canonical_conditions = conditions or {"Condition A": 21}
-    times = np.arange(N_TIMES, dtype=float) / SFREQ
+    times = np.arange(n_times, dtype=float) / SFREQ
     repetitions: list[np.ndarray] = []
     for repetition in range(2):
         repetitions.append(
             np.vstack(
                 [
-                    (channel + 1) * 1e-8 * np.sin(
-                        2.0 * np.pi * 5.0 * times + channel * 0.03 + repetition * 0.1
-                    )
+                    (channel + 1) * 1e-8 * np.sin(2.0 * np.pi * 5.0 * times + channel * 0.03 + repetition * 0.1)
                     for channel in range(len(DEFAULT_ELECTRODE_NAMES_64))
                 ]
             )
@@ -881,6 +981,7 @@ def _write_time_domain_derivative(
     )
     epochs.set_eeg_reference(ref_channels="average", projection=True, verbose=False)
     epochs.apply_proj(verbose=False)
+    resolved_n_step = n_times if n_step is None else n_step
     write_source_ready_time_domain_derivatives(
         project_root=root,
         participant_id=participant_id,
@@ -891,8 +992,8 @@ def _write_time_domain_derivative(
         crop_provenance_by_condition={
             label: {
                 "crop_mode": "55_onbin",
-                "N": N_TIMES,
-                "N_step": N_TIMES,
+                "N": n_times,
+                "N_step": resolved_n_step,
                 "N_mod_step": 0,
             }
             for label in canonical_conditions
@@ -950,11 +1051,7 @@ def _source_psd_callable(
         last_bin = int(round(float(kwargs["fmax"]) / df))
         frequencies = np.arange(first_bin, last_bin + 1, dtype=float) * df
         source_count = int(kwargs["inverse_operator"]["source_count"])
-        amplitudes = (
-            1.0
-            + np.arange(source_count, dtype=float)[:, None] * 0.05
-            + frequencies[None, :] * 0.02
-        )
+        amplitudes = 1.0 + np.arange(source_count, dtype=float)[:, None] * 0.05 + frequencies[None, :] * 0.02
         amplitudes[:, np.isclose(frequencies, 20.0)] += 1.5
         return SimpleNamespace(data=amplitudes**2, times=frequencies)
 

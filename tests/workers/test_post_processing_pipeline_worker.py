@@ -138,6 +138,54 @@ def test_each_source_map_step_remains_successful_when_source_participants_are_om
 
 
 @pytest.mark.parametrize(
+    ("mode", "loader_name", "output_folder"),
+    (
+        ("l2_mne_source_psd", "_load_source_psd_export_api", "l2"),
+        (
+            "eloreta_volume_source_psd",
+            "_load_eloreta_source_psd_export_api",
+            "eloreta",
+        ),
+    ),
+)
+def test_each_source_map_step_reports_condition_specific_omissions_as_warnings(
+    tmp_path,
+    monkeypatch,
+    mode: str,
+    loader_name: str,
+    output_folder: str,
+) -> None:
+    worker = PostProcessingPipelineWorker(_Project(tmp_path))
+    output_dir = tmp_path / output_folder
+
+    def _write_payloads(**_kwargs):
+        return SimpleNamespace(
+            manifest_path=output_dir / "manifest.json",
+            included_participants=("P01", "P02"),
+            source_ineligible_participants=(),
+            source_condition_omissions=(
+                SimpleNamespace(
+                    participant_id="P01",
+                    condition_id="22",
+                    reason_code="noncanonical_source_sample_count",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        worker_module,
+        loader_name,
+        lambda: (lambda _root: output_dir, _write_payloads),
+    )
+
+    result = worker._run_source_map_mode(tmp_path, mode)
+
+    assert result.ok is True
+    assert result.warning is True
+    assert "1 incompatible or unavailable participant-condition" in result.message
+
+
+@pytest.mark.parametrize(
     "failing_mode",
     ("l2_mne_source_psd", "eloreta_volume_source_psd"),
 )

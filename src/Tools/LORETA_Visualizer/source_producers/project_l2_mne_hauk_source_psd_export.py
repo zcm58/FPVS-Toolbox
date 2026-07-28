@@ -20,7 +20,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -96,10 +96,11 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 
 PROJECT_L2_MNE_HAUK_SOURCE_PSD_OUTPUT_FOLDER = "L2-MNE Hauk Source PSD Beta"
-DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME = (
-    "project_l2_mne_hauk_source_psd_manifest.json"
+DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME = "project_l2_mne_hauk_source_psd_manifest.json"
+SOURCE_PARTICIPANT_ELIGIBILITY_POLICY = "available_case_by_group_condition_v1"
+SOURCE_SAMPLE_COUNT_SELECTION_POLICY = (
+    "unique_participant_supported_modal_sample_count_v1"
 )
-SOURCE_PARTICIPANT_ELIGIBILITY_POLICY = "complete_case_all_canonical_conditions_v1"
 
 
 class ProjectL2MNEHaukSourcePsdExportError(RuntimeError):
@@ -118,7 +119,7 @@ class ProjectSourceIneligibleParticipant:
     source_derivative_status: str = ""
 
     def to_metadata(self) -> dict[str, Any]:
-        """Return the durable complete-case omission record."""
+        """Return the durable global source-cohort omission record."""
 
         return {
             "participant_id": self.participant_id,
@@ -129,6 +130,37 @@ class ProjectSourceIneligibleParticipant:
             "source_derivative_status": self.source_derivative_status,
             "scope": "all_source_conditions",
         }
+
+
+@dataclass(frozen=True)
+class ProjectSourceConditionOmission:
+    """One unavailable participant-condition input omitted from source maps."""
+
+    participant_id: str
+    group_id: str | None
+    condition_id: str
+    condition_label: str
+    reason_code: str
+    detail: str
+    source_derivative_status: str = ""
+    sampling_contract: Mapping[str, Any] | None = None
+
+    def to_metadata(self) -> dict[str, Any]:
+        """Return the durable condition-specific omission record."""
+
+        metadata: dict[str, Any] = {
+            "participant_id": self.participant_id,
+            "group_id": self.group_id,
+            "condition_id": self.condition_id,
+            "condition_label": self.condition_label,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "source_derivative_status": self.source_derivative_status,
+            "scope": "source_condition",
+        }
+        if self.sampling_contract is not None:
+            metadata["sampling_contract"] = dict(self.sampling_contract)
+        return metadata
 
 
 @dataclass(frozen=True)
@@ -147,6 +179,7 @@ class ProjectL2MNEHaukSourcePsdExportResult:
     excluded_subjects: tuple[str, ...]
     flagged_subjects: tuple[str, ...]
     source_ineligible_participants: tuple[ProjectSourceIneligibleParticipant, ...]
+    source_condition_omissions: tuple[ProjectSourceConditionOmission, ...]
     cache_hit_count: int
     cache_miss_count: int
     participant_sidecar_path: Path
@@ -183,10 +216,20 @@ class _ProjectGroupSpec:
 
 
 @dataclass(frozen=True)
+class _ProjectParticipantSpec:
+    participant_id: str
+    group_id: str | None
+    group_folder: str | None
+    condition_ids: tuple[str, ...]
+    ledger_entry: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
 class _ProjectInputPlan:
     expected_inputs: tuple[ExpectedProjectTimeDomainInput, ...]
     conditions: tuple[_ConditionSpec, ...]
     participants: tuple[str, ...]
+    participants_by_condition: Mapping[str, tuple[str, ...]]
     group_id_by_participant: Mapping[str, str | None]
     group_folder_by_participant: Mapping[str, str | None]
     groups: tuple[_ProjectGroupSpec, ...]
@@ -195,6 +238,7 @@ class _ProjectInputPlan:
     processing_fingerprint_version: str
     participant_selection: ProjectSourceParticipantSelection
     source_ineligible_participants: tuple[ProjectSourceIneligibleParticipant, ...]
+    source_condition_omissions: tuple[ProjectSourceConditionOmission, ...]
 
 
 @dataclass(frozen=True)
@@ -204,12 +248,8 @@ class _ValidationBinPlan:
     excluded_offsets: tuple[int, ...] = (-1, 0, 1)
     candidate_noise_offsets: tuple[int, ...] = DEFAULT_HAUK_SOURCE_PSD_NOISE_OFFSETS
     min_noise_bins: int = DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT
-    required_candidate_noise_bin_count: int = (
-        DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT
-    )
-    retained_noise_bin_count_after_extreme_drop: int = (
-        DEFAULT_HAUK_SOURCE_PSD_RETAINED_NOISE_BIN_COUNT
-    )
+    required_candidate_noise_bin_count: int = DEFAULT_HAUK_SOURCE_PSD_REQUIRED_NOISE_BIN_COUNT
+    retained_noise_bin_count_after_extreme_drop: int = DEFAULT_HAUK_SOURCE_PSD_RETAINED_NOISE_BIN_COUNT
 
 
 @dataclass(frozen=True)
@@ -220,6 +260,7 @@ class _ValidationReportInputs:
     excluded_subjects: tuple[str, ...]
     flagged_subjects: tuple[str, ...]
     source_ineligible_participants: tuple[Mapping[str, Any], ...]
+    source_condition_omissions: tuple[Mapping[str, Any], ...]
     diagnostics: tuple[str, ...]
     bin_plan: _ValidationBinPlan
     participant_eligibility_policy: str = SOURCE_PARTICIPANT_ELIGIBILITY_POLICY
@@ -241,11 +282,7 @@ def default_project_l2_mne_hauk_source_psd_output_dir(project_root: str | Path) 
     """Return the canonical project-local Option-1 output directory."""
 
     root = Path(project_root).expanduser().resolve()
-    return (
-        root
-        / PROJECT_SOURCE_LOCALIZATION_FOLDER
-        / PROJECT_L2_MNE_HAUK_SOURCE_PSD_OUTPUT_FOLDER
-    )
+    return root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_SOURCE_PSD_OUTPUT_FOLDER
 
 
 def write_project_l2_mne_hauk_source_psd_payloads(
@@ -286,10 +323,27 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         root=root,
         include_flagged_subjects=include_flagged_subjects,
     )
-    if input_plan.source_ineligible_participants:
-        skipped_ids = ", ".join(
-            item.participant_id for item in input_plan.source_ineligible_participants
+    if input_plan.source_condition_omissions:
+        omitted_participants = {item.participant_id for item in input_plan.source_condition_omissions}
+        _emit_progress(
+            progress_callback,
+            (
+                "Source cohort warning: using condition-specific cohorts; omitting "
+                f"{len(input_plan.source_condition_omissions)} unavailable "
+                "participant-condition input(s) across "
+                f"{len(omitted_participants)} participant(s)."
+            ),
         )
+        for item in input_plan.source_condition_omissions:
+            logger.warning(
+                "project_l2_mne_hauk_source_condition_omitted participant=%s condition=%s reason=%s detail=%s",
+                item.participant_id,
+                item.condition_id,
+                item.reason_code,
+                item.detail,
+            )
+    if input_plan.source_ineligible_participants:
+        skipped_ids = ", ".join(item.participant_id for item in input_plan.source_ineligible_participants)
         _emit_progress(
             progress_callback,
             (
@@ -299,8 +353,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         )
         for item in input_plan.source_ineligible_participants:
             logger.warning(
-                "project_l2_mne_hauk_source_participant_ineligible "
-                "participant=%s reason=%s detail=%s",
+                "project_l2_mne_hauk_source_participant_ineligible participant=%s reason=%s detail=%s",
                 item.participant_id,
                 item.reason_code,
                 item.detail,
@@ -313,12 +366,32 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         expected_processing_fingerprint=input_plan.processing_fingerprint,
         expected_processing_fingerprint_version=input_plan.processing_fingerprint_version,
     )
+    sampling_omission_count = len(project_inputs.sampling_contract_omissions)
+    input_plan = reconcile_project_hauk_source_psd_sampling_contract(
+        input_plan,
+        project_inputs=project_inputs,
+    )
+    if sampling_omission_count:
+        sampling_omissions = input_plan.source_condition_omissions[-sampling_omission_count:]
+        _emit_progress(
+            progress_callback,
+            (
+                "Source cohort warning: omitted "
+                f"{sampling_omission_count} participant-condition derivative(s) "
+                "that did not match the unique modal sample-count contract."
+            ),
+        )
+        for item in sampling_omissions:
+            logger.warning(
+                "project_l2_mne_hauk_source_condition_omitted participant=%s condition=%s reason=%s detail=%s",
+                item.participant_id,
+                item.condition_id,
+                item.reason_code,
+                item.detail,
+            )
     _emit_progress(
         progress_callback,
-        (
-            f"Validated {len(project_inputs.records)} participant-condition time-domain "
-            "derivative(s)."
-        ),
+        (f"Validated {len(project_inputs.records)} participant-condition time-domain derivative(s)."),
     )
 
     harmonics, harmonic_metadata = _resolve_selected_harmonics(
@@ -326,9 +399,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         selected_harmonics_hz=selected_harmonics_hz,
         progress_callback=progress_callback,
     )
-    selected_method_id = _source_psd_method_id_for_orientation_mode(
-        source_orientation_mode
-    )
+    selected_method_id = _source_psd_method_id_for_orientation_mode(source_orientation_mode)
     source_psd_config = HaukSourcePsdConfig(
         selected_harmonics_hz=harmonics,
         source_orientation_mode=source_orientation_mode,
@@ -452,13 +523,16 @@ def write_project_l2_mne_hauk_source_psd_payloads(
             "excluded_subjects": list(input_plan.participant_selection.excluded_subjects),
             "flagged_subjects": list(input_plan.participant_selection.flagged_subjects),
             "source_ineligible_participants": [
-                item.to_metadata()
-                for item in input_plan.source_ineligible_participants
+                item.to_metadata() for item in input_plan.source_ineligible_participants
             ],
+            "source_condition_omissions": [item.to_metadata() for item in input_plan.source_condition_omissions],
+            "source_sample_count_selection_policy": (
+                SOURCE_SAMPLE_COUNT_SELECTION_POLICY
+            ),
+            "source_sample_count_n_times": project_inputs.n_times,
+            "source_sample_count_omission_count": sampling_omission_count,
             "group_summary_policy": (
-                "separate_canonical_project_groups"
-                if input_plan.split_group_summaries
-                else "single_project_cohort"
+                "separate_canonical_project_groups" if input_plan.split_group_summaries else "single_project_cohort"
             ),
             "included_project_groups": [
                 {
@@ -497,6 +571,9 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         excluded_subjects=input_plan.participant_selection.excluded_subjects,
         flagged_subjects=input_plan.participant_selection.flagged_subjects,
         source_ineligible_participants=input_plan.source_ineligible_participants,
+        source_condition_omissions=input_plan.source_condition_omissions,
+        source_sample_count_n_times=project_inputs.n_times,
+        source_sample_count_omission_count=sampling_omission_count,
     )
     producer_result = SourceProducerRunResult(
         method_id=participant_result.producer_result.method_id,
@@ -515,21 +592,20 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         conditions=prepared_conditions,
         excluded_subjects=input_plan.participant_selection.excluded_subjects,
         flagged_subjects=input_plan.participant_selection.flagged_subjects,
-        source_ineligible_participants=tuple(
-            item.to_metadata()
-            for item in input_plan.source_ineligible_participants
-        ),
+        source_ineligible_participants=tuple(item.to_metadata() for item in input_plan.source_ineligible_participants),
+        source_condition_omissions=tuple(item.to_metadata() for item in input_plan.source_condition_omissions),
         diagnostics=(
             f"validated_time_domain_derivatives={len(project_inputs.records)}",
             f"included_participants={len(input_plan.participants)}",
             f"source_ineligible_participants={len(input_plan.source_ineligible_participants)}",
+            f"source_condition_omissions={len(input_plan.source_condition_omissions)}",
+            "source_sample_count_selection_policy="
+            + SOURCE_SAMPLE_COUNT_SELECTION_POLICY,
+            f"source_sample_count_n_times={project_inputs.n_times}",
+            f"source_sample_count_omissions={sampling_omission_count}",
             f"prepared_group_conditions={len(prepared_conditions)}",
             "group_summary_policy="
-            + (
-                "separate_canonical_project_groups"
-                if input_plan.split_group_summaries
-                else "single_project_cohort"
-            ),
+            + ("separate_canonical_project_groups" if input_plan.split_group_summaries else "single_project_cohort"),
             f"cache_hits={cache_hit_count}",
             f"cache_misses={cache_miss_count}",
         ),
@@ -542,14 +618,11 @@ def write_project_l2_mne_hauk_source_psd_payloads(
                 input_file_count=len(condition.participant_values),
                 workbook_count=0,
                 included_subject_count=len(condition.participant_values),
-                included_subjects=tuple(
-                    row.participant_id for row in condition.participant_values
-                ),
+                included_subjects=tuple(row.participant_id for row in condition.participant_values),
                 flagged_subjects=tuple(
                     row.participant_id
                     for row in condition.participant_values
-                    if row.participant_id
-                    in input_plan.participant_selection.flagged_subjects
+                    if row.participant_id in input_plan.participant_selection.flagged_subjects
                 ),
             )
             for condition in prepared_conditions
@@ -579,6 +652,7 @@ def write_project_l2_mne_hauk_source_psd_payloads(
         excluded_subjects=input_plan.participant_selection.excluded_subjects,
         flagged_subjects=input_plan.participant_selection.flagged_subjects,
         source_ineligible_participants=input_plan.source_ineligible_participants,
+        source_condition_omissions=input_plan.source_condition_omissions,
         cache_hit_count=cache_hit_count,
         cache_miss_count=cache_miss_count,
         participant_sidecar_path=participant_result.participant_sidecar_path,
@@ -596,9 +670,8 @@ def write_project_l2_mne_hauk_source_psd_payloads(
             "method_id": result.method_id,
             "source_orientation_mode": result.source_orientation_mode,
             "participant_count": len(result.included_participants),
-            "source_ineligible_participant_count": len(
-                result.source_ineligible_participants
-            ),
+            "source_ineligible_participant_count": len(result.source_ineligible_participants),
+            "source_condition_omission_count": len(result.source_condition_omissions),
             "condition_count": len(prepared_conditions),
             "cache_hit_count": cache_hit_count,
             "cache_miss_count": cache_miss_count,
@@ -617,27 +690,19 @@ def _active_project_root(project: Any, *, project_root: str | Path | None) -> Pa
     if project_root is not None:
         supplied = Path(project_root).expanduser().resolve()
         if supplied != root:
-            raise ValueError(
-                "project_root must match the active project's canonical project_root."
-            )
+            raise ValueError("project_root must match the active project's canonical project_root.")
     return root
 
 
 def _project_output_dir(project_root: Path, output_dir: str | Path | None) -> Path:
-    target = (
-        default_project_l2_mne_hauk_source_psd_output_dir(project_root)
-        if output_dir is None
-        else Path(output_dir)
-    )
+    target = default_project_l2_mne_hauk_source_psd_output_dir(project_root) if output_dir is None else Path(output_dir)
     if not target.is_absolute():
         target = project_root / target
     resolved = target.expanduser().resolve()
     try:
         resolved.relative_to(project_root)
     except ValueError as exc:
-        raise ValueError(
-            "Project Hauk source-PSD output directory must stay inside the project root."
-        ) from exc
+        raise ValueError("Project Hauk source-PSD output directory must stay inside the project root.") from exc
     if resolved == project_root:
         raise ValueError("Project Hauk source-PSD output directory cannot be the project root.")
     return resolved
@@ -663,9 +728,10 @@ def _build_project_input_plan(
             "The processing ledger has no usable participant entries. Reprocess the project."
         )
 
-    included: list[tuple[str, str | None, str | None, Mapping[str, Any]]] = []
+    included: list[_ProjectParticipantSpec] = []
     ledger_excluded: list[str] = []
     source_ineligible: list[ProjectSourceIneligibleParticipant] = []
+    source_condition_omissions: list[ProjectSourceConditionOmission] = []
     for ledger_key, entry_value in sorted(entries.items(), key=lambda item: str(item[0]).casefold()):
         if not isinstance(entry_value, Mapping):
             continue
@@ -687,15 +753,30 @@ def _build_project_input_plan(
             raise ProjectL2MNEHaukSourcePsdExportError(
                 f"Processing-ledger participant identity mismatch for {ledger_key!r}."
             )
-        group_id = _optional_text(entry_value.get("group_id"))
-        missing_conditions = _string_sequence(entry_value.get("missing_condition_labels"))
+        ledger_group_id = _optional_text(entry_value.get("group_id"))
+        try:
+            group_id, group_folder = _canonical_participant_group(
+                group_context,
+                participant_id=participant_id,
+                ledger_group_id=ledger_group_id,
+            )
+        except GroupConfigurationError as exc:
+            raise ProjectL2MNEHaukSourcePsdExportError(
+                f"Processing-ledger group metadata is invalid for {participant_id}: {exc}"
+            ) from exc
+        missing_conditions = _canonical_missing_conditions(
+            _string_sequence(entry_value.get("missing_condition_labels")),
+            conditions=conditions,
+            participant_id=participant_id,
+        )
+        missing_condition_labels = tuple(condition.label for condition in missing_conditions)
         completeness = str(entry_value.get("condition_completeness") or "complete").casefold()
-        if completeness != "complete" or missing_conditions:
+        source_derivative_status = str(entry_value.get("source_derivative_status") or "").strip()
+        source_derivative_status_key = source_derivative_status.casefold()
+        if completeness != "complete" and not missing_conditions:
             detail = (
-                "Missing canonical condition output(s): "
-                + ", ".join(missing_conditions)
-                if missing_conditions
-                else f"Condition completeness is {completeness!r}."
+                f"Condition completeness is {completeness!r}, but the processing "
+                "ledger does not identify which canonical conditions are unavailable."
             )
             source_ineligible.append(
                 ProjectSourceIneligibleParticipant(
@@ -703,23 +784,27 @@ def _build_project_input_plan(
                     group_id=group_id,
                     reason_code="incomplete_condition_set",
                     detail=detail,
-                    missing_condition_labels=missing_conditions,
-                    source_derivative_status=str(
-                        entry_value.get("source_derivative_status") or ""
-                    ).strip(),
+                    source_derivative_status=source_derivative_status,
                 )
             )
             continue
-        source_derivative_status = str(
-            entry_value.get("source_derivative_status") or ""
-        ).strip().casefold()
-        if source_derivative_status and source_derivative_status != "complete":
-            source_warning = str(
-                entry_value.get("source_derivative_warning") or ""
-            ).strip()
+        if len(missing_conditions) == len(conditions):
+            detail = "Missing canonical condition output(s): " + ", ".join(missing_condition_labels)
+            source_ineligible.append(
+                ProjectSourceIneligibleParticipant(
+                    participant_id=participant_id,
+                    group_id=group_id,
+                    reason_code="incomplete_condition_set",
+                    detail=detail,
+                    missing_condition_labels=missing_condition_labels,
+                    source_derivative_status=source_derivative_status,
+                )
+            )
+            continue
+        if source_derivative_status_key and source_derivative_status_key != "complete" and not missing_conditions:
+            source_warning = str(entry_value.get("source_derivative_warning") or "").strip()
             detail = source_warning or (
-                "Source-ready time-domain derivative status is "
-                f"{source_derivative_status!r}, not complete."
+                f"Source-ready time-domain derivative status is {source_derivative_status_key!r}, not complete."
             )
             source_ineligible.append(
                 ProjectSourceIneligibleParticipant(
@@ -727,7 +812,7 @@ def _build_project_input_plan(
                     group_id=group_id,
                     reason_code="source_derivative_incomplete",
                     detail=detail,
-                    source_derivative_status=source_derivative_status,
+                    source_derivative_status=source_derivative_status_key,
                 )
             )
             continue
@@ -741,44 +826,48 @@ def _build_project_input_plan(
                 f"Processing-ledger condition expectations for {participant_id} do not match the active project. "
                 "Reprocess the project before source-map generation."
             )
-        try:
-            group_folder = _canonical_group_folder(
-                group_context,
+        missing_condition_ids = {condition.condition_id for condition in missing_conditions}
+        available_condition_ids = tuple(
+            condition.condition_id for condition in conditions if condition.condition_id not in missing_condition_ids
+        )
+        source_warning = str(entry_value.get("source_derivative_warning") or "").strip()
+        for condition in missing_conditions:
+            source_condition_omissions.append(
+                ProjectSourceConditionOmission(
+                    participant_id=participant_id,
+                    group_id=group_id,
+                    condition_id=condition.condition_id,
+                    condition_label=condition.label,
+                    reason_code="missing_canonical_condition_output",
+                    detail=source_warning
+                    or (f"Processing ledger reports no completed output for canonical condition {condition.label!r}."),
+                    source_derivative_status=source_derivative_status,
+                )
+            )
+        included.append(
+            _ProjectParticipantSpec(
                 participant_id=participant_id,
                 group_id=group_id,
+                group_folder=group_folder,
+                condition_ids=available_condition_ids,
+                ledger_entry=entry_value,
             )
-        except GroupConfigurationError as exc:
-            raise ProjectL2MNEHaukSourcePsdExportError(
-                f"Processing-ledger group metadata is invalid for {participant_id}: {exc}"
-            ) from exc
-        included.append((participant_id, group_id, group_folder, entry_value))
+        )
 
     if not included:
-        skipped_detail = "; ".join(
-            f"{item.participant_id}: {item.detail}"
-            for item in source_ineligible
-        )
+        skipped_detail = "; ".join(f"{item.participant_id}: {item.detail}" for item in source_ineligible)
         suffix = f" Source-ineligible participants: {skipped_detail}" if skipped_detail else ""
         raise ProjectL2MNEHaukSourcePsdExportError(
-            "No completed, source-eligible participants remain after project exclusions."
-            + suffix
+            "No completed, source-eligible participants remain after project exclusions." + suffix
         )
     if ledger_excluded:
         selection = ProjectSourceParticipantSelection(
-            excluded_subjects=tuple(
-                sorted({*selection.excluded_subjects, *ledger_excluded})
-            ),
+            excluded_subjects=tuple(sorted({*selection.excluded_subjects, *ledger_excluded})),
             flagged_subjects=selection.flagged_subjects,
         )
 
-    fingerprints = {
-        str(entry.get("processing_fingerprint") or "").strip()
-        for _participant, _group, _group_folder, entry in included
-    }
-    versions = {
-        str(entry.get("processing_fingerprint_version") or "").strip()
-        for _participant, _group, _group_folder, entry in included
-    }
+    fingerprints = {str(item.ledger_entry.get("processing_fingerprint") or "").strip() for item in included}
+    versions = {str(item.ledger_entry.get("processing_fingerprint_version") or "").strip() for item in included}
     if "" in fingerprints or len(fingerprints) != 1:
         raise ProjectL2MNEHaukSourcePsdExportError(
             "Completed source participants do not share one current processing fingerprint. "
@@ -796,11 +885,18 @@ def _build_project_input_plan(
     group_lookup: dict[str, str | None] = {}
     group_folder_lookup: dict[str, str | None] = {}
     participants: list[str] = []
-    for participant_id, group_id, group_folder, _entry in included:
+    participants_by_condition: dict[str, list[str]] = {condition.condition_id: [] for condition in conditions}
+    conditions_by_id = {condition.condition_id: condition for condition in conditions}
+    for item in included:
+        participant_id = item.participant_id
+        group_id = item.group_id
+        group_folder = item.group_folder
         participants.append(participant_id)
         group_lookup[participant_id] = group_id
         group_folder_lookup[participant_id] = group_folder
-        for condition in conditions:
+        for condition_id in item.condition_ids:
+            condition = conditions_by_id[condition_id]
+            participants_by_condition[condition_id].append(participant_id)
             expected.append(
                 ExpectedProjectTimeDomainInput(
                     participant_id=participant_id,
@@ -816,9 +912,7 @@ def _build_project_input_plan(
             label=group.label,
             folder=group.folder_name,
             participants=tuple(
-                participant
-                for participant in participants
-                if group_lookup.get(participant) == group.group_id
+                participant for participant in participants if group_lookup.get(participant) == group.group_id
             ),
         )
         for group in group_context.groups
@@ -828,6 +922,10 @@ def _build_project_input_plan(
         expected_inputs=tuple(expected),
         conditions=conditions,
         participants=tuple(participants),
+        participants_by_condition={
+            condition_id: tuple(condition_participants)
+            for condition_id, condition_participants in participants_by_condition.items()
+        },
         group_id_by_participant=dict(group_lookup),
         group_folder_by_participant=dict(group_folder_lookup),
         groups=project_groups,
@@ -836,15 +934,14 @@ def _build_project_input_plan(
         processing_fingerprint_version=version,
         participant_selection=selection,
         source_ineligible_participants=tuple(source_ineligible),
+        source_condition_omissions=tuple(source_condition_omissions),
     )
 
 
 def _project_conditions(project: Any) -> tuple[_ConditionSpec, ...]:
     event_map = getattr(project, "event_map", None)
     if not isinstance(event_map, Mapping) or not event_map:
-        raise ProjectL2MNEHaukSourcePsdExportError(
-            "The active project has no canonical condition/event mapping."
-        )
+        raise ProjectL2MNEHaukSourcePsdExportError("The active project has no canonical condition/event mapping.")
     conditions: list[_ConditionSpec] = []
     seen_ids: set[str] = set()
     for raw_label, raw_event_id in event_map.items():
@@ -858,9 +955,7 @@ def _project_conditions(project: Any) -> tuple[_ConditionSpec, ...]:
                 f"Project condition {label!r} has an invalid event ID: {raw_event_id!r}."
             ) from exc
         if event_id <= 0:
-            raise ProjectL2MNEHaukSourcePsdExportError(
-                f"Project condition {label!r} must use a positive event ID."
-            )
+            raise ProjectL2MNEHaukSourcePsdExportError(f"Project condition {label!r} must use a positive event ID.")
         condition_id = str(event_id)
         if condition_id in seen_ids:
             raise ProjectL2MNEHaukSourcePsdExportError(
@@ -871,31 +966,57 @@ def _project_conditions(project: Any) -> tuple[_ConditionSpec, ...]:
     return tuple(conditions)
 
 
-def _canonical_group_folder(
+def _canonical_missing_conditions(
+    missing_condition_labels: Sequence[str],
+    *,
+    conditions: Sequence[_ConditionSpec],
+    participant_id: str,
+) -> tuple[_ConditionSpec, ...]:
+    if not missing_condition_labels:
+        return ()
+    conditions_by_label: dict[str, _ConditionSpec] = {}
+    for condition in conditions:
+        key = condition.label.casefold()
+        if key in conditions_by_label:
+            raise ProjectL2MNEHaukSourcePsdExportError(
+                "Project condition labels must be unique when compared case-insensitively for source-map generation."
+            )
+        conditions_by_label[key] = condition
+    unknown_labels = tuple(label for label in missing_condition_labels if label.casefold() not in conditions_by_label)
+    if unknown_labels:
+        raise ProjectL2MNEHaukSourcePsdExportError(
+            f"Processing-ledger missing-condition metadata for {participant_id} "
+            "references unknown canonical condition label(s): "
+            + ", ".join(unknown_labels)
+            + ". Reprocess the participant before source-map generation."
+        )
+    missing_keys = {label.casefold() for label in missing_condition_labels}
+    return tuple(condition for condition in conditions if condition.label.casefold() in missing_keys)
+
+
+def _canonical_participant_group(
     context: ProjectGroupContext,
     *,
     participant_id: str,
-    group_id: str | None,
-) -> str | None:
+    ledger_group_id: str | None,
+) -> tuple[str | None, str | None]:
     if not context.has_group_metadata:
-        if group_id is not None:
-            raise GroupConfigurationError(
-                f"ledger group_id {group_id!r} is present in an ungrouped project."
-            )
-        return None
-    if group_id is None:
-        raise GroupConfigurationError("a grouped project requires a ledger group_id.")
-    group = context.group(group_id)
-    participant_rows = {
-        row.participant_id.casefold(): row for row in context.participants
-    }
-    participant = participant_rows.get(participant_id.casefold())
-    if participant is not None and participant.group_id != group_id:
+        if ledger_group_id is not None:
+            raise GroupConfigurationError(f"ledger group_id {ledger_group_id!r} is present in an ungrouped project.")
+        return None, None
+    try:
+        participant = context.participant(participant_id)
+    except GroupConfigurationError as exc:
+        raise GroupConfigurationError("a grouped source participant must be registered in project.json.") from exc
+    if participant.group_id is None:
+        raise GroupConfigurationError("a grouped source participant requires a canonical group_id in project.json.")
+    if ledger_group_id != participant.group_id:
         raise GroupConfigurationError(
-            f"active project participant metadata assigns group_id {participant.group_id!r}, "
-            f"not ledger group_id {group_id!r}."
+            f"ledger group_id {ledger_group_id!r} does not match canonical "
+            f"project.json group_id {participant.group_id!r}."
         )
-    return group.folder_name
+    group = context.group(participant.group_id)
+    return group.group_id, group.folder_name
 
 
 def _resolve_selected_harmonics(
@@ -918,9 +1039,7 @@ def _resolve_selected_harmonics(
     selection = load_processing_harmonic_selection(
         project,
         log_func=(
-            (lambda message: _emit_progress(progress_callback, message))
-            if progress_callback is not None
-            else None
+            (lambda message: _emit_progress(progress_callback, message)) if progress_callback is not None else None
         ),
     )
     metadata = dict(selection.to_metadata())
@@ -935,9 +1054,7 @@ def _resolve_selected_harmonics(
                 )
             normalized_z_by_harmonic[frequency_key] = z_score
         metadata["selection_z_by_harmonic"] = normalized_z_by_harmonic
-    harmonics = HaukSourcePsdConfig(
-        selected_harmonics_hz=tuple(selection.selected_harmonics_hz)
-    ).selected_harmonics_hz
+    harmonics = HaukSourcePsdConfig(selected_harmonics_hz=tuple(selection.selected_harmonics_hz)).selected_harmonics_hz
     metadata["source"] = "saved_processing_harmonics"
     metadata["selected_harmonics_hz"] = list(harmonics)
     metadata["exploratory"] = False
@@ -986,14 +1103,10 @@ def _numerical_model_cache_metadata(model: MneFsaverageSourcePsdModel) -> dict[s
         "faces_sha256": _array_sha256(forward.faces),
         "leadfield_sha256": _array_sha256(forward.leadfield),
         "source_vertex_ids": (
-            None
-            if forward.source_vertex_ids is None
-            else [int(value) for value in forward.source_vertex_ids]
+            None if forward.source_vertex_ids is None else [int(value) for value in forward.source_vertex_ids]
         ),
         "source_hemispheres": (
-            None
-            if forward.source_hemispheres is None
-            else [str(value) for value in forward.source_hemispheres]
+            None if forward.source_hemispheres is None else [str(value) for value in forward.source_hemispheres]
         ),
         "metadata": dict(model.metadata),
     }
@@ -1039,9 +1152,7 @@ def _participant_values_from_cache(
     expected_source_count: int,
 ) -> L2MNEHaukParticipantZScoreValues:
     if cached is None or cached.source_count != expected_source_count:
-        raise ProjectL2MNEHaukSourcePsdExportError(
-            "A source-PSD cache hit has an incompatible source count."
-        )
+        raise ProjectL2MNEHaukSourcePsdExportError("A source-PSD cache hit has an incompatible source count.")
     # Participant identity is supplied by the validated derivative record.  It
     # is intentionally not inferred from a content-addressed cache entry,
     # because identical derivatives may legitimately share a scientific key.
@@ -1081,10 +1192,7 @@ def _source_psd_method_id_for_orientation_mode(
         return HAUK_SOURCE_PSD_CORTICAL_NORMAL_METHOD_ID
     if mode == SOURCE_ORIENTATION_MODE_LEGACY_MNE_PSD_POWER_NORM:
         return HAUK_SOURCE_PSD_METHOD_ID
-    raise ValueError(
-        "Unsupported L2-MNE source orientation mode: "
-        f"{source_orientation_mode!r}."
-    )
+    raise ValueError(f"Unsupported L2-MNE source orientation mode: {source_orientation_mode!r}.")
 
 
 def _enrich_source_psd_provenance(
@@ -1098,14 +1206,13 @@ def _enrich_source_psd_provenance(
     excluded_subjects: Sequence[str],
     flagged_subjects: Sequence[str],
     source_ineligible_participants: Sequence[ProjectSourceIneligibleParticipant],
+    source_condition_omissions: Sequence[ProjectSourceConditionOmission],
+    source_sample_count_n_times: int,
+    source_sample_count_omission_count: int,
 ) -> None:
-    condition_provenance = {
-        condition.condition_id: _condition_group_provenance(condition)
-        for condition in conditions
-    }
+    condition_provenance = {condition.condition_id: _condition_group_provenance(condition) for condition in conditions}
     split_group_summaries = any(
-        bool(provenance.get("group_split_applied"))
-        for provenance in condition_provenance.values()
+        bool(provenance.get("group_split_applied")) for provenance in condition_provenance.values()
     )
     provenance = {
         "source_psd_method": dict(method_metadata),
@@ -1113,18 +1220,21 @@ def _enrich_source_psd_provenance(
         "reference_code_repository": method_metadata.get("reference_code_repository"),
         "reference_method_relation": method_metadata.get("reference_method_relation"),
         "group_summary_policy": (
-            "separate_canonical_project_groups"
-            if split_group_summaries
-            else "single_project_cohort"
+            "separate_canonical_project_groups" if split_group_summaries else "single_project_cohort"
         ),
         "participant_eligibility_policy": SOURCE_PARTICIPANT_ELIGIBILITY_POLICY,
         "included_participants": list(included_participants),
         "excluded_subjects": list(excluded_subjects),
         "flagged_subjects": list(flagged_subjects),
-        "source_ineligible_participants": [
-            item.to_metadata()
-            for item in source_ineligible_participants
-        ],
+        "source_ineligible_participants": [item.to_metadata() for item in source_ineligible_participants],
+        "source_condition_omissions": [item.to_metadata() for item in source_condition_omissions],
+        "source_sample_count_selection_policy": (
+            SOURCE_SAMPLE_COUNT_SELECTION_POLICY
+        ),
+        "source_sample_count_n_times": int(source_sample_count_n_times),
+        "source_sample_count_omission_count": int(
+            source_sample_count_omission_count
+        ),
     }
     for path in (manifest_path, participant_sidecar_path):
         target = Path(path).resolve()
@@ -1162,9 +1272,7 @@ def _enrich_source_psd_provenance(
                 if condition_metadata is None:
                     continue
                 row_metadata = row.get("metadata")
-                merged_row_metadata = (
-                    dict(row_metadata) if isinstance(row_metadata, Mapping) else {}
-                )
+                merged_row_metadata = dict(row_metadata) if isinstance(row_metadata, Mapping) else {}
                 merged_row_metadata["project_group"] = condition_metadata
                 row["metadata"] = merged_row_metadata
         temporary = target.with_suffix(target.suffix + ".tmp")
@@ -1214,25 +1322,31 @@ def _precomputed_conditions(
     *,
     rows_by_condition: Mapping[str, Sequence[L2MNEHaukParticipantZScoreValues]],
 ) -> tuple[L2MNEHaukPrecomputedParticipantGroupCondition, ...]:
-    participant_count = len(plan.participants)
     conditions: list[L2MNEHaukPrecomputedParticipantGroupCondition] = []
     for condition in plan.conditions:
         rows = tuple(rows_by_condition.get(condition.condition_id, ()))
-        if len(rows) != participant_count:
+        expected_participants = tuple(plan.participants_by_condition.get(condition.condition_id, ()))
+        if len(rows) != len(expected_participants):
             raise ProjectL2MNEHaukSourcePsdExportError(
                 f"Source-PSD participant set for {condition.label} is incomplete: "
-                f"{len(rows)} of {participant_count} maps."
+                f"{len(rows)} of {len(expected_participants)} planned maps."
             )
-        if tuple(row.participant_id for row in rows) != plan.participants:
+        if tuple(row.participant_id for row in rows) != expected_participants:
             raise ProjectL2MNEHaukSourcePsdExportError(
-                f"Source-PSD participant order for {condition.label} does not match the ledger plan."
+                f"Source-PSD participant order for {condition.label} does not match the condition-specific ledger plan."
             )
+        if not rows:
+            continue
         if plan.split_group_summaries:
             rows_by_participant = {row.participant_id: row for row in rows}
             for group in plan.groups:
                 group_rows = tuple(
-                    rows_by_participant[participant] for participant in group.participants
+                    rows_by_participant[participant]
+                    for participant in group.participants
+                    if participant in rows_by_participant
                 )
+                if not group_rows:
+                    continue
                 conditions.append(
                     _precomputed_group_condition(
                         plan,
@@ -1253,6 +1367,10 @@ def _precomputed_conditions(
                     split_group_summaries=False,
                 )
             )
+    if not conditions:
+        raise ProjectL2MNEHaukSourcePsdExportError(
+            "No source-PSD group-condition maps remain after applying condition-specific participant availability."
+        )
     return tuple(conditions)
 
 
@@ -1275,9 +1393,7 @@ def _precomputed_group_condition(
         else condition.condition_id
     )
     prepared_label = (
-        f"{group.label} - {condition.label}"
-        if split_group_summaries and group is not None
-        else condition.label
+        f"{group.label} - {condition.label}" if split_group_summaries and group is not None else condition.label
     )
     return L2MNEHaukPrecomputedParticipantGroupCondition(
         condition_id=prepared_condition_id,
@@ -1294,12 +1410,10 @@ def _precomputed_group_condition(
             "group_folder": None if group is None else group.folder,
             "participant_ids": list(participant_ids),
             "participant_group_ids": {
-                participant: plan.group_id_by_participant.get(participant)
-                for participant in participant_ids
+                participant: plan.group_id_by_participant.get(participant) for participant in participant_ids
             },
             "participant_group_folders": {
-                participant: plan.group_folder_by_participant.get(participant)
-                for participant in participant_ids
+                participant: plan.group_folder_by_participant.get(participant) for participant in participant_ids
             },
         },
     )
@@ -1357,7 +1471,7 @@ def _replace_file(source: str | Path, destination: str | Path) -> None:
 
 # Public, method-neutral project-planning seams.  The L2-MNE exporter remains
 # the historical owner for now, but sibling source-PSD methods must consume the
-# exact same complete-case ledger plan and saved harmonic selection rather than
+# exact same condition-specific ledger plan and saved harmonic selection rather than
 # reimplementing cohort eligibility independently.
 ProjectHaukSourcePsdConditionSpec = _ConditionSpec
 ProjectHaukSourcePsdGroupSpec = _ProjectGroupSpec
@@ -1380,12 +1494,110 @@ def build_project_hauk_source_psd_input_plan(
     root: Path,
     include_flagged_subjects: bool,
 ) -> ProjectHaukSourcePsdInputPlan:
-    """Build the shared complete-case ledger/condition plan."""
+    """Build the shared available-case ledger/condition plan."""
 
     return _build_project_input_plan(
         project,
         root=root,
         include_flagged_subjects=include_flagged_subjects,
+    )
+
+
+def reconcile_project_hauk_source_psd_sampling_contract(
+    plan: ProjectHaukSourcePsdInputPlan,
+    *,
+    project_inputs: ProjectTimeDomainInputSet,
+) -> ProjectHaukSourcePsdInputPlan:
+    """Apply central time-domain sampling omissions to the shared cohort plan."""
+
+    omitted_records = tuple(project_inputs.sampling_contract_omissions)
+    if not omitted_records:
+        return plan
+
+    omitted_keys = {record.key for record in omitted_records}
+    expected_inputs = tuple(item for item in plan.expected_inputs if item.key not in omitted_keys)
+    participants_by_condition = {
+        condition_id: tuple(
+            participant_id
+            for participant_id in participant_ids
+            if (
+                plan.group_id_by_participant.get(participant_id),
+                participant_id,
+                condition_id,
+            )
+            not in omitted_keys
+        )
+        for condition_id, participant_ids in plan.participants_by_condition.items()
+    }
+    active_participants = {record.participant_id for record in project_inputs.records}
+    participants = tuple(
+        participant_id for participant_id in plan.participants if participant_id in active_participants
+    )
+    groups = tuple(
+        replace(
+            group,
+            participants=tuple(
+                participant_id for participant_id in group.participants if participant_id in active_participants
+            ),
+        )
+        for group in plan.groups
+        if any(participant_id in active_participants for participant_id in group.participants)
+    )
+    canonical_duration_sec = project_inputs.n_times / project_inputs.sfreq_hz
+    sampling_omissions = tuple(
+        ProjectSourceConditionOmission(
+            participant_id=record.participant_id,
+            group_id=record.group_id,
+            condition_id=record.condition_id,
+            condition_label=record.condition_label,
+            reason_code="noncanonical_source_sample_count",
+            detail=(
+                "Source-ready derivative has "
+                f"N={record.n_times} ({record.duration_sec:g} s, "
+                f"df={record.frequency_resolution_hz:.12g} Hz), while the unique "
+                f"modal source contract is N={project_inputs.n_times} "
+                f"({canonical_duration_sec:g} s, "
+                f"df={project_inputs.frequency_resolution_hz:.12g} Hz). "
+                "This participant-condition was omitted so every retained source "
+                "z-score uses the same exact FFT and neighboring-noise-bin contract."
+            ),
+            source_derivative_status="noncanonical_sample_count",
+            sampling_contract={
+                "selection_policy": SOURCE_SAMPLE_COUNT_SELECTION_POLICY,
+                "actual": {
+                    "n_times": record.n_times,
+                    "duration_sec": record.duration_sec,
+                    "frequency_resolution_hz": record.frequency_resolution_hz,
+                },
+                "canonical": {
+                    "n_times": project_inputs.n_times,
+                    "duration_sec": canonical_duration_sec,
+                    "frequency_resolution_hz": project_inputs.frequency_resolution_hz,
+                },
+            },
+        )
+        for record in omitted_records
+    )
+    return replace(
+        plan,
+        expected_inputs=expected_inputs,
+        participants=participants,
+        participants_by_condition=participants_by_condition,
+        group_id_by_participant={
+            participant_id: group_id
+            for participant_id, group_id in plan.group_id_by_participant.items()
+            if participant_id in active_participants
+        },
+        group_folder_by_participant={
+            participant_id: group_folder
+            for participant_id, group_folder in plan.group_folder_by_participant.items()
+            if participant_id in active_participants
+        },
+        groups=groups,
+        source_condition_omissions=(
+            *plan.source_condition_omissions,
+            *sampling_omissions,
+        ),
     )
 
 
@@ -1415,6 +1627,9 @@ def enrich_project_hauk_source_psd_provenance(
     excluded_subjects: Sequence[str],
     flagged_subjects: Sequence[str],
     source_ineligible_participants: Sequence[ProjectSourceIneligibleParticipant],
+    source_condition_omissions: Sequence[ProjectSourceConditionOmission],
+    source_sample_count_n_times: int,
+    source_sample_count_omission_count: int,
 ) -> None:
     """Add shared cohort/method provenance to a source-PSD manifest and sidecar."""
 
@@ -1428,6 +1643,9 @@ def enrich_project_hauk_source_psd_provenance(
         excluded_subjects=excluded_subjects,
         flagged_subjects=flagged_subjects,
         source_ineligible_participants=source_ineligible_participants,
+        source_condition_omissions=source_condition_omissions,
+        source_sample_count_n_times=source_sample_count_n_times,
+        source_sample_count_omission_count=source_sample_count_omission_count,
     )
 
 
@@ -1435,16 +1653,19 @@ __all__ = [
     "DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME",
     "PROJECT_L2_MNE_HAUK_SOURCE_PSD_OUTPUT_FOLDER",
     "SOURCE_PARTICIPANT_ELIGIBILITY_POLICY",
+    "SOURCE_SAMPLE_COUNT_SELECTION_POLICY",
     "ProjectL2MNEHaukSourcePsdExportError",
     "ProjectL2MNEHaukSourcePsdExportResult",
     "ProjectHaukSourcePsdConditionSpec",
     "ProjectHaukSourcePsdGroupSpec",
     "ProjectHaukSourcePsdInputPlan",
+    "ProjectSourceConditionOmission",
     "ProjectSourceIneligibleParticipant",
     "active_project_hauk_source_psd_root",
     "build_project_hauk_source_psd_input_plan",
     "default_project_l2_mne_hauk_source_psd_output_dir",
     "enrich_project_hauk_source_psd_provenance",
+    "reconcile_project_hauk_source_psd_sampling_contract",
     "resolve_project_hauk_source_psd_harmonics",
     "write_project_l2_mne_hauk_source_psd_payloads",
 ]

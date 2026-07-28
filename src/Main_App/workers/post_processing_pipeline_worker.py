@@ -305,21 +305,36 @@ class PostProcessingPipelineWorker(QObject):
             source_ineligible = tuple(
                 getattr(result, "source_ineligible_participants", ()) or ()
             )
-            if source_ineligible:
+            source_condition_omissions = tuple(
+                getattr(result, "source_condition_omissions", ()) or ()
+            )
+            if source_ineligible or source_condition_omissions:
                 skipped_ids = ", ".join(
                     str(getattr(item, "participant_id", "")).strip()
                     for item in source_ineligible
                     if str(getattr(item, "participant_id", "")).strip()
                 )
-                return PostProcessingStepResult(
-                    mode,
-                    True,
+                warning_parts = [
                     (
                         f"{label} generated from "
                         f"{len(tuple(getattr(result, 'included_participants', ()) or ()))} "
-                        "source-eligible participant(s); source-ineligible participant(s) "
-                        f"were omitted from every condition: {skipped_ids}."
-                    ),
+                        "source-eligible participant(s)"
+                    )
+                ]
+                if source_ineligible:
+                    warning_parts.append(
+                        "source-ineligible participant(s) were omitted from "
+                        f"every condition: {skipped_ids}"
+                    )
+                if source_condition_omissions:
+                    warning_parts.append(
+                        f"{len(source_condition_omissions)} incompatible or "
+                        "unavailable participant-condition input(s) were omitted"
+                    )
+                return PostProcessingStepResult(
+                    mode,
+                    True,
+                    "; ".join(warning_parts) + ".",
                     str(result.manifest_path),
                     warning=True,
                 )
@@ -353,21 +368,36 @@ class PostProcessingPipelineWorker(QObject):
             source_ineligible = tuple(
                 getattr(result, "source_ineligible_participants", ()) or ()
             )
-            if source_ineligible:
+            source_condition_omissions = tuple(
+                getattr(result, "source_condition_omissions", ()) or ()
+            )
+            if source_ineligible or source_condition_omissions:
                 skipped_ids = ", ".join(
                     str(getattr(item, "participant_id", "")).strip()
                     for item in source_ineligible
                     if str(getattr(item, "participant_id", "")).strip()
                 )
-                return PostProcessingStepResult(
-                    mode,
-                    True,
+                warning_parts = [
                     (
                         f"{label} generated from "
                         f"{len(tuple(getattr(result, 'included_participants', ()) or ()))} "
-                        "source-eligible participant(s); source-ineligible participant(s) "
-                        f"were omitted from every condition: {skipped_ids}."
-                    ),
+                        "source-eligible participant(s)"
+                    )
+                ]
+                if source_ineligible:
+                    warning_parts.append(
+                        "source-ineligible participant(s) were omitted from "
+                        f"every condition: {skipped_ids}"
+                    )
+                if source_condition_omissions:
+                    warning_parts.append(
+                        f"{len(source_condition_omissions)} incompatible or "
+                        "unavailable participant-condition input(s) were omitted"
+                    )
+                return PostProcessingStepResult(
+                    mode,
+                    True,
+                    "; ".join(warning_parts) + ".",
                     str(result.manifest_path),
                     warning=True,
                 )

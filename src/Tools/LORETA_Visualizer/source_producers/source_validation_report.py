@@ -8,6 +8,7 @@ project inputs.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -118,6 +119,7 @@ def _payload_summary(payload: ProducedPayload) -> dict[str, Any]:
         "value_label": str(raw.get("value_label", "")),
         "source_value_unit": str(metadata.get("source_value_unit", "")),
         "participant_zscore_aggregation": str(metadata.get("participant_zscore_aggregation", "")),
+        "participant_count": _int_or_none(metadata.get("participant_count")),
         "source_count": len(raw.get("points", [])),
         "value_min": min(values) if values else None,
         "value_max": max(values) if values else None,
@@ -203,6 +205,7 @@ def _lateralization_row_summary(row: dict[str, Any]) -> dict[str, Any]:
 def _input_summary(project_inputs: Any) -> dict[str, Any]:
     bin_plan = getattr(project_inputs, "bin_plan", None)
     source_ineligible = _source_ineligible_participants(project_inputs)
+    source_condition_omissions = _source_condition_omissions(project_inputs)
     summaries = []
     for summary in getattr(project_inputs, "summaries", ()):
         summaries.append(
@@ -227,20 +230,17 @@ def _input_summary(project_inputs: Any) -> dict[str, Any]:
         "condition_count": len(getattr(project_inputs, "conditions", ())),
         "excluded_subjects": list(getattr(project_inputs, "excluded_subjects", ())),
         "flagged_subjects": list(getattr(project_inputs, "flagged_subjects", ())),
-        "participant_eligibility_policy": str(
-            getattr(project_inputs, "participant_eligibility_policy", "")
-        ),
+        "participant_eligibility_policy": str(getattr(project_inputs, "participant_eligibility_policy", "")),
         "source_cohort_status": (
-            "complete_with_warnings" if source_ineligible else "complete"
+            "complete_with_warnings" if source_ineligible or source_condition_omissions else "complete"
         ),
         "source_ineligible_participants": source_ineligible,
+        "source_condition_omissions": source_condition_omissions,
         "diagnostics": list(getattr(project_inputs, "diagnostics", ())),
         "frequency_resolution_hz": getattr(bin_plan, "frequency_resolution_hz", None),
         "noise_window_bins": getattr(bin_plan, "noise_window_bins", None),
         "excluded_noise_offsets": list(getattr(bin_plan, "excluded_offsets", ())),
-        "candidate_noise_offsets": list(
-            getattr(bin_plan, "candidate_noise_offsets", ())
-        ),
+        "candidate_noise_offsets": list(getattr(bin_plan, "candidate_noise_offsets", ())),
         "min_noise_bins": getattr(bin_plan, "min_noise_bins", None),
         "required_candidate_noise_bin_count": getattr(
             bin_plan,
@@ -267,12 +267,8 @@ def _source_ineligible_participants(project_inputs: Any) -> list[dict[str, Any]]
                 "group_id": getattr(value, "group_id", None),
                 "reason_code": getattr(value, "reason_code", ""),
                 "detail": getattr(value, "detail", ""),
-                "missing_condition_labels": getattr(
-                    value, "missing_condition_labels", ()
-                ),
-                "source_derivative_status": getattr(
-                    value, "source_derivative_status", ""
-                ),
+                "missing_condition_labels": getattr(value, "missing_condition_labels", ()),
+                "source_derivative_status": getattr(value, "source_derivative_status", ""),
                 "scope": "all_source_conditions",
             }
         rows.append(
@@ -281,15 +277,45 @@ def _source_ineligible_participants(project_inputs: Any) -> list[dict[str, Any]]
                 "group_id": item.get("group_id"),
                 "reason_code": str(item.get("reason_code") or ""),
                 "detail": str(item.get("detail") or ""),
-                "missing_condition_labels": list(
-                    item.get("missing_condition_labels") or ()
-                ),
-                "source_derivative_status": str(
-                    item.get("source_derivative_status") or ""
-                ),
+                "missing_condition_labels": list(item.get("missing_condition_labels") or ()),
+                "source_derivative_status": str(item.get("source_derivative_status") or ""),
                 "scope": str(item.get("scope") or "all_source_conditions"),
             }
         )
+    return rows
+
+
+def _source_condition_omissions(project_inputs: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for value in getattr(project_inputs, "source_condition_omissions", ()):
+        if isinstance(value, dict):
+            item = value
+        else:
+            item = {
+                "participant_id": getattr(value, "participant_id", ""),
+                "group_id": getattr(value, "group_id", None),
+                "condition_id": getattr(value, "condition_id", ""),
+                "condition_label": getattr(value, "condition_label", ""),
+                "reason_code": getattr(value, "reason_code", ""),
+                "detail": getattr(value, "detail", ""),
+                "source_derivative_status": getattr(value, "source_derivative_status", ""),
+                "sampling_contract": getattr(value, "sampling_contract", None),
+                "scope": "source_condition",
+            }
+        row = {
+            "participant_id": str(item.get("participant_id") or ""),
+            "group_id": item.get("group_id"),
+            "condition_id": str(item.get("condition_id") or ""),
+            "condition_label": str(item.get("condition_label") or ""),
+            "reason_code": str(item.get("reason_code") or ""),
+            "detail": str(item.get("detail") or ""),
+            "source_derivative_status": str(item.get("source_derivative_status") or ""),
+            "scope": str(item.get("scope") or "source_condition"),
+        }
+        sampling_contract = item.get("sampling_contract")
+        if isinstance(sampling_contract, Mapping):
+            row["sampling_contract"] = dict(sampling_contract)
+        rows.append(row)
     return rows
 
 
@@ -304,7 +330,9 @@ def _generated_files(
     return {
         "manifest": manifest_file.name,
         "payloads": [payload.payload_path.name for payload in payloads],
-        "participant_sidecar": participant_file.name if participant_file is not None and participant_file.exists() else "",
+        "participant_sidecar": participant_file.name
+        if participant_file is not None and participant_file.exists()
+        else "",
         "lateralization_json": (
             lateralization_file.name if lateralization_file is not None and lateralization_file.exists() else ""
         ),
@@ -390,18 +418,11 @@ def _markdown_report(report: dict[str, Any]) -> str:
     lateralization = report["lateralization_summary"]
     noise_summary_lines: list[str] = []
     required_noise_bins = input_summary["required_candidate_noise_bin_count"]
-    retained_noise_bins = input_summary[
-        "retained_noise_bin_count_after_extreme_drop"
-    ]
+    retained_noise_bins = input_summary["retained_noise_bin_count_after_extreme_drop"]
     if required_noise_bins is not None:
-        noise_summary_lines.append(
-            f"- Required candidate noise bins: {required_noise_bins}"
-        )
+        noise_summary_lines.append(f"- Required candidate noise bins: {required_noise_bins}")
     if retained_noise_bins is not None:
-        noise_summary_lines.append(
-            "- Noise bins retained after extreme-value drop: "
-            f"{retained_noise_bins}"
-        )
+        noise_summary_lines.append(f"- Noise bins retained after extreme-value drop: {retained_noise_bins}")
     lines = [
         "# Source Localization Validation Report",
         "",
@@ -418,20 +439,18 @@ def _markdown_report(report: dict[str, Any]) -> str:
         "",
         "## Source Cohort",
         "",
-        (
-            "- Eligibility policy: "
-            + (input_summary["participant_eligibility_policy"] or "not recorded")
-        ),
+        ("- Eligibility policy: " + (input_summary["participant_eligibility_policy"] or "not recorded")),
         f"- Project/QC exclusions: {len(input_summary['excluded_subjects'])}",
         f"- Source-ineligible participants: {len(input_summary['source_ineligible_participants'])}",
+        (f"- Unavailable participant-condition inputs: {len(input_summary['source_condition_omissions'])}"),
         "",
     ]
     source_ineligible = input_summary["source_ineligible_participants"]
+    source_condition_omissions = input_summary["source_condition_omissions"]
     if source_ineligible:
         lines.extend(
             (
-                "Source-ineligible participants were omitted from every source condition; "
-                "the retained maps use one complete-case cohort.",
+                "The participants below were omitted from every source condition.",
                 "",
                 "| Participant | Reason | Detail |",
                 "| --- | --- | --- |",
@@ -445,7 +464,27 @@ def _markdown_report(report: dict[str, Any]) -> str:
                 f"{_markdown_cell(item['detail'])} |"
             )
         lines.append("")
-    else:
+    if source_condition_omissions:
+        lines.extend(
+            (
+                "Available-case maps retain every completed participant-condition "
+                "input; only the unavailable inputs below were omitted.",
+                "",
+                "| Participant | Condition | Reason | Detail |",
+                "| --- | --- | --- | --- |",
+            )
+        )
+        for item in source_condition_omissions:
+            condition = item["condition_label"] or item["condition_id"]
+            lines.append(
+                "| "
+                f"{_markdown_cell(item['participant_id'])} | "
+                f"{_markdown_cell(condition)} | "
+                f"{_markdown_cell(item['reason_code'])} | "
+                f"{_markdown_cell(item['detail'])} |"
+            )
+        lines.append("")
+    if not source_ineligible and not source_condition_omissions:
         lines.extend(("- No source-only participant omissions were recorded.", ""))
     lines.extend(
         (
@@ -485,8 +524,8 @@ def _markdown_report(report: dict[str, Any]) -> str:
             "",
             "## Payload Summary",
             "",
-            "| Payload | Source model | Aggregation | Value range | Cluster sources |",
-            "| --- | --- | --- | ---: | ---: |",
+            "| Payload | Source model | Aggregation | N | Value range | Cluster sources |",
+            "| --- | --- | --- | ---: | ---: | ---: |",
         )
     )
     for payload in report["payload_summaries"]:
@@ -494,7 +533,8 @@ def _markdown_report(report: dict[str, Any]) -> str:
         lines.append(
             "| "
             f"{payload['file']} | {payload['source_model']} | "
-            f"{payload['participant_zscore_aggregation']} | {value_range} | "
+            f"{payload['participant_zscore_aggregation']} | "
+            f"{_format_number(payload['participant_count'])} | {value_range} | "
             f"{_format_number(payload['cluster_mask_source_count'])} |"
         )
     lines.extend(("", "## Limitations", ""))

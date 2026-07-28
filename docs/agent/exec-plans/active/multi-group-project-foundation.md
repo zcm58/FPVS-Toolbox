@@ -193,6 +193,7 @@ class ProjectDatasetIndex:
     groups: Mapping[str, GroupInfo]
     participants: Mapping[str, ParticipantInfo]
     workbooks: tuple[WorkbookRecord, ...]
+    excluded_workbooks: tuple[WorkbookRecord, ...]
     diagnostics: tuple[DatasetDiagnostic, ...]
 ```
 
@@ -204,6 +205,9 @@ Required query/adaptation behavior:
   `{participant: {condition: workbook_path}}` shape.
 - Provide a compatibility adapter for display-label group maps currently used
   by Stats-ready export and SNR group overlays.
+- Apply persisted participant-condition exclusions once at the index boundary,
+  retaining those records separately in `excluded_workbooks` for audit and
+  diagnostics so every downstream consumer sees the same active cohort.
 - Prefer exact known manifest participant IDs before legacy filename regexes.
 - Report missing assignments, duplicate participant/condition workbooks, and
   stale flat/grouped duplicates explicitly. Preserve the current compatibility

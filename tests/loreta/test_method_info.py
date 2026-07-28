@@ -7,7 +7,19 @@ def test_loreta_method_info_copy_covers_mask_and_references() -> None:
 
     assert "Cluster-Based Permutation Mask" in html
     assert "generates both EEG-only L2-MNE cortical and" in normalized_html
-    assert "same complete-case participant cohort" in normalized_html
+    assert (
+        "Each participant contributes to every canonical condition they completed"
+        in normalized_html
+    )
+    assert (
+        "A missing condition omits only that participant-condition input"
+        in normalized_html
+    )
+    assert (
+        "Every group-condition map records its own participant count and participant identities"
+        in normalized_html
+    )
+    assert "complete-case participant cohort" not in normalized_html
     assert "l2_mne_hauk_source_psd_cortical_normal_v1" in html
     assert 'pick_ori="normal"' in html
     assert "l2_mne_hauk_source_psd_v1" in html
