@@ -118,6 +118,7 @@ def _processing_cache_reset_is_busy(host: Any) -> bool:
     for attribute in (
         "_preflight_qc_thread",
         "_post_processing_pipeline_thread",
+        "_settings_full_fft_grid_qc_thread",
         "_settings_harmonic_recalc_thread",
         "_project_processing_cache_thread",
     ):

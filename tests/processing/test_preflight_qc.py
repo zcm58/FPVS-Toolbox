@@ -11,8 +11,10 @@ from Main_App.io.load_utils import BdfPreflightInfo
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
 from Main_App.processing.preflight_qc import (
+    PreflightConditionCropObservation,
     PreflightQcFileResult,
     PreflightQcScan,
+    build_preflight_condition_crop_grid_audit,
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
@@ -216,3 +218,215 @@ def test_scan_preprocessing_qc_uses_parallel_workers(
         "control",
         "patient",
     ]
+
+
+def _condition_crop_result(
+    tmp_path: Path,
+    participant_id: str,
+    condition: str,
+    *,
+    oddball_cycles: int,
+    repetitions: int = 1,
+) -> PreflightQcFileResult:
+    sfreq = 256.0
+    sample_count = int(round((oddball_cycles / 1.2) * sfreq))
+    return PreflightQcFileResult(
+        path=tmp_path / f"{participant_id}.bdf",
+        participant_id=participant_id,
+        group_id="control",
+        load_error=None,
+        raw_channel_qc={},
+        raw_spectral_qc={},
+        condition_qc={
+            "event_plan": {
+                "sfreq": sfreq,
+                "spans": [
+                    {
+                        "condition_id": 22,
+                        "condition_label": condition,
+                        "repetition_index": repetition,
+                        "spectral_start_sample": repetition * 100_000,
+                        "spectral_stop_sample": repetition * 100_000
+                        + sample_count,
+                        "spectral_fallback_reason": None,
+                    }
+                    for repetition in range(repetitions)
+                ],
+            }
+        },
+    )
+
+
+def test_preflight_crop_grid_audit_flags_condition_against_project_majority(
+    tmp_path: Path,
+) -> None:
+    scan = PreflightQcScan(
+        results=(
+            _condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
+            _condition_crop_result(tmp_path, "P2", "Faces", oddball_cycles=144),
+            _condition_crop_result(
+                tmp_path,
+                "P3",
+                "Negative Valence",
+                oddball_cycles=144,
+                repetitions=3,
+            ),
+            _condition_crop_result(
+                tmp_path,
+                "P4",
+                "Negative Valence",
+                oddball_cycles=21,
+                repetitions=3,
+            ),
+        )
+    )
+
+    audit = build_preflight_condition_crop_grid_audit(scan)
+
+    assert audit.reference_oddball_cycles == 144
+    assert audit.reference_duration_s == 120.0
+    assert audit.reference_support == 3
+    assert audit.reference_total == 4
+    assert [
+        (
+            candidate.participant_id,
+            candidate.condition_label,
+            candidate.oddball_cycles,
+            candidate.repetition_count,
+        )
+        for candidate in audit.review_candidates
+    ] == [("P4", "Negative Valence", 21, 3)]
+
+
+def test_preflight_crop_grid_audit_excludes_saved_pairs_from_reference(
+    tmp_path: Path,
+) -> None:
+    scan = PreflightQcScan(
+        results=(
+            _condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
+            _condition_crop_result(tmp_path, "P2", "Faces", oddball_cycles=144),
+            _condition_crop_result(
+                tmp_path,
+                "P4",
+                "Negative Valence",
+                oddball_cycles=21,
+            ),
+        )
+    )
+
+    audit = build_preflight_condition_crop_grid_audit(
+        scan,
+        excluded_participant_conditions={"p4": ["negative valence"]},
+    )
+
+    assert audit.reference_oddball_cycles == 144
+    assert audit.review_candidates == ()
+    observation = next(
+        row for row in audit.observations if row.participant_id == "P4"
+    )
+    assert observation.already_excluded is True
+
+
+def test_preflight_crop_grid_audit_does_not_guess_from_tied_grids(
+    tmp_path: Path,
+) -> None:
+    scan = PreflightQcScan(
+        results=(
+            _condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
+            _condition_crop_result(tmp_path, "P2", "Faces", oddball_cycles=21),
+        )
+    )
+
+    audit = build_preflight_condition_crop_grid_audit(scan)
+
+    assert audit.reference_oddball_cycles is None
+    assert audit.has_unresolved_grid_conflict is True
+    assert [row.participant_id for row in audit.review_candidates] == [
+        "P1",
+        "P2",
+    ]
+    assert audit.recommended_exclusions == ()
+    assert audit.is_compatible_with_exclusions({}) is False
+    assert audit.is_compatible_with_exclusions({"P2": ["Faces"]}) is True
+
+
+def test_preflight_crop_grid_audit_uses_existing_project_grids_as_reference(
+    tmp_path: Path,
+) -> None:
+    project_observations = tuple(
+        PreflightConditionCropObservation(
+            path=tmp_path / f"P{index}_Faces_Results.xlsx",
+            participant_id=f"P{index}",
+            group_id="control",
+            condition_label="Faces",
+            condition_id=1,
+            repetition_count=0,
+            oddball_cycles=144,
+            duration_s=120.0,
+            issue=None,
+        )
+        for index in (1, 2)
+    )
+    scan = PreflightQcScan(
+        results=(
+            _condition_crop_result(
+                tmp_path,
+                "P4",
+                "Negative Valence",
+                oddball_cycles=21,
+            ),
+        ),
+        project_grid_observations=project_observations,
+    )
+
+    audit = build_preflight_condition_crop_grid_audit(scan)
+
+    assert audit.reference_oddball_cycles == 144
+    assert audit.reference_support == 2
+    assert audit.reference_total == 3
+    assert [row.participant_id for row in audit.review_candidates] == ["P4"]
+
+
+def test_preflight_current_raw_grid_replaces_existing_pair_observation(
+    tmp_path: Path,
+) -> None:
+    scan = PreflightQcScan(
+        results=(
+            _condition_crop_result(
+                tmp_path,
+                "P1",
+                "Faces",
+                oddball_cycles=21,
+            ),
+        ),
+        project_grid_observations=(
+            PreflightConditionCropObservation(
+                path=tmp_path / "P1_Faces_Results.xlsx",
+                participant_id="P1",
+                group_id="control",
+                condition_label="Faces",
+                condition_id=1,
+                repetition_count=0,
+                oddball_cycles=144,
+                duration_s=120.0,
+                issue=None,
+            ),
+            PreflightConditionCropObservation(
+                path=tmp_path / "P2_Faces_Results.xlsx",
+                participant_id="P2",
+                group_id="control",
+                condition_label="Faces",
+                condition_id=1,
+                repetition_count=0,
+                oddball_cycles=144,
+                duration_s=120.0,
+                issue=None,
+            ),
+        ),
+    )
+
+    audit = build_preflight_condition_crop_grid_audit(scan)
+
+    assert audit.reference_oddball_cycles is None
+    assert audit.reference_total == 2
+    assert sorted(row.oddball_cycles for row in audit.observations) == [21, 144]

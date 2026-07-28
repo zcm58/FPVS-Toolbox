@@ -55,6 +55,7 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["removed_electrode_detection_mode"] == "off"
     assert normalized["manual_removed_electrodes"] == {}
     assert normalized["manual_excluded_participants"] == []
+    assert normalized["manual_excluded_participant_conditions"] == {}
     assert "save_preprocessed_fif" not in normalized
     assert normalized["stim_channel"] == "Status"
 
@@ -76,6 +77,9 @@ def test_normalization_and_roundtrip(tmp_path):
             "removed_electrode_detection_mode": "manual",
             "manual_removed_electrodes": {"P01": ["P9"]},
             "manual_excluded_participants": ["P12"],
+            "manual_excluded_participant_conditions": {
+                "P01": ["Negative Valence"]
+            },
             "stim_channel": "Status",
         }
     )
@@ -91,6 +95,9 @@ def test_normalization_and_roundtrip(tmp_path):
     assert saved["preprocessing"]["removed_electrode_detection_mode"] == "manual"
     assert saved["preprocessing"]["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert saved["preprocessing"]["manual_excluded_participants"] == ["P12"]
+    assert saved["preprocessing"]["manual_excluded_participant_conditions"] == {
+        "P01": ["Negative Valence"]
+    }
     assert "downsample_rate" not in saved["preprocessing"]
 
     fresh = Project.load(tmp_path)
@@ -101,6 +108,9 @@ def test_normalization_and_roundtrip(tmp_path):
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
     assert fresh.preprocessing["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert fresh.preprocessing["manual_excluded_participants"] == ["P12"]
+    assert fresh.preprocessing["manual_excluded_participant_conditions"] == {
+        "P01": ["Negative Valence"]
+    }
     assert "save_preprocessed_fif" not in fresh.preprocessing
 
 

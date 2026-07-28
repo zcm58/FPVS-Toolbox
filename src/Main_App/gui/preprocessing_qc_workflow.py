@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -26,14 +27,21 @@ from PySide6.QtWidgets import (
 from Main_App.gui.components import make_action_button
 from Main_App.io.load_utils import format_bdf_recording_not_started_message
 from Main_App.processing.qc_summary_export import QUALITY_CHECK_FOLDER
+from Main_App.processing.full_fft_grid_qc import audit_project_full_fft_grids
 from Main_App.processing.preflight_qc import (
     HeaderOnlyPreflight,
+    PreflightConditionCropGridAudit,
+    PreflightConditionCropObservation,
     PreflightQcFileResult,
     PreflightQcScan,
+    build_preflight_condition_crop_grid_audit,
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
 from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
+from Main_App.processing.frequency_domain_qc import (
+    mark_frequency_domain_outputs_stale,
+)
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     build_removed_electrode_review_record,
@@ -42,6 +50,7 @@ from Main_App.processing.removed_electrode_detection import (
 )
 from Main_App.projects.grouping import project_group_context
 from Main_App.projects.preprocessing_settings import (
+    normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
 )
 
@@ -73,11 +82,13 @@ _HARD_EXCLUSION_REASON_COLUMN = 3
 _HARD_EXCLUSION_DETAILS_COLUMN = 4
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
-_DATA_QUALITY_STEP_TOTAL = 4
+_CONDITION_EXCLUSION_CHECK_COLUMN = 6
+_DATA_QUALITY_STEP_TOTAL = 5
 _SCAN_SIGNAL_HEALTH_STEP = 1
-_CONFIRM_REMOVED_ELECTRODES_STEP = 2
-_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP = 3
-_REVIEW_OTHER_FLAGS_STEP = 4
+_CONFIRM_CONDITION_EXCLUSIONS_STEP = 2
+_CONFIRM_REMOVED_ELECTRODES_STEP = 3
+_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP = 4
+_REVIEW_OTHER_FLAGS_STEP = 5
 
 
 class _PreflightQcWorker(QObject):
@@ -118,6 +129,36 @@ class _PreflightQcWorker(QObject):
                 project_root=self._project_root,
                 event_map=self._event_map,
             )
+            if self._project_root is not None and not self._cancelled:
+                project_grid_audit = audit_project_full_fft_grids(
+                    self._project_root
+                )
+                event_ids = {
+                    str(label).strip().casefold(): int(condition_id)
+                    for label, condition_id in self._event_map.items()
+                    if str(label).strip()
+                }
+                scan = replace(
+                    scan,
+                    project_grid_observations=tuple(
+                        PreflightConditionCropObservation(
+                            path=observation.path,
+                            participant_id=observation.participant_id,
+                            group_id=observation.group_id,
+                            condition_label=observation.condition,
+                            condition_id=event_ids.get(
+                                observation.condition.casefold(),
+                                -1,
+                            ),
+                            repetition_count=0,
+                            oddball_cycles=observation.oddball_cycles,
+                            duration_s=observation.duration_s,
+                            issue=observation.issue,
+                            already_excluded=observation.already_excluded,
+                        )
+                        for observation in project_grid_audit.observations
+                    ),
+                )
         except Exception as exc:  # pragma: no cover - defensive signal bridge
             logger.exception("Preprocessing QC scan failed.")
             self.failed.emit(str(exc))
@@ -1495,6 +1536,251 @@ def _install_hard_exclusion_details(
     table.resizeRowsToContents()
 
 
+def _condition_crop_review_rows(
+    audit: PreflightConditionCropGridAudit,
+    group_labels: Mapping[str, str],
+) -> list[tuple[str, str, str, str, str, str, str]]:
+    expected = (
+        f"{audit.reference_duration_s:g} s "
+        f"({audit.reference_oddball_cycles} oddball cycles)"
+        if audit.reference_duration_s is not None
+        and audit.reference_oddball_cycles is not None
+        else "No strict-majority grid"
+    )
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    for observation in audit.review_candidates:
+        observed = (
+            f"{observation.duration_s:g} s "
+            f"({observation.oddball_cycles} oddball cycles)"
+            if observation.duration_s is not None
+            and observation.oddball_cycles is not None
+            else "Unavailable"
+        )
+        rows.append(
+            (
+                observation.participant_id,
+                _group_display_name(observation.group_id, group_labels),
+                observation.condition_label,
+                observed,
+                expected,
+                (
+                    observation.issue
+                    or (
+                        "Multiple valid FFT grids exist; choose which "
+                        "participant-condition cohort to keep."
+                        if audit.has_unresolved_grid_conflict
+                        else (
+                            "Usable crop has a different FFT grid from the "
+                            "project majority."
+                        )
+                    )
+                ),
+                "",
+            )
+        )
+    return rows
+
+
+def _checked_condition_crop_pairs(
+    host: Any,
+    candidates: Sequence[PreflightConditionCropObservation],
+) -> set[tuple[str, str]]:
+    table = getattr(host, "processing_files_table", None)
+    if table is None:
+        return {candidate.pair_key for candidate in candidates}
+    checked: set[tuple[str, str]] = set()
+    for row, candidate in enumerate(candidates):
+        item = table.item(row, _CONDITION_EXCLUSION_CHECK_COLUMN)
+        if item is not None and item.checkState() == Qt.Checked:
+            checked.add(candidate.pair_key)
+    return checked
+
+
+def _replace_reviewed_condition_exclusions(
+    existing: Mapping[str, Sequence[str]] | None,
+    candidates: Sequence[PreflightConditionCropObservation],
+    checked_pairs: set[tuple[str, str]],
+) -> dict[str, list[str]]:
+    normalized = normalize_manual_excluded_participant_conditions(existing)
+    reviewed_pairs = {candidate.pair_key for candidate in candidates}
+    values: dict[str, list[str]] = {}
+    for participant_id, conditions in normalized.items():
+        for condition in conditions:
+            if (participant_id.casefold(), condition.casefold()) in reviewed_pairs:
+                continue
+            values.setdefault(participant_id, []).append(condition)
+    for candidate in candidates:
+        if candidate.pair_key in checked_pairs:
+            values.setdefault(candidate.participant_id, []).append(
+                candidate.condition_label
+            )
+    return normalize_manual_excluded_participant_conditions(values)
+
+
+def _confirm_condition_crop_exclusions(
+    host: Any,
+    params: dict[str, Any],
+    scan: PreflightQcScan,
+    group_labels: Mapping[str, str],
+) -> bool:
+    existing = normalize_manual_excluded_participant_conditions(
+        params.get("manual_excluded_participant_conditions")
+    )
+    audit = build_preflight_condition_crop_grid_audit(
+        scan,
+        excluded_participant_conditions=existing,
+        excluded_participants=normalize_manual_excluded_participants(
+            params.get("manual_excluded_participants")
+        ),
+    )
+    candidates = audit.review_candidates
+    if not candidates:
+        return True
+
+    _show_data_quality_notice(
+        host,
+        "Review conditions with a different usable FFT crop.",
+        "These condition workbooks would use a different frequency grid from "
+        "the project majority. You can exclude selected participant-condition "
+        "pairs from downstream analysis without deleting raw data or workbooks.",
+    )
+    _begin_preflight_page(
+        host,
+        step=_CONFIRM_CONDITION_EXCLUSIONS_STEP,
+        title="Confirm Condition Exclusions",
+        message="Review usable-data crop differences before processing continues.",
+        busy=False,
+        review_visible=True,
+        review_title="Condition Crop Exclusions",
+        progress_visible=False,
+        checklist=(
+            "Compare the usable FFT crop with the project reference",
+            "Keep selected participant-condition pairs out of downstream analyses",
+            "Preserve raw data and generated workbooks for audit",
+        ),
+    )
+    _set_label(
+        host,
+        "processing_summary_label",
+        "A different crop length creates a different FFT grid and prevents "
+        "project-wide statistically significant harmonic selection.",
+    )
+    _set_label(
+        host,
+        "processing_current_file_label",
+        "Checked rows remain on disk but will not enter Stats, harmonic selection, "
+        "Plot Generator, or other shared-index analyses.",
+    )
+    _set_preflight_table(
+        host,
+        [
+            "PID",
+            "Group",
+            "Condition",
+            "Usable FFT crop",
+            "Project reference",
+            "Reason",
+            "Exclude downstream",
+        ],
+        _condition_crop_review_rows(audit, group_labels),
+        stretch_column=5,
+        center_columns=True,
+    )
+    table = getattr(host, "processing_files_table", None)
+    if table is not None:
+        recommended_pairs = {
+            observation.pair_key
+            for observation in audit.recommended_exclusions
+        }
+        for row, candidate in enumerate(candidates):
+            item = table.item(row, _CONDITION_EXCLUSION_CHECK_COLUMN)
+            if item is None:
+                item = QTableWidgetItem()
+                table.setItem(row, _CONDITION_EXCLUSION_CHECK_COLUMN, item)
+            item.setFlags(
+                (item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable
+            )
+            item.setCheckState(
+                Qt.Checked
+                if candidate.pair_key in recommended_pairs
+                else Qt.Unchecked
+            )
+            if candidate.already_excluded:
+                item.setToolTip("This participant-condition is already excluded.")
+
+    while True:
+        choice = _await_preflight_choice(
+            host,
+            (
+                ("Save Selected / Next", "save", "primary"),
+                ("Continue Without Changes", "skip", "secondary"),
+            ),
+        )
+        if choice != "save":
+            return True
+        updated = _replace_reviewed_condition_exclusions(
+            existing,
+            candidates,
+            _checked_condition_crop_pairs(host, candidates),
+        )
+        if audit.is_compatible_with_exclusions(updated):
+            break
+        QMessageBox.warning(
+            host,
+            "Incompatible FFT Grids Still Included",
+            "The selected exclusions still leave no usable grid or more than one "
+            "FFT grid in downstream analysis. Select complete participant-condition "
+            "rows for exclusion, or continue without saving this QC decision.",
+        )
+
+    updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
+    updated_preproc["manual_excluded_participant_conditions"] = updated
+    try:
+        normalized = host.currentProject.update_preprocessing(updated_preproc)
+        host.currentProject.save()
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.exception("Failed to save participant-condition exclusions.")
+        QMessageBox.critical(
+            host,
+            "Project Save Error",
+            f"Could not save participant-condition exclusions: {exc}",
+        )
+        return False
+
+    if updated != existing:
+        try:
+            mark_frequency_domain_outputs_stale(
+                host.currentProject.project_root,
+                reason="Participant-condition FFT crop exclusions changed.",
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.exception(
+                "Participant-condition exclusions saved, but downstream "
+                "frequency-domain status could not be marked stale."
+            )
+            QMessageBox.warning(
+                host,
+                "Exclusions Saved With Warning",
+                "The participant-condition exclusions were saved, but FPVS "
+                "Toolbox could not update the downstream-stale status: "
+                f"{exc}",
+            )
+
+    params["manual_excluded_participant_conditions"] = dict(
+        normalized.get("manual_excluded_participant_conditions") or {}
+    )
+    host.validated_params = params
+    try:
+        host.log(
+            "Data quality check saved downstream participant-condition "
+            f"exclusions: {params['manual_excluded_participant_conditions']}",
+            level=logging.WARNING,
+        )
+    except (AttributeError, TypeError, RuntimeError):
+        pass
+    return True
+
+
 def _confirm_hard_exclusions(
     host: Any,
     params: dict[str, Any],
@@ -1806,6 +2092,14 @@ def run_preprocessing_qc_workflow(
         group_labels=group_labels,
     )
     if scan is None or scan.cancelled:
+        return False
+
+    if not _confirm_condition_crop_exclusions(
+        host,
+        params,
+        scan,
+        group_labels,
+    ):
         return False
 
     if active_infos and not _review_removed_electrodes(

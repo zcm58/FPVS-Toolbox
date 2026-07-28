@@ -2,7 +2,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.projects.preprocessing_settings import (
+    is_participant_condition_excluded,
+    normalize_manual_excluded_participant_conditions,
+    normalize_preprocessing_settings,
+)
 
 
 def test_defaults_use_expected_bandpass():
@@ -15,6 +19,7 @@ def test_defaults_use_expected_bandpass():
     assert normalized["removed_electrode_detection_mode"] == "auto"
     assert normalized["manual_removed_electrodes"] == {}
     assert normalized["manual_excluded_participants"] == []
+    assert normalized["manual_excluded_participant_conditions"] == {}
 
 
 def test_line_noise_settings_normalize_to_typed_values():
@@ -103,3 +108,39 @@ def test_manual_excluded_participants_normalize_from_list_and_mapping():
         }
     )
     assert normalized["manual_excluded_participants"] == ["P9", "P11"]
+
+
+def test_manual_excluded_participant_conditions_normalize_case_insensitively():
+    normalized = normalize_manual_excluded_participant_conditions(
+        {
+            "P12": ["Negative Valence", "faces"],
+            "p12": ["Faces", "Neutral Happy"],
+            "P3": "Angry Neutral; angry neutral",
+        }
+    )
+
+    assert normalized == {
+        "P3": ["Angry Neutral"],
+        "P12": ["faces", "Negative Valence", "Neutral Happy"],
+    }
+    assert is_participant_condition_excluded(
+        normalized,
+        "p12",
+        "NEGATIVE VALENCE",
+    )
+    assert not is_participant_condition_excluded(normalized, "P3", "Faces")
+
+
+def test_manual_excluded_participant_conditions_accept_json_mapping():
+    normalized = normalize_preprocessing_settings(
+        {
+            "participant_condition_exclusions": (
+                '{"P4": ["Negative Valence"], "P1": ["Negative Valence"]}'
+            )
+        }
+    )
+
+    assert normalized["manual_excluded_participant_conditions"] == {
+        "P1": ["Negative Valence"],
+        "P4": ["Negative Valence"],
+    }

@@ -210,6 +210,7 @@ def validate_inputs(host: Any) -> bool:
             "removed_electrode_detection_mode",
             "manual_removed_electrodes",
             "manual_excluded_participants",
+            "manual_excluded_participant_conditions",
             "_fpvs_preflight_recording_not_started_files",
         )
         for opt in preproc_options:
@@ -235,6 +236,7 @@ def validate_inputs(host: Any) -> bool:
                 "removed_electrode_detection_mode",
                 "manual_removed_electrodes",
                 "manual_excluded_participants",
+                "manual_excluded_participant_conditions",
             )
             dialog_snapshot = {
                 key: edit.text()
@@ -486,6 +488,9 @@ def build_validated_params(host: Any) -> dict | None:
         ),
         "manual_excluded_participants": list(
             normalized.get("manual_excluded_participants") or []
+        ),
+        "manual_excluded_participant_conditions": dict(
+            normalized.get("manual_excluded_participant_conditions") or {}
         ),
         "epoch_start": epoch_start,
         "epoch_end": epoch_end,

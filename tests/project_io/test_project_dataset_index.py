@@ -572,6 +572,117 @@ def test_workbook_file_scope_indexes_only_that_workbook(tmp_path: Path) -> None:
     assert [record.path for record in index.workbooks] == [selected]
 
 
+def test_project_dataset_index_filters_participant_condition_exclusions(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = _write_project(
+        project_root,
+        groups={},
+        participants={},
+    )
+    excluded = _workbook(
+        excel_root,
+        "Negative Valence",
+        None,
+        "P01_Negative Valence_Results.xlsx",
+    )
+    included = _workbook(
+        excel_root,
+        "Positive Valence",
+        None,
+        "P01_Positive Valence_Results.xlsx",
+    )
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"] = {
+        "manual_excluded_participant_conditions": {
+            "p01": ["negative valence"],
+        }
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    index = load_project_dataset_index(project_root)
+
+    assert [record.path for record in index.workbooks] == [included]
+    assert [record.path for record in index.excluded_workbooks] == [excluded]
+    assert index.subject_data() == {
+        "P01": {"Positive Valence": str(included)}
+    }
+    diagnostics = [
+        row
+        for row in index.diagnostics
+        if row.code == "excluded_participant_condition"
+    ]
+    assert len(diagnostics) == 1
+    assert diagnostics[0].paths == (excluded,)
+
+    direct = load_project_dataset_index(excluded)
+    assert direct.workbooks == ()
+    assert [record.path for record in direct.excluded_workbooks] == [excluded]
+    assert "excluded_participant_condition" in {
+        diagnostic.code for diagnostic in direct.diagnostics
+    }
+
+
+@pytest.mark.parametrize(
+    "setting_key",
+    (
+        "excluded_participant_conditions",
+        "participant_condition_exclusions",
+    ),
+)
+def test_project_dataset_index_honors_condition_exclusion_aliases(
+    tmp_path: Path,
+    setting_key: str,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = _write_project(
+        project_root,
+        groups={},
+        participants={},
+    )
+    excluded = _workbook(
+        excel_root,
+        "Faces",
+        None,
+        "P01_Faces_Results.xlsx",
+    )
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"] = {setting_key: {"P01": ["Faces"]}}
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    index = load_project_dataset_index(project_root)
+
+    assert index.workbooks == ()
+    assert [record.path for record in index.excluded_workbooks] == [excluded]
+
+
+def test_project_dataset_index_wraps_malformed_condition_exclusions(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = _write_project(
+        project_root,
+        groups={},
+        participants={},
+    )
+    _workbook(excel_root, "Faces", None, "P01_Faces_Results.xlsx")
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"] = {
+        "manual_excluded_participant_conditions": ["P01", "Faces"]
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    with pytest.raises(
+        DatasetIndexError,
+        match="manual_excluded_participant_conditions",
+    ):
+        load_project_dataset_index(project_root)
+
+
 def test_project_file_scope_rejects_nonworkbooks_and_outside_excel(
     tmp_path: Path,
 ) -> None:

@@ -35,6 +35,9 @@ _LINE_NOISE_FREQUENCY = "line_noise_frequency"
 _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
 _MANUAL_EXCLUDED_PARTICIPANTS = "manual_excluded_participants"
+_MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS = (
+    "manual_excluded_participant_conditions"
+)
 
 _GROUP_SIGNIFICANT_POLICY_NAME = "Group-level significant harmonics (Volfart/Retter/Rossion style)"
 _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION = "union_roi_electrodes"
@@ -115,6 +118,16 @@ _FIELDS: tuple[_Field, ...] = (
         ),
         [],
         _MANUAL_EXCLUDED_PARTICIPANTS,
+    ),
+    _Field(
+        "manual_excluded_participant_conditions",
+        (
+            "manual_excluded_participant_conditions",
+            "excluded_participant_conditions",
+            "participant_condition_exclusions",
+        ),
+        {},
+        _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS,
     ),
     _Field(
         "max_parallel_workers_override",
@@ -299,6 +312,97 @@ def normalize_manual_excluded_participants(value: Any) -> list[str]:
     return sorted(normalized, key=_participant_sort_key)
 
 
+def normalize_manual_excluded_participant_conditions(
+    value: Any,
+) -> dict[str, list[str]]:
+    """Normalize participant-scoped condition exclusions for downstream tools."""
+
+    if value in (None, ""):
+        return {}
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            import json
+
+            decoded = json.loads(text)
+        except (TypeError, ValueError):
+            decoded = None
+        if decoded is None:
+            raise ValueError(
+                "Participant-condition exclusions must be a PID-to-condition map."
+            )
+        return normalize_manual_excluded_participant_conditions(decoded)
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "Participant-condition exclusions must be a PID-to-condition map."
+        )
+
+    participant_casing: dict[str, str] = {}
+    conditions_by_participant: dict[str, dict[str, str]] = {}
+    for raw_pid, raw_conditions in value.items():
+        pid = str(raw_pid or "").strip()
+        if not pid:
+            continue
+        pid_key = pid.casefold()
+        participant_casing.setdefault(pid_key, pid)
+        if raw_conditions in (None, ""):
+            continue
+        if isinstance(raw_conditions, str):
+            condition_items: Iterable[Any] = raw_conditions.replace(";", ",").split(",")
+        elif isinstance(raw_conditions, Mapping):
+            condition_items = (
+                condition
+                for condition, enabled in raw_conditions.items()
+                if enabled not in (False, None, "", 0)
+            )
+        elif isinstance(raw_conditions, Iterable):
+            condition_items = raw_conditions
+        else:
+            condition_items = (raw_conditions,)
+
+        condition_lookup = conditions_by_participant.setdefault(pid_key, {})
+        for raw_condition in condition_items:
+            condition = str(raw_condition or "").strip()
+            if not condition:
+                continue
+            condition_lookup.setdefault(condition.casefold(), condition)
+
+    normalized: dict[str, list[str]] = {}
+    for pid_key in sorted(
+        conditions_by_participant,
+        key=lambda key: _participant_sort_key(participant_casing[key]),
+    ):
+        condition_lookup = conditions_by_participant[pid_key]
+        if not condition_lookup:
+            continue
+        normalized[participant_casing[pid_key]] = sorted(
+            condition_lookup.values(),
+            key=str.casefold,
+        )
+    return normalized
+
+
+def is_participant_condition_excluded(
+    exclusions: Mapping[str, Iterable[str]] | None,
+    participant_id: str,
+    condition: str,
+) -> bool:
+    """Return whether a participant-condition pair is excluded, case-insensitively."""
+
+    participant_key = str(participant_id or "").strip().casefold()
+    condition_key = str(condition or "").strip().casefold()
+    if not participant_key or not condition_key:
+        return False
+    normalized = normalize_manual_excluded_participant_conditions(exclusions)
+    return any(
+        pid.casefold() == participant_key
+        and any(label.casefold() == condition_key for label in labels)
+        for pid, labels in normalized.items()
+    )
+
+
 def _validate_bandpass(low_pass: float, high_pass: float) -> None:
     """Ensure low/high cutoffs are sensible and not inverted."""
 
@@ -358,6 +462,10 @@ def normalize_preprocessing_settings(
             normalized[field.name] = normalize_manual_removed_electrodes_map(raw_value)
         elif field.type == _MANUAL_EXCLUDED_PARTICIPANTS:
             normalized[field.name] = normalize_manual_excluded_participants(raw_value)
+        elif field.type == _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS:
+            normalized[field.name] = (
+                normalize_manual_excluded_participant_conditions(raw_value)
+            )
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
 
@@ -417,6 +525,8 @@ def normalize_preprocessing_settings(
 __all__ = [
     "normalize_preprocessing_settings",
     "normalize_manual_excluded_participants",
+    "normalize_manual_excluded_participant_conditions",
+    "is_participant_condition_excluded",
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
 ]

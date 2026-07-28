@@ -868,6 +868,22 @@ class MainWindow(QMainWindow, ProcessingMixin):
         processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        grid_thread = getattr(self, "_settings_full_fft_grid_qc_thread", None)
+        try:
+            grid_check_running = (
+                grid_thread is not None and grid_thread.isRunning()
+            )
+        except RuntimeError:
+            grid_check_running = False
+        if grid_check_running:
+            QMessageBox.information(
+                self,
+                "FFT Grid Check In Progress",
+                "Wait for the processed FFT grid check to finish before closing "
+                "FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         cache_thread = getattr(self, "_project_processing_cache_thread", None)
         try:
             cache_reset_running = cache_thread is not None and cache_thread.isRunning()

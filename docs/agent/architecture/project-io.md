@@ -17,6 +17,11 @@ FPVS Toolbox uses a strict hybrid settings model:
 - App-level settings use `FPVS_CONFIG_HOME` when set, otherwise the user-writable app config root under `%LOCALAPPDATA%\FPVS Toolbox\settings\` on Windows.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
+- `preprocessing.manual_excluded_participant_conditions` stores a normalized,
+  deterministic participant-ID-to-condition-list mapping. Participant and
+  condition matching is case-insensitive. These are downstream cohort
+  exclusions: the raw recordings and generated workbooks remain available for
+  audit, and changing the map does not request raw EEG reprocessing.
 - Stats may store reusable analysis metadata in `project.json` under
   `tools.stats`. The group-significant harmonics cache lives at
   `tools.stats.group_significant_harmonics_cache`, is keyed by selected
@@ -168,6 +173,14 @@ diagnostics. It accepts the project root, configured Excel root, condition
 folder, or group folder without creating directories. Exact manifest
 participant IDs take precedence over legacy filename matching; canonical
 grouped copies take precedence over stale flat copies.
+
+For managed project scans, the shared index applies
+`manual_excluded_participant_conditions` only after canonical participant/group
+identity and duplicate priority are resolved. Active `workbooks`, condition
+partitions, and selection helpers omit those records, while
+`excluded_workbooks` and `excluded_participant_condition` diagnostics preserve
+the resolved paths for review. Unmanaged scans do not apply manifest
+exclusions.
 
 Group membership always comes from the normalized participant metadata in
 `project.json`. A generated group folder is retained on `WorkbookRecord` only

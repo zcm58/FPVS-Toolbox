@@ -470,9 +470,15 @@ def test_reset_project_processing_cache_refuses_without_project_or_while_busy(
     win.currentProject = SimpleNamespace(project_root=project_root)
     win._settings_harmonic_recalc_thread = SimpleNamespace(isRunning=lambda: True)
     win.actionResetProjectProcessingCache.trigger()
+    win._settings_harmonic_recalc_thread = None
+    win._settings_full_fft_grid_qc_thread = SimpleNamespace(
+        isRunning=lambda: True
+    )
+    win.actionResetProjectProcessingCache.trigger()
 
     assert [title for title, _message in warnings] == [
         "No Project",
+        "Processing Is Active",
         "Processing Is Active",
     ]
     assert not questions

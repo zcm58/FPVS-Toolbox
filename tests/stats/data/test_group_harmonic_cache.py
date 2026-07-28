@@ -167,6 +167,27 @@ def test_project_processing_signature_tracks_fft_multinotch_settings(tmp_path: P
     assert enabled_50 != disabled
 
 
+def test_project_processing_signature_tracks_participant_condition_exclusions(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    manifest = json.loads(
+        (project_root / "project.json").read_text(encoding="utf-8")
+    )
+
+    included = build_project_processing_signature(manifest)
+    manifest["preprocessing"]["manual_excluded_participant_conditions"] = {
+        "P1": ["Negative Valence"]
+    }
+    excluded = build_project_processing_signature(manifest)
+
+    assert included != excluded
+    assert excluded["preprocessing"][
+        "manual_excluded_participant_conditions"
+    ] == {"P1": ["Negative Valence"]}
+
+
 def test_frequency_domain_workflow_status_does_not_invalidate_harmonics(
     tmp_path: Path,
 ) -> None:

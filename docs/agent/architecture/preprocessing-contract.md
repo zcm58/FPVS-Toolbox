@@ -77,11 +77,23 @@ Before the processing ledger plan is chosen, the GUI may run the embedded
 preflight QC workflow in `src/Main_App/gui/preprocessing_qc_workflow.py`. This
 workflow is review-first: it scans the selected BDF pool for BioSemi
 recording-not-started files, loads eligible raw files in a `QThread` for
-conservative removed-electrode/raw-channel/spectral QC summaries, asks the user
-to confirm the manual removed-electrode table, offers participant-level
-exclusions, and reports remaining suspicious findings. Accepted manual
-removed-electrode and participant-exclusion decisions are saved to project
-preprocessing settings before `classify_processing_inputs()` runs. Confirmed
+conservative removed-electrode/raw-channel/spectral QC summaries, compares one
+locked FFT-grid observation per participant-condition against a unique strict
+majority when one exists, asks the user to confirm any participant-condition
+grid exclusions, asks the user to confirm the manual removed-electrode table,
+offers participant-level exclusions, and reports remaining suspicious
+findings. The grid identity is the sampling-rate-independent integer count of
+1.2-Hz oddball cycles in the planned crop; the review does not hard-code 120
+seconds or alter the locked shortest-common crop calculation. Incremental raw
+observations are compared with header-only observations from the active,
+completed processed-workbook cohort; the current raw plan replaces an older
+workbook observation for the same participant-condition. Ledger-incomplete and
+frequency-domain-excluded participants do not define the reference. When valid
+grids are tied, the review shows each cohort without guessing which one to
+preselect. Accepted manual
+removed-electrode, participant-condition, and participant-exclusion decisions
+are saved to project preprocessing settings before
+`classify_processing_inputs()` runs. Confirmed
 recording-not-started files are passed to the process runner through
 `_fpvs_preflight_recording_not_started_files` so they can be recorded as
 `recording_not_started` exclusions without creating child-process work. The raw
@@ -94,6 +106,13 @@ for the current raw-file metadata and processing fingerprint keep their prior
 QC decisions. If preflight QC adds participant-specific project metadata for
 new files, the GUI carries forward still-valid completed states and refreshes
 only skipped ledger fingerprint metadata so later runs do not rescan old files.
+Settings provides a separate processed-workbook FullFFT-grid review for already
+completed files. It reads workbook headers on a worker thread, uses the same
+active harmonic-selection cohort and strict-majority oddball-cycle identity,
+retains already excluded pairs for editing, and lets the user add or clear
+participant-condition exclusions. Valid tied grids are shown without an
+automatic choice, and recalculation remains blocked until the proposed included
+cohort has exactly one valid FFT grid.
 
 Epoch building in the process runner must preserve locked FFT crop behavior.
 When valid `55_onbin` repetition crops exist for a condition, those repetitions
@@ -124,7 +143,12 @@ fingerprints use `processing_fingerprint_v9_source_ready_time_domain`. The
 raw channel-health QC threshold, removed-electrode QC mode, per-file manual
 removed-electrode list, baseline raw-amplitude metadata, and rare-burst
 candidate list are part of the cache payload so changes to those settings
-invalidate cached preprocessed Raw files. The cache identity also includes the
+invalidate cached preprocessed Raw files. The downstream-only
+`manual_excluded_participant_conditions` setting is deliberately omitted from
+the raw-processing fingerprint: it does not change EEG preprocessing or
+workbook generation. It remains part of the Stats harmonic-cache signature so
+changing the included workbook cohort requires harmonic recalculation. The
+cache identity also includes the
 line-noise-filter enabled state, selected 50 or 60 Hz mains frequency, method
 version, half-width, and component count. The v9 cache metadata also persists
 raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names

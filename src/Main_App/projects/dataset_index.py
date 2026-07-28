@@ -37,6 +37,9 @@ from .dataset_scan import (
     workbook_location,
 )
 from .grouping import GroupInfo, ParticipantInfo, load_project_group_context
+from .preprocessing_settings import (
+    normalize_manual_excluded_participant_conditions,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,7 @@ class ProjectDatasetIndex:
     groups: Mapping[str, GroupInfo]
     participants: Mapping[str, ParticipantInfo]
     workbooks: tuple[WorkbookRecord, ...]
+    excluded_workbooks: tuple[WorkbookRecord, ...]
     diagnostics: tuple[DatasetDiagnostic, ...]
 
     @property
@@ -497,6 +501,64 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             ),
         )
     )
+    excluded_pairs: set[tuple[str, str]] = set()
+    if manifest_view is not None:
+        preprocessing = manifest_view.get("preprocessing")
+        raw_exclusions = None
+        exclusion_key = "manual_excluded_participant_conditions"
+        if isinstance(preprocessing, Mapping):
+            for candidate_key in (
+                "manual_excluded_participant_conditions",
+                "excluded_participant_conditions",
+                "participant_condition_exclusions",
+            ):
+                if candidate_key in preprocessing:
+                    exclusion_key = candidate_key
+                    raw_exclusions = preprocessing[candidate_key]
+                    break
+        try:
+            normalized_exclusions = (
+                normalize_manual_excluded_participant_conditions(raw_exclusions)
+            )
+        except ValueError as exc:
+            raise DatasetIndexError(
+                "Invalid project.json preprocessing setting "
+                f"'{exclusion_key}' for {project_root}: {exc}"
+            ) from exc
+        excluded_pairs = {
+            (participant_id.casefold(), condition.casefold())
+            for participant_id, conditions in normalized_exclusions.items()
+            for condition in conditions
+        }
+
+    records = tuple(
+        record
+        for record in all_records
+        if (record.participant_id.casefold(), record.condition.casefold())
+        not in excluded_pairs
+    )
+    excluded_records = tuple(
+        record
+        for record in all_records
+        if (record.participant_id.casefold(), record.condition.casefold())
+        in excluded_pairs
+    )
+    for record in excluded_records:
+        key = (record.participant_id.casefold(), record.condition.casefold())
+        paths = duplicate_paths.get(key, [record.path])
+        unique_paths = tuple(
+            dict.fromkeys(Path(path).resolve(strict=False) for path in paths)
+        )
+        diagnostics.append(
+            DatasetDiagnostic(
+                code="excluded_participant_condition",
+                message=(
+                    f"Excluded {record.participant_id} / {record.condition} from "
+                    "downstream workbook analyses by project QC decision."
+                ),
+                paths=unique_paths,
+            )
+        )
     return ProjectDatasetIndex(
         project_root=project_root,
         excel_root=excel_root,
@@ -504,7 +566,8 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         manifest=manifest_view,
         groups=MappingProxyType(groups),
         participants=MappingProxyType(participants),
-        workbooks=all_records,
+        workbooks=records,
+        excluded_workbooks=excluded_records,
         diagnostics=tuple(diagnostics),
     )
 

@@ -11,6 +11,7 @@ tests/gui/test_main_window_excel_popup_logic.py
 tests/gui/test_main_window_layout_smoke.py
 tests/gui/test_main_window_processing.py
 tests/gui/test_nonblocking_qmessagebox.py
+tests/gui/test_participant_condition_exclusions_dialog.py
 tests/gui/test_qc_group_membership.py
 tests/gui/test_sensitivity_analysis_gui.py
 tests/gui/test_settings_and_status.py

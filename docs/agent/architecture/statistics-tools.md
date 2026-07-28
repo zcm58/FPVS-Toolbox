@@ -185,8 +185,12 @@ Rules:
   workbook cannot block harmonic selection while its file remains on disk for
   audit. The Settings review reads only FullFFT headers, identifies each grid
   by the exact 1.2-Hz bin index (the integer oddball-cycle count), and flags
-  shorter or longer grids that differ from a unique strict project majority;
-  it does not change Stats' exact-column or neighboring-noise rules.
+  shorter or longer grids that differ from a unique strict project majority.
+  Its reference uses the same completed, frequency-domain-active participant
+  cohort as harmonic selection. If valid grids tie, it presents every cohort
+  without guessing and does not start recalculation until the proposed included
+  workbooks share one valid grid. It does not change Stats' exact-column or
+  neighboring-noise rules.
 - After group-level harmonics are selected, the `BCA (uV)` sheet must also
   contain exact included harmonic columns such as `1.2000_Hz`. Do not use
   tolerance matching, nearest-column matching, or policy fallbacks for selected

@@ -44,6 +44,7 @@ tests = [
   "tests/processing/test_fft_crop_utils.py",
   "tests/processing/test_fft_multinotch.py",
   "tests/processing/test_filter_downsample_order.py",
+  "tests/processing/test_full_fft_grid_qc.py",
   "tests/processing/test_frequency_domain_qc.py",
   "tests/processing/test_harmonic_selection_qc.py",
   "tests/processing/test_pipeline_speed_safety.py",

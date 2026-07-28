@@ -45,18 +45,24 @@ from Main_App.gui.manual_participant_exclusions_dialog import (
     ManualParticipantExclusionsDialog,
 )
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
+from Main_App.gui.participant_condition_exclusions_dialog import (
+    ParticipantConditionExclusionsDialog,
+)
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
     clear_manual_frequency_domain_participant_exclusions,
+    mark_frequency_domain_outputs_stale,
     thresholds_summary_lines,
 )
+from Main_App.projects import DatasetIndexError, load_project_dataset_index
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_DEFAULTS,
+    normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
     normalize_preprocessing_settings,
 )
@@ -142,6 +148,7 @@ class SettingsDialog(QDialog):
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
         self._custom_roi_presets_by_montage: dict[str, list[tuple[str, list[str]]]] = {}
+        self._settings_footer_buttons: list[QWidget] = []
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
         self.out_edit = None
@@ -195,6 +202,9 @@ class SettingsDialog(QDialog):
         actions.add_button(save_btn)
         actions.add_button(cancel_btn)
         footer_layout.addWidget(actions)
+        self._settings_footer_buttons.extend(
+            (change_root, save_btn, cancel_btn)
+        )
 
         layout.addWidget(footer)
 
@@ -527,7 +537,24 @@ class SettingsDialog(QDialog):
         self.recalculate_harmonics_button.clicked.connect(
             self._on_recalculate_harmonics_clicked
         )
+        self.review_condition_exclusions_button = make_action_button(
+            "Review FFT Crop Exclusions",
+            compact=True,
+            parent=harmonic_group,
+        )
+        self.review_condition_exclusions_button.setObjectName(
+            "settings_review_condition_exclusions_button"
+        )
+        self.review_condition_exclusions_button.setToolTip(
+            "Check processed FullFFT grids and exclude selected participant-condition "
+            "pairs from downstream analyses."
+        )
+        self.review_condition_exclusions_button.setEnabled(self.project is not None)
+        self.review_condition_exclusions_button.clicked.connect(
+            self._on_review_condition_exclusions_clicked
+        )
         harmonic_actions.add_button(self.recalculate_harmonics_button)
+        harmonic_actions.add_button(self.review_condition_exclusions_button)
         harmonic_group.content_layout.addWidget(harmonic_actions)
 
         self.harmonic_recalculation_status = StatusBanner("", harmonic_group, variant="info")
@@ -724,6 +751,14 @@ class SettingsDialog(QDialog):
             self._manual_excluded_participants = normalize_manual_excluded_participants(
                 qc_preproc.get("manual_excluded_participants", [])
             )
+            self._manual_excluded_participant_conditions = (
+                normalize_manual_excluded_participant_conditions(
+                    qc_preproc.get(
+                        "manual_excluded_participant_conditions",
+                        {},
+                    )
+                )
+            )
         else:
             auto_detect_default = (
                 self.manager.get(
@@ -757,6 +792,7 @@ class SettingsDialog(QDialog):
                     "[]",
                 )
             )
+            self._manual_excluded_participant_conditions = {}
         self.removed_electrode_detection_mode_combo = QComboBox(qc_group)
         self.removed_electrode_detection_mode_combo.setObjectName(
             "settings_removed_electrode_detection_mode"
@@ -1024,12 +1060,17 @@ class SettingsDialog(QDialog):
                     continue
                 if str(entry.get("status") or "").casefold() == "completed":
                     return True
-        subfolders = getattr(self.project, "subfolders", {}) or {}
-        excel_root = Path(subfolders.get("excel") or (project_root / "1 - Excel Data Files"))
         try:
-            return excel_root.exists() and any(excel_root.rglob("*_Results.xlsx"))
-        except OSError:
+            dataset_index = load_project_dataset_index(project_root)
+        except (DatasetIndexError, OSError):
             return False
+        return any(
+            record.path.name.casefold().endswith("_results.xlsx")
+            for record in (
+                *dataset_index.workbooks,
+                *dataset_index.excluded_workbooks,
+            )
+        )
 
     def _harmonic_settings_changed_after_processing(
         self,
@@ -1109,7 +1150,247 @@ class SettingsDialog(QDialog):
                 "Process this project before recalculating harmonic selection.",
             )
             return
-        self._start_harmonic_recalculation()
+        self._start_full_fft_grid_review(recalculate_after=True)
+
+    def _on_review_condition_exclusions_clicked(self) -> None:
+        if self.project is None:
+            return
+        if not self._project_has_processed_outputs():
+            QMessageBox.information(
+                self,
+                "No Processed Data",
+                "Process this project before reviewing FFT crop exclusions.",
+            )
+            return
+        self._start_full_fft_grid_review(recalculate_after=False)
+
+    def _save_participant_condition_exclusions(
+        self,
+        exclusions: Dict[str, Any],
+    ) -> bool:
+        if self.project is None:
+            return False
+        normalized_exclusions = normalize_manual_excluded_participant_conditions(
+            exclusions
+        )
+        current = normalize_manual_excluded_participant_conditions(
+            self.project.preprocessing.get(
+                "manual_excluded_participant_conditions",
+                {},
+            )
+        )
+        if normalized_exclusions == current:
+            self._manual_excluded_participant_conditions = normalized_exclusions
+            return True
+        updated_preproc = dict(self.project.preprocessing)
+        updated_preproc["manual_excluded_participant_conditions"] = (
+            normalized_exclusions
+        )
+        try:
+            normalized = self.project.update_preprocessing(updated_preproc)
+            self.project.save()
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(
+                self,
+                "Project Save Error",
+                f"Could not save participant-condition exclusions: {exc}",
+            )
+            return False
+
+        self._project_cache = normalized
+        self._manual_excluded_participant_conditions = dict(
+            normalized.get("manual_excluded_participant_conditions") or {}
+        )
+        invalidation_warnings: list[str] = []
+        try:
+            mark_frequency_domain_outputs_stale(
+                self.project.project_root,
+                reason="Participant-condition FFT crop exclusions changed.",
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            invalidation_warnings.append(
+                f"downstream-stale status could not be updated ({exc})"
+            )
+        try:
+            clear_group_significant_selection_cache()
+        except RuntimeError as exc:
+            invalidation_warnings.append(
+                f"the in-memory harmonic cache could not be cleared ({exc})"
+            )
+        try:
+            clear_cached_group_harmonic_selections(self.project.project_root)
+        except OSError as exc:
+            invalidation_warnings.append(
+                f"the saved harmonic cache could not be cleared ({exc})"
+            )
+        if invalidation_warnings:
+            QMessageBox.warning(
+                self,
+                "Exclusions Saved With Warning",
+                "The participant-condition exclusions were saved, but "
+                + "; ".join(invalidation_warnings)
+                + ". Recalculate harmonics before relying on downstream outputs.",
+            )
+        return True
+
+    def _set_full_fft_grid_review_controls_enabled(self, enabled: bool) -> None:
+        for button in self._settings_footer_buttons:
+            try:
+                button.setEnabled(enabled)
+            except RuntimeError:
+                continue
+        self.recalculate_harmonics_button.setEnabled(
+            enabled and self.project is not None
+        )
+        self.review_condition_exclusions_button.setEnabled(
+            enabled and self.project is not None
+        )
+
+    def _start_full_fft_grid_review(
+        self,
+        *,
+        recalculate_after: bool,
+        accept_on_success: bool = False,
+    ) -> bool:
+        if self.project is None:
+            return False
+        owner = getattr(self, "host", None) or self
+        if getattr(owner, "_settings_full_fft_grid_qc_thread", None) is not None:
+            QMessageBox.information(
+                self,
+                "FFT Grid Check Already Running",
+                "FPVS Toolbox is already checking processed FFT grids.",
+            )
+            return False
+        if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
+            QMessageBox.information(
+                self,
+                "Recalculation Already Running",
+                "Wait for harmonic recalculation to finish before checking FFT grids.",
+            )
+            return False
+        try:
+            from Main_App.gui.project_workflows import (
+                _processing_cache_reset_is_busy,
+            )
+
+            project_operation_busy = _processing_cache_reset_is_busy(owner)
+        except (AttributeError, RuntimeError):
+            project_operation_busy = False
+        if project_operation_busy:
+            QMessageBox.information(
+                self,
+                "Project Operation In Progress",
+                "Wait for the current data-quality, processing, post-processing, "
+                "or cache-reset operation before checking FFT grids.",
+            )
+            return False
+        try:
+            from Main_App.workers.full_fft_grid_qc_worker import FullFftGridQcWorker
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "FFT Grid Check Unavailable",
+                f"The FFT grid check could not start: {exc}",
+            )
+            return False
+
+        self._set_harmonic_recalculation_status(
+            "Checking processed FullFFT grids for incompatible crop lengths...",
+            "info",
+        )
+        self._set_full_fft_grid_review_controls_enabled(False)
+        thread = QThread(owner)
+        worker = FullFftGridQcWorker(self.project.project_root)
+        worker.moveToThread(thread)
+        owner._settings_full_fft_grid_qc_thread = thread
+        owner._settings_full_fft_grid_qc_worker = worker
+
+        def _release_worker() -> None:
+            owner._settings_full_fft_grid_qc_thread = None
+            owner._settings_full_fft_grid_qc_worker = None
+            self._set_full_fft_grid_review_controls_enabled(True)
+            if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
+                self.recalculate_harmonics_button.setEnabled(False)
+                self.review_condition_exclusions_button.setEnabled(False)
+
+        def _handle_finished(audit: object) -> None:
+            candidates = tuple(getattr(audit, "review_candidates", ()) or ())
+            should_open = (
+                bool(candidates)
+                or bool(
+                    getattr(audit, "has_unresolved_grid_conflict", False)
+                )
+                or not recalculate_after
+            )
+            accepted = True
+            proposed_exclusions = self._manual_excluded_participant_conditions
+            if should_open:
+                dialog = ParticipantConditionExclusionsDialog(
+                    audit,
+                    self._manual_excluded_participant_conditions,
+                    self,
+                )
+                accepted = dialog.exec() == QDialog.Accepted
+                if accepted:
+                    proposed_exclusions = (
+                        dialog.excluded_participant_conditions()
+                    )
+                    accepted = self._save_participant_condition_exclusions(
+                        proposed_exclusions
+                    )
+            if not accepted:
+                self._set_harmonic_recalculation_status(
+                    "FFT crop exclusion review was cancelled.",
+                    "warning",
+                )
+                return
+            if recalculate_after:
+                if not audit.is_compatible_with_exclusions(
+                    proposed_exclusions
+                ):
+                    self._set_harmonic_recalculation_status(
+                        "Harmonic recalculation is waiting for one compatible "
+                        "included FFT grid.",
+                        "warning",
+                    )
+                    QMessageBox.warning(
+                        self,
+                        "Incompatible FFT Grids Still Included",
+                        "The included participant-condition workbooks still use "
+                        "more than one FFT grid, contain an invalid FullFFT header, "
+                        "or leave no usable workbook. Adjust the checked exclusions "
+                        "before recalculating harmonics.",
+                    )
+                    return
+                self._start_harmonic_recalculation(
+                    accept_on_success=accept_on_success
+                )
+            else:
+                self._set_harmonic_recalculation_status(
+                    "Participant-condition exclusions saved. Recalculate harmonics "
+                    "to rebuild the project-wide selection.",
+                    "success",
+                )
+
+        def _handle_failed(message: str) -> None:
+            self._set_harmonic_recalculation_status(
+                f"FFT grid check failed: {message}",
+                "warning",
+            )
+            QMessageBox.warning(self, "FFT Grid Check Failed", message)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(_handle_finished)
+        worker.failed.connect(thread.quit)
+        worker.failed.connect(worker.deleteLater)
+        worker.failed.connect(_handle_failed)
+        thread.finished.connect(_release_worker)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+        return True
 
     def _start_harmonic_recalculation(self, *, accept_on_success: bool = False) -> bool:
         if self.project is None:
@@ -1161,6 +1442,7 @@ class SettingsDialog(QDialog):
             "info",
         )
         self.recalculate_harmonics_button.setEnabled(False)
+        self.review_condition_exclusions_button.setEnabled(False)
         thread = QThread(owner)
         worker = ProcessingHarmonicSelectionWorker(self.project)
         worker.moveToThread(thread)
@@ -1201,7 +1483,9 @@ class SettingsDialog(QDialog):
             finally:
                 owner._settings_harmonic_recalc_thread = None
                 owner._settings_harmonic_recalc_worker = None
-                self.recalculate_harmonics_button.setEnabled(self.project is not None)
+                enabled = self.project is not None
+                self.recalculate_harmonics_button.setEnabled(enabled)
+                self.review_condition_exclusions_button.setEnabled(enabled)
 
         thread.started.connect(worker.run)
         worker.finished.connect(thread.quit)
@@ -1472,8 +1756,40 @@ class SettingsDialog(QDialog):
             return False
         return True
 
+    def _full_fft_grid_review_is_running(self) -> bool:
+        owner = getattr(self, "host", None) or self
+        thread = getattr(owner, "_settings_full_fft_grid_qc_thread", None)
+        if thread is None:
+            return False
+        is_running = getattr(thread, "isRunning", None)
+        if not callable(is_running):
+            return True
+        try:
+            return bool(is_running())
+        except RuntimeError:
+            return False
+
+    def reject(self) -> None:
+        if self._full_fft_grid_review_is_running():
+            QMessageBox.information(
+                self,
+                "FFT Grid Check In Progress",
+                "Wait for the processed FFT grid check to finish before closing "
+                "Settings.",
+            )
+            return
+        super().reject()
+
     # ------------------------------------------------------------------
     def _save(self) -> None:
+        if self._full_fft_grid_review_is_running():
+            QMessageBox.information(
+                self,
+                "FFT Grid Check In Progress",
+                "Wait for the processed FFT grid check to finish before saving "
+                "Settings.",
+            )
+            return
         using_project = self.project is not None
 
         validated_preproc = self._validated_preproc_payload()
@@ -1615,7 +1931,10 @@ class SettingsDialog(QDialog):
             pass
 
         if recalculate_harmonics_after_save:
-            if self._start_harmonic_recalculation(accept_on_success=True):
+            if self._start_full_fft_grid_review(
+                recalculate_after=True,
+                accept_on_success=True,
+            ):
                 return
 
         self.accept()
@@ -1663,6 +1982,9 @@ class SettingsDialog(QDialog):
         values["manual_removed_electrodes"] = dict(self._manual_removed_electrodes_by_pid)
         values["manual_excluded_participants"] = list(
             self._manual_excluded_participants
+        )
+        values["manual_excluded_participant_conditions"] = dict(
+            self._manual_excluded_participant_conditions
         )
         fixed_selected = self._fixed_harmonic_list_selected()
         values["harmonic_selection_policy"] = (

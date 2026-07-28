@@ -11,6 +11,7 @@ from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
     SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT,
+    build_processing_fingerprint,
     carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
     clean_downstream_outputs_for_reprocess_all,
@@ -55,6 +56,30 @@ def _settings() -> dict[str, object]:
         "oddball_freq": 1.2,
         "bca_upper_limit": 14.4,
     }
+
+
+def test_participant_condition_exclusions_do_not_change_raw_processing_fingerprint(
+    tmp_path: Path,
+) -> None:
+    project, _raw_info = _project_with_raw(tmp_path)
+    settings = _settings()
+    baseline = build_processing_fingerprint(
+        project,
+        settings,
+        project.event_map,
+    )
+
+    project.preprocessing["manual_excluded_participant_conditions"] = {
+        "P01": ["Condition A"]
+    }
+    settings["manual_excluded_participant_conditions"] = {
+        "P01": ["Condition A"]
+    }
+
+    assert (
+        build_processing_fingerprint(project, settings, project.event_map)
+        == baseline
+    )
 
 
 def _write_expected_outputs(plan) -> None:

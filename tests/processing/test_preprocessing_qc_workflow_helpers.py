@@ -29,22 +29,27 @@ class _LabelStub:
         (
             workflow._SCAN_SIGNAL_HEALTH_STEP,
             "Scan Signal Health",
-            "Step 1 of 4: Scan Signal Health",
+            "Step 1 of 5: Scan Signal Health",
+        ),
+        (
+            workflow._CONFIRM_CONDITION_EXCLUSIONS_STEP,
+            "Confirm Condition Exclusions",
+            "Step 2 of 5: Confirm Condition Exclusions",
         ),
         (
             workflow._CONFIRM_REMOVED_ELECTRODES_STEP,
             "Confirm Removed Electrodes",
-            "Step 2 of 4: Confirm Removed Electrodes",
+            "Step 3 of 5: Confirm Removed Electrodes",
         ),
         (
             workflow._CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
             "Confirm Participant Exclusions",
-            "Step 3 of 4: Confirm Participant Exclusions",
+            "Step 4 of 5: Confirm Participant Exclusions",
         ),
         (
             workflow._REVIEW_OTHER_FLAGS_STEP,
             "Review Other Flags",
-            "Step 4 of 4: Review Other Flags",
+            "Step 5 of 5: Review Other Flags",
         ),
     ),
 )
@@ -375,3 +380,48 @@ def test_review_flags_workbook_preserves_group_membership(tmp_path: Path) -> Non
         ("PID", "Group", "Source File", "Flagged Item"),
         ("P17", "Patient", "p17.bdf", "spatially inconsistent channel(s): AF3"),
     ]
+
+
+def test_condition_crop_review_replaces_only_reviewed_exclusion_pairs(
+    tmp_path: Path,
+) -> None:
+    candidates = (
+        workflow.PreflightConditionCropObservation(
+            path=tmp_path / "P1.bdf",
+            participant_id="P1",
+            group_id="control",
+            condition_label="Negative Valence",
+            condition_id=22,
+            repetition_count=2,
+            oddball_cycles=21,
+            duration_s=17.5,
+            issue=None,
+            already_excluded=True,
+        ),
+        workflow.PreflightConditionCropObservation(
+            path=tmp_path / "P4.bdf",
+            participant_id="P4",
+            group_id="control",
+            condition_label="Negative Valence",
+            condition_id=22,
+            repetition_count=3,
+            oddball_cycles=21,
+            duration_s=17.5,
+            issue=None,
+        ),
+    )
+
+    updated = workflow._replace_reviewed_condition_exclusions(
+        {
+            "P1": ["Negative Valence", "Faces"],
+            "P9": ["Neutral Happy"],
+        },
+        candidates,
+        {("p4", "negative valence")},
+    )
+
+    assert updated == {
+        "P1": ["Faces"],
+        "P4": ["Negative Valence"],
+        "P9": ["Neutral Happy"],
+    }

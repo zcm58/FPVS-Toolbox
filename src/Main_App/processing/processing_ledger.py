@@ -29,6 +29,9 @@ PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
 PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v9_source_ready_time_domain"
+_DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
+    {"manual_excluded_participant_conditions"}
+)
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
@@ -408,9 +411,20 @@ def build_processing_fingerprint(
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
 ) -> str:
+    fingerprint_settings = {
+        key: value
+        for key, value in settings.items()
+        if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
+    }
+    project_preprocessing = getattr(project, "preprocessing", {}) or {}
+    fingerprint_project_preprocessing = {
+        key: value
+        for key, value in project_preprocessing.items()
+        if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
+    }
     payload = {
         "version": PROCESSING_FINGERPRINT_VERSION,
-        "settings": dict(settings),
+        "settings": fingerprint_settings,
         "fft_multinotch": {
             "enabled": settings.get("line_noise_filter_enabled", True),
             "mains_frequency_hz": settings.get("line_noise_frequency_hz", 60),
@@ -419,7 +433,7 @@ def build_processing_fingerprint(
             "component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
         },
         "event_map": {str(key): int(value) for key, value in event_map.items()},
-        "project_preprocessing": getattr(project, "preprocessing", {}) or {},
+        "project_preprocessing": fingerprint_project_preprocessing,
         "project_options": getattr(project, "options", {}) or {},
         "project_subfolders": getattr(project, "subfolders", {}) or {},
         "project_groups": getattr(project, "groups", {}) or {},

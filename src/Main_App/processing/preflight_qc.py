@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ import numpy as np
 
 from Main_App.io import load_utils
 from Main_App.io.load_utils import BDF_RECORDING_NOT_STARTED_REASON, BdfPreflightInfo
+from Main_App.Shared.fft_crop_utils import ODDBALL_FREQ
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.preflight_qc_cache import (
     load_preflight_qc_cache,
@@ -164,6 +166,9 @@ class PreflightQcScan:
 
     results: tuple[PreflightQcFileResult, ...]
     cancelled: bool = False
+    project_grid_observations: tuple[
+        "PreflightConditionCropObservation", ...
+    ] = ()
 
     @property
     def suggested_removed_electrodes(self) -> dict[str, list[str]]:
@@ -207,6 +212,312 @@ class PreflightQcScan:
             )
         )
 
+
+@dataclass(frozen=True, slots=True)
+class PreflightConditionCropObservation:
+    """One raw participant-condition's planned locked FFT crop grid."""
+
+    path: Path
+    participant_id: str
+    group_id: str | None
+    condition_label: str
+    condition_id: int
+    repetition_count: int
+    oddball_cycles: int | None
+    duration_s: float | None
+    issue: str | None
+    already_excluded: bool = False
+
+    @property
+    def pair_key(self) -> tuple[str, str]:
+        return self.participant_id.casefold(), self.condition_label.casefold()
+
+
+@dataclass(frozen=True, slots=True)
+class PreflightConditionCropGridAudit:
+    """Strict-majority crop reference and condition-level review candidates."""
+
+    observations: tuple[PreflightConditionCropObservation, ...]
+    reference_oddball_cycles: int | None
+    reference_support: int
+    reference_total: int
+
+    @property
+    def reference_duration_s(self) -> float | None:
+        if self.reference_oddball_cycles is None:
+            return None
+        return self.reference_oddball_cycles / float(ODDBALL_FREQ)
+
+    @property
+    def review_candidates(self) -> tuple[PreflightConditionCropObservation, ...]:
+        if self.reference_oddball_cycles is None:
+            valid_grids = {
+                observation.oddball_cycles
+                for observation in self.observations
+                if not observation.already_excluded
+                and observation.issue is None
+                and observation.oddball_cycles is not None
+            }
+            unresolved_conflict = len(valid_grids) > 1
+        else:
+            unresolved_conflict = False
+        return tuple(
+            observation
+            for observation in self.observations
+            if not observation.already_excluded
+            and (
+                observation.issue is not None
+                or unresolved_conflict
+                or (
+                    self.reference_oddball_cycles is not None
+                    and observation.oddball_cycles
+                    != self.reference_oddball_cycles
+                )
+            )
+        )
+
+    @property
+    def recommended_exclusions(
+        self,
+    ) -> tuple[PreflightConditionCropObservation, ...]:
+        """Return invalid rows and strict-majority mismatches safe to precheck."""
+
+        return tuple(
+            observation
+            for observation in self.observations
+            if not observation.already_excluded
+            and (
+                observation.issue is not None
+                or (
+                    self.reference_oddball_cycles is not None
+                    and observation.oddball_cycles
+                    != self.reference_oddball_cycles
+                )
+            )
+        )
+
+    @property
+    def has_unresolved_grid_conflict(self) -> bool:
+        return (
+            self.reference_oddball_cycles is None
+            and len(
+                {
+                    observation.oddball_cycles
+                    for observation in self.observations
+                    if not observation.already_excluded
+                    and observation.issue is None
+                    and observation.oddball_cycles is not None
+                }
+            )
+            > 1
+        )
+
+    def is_compatible_with_exclusions(
+        self,
+        exclusions: Mapping[str, Sequence[str]],
+    ) -> bool:
+        excluded_pairs = {
+            (str(participant).strip().casefold(), str(condition).strip().casefold())
+            for participant, conditions in exclusions.items()
+            for condition in conditions
+            if str(participant).strip() and str(condition).strip()
+        }
+        active = tuple(
+            observation
+            for observation in self.observations
+            if observation.pair_key not in excluded_pairs
+        )
+        if not active or any(observation.issue is not None for observation in active):
+            return False
+        return (
+            len(
+                {
+                    observation.oddball_cycles
+                    for observation in active
+                    if observation.oddball_cycles is not None
+                }
+            )
+            == 1
+        )
+
+
+def build_preflight_condition_crop_grid_audit(
+    scan: PreflightQcScan,
+    *,
+    excluded_participant_conditions: Mapping[str, Sequence[str]] | None = None,
+    excluded_participants: Sequence[str] = (),
+) -> PreflightConditionCropGridAudit:
+    """Compare valid raw crop plans without changing locked crop arithmetic."""
+
+    excluded_participant_keys = {
+        str(participant).strip().casefold()
+        for participant in excluded_participants
+        if str(participant).strip()
+    }
+    excluded_pair_keys = {
+        (str(participant).strip().casefold(), str(condition).strip().casefold())
+        for participant, conditions in (
+            excluded_participant_conditions or {}
+        ).items()
+        for condition in conditions
+        if str(participant).strip() and str(condition).strip()
+    }
+    observations: list[PreflightConditionCropObservation] = []
+    for result in scan.results:
+        if result.participant_id.casefold() in excluded_participant_keys:
+            continue
+        observations.extend(
+            _condition_crop_observations(
+                result,
+                excluded_pair_keys=excluded_pair_keys,
+            )
+        )
+    current_pairs = {observation.pair_key for observation in observations}
+    for project_observation in scan.project_grid_observations:
+        if (
+            project_observation.participant_id.casefold()
+            in excluded_participant_keys
+            or project_observation.pair_key in current_pairs
+        ):
+            continue
+        observations.append(
+            PreflightConditionCropObservation(
+                path=project_observation.path,
+                participant_id=project_observation.participant_id,
+                group_id=project_observation.group_id,
+                condition_label=project_observation.condition_label,
+                condition_id=project_observation.condition_id,
+                repetition_count=project_observation.repetition_count,
+                oddball_cycles=project_observation.oddball_cycles,
+                duration_s=project_observation.duration_s,
+                issue=project_observation.issue,
+                already_excluded=(
+                    project_observation.pair_key in excluded_pair_keys
+                ),
+            )
+        )
+    observations.sort(
+        key=lambda observation: (
+            str(observation.group_id or "").casefold(),
+            observation.participant_id.casefold(),
+            observation.condition_id,
+            observation.condition_label.casefold(),
+        )
+    )
+
+    active_cycles = [
+        int(observation.oddball_cycles)
+        for observation in observations
+        if not observation.already_excluded
+        and observation.issue is None
+        and observation.oddball_cycles is not None
+    ]
+    total = len(active_cycles)
+    reference: int | None = None
+    support = 0
+    if total >= 2:
+        counts = Counter(active_cycles)
+        candidate, support = counts.most_common(1)[0]
+        if support >= 2 and support * 2 > total:
+            reference = int(candidate)
+    return PreflightConditionCropGridAudit(
+        observations=tuple(observations),
+        reference_oddball_cycles=reference,
+        reference_support=int(support),
+        reference_total=total,
+    )
+
+
+def _condition_crop_observations(
+    result: PreflightQcFileResult,
+    *,
+    excluded_pair_keys: set[tuple[str, str]],
+) -> list[PreflightConditionCropObservation]:
+    condition_qc = result.condition_qc or {}
+    event_plan = condition_qc.get("event_plan")
+    if not isinstance(event_plan, Mapping):
+        return []
+    spans = event_plan.get("spans")
+    if not isinstance(spans, Sequence) or isinstance(spans, (str, bytes)):
+        return []
+    try:
+        sfreq = float(event_plan.get("sfreq"))
+    except (TypeError, ValueError):
+        return []
+    if not np.isfinite(sfreq) or sfreq <= 0.0:
+        return []
+
+    grouped: dict[tuple[int, str], list[Mapping[str, object]]] = defaultdict(list)
+    for raw_span in spans:
+        if not isinstance(raw_span, Mapping):
+            continue
+        try:
+            condition_id = int(raw_span.get("condition_id"))
+        except (TypeError, ValueError):
+            continue
+        condition_label = str(raw_span.get("condition_label") or "").strip()
+        if not condition_label:
+            condition_label = str(condition_id)
+        grouped[(condition_id, condition_label)].append(raw_span)
+
+    observations: list[PreflightConditionCropObservation] = []
+    for (condition_id, condition_label), condition_spans in grouped.items():
+        lengths: list[int] = []
+        issue: str | None = None
+        for span in condition_spans:
+            fallback_reason = str(
+                span.get("spectral_fallback_reason") or ""
+            ).strip()
+            if fallback_reason:
+                issue = f"Locked FFT crop unavailable: {fallback_reason}."
+                break
+            try:
+                start = int(span.get("spectral_start_sample"))
+                stop = int(span.get("spectral_stop_sample"))
+            except (TypeError, ValueError):
+                issue = "Locked FFT crop bounds are missing."
+                break
+            if stop <= start:
+                issue = "Locked FFT crop bounds are empty."
+                break
+            lengths.append(stop - start)
+
+        cycles: int | None = None
+        duration_s: float | None = None
+        if issue is None:
+            if not lengths:
+                issue = "No locked FFT crop was planned."
+            elif len(set(lengths)) != 1:
+                issue = "Condition repetitions do not share one FFT crop length."
+            else:
+                duration_s = lengths[0] / sfreq
+                raw_cycles = float(ODDBALL_FREQ) * duration_s
+                rounded_cycles = int(round(raw_cycles))
+                if rounded_cycles <= 0 or abs(raw_cycles - rounded_cycles) > 1e-6:
+                    issue = "The planned FFT crop is not exactly oddball-bin locked."
+                    duration_s = None
+                else:
+                    cycles = rounded_cycles
+
+        pair_key = (
+            result.participant_id.casefold(),
+            condition_label.casefold(),
+        )
+        observations.append(
+            PreflightConditionCropObservation(
+                path=result.path,
+                participant_id=result.participant_id,
+                group_id=result.group_id,
+                condition_label=condition_label,
+                condition_id=condition_id,
+                repetition_count=len(condition_spans),
+                oddball_cycles=cycles,
+                duration_s=duration_s,
+                issue=issue,
+                already_excluded=pair_key in excluded_pair_keys,
+            )
+        )
+    return observations
 
 def _path_key(path: Path) -> str:
     try:
@@ -1274,8 +1585,11 @@ def scan_preprocessing_qc(
 __all__ = [
     "BDF_RECORDING_NOT_STARTED_REASON",
     "HeaderOnlyPreflight",
+    "PreflightConditionCropGridAudit",
+    "PreflightConditionCropObservation",
     "PreflightQcFileResult",
     "PreflightQcScan",
+    "build_preflight_condition_crop_grid_audit",
     "scan_preprocessing_qc",
     "scan_recording_not_started_files",
 ]

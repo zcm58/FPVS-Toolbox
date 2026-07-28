@@ -47,6 +47,9 @@ _DATASET_PATH_NAMES = {
 _PREPROCESSING_NAMES = {
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
+    "is_participant_condition_excluded",
+    "normalize_manual_excluded_participant_conditions",
+    "normalize_manual_excluded_participants",
     "normalize_preprocessing_settings",
 }
 

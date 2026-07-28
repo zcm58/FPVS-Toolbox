@@ -283,8 +283,147 @@ def test_processing_harmonic_selection_qc_resolves_relative_excel_subfolder(
     assert report.workbook_path.exists()
 
 
-def _write_group_policy_workbook(path: Path, *, scale: int) -> None:
-    frequency_values = [round(0.3 * idx, 4) for idx in range(0, int(round(10.2 / 0.3)) + 1)]
+def test_processing_harmonic_inputs_omit_excluded_participant_condition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    faces_root = excel_root / "Faces"
+    negative_root = excel_root / "Negative Valence"
+    faces_root.mkdir(parents=True)
+    negative_root.mkdir(parents=True)
+    p1_faces = faces_root / "P1_Faces_Results.xlsx"
+    p1_negative = negative_root / "P1_Negative Valence_Results.xlsx"
+    p2_negative = negative_root / "P2_Negative Valence_Results.xlsx"
+    for path in (p1_faces, p1_negative, p2_negative):
+        path.write_text("fixture", encoding="utf-8")
+    preprocessing = {
+        "manual_excluded_participant_conditions": {
+            "P1": ["Negative Valence"]
+        }
+    }
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1, "Negative Valence": 2},
+                "preprocessing": preprocessing,
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map={"Faces": 1, "Negative Valence": 2},
+        preprocessing=preprocessing,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_filter_to_completed_subjects",
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"]),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "filter_frequency_domain_subjects",
+        lambda _root, subjects, subject_data: (subjects, subject_data, []),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"]},
+    )
+
+    inputs = harmonic_selection_qc._processing_harmonic_selection_inputs(project)
+
+    assert inputs.subject_data == {
+        "P1": {"Faces": str(p1_faces)},
+        "P2": {"Negative Valence": str(p2_negative)},
+    }
+    assert str(p1_negative) not in {
+        path
+        for participant_data in inputs.subject_data.values()
+        for path in participant_data.values()
+    }
+
+
+def test_processing_harmonic_selection_succeeds_after_grid_outlier_exclusion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    faces_root = excel_root / "Faces"
+    negative_root = excel_root / "Negative Valence"
+    faces_root.mkdir(parents=True)
+    negative_root.mkdir(parents=True)
+    _write_group_policy_workbook(
+        faces_root / "S1_Faces_Results.xlsx",
+        scale=1,
+    )
+    _write_group_policy_workbook(
+        faces_root / "S2_Faces_Results.xlsx",
+        scale=2,
+    )
+    _write_group_policy_workbook(
+        negative_root / "S3_Negative Valence_Results.xlsx",
+        scale=1,
+        spacing_hz=0.4,
+    )
+    preprocessing = {
+        "manual_excluded_participant_conditions": {
+            "S3": ["Negative Valence"]
+        }
+    }
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1, "Negative Valence": 2},
+                "preprocessing": preprocessing,
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map={"Faces": 1, "Negative Valence": 2},
+        preprocessing=preprocessing,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_base_frequency_hz",
+        lambda: 6.0,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_bca_upper_limit_hz",
+        lambda: 8.4,
+    )
+
+    report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+
+    assert report.workbook_path.exists()
+    assert report.selection_metadata["selected_harmonics_hz"] == pytest.approx(
+        [1.2, 2.4, 3.6, 4.8, 7.2]
+    )
+
+
+def _write_group_policy_workbook(
+    path: Path,
+    *,
+    scale: int,
+    spacing_hz: float = 0.3,
+) -> None:
+    frequency_values = [
+        round(spacing_hz * idx, 4)
+        for idx in range(0, int(round(10.2 / spacing_hz)) + 1)
+    ]
     fft_values = []
     for idx, freq in enumerate(frequency_values):
         value = 20.0 if freq in {1.2, 3.6, 7.2} else (1.2 if idx % 2 == 0 else 0.8)
