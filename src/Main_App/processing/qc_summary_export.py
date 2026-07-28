@@ -402,22 +402,37 @@ def _missing_condition_labels(
     return derived
 
 
-def _cache_qc_for_entry(project: Any, entry: Mapping[str, Any]) -> Mapping[str, Any]:
+_PreprocessedCacheIdentity = tuple[Path, int, int]
+_PreprocessedCacheQcIndex = Mapping[
+    _PreprocessedCacheIdentity,
+    Mapping[str, Any],
+]
+
+
+def _cache_identity_for_entry(
+    entry: Mapping[str, Any],
+) -> _PreprocessedCacheIdentity | None:
     raw_file = entry.get("raw_file")
     if not raw_file:
-        return {}
+        return None
     try:
         raw_path = Path(str(raw_file)).resolve()
         expected_size = int(entry.get("raw_size"))
         expected_mtime_ns = int(entry.get("raw_mtime_ns"))
     except (OSError, TypeError, ValueError):
-        return {}
+        return None
+    return raw_path, expected_size, expected_mtime_ns
 
+
+def _preprocessed_cache_qc_index(project: Any) -> _PreprocessedCacheQcIndex:
     cache_dir = Path(project.project_root) / ".fpvs_cache" / "preprocessed"
     if not cache_dir.exists():
         return {}
 
-    matches: list[tuple[float, Mapping[str, Any]]] = []
+    newest_by_identity: dict[
+        _PreprocessedCacheIdentity,
+        tuple[float, Mapping[str, Any]],
+    ] = {}
     for meta_path in cache_dir.glob("*.json"):
         try:
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -430,27 +445,37 @@ def _cache_qc_for_entry(project: Any, entry: Mapping[str, Any]) -> Mapping[str, 
             continue
         source_path = payload.get("source_path")
         try:
-            same_source = Path(str(source_path)).resolve() == raw_path
+            raw_path = Path(str(source_path)).resolve()
         except (OSError, TypeError, ValueError):
-            same_source = False
-        if not same_source:
             continue
         try:
             source_size = int(payload.get("source_size") or -1)
             source_mtime_ns = int(payload.get("source_mtime_ns") or -1)
         except (TypeError, ValueError):
             continue
-        if source_size != expected_size or source_mtime_ns != expected_mtime_ns:
-            continue
+        identity = (raw_path, source_size, source_mtime_ns)
         try:
             timestamp = meta_path.stat().st_mtime
         except OSError:
             timestamp = 0.0
-        matches.append((timestamp, metadata))
+        current = newest_by_identity.get(identity)
+        if current is None or timestamp > current[0]:
+            newest_by_identity[identity] = (timestamp, metadata)
 
-    if not matches:
+    return {
+        identity: metadata
+        for identity, (_, metadata) in newest_by_identity.items()
+    }
+
+
+def _cache_qc_for_entry(
+    cache_index: _PreprocessedCacheQcIndex,
+    entry: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    identity = _cache_identity_for_entry(entry)
+    if identity is None:
         return {}
-    return max(matches, key=lambda item: item[0])[1]
+    return cache_index.get(identity, {})
 
 
 def build_processing_qc_rows(
@@ -463,11 +488,17 @@ def build_processing_qc_rows(
     ledger = load_ledger(Path(project.project_root))
     results_by_path = _result_by_path(results)
     review_flags = _review_flags_by_pid(project)
+    cache_index: _PreprocessedCacheQcIndex | None = None
     rows: list[dict[str, object]] = []
     for state in plan.states:
         review = review_flags.get(state.participant_id.casefold(), {})
         entry = _entry_for_pid(ledger, state.participant_id)
-        cache_entry = _cache_qc_for_entry(project, entry) if entry else {}
+        if entry:
+            if cache_index is None:
+                cache_index = _preprocessed_cache_qc_index(project)
+            cache_entry = _cache_qc_for_entry(cache_index, entry)
+        else:
+            cache_entry = {}
         result = results_by_path.get(state.info.path.resolve())
         raw_qc_low_variance_channels = _raw_qc_low_variance_channels_from_result(
             result

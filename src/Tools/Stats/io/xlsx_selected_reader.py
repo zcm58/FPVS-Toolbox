@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 import posixpath
 from pathlib import Path
 from time import perf_counter
@@ -23,6 +26,42 @@ _VALUE_TAG = f"{{{_SPREADSHEET_NS}}}v"
 _RELATIONSHIP_TAG = f"{{{_PACKAGE_REL_NS}}}Relationship"
 
 
+@dataclass(frozen=True)
+class _WorkbookSignature:
+    resolved_path: str
+    size_bytes: int
+    mtime_ns: int
+    ctime_ns: int
+    device_id: int
+    file_id: int
+
+
+@dataclass(frozen=True)
+class _SelectedReadKey:
+    workbook: _WorkbookSignature
+    sheet_name: str
+    requested_columns: tuple[str, ...]
+    require_all: bool
+    included_electrodes_upper: frozenset[str] | None
+    electrode_column: str
+
+
+@dataclass
+class _RunScopedXlsxReadCache:
+    headers: dict[tuple[_WorkbookSignature, str], tuple[object, ...]] = field(
+        default_factory=dict
+    )
+    selected_frames: dict[_SelectedReadKey, pd.DataFrame] = field(
+        default_factory=dict
+    )
+
+
+_ACTIVE_XLSX_READ_CACHE: ContextVar[_RunScopedXlsxReadCache | None] = ContextVar(
+    "active_xlsx_selected_read_cache",
+    default=None,
+)
+
+
 class MissingXlsxColumnsError(ValueError):
     """Raised when an `.xlsx` worksheet lacks required exact columns."""
 
@@ -35,8 +74,29 @@ class MissingXlsxColumnsError(ValueError):
         )
 
 
+@contextmanager
+def xlsx_read_cache_scope() -> Iterator[None]:
+    """Reuse exact workbook reads within one explicitly bounded caller run."""
+
+    token = _ACTIVE_XLSX_READ_CACHE.set(_RunScopedXlsxReadCache())
+    try:
+        yield
+    finally:
+        _ACTIVE_XLSX_READ_CACHE.reset(token)
+
+
 def read_xlsx_sheet_header(excel_path: str | Path, *, sheet_name: str) -> list[object]:
     """Return the first-row values for a worksheet without loading all rows."""
+
+    cache = _ACTIVE_XLSX_READ_CACHE.get()
+    cache_key: tuple[_WorkbookSignature, str] | None = None
+    if cache is not None:
+        signature = _workbook_signature_or_none(excel_path)
+        if signature is not None:
+            cache_key = (signature, str(sheet_name))
+            cached = cache.headers.get(cache_key)
+            if cached is not None:
+                return list(cached)
 
     with zipfile.ZipFile(excel_path) as archive:
         worksheet_member = _worksheet_member(archive, sheet_name)
@@ -47,7 +107,19 @@ def read_xlsx_sheet_header(excel_path: str | Path, *, sheet_name: str) -> list[o
                     continue
                 header = _row_values_by_column(row, shared_strings)
                 row.clear()
+                if (
+                    cache is not None
+                    and cache_key is not None
+                    and _workbook_signature_or_none(excel_path) == cache_key[0]
+                ):
+                    cache.headers[cache_key] = tuple(header)
                 return header
+    if (
+        cache is not None
+        and cache_key is not None
+        and _workbook_signature_or_none(excel_path) == cache_key[0]
+    ):
+        cache.headers[cache_key] = ()
     return []
 
 
@@ -68,6 +140,30 @@ def read_xlsx_sheet_selected_columns(
     """
 
     requested_columns = _unique_requested_columns(required_columns)
+    cache_started = perf_counter()
+    cache = _ACTIVE_XLSX_READ_CACHE.get()
+    cache_key: _SelectedReadKey | None = None
+    if cache is not None:
+        signature = _workbook_signature_or_none(excel_path)
+        if signature is not None:
+            cache_key = _SelectedReadKey(
+                workbook=signature,
+                sheet_name=str(sheet_name),
+                requested_columns=tuple(requested_columns),
+                require_all=bool(require_all),
+                included_electrodes_upper=(
+                    frozenset(included_electrodes_upper)
+                    if included_electrodes_upper is not None
+                    else None
+                ),
+                electrode_column=str(electrode_column),
+            )
+            cached = cache.selected_frames.get(cache_key)
+            if cached is not None:
+                frame = cached.copy(deep=True)
+                _add_timing_detail(timing_details, "cache_hit", cache_started)
+                return frame
+
     started = perf_counter()
     with zipfile.ZipFile(excel_path) as archive:
         worksheet_member = _worksheet_member(archive, sheet_name)
@@ -90,7 +186,31 @@ def read_xlsx_sheet_selected_columns(
                 timing_details=timing_details,
                 row_stream_started=started,
             )
+        if (
+            cache is not None
+            and cache_key is not None
+            and _workbook_signature_or_none(excel_path) == cache_key.workbook
+        ):
+            cache.selected_frames[cache_key] = frame.copy(deep=True)
         return frame
+
+
+def _workbook_signature_or_none(
+    excel_path: str | Path,
+) -> _WorkbookSignature | None:
+    try:
+        path = Path(excel_path).expanduser().resolve(strict=False)
+        stat = path.stat()
+    except OSError:
+        return None
+    return _WorkbookSignature(
+        resolved_path=str(path),
+        size_bytes=int(stat.st_size),
+        mtime_ns=int(stat.st_mtime_ns),
+        ctime_ns=int(stat.st_ctime_ns),
+        device_id=int(stat.st_dev),
+        file_id=int(stat.st_ino),
+    )
 
 
 def _add_timing_detail(
@@ -320,4 +440,5 @@ __all__ = [
     "MissingXlsxColumnsError",
     "read_xlsx_sheet_header",
     "read_xlsx_sheet_selected_columns",
+    "xlsx_read_cache_scope",
 ]

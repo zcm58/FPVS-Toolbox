@@ -94,6 +94,98 @@ def test_stats_and_source_exports_are_unconditional_sibling_steps() -> None:
     assert source_index > stats_index
 
 
+def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
+    tree = _worker_tree()
+    run_method = _class_method(tree, "run")
+    stack_assignment = next(
+        statement
+        for statement in run_method.body
+        if isinstance(statement, ast.Assign)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id == "ExitStack"
+    )
+    assert any(
+        isinstance(target, ast.Name) and target.id == "cache_stack"
+        for target in stack_assignment.targets
+    )
+
+    try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
+    cache_import = next(
+        statement
+        for statement in try_node.body
+        if isinstance(statement, ast.ImportFrom)
+        and statement.module == "Tools.Stats.io.xlsx_selected_reader"
+    )
+    assert [alias.name for alias in cache_import.names] == ["xlsx_read_cache_scope"]
+
+    enter_statement = next(
+        statement
+        for statement in try_node.body
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == "enter_context"
+    )
+    enter_call = enter_statement.value
+    assert isinstance(enter_call.func.value, ast.Name)
+    assert enter_call.func.value.id == "cache_stack"
+    assert len(enter_call.args) == 1
+    scope_call = enter_call.args[0]
+    assert isinstance(scope_call, ast.Call)
+    assert isinstance(scope_call.func, ast.Name)
+    assert scope_call.func.id == "xlsx_read_cache_scope"
+    enter_index = try_node.body.index(enter_statement)
+    qc_index = next(
+        index
+        for index, statement in enumerate(try_node.body)
+        if isinstance(statement, ast.Assign)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == "_run_frequency_domain_qc_review"
+    )
+    assert enter_index < qc_index
+    normal_close_index = next(
+        index
+        for index, statement in enumerate(try_node.body)
+        if _is_named_method_call(statement, "cache_stack", "close")
+    )
+    source_maps_index = next(
+        index
+        for index, statement in enumerate(try_node.body)
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == "extend"
+        and statement.value.args
+        and isinstance(statement.value.args[0], ast.Call)
+        and isinstance(statement.value.args[0].func, ast.Attribute)
+        and statement.value.args[0].func.attr == "_run_source_maps"
+    )
+    assert normal_close_index < source_maps_index
+    assert any(isinstance(node, ast.Return) for node in ast.walk(try_node))
+    assert try_node.handlers
+    assert any(
+        _is_named_method_call(statement, "cache_stack", "close")
+        for statement in try_node.finalbody
+    )
+
+
+def _is_named_method_call(
+    statement: ast.stmt,
+    object_name: str,
+    method_name: str,
+) -> bool:
+    return (
+        isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == method_name
+        and isinstance(statement.value.func.value, ast.Name)
+        and statement.value.func.value.id == object_name
+    )
+
+
 def test_source_psd_exporters_are_loaded_through_separate_expected_seams() -> None:
     tree = _worker_tree()
     expected_loaders = {

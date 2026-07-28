@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 from openpyxl import Workbook
 
@@ -414,6 +416,124 @@ def test_processing_qc_summary_uses_matching_cache_for_legacy_failed_entry(tmp_p
     assert rows[0]["Kurtosis-Rejected Electrodes"] == "P8"
     assert rows[0]["Electrodes Interpolated"] == "FT7, P9, P8"
     assert rows[0]["Total Number of Electrodes removed/rejected"] == 3
+
+
+def test_processing_qc_summary_indexes_cache_once_and_uses_newest_matching_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project, infos = _project_with_raws(tmp_path)
+    plan = classify_processing_inputs(project, infos, _settings(), project.event_map)
+    raw_stats = [info.path.stat() for info in infos]
+    ledger_path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    info.subject_id: {
+                        "participant_id": info.subject_id,
+                        "raw_file": str(info.path),
+                        "raw_size": raw_stat.st_size,
+                        "raw_mtime_ns": raw_stat.st_mtime_ns,
+                        "status": "failed",
+                        "n_rejected": 0,
+                    }
+                    for info, raw_stat in zip(infos, raw_stats)
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache_dir = project.project_root / ".fpvs_cache" / "preprocessed"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_metadata(
+        name: str,
+        *,
+        source_path: Path,
+        source_size: int,
+        source_mtime_ns: int,
+        manual_channels: list[str],
+        metadata_mtime_ns: int,
+    ) -> Path:
+        meta_path = cache_dir / name
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "source_path": str(source_path),
+                        "source_size": source_size,
+                        "source_mtime_ns": source_mtime_ns,
+                    },
+                    "raw_qc_manual_removed_channels": manual_channels,
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.utime(
+            meta_path,
+            ns=(metadata_mtime_ns, metadata_mtime_ns),
+        )
+        return meta_path
+
+    p01_old = write_metadata(
+        "P01_old.json",
+        source_path=infos[0].path,
+        source_size=raw_stats[0].st_size,
+        source_mtime_ns=raw_stats[0].st_mtime_ns,
+        manual_channels=["FT7"],
+        metadata_mtime_ns=1_700_000_000_000_000_000,
+    )
+    p01_new = write_metadata(
+        "P01_new.json",
+        source_path=infos[0].path,
+        source_size=raw_stats[0].st_size,
+        source_mtime_ns=raw_stats[0].st_mtime_ns,
+        manual_channels=["P9"],
+        metadata_mtime_ns=1_700_000_001_000_000_000,
+    )
+    p02 = write_metadata(
+        "P02.json",
+        source_path=infos[1].path,
+        source_size=raw_stats[1].st_size,
+        source_mtime_ns=raw_stats[1].st_mtime_ns,
+        manual_channels=["P10"],
+        metadata_mtime_ns=1_700_000_002_000_000_000,
+    )
+    wrong_identity = write_metadata(
+        "P01_wrong_size.json",
+        source_path=infos[0].path,
+        source_size=raw_stats[0].st_size + 1,
+        source_mtime_ns=raw_stats[0].st_mtime_ns,
+        manual_channels=["Cz"],
+        metadata_mtime_ns=1_700_000_003_000_000_000,
+    )
+    malformed = cache_dir / "malformed.json"
+    malformed.write_text("{", encoding="utf-8")
+    metadata_paths = {
+        p01_old,
+        p01_new,
+        p02,
+        wrong_identity,
+        malformed,
+    }
+    read_counts = {path: 0 for path in metadata_paths}
+    original_read_text = Path.read_text
+
+    def counted_read_text(self: Path, *args, **kwargs) -> str:
+        if self in read_counts:
+            read_counts[self] += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+
+    rows = build_processing_qc_rows(project, plan, [])
+
+    assert rows[0]["Manually Removed Electrodes"] == "P9"
+    assert rows[1]["Manually Removed Electrodes"] == "P10"
+    assert set(read_counts.values()) == {1}
 
 
 def test_processing_qc_summary_treats_legacy_missing_condition_as_included(

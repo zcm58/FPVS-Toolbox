@@ -117,6 +117,31 @@ The target label is `1.2Hz`. Neighbor amplitudes are exported for +/-11 FFT bins
 
 `write_results_workbook(...)` writes each provided metric DataFrame to its existing sheet name with no index column, freezes the header row, center-aligns cells vertically and horizontally, and sets each column width from the maximum header/data string length plus four characters. The optional `FFT and neighbors` sheet is written only when the neighbor DataFrame is present and non-empty.
 
+Column-width measurement may process adjacent columns in bounded DataFrame
+blocks, but it must preserve the exact per-column `str(...)` length maximum and
+the existing `+ 4` width. When the workbook destination is on a different
+Windows volume from the system temporary directory, the final XLSX container
+is assembled on the temporary volume, copied sequentially to a same-directory
+temporary file beneath the intended project output folder, and atomically
+replaced into place. The staging file is ephemeral: every durable file and the
+publish temporary remain confined to the active project output path, and a
+failed staged write must leave an existing workbook untouched.
+
+During one `PostProcessingPipelineWorker.run()` call, repeated exact selected
+reads from source XLSX workbooks may share a run-scoped cache. Cache identity
+must include the resolved workbook path, size, nanosecond modification time,
+filesystem ctime/creation identity, device/file identity, worksheet,
+requested-column order, missing-column policy, electrode filter, and
+electrode-column name. Processed input workbooks are immutable during these
+scoped phases; concurrent same-file in-place edits are outside this boundary.
+Cached frames are returned as defensive copies, and a pre/post signature check
+prevents a read changed in flight from being stored. The scope is closed on
+success, error, and the early frequency-domain-QC review return; reads outside
+that explicit worker scope remain uncached. Process-global or cross-run
+workbook caches are not allowed. On the normal path it is released after
+Stats-ready export and before the memory-intensive time-domain source-map
+producers, which do not consume the selected-XLSX reader.
+
 ## Preservation Rules
 
 - Do not change metric formulas, FFT bin selection, noise-window logic, sheet names, column names, filename/folder naming, channel ordering, logging semantics, or completion/error behavior.

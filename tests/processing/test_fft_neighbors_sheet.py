@@ -1,7 +1,10 @@
 import logging
+import zipfile
 
 import pytest
+from Main_App.Shared import post_process_excel
 from Main_App.Shared.post_process_excel import (
+    _column_widths,
     build_fft_neighbors_rows,
     write_results_workbook,
 )
@@ -9,6 +12,136 @@ from Main_App.Shared.post_process_excel import (
 np = pytest.importorskip('numpy')
 pd = pytest.importorskip('pandas')
 load_workbook = pytest.importorskip('openpyxl').load_workbook
+
+
+def _scalar_column_widths(frame):
+    widths = []
+    for column_index, header_name in enumerate(frame.columns):
+        series = frame.iloc[:, column_index]
+        max_len = max(
+            len(str(header_name)),
+            series.astype(str).map(len).max() if not series.empty else 0,
+        )
+        widths.append(int(max_len) + 4)
+    return tuple(widths)
+
+
+def test_column_width_blocks_preserve_scalar_string_length_semantics() -> None:
+    frame = pd.DataFrame(
+        {
+            "Electrode": ["Oz", "PO8", None, "very-long-electrode-name"],
+            "1.2000_Hz": [1.0, np.nan, -12345.6789, np.inf],
+            "Mixed": ["short", 123, False, ""],
+        }
+    )
+
+    assert _column_widths(frame) == _scalar_column_widths(frame)
+
+
+def test_cross_volume_staging_publishes_one_sequential_copy(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workbook_path = tmp_path / "staged-result.xlsx"
+    copy_calls = []
+    original_copyfile = post_process_excel.shutil.copyfile
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_should_stage_workbook_locally",
+        lambda _destination: True,
+    )
+
+    def record_copy(source, destination):
+        copy_calls.append((source, destination))
+        return original_copyfile(source, destination)
+
+    monkeypatch.setattr(post_process_excel.shutil, "copyfile", record_copy)
+
+    write_results_workbook(
+        str(workbook_path),
+        {
+            "FFT Amplitude (uV)": pd.DataFrame(
+                {"Electrode": ["Oz"], "1.2000_Hz": [1.25]}
+            )
+        },
+    )
+
+    assert workbook_path.is_file()
+    assert len(copy_calls) == 1
+    staged_source, publish_target = map(lambda value: value.resolve(), copy_calls[0])
+    assert staged_source.parent != workbook_path.parent
+    assert publish_target.parent == workbook_path.parent
+    worksheet = load_workbook(workbook_path, data_only=True)["FFT Amplitude (uV)"]
+    assert worksheet["A2"].value == "Oz"
+    assert worksheet["B2"].value == 1.25
+
+
+def test_cross_volume_staging_preserves_xlsx_members_except_core_timestamps(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    direct_path = tmp_path / "direct.xlsx"
+    staged_path = tmp_path / "staged.xlsx"
+    frame = pd.DataFrame(
+        {
+            "Electrode": ["Oz", "POz"],
+            "1.2000_Hz": [1.25, -0.5],
+        }
+    )
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_should_stage_workbook_locally",
+        lambda _destination: False,
+    )
+    write_results_workbook(str(direct_path), {"FFT Amplitude (uV)": frame})
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_should_stage_workbook_locally",
+        lambda _destination: True,
+    )
+    write_results_workbook(str(staged_path), {"FFT Amplitude (uV)": frame})
+
+    with zipfile.ZipFile(direct_path) as direct, zipfile.ZipFile(staged_path) as staged:
+        assert direct.namelist() == staged.namelist()
+        stable_members = [
+            name for name in direct.namelist() if name != "docProps/core.xml"
+        ]
+        assert {
+            name: direct.read(name) for name in stable_members
+        } == {
+            name: staged.read(name) for name in stable_members
+        }
+
+
+def test_cross_volume_staging_preserves_existing_workbook_on_write_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    workbook_path = tmp_path / "existing-result.xlsx"
+    original_bytes = b"existing workbook sentinel"
+    workbook_path.write_bytes(original_bytes)
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_should_stage_workbook_locally",
+        lambda _destination: True,
+    )
+
+    def fail_to_excel(*_args, **_kwargs):
+        raise RuntimeError("synthetic write failure")
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fail_to_excel)
+
+    with pytest.raises(RuntimeError, match="synthetic write failure"):
+        write_results_workbook(
+            str(workbook_path),
+            {"FFT Amplitude (uV)": pd.DataFrame({"Electrode": ["Oz"]})},
+        )
+
+    assert workbook_path.read_bytes() == original_bytes
 
 
 def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):

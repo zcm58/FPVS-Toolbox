@@ -142,6 +142,41 @@ def test_condition_qc_vectorized_percentiles_are_bit_exact_with_v1_formulas() ->
     )
 
 
+def test_v2_metrics_preserve_explicit_float64_coercion() -> None:
+    values = np.random.default_rng(0).normal(size=257).astype(np.float32)
+    values64 = np.asarray(values, dtype=np.float64)
+
+    metrics = raw_channel_qc._v2_channel_metrics("Fp1", values)
+    expected = (
+        float(np.nanstd(values64) * 1e6),
+        float(
+            (
+                np.nanpercentile(values64, 99.5)
+                - np.nanpercentile(values64, 0.5)
+            )
+            * 1e6
+        ),
+        float(
+            (
+                np.nanpercentile(values64, 99.95)
+                - np.nanpercentile(values64, 0.05)
+            )
+            * 1e6
+        ),
+        float((np.nanmax(values64) - np.nanmin(values64)) * 1e6),
+    )
+    actual = (
+        metrics.std_uv,
+        metrics.p2p_99_uv,
+        metrics.p2p_999_uv,
+        metrics.full_p2p_uv,
+    )
+
+    assert tuple(np.float64(value).tobytes() for value in actual) == tuple(
+        np.float64(value).tobytes() for value in expected
+    )
+
+
 def test_shared_condition_buffer_avoids_full_concatenation(monkeypatch) -> None:
     data = _noise(43, 45)
     blocks = [

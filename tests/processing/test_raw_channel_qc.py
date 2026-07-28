@@ -1,13 +1,93 @@
 from __future__ import annotations
 
+import warnings
+
 import mne
 import numpy as np
+import pytest
 
+import Main_App.processing.raw_channel_qc as raw_channel_qc_module
 from Main_App.processing.raw_channel_qc import (
     LEFT_HEMISPHERE_CHANNELS,
     RIGHT_HEMISPHERE_CHANNELS,
+    _channel_metric_values,
     evaluate_raw_channel_qc,
 )
+
+
+def _reference_channel_metric_values(
+    values: np.ndarray,
+) -> tuple[float, float, float, float]:
+    metric_values = np.asarray(values)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return (
+            float(np.nanstd(metric_values) * 1e6),
+            float(
+                (
+                    np.nanpercentile(metric_values, 99.5)
+                    - np.nanpercentile(metric_values, 0.5)
+                )
+                * 1e6
+            ),
+            float(
+                (
+                    np.nanpercentile(metric_values, 99.95)
+                    - np.nanpercentile(metric_values, 0.05)
+                )
+                * 1e6
+            ),
+            float(
+                (np.nanmax(metric_values) - np.nanmin(metric_values)) * 1e6
+            ),
+        )
+
+
+def _metric_bytes(metrics: tuple[float, ...]) -> bytes:
+    return np.asarray(metrics, dtype=np.float64).tobytes()
+
+
+def _float_bytes_tree(value):
+    if isinstance(value, float):
+        return np.float64(value).tobytes()
+    if isinstance(value, dict):
+        return {key: _float_bytes_tree(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return tuple(_float_bytes_tree(item) for item in value)
+    return value
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        np.array([-4e-6, -0.0, 0.0, 1e-6, 5e-6], dtype=np.float64),
+        np.array(
+            [np.nan, -np.inf, -2e-6, 0.0, 3e-6, np.inf],
+            dtype=np.float64,
+        ),
+        np.array([0.0, -0.0, 0.0, -0.0], dtype=np.float64),
+        np.array([-4e-6, -0.0, 0.0, 1e-6, 5e-6], dtype=np.float32),
+        np.arange(-16.0, 16.0, dtype=np.float64)[::2],
+        np.full(12, np.nan, dtype=np.float64),
+    ],
+    ids=[
+        "finite",
+        "nonfinite",
+        "signed-zero",
+        "float32",
+        "noncontiguous",
+        "all-nan",
+    ],
+)
+def test_channel_metric_values_match_v1_formulas_byte_exact(
+    values: np.ndarray,
+) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        actual = _channel_metric_values(values)
+    expected = _reference_channel_metric_values(values)
+
+    assert _metric_bytes(actual) == _metric_bytes(expected)
 
 
 def _raw_with_left_failure() -> mne.io.RawArray:
@@ -183,6 +263,26 @@ def test_raw_channel_qc_marks_isolated_low_variance_channels_for_interpolation()
     assert result.bad_channels == ("P9",)
     assert result.channels_to_interpolate == ("P9",)
     assert result.triggered_rules == ()
+
+
+def test_raw_channel_qc_v1_output_matches_reference_metrics_byte_exact(
+    monkeypatch,
+) -> None:
+    raw = _raw_with_clustered_removed_channels(["P9"])
+    settings = {"stim_channel": "Status", "max_bad_chans": 20}
+
+    optimized = evaluate_raw_channel_qc(raw, settings, filename="p03.bdf")
+    monkeypatch.setattr(
+        raw_channel_qc_module,
+        "_channel_metric_values",
+        _reference_channel_metric_values,
+    )
+    reference = evaluate_raw_channel_qc(raw, settings, filename="p03.bdf")
+
+    assert optimized == reference
+    assert _float_bytes_tree(optimized.to_payload()) == _float_bytes_tree(
+        reference.to_payload()
+    )
 
 
 def test_raw_channel_qc_flags_spatial_outlier_without_interpolation() -> None:

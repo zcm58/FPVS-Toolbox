@@ -224,6 +224,60 @@ class _ChannelStats:
     full_p2p_uv: float
 
 
+def _channel_metric_values(
+    values: np.ndarray,
+) -> tuple[float, float, float, float]:
+    """Return the v1 metrics while sharing percentile work."""
+
+    metric_values = np.asarray(values)
+    finite_float64 = (
+        metric_values.dtype == np.dtype(np.float64)
+        and metric_values.size > 0
+        and bool(np.isfinite(metric_values).all())
+    )
+    if finite_float64:
+        percentiles = np.percentile(
+            metric_values,
+            [0.05, 0.5, 99.5, 99.95],
+        )
+        std_uv = float(np.std(metric_values) * 1e6)
+        full_p2p_uv = float(
+            (np.max(metric_values) - np.min(metric_values)) * 1e6
+        )
+    elif metric_values.dtype == np.dtype(np.float64):
+        percentiles = np.nanpercentile(
+            metric_values,
+            [0.05, 0.5, 99.5, 99.95],
+        )
+        std_uv = float(np.nanstd(metric_values) * 1e6)
+        full_p2p_uv = float(
+            (np.nanmax(metric_values) - np.nanmin(metric_values)) * 1e6
+        )
+    else:
+        std_uv = float(np.nanstd(metric_values) * 1e6)
+        p2p_99_uv = float(
+            (
+                np.nanpercentile(metric_values, 99.5)
+                - np.nanpercentile(metric_values, 0.5)
+            )
+            * 1e6
+        )
+        p2p_999_uv = float(
+            (
+                np.nanpercentile(metric_values, 99.95)
+                - np.nanpercentile(metric_values, 0.05)
+            )
+            * 1e6
+        )
+        full_p2p_uv = float(
+            (np.nanmax(metric_values) - np.nanmin(metric_values)) * 1e6
+        )
+        return std_uv, p2p_99_uv, p2p_999_uv, full_p2p_uv
+    p2p_99_uv = float((percentiles[2] - percentiles[1]) * 1e6)
+    p2p_999_uv = float((percentiles[3] - percentiles[0]) * 1e6)
+    return std_uv, p2p_99_uv, p2p_999_uv, full_p2p_uv
+
+
 CONDITION_RAW_CHANNEL_QC_METHOD_VERSION = "condition_blocks_v4"
 
 
@@ -1023,15 +1077,14 @@ def evaluate_raw_channel_qc(
         elif group == "midline":
             midline_total += 1
 
-        values = data[row_index]
-        std_uv = float(np.nanstd(values) * 1e6)
-        p2p_99_uv = float(
-            (np.nanpercentile(values, 99.5) - np.nanpercentile(values, 0.5)) * 1e6
+        (
+            std_uv,
+            p2p_99_uv,
+            p2p_999_uv,
+            full_p2p_uv,
+        ) = _channel_metric_values(
+            data[row_index]
         )
-        p2p_999_uv = float(
-            (np.nanpercentile(values, 99.95) - np.nanpercentile(values, 0.05)) * 1e6
-        )
-        full_p2p_uv = float((np.nanmax(values) - np.nanmin(values)) * 1e6)
         channel_stats.append(
             _ChannelStats(
                 channel=channel,
@@ -1334,13 +1387,15 @@ def _v2_channel_metrics(channel: str, values: np.ndarray) -> RawChannelMetricSet
     """Apply the v1 float64 formulas with one vectorized percentile call."""
 
     values64 = np.asarray(values, dtype=np.float64)
-    percentiles = np.nanpercentile(values64, [0.05, 0.5, 99.5, 99.95])
+    std_uv, p2p_99_uv, p2p_999_uv, full_p2p_uv = _channel_metric_values(
+        values64
+    )
     return RawChannelMetricSet(
         channel=channel,
-        std_uv=float(np.nanstd(values64) * 1e6),
-        p2p_99_uv=float((percentiles[2] - percentiles[1]) * 1e6),
-        p2p_999_uv=float((percentiles[3] - percentiles[0]) * 1e6),
-        full_p2p_uv=float((np.nanmax(values64) - np.nanmin(values64)) * 1e6),
+        std_uv=std_uv,
+        p2p_99_uv=p2p_99_uv,
+        p2p_999_uv=p2p_999_uv,
+        full_p2p_uv=full_p2p_uv,
     )
 
 

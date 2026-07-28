@@ -593,8 +593,19 @@ def _preproc_cache_key(payload: Dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _preproc_cache_paths(project_root: Path, file_path: Path, cache_key: str) -> Tuple[Path, Path]:
-    safe_stem = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in file_path.stem)
+def _preproc_cache_safe_stem(file_path: Path) -> str:
+    return "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_"
+        for ch in file_path.stem
+    )
+
+
+def _preproc_cache_paths(
+    project_root: Path,
+    file_path: Path,
+    cache_key: str,
+) -> Tuple[Path, Path]:
+    safe_stem = _preproc_cache_safe_stem(file_path)
     cache_dir = project_root / ".fpvs_cache" / "preprocessed"
     raw_path = cache_dir / f"{safe_stem}_{cache_key[:16]}_raw.fif"
     meta_path = cache_dir / f"{safe_stem}_{cache_key[:16]}.json"
@@ -615,7 +626,8 @@ def _prune_stale_preprocessed_cache(
         return 0
 
     pruned = 0
-    for meta_path in cache_dir.glob("*.json"):
+    safe_stem = _preproc_cache_safe_stem(Path(source_path))
+    for meta_path in cache_dir.glob(f"{safe_stem}_*.json"):
         if meta_path == keep_meta_path:
             continue
         try:

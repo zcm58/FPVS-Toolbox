@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -1125,3 +1126,86 @@ def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -
     assert status == "hit"
     assert loaded_audit == {"file": "fake.bdf", "version": "new"}
     assert n_rejected == 2
+
+
+def test_preprocessed_cache_prune_scopes_scan_by_sanitized_source_stem(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    source_path = (tmp_path / "Subject.01.bdf").resolve()
+    colliding_source_path = (tmp_path / "Subject_01.bdf").resolve()
+    unrelated_source_path = (tmp_path / "Other.bdf").resolve()
+    _, keep_meta_path = process_runner._preproc_cache_paths(
+        project_root,
+        source_path,
+        "a" * 64,
+    )
+    old_raw_path, old_meta_path = process_runner._preproc_cache_paths(
+        project_root,
+        source_path,
+        "b" * 64,
+    )
+    collision_raw_path, collision_meta_path = process_runner._preproc_cache_paths(
+        project_root,
+        colliding_source_path,
+        "c" * 64,
+    )
+    unrelated_raw_path, unrelated_meta_path = process_runner._preproc_cache_paths(
+        project_root,
+        unrelated_source_path,
+        "d" * 64,
+    )
+    assert process_runner._preproc_cache_safe_stem(
+        source_path
+    ) == process_runner._preproc_cache_safe_stem(colliding_source_path)
+
+    def write_entry(meta_path: Path, raw_path: Path, payload_source: Path) -> None:
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(
+            json.dumps({"payload": {"source_path": str(payload_source)}}),
+            encoding="utf-8",
+        )
+        raw_path.write_bytes(b"cached raw")
+
+    keep_raw_path = process_runner._raw_cache_path_for_meta(keep_meta_path)
+    write_entry(keep_meta_path, keep_raw_path, source_path)
+    write_entry(old_meta_path, old_raw_path, source_path)
+    write_entry(
+        collision_meta_path,
+        collision_raw_path,
+        colliding_source_path,
+    )
+    write_entry(
+        unrelated_meta_path,
+        unrelated_raw_path,
+        unrelated_source_path,
+    )
+    original_read_text = Path.read_text
+    read_paths: list[Path] = []
+
+    def tracked_read_text(self: Path, *args, **kwargs) -> str:
+        read_paths.append(self)
+        if self == unrelated_meta_path:
+            pytest.fail("unrelated cache metadata should not be read")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+
+    pruned = process_runner._prune_stale_preprocessed_cache(
+        cache_dir=keep_meta_path.parent,
+        source_path=str(source_path),
+        keep_meta_path=keep_meta_path,
+    )
+
+    assert pruned == 1
+    assert not old_meta_path.exists()
+    assert not old_raw_path.exists()
+    assert keep_meta_path.exists()
+    assert keep_raw_path.exists()
+    assert collision_meta_path.exists()
+    assert collision_raw_path.exists()
+    assert collision_meta_path in read_paths
+    assert unrelated_meta_path.exists()
+    assert unrelated_raw_path.exists()
+    assert unrelated_meta_path not in read_paths

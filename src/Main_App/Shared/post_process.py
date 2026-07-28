@@ -38,6 +38,12 @@ def _elapsed_ms(started_at: float) -> int:
     return int((perf_counter() - started_at) * 1000)
 
 
+def _mean_epochs_float64(epoch_data: np.ndarray) -> np.ndarray:
+    """Average epoch data in float64 without copying an existing float64 array."""
+
+    return np.mean(np.asarray(epoch_data, dtype=np.float64), axis=0)
+
+
 def _create_output_subfolder(
     app: Any,
     parent_folder: str | os.PathLike[str],
@@ -453,7 +459,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 else:  # Epochs
                     average_started = perf_counter()
                     ep_data = data_eeg.get_data()
-                    avg_data = np.mean(ep_data.astype(np.float64), axis=0)
+                    avg_data = _mean_epochs_float64(ep_data)
                     _log_export_timing(
                         "epochs_get_data_average",
                         average_started,

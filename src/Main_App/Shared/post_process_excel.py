@@ -1,3 +1,8 @@
+from contextlib import contextmanager
+import os
+from pathlib import Path
+import shutil
+import tempfile
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
@@ -6,6 +11,7 @@ import pandas as pd
 
 
 NEIGHBOR_OFFSETS = [*range(-11, 0), *range(1, 12)]
+_COLUMN_WIDTH_CHUNK_SIZE = 1024
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -34,6 +40,91 @@ def _log_excel_timing(
     }
     if timing_sink is not None:
         timing_sink.append(record)
+
+
+def _column_widths(frame: pd.DataFrame) -> tuple[int, ...]:
+    """Return the established ``max(str length) + 4`` widths in bounded blocks."""
+
+    widths: list[int] = []
+    for start in range(0, len(frame.columns), _COLUMN_WIDTH_CHUNK_SIZE):
+        chunk = frame.iloc[:, start : start + _COLUMN_WIDTH_CHUNK_SIZE]
+        if chunk.empty:
+            value_lengths = [0] * len(chunk.columns)
+        else:
+            string_lengths = chunk.astype(str).map(len)
+            value_lengths = [
+                int(value)
+                for value in string_lengths.max(axis=0).to_numpy()
+            ]
+        widths.extend(
+            max(len(str(header_name)), value_lengths[index]) + 4
+            for index, header_name in enumerate(chunk.columns)
+        )
+    return tuple(widths)
+
+
+def _apply_column_widths(
+    worksheet: Any,
+    frame: pd.DataFrame,
+    center_format: Any,
+) -> None:
+    for column_index, width in enumerate(_column_widths(frame)):
+        worksheet.set_column(
+            column_index,
+            column_index,
+            width,
+            center_format,
+        )
+
+
+def _path_volume(path: Path) -> str:
+    absolute = path.expanduser().absolute()
+    return os.path.splitdrive(os.fspath(absolute))[0].casefold()
+
+
+def _should_stage_workbook_locally(destination: Path) -> bool:
+    """Return whether final XLSX assembly would otherwise target another volume."""
+
+    destination_volume = _path_volume(destination)
+    temporary_volume = _path_volume(Path(tempfile.gettempdir()))
+    return bool(
+        destination_volume
+        and temporary_volume
+        and destination_volume != temporary_volume
+    )
+
+
+@contextmanager
+def _workbook_write_target(destination: Path):
+    """Yield a local assembly path and atomically publish cross-volume results."""
+
+    if not _should_stage_workbook_locally(destination):
+        yield os.fspath(destination)
+        return
+
+    stage_descriptor, stage_name = tempfile.mkstemp(
+        prefix="fpvs-workbook-",
+        suffix=".xlsx",
+    )
+    os.close(stage_descriptor)
+    stage_path = Path(stage_name)
+    publish_path: Path | None = None
+    try:
+        yield os.fspath(stage_path)
+        publish_descriptor, publish_name = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.stem}.",
+            suffix=".xlsx.tmp",
+        )
+        os.close(publish_descriptor)
+        publish_path = Path(publish_name)
+        shutil.copyfile(stage_path, publish_path)
+        os.replace(publish_path, destination)
+        publish_path = None
+    finally:
+        stage_path.unlink(missing_ok=True)
+        if publish_path is not None:
+            publish_path.unlink(missing_ok=True)
 
 
 def build_fft_neighbors_rows(
@@ -137,97 +228,99 @@ def write_results_workbook(
 ) -> None:
     """Write results workbook with consistent formatting and optional debug sheet."""
     workbook_started = perf_counter()
+    destination = Path(full_excel_path)
     try:
-        with pd.ExcelWriter(full_excel_path, engine="xlsxwriter") as writer:
-            workbook = writer.book
-            center_fmt = workbook.add_format({"align": "center", "valign": "vcenter"})
-
-            for sheet_name, df_to_write in dataframes_to_save.items():
-                sheet_started = perf_counter()
-                write_started = perf_counter()
-                df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
-                _log_excel_timing(
-                    "sheet_to_excel",
-                    write_started,
-                    path=full_excel_path,
-                    sheet_name=sheet_name,
-                    rows=len(df_to_write),
-                    cols=len(df_to_write.columns),
-                    timing_sink=timing_sink,
-                )
-                worksheet = writer.sheets[sheet_name]
-                worksheet.freeze_panes(1, 0)
-                widths_started = perf_counter()
-                for col_idx, header_name in enumerate(df_to_write.columns):
-                    max_len = max(
-                        len(str(header_name)),
-                        df_to_write[header_name].astype(str).map(len).max()
-                        if not df_to_write[header_name].empty
-                        else 0,
-                    )
-                    worksheet.set_column(col_idx, col_idx, max_len + 4, center_fmt)
-                _log_excel_timing(
-                    "sheet_column_widths",
-                    widths_started,
-                    path=full_excel_path,
-                    sheet_name=sheet_name,
-                    rows=len(df_to_write),
-                    cols=len(df_to_write.columns),
-                    timing_sink=timing_sink,
-                )
-                _log_excel_timing(
-                    "sheet_total",
-                    sheet_started,
-                    path=full_excel_path,
-                    sheet_name=sheet_name,
-                    rows=len(df_to_write),
-                    cols=len(df_to_write.columns),
-                    timing_sink=timing_sink,
+        with _workbook_write_target(destination) as workbook_path:
+            with pd.ExcelWriter(workbook_path, engine="xlsxwriter") as writer:
+                workbook = writer.book
+                center_fmt = workbook.add_format(
+                    {"align": "center", "valign": "vcenter"}
                 )
 
-            if fft_neighbors_df is not None and not fft_neighbors_df.empty:
-                sheet_name = "FFT and neighbors"
-                sheet_started = perf_counter()
-                write_started = perf_counter()
-                fft_neighbors_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                _log_excel_timing(
-                    "sheet_to_excel",
-                    write_started,
-                    path=full_excel_path,
-                    sheet_name=sheet_name,
-                    rows=len(fft_neighbors_df),
-                    cols=len(fft_neighbors_df.columns),
-                    timing_sink=timing_sink,
-                )
-                worksheet = writer.sheets[sheet_name]
-                worksheet.freeze_panes(1, 0)
-                widths_started = perf_counter()
-                for col_idx, header_name in enumerate(fft_neighbors_df.columns):
-                    max_len = max(
-                        len(str(header_name)),
-                        fft_neighbors_df[header_name].astype(str).map(len).max()
-                        if not fft_neighbors_df[header_name].empty
-                        else 0,
+                for sheet_name, df_to_write in dataframes_to_save.items():
+                    sheet_started = perf_counter()
+                    write_started = perf_counter()
+                    df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                    _log_excel_timing(
+                        "sheet_to_excel",
+                        write_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(df_to_write),
+                        cols=len(df_to_write.columns),
+                        timing_sink=timing_sink,
                     )
-                    worksheet.set_column(col_idx, col_idx, max_len + 4, center_fmt)
-                _log_excel_timing(
-                    "sheet_column_widths",
-                    widths_started,
-                    path=full_excel_path,
-                    sheet_name=sheet_name,
-                    rows=len(fft_neighbors_df),
-                    cols=len(fft_neighbors_df.columns),
-                    timing_sink=timing_sink,
-                )
-                _log_excel_timing(
-                    "sheet_total",
-                    sheet_started,
-                    path=full_excel_path,
-                    sheet_name=sheet_name,
-                    rows=len(fft_neighbors_df),
-                    cols=len(fft_neighbors_df.columns),
-                    timing_sink=timing_sink,
-                )
+                    worksheet = writer.sheets[sheet_name]
+                    worksheet.freeze_panes(1, 0)
+                    widths_started = perf_counter()
+                    _apply_column_widths(
+                        worksheet,
+                        df_to_write,
+                        center_fmt,
+                    )
+                    _log_excel_timing(
+                        "sheet_column_widths",
+                        widths_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(df_to_write),
+                        cols=len(df_to_write.columns),
+                        timing_sink=timing_sink,
+                    )
+                    _log_excel_timing(
+                        "sheet_total",
+                        sheet_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(df_to_write),
+                        cols=len(df_to_write.columns),
+                        timing_sink=timing_sink,
+                    )
+
+                if fft_neighbors_df is not None and not fft_neighbors_df.empty:
+                    sheet_name = "FFT and neighbors"
+                    sheet_started = perf_counter()
+                    write_started = perf_counter()
+                    fft_neighbors_df.to_excel(
+                        writer,
+                        sheet_name=sheet_name,
+                        index=False,
+                    )
+                    _log_excel_timing(
+                        "sheet_to_excel",
+                        write_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(fft_neighbors_df),
+                        cols=len(fft_neighbors_df.columns),
+                        timing_sink=timing_sink,
+                    )
+                    worksheet = writer.sheets[sheet_name]
+                    worksheet.freeze_panes(1, 0)
+                    widths_started = perf_counter()
+                    _apply_column_widths(
+                        worksheet,
+                        fft_neighbors_df,
+                        center_fmt,
+                    )
+                    _log_excel_timing(
+                        "sheet_column_widths",
+                        widths_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(fft_neighbors_df),
+                        cols=len(fft_neighbors_df.columns),
+                        timing_sink=timing_sink,
+                    )
+                    _log_excel_timing(
+                        "sheet_total",
+                        sheet_started,
+                        path=full_excel_path,
+                        sheet_name=sheet_name,
+                        rows=len(fft_neighbors_df),
+                        cols=len(fft_neighbors_df.columns),
+                        timing_sink=timing_sink,
+                    )
     finally:
         _log_excel_timing(
             "workbook_write_total",

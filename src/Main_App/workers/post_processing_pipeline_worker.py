@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,7 +80,11 @@ class PostProcessingPipelineWorker(QObject):
     @Slot()
     def run(self) -> None:
         steps: list[PostProcessingStepResult] = []
+        cache_stack = ExitStack()
         try:
+            from Tools.Stats.io.xlsx_selected_reader import xlsx_read_cache_scope
+
+            cache_stack.enter_context(xlsx_read_cache_scope())
             project_root = Path(self._project.project_root).expanduser().resolve()
             qc_message = "FPVS Toolbox is checking summed BCA values before final harmonic selection."
             self._emit_phase_progress(
@@ -152,6 +157,7 @@ class PostProcessingPipelineWorker(QObject):
                 3,
                 stats_message,
             )
+            cache_stack.close()
             # Stats-ready export and source localization are sibling consumers
             # of the accepted harmonic selection. A failure in one must not
             # suppress the other scientific workflow.
@@ -165,6 +171,8 @@ class PostProcessingPipelineWorker(QObject):
                     str(exc),
                 )
             )
+        finally:
+            cache_stack.close()
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
         completion_message = (

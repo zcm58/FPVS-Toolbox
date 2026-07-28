@@ -3,13 +3,37 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from Main_App.Shared.post_process import (
     _create_output_subfolder,
+    _mean_epochs_float64,
     _resolve_target_frequencies,
     post_process,
 )
+
+
+@pytest.mark.parametrize(
+    "array_kind",
+    ["float64", "float32", "noncontiguous"],
+)
+def test_mean_epochs_float64_matches_copying_expression_byte_exact(
+    array_kind: str,
+) -> None:
+    epoch_data = np.random.default_rng(24).normal(size=(7, 5, 18))
+    if array_kind == "float32":
+        epoch_data = epoch_data.astype(np.float32)
+    elif array_kind == "noncontiguous":
+        epoch_data = epoch_data[:, :, ::2]
+        assert not epoch_data.flags.c_contiguous
+
+    expected = np.mean(epoch_data.astype(np.float64), axis=0)
+    actual = _mean_epochs_float64(epoch_data)
+
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+    assert actual.tobytes() == expected.tobytes()
 
 
 def test_resolve_target_frequencies_from_nested_analysis_dict() -> None:
