@@ -87,6 +87,17 @@ REMOVED_ELECTRODE_REVIEW_KEYS = (
 )
 
 
+class _SourceEpochSetIncompleteError(RuntimeError):
+    """Expected source-export omission when configured conditions are unavailable."""
+
+    def __init__(self, missing_conditions: list[str]) -> None:
+        self.missing_conditions = tuple(missing_conditions)
+        super().__init__(
+            "Source-ready time-domain derivatives require every configured "
+            "condition; missing: " + ", ".join(self.missing_conditions)
+        )
+
+
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         text = value.strip()
@@ -175,11 +186,47 @@ def _complete_source_epoch_set(
 
     missing = [label for label in event_map if not epochs_by_condition.get(label)]
     if missing:
-        raise RuntimeError(
-            "Source-ready time-domain derivatives require every configured "
-            "condition; missing: " + ", ".join(missing)
-        )
+        raise _SourceEpochSetIncompleteError(missing)
     return {label: epochs_by_condition[label] for label in event_map}
+
+
+def _log_skipped_condition_summary(
+    file_path: Path,
+    skipped_conditions: list[tuple[str, int, str]],
+) -> None:
+    """Emit one actionable warning for all unavailable conditions in a file."""
+
+    if not skipped_conditions:
+        return
+    details = "; ".join(
+        f"{label!r} (code={code}): {reason}"
+        for label, code, reason in skipped_conditions
+    )
+    logger.warning(
+        "[AUDIT WARNING] %s: skipped configured condition(s): %s.",
+        file_path.name,
+        details,
+    )
+
+
+def _log_source_derivative_issue(
+    file_path: Path,
+    exc: Exception,
+) -> None:
+    """Keep expected incompleteness quiet while retaining unexpected tracebacks."""
+
+    if isinstance(exc, _SourceEpochSetIncompleteError):
+        logger.debug(
+            "source_ready_time_domain_incomplete file=%s missing_conditions=%s",
+            file_path.name,
+            list(exc.missing_conditions),
+        )
+        return
+    logger.exception(
+        "source_ready_time_domain_failed file=%s error=%s",
+        file_path.name,
+        exc,
+    )
 
 
 def _manual_removed_electrodes_for_file(
@@ -1348,17 +1395,16 @@ def _run_full_pipeline_for_file(
             crop_logger.warning("file=%s run_warning=%s", file_path.name, run_warning)
 
         epochs_dict: Dict[str, List[object]] = {}
+        skipped_conditions: list[tuple[str, int, str]] = []
         total_epochs = 0
 
         for label, code in event_map.items():
             code_int = int(code)
 
             if code_int not in have_codes:
-                msg = (
-                    f"[AUDIT WARNING] {file_path.name}: label='{label}' code={code_int} "
-                    f"has 0 matching events; skipping epochs for this label."
+                skipped_conditions.append(
+                    (label, code_int, "0 matching events")
                 )
-                logger.warning(msg)
                 epochs_dict[label] = []
                 continue
 
@@ -1506,11 +1552,9 @@ def _run_full_pipeline_for_file(
             )
 
             if n_ep == 0:
-                msg = (
-                    f"[AUDIT WARNING] {file_path.name}: label='{label}' code={code_int} "
-                    f"produced 0 epochs after epoching; skipping this label."
+                skipped_conditions.append(
+                    (label, code_int, "0 epochs after epoching")
                 )
-                logger.warning(msg)
                 epochs_dict[label] = []
                 continue
 
@@ -1530,6 +1574,8 @@ def _run_full_pipeline_for_file(
             epochs.metadata = pd.DataFrame(rep_metadata)
             epochs_dict[label] = [epochs]
             total_epochs += n_ep
+
+        _log_skipped_condition_summary(file_path, skipped_conditions)
 
         # If no epochs at all were created for any label, this is a real failure
         if total_epochs == 0:
@@ -1640,11 +1686,7 @@ def _run_full_pipeline_for_file(
             )
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             source_derivative_warning = str(exc)
-            logger.exception(
-                "source_ready_time_domain_failed file=%s error=%s",
-                file_path.name,
-                exc,
-            )
+            _log_source_derivative_issue(file_path, exc)
         _record_timing("source_time_domain_export", section_started)
 
         # 7) Preproc audit (after)

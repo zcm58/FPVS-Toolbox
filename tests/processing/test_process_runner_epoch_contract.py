@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,11 +18,77 @@ from Main_App.workers import process_runner
 
 
 def test_source_epoch_set_requires_every_configured_condition() -> None:
-    with pytest.raises(RuntimeError, match="every configured condition; missing: B"):
+    with pytest.raises(
+        process_runner._SourceEpochSetIncompleteError,
+        match="every configured condition; missing: B",
+    ) as exc_info:
         process_runner._complete_source_epoch_set(
             {"A": [object()], "B": []},
             {"A": 21, "B": 22},
         )
+
+    assert exc_info.value.missing_conditions == ("B",)
+
+
+def test_skipped_conditions_are_logged_once_per_file(caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger=process_runner.__name__):
+        process_runner._log_skipped_condition_summary(
+            Path("P07.bdf"),
+            [
+                ("Angry Caucasian", 41, "0 matching events"),
+                ("Happy Caucasian", 43, "0 epochs after epoching"),
+            ],
+        )
+
+    records = [
+        record
+        for record in caplog.records
+        if "[AUDIT WARNING]" in record.getMessage()
+    ]
+    assert len(records) == 1
+    assert "P07.bdf" in records[0].getMessage()
+    assert "'Angry Caucasian' (code=41): 0 matching events" in records[0].getMessage()
+    assert "'Happy Caucasian' (code=43): 0 epochs after epoching" in records[
+        0
+    ].getMessage()
+
+
+def test_expected_source_epoch_gap_logs_without_traceback(caplog) -> None:
+    with caplog.at_level(logging.DEBUG, logger=process_runner.__name__):
+        try:
+            process_runner._complete_source_epoch_set(
+                {"A": [object()], "B": []},
+                {"A": 21, "B": 22},
+            )
+        except RuntimeError as exc:
+            process_runner._log_source_derivative_issue(Path("P07.bdf"), exc)
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("source_ready_time_domain_incomplete")
+    ]
+    assert len(records) == 1
+    assert records[0].levelno == logging.DEBUG
+    assert records[0].exc_info is None
+    assert "missing_conditions=['B']" in records[0].getMessage()
+
+
+def test_unexpected_source_derivative_issue_keeps_traceback(caplog) -> None:
+    with caplog.at_level(logging.ERROR, logger=process_runner.__name__):
+        try:
+            raise OSError("disk unavailable")
+        except OSError as exc:
+            process_runner._log_source_derivative_issue(Path("P07.bdf"), exc)
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("source_ready_time_domain_failed")
+    ]
+    assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
+    assert records[0].exc_info is not None
 
 
 def test_source_epoch_set_preserves_configured_condition_order() -> None:
