@@ -173,7 +173,7 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
     project_root, excel_root = _build_plot_project(
         tmp_path,
         subjects=["P01", "P02"],
-        conditions=["CondA"],
+        conditions=["CondA", "CondB"],
         groups=groups,
         participants=participants,
     )
@@ -190,8 +190,11 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
     win.out_edit.setText(str(output_dir))
 
     assert win.group_box.isVisible()
+    assert win.condition_combo.currentText() == "All Conditions"
 
     win.group_overlay_check.setChecked(True)
+    assert win.condition_combo.currentText() == "CondA"
+    assert win.condition_combo.model().item(0).isEnabled() is False
     item = win.group_list.item(0)
     assert item.text() == ""
     assert item.data(Qt.UserRole) == "GroupA"

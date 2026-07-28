@@ -90,8 +90,11 @@ class PlotGeneratorSelectionMixin:
         self.group_list.setEnabled(checked)
         self._update_group_color_widgets()
         if checked:
+            self._ensure_condition_a_valid_for_overlay()
+            self._set_all_conditions_enabled(False)
             self._force_legend_defaults()
         else:
+            self._set_all_conditions_enabled(not self.overlay_check.isChecked())
             self._sync_legend_defaults_with_conditions()
         self._update_legend_group_visibility()
         self._check_required()

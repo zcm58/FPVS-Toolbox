@@ -8,19 +8,29 @@ def test_finish_all_uses_generated_paths(qtbot, monkeypatch) -> None:
     window = PlotGeneratorWindow()
     qtbot.addWidget(window)
 
-    called: dict[str, int] = {"question": 0}
+    called: dict[str, object] = {"question": 0, "message": ""}
 
-    def _fake_question(*_args, **_kwargs):
+    def _fake_question(_parent, _title, message, *_args, **_kwargs):
         called["question"] += 1
+        called["message"] = message
         return QMessageBox.No
 
     monkeypatch.setattr(QMessageBox, "question", _fake_question)
 
     window._generated_paths = ["C:/tmp/plot.png"]
     window._failed_items = []
+    window._warning_items = [
+        {
+            "code": "selected_group_no_data",
+            "item": "Patient",
+            "message": "Patient has no usable participant SNR data.",
+        }
+    ]
     window._finish_all()
 
     assert called["question"] == 1
+    assert "1 warning" in str(called["message"])
+    assert "1 warning" in window.log.toPlainText()
 
 
 def test_finish_all_reports_no_plots_when_generated_paths_empty(qtbot, monkeypatch) -> None:

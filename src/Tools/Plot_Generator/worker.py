@@ -173,6 +173,8 @@ class _Worker(
         self.qc_report_paths: list[str] = []
         self.spectral_qc_flags: list[dict[str, object]] = []
         self.failed_items: list[dict[str, str]] = []
+        self.warning_items: list[dict[str, str]] = []
+        self.group_roi_sample_sizes: dict[str, dict[str, int]] = {}
         self._timings: dict[str, float] = {
             "excel_load": 0.0,
             "roi_aggregate": 0.0,
@@ -210,6 +212,7 @@ class _Worker(
                     "qc_report_paths": list(self.qc_report_paths),
                     "spectral_qc_flags": list(self.spectral_qc_flags),
                     "failed_items": list(self.failed_items),
+                    "warning_items": list(self.warning_items),
                 }
             )
 
@@ -284,6 +287,11 @@ class _Worker(
 
     def _record_failure(self, *, item: str, error: str) -> None:
         self.failed_items.append({"item": item, "error": error})
+
+    def _record_warning(self, *, code: str, item: str, message: str) -> None:
+        warning = {"code": code, "item": item, "message": message}
+        if warning not in self.warning_items:
+            self.warning_items.append(warning)
 
     def _read_analysis_float(self, option: str, fallback: float) -> float:
         try:
@@ -365,14 +373,22 @@ class _Worker(
             return
 
         freqs, subject_data = self._collect_data(self.condition)
+        if self.enable_group_overlay and (not freqs or not subject_data):
+            self._build_group_curves({})
+            return
         if freqs and subject_data:
             averaged = self._aggregate_roi_data(subject_data)
-            if not averaged:
-                self._emit("No ROI data to plot.")
-                return
-            group_curves = self._build_group_curves(subject_data)
-            if group_curves:
+            if self.enable_group_overlay:
+                group_curves = self._build_group_curves(subject_data)
+                if not group_curves:
+                    return
+                if not averaged:
+                    self._emit("No ROI data to plot.")
+                    return
                 self._plot(freqs, averaged, group_curves)
             else:
+                if not averaged:
+                    self._emit("No ROI data to plot.")
+                    return
                 self._plot(freqs, averaged)
 

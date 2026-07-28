@@ -43,7 +43,15 @@ the log.
 
 Condition A/B overlay is hidden in multi-group mode because group overlay is the
 supported comparison for that mode. The first and second color and legend
-controls map to the first two selected groups.
+controls map to the first two selected groups. Additional selected groups use
+automatic distinct colors, marker shapes, and their project labels.
+
+Each curve label includes the number of participants that contributed finite
+SNR values to that ROI, such as `Control (n=18)`. If a selected group has no
+usable data for an ROI, the tool names that group and ROI in the log and run
+warning count, then omits it from that figure. If every selected group is empty,
+the tool skips the group-overlay figure instead of substituting a pooled
+all-participant curve.
 
 ## Figure Options
 
@@ -55,8 +63,14 @@ silently changing the plotted source values.
 ## Outputs
 
 The tool writes matching 600-DPI `.png` and `.pdf` files for every generated
-condition × ROI figure. The default filename is `<condition> - <ROI>`. A run
-summary reports generated files, skipped items, and quality-control reports.
+condition × ROI figure. Ordinary figures use `<condition> - <ROI>`. Group
+overlays use `<condition> - <ROI>_group_overlay`, so regenerating a group
+overlay cannot overwrite the corresponding ordinary figure. A run summary
+reports generated files, warnings, skipped items, and quality-control reports.
+
+All participant workbooks contributing to one figure must use the same FullSNR
+frequency grid. A workbook with a different grid is skipped and reported rather
+than being averaged into the wrong frequency positions.
 
 SNR is a descriptive frequency-domain normalization. A peak can help show that
 the target response stands above neighboring frequencies, but it is not by

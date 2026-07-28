@@ -201,6 +201,7 @@ class PlotGeneratorWindow(
         self._worker: object | None = None
         self._generated_paths: list[str] = []
         self._failed_items: list[dict[str, str]] = []
+        self._warning_items: list[dict[str, str]] = []
         self._spectral_qc_flags: list[dict[str, object]] = []
         self._spectral_qc_report_paths: list[str] = []
         self._gen_params: (

@@ -81,6 +81,76 @@ def test_full_snr_roi_averaging(tmp_path, monkeypatch):
     assert data == [4.0, 5.0, 6.5, 7.5]
 
 
+def test_full_snr_skips_workbook_with_mismatched_frequency_grid(
+    tmp_path,
+    monkeypatch,
+):
+    module = _import_module()
+    cond_dir = tmp_path / "Cond"
+    cond_dir.mkdir()
+    for filename, columns in (
+        (
+            "P01_Cond_Results.xlsx",
+            {"1.0000_Hz": [2.0], "2.0000_Hz": [4.0]},
+        ),
+        (
+            "P02_Cond_Results.xlsx",
+            {"1.0000_Hz": [20.0], "3.0000_Hz": [40.0]},
+        ),
+    ):
+        with pd.ExcelWriter(cond_dir / filename) as writer:
+            pd.DataFrame(
+                {"Electrode": ["Cz"], **columns}
+            ).to_excel(writer, sheet_name="FullSNR", index=False)
+
+    captured = {}
+    messages = []
+    monkeypatch.setattr(
+        module._Worker,
+        "_plot",
+        lambda self, freqs, roi_data: captured.update(
+            {"freqs": freqs, "roi_data": roi_data}
+        ),
+    )
+    monkeypatch.setattr(
+        module._Worker,
+        "_emit",
+        lambda self, message, *_args: messages.append(message),
+    )
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Central": ["Cz"]},
+        selected_roi="Central",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=3.0,
+        y_min=0.0,
+        y_max=50.0,
+        out_dir=str(tmp_path),
+        spectral_qc_enabled=False,
+    )
+
+    worker._run()
+
+    assert captured == {
+        "freqs": [1.0, 2.0],
+        "roi_data": {"Central": [2.0, 4.0]},
+    }
+    assert worker.failed_items == [
+        {
+            "item": "P02_Cond_Results.xlsx",
+            "error": "FullSNR frequency grid mismatch",
+        }
+    ]
+    assert any(
+        "FullSNR frequency grid does not match" in message
+        for message in messages
+    )
+
+
 def test_excel_discovery_ignores_sidecar_and_temp_workbooks(tmp_path, monkeypatch):
     module = _import_module()
 

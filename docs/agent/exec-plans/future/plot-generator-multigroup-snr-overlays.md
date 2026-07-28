@@ -2,13 +2,9 @@
 
 ## Status
 
-Future plan. Not active implementation work.
-
-This plan was refreshed against the current code on 2026-07-10. The existing
-implementation is no longer just a stub: single-condition group overlays are
-present in the GUI, worker payload, data collection, aggregation, rendering,
-focused tests, and user documentation. Future work should finish and harden
-that workflow, not restart it.
+Implemented on 2026-07-28. This file is retained temporarily as the focused
+verification record while the broader active multi-group plan still links to
+it. The hardening work preserved the single-condition group-overlay contract.
 
 ## Scope Decision
 
@@ -131,24 +127,30 @@ Current normalization behavior:
   filters by selected group, averages each group's subjects per ROI, and does
   not re-read Excel files.
 - Unknown subjects are excluded from group curves and logged by
-  `_warn_unknown_subjects(...)`; they are not currently counted as failed
-  items.
-- If no selected group has data, the worker logs that it is showing the overall
-  average only and renders the non-group average.
+  `_warn_unknown_subjects(...)`; they remain warnings rather than failed items
+  and are included in the worker completion payload.
+- Per-group sample sizes count participants with at least one finite value for
+  each ROI and are shown in the curve labels.
+- Selected group/ROI combinations without usable data are named in warnings and
+  omitted. An all-empty group-overlay ROI is skipped instead of being replaced
+  by the pooled all-participant average.
+- Workbooks whose selected FullSNR frequency grids differ from the first usable
+  workbook are skipped and reported instead of being averaged by column
+  position.
 
 ### Rendering and Output
 
 - `rendering.py::_plot(...)` accepts `group_curves` for single-condition plots.
 - One line is drawn per selected group that has ROI data.
 - The first selected group uses `stem_color`, the second uses `stem_color_b`,
-  and further groups use Matplotlib's palette.
+  and further groups use non-conflicting colors from Matplotlib's palette.
 - Oddball markers are drawn for each plotted group. The first group uses circle
-  markers and the second uses triangle markers; additional groups use square
-  markers with no extra peak legend label.
-- Current filenames use the visible title (or condition fallback) plus ROI:
+  markers, the second uses triangle markers, and additional groups cycle through
+  distinct marker shapes with no extra peak legend label.
+- Ordinary filenames use the visible title (or condition fallback) plus ROI:
   `{title or condition} - {ROI}.png` and the matching `.pdf`.
-- This means group overlays currently overwrite the same output path shape as
-  a non-group single-condition plot for the same title/condition and ROI.
+- Group-overlay filenames append `_group_overlay`, preserving an ordinary
+  single-condition figure with the same title and ROI.
 
 ### Existing Tests
 
@@ -187,38 +189,21 @@ explicitly approves a safe visible Qt test environment.
 - Known manifest participant IDs are preferred over legacy `P#` parsing.
 - Unassigned subjects are excluded from group curves and logged as warnings,
   not counted as partial failures.
-- Current output filenames stay unchanged unless the user explicitly requests a
-  group-overlay filename suffix.
+- Group-overlay output filenames use the `_group_overlay` suffix; non-group
+  filenames remain unchanged.
+- A group-overlay request never falls back to a pooled all-participant curve
+  when the selected groups have no usable data.
 
-## Remaining Gaps Before This Is "First-Class"
+## Completed First-Class Hardening
 
-These are the useful remaining implementation targets. Do not repeat already
-covered fixture work unless a test demonstrates a gap.
-
-1. **Output identity is ambiguous.**
-   Group overlays currently save to the same filename shape as ordinary
-   single-condition plots. Decide whether that is acceptable. If not, add a
-   small explicit suffix such as `_group_overlay` and update tests/user docs.
-
-2. **More-than-two selected groups need a clearer contract.**
-   The code supports more than two groups with automatic palette colors and
-   square oddball markers, but only the first two groups have custom legend and
-   peak-label fields. Either document this as supported behavior or restrict
-   selection to two groups in the GUI.
-
-3. **No-data selected groups are silently omitted except for the all-empty case.**
-   `_build_group_curves(...)` skips individual selected groups with no subject
-   data. Add a warning that names each selected group with no data, or document
-   intentional omission.
-
-4. **Unassigned-subject behavior is log-only.**
-   This matches current behavior, but the finished payload does not expose a
-   warning count. If the GUI should summarize warnings at completion, add an
-   explicit warning payload field rather than overloading `failed_items`.
-
-5. **All-ROI grouped file export needs explicit non-GUI coverage.**
-   Multi-ROI group aggregation is covered, but no focused test proves that the
-   grouped render path writes one PNG/PDF pair per ROI.
+- [x] Distinct `_group_overlay` PNG/PDF output identity.
+- [x] Documented and tested support for more than two selected groups.
+- [x] Per-ROI participant sample sizes in legend labels.
+- [x] Named no-data and unassigned-participant warnings in the completion
+      payload and GUI run summary.
+- [x] No pooled fallback for an empty selected-group/ROI overlay.
+- [x] All-ROI grouped export coverage for one PNG/PDF pair per usable ROI.
+- [x] Frequency-grid mismatch guard before participant averaging.
 
 ## Gaps Resolved Since The Previous Refresh
 
@@ -227,90 +212,24 @@ covered fixture work unless a test demonstrates a gap.
   assignments, first/second color and legend mapping, and unassigned-workbook
   warning behavior.
 - Non-GUI coverage now proves all-ROI group aggregation across two ROIs.
-- The current Windows-safe `{title or condition} - {ROI}` filename contract is
-  documented accurately; the unresolved decision is whether group overlays
-  need a distinguishing suffix.
+- The Windows-safe filename contract now preserves ordinary
+  `{title or condition} - {ROI}` exports and gives group overlays the explicit
+  `_group_overlay` suffix.
 
-## Execution Slices
+## Implemented Slices
 
-### Slice 1: Baseline and Policy Lock
-
-Goal: convert the current implicit behavior into explicit tests/docs before
-changing output behavior.
-
-1. Run the focused non-GUI checks listed below.
-2. Add/adjust tests to lock:
-   - single-condition-only group overlay;
-   - comparison mode remains hidden/disabled for multi-group projects;
-   - scalp maps remain disabled in multi-group mode;
-   - all groups are checked by default;
-   - group overlay off still produces normal overall-average plots.
-3. Update this plan or the Plot Generator scoped `AGENTS.md` only if the
-   locked policy changes.
-
-### Slice 2: Output Filename Decision
-
-Goal: make generated files distinguishable enough for users.
-
-1. Decide between:
-   - preserve current filename shape, or
-   - add a suffix such as `_group_overlay`.
-2. If suffixing, update `rendering.py` and tests around generated PNG/PDF
-   filenames.
-3. Preserve non-group filenames exactly.
-
-### Slice 3: Group Count and Legend Contract
-
-Goal: make selected group count behavior unambiguous.
-
-1. Decide whether more than two selected groups are supported.
-2. If supported, document:
-   - first/second group custom label fields;
-   - automatic labels for group 3+;
-   - palette and marker behavior.
-3. If not supported, enforce max-two group selection in the GUI and add tests.
-4. Preserve first/second group color mapping either way.
-
-### Slice 4: Warning Semantics
-
-Goal: make missing/empty group cases visible without turning warnings into
-false failures.
-
-1. Add or pin warnings for:
-   - selected groups with no subject data;
-   - Excel files with subjects absent from `project.json`;
-   - manifests with groups but no participant assignments.
-2. Keep fail-fast GUI validation for missing group assignments when overlay is
-   requested.
-3. If a completion summary should mention warnings, add explicit warning
-   payload data and tests; do not overload `failed_items`.
-
-### Slice 5: All-ROI and Rendering Coverage
-
-Goal: prove grouped overlays work beyond the one-ROI happy path.
-
-1. Add a non-GUI worker/rendering test for `ALL_ROIS_OPTION` with at least two
-   ROIs.
-2. Verify one PNG/PDF pair per ROI.
-3. Verify current line-plot baseline/grid/oddball behavior remains unchanged
-   for non-group plots.
-
-### Slice 6: Documentation and Visible Smoke
-
-Goal: make the feature executable by users and future agents.
-
-1. Update user-facing SNR Plots docs if the visible workflow or
-   filename behavior changes.
-2. Update `src/Tools/Plot_Generator/AGENTS.md` if ownership, policy, or
-   verification commands change.
-3. Document a visible/manual smoke path:
-   - open a multi-group project;
-   - confirm input folder is the canonical Excel root;
-   - confirm Group Options appear;
-   - enable group overlay;
-   - uncheck one group and generate one ROI plot;
-   - verify log warnings for unassigned participants, if present;
-   - verify PNG/PDF output and legend colors.
+1. Locked the one-condition overlay policy and disabled `All Conditions` while
+   group overlay is enabled.
+2. Added the `_group_overlay` filename suffix without changing ordinary export
+   names.
+3. Kept editable first/second group styles and added deterministic automatic
+   colors, labels, and marker shapes for additional groups.
+4. Added per-ROI sample counts, structured no-data/unassigned warnings, and a
+   completion warning count without treating warnings as failed workbooks.
+5. Added all-ROI paired-export coverage and prevented pooled fallback figures
+   for empty group/ROI combinations.
+6. Updated scoped developer and user documentation. The remaining visible smoke
+   path is listed below.
 
 ## Verification Plan
 

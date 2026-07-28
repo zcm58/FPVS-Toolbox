@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -46,3 +47,26 @@ def _select_frequency_pairs(
         if (x_min - tolerance) <= freq <= (x_max + tolerance)
     ]
     return [freq for freq, _ in selected], [col for _, col in selected]
+
+
+def _frequency_grids_match(
+    reference: Sequence[float],
+    candidate: Sequence[float],
+    *,
+    tolerance: float = 1e-9,
+) -> bool:
+    """Return whether two ordered FullSNR grids are positionally compatible."""
+
+    return len(reference) == len(candidate) and all(
+        math.isclose(
+            float(reference_value),
+            float(candidate_value),
+            rel_tol=0.0,
+            abs_tol=tolerance,
+        )
+        for reference_value, candidate_value in zip(
+            reference,
+            candidate,
+            strict=True,
+        )
+    )

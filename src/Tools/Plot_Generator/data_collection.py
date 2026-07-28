@@ -18,6 +18,7 @@ from Main_App.projects import (
 )
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.Plot_Generator.excel_inputs import (
+    _frequency_grids_match,
     _infer_subject_id_from_path,
 )
 from Tools.Plot_Generator.full_snr_reader import (
@@ -78,6 +79,11 @@ class PlotDataCollectionMixin:
                 include_legacy_aliases=False,
             )
             if self.enable_group_overlay:
+                if not canonical_groups:
+                    raise RuntimeError(
+                        "No current canonical participant group assignments "
+                        "are available for the selected group overlay."
+                    )
                 canonical_labels = {
                     group.label.casefold(): group.label
                     for group in index.ordered_groups
@@ -359,16 +365,32 @@ class PlotDataCollectionMixin:
                 overall_total,
             )
 
-            if (
+            unassigned_group_subject = (
                 self.enable_group_overlay
                 and self.multi_group_mode
                 and self.subject_groups
                 and subject_id not in self.subject_groups
-            ):
+            )
+            if unassigned_group_subject:
                 self._unknown_subject_files.add(excel_path.name)
-
-            if freqs is None:
-                freqs = ordered_freqs
+            elif freqs is None:
+                freqs = list(ordered_freqs)
+            elif not _frequency_grids_match(list(freqs), ordered_freqs):
+                message = (
+                    f"Skipping {excel_path.name}: its FullSNR frequency "
+                    "grid does not match the first usable workbook."
+                )
+                self._emit(
+                    message,
+                    offset + processed_files,
+                    overall_total,
+                )
+                self._record_failure(
+                    item=excel_path.name,
+                    error="FullSNR frequency grid mismatch",
+                )
+                processed_files += 1
+                continue
 
             electrode_upper = df["Electrode"].astype(str).str.upper().to_numpy()
             snr_values = df[ordered_cols].to_numpy(dtype=float, copy=False)

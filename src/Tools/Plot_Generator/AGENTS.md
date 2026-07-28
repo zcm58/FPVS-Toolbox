@@ -13,6 +13,8 @@ Current ownership map:
 - `gui.py`: `PlotGeneratorWindow` page implementation.
 - `generation_workflow.py`: condition queueing, QThread worker launch/cancel,
   progress aggregation, and completion handling.
+- `generation_outcome.py`: pure worker-payload normalization and
+  completion-summary formatting used by the GUI workflow.
 - `ui_sections.py`, `settings_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
   GUI, settings, selection, and thin shared-project adapters.
@@ -52,9 +54,20 @@ v2.1 project contract:
   SNR Plots `input_folder` settings override that canonical project root.
   Group Options should only activate when that canonical Excel root is selected.
 - Multi-group plotting is a one-condition, group-overlay workflow. Hide the
-  condition overlay checkbox in multi-group mode; the existing
-  A/B colors, legend labels, and peak labels map to the first and second
-  selected groups.
+  condition overlay checkbox in multi-group mode. The A/B colors, custom legend
+  labels, and peak labels map to the first and second selected groups; groups
+  three and higher use deterministic automatic colors, distinct marker shapes,
+  and their canonical display labels.
+- Group-overlay legends show the number of participants contributing finite SNR
+  values to each ROI as `n=...`. A selected group with no usable data for an ROI
+  is named in the log and completion warnings and omitted from that figure. If
+  every selected group is empty for an ROI, skip the figure rather than
+  rendering a pooled all-participant curve.
+- Group-overlay PNG/PDF pairs append `_group_overlay` to the normal
+  `<title or condition> - <ROI>` stem so they cannot overwrite the corresponding
+  non-group figure. Preserve normal single-condition filenames.
+- Never average FullSNR workbooks positionally when their selected frequency
+  grids differ. Skip and report the incompatible workbook instead.
 - Plot Generator is SNR-line-plot only. Scalp maps belong to the dedicated
   scalp plotting tool; do not reintroduce scalp-map GUI controls, BCA/Z scalp
   data collection, MNE topomap rendering, or Plot Generator scalp helper modules.

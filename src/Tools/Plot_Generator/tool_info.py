@@ -26,7 +26,16 @@ matching 600-DPI PNG and PDF.
 Single-group projects can overlay two conditions. Multi-group projects use a
 one-condition group overlay based on participant assignments in project.json;
 workbooks without a matching assignment are omitted from group curves and
-reported in the log.
+reported in the log. Each group legend shows the number of participants that
+contributed usable data to that ROI. Selected groups without usable data are
+flagged and omitted; the tool never substitutes a pooled curve for an empty
+group overlay.
+</p>
+<p>
+Group-overlay exports add <code>_group_overlay</code> to the filename so they
+remain separate from ordinary single-condition figures. The first two groups
+use the editable colors and labels; additional groups receive automatic,
+distinct colors, markers, and project labels.
 </p>
 
 """

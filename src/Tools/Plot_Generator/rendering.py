@@ -32,6 +32,8 @@ plt.rcParams.update(
 
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
+_GROUP_OVERLAY_SUFFIX = "_group_overlay"
+_GROUP_MARKERS = ("o", "^", "s", "D", "P", "X", "v", "<", ">")
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*]+')
 
 
@@ -44,6 +46,42 @@ def _safe_figure_stem(*, base_title: str, roi: str) -> str:
     stem = _ILLEGAL_FILENAME_CHARS.sub("_", stem)
     stem = re.sub(r"\s+", " ", stem).strip(" ._")
     return stem or "SNR Plot"
+
+
+def _group_color(
+    group_index: int,
+    *,
+    color_a: str,
+    color_b: str,
+    palette: List[str],
+) -> str:
+    if group_index == 0:
+        return color_a
+    if group_index == 1:
+        return color_b
+    reserved = {
+        matplotlib.colors.to_rgba(color_a),
+        matplotlib.colors.to_rgba(color_b),
+    }
+    automatic: List[str] = []
+    seen = set(reserved)
+    for color in palette:
+        rgba = matplotlib.colors.to_rgba(color)
+        if rgba in seen:
+            continue
+        automatic.append(color)
+        seen.add(rgba)
+    if not automatic:
+        automatic = palette
+    return automatic[(group_index - 2) % len(automatic)]
+
+
+def _group_marker(group_index: int) -> str:
+    return _GROUP_MARKERS[group_index % len(_GROUP_MARKERS)]
+
+
+def _label_with_sample_size(label: str, sample_size: int | None) -> str:
+    return f"{label} (n={sample_size})" if sample_size is not None else label
 
 
 class PlotRenderingMixin:
@@ -87,40 +125,43 @@ class PlotRenderingMixin:
                     vals = data.get(roi)
                     if not vals:
                         continue
-                    color = (
-                        self.stem_color
-                        if idx == 0
-                        else self.stem_color_b
-                        if idx == 1
-                        else palette[idx % len(palette)]
+                    color = _group_color(
+                        idx,
+                        color_a=self.stem_color,
+                        color_b=self.stem_color_b,
+                        palette=palette,
                     )
-                    label = (
+                    base_label = (
                         self._resolve_legend_label(self.legend_condition_a, group_name)
                         if idx == 0
                         else self._resolve_legend_label(self.legend_condition_b, group_name)
                         if idx == 1
                         else group_name
                     )
+                    sample_size = self.group_roi_sample_sizes.get(
+                        group_name, {}
+                    ).get(roi)
                     ax.plot(
                         freqs,
                         vals,
-                        label=label,
+                        label=_label_with_sample_size(
+                            base_label,
+                            sample_size,
+                        ),
                         color=color,
                         linewidth=2.0,
                     )
                     plotted = True
                 if not plotted:
                     self._emit(
-                        "No group data available for overlay. Displaying overall average only.",
+                        f"No selected group has usable data for ROI {roi}; "
+                        "skipping this group-overlay figure.",
                         0,
                         0,
                     )
-                    ax.plot(
-                        freqs,
-                        amps,
-                        color=self.stem_color,
-                        label=self._resolve_legend_label(self.legend_condition_a, self.condition),
-                    )
+                    self._mark_timing("plot_render", render_started)
+                    plt.close(fig)
+                    continue
             else:
                 ax.plot(
                     freqs,
@@ -139,14 +180,12 @@ class PlotRenderingMixin:
                         vals = group_curves.get(group_name, {}).get(roi)
                         if not vals:
                             continue
-                        color = (
-                            self.stem_color
-                            if group_idx == 0
-                            else self.stem_color_b
-                            if group_idx == 1
-                            else palette[group_idx % len(palette)]
+                        color = _group_color(
+                            group_idx,
+                            color_a=self.stem_color,
+                            color_b=self.stem_color_b,
+                            palette=palette,
                         )
-                        marker = "o" if group_idx == 0 else "^" if group_idx == 1 else "s"
                         peak_label = (
                             self._resolve_legend_label(self.legend_a_peaks, _DEFAULT_A_PEAKS)
                             if group_idx == 0
@@ -160,7 +199,7 @@ class PlotRenderingMixin:
                             ax.scatter(
                                 freq_array[closest],
                                 vals[closest],
-                                marker=marker,
+                                marker=_group_marker(group_idx),
                                 facecolor=color,
                                 edgecolor="black",
                                 zorder=4,
@@ -232,7 +271,13 @@ class PlotRenderingMixin:
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             fig.tight_layout()
-            fname = f"{_safe_figure_stem(base_title=self.title or self.condition, roi=roi)}.png"
+            figure_stem = _safe_figure_stem(
+                base_title=self.title or self.condition,
+                roi=roi,
+            )
+            if use_group_overlay:
+                figure_stem += _GROUP_OVERLAY_SUFFIX
+            fname = f"{figure_stem}.png"
             save_kwargs = {
                 "dpi": FIGURE_EXPORT_DPI,
                 "pad_inches": 0.05,

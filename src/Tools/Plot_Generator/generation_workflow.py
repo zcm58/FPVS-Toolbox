@@ -12,6 +12,11 @@ from Main_App.gui.open_paths import open_path_in_file_manager
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
 )
+from Tools.Plot_Generator.generation_outcome import (
+    format_completion_summary,
+    format_no_plots_message,
+    normalize_worker_outcome,
+)
 from Tools.Plot_Generator.selection_state import ALL_CONDITIONS_OPTION
 from Tools.Plot_Generator.spectral_qc_alerts import (
     build_spectral_qc_alert_message,
@@ -76,6 +81,7 @@ class PlotGeneratorWorkflowMixin:
         self._current_condition = 0
         self._spectral_qc_flags.clear()
         self._spectral_qc_report_paths.clear()
+        self._warning_items.clear()
         self.cancel_btn.setEnabled(False)
         self.gen_btn.setEnabled(True)
         self._append_log("Generation cancelled.")
@@ -161,34 +167,18 @@ class PlotGeneratorWorkflowMixin:
         self._thread.start()
 
     def _on_worker_finished(self, payload: dict) -> None:
-        generated = payload.get("generated_paths", [])
-        qc_reports = payload.get("qc_report_paths", [])
-        spectral_qc_flags = payload.get("spectral_qc_flags", [])
-        failed = payload.get("failed_items", [])
-        generated_paths = [
-            str(path) for path in generated if isinstance(path, str) and path
-        ]
-        qc_report_paths = [
-            str(path) for path in qc_reports if isinstance(path, str) and path
-        ]
-        flagged_electrodes = [
-            dict(item) for item in spectral_qc_flags if isinstance(item, dict)
-        ]
-        failed_items = [
-            {"item": str(item.get("item", "")), "error": str(item.get("error", ""))}
-            for item in failed
-            if isinstance(item, dict)
-        ]
-        self._generated_paths.extend(generated_paths)
-        self._failed_items.extend(failed_items)
-        self._spectral_qc_report_paths.extend(qc_report_paths)
-        self._spectral_qc_flags.extend(flagged_electrodes)
-        for path in qc_report_paths:
+        outcome = normalize_worker_outcome(payload)
+        self._generated_paths.extend(outcome.generated_paths)
+        self._failed_items.extend(outcome.failed_items)
+        self._warning_items.extend(outcome.warning_items)
+        self._spectral_qc_report_paths.extend(outcome.qc_report_paths)
+        self._spectral_qc_flags.extend(outcome.spectral_qc_flags)
+        for path in outcome.qc_report_paths:
             self._append_log(f"Unexpected SNR peak report: {path}")
-        if flagged_electrodes:
+        if outcome.spectral_qc_flags:
             self._append_log(
                 "Unexpected SNR peak scan flagged "
-                f"{len(flagged_electrodes)} participant-electrode pair(s)."
+                f"{len(outcome.spectral_qc_flags)} participant-electrode pair(s)."
             )
         logger.info(
             "SNR worker finished.",
@@ -196,10 +186,11 @@ class PlotGeneratorWorkflowMixin:
                 "operation": "snr_plot_generate",
                 "project_root": str(self._project_root) if self._project_root else None,
                 "condition": payload.get("condition"),
-                "generated_count": len(generated_paths),
-                "qc_report_count": len(qc_report_paths),
-                "spectral_qc_flag_count": len(flagged_electrodes),
-                "failed_count": len(failed_items),
+                "generated_count": len(outcome.generated_paths),
+                "qc_report_count": len(outcome.qc_report_paths),
+                "spectral_qc_flag_count": len(outcome.spectral_qc_flags),
+                "failed_count": len(outcome.failed_items),
+                "warning_count": len(outcome.warning_items),
             },
         )
 
@@ -212,22 +203,28 @@ class PlotGeneratorWorkflowMixin:
 
         generated_count = len(self._generated_paths)
         failed_count = len(self._failed_items)
+        warning_count = len(self._warning_items)
         spectral_qc_message = build_spectral_qc_alert_message(
             self._spectral_qc_flags,
             self._spectral_qc_report_paths,
         )
 
         if generated_count > 0:
-            if failed_count > 0:
-                msg = f"Generated {generated_count} plots; {failed_count} failed. See logs for details."
-                self._append_log(msg)
+            summary = format_completion_summary(
+                generated_count=generated_count,
+                warning_count=warning_count,
+                failed_count=failed_count,
+            )
+            self._append_log(summary)
+            if failed_count > 0 or warning_count > 0:
                 logger.warning(
-                    "SNR plot generation completed with partial failures.",
+                    "SNR plot generation completed with warnings or partial failures.",
                     extra={
                         "operation": "snr_plot_generate",
                         "project_root": str(self._project_root) if self._project_root else None,
                         "generated_count": generated_count,
                         "failed_count": failed_count,
+                        "warning_count": warning_count,
                     },
                 )
             if spectral_qc_message:
@@ -240,24 +237,28 @@ class PlotGeneratorWorkflowMixin:
             resp = QMessageBox.question(
                 self,
                 "Finished",
-                "Plots have been successfully generated. View plots?",
+                f"{summary}\n\nView plots?",
                 QMessageBox.Yes | QMessageBox.No,
             )
             if resp == QMessageBox.Yes:
                 self._open_output_folder()
         else:
-            self._append_log("No plots were generated. Please check the log for errors.")
+            self._append_log(
+                format_no_plots_message(warning_count=warning_count)
+            )
             logger.warning(
                 "SNR plot generation produced no plot files.",
                 extra={
                     "operation": "snr_plot_generate",
                     "project_root": str(self._project_root) if self._project_root else None,
                     "failed_count": failed_count,
+                    "warning_count": warning_count,
                 },
             )
 
         self._generated_paths.clear()
         self._failed_items.clear()
+        self._warning_items.clear()
         self._spectral_qc_flags.clear()
         self._spectral_qc_report_paths.clear()
 
@@ -380,6 +381,7 @@ class PlotGeneratorWorkflowMixin:
             self.log.clear()
             self._generated_paths.clear()
             self._failed_items.clear()
+            self._warning_items.clear()
             self._spectral_qc_flags.clear()
             self._spectral_qc_report_paths.clear()
             self._animate_progress_to(0)

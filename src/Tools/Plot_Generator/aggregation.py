@@ -31,6 +31,14 @@ def _nanmean_columns(rows: List[List[float]]) -> List[float]:
     ).tolist()
 
 
+def _has_finite_value(values: Iterable[float]) -> bool:
+    try:
+        numeric = np.asarray(list(values), dtype=float)
+    except (TypeError, ValueError):
+        return False
+    return bool(numeric.size and np.isfinite(numeric).any())
+
+
 class PlotAggregationMixin:
     """Worker-state helpers for ROI averaging and group overlay curves."""
 
@@ -53,7 +61,7 @@ class PlotAggregationMixin:
                     if filtered is not None and pid not in filtered:
                         continue
                     values = roi_values.get(roi)
-                    if values:
+                    if values and _has_finite_value(values):
                         rows.append(values)
                 if rows:
                     aggregated[roi] = _nanmean_columns(rows)
@@ -67,26 +75,73 @@ class PlotAggregationMixin:
     ) -> Dict[str, Dict[str, List[float]]]:
         if not self.enable_group_overlay or not self.subject_groups:
             self._unknown_subject_files.clear()
+            self.group_roi_sample_sizes.clear()
             return {}
 
         # Group overlays reuse the already collected subject data so the worker
         # never re-reads Excel files or blocks the UI thread with redundant IO.
         per_group: Dict[str, Dict[str, List[float]]] = {}
+        self.group_roi_sample_sizes.clear()
+        roi_names = self._selected_roi_names()
         for group in self.selected_groups:
             subjects = {
                 pid
                 for pid, grp in self.subject_groups.items()
                 if grp == group and pid in subject_data
             }
-            if not subjects:
-                continue
-            aggregated = self._aggregate_roi_data(subject_data, subjects)
+            roi_sample_sizes = {
+                roi: sum(
+                    _has_finite_value(
+                        subject_data.get(pid, {}).get(roi, [])
+                    )
+                    for pid in subjects
+                )
+                for roi in roi_names
+            }
+            self.group_roi_sample_sizes[group] = roi_sample_sizes
+            aggregated = (
+                self._aggregate_roi_data(subject_data, subjects)
+                if subjects
+                else {}
+            )
             if aggregated:
                 per_group[group] = aggregated
+            missing_rois = [
+                roi for roi, sample_size in roi_sample_sizes.items()
+                if sample_size == 0
+            ]
+            if missing_rois:
+                roi_text = ", ".join(missing_rois)
+                message = (
+                    f"Selected group '{group}' has no usable participant SNR "
+                    f"data for: {roi_text}. It will be omitted from those "
+                    "group-overlay plots."
+                )
+                self._emit(f"Warning: {message}", 0, 0)
+                self._record_warning(
+                    code="selected_group_no_data",
+                    item=group,
+                    message=message,
+                )
+
+        for roi in roi_names:
+            sample_sizes = [
+                f"{group} n={self.group_roi_sample_sizes[group][roi]}"
+                for group in self.selected_groups
+                if self.group_roi_sample_sizes[group][roi] > 0
+            ]
+            if sample_sizes:
+                self._emit(
+                    f"Group sample sizes for ROI {roi}: "
+                    + "; ".join(sample_sizes),
+                    0,
+                    0,
+                )
 
         if not per_group:
             self._emit(
-                "No participants assigned to the selected groups. Showing overall average only.",
+                "No selected group has usable participant SNR data. "
+                "No group-overlay plot will be created.",
                 0,
                 0,
             )
@@ -100,10 +155,14 @@ class PlotAggregationMixin:
             and self._unknown_subject_files
         ):
             files = ", ".join(sorted(self._unknown_subject_files))
-            self._emit(
-                "Warning: The following Excel files lack group assignments and were excluded from group overlays:"
-                f" {files}",
-                0,
-                0,
+            message = (
+                "The following Excel files lack canonical group assignments "
+                f"and were excluded from group overlays: {files}"
+            )
+            self._emit(f"Warning: {message}", 0, 0)
+            self._record_warning(
+                code="unassigned_participant",
+                item=files,
+                message=message,
             )
             self._unknown_subject_files.clear()
