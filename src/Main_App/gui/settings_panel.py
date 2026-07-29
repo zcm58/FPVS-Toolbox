@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from pathlib import Path
 
 import config
 import psutil
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -86,6 +86,37 @@ from Tools.Stats.analysis.dv_policy_settings import (
 )
 from Tools.Stats.analysis.dv_policy_group_significant import clear_group_significant_selection_cache
 from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_selections
+
+
+class _SettingsWorkerUiBridge(QObject):
+    """Marshal Settings worker callbacks onto the main GUI thread."""
+
+    def __init__(
+        self,
+        *,
+        result_callback: Callable[[object], None],
+        failed_callback: Callable[[str], None] | None = None,
+        thread_finished_callback: Callable[[], None] | None = None,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._result_callback = result_callback
+        self._failed_callback = failed_callback
+        self._thread_finished_callback = thread_finished_callback
+
+    @Slot(object)
+    def handle_result(self, result: object) -> None:
+        self._result_callback(result)
+
+    @Slot(str)
+    def handle_failed(self, message: str) -> None:
+        if self._failed_callback is not None:
+            self._failed_callback(message)
+
+    @Slot()
+    def handle_thread_finished(self) -> None:
+        if self._thread_finished_callback is not None:
+            self._thread_finished_callback()
 
 
 class SettingsPanel(QWidget):
@@ -1309,6 +1340,7 @@ class SettingsDialog(QDialog):
         def _release_worker() -> None:
             owner._settings_full_fft_grid_qc_thread = None
             owner._settings_full_fft_grid_qc_worker = None
+            owner._settings_full_fft_grid_qc_bridge = None
             self._set_full_fft_grid_review_controls_enabled(True)
             if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
                 self.recalculate_harmonics_button.setEnabled(False)
@@ -1380,14 +1412,22 @@ class SettingsDialog(QDialog):
             )
             QMessageBox.warning(self, "FFT Grid Check Failed", message)
 
+        bridge = _SettingsWorkerUiBridge(
+            result_callback=_handle_finished,
+            failed_callback=_handle_failed,
+            thread_finished_callback=_release_worker,
+            parent=owner,
+        )
+        owner._settings_full_fft_grid_qc_bridge = bridge
         thread.started.connect(worker.run)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(_handle_finished)
+        worker.finished.connect(bridge.handle_result)
         worker.failed.connect(thread.quit)
         worker.failed.connect(worker.deleteLater)
-        worker.failed.connect(_handle_failed)
-        thread.finished.connect(_release_worker)
+        worker.failed.connect(bridge.handle_failed)
+        thread.finished.connect(bridge.handle_thread_finished)
+        thread.finished.connect(bridge.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.start()
         return True
@@ -1443,48 +1483,58 @@ class SettingsDialog(QDialog):
         owner._settings_harmonic_recalc_thread = thread
         owner._settings_harmonic_recalc_worker = worker
 
-        def _handle_finished(result: dict) -> None:
-            try:
-                if result.get("ok"):
-                    workbook_path = result.get("workbook_path", "")
-                    self._initial_harmonic_settings_signature = (
-                        self._harmonic_settings_signature_from_preprocessing(
-                            self._project_preprocessing()
-                        )
+        def _handle_finished(result: object) -> None:
+            payload = result if isinstance(result, dict) else {}
+            if payload.get("ok"):
+                workbook_path = payload.get("workbook_path", "")
+                self._initial_harmonic_settings_signature = (
+                    self._harmonic_settings_signature_from_preprocessing(
+                        self._project_preprocessing()
                     )
-                    self._set_harmonic_recalculation_status(
-                        f"Harmonic selection recalculated: {workbook_path}",
-                        "success",
-                    )
-                    QMessageBox.information(
-                        self,
-                        "Harmonics Recalculated",
-                        f"Harmonic selection was recalculated and saved to:\n{workbook_path}",
-                    )
-                    if accept_on_success:
-                        self.accept()
-                else:
-                    message = str(result.get("error") or "Unknown error")
-                    self._set_harmonic_recalculation_status(
-                        f"Harmonic recalculation failed: {message}",
-                        "warning",
-                    )
-                    QMessageBox.warning(
-                        self,
-                        "Harmonic Recalculation Failed",
-                        message,
-                    )
-            finally:
-                owner._settings_harmonic_recalc_thread = None
-                owner._settings_harmonic_recalc_worker = None
-                enabled = self.project is not None
-                self.recalculate_harmonics_button.setEnabled(enabled)
-                self.review_condition_exclusions_button.setEnabled(enabled)
+                )
+                self._set_harmonic_recalculation_status(
+                    f"Harmonic selection recalculated: {workbook_path}",
+                    "success",
+                )
+                QMessageBox.information(
+                    self,
+                    "Harmonics Recalculated",
+                    f"Harmonic selection was recalculated and saved to:\n{workbook_path}",
+                )
+                if accept_on_success:
+                    self.accept()
+            else:
+                message = str(payload.get("error") or "Unknown error")
+                self._set_harmonic_recalculation_status(
+                    f"Harmonic recalculation failed: {message}",
+                    "warning",
+                )
+                QMessageBox.warning(
+                    self,
+                    "Harmonic Recalculation Failed",
+                    message,
+                )
 
+        def _release_worker() -> None:
+            owner._settings_harmonic_recalc_thread = None
+            owner._settings_harmonic_recalc_worker = None
+            owner._settings_harmonic_recalc_bridge = None
+            enabled = self.project is not None
+            self.recalculate_harmonics_button.setEnabled(enabled)
+            self.review_condition_exclusions_button.setEnabled(enabled)
+
+        bridge = _SettingsWorkerUiBridge(
+            result_callback=_handle_finished,
+            thread_finished_callback=_release_worker,
+            parent=owner,
+        )
+        owner._settings_harmonic_recalc_bridge = bridge
         thread.started.connect(worker.run)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(_handle_finished)
+        worker.finished.connect(bridge.handle_result)
+        thread.finished.connect(bridge.handle_thread_finished)
+        thread.finished.connect(bridge.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.start()
         return True

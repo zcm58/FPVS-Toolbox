@@ -53,6 +53,11 @@ Common long-running work:
   then locks project navigation, the active workspace, the Start button, and
   the shared processing start guard until the worker emits completion or
   failure; the worker never touches widgets.
+- Settings harmonic recalculation runs its FullFFT-grid audit and harmonic
+  selection in separate background `QThread` workers. Result, failure, and
+  thread-finished signals must pass through the main-thread
+  `_SettingsWorkerUiBridge` before updating Settings widgets, opening review or
+  result dialogs, or releasing GUI controls.
 
 Rules:
 

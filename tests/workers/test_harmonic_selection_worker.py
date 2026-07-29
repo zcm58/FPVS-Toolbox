@@ -1,13 +1,49 @@
 import logging
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 
+from Main_App.gui.settings_panel import _SettingsWorkerUiBridge
 from Main_App.workers import full_fft_grid_qc_worker, harmonic_selection_worker
 
 
 pytestmark = pytest.mark.qt
+
+
+class _ThreadedResultEmitter(QObject):
+    finished = Signal(object)
+
+    @Slot()
+    def run(self) -> None:
+        self.finished.emit({"ok": True})
+
+
+def test_settings_worker_bridge_marshals_result_to_gui_thread(qtbot) -> None:
+    main_thread_id = threading.get_ident()
+    callback_thread_ids: list[int] = []
+    bridge = _SettingsWorkerUiBridge(
+        result_callback=lambda _result: callback_thread_ids.append(
+            threading.get_ident()
+        )
+    )
+    thread = QThread()
+    emitter = _ThreadedResultEmitter()
+    emitter.moveToThread(thread)
+    thread.started.connect(emitter.run)
+    emitter.finished.connect(bridge.handle_result)
+    emitter.finished.connect(thread.quit)
+    emitter.finished.connect(emitter.deleteLater)
+
+    with qtbot.waitSignal(thread.finished):
+        thread.start()
+    qtbot.waitUntil(lambda: len(callback_thread_ids) == 1)
+    thread.deleteLater()
+    bridge.deleteLater()
+
+    assert callback_thread_ids == [main_thread_id]
 
 
 def test_settings_worker_forces_transactional_harmonic_recalculation(
