@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
 
@@ -36,9 +36,12 @@ class ProjectScanResult:
     conditions: List[str]
     subject_data: Dict[str, Dict[str, str]]
     manifest: dict | None
+    # Compatibility display-label map used by the existing Stats-ready
+    # workbook. Native inference must use ``participant_group_ids`` instead.
     participants_map: Dict[str, str]
     project_root: Path | None = None
     project_is_multi_group: bool = False
+    participant_group_ids: Dict[str, str] = field(default_factory=dict)
 
 
 logger = logging.getLogger(__name__)
@@ -264,6 +267,10 @@ def load_project_scan(folder: str) -> ProjectScanResult:
         subject_data=index.subject_data(),
         manifest=manifest,
         participants_map=index.participant_group_label_map(
+            uppercase_keys=True,
+            include_legacy_aliases=True,
+        ),
+        participant_group_ids=index.participant_group_id_map(
             uppercase_keys=True,
             include_legacy_aliases=True,
         ),

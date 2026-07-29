@@ -133,3 +133,5 @@ def test_project_scan_marks_multi_group_manifest(tmp_path):
     assert scan.project_root == project_root.resolve()
     assert scan.subjects == ["P1"]
     assert scan.conditions == ["Faces"]
+    assert scan.participants_map["P1"] == "Control"
+    assert scan.participant_group_ids["P1"] == "control"

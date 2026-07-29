@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 0 - execution plan and baseline audit
+- Current phase: Phase 2 - single-group inference
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -558,20 +558,21 @@ Deliverables:
 
 Definition of done:
 
-- [ ] Complete-condition intersection is deterministic and tested.
-- [ ] The participant cohort is frozen before condition intersection; no
+- [x] Complete-condition intersection is deterministic and tested.
+- [x] The participant cohort is frozen before condition intersection; no
       participant is silently removed to recover more conditions.
-- [ ] Duplicate participant x Condition x ROI cells hard-fail with a useful
+- [x] Duplicate participant x Condition x ROI cells hard-fail with a useful
       message.
-- [ ] Canonical group IDs come from the shared dataset index without changing
+- [x] Canonical group IDs come from the shared dataset index without changing
       `participants_map` display labels or the Stats-ready schema.
-- [ ] Holm, BH, and no-adjustment outputs match reference values.
-- [ ] Every adjusted row records a named family and its size.
-- [ ] Scientific metadata and test inventories survive explicit
+- [x] Holm, BH, and no-adjustment outputs match reference values.
+- [x] Every adjusted row records a named family and its size.
+- [x] Scientific metadata and test inventories survive explicit
       serialization without relying only on `DataFrame.attrs`.
-- [ ] No GUI imports exist in the new analysis modules.
-- [ ] `verify.py --scope stats --tier focused` passes.
-- [ ] Plan progress is updated and committed with the implementation.
+- [x] No GUI imports exist in the new analysis modules.
+- [x] `verify.py --scope stats --tier focused` passes (51 registered tests);
+      33 new/direct Phase 1 tests also pass.
+- [x] Plan progress is updated and committed with the implementation.
 
 Commit:
 
@@ -838,7 +839,7 @@ To perform after Phase 6 in a safe visible Windows session:
 ## Progress
 
 - [x] Phase 0 - Plan and baseline
-- [ ] Phase 1 - Shared inference and design core
+- [x] Phase 1 - Shared inference and design core
 - [ ] Phase 2 - Single-group inference
 - [ ] Phase 3 - Native multi-group engines
 - [ ] Phase 4 - Robust sensitivities and diagnostics
