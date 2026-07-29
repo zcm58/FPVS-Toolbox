@@ -1431,12 +1431,6 @@ class SettingsDialog(QDialog):
             )
             return False
 
-        clear_group_significant_selection_cache()
-        try:
-            clear_cached_group_harmonic_selections(self.project.project_root)
-        except OSError:
-            pass
-
         self._set_harmonic_recalculation_status(
             "Recalculating harmonic selection from processed Excel outputs...",
             "info",

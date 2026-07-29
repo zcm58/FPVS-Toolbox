@@ -570,6 +570,103 @@ def test_processing_harmonic_selection_reuses_cached_selection_between_runs(
     assert any("Group harmonic selection cache hit" in message for message in messages)
 
 
+def test_processing_harmonic_selection_force_recalculate_bypasses_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
+    conditions = ["C1", "C2"]
+    rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
+    for idx, condition in enumerate(conditions, start=1):
+        path = _project_workbook_path(project_root, "S1", condition)
+        _write_group_policy_workbook(path, scale=idx)
+
+    original_fullfft_loader = group_policy._load_mean_amplitude_series
+    fullfft_load_count = 0
+
+    def _recording_fullfft_loader(*args, **kwargs):
+        nonlocal fullfft_load_count
+        fullfft_load_count += 1
+        return original_fullfft_loader(*args, **kwargs)
+
+    monkeypatch.setattr(
+        group_policy,
+        "_load_mean_amplitude_series",
+        _recording_fullfft_loader,
+    )
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+    messages: list[str] = []
+
+    try:
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(
+            Project.load(project_root)
+        )
+        report = harmonic_selection_qc.run_processing_harmonic_selection_qc(
+            Project.load(project_root),
+            log_func=messages.append,
+            force_recalculate=True,
+        )
+    finally:
+        group_policy.clear_group_significant_selection_cache()
+
+    assert fullfft_load_count == 2 * len(conditions)
+    assert report.selection_metadata["selection_cache_source"] == (
+        "computed_this_run_saved_project_metadata"
+    )
+    assert any("Forced harmonic recalculation requested" in message for message in messages)
+
+
+def test_processing_harmonic_selection_force_failure_preserves_saved_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
+    rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
+    for idx, condition in enumerate(("C1", "C2"), start=1):
+        path = _project_workbook_path(project_root, "S1", condition)
+        _write_group_policy_workbook(path, scale=idx)
+
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 3.6)
+
+    try:
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(
+            Project.load(project_root)
+        )
+        manifest_path = project_root / "project.json"
+        before = json.loads(manifest_path.read_text(encoding="utf-8"))["tools"]["stats"][
+            "group_significant_harmonics_cache"
+        ]["entries"]
+        monkeypatch.setattr(
+            group_policy,
+            "_build_grand_average_amplitude",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("forced recalculation failed")
+            ),
+        )
+
+        with pytest.raises(RuntimeError, match="forced recalculation failed"):
+            harmonic_selection_qc.run_processing_harmonic_selection_qc(
+                Project.load(project_root),
+                force_recalculate=True,
+            )
+
+        after = json.loads(manifest_path.read_text(encoding="utf-8"))["tools"]["stats"][
+            "group_significant_harmonics_cache"
+        ]["entries"]
+    finally:
+        group_policy.clear_group_significant_selection_cache()
+
+    assert after == before
+
+
 def test_group_significant_policy_uses_processing_metadata_without_fullfft(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -27,6 +27,7 @@ class ProcessingHarmonicSelectionWorker(QObject):
             report = run_processing_harmonic_selection_qc(
                 self._project,
                 log_func=messages.append,
+                force_recalculate=True,
             )
             self.finished.emit(
                 {

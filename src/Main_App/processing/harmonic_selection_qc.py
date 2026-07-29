@@ -61,8 +61,14 @@ def run_processing_harmonic_selection_qc(
     *,
     log_func: Callable[[str], None] | None = None,
     dataset_index: ProjectDatasetIndex | None = None,
+    force_recalculate: bool = False,
 ) -> ProcessingHarmonicSelectionReport:
-    """Build and persist the project harmonic-selection cache after processing."""
+    """Build and persist the project harmonic-selection cache after processing.
+
+    ``force_recalculate`` bypasses reusable selections without deleting the
+    durable entry first. The newly calculated selection replaces the current
+    fingerprint only after the calculation and project-metadata write succeed.
+    """
     messages: list[str] = []
 
     def _log(message: str) -> None:
@@ -100,7 +106,18 @@ def run_processing_harmonic_selection_qc(
             settings=settings,
             max_freq=max_frequency_hz,
             project_root=project_root,
+            force_recalculate=force_recalculate,
         )
+        if (
+            force_recalculate
+            and selection.selection_cache_source
+            != "computed_this_run_saved_project_metadata"
+        ):
+            raise RuntimeError(
+                "Harmonic selection was recalculated but the replacement could "
+                "not be saved to project metadata. The previous saved selection "
+                "was left unchanged."
+            )
         metadata = selection.to_metadata()
         _require_persisted_group_harmonic_selection(inputs)
     else:

@@ -54,3 +54,4 @@ tests/stats/pipeline/test_stats_project_paths.py
 tests/stats/qc/test_stats_flagged_participants_report.py
 tests/stats/qc/test_stats_manual_exclusion.py
 tests/stats/reporting/test_stats_reporting_summary_smoke.py
+tests/workers/test_harmonic_selection_worker.py

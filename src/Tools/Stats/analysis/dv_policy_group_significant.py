@@ -766,6 +766,7 @@ def build_group_significant_harmonic_selection(
     settings: DVPolicySettings,
     max_freq: float | None = None,
     project_root: str | Path | None = None,
+    force_recalculate: bool = False,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
     electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
@@ -815,54 +816,60 @@ def build_group_significant_harmonic_selection(
             else None
         ),
     )
-    cached = _get_cached_group_significant_selection(cache_key)
-    if cached is not None:
-        cached = _repair_project_cache_for_in_memory_selection(
-            cache_request,
-            cached,
-            log_func,
-        )
-        elapsed = perf_counter() - started
+    if force_recalculate:
         log_func(
-            "[PERF] Group harmonic selection cache hit: "
-            f"reusing {len(cached.selected_harmonics_hz)} selected harmonics "
-            f"for {len(subjects) * len(conditions)} planned workbooks "
-            f"in {elapsed:.2f}s."
+            "Forced harmonic recalculation requested; existing in-memory and "
+            "saved selections will be ignored until a replacement is ready."
         )
-        logger.debug(
-            "stats_group_harmonics_selection_cache_hit",
-            extra={
-                "elapsed_s": elapsed,
-                "subjects": len(subjects),
-                "conditions": len(conditions),
-                "selected_harmonics": _format_harmonic_frequency_list(
-                    cached.selected_harmonics_hz
-                ),
-            },
-        )
-        return cached
-    project_cached = _load_project_cached_selection(cache_request, log_func)
-    if project_cached is not None:
-        elapsed = perf_counter() - started
-        log_func(
-            "[PERF] Project harmonic cache hit: "
-            f"using {len(project_cached.selected_harmonics_hz)} saved harmonics "
-            f"for {len(subjects) * len(conditions)} planned workbooks "
-            f"in {elapsed:.2f}s."
-        )
-        logger.debug(
-            "stats_group_harmonics_project_cache_hit",
-            extra={
-                "elapsed_s": elapsed,
-                "subjects": len(subjects),
-                "conditions": len(conditions),
-                "selected_harmonics": _format_harmonic_frequency_list(
-                    project_cached.selected_harmonics_hz
-                ),
-            },
-        )
-        _store_group_significant_selection(cache_key, project_cached)
-        return project_cached
+    else:
+        cached = _get_cached_group_significant_selection(cache_key)
+        if cached is not None:
+            cached = _repair_project_cache_for_in_memory_selection(
+                cache_request,
+                cached,
+                log_func,
+            )
+            elapsed = perf_counter() - started
+            log_func(
+                "[PERF] Group harmonic selection cache hit: "
+                f"reusing {len(cached.selected_harmonics_hz)} selected harmonics "
+                f"for {len(subjects) * len(conditions)} planned workbooks "
+                f"in {elapsed:.2f}s."
+            )
+            logger.debug(
+                "stats_group_harmonics_selection_cache_hit",
+                extra={
+                    "elapsed_s": elapsed,
+                    "subjects": len(subjects),
+                    "conditions": len(conditions),
+                    "selected_harmonics": _format_harmonic_frequency_list(
+                        cached.selected_harmonics_hz
+                    ),
+                },
+            )
+            return cached
+        project_cached = _load_project_cached_selection(cache_request, log_func)
+        if project_cached is not None:
+            elapsed = perf_counter() - started
+            log_func(
+                "[PERF] Project harmonic cache hit: "
+                f"using {len(project_cached.selected_harmonics_hz)} saved harmonics "
+                f"for {len(subjects) * len(conditions)} planned workbooks "
+                f"in {elapsed:.2f}s."
+            )
+            logger.debug(
+                "stats_group_harmonics_project_cache_hit",
+                extra={
+                    "elapsed_s": elapsed,
+                    "subjects": len(subjects),
+                    "conditions": len(conditions),
+                    "selected_harmonics": _format_harmonic_frequency_list(
+                        project_cached.selected_harmonics_hz
+                    ),
+                },
+            )
+            _store_group_significant_selection(cache_key, project_cached)
+            return project_cached
     log_func(
         "[PERF] Group harmonic selection cache miss: "
         "building selection from FullFFT amplitude spectra."

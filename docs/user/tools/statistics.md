@@ -107,7 +107,9 @@ missing or stale selection must be recalculated before the analysis proceeds;
 the Stats tool does not silently invent another list. Use
 **Settings > Preprocessing > Harmonic Selection > Recalculate Harmonics**.
 The Statistical Analysis page provides a link to that Settings workflow; it
-does not delete or recalculate the processing-time selection itself.
+does not delete or recalculate the processing-time selection itself. Settings
+keeps the prior saved entry while the fresh calculation runs, so a failed or
+cancelled retry cannot erase the last completed selection.
 
 ### Why provenance changes interpretation
 

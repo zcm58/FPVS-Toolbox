@@ -162,7 +162,10 @@ selection in `project.json`, and writes
 `Quality Check/Harmonic_Selection_Summary.xlsx`. Active downstream project
 tools load this processing-time selection. They must stop with reprocessing or
 Settings-recalculation guidance when it is missing or stale rather than
-calculating another list.
+calculating another list. Settings recalculation must force a fresh calculation
+from the current FullFFT workbooks without deleting the previous durable entry
+at startup; the current fingerprint is replaced only after the recalculation
+and project-metadata write succeed.
 
 ## Raw QC Hard Exclusions
 
