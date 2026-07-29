@@ -258,7 +258,7 @@ def run_group_cell_comparisons(
     alpha: float = 0.05,
     analysis_scope: str = "complete_core",
 ) -> GroupComparisonResult:
-    """Run two-sided Welch comparisons across a declared complete-cell family."""
+    """Run two-sided Welch comparisons across the retained cell family."""
 
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a pandas DataFrame.")
@@ -355,12 +355,19 @@ def run_group_cell_comparisons(
     family = family_spec or FamilySpec(
         family_id="group_core_cells",
         family_label=(
-            f"Complete-core Condition x ROI contrasts: {group_a} versus {group_b}"
+            (
+                "Available-case"
+                if scope == "available_case"
+                else "Complete-core"
+            )
+            + f" Condition x ROI contrasts: {group_a} versus {group_b}"
         ),
         method=CorrectionMethod.coerce(correction),
         alpha=float(alpha),
     )
     contrasts = apply_family_correction(raw, family, p_col="p_raw")
+    contrasts["analysis_scope"] = scope
+    contrasts["missing_values_imputed"] = False
     diagnostics = build_group_cell_diagnostics(
         working.rename(columns={"_numeric_dv": "_diagnostic_value"}),
         value_col="_diagnostic_value",

@@ -202,13 +202,22 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     ] == ["holm", "fdr_bh"]
     assert window.response_alternative_combo.currentData() == "two_sided"
     assert window.analysis_scope_combo.currentData() == "complete_core"
-    assert window.analysis_scope_combo.count() == 1
-    assert not window.analysis_scope_combo.isEnabled()
+    assert window.analysis_scope_combo.count() == 2
+    assert window.analysis_scope_combo.itemData(1) == "available_case"
+    assert window.analysis_scope_combo.isEnabled()
     assert window.resample_count_spin.objectName() == "stats_resample_count_spin"
     assert window.resample_count_spin.value() == 9_999
     assert window.strict_omnibus_family_checkbox.isChecked()
     assert window.robust_sensitivity_checkbox.isChecked()
     assert window.resampling_sensitivity_checkbox.isChecked()
+    window.analysis_scope_combo.setCurrentIndex(1)
+    assert not window.resampling_sensitivity_checkbox.isChecked()
+    assert not window.resampling_sensitivity_checkbox.isEnabled()
+    assert not window.resample_count_spin.isEnabled()
+    window.analysis_scope_combo.setCurrentIndex(0)
+    assert window.resampling_sensitivity_checkbox.isChecked()
+    assert window.resampling_sensitivity_checkbox.isEnabled()
+    assert window.resample_count_spin.isEnabled()
     assert window.stability_sensitivity_checkbox.isChecked()
     assert window.group_pair_combo.isHidden()
     assert not window.group_pair_combo.isEnabled()

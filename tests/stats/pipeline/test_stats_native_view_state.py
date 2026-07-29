@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from Tools.Stats.analysis.dv_policies import GROUP_SIGNIFICANT_POLICY_NAME
-from Tools.Stats.common.stats_core import PipelineId
+from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.ui.stats_window_actions import StatsWindowActionsMixin
+from Tools.Stats.ui.stats_window_pipeline import StatsWindowPipelineMixin
 from Tools.Stats.ui.stats_window_support import (
     build_native_group_state,
     build_preliminary_workbook_coverage,
@@ -73,6 +74,12 @@ def test_preliminary_coverage_retains_participants_and_flags_conditions() -> Non
     assert summary.startswith("Preliminary workbook coverage")
     assert "Objects missing for P2" in summary
     assert "does not remove participants" in summary
+    available_case_summary = format_preliminary_workbook_coverage(
+        coverage,
+        analysis_scope="available_case",
+    )
+    assert "retained for the available-case LMM" in available_case_summary
+    assert "determined after QC" in available_case_summary
 
 
 def test_preliminary_coverage_reports_complete_selected_conditions() -> None:
@@ -135,3 +142,28 @@ def test_native_state_snapshot_exposes_plain_pipeline_configuration() -> None:
     coverage = snapshot["preliminary_coverage"]
     assert coverage["complete_conditions"] == ["Faces"]
     assert coverage["n_participants"] == 2
+
+
+def test_pipeline_progress_uses_the_actual_scope_specific_queue() -> None:
+    view = StatsWindowPipelineMixin()
+    view._progress_updates = []
+    view._native_step_order_by_pipeline = {
+        PipelineId.SINGLE: (
+            StepId.PREPARE_ANALYSIS,
+            StepId.MIXED_MODEL,
+            StepId.REPORT_BUNDLE,
+        )
+    }
+    rendered: dict[str, object] = {}
+    view.set_pipeline_progress = lambda phase, *, percent: rendered.update(
+        {"phase": phase, "percent": percent}
+    )
+
+    view._set_native_worker_progress(
+        PipelineId.SINGLE,
+        StepId.PREPARE_ANALYSIS,
+        100,
+    )
+
+    assert view._progress_updates == [33]
+    assert rendered["percent"] == 33

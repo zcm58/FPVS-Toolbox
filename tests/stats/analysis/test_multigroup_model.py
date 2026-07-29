@@ -138,6 +138,88 @@ def test_incomplete_core_is_blocked_without_dropping_participant() -> None:
         model.run_multigroup_mixed_model(data)
 
 
+def test_available_case_keeps_incomplete_participants_and_exact_lrt_rows() -> None:
+    rng = np.random.default_rng(20260729)
+    rows: list[dict[str, object]] = []
+    for group_index, group_id in enumerate(("control", "anxious")):
+        for participant_index in range(8):
+            participant_id = f"{group_id}_{participant_index + 1}"
+            participant_effect = float(rng.normal(0.0, 0.5))
+            for condition_index, condition in enumerate(
+                ("faces", "objects", "words")
+            ):
+                for roi_index, roi in enumerate(("left", "right")):
+                    if (
+                        group_id == "control"
+                        and participant_index == 1
+                        and condition == "objects"
+                    ) or (
+                        group_id == "anxious"
+                        and participant_index == 5
+                        and condition == "words"
+                        and roi == "right"
+                    ):
+                        continue
+                    rows.append(
+                        {
+                            "participant_id": participant_id,
+                            "group_id": group_id,
+                            "condition": condition,
+                            "roi": roi,
+                            "value": (
+                                1.2
+                                + participant_effect
+                                + 0.22 * group_index
+                                + 0.16 * condition_index
+                                + 0.1 * roi_index
+                                + float(rng.normal(0.0, 0.1))
+                            ),
+                        }
+                    )
+
+    result = model.run_multigroup_mixed_model(
+        pd.DataFrame(rows),
+        known_group_ids=("control", "anxious"),
+        analysis_scope="available_case",
+    )
+
+    assert result.status == "ok"
+    assert result.omnibus["status"].eq("ok").all()
+    assert result.omnibus["same_observed_rows"].all()
+    assert result.omnibus["n_observations_full"].eq(len(rows)).all()
+    assert result.omnibus["n_observations_reduced"].eq(len(rows)).all()
+    diagnostics = result.diagnostics.set_index("check_id")
+    assert diagnostics.loc["participant_cell_coverage", "status"] == "warning"
+    metadata = result.metadata.set_index("field")["value"]
+    assert metadata["analysis_scope"] == "available_case"
+    assert int(metadata["n_observations"]) == len(rows)
+
+
+def test_available_case_blocks_empty_group_condition_roi_cell() -> None:
+    data = _complete_core_data()
+    data = data.loc[
+        ~(
+            data["group_id"].eq("anxious")
+            & data["condition"].eq("objects")
+            & data["roi"].eq("right")
+        )
+    ].copy()
+
+    with pytest.raises(
+        model.MultigroupModelValidationError,
+        match="Structurally empty Group x Condition x ROI",
+    ) as caught:
+        model.run_multigroup_mixed_model(
+            data,
+            analysis_scope="available_case",
+        )
+
+    diagnostic = caught.value.diagnostics.set_index("check_id").loc[
+        "factorial_cells_observed"
+    ]
+    assert diagnostic["status"] == "failed"
+
+
 def test_unknown_canonical_group_id_is_blocked() -> None:
     with pytest.raises(
         model.MultigroupModelValidationError,
@@ -250,6 +332,33 @@ def test_failed_reduced_ml_fit_remains_visible(monkeypatch) -> None:
     assert attempts["status"].eq("error").all()
     assert attempts["error"].str.contains("synthetic reduced-model failure").all()
     assert result.omnibus["caveat"].str.contains("asymptotic chi-square").all()
+
+
+def test_ml_row_identity_mismatch_is_nonreportable(monkeypatch) -> None:
+    comparisons = model.build_multigroup_omnibus_comparisons()
+    mismatched_formula = comparisons[1].reduced_formula
+    expected_rows = tuple(range(len(_complete_core_data())))
+
+    def fake_fit(**kwargs):
+        result = _mock_fit_for_formula_specs(**kwargs)
+        row_labels = (
+            expected_rows[:-1]
+            if kwargs["formula"] == mismatched_formula
+            else expected_rows
+        )
+        result.model.data = SimpleNamespace(row_labels=row_labels)
+        return result
+
+    monkeypatch.setattr(model, "_fit_mixedlm_once", fake_fit)
+    result = model.run_multigroup_mixed_model(_complete_core_data())
+
+    mismatch = result.omnibus.set_index("effect_id").loc[
+        "group_condition_roi_interaction"
+    ]
+    assert result.status == "partial"
+    assert mismatch["status"] == "failed"
+    assert bool(mismatch["reportable"]) is False
+    assert "exact same validated observed rows" in mismatch["error"]
 
 
 def test_failed_final_reml_fit_returns_explicit_failed_bundle(monkeypatch) -> None:

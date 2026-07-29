@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 METHOD_DEPENDENT_PHRASE = "Results are method-dependent."
 ADAPTIVE_HARMONIC_WARNING = (
     "Harmonics were selected adaptively from the same sample. Response-detection "

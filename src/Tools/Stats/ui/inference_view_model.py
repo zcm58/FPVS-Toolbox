@@ -44,7 +44,7 @@ STEP_PHASE_LABELS: dict[StepId, str] = {
     StepId.BASELINE_VS_ZERO: "Testing responses against zero",
     StepId.MULTIGROUP_MODEL: "Fitting the multi-group mixed model",
     StepId.GROUP_CELL_COMPARISONS: "Comparing groups within condition × ROI cells",
-    StepId.SENSITIVITIES: "Running robust and resampling checks",
+    StepId.SENSITIVITIES: "Running sensitivity checks",
     StepId.REPORT_BUNDLE: "Building and exporting the results report",
 }
 
@@ -122,11 +122,16 @@ class NativeInferenceOptions:
             raise ValueError("alpha must be strictly between 0 and 1.")
         object.__setattr__(self, "alpha", alpha)
         scope = _normalized_token(self.analysis_scope)
-        if scope != "complete_core":
+        if scope not in {"complete_core", "available_case"}:
             raise ValueError(
-                "The native analysis currently supports complete-core coverage only."
+                "analysis_scope must be 'complete_core' or 'available_case'."
             )
         object.__setattr__(self, "analysis_scope", scope)
+        if scope == "available_case":
+            # Max-|t| resampling currently relies on one complete participant-by-
+            # cell matrix. Do not silently rebuild a complete-case subset inside
+            # an analysis explicitly selected to retain incomplete participants.
+            object.__setattr__(self, "run_resampling", False)
         if self.mode is AnalysisMode.SINGLE and self.selected_group_pair is not None:
             raise ValueError("selected_group_pair is only valid in multi-group mode.")
         pair = self.selected_group_pair
@@ -216,7 +221,7 @@ class NativeInferenceOptions:
 def pipeline_steps_for_options(
     options: NativeInferenceOptions,
 ) -> tuple[StepId, ...]:
-    """Return the native queue, omitting sensitivity work only when disabled."""
+    """Return the analysis-scope-specific native worker queue."""
 
     enabled = any(
         (
@@ -225,16 +230,27 @@ def pipeline_steps_for_options(
             options.run_stability,
         )
     )
+    pipeline_id = (
+        PipelineId.MULTI
+        if options.mode is AnalysisMode.MULTI
+        else PipelineId.SINGLE
+    )
+    excluded = (
+        {
+            StepId.RM_ANOVA,
+            StepId.INTERACTION_POSTHOCS,
+        }
+        if (
+            pipeline_id is PipelineId.SINGLE
+            and options.analysis_scope == "available_case"
+        )
+        else set()
+    )
     return tuple(
         step_id
-        for step_id in PIPELINE_STEP_ORDER[
-            (
-                PipelineId.MULTI
-                if options.mode is AnalysisMode.MULTI
-                else PipelineId.SINGLE
-            )
-        ]
-        if enabled or step_id is not StepId.SENSITIVITIES
+        for step_id in PIPELINE_STEP_ORDER[pipeline_id]
+        if step_id not in excluded
+        and (enabled or step_id is not StepId.SENSITIVITIES)
     )
 
 
@@ -248,10 +264,14 @@ def overall_progress(
     pipeline_id: PipelineId,
     step_id: StepId,
     step_percent: int | float,
+    *,
+    step_order: tuple[StepId, ...] | None = None,
 ) -> int:
     """Map one worker's 0-100 progress into the full pipeline's 0-100 range."""
 
-    order = PIPELINE_STEP_ORDER[pipeline_id]
+    order = tuple(step_order or PIPELINE_STEP_ORDER[pipeline_id])
+    if not order:
+        return max(0, min(100, int(round(float(step_percent)))))
     try:
         index = order.index(step_id)
     except ValueError:

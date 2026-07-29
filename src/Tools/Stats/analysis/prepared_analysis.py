@@ -1,10 +1,10 @@
 """Immutable, GUI-neutral preparation boundary for native Stats inference.
 
-The design audit is intentionally performed once.  Downstream workers receive
+The design audit is intentionally performed once. Downstream workers receive
 the resulting :class:`PreparedAnalysisPayload` and must not rediscover project
-files, repeat QC decisions, or recompute the complete-condition intersection.
-Dataframe-valued properties return defensive copies so callers cannot mutate
-the stored analysis cohort accidentally.
+files, repeat QC decisions, or change the selected analysis scope. Dataframe-
+valued properties return defensive copies so callers cannot mutate the stored
+analysis cohort accidentally.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import pandas as pd
 from Tools.Stats.analysis.design_audit import (
     DesignAuditResult,
     DesignStatus,
+    audit_analysis_design,
     audit_complete_core_design,
 )
 from Tools.Stats.analysis.inference_contracts import (
@@ -29,7 +30,7 @@ from Tools.Stats.analysis.inference_contracts import (
 )
 
 
-PREPARED_ANALYSIS_SCHEMA_VERSION = 1
+PREPARED_ANALYSIS_SCHEMA_VERSION = 2
 
 
 class PreparedAnalysisError(ValueError):
@@ -166,13 +167,16 @@ class PreparedAnalysisPayload:
     condition_col: str
     roi_col: str
     group_col: str
+    analysis_scope: str
     status: DesignStatus
     status_code: str
     message: str
     frozen_participants: tuple[str, ...]
+    contributing_participants: tuple[str, ...]
     requested_conditions: tuple[str, ...]
     selected_rois: tuple[str, ...]
     complete_conditions: tuple[str, ...]
+    retained_conditions: tuple[str, ...]
     excluded_conditions: tuple[str, ...]
     selected_group_pair: tuple[str, str] | None
     _canonical_group_ids: dict[str, str]
@@ -196,7 +200,7 @@ class PreparedAnalysisPayload:
 
     @property
     def primary_data(self) -> pd.DataFrame:
-        """Return a defensive copy of the frozen complete-core rows."""
+        """Return a defensive copy of the audited primary analysis rows."""
 
         return self._primary_data.copy(deep=True)
 
@@ -241,6 +245,11 @@ class PreparedAnalysisPayload:
     def metadata_frame(self) -> pd.DataFrame:
         """Return one export-ready preparation metadata row."""
 
+        partial_conditions = tuple(
+            condition
+            for condition in self.retained_conditions
+            if condition not in self.complete_conditions
+        )
         return pd.DataFrame(
             [
                 {
@@ -257,9 +266,16 @@ class PreparedAnalysisPayload:
                     "condition_col": self.condition_col,
                     "roi_col": self.roi_col,
                     "group_col": self.group_col,
+                    "analysis_scope": self.analysis_scope,
                     "n_frozen_participants": len(self.frozen_participants),
                     "frozen_participants": "; ".join(
                         self.frozen_participants
+                    ),
+                    "n_contributing_participants": len(
+                        self.contributing_participants
+                    ),
+                    "contributing_participants": "; ".join(
+                        self.contributing_participants
                     ),
                     "requested_conditions": "; ".join(
                         self.requested_conditions
@@ -267,9 +283,17 @@ class PreparedAnalysisPayload:
                     "complete_conditions": "; ".join(
                         self.complete_conditions
                     ),
+                    "retained_conditions": "; ".join(
+                        self.retained_conditions
+                    ),
+                    "partial_conditions": "; ".join(
+                        partial_conditions
+                    ),
                     "excluded_conditions": "; ".join(
                         self.excluded_conditions
                     ),
+                    "n_observed_rows": len(self._primary_data),
+                    "missing_values_imputed": False,
                     "selected_rois": "; ".join(self.selected_rois),
                     "selected_group_pair": (
                         ""
@@ -335,8 +359,9 @@ def prepare_analysis_payload(
     selected_group_pair: Sequence[object] | None = None,
     settings: Mapping[object, object] | None = None,
     preparation_id: str | None = None,
+    analysis_scope: str = "complete_core",
 ) -> PreparedAnalysisPayload:
-    """Audit ``data`` once and freeze the complete-core analysis boundary."""
+    """Audit ``data`` once and freeze the requested analysis boundary."""
 
     if not isinstance(run_spec, AnalysisRunSpec):
         raise TypeError("run_spec must be an AnalysisRunSpec.")
@@ -361,18 +386,28 @@ def prepare_analysis_payload(
             canonical_group_ids
         ).items()
     }
-    audit = audit_complete_core_design(
-        data,
-        dv_col=dv_name,
-        subject_col=subject_name,
-        condition_col=condition_name,
-        roi_col=roi_name,
-        frozen_participants=frozen_participants,
-        selected_conditions=selected_conditions,
-        selected_rois=selected_rois,
-        canonical_group_ids=copied_group_map or None,
-        require_groups=resolved_mode is AnalysisMode.MULTI,
+    audit_kwargs = {
+        "dv_col": dv_name,
+        "subject_col": subject_name,
+        "condition_col": condition_name,
+        "roi_col": roi_name,
+        "frozen_participants": frozen_participants,
+        "selected_conditions": selected_conditions,
+        "selected_rois": selected_rois,
+        "canonical_group_ids": copied_group_map or None,
+        "require_groups": resolved_mode is AnalysisMode.MULTI,
+    }
+    normalized_scope = (
+        str(analysis_scope).strip().casefold().replace("-", "_")
     )
+    if normalized_scope == "complete_core":
+        audit = audit_complete_core_design(data, **audit_kwargs)
+    else:
+        audit = audit_analysis_design(
+            data,
+            **audit_kwargs,
+            analysis_scope=normalized_scope,
+        )
     canonical_assignments = _canonical_assignments(audit)
     primary = audit.primary_data.copy(deep=True)
     if "group_id" in primary.columns and group_name != "group_id":
@@ -421,13 +456,18 @@ def prepare_analysis_payload(
         condition_col=condition_name,
         roi_col=roi_name,
         group_col=group_name,
+        analysis_scope=audit.analysis_scope,
         status=audit.status,
         status_code=audit.status_code,
         message=audit.message,
         frozen_participants=tuple(audit.frozen_participants),
+        contributing_participants=tuple(
+            audit.contributing_participants
+        ),
         requested_conditions=tuple(audit.requested_conditions),
         selected_rois=tuple(audit.selected_rois),
         complete_conditions=tuple(audit.complete_conditions),
+        retained_conditions=tuple(audit.retained_conditions),
         excluded_conditions=tuple(audit.excluded_conditions),
         selected_group_pair=resolved_pair,
         _canonical_group_ids=dict(canonical_assignments),

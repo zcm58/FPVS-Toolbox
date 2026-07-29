@@ -343,9 +343,12 @@ def build_preliminary_workbook_coverage(
 
 def format_preliminary_workbook_coverage(
     coverage: PreliminaryWorkbookCoverage,
+    *,
+    analysis_scope: str = "complete_core",
 ) -> str:
-    """Return a concise, explicitly preliminary complete-core preview."""
+    """Return a concise, explicitly preliminary scope-aware coverage preview."""
 
+    scope = str(analysis_scope or "").strip().casefold().replace("-", "_")
     if not coverage.participants:
         return (
             "Preliminary workbook coverage: scan a project before evaluating "
@@ -370,9 +373,19 @@ def format_preliminary_workbook_coverage(
             f"{len(coverage.complete_conditions)}/"
             f"{len(coverage.selected_conditions)} selected conditions are "
             f"supplied by all {len(coverage.participants)} scanned participants. "
-            f"Incomplete: {details}. Incomplete conditions are excluded from "
-            "the primary complete-core analysis; this preview does not remove "
-            "participants."
+            f"Incomplete: {details}. "
+            + (
+                "Available observations from incomplete conditions are retained "
+                "for the available-case LMM when the fixed-effect design remains "
+                "estimable. Exact usable rows are determined after QC and manual "
+                "exclusions; this preview does not remove participants."
+                if scope == "available_case"
+                else (
+                    "Incomplete conditions are excluded from the primary "
+                    "complete-core analysis; this preview does not remove "
+                    "participants."
+                )
+            )
         )
     return (
         "Preliminary workbook coverage (before QC/manual exclusions): all "

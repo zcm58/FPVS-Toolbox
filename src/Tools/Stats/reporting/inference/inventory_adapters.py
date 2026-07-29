@@ -406,12 +406,35 @@ def headline_contract(
     """Return whether the p-value contract may enter visible findings."""
 
     lowered = frame_name.casefold()
+    explicit = None
+    analysis_scope = ""
     if row is not None:
         explicit = first_nonmissing(row, ("headline_eligible",))
         if explicit is not None and not bool_value(explicit, default=False):
             return False, "analysis_marked_detailed_only"
+        scope_value = first_nonmissing(row, ("analysis_scope",))
+        if scope_value is not None:
+            analysis_scope = (
+                str(scope_value).strip().casefold().replace("-", "_")
+            )
     if "fixed effects" in lowered:
         return False, "fixed_effect_wald_estimates_are_detailed_only"
+    if p_source == "wald":
+        return False, "raw_wald_p_is_detailed_only"
+    if (
+        explicit is not None
+        and bool_value(explicit, default=False)
+        and analysis_scope == "available_case"
+        and "mixed model" in lowered
+        and "lrt" in lowered
+        and p_source
+        in {
+            "likelihood_ratio",
+            "multiplicity_adjusted",
+            "canonical_reported",
+        }
+    ):
+        return True, "available_case_lmm_lrt_marked_headline_eligible"
     if "mixed model" in lowered and "lrt" in lowered:
         return False, "single_mixed_model_lrt_is_secondary"
     if p_source in {"multiplicity_adjusted", "canonical_reported"}:
@@ -420,8 +443,6 @@ def headline_contract(
         "omnibus" in lowered or "lrt" in lowered
     ):
         return True, "explicit_omnibus_likelihood_ratio_test"
-    if p_source == "wald":
-        return False, "raw_wald_p_is_detailed_only"
     if p_source == "raw":
         return False, "raw_p_is_detailed_only"
     return False, "no_headline_safe_p_value"

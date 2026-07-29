@@ -14,11 +14,18 @@ that relies on the native Statistical Analysis tool.
 - Report participant age range, recruitment population, inclusion/exclusion
   rules, every canonical group definition, and N per group.
 - Report QC and manual exclusions before the analysis. State that the eligible
-  participant cohort was frozen before shared conditions were found.
-- List every requested condition and ROI, then list the complete conditions
-  retained for all frozen participants and the incomplete conditions excluded.
-  State that participants were not dropped inside the model to rescue a
-  condition.
+  participant cohort was frozen before the analysis scope was applied.
+- Name the scope as **complete core** or **available-case LMM**. For complete
+  core, list conditions retained for every frozen participant and incomplete
+  conditions excluded. For available case, report frozen N, contributing N,
+  fully complete conditions, partially observed retained conditions,
+  structurally excluded conditions, missing/non-finite cell counts, and the
+  observed N in each model or comparison cell.
+- For available case, state explicitly that missing responses were not imputed,
+  that repeated-measures ANOVA and paired post-hoc tests were intentionally
+  omitted, and that the likelihood analysis assumes ignorable/MAR missingness
+  conditional on modeled variables. Explain that MNAR exclusions can bias
+  estimates and p-values.
 - For a multi-group project, state that group assignments came from canonical
   `project.json` `group_id` values rather than folder-name inference. If more
   than two groups were present, identify the exact pair chosen for direct cell
@@ -40,7 +47,7 @@ that relies on the native Statistical Analysis tool.
 
 ### Primary statistical model
 
-For a single-group analysis, report:
+For a complete-core single-group analysis, report:
 
 - the Condition x ROI repeated-measures ANOVA, its backend, effect degrees of
   freedom, F statistic, partial eta squared, sphericity result, and the exact
@@ -66,6 +73,21 @@ For a single-group analysis, report:
   planned or manually requested exploratory comparisons, plus the one-sample
   response-versus-zero alternative and correction family.
 
+For an available-case single-group analysis, report:
+
+- the sum-coded Condition x ROI mixed model, the finite observed row set,
+  participant grouping, requested and accepted random-effects formula,
+  optimizer, convergence/singularity status, and any random-intercept fallback;
+- that final coefficient estimates used REML and hierarchy-preserving omnibus
+  comparisons used the same observed rows in full and reduced ML fits with an
+  asymptotic chi-square reference;
+- the selected adjustment across the canonical likelihood-ratio omnibus family;
+- that explicitly eligible adjusted likelihood-ratio rows supplied the
+  available-case factorial headline, while raw coefficient-level Wald p-values
+  remained detailed-only; and
+- that repeated-measures ANOVA and paired follow-ups were not run because their
+  balanced/paired data requirements were not met.
+
 For a multi-group analysis, report:
 
 - the full sum-coded
@@ -86,6 +108,10 @@ For a multi-group analysis, report:
   group, mean difference, 95% confidence interval, and Hedges g; and
 - the exact status of the joint group-related test before interpreting
   Condition/ROI-specific contrasts.
+
+For available-case multi-group runs, additionally state that the full and
+reduced likelihood models used the same finite observed row set, that missing
+responses were not imputed, and that Welch comparison Ns may differ by cell.
 
 Do not describe the Toolbox's `statsmodels` ML likelihood-ratio p-values as
 Kenward-Roger or Satterthwaite results. They are also not numerical replicas of

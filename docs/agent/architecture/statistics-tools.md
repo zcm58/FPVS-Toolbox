@@ -224,20 +224,29 @@ Rules:
   values. Do not add an "ignore groups" or pooled-single-group shortcut to a
   multi-group project; a scientifically pooled analysis must be a separately
   defined single-group project.
-- Both native modes use one participant-first complete-core preparation. Freeze
-  the QC/manual-eligible participant cohort before intersecting conditions. A
-  requested condition is retained only when every frozen participant has
-  exactly one finite dependent value in every selected ROI. Exclude an
-  incomplete condition from the primary analysis; never drop participants
-  inside a model to recover that condition. The primary GUI scope is therefore
-  complete core, not an unlabelled available-case analysis.
-- The native single-group pipeline runs a Condition x ROI repeated-measures
-  ANOVA, a sum-coded Condition x ROI `statsmodels` mixed model, gated/declared
-  paired follow-ups, and one-sample response-versus-zero tests for each retained
-  Condition x ROI cell. The main mixed-model estimates use REML and the
-  hierarchy-preserving omnibus comparisons refit nested models with ML. The
-  default response alternative is two-sided; allow "greater than zero" only as
-  an explicitly chosen, prospectively justified direction.
+- Both native modes freeze the QC/manual-eligible participant cohort before
+  applying one explicit analysis scope. `complete_core` retains a requested
+  condition only when every frozen participant has exactly one finite
+  dependent value in every selected ROI. `available_case` retains finite
+  observations from a condition only when every required fixed-effect
+  Condition x ROI cell (and Group cell in multi-group mode) is structurally
+  observed. Never drop participants silently to improve condition coverage,
+  never impute missing responses, and always export frozen versus contributing
+  participants, complete/partial/excluded conditions, participant coverage,
+  model-cell coverage, and missing observations.
+- The complete-core single-group pipeline runs a Condition x ROI
+  repeated-measures ANOVA, a sum-coded Condition x ROI `statsmodels` mixed
+  model, gated/declared paired follow-ups, and one-sample
+  response-versus-zero tests for each retained Condition x ROI cell. The
+  available-case single-group pipeline uses the mixed model for factorial
+  inference and intentionally omits RM-ANOVA and paired post-hoc steps. Its
+  explicitly eligible canonical ML likelihood-ratio rows may enter the
+  headline after the selected omnibus-family adjustment; coefficient-level
+  Wald rows remain detailed-only. Main mixed-model estimates use REML and
+  hierarchy-preserving omnibus comparisons refit nested models with ML on the
+  same observed rows. The default response alternative is two-sided; allow
+  "greater than zero" only as an explicitly chosen, prospectively justified
+  direction.
 - With strict interaction gating enabled, omnibus-triggered single-group
   follow-ups run only when the canonical RM-ANOVA Condition x ROI interaction
   is significant. The gate uses the same Greenhouse-Geisser-aware
@@ -263,7 +272,9 @@ Rules:
   model is singular or does not converge, its explicit random-intercept
   fallback and reason must remain in diagnostics. Final coefficient estimates
   use REML; hierarchy-preserving full-versus-reduced omnibus comparisons use ML
-  likelihood-ratio tests against an asymptotic chi-square reference.
+  likelihood-ratio tests against an asymptotic chi-square reference. In
+  available-case scope, every full/reduced comparison must use the identical
+  finite observed row set.
 - The multi-group omnibus result labelled "Any group-related effect" is a joint
   block test of every term containing Group; it is not a pure Group main-effect
   test. The Group x Condition x ROI, Group x Condition-related, and Group x
@@ -283,10 +294,12 @@ Rules:
   uses two-sided Welch independent-samples t-tests, signed as selected
   `group_a - group_b`, with mean differences, 95% confidence intervals, and
   small-sample-corrected Hedges g. The default `group_core_cells` family applies
-  one global Holm correction across every complete cell. Benjamini-Hochberg is
-  an explicitly exploratory FDR option. When more than two canonical groups
-  are present, the full omnibus model includes all groups but the user must
-  choose the exact pair used for cell contrasts.
+  one global Holm correction across every estimable retained cell.
+  Benjamini-Hochberg is an explicitly exploratory FDR option. Available-case
+  cell comparisons use the finite observations in that cell and report the
+  resulting N for each group; Ns may vary across cells. When more than two
+  canonical groups are present, the full omnibus model includes all groups but
+  the user must choose the exact pair used for cell contrasts.
 - The single-group response family is `response_core_cells`, and its default is
   one global Holm correction across retained Condition x ROI cells. Declared
   interaction follow-ups use their own named family. A correction label,
@@ -300,6 +313,11 @@ Rules:
   Methods & Checks and should be considered together with the prespecified
   robust/resampling sensitivities, not used as a data-driven test-selection
   switch.
+- Available-case likelihood inference assumes missingness is ignorable/MAR
+  after conditioning on modeled variables. Reports must state this assumption,
+  the absence of imputation, and the risk that MNAR exclusions can bias
+  estimates and p-values. The LMM's ability to fit partial repeated measures
+  must never be described as proof that missingness is harmless.
 - Trimmed-mean or rank tests, participant-level sign-flip/group-label max-|t|
   resampling, and leave-one-participant-out stability are sensitivity
   analyses. They must retain the `sensitivity` interpretation role and must
@@ -316,8 +334,9 @@ Rules:
   provide evidence" for a nonsignificant test; it must never translate
   nonsignificance into equivalence or proof of no response. Detailed Methods
   and the workbook retain all estimates, intervals, effects, formulas,
-  diagnostics, corrections, exclusions, coverage, provenance, and source
-  frames.
+  diagnostics, corrections, exclusions, frozen and contributing Ns,
+  complete/partial/structurally excluded conditions, per-cell Ns, missingness
+  caveats, coverage, provenance, and source frames.
 - FullSNR helpers are vectorized for speed, but must preserve the legacy
   +/-10-bin noise window, immediate-neighbor exclusion, min-bin behavior, and
   zero-division handling exactly.

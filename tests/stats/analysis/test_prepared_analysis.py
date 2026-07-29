@@ -118,6 +118,38 @@ def test_payload_is_frozen_and_dataframe_properties_are_defensive_copies() -> No
     assert not payload.design_frames["Primary Data"]["summed"].eq(-888.0).any()
 
 
+def test_available_case_payload_keeps_incomplete_condition_observations() -> None:
+    payload = prepare_analysis_payload(
+        _data(),
+        mode="single",
+        run_spec=_run_spec(),
+        dv_col="summed",
+        subject_col="pid",
+        condition_col="task",
+        roi_col="region",
+        frozen_participants=("P1", "P2", "P3", "P4"),
+        selected_conditions=("shared", "incomplete"),
+        selected_rois=("left", "right"),
+        analysis_scope="available_case",
+        preparation_id="available-preparation",
+    )
+
+    assert payload.ready
+    assert payload.analysis_scope == "available_case"
+    assert payload.complete_conditions == ("shared",)
+    assert payload.retained_conditions == ("shared", "incomplete")
+    assert payload.excluded_conditions == ()
+    assert payload.contributing_participants == ("P1", "P2", "P3", "P4")
+    assert len(payload.primary_data) == 14
+    assert set(payload.primary_data["task"]) == {"shared", "incomplete"}
+    metadata = payload.metadata_frame().iloc[0]
+    assert metadata["partial_conditions"] == "incomplete"
+    assert metadata["n_observed_rows"] == 14
+    assert bool(metadata["missing_values_imputed"]) is False
+    missing = payload.design_frames["Missing Observations"]
+    assert len(missing.query("participant_id == 'P4'")) == 2
+
+
 def test_blocked_multigroup_audit_and_all_metadata_frames_remain_explicit() -> None:
     payload = prepare_analysis_payload(
         _data(),

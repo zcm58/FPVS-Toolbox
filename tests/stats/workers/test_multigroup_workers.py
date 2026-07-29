@@ -71,13 +71,27 @@ def _long_data() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _payload(*, mode: str = "multi", strict_omnibus: bool = False):
+def _payload(
+    *,
+    mode: str = "multi",
+    strict_omnibus: bool = False,
+    analysis_scope: str = "complete_core",
+):
     groups = {
         f"P{index}": "control" if index <= 3 else "anxious"
         for index in range(1, 7)
     }
+    data = _long_data()
+    if analysis_scope == "available_case":
+        data = data.loc[
+            ~(
+                data["participant"].eq("P6")
+                & data["condition"].eq("B")
+                & data["roi"].eq("R2")
+            )
+        ].copy()
     return prepare_analysis_payload(
-        _long_data(),
+        data,
         mode=mode,
         run_spec=_run_spec(strict_omnibus=strict_omnibus),
         dv_col="value",
@@ -87,6 +101,7 @@ def _payload(*, mode: str = "multi", strict_omnibus: bool = False):
         canonical_group_ids=groups if mode == "multi" else None,
         selected_group_pair=("anxious", "control") if mode == "multi" else None,
         preparation_id=f"{mode}-prepared",
+        analysis_scope=analysis_scope,
     )
 
 
@@ -251,6 +266,34 @@ def test_callback_first_model_and_group_steps_reuse_payload_and_frames(
     assert messages
 
 
+def test_available_case_scope_reaches_multigroup_model_and_cell_tests(
+    monkeypatch,
+) -> None:
+    payload = _payload(analysis_scope="available_case")
+    captured: dict[str, object] = {}
+
+    def fake_model(_data, **kwargs):
+        captured["model_scope"] = kwargs["analysis_scope"]
+        return _FrameBundle()
+
+    def fake_cells(_data, **kwargs):
+        captured["cell_scope"] = kwargs["analysis_scope"]
+        return _FrameBundle()
+
+    monkeypatch.setattr(workers, "run_multigroup_mixed_model", fake_model)
+    monkeypatch.setattr(workers, "_run_group_cell_comparisons", fake_cells)
+
+    model_result = workers.run_multigroup_model_step(payload)
+    cell_result = workers.run_group_cell_step(payload)
+
+    assert model_result["status"] == "ok"
+    assert cell_result["status"] == "ok"
+    assert captured == {
+        "model_scope": "available_case",
+        "cell_scope": "available_case",
+    }
+
+
 def test_strict_omnibus_family_corrects_multigroup_lrt_rows(monkeypatch) -> None:
     payload = _payload(strict_omnibus=True)
     omnibus = pd.DataFrame(
@@ -362,6 +405,76 @@ def test_strict_omnibus_family_corrects_single_rm_anova_rows(
     assert corrected["family_size"].eq(3).all()
 
 
+def test_available_case_single_lmm_is_corrected_and_headline_eligible(
+    monkeypatch,
+) -> None:
+    payload = _payload(
+        mode="single",
+        strict_omnibus=True,
+        analysis_scope="available_case",
+    )
+    fixed = pd.DataFrame([{"Effect": "Intercept", "Coef.": 1.0}])
+    lrt = pd.DataFrame(
+        {
+            "effect_id": [
+                "condition_roi_interaction",
+                "condition_related_block",
+                "roi_related_block",
+            ],
+            "p_value_chi2": [0.01, 0.03, 0.20],
+            "status": ["ok", "ok", "ok"],
+            "reportable": [True, True, True],
+        }
+    )
+    fixed.attrs["lrt_table"] = lrt
+    fixed.attrs["model_diagnostics"] = pd.DataFrame(
+        [{"check_id": "observed_row_set", "status": "ok"}]
+    )
+    monkeypatch.setattr(
+        workers,
+        "run_mixed_effects_model",
+        lambda **kwargs: (
+            fixed,
+            {"analysis_scope": kwargs["analysis_scope"]},
+        ),
+    )
+
+    result = workers.run_single_lmm_step(payload)
+    corrected = result["export_frames"]["Mixed Model LRT"]
+
+    assert result["status"] == "ok"
+    assert corrected["p_adjusted"].tolist() == pytest.approx(
+        [0.03, 0.06, 0.20]
+    )
+    assert corrected["headline_eligible"].all()
+    assert corrected["analysis_scope"].eq("available_case").all()
+    assert "Mixed Model Diagnostics" in result["export_frames"]
+    assert result["fit_status"]["prepared_complete_core"] is False
+    assert result["fit_status"]["n_observations"] == len(
+        payload.primary_data
+    )
+
+
+def test_available_case_blocks_rm_anova_and_paired_posthocs(monkeypatch) -> None:
+    payload = _payload(mode="single", analysis_scope="available_case")
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("complete-matrix method reached available-case data")
+
+    monkeypatch.setattr(
+        workers,
+        "run_repeated_measures_anova",
+        fail_if_called,
+    )
+    monkeypatch.setattr(workers, "run_interaction_posthocs", fail_if_called)
+
+    anova = workers.run_single_rm_anova_step(payload)
+    posthoc = workers.run_single_posthoc_step(payload)
+
+    assert anova["status_code"] == "rm_anova_requires_complete_core"
+    assert posthoc["status_code"] == "paired_posthocs_require_complete_core"
+
+
 def test_blocked_audit_refuses_downstream_model(monkeypatch) -> None:
     blocked = prepare_analysis_payload(
         _long_data(),
@@ -440,6 +553,64 @@ def test_sensitivity_step_returns_robust_resampling_and_stability_frames() -> No
         result["export_frames"]["Sensitivity Settings"].iloc[0]["seed"]
         == 1729
     )
+
+
+def test_available_case_suppresses_complete_matrix_resampling() -> None:
+    payload = _payload(analysis_scope="available_case")
+
+    result = workers.run_sensitivity_step(
+        payload,
+        config={
+            "run_robust": False,
+            "run_resampling": True,
+            "run_stability": False,
+            "n_resamples": 19,
+        },
+    )
+
+    assert result["status"] == "ok"
+    metadata = result["export_frames"]["Resampling Metadata"].iloc[0]
+    assert metadata["overall_status"] == "not_run"
+    assert (
+        metadata["status_code"]
+        == "incompatible_with_available_case_scope"
+    )
+    assert "Resampling Cell Results" not in result["export_frames"]
+    settings = result["export_frames"]["Sensitivity Settings"].iloc[0]
+    assert bool(settings["run_resampling"]) is True
+    assert bool(settings["run_resampling_effective"]) is False
+
+
+def test_available_case_scope_reaches_leave_one_out_stability(
+    monkeypatch,
+) -> None:
+    payload = _payload(analysis_scope="available_case")
+    captured: dict[str, object] = {}
+
+    class FakeStability:
+        def to_frames(self):
+            return {"LOO Stability Summary": pd.DataFrame([{"status": "ok"}])}
+
+    def fake_stability(_data, **kwargs):
+        captured["scope"] = kwargs["analysis_scope"]
+        return FakeStability()
+
+    monkeypatch.setattr(
+        workers,
+        "run_two_group_leave_one_out_stability",
+        fake_stability,
+    )
+    result = workers.run_sensitivity_step(
+        payload,
+        config={
+            "run_robust": False,
+            "run_resampling": False,
+            "run_stability": True,
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert captured["scope"] == "available_case"
 
 
 @pytest.mark.parametrize(
@@ -561,6 +732,51 @@ def test_project_input_prepare_path_runs_inside_callback_first_worker(
     assert progress[-1] == 100
 
 
+def test_project_prepare_passes_available_scope_into_payload(
+    monkeypatch,
+) -> None:
+    project_long = _long_data().rename(
+        columns={"participant": "subject"}
+    )
+    project_long = project_long.loc[
+        ~(
+            project_long["subject"].eq("P6")
+            & project_long["condition"].eq("B")
+            & project_long["roi"].eq("R2")
+        )
+    ].copy()
+    captured: dict[str, object] = {}
+
+    def fake_project_prepare(**kwargs):
+        captured["analysis_scope"] = kwargs["analysis_scope"]
+        return (
+            project_long,
+            [f"P{index}" for index in range(1, 7)],
+            {"project_input_prepared": True},
+        )
+
+    monkeypatch.setattr(
+        workers,
+        "_prepare_project_long_data",
+        fake_project_prepare,
+    )
+    result = workers.run_prepare_analysis(
+        subjects=[f"P{index}" for index in range(1, 7)],
+        conditions=["A", "B"],
+        subject_data={f"P{index}": {} for index in range(1, 7)},
+        base_freq=6.0,
+        rois={"R1": ["Oz"], "R2": ["POz"]},
+        mode="single",
+        analysis_scope="available_case",
+    )
+
+    payload = result["prepared_payload"]
+    assert captured["analysis_scope"] == "available_case"
+    assert payload.analysis_scope == "available_case"
+    assert payload.retained_conditions == ("A", "B")
+    assert len(payload.primary_data) == len(project_long)
+
+
 def test_project_prepare_accepts_canonical_and_display_group_aliases(
     monkeypatch,
 ) -> None:
@@ -655,6 +871,116 @@ def test_project_adapter_reuses_qc_and_applies_manual_then_nonfinite_exclusions(
     assert metadata["qc_report"] is qc_report
     outlier_report = metadata["outlier_report"]
     assert outlier_report.summary.n_subjects_required_excluded == 1
+
+
+def test_available_case_missing_workbook_does_not_exclude_participant(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    p1_a = tmp_path / "P1_A.xlsx"
+    p1_b = tmp_path / "P1_B.xlsx"
+    p2_a = tmp_path / "P2_A.xlsx"
+    for path in (p1_a, p1_b, p2_a):
+        path.touch()
+
+    monkeypatch.setattr(
+        workers,
+        "prepare_summed_bca_data",
+        lambda **_kwargs: {
+            "P1": {"A": {"R1": 1.0}, "B": {"R1": 1.2}},
+            "P2": {"A": {"R1": 0.9}, "B": {"R1": float("nan")}},
+        },
+    )
+
+    frame, frozen, metadata = workers._prepare_project_long_data(
+        subjects=["P1", "P2"],
+        conditions=["A", "B"],
+        conditions_all=["A", "B"],
+        subject_data={
+            "P1": {"A": str(p1_a), "B": str(p1_b)},
+            "P2": {"A": str(p2_a)},
+        },
+        base_freq=6.0,
+        rois={"R1": ["Oz"]},
+        rois_all=None,
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
+        outlier_abs_limit=50.0,
+        qc_config=None,
+        qc_state={"report": _cached_qc_report()},
+        manual_excluded_pids=None,
+        max_freq=None,
+        project_root=None,
+        message_emit=lambda _message: None,
+        progress_callback=None,
+        analysis_scope="available_case",
+    )
+
+    assert frozen == ["P1", "P2"]
+    assert set(frame["subject"]) == {"P1", "P2"}
+    assert not (
+        frame["subject"].eq("P2") & frame["condition"].eq("B")
+    ).any()
+    assert metadata["analysis_scope"] == "available_case"
+    assert metadata["missing_source_workbooks"] == [
+        {
+            "participant_id": "P2",
+            "condition": "B",
+            "reason": "source_workbook_absent",
+            "source_path": "",
+        }
+    ]
+    assert (
+        metadata["outlier_report"].summary.n_subjects_required_excluded
+        == 0
+    )
+
+
+def test_available_case_present_workbook_nonfinite_still_excludes_participant(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    p1_a = tmp_path / "P1_A.xlsx"
+    p2_a = tmp_path / "P2_A.xlsx"
+    p1_a.touch()
+    p2_a.touch()
+    monkeypatch.setattr(
+        workers,
+        "prepare_summed_bca_data",
+        lambda **_kwargs: {
+            "P1": {"A": {"R1": 1.0}},
+            "P2": {"A": {"R1": float("nan")}},
+        },
+    )
+
+    frame, frozen, metadata = workers._prepare_project_long_data(
+        subjects=["P1", "P2"],
+        conditions=["A"],
+        conditions_all=["A"],
+        subject_data={
+            "P1": {"A": str(p1_a)},
+            "P2": {"A": str(p2_a)},
+        },
+        base_freq=6.0,
+        rois={"R1": ["Oz"]},
+        rois_all=None,
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
+        outlier_abs_limit=50.0,
+        qc_config=None,
+        qc_state={"report": _cached_qc_report()},
+        manual_excluded_pids=None,
+        max_freq=None,
+        project_root=None,
+        message_emit=lambda _message: None,
+        progress_callback=None,
+        analysis_scope="available_case",
+    )
+
+    assert frozen == ["P1"]
+    assert frame["subject"].tolist() == ["P1"]
+    assert (
+        metadata["outlier_report"].summary.n_subjects_required_excluded
+        == 1
+    )
 
 
 def test_prepare_cancellation_after_adaptive_preflight_skips_summed_bca(

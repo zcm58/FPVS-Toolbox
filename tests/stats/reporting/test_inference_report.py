@@ -40,6 +40,92 @@ def _prepared_design(*, excluded: str = "incomplete") -> dict[str, pd.DataFrame]
     }
 
 
+def _available_case_design() -> dict[str, pd.DataFrame]:
+    return {
+        "Analysis Design": pd.DataFrame(
+            [
+                {
+                    "status": "ready",
+                    "analysis_scope": "available_case",
+                    "n_frozen_participants": 12,
+                    "n_contributing_participants": 10,
+                    "retained_conditions": "faces; objects",
+                    "complete_conditions": "faces",
+                    "excluded_conditions": "scrambled",
+                    "n_observed_rows": 35,
+                }
+            ]
+        ),
+        "Coverage": pd.DataFrame(
+            [
+                {"condition": "faces", "roi": "left", "cell_complete": True},
+                {"condition": "objects", "roi": "left", "cell_complete": False},
+                {
+                    "condition": "scrambled",
+                    "roi": "left",
+                    "cell_complete": False,
+                },
+            ]
+        ),
+        "Model Cell Coverage": pd.DataFrame(
+            [
+                {
+                    "group_id": None,
+                    "condition": "faces",
+                    "roi": "left",
+                    "n_finite_values": 10,
+                    "structurally_observed": True,
+                },
+                {
+                    "group_id": None,
+                    "condition": "objects",
+                    "roi": "left",
+                    "n_finite_values": 8,
+                    "structurally_observed": True,
+                },
+                {
+                    "group_id": None,
+                    "condition": "scrambled",
+                    "roi": "left",
+                    "n_finite_values": 0,
+                    "structurally_observed": False,
+                },
+            ]
+        ),
+        "Participant Coverage": pd.DataFrame(
+            [
+                {
+                    "participant_id": f"S{index:02d}",
+                    "contributes_to_primary": index <= 10,
+                }
+                for index in range(1, 13)
+            ]
+        ),
+        "Missing Observations": pd.DataFrame(
+            [
+                {
+                    "participant_id": "S11",
+                    "condition": "objects",
+                    "roi": "left",
+                    "condition_retained": True,
+                },
+                {
+                    "participant_id": "S12",
+                    "condition": "objects",
+                    "roi": "left",
+                    "condition_retained": True,
+                },
+                {
+                    "participant_id": "S01",
+                    "condition": "scrambled",
+                    "roi": "left",
+                    "condition_retained": False,
+                },
+            ]
+        ),
+    }
+
+
 def _response_results(
     *,
     p_adjusted: float = 0.012,
@@ -518,6 +604,8 @@ def test_single_mixed_model_lrt_is_detailed_secondary() -> None:
                 "p_value_chi2": 0.01,
                 "status": "ok",
                 "reportable": True,
+                "headline_eligible": True,
+                "analysis_scope": "complete_core",
             }
         ]
     )
@@ -532,6 +620,113 @@ def test_single_mixed_model_lrt_is_detailed_secondary() -> None:
     assert row["p_value_source"] == "likelihood_ratio"
     assert not bool(row["headline_eligible"])
     assert row["headline_reason"] == "single_mixed_model_lrt_is_secondary"
+
+
+def test_available_case_single_mixed_model_lrt_can_be_headlined_explicitly() -> None:
+    lrt = pd.DataFrame(
+        [
+            {
+                "Effect": "condition * roi",
+                "p_value_chi2": 0.01,
+                "p_adjusted": 0.03,
+                "adjustment_method": "holm",
+                "family_id": "omnibus_effects_strict",
+                "family_size": 3,
+                "status": "ok",
+                "reportable": True,
+                "headline_eligible": True,
+                "analysis_scope": "available_case",
+            }
+        ]
+    )
+
+    bundle = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {"Mixed Model LRT": lrt},
+    )
+
+    row = bundle.test_inventory.iloc[0]
+    assert bool(row["headline_eligible"])
+    assert row["headline_reason"] == (
+        "available_case_lmm_lrt_marked_headline_eligible"
+    )
+    assert "condition * roi: evidence of a within-subject effect" in (
+        bundle.at_a_glance
+    )
+
+
+def test_available_case_reporting_discloses_missing_data_contract() -> None:
+    bundle = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            "Mixed Model LRT": pd.DataFrame(
+                [
+                    {
+                        "Effect": "condition",
+                        "p_value_chi2": 0.20,
+                        "status": "ok",
+                        "reportable": True,
+                        "headline_eligible": True,
+                        "analysis_scope": "available_case",
+                    }
+                ]
+            )
+        },
+    )
+
+    text = f"{bundle.at_a_glance}\n{bundle.detailed_methods}"
+    assert "frozen at N=12" in text
+    assert "N=10 participant(s) contributed" in text
+    assert "Conditions retained for available-case modeling: faces; objects" in text
+    assert "Fully complete conditions: faces" in text
+    assert "Partially observed conditions retained in the model: objects" in text
+    assert "required fixed-effect cell" in text
+    assert "No imputation was performed" in text
+    assert "varied from N=8 to N=10" in text
+    assert "Repeated-measures ANOVA and paired post-hoc tests" in text
+    assert "missing at random, MAR" in text
+    assert "missing not at random, MNAR" in text
+    assert {
+        "available_case_no_imputation",
+        "available_case_mar_assumption",
+        "available_case_mnar_bias",
+        "balanced_methods_omitted",
+        "frozen_vs_contributing_participants",
+        "varying_cell_sample_sizes",
+    }.issubset(set(bundle.limitations["code"]))
+    summary = bundle.run_summary.iloc[0]
+    assert summary["analysis_scope"] == "available_case"
+    assert summary["n_frozen_participants"] == 12
+    assert summary["n_contributing_participants"] == 10
+    assert summary["partial_conditions"] == "objects"
+    assert summary["imputation_method"] == "none"
+
+
+def test_available_case_wald_row_remains_detailed_only_when_explicitly_marked() -> None:
+    fixed_effect = pd.DataFrame(
+        [
+            {
+                "Effect": "condition[T.objects]",
+                "P>|z|": 0.01,
+                "status": "ok",
+                "headline_eligible": True,
+                "analysis_scope": "available_case",
+            }
+        ]
+    )
+
+    bundle = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {"Mixed Model": fixed_effect},
+    )
+
+    row = bundle.test_inventory.iloc[0]
+    assert row["p_value_source"] == "wald"
+    assert not bool(row["headline_eligible"])
+    assert row["headline_reason"] == "raw_wald_p_is_detailed_only"
 
 
 def test_analysis_can_mark_unadjusted_omnibus_decomposition_detailed_only() -> None:

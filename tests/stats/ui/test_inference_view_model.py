@@ -100,7 +100,7 @@ def test_mode_and_harmonic_provenance_follow_explicit_contracts() -> None:
     )
 
 
-def test_single_mode_rejects_group_pair_and_invalid_scope() -> None:
+def test_single_mode_rejects_group_pair_and_unknown_scope() -> None:
     common = {
         "mode": AnalysisMode.SINGLE,
         "profile": AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
@@ -115,10 +115,10 @@ def test_single_mode_rejects_group_pair_and_invalid_scope() -> None:
             **common,
             selected_group_pair=("a", "b"),
         )
-    with pytest.raises(ValueError, match="complete-core"):
+    with pytest.raises(ValueError, match="analysis_scope"):
         NativeInferenceOptions(
             **common,
-            analysis_scope="available_case",
+            analysis_scope="participant_mean",
         )
 
 
@@ -141,6 +141,24 @@ def test_pipeline_progress_maps_each_step_into_the_full_run() -> None:
     assert "condition" in phase_label(
         StepId.GROUP_CELL_COMPARISONS
     ).casefold()
+    available_case_order = (
+        StepId.PREPARE_ANALYSIS,
+        StepId.MIXED_MODEL,
+        StepId.BASELINE_VS_ZERO,
+        StepId.REPORT_BUNDLE,
+    )
+    assert overall_progress(
+        PipelineId.SINGLE,
+        StepId.PREPARE_ANALYSIS,
+        100,
+        step_order=available_case_order,
+    ) == 25
+    assert overall_progress(
+        PipelineId.SINGLE,
+        StepId.REPORT_BUNDLE,
+        100,
+        step_order=available_case_order,
+    ) == 100
 
 
 def test_single_queue_omits_sensitivities_only_when_all_are_disabled() -> None:
@@ -164,3 +182,46 @@ def test_single_queue_omits_sensitivities_only_when_all_are_disabled() -> None:
     assert StepId.SENSITIVITIES not in pipeline_steps_for_options(disabled)
     assert pipeline_steps_for_options(disabled)[0] is StepId.PREPARE_ANALYSIS
     assert pipeline_steps_for_options(disabled)[-1] is StepId.REPORT_BUNDLE
+
+
+def test_available_case_single_queue_uses_lmm_and_suppresses_paired_steps() -> None:
+    options = NativeInferenceOptions(
+        mode=AnalysisMode.SINGLE,
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        correction=CorrectionMethod.HOLM,
+        alternative=Alternative.TWO_SIDED,
+        harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
+        alpha=0.05,
+        analysis_scope="available_case",
+        run_resampling=True,
+    )
+
+    queue = pipeline_steps_for_options(options)
+
+    assert options.analysis_scope == "available_case"
+    assert options.run_resampling is False
+    assert options.sensitivity_config()["run_resampling"] is False
+    assert StepId.MIXED_MODEL in queue
+    assert StepId.BASELINE_VS_ZERO in queue
+    assert StepId.RM_ANOVA not in queue
+    assert StepId.INTERACTION_POSTHOCS not in queue
+    assert StepId.SENSITIVITIES in queue
+
+
+def test_available_case_multi_queue_keeps_model_and_cell_comparisons() -> None:
+    options = NativeInferenceOptions(
+        mode=AnalysisMode.MULTI,
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        correction=CorrectionMethod.HOLM,
+        alternative=Alternative.TWO_SIDED,
+        harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
+        alpha=0.05,
+        analysis_scope="available_case",
+        selected_group_pair=("a", "b"),
+    )
+
+    queue = pipeline_steps_for_options(options)
+
+    assert StepId.MULTIGROUP_MODEL in queue
+    assert StepId.GROUP_CELL_COMPARISONS in queue
+    assert options.run_resampling is False

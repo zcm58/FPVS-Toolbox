@@ -30,14 +30,21 @@ that might be needed for a publication quality manuscript.
 The Stats tool supports native single- and multi-group inference. Project mode
 is manifest-owned: a true multi-group project must use canonical `group_id`
 values and must not be silently pooled into the single-group pipeline. Both
-modes freeze the QC/manual-eligible participant cohort before finding the
-complete shared Condition x ROI core. Conditions may be excluded for
-incomplete coverage; participants must not be dropped inside a model to rescue
-a condition. The default strict `omnibus_effects_strict` family applies the
-selected correction (Holm by default) to canonical single-group RM-ANOVA
-effects or the four multi-group ML-LRT rows. If strict control is disabled,
-the joint "Any group-related effect" test is the sole primary multi-group
-omnibus question and the decomposition rows remain exploratory.
+modes freeze the QC/manual-eligible participant cohort before applying the
+selected missing-data scope. Complete core remains the default and excludes
+Conditions lacking full participant x ROI coverage. Available-case LMM mode
+retains finite observations from structurally estimable Conditions without
+imputation; it must not run RM-ANOVA, paired post-hocs, or the current
+complete-matrix max-|t| resampling. Participants must never be dropped inside
+a model to rescue a Condition. Available-case reports must distinguish frozen
+from contributing participants, report varying cell Ns, and disclose the MAR
+assumption and possible MNAR bias. The default strict
+`omnibus_effects_strict` family applies the selected correction (Holm by
+default) to canonical single-group RM-ANOVA effects, available-case
+single-group ML-LRT rows, or the four multi-group ML-LRT rows. If strict
+control is disabled, the joint "Any group-related effect" test is the sole
+primary multi-group omnibus question and the decomposition rows remain
+exploratory.
 
 v2.1 project contract:
 

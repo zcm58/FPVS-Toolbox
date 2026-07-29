@@ -246,6 +246,13 @@ def test_complete_core_is_validated_and_available_case_is_labelled() -> None:
         analysis_scope="available_case",
     )
     assert result.metadata.loc[0, "analysis_scope"] == "available_case"
+    contrasts = result.contrasts.set_index("condition")
+    assert contrasts.loc["Faces", "n_group_a"] == 3
+    assert contrasts.loc["Objects", "n_group_a"] == 2
+    assert contrasts["n_group_b"].eq(3).all()
+    assert contrasts["analysis_scope"].eq("available_case").all()
+    assert contrasts["missing_values_imputed"].eq(False).all()
+    assert "Available-case" in result.metadata.loc[0, "family_label"]
 
 
 def test_tiny_and_zero_variance_cells_remain_non_estimable_without_infinity() -> None:

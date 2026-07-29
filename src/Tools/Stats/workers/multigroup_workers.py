@@ -79,7 +79,7 @@ from Tools.Stats.data.group_harmonic_cache import (
 )
 
 
-PREPARED_WORKER_SCHEMA_VERSION = 1
+PREPARED_WORKER_SCHEMA_VERSION = 2
 MAX_SENSITIVITY_RESAMPLES = 100_000
 MAX_ROBUST_CELLS = 512
 ProgressCallback = Callable[[int, int], None]
@@ -503,6 +503,7 @@ def _normalized_preparation_kwargs(
         "selected_group_pair",
         "settings",
         "preparation_id",
+        "analysis_scope",
     }
     return {key: value for key, value in values.items() if key in allowed}
 
@@ -526,7 +527,13 @@ def _prepare_project_long_data(
     message_emit: Callable[[str], None],
     progress_callback: ProgressCallback | None,
     cancel_check: CancelCheck | None = None,
+    analysis_scope: str = "complete_core",
 ) -> tuple[pd.DataFrame, list[str], dict[str, object]]:
+    scope = str(analysis_scope).strip().casefold().replace("-", "_")
+    if scope not in {"complete_core", "available_case"}:
+        raise ValueError(
+            "analysis_scope must be 'complete_core' or 'available_case'."
+        )
     selected_subjects = [str(value) for value in subjects]
     excluded = {
         str(value)
@@ -659,6 +666,52 @@ def _prepare_project_long_data(
         raise RuntimeError("Summed-BCA preparation returned no data.")
     _emit_progress(progress_callback, 3, 5)
     long_data = _long_format_from_bca(nested)
+    missing_source_pairs: list[dict[str, str]] = []
+    if scope == "available_case":
+        available_pairs: set[tuple[str, str]] = set()
+        for participant in selected_subjects:
+            participant_sources = selected_subject_data.get(participant, {})
+            if not isinstance(participant_sources, Mapping):
+                participant_sources = {}
+            sources_by_condition = {
+                str(key).strip().casefold(): value
+                for key, value in participant_sources.items()
+            }
+            for condition in (str(value) for value in conditions):
+                source = sources_by_condition.get(
+                    condition.strip().casefold()
+                )
+                source_exists = bool(source) and Path(str(source)).is_file()
+                if source_exists:
+                    available_pairs.add(
+                        (participant.casefold(), condition.casefold())
+                    )
+                else:
+                    missing_source_pairs.append(
+                        {
+                            "participant_id": participant,
+                            "condition": condition,
+                            "reason": "source_workbook_absent",
+                            "source_path": "" if source is None else str(source),
+                        }
+                    )
+        row_pairs = pd.Series(
+            list(
+                zip(
+                    long_data["subject"].astype(str).str.casefold(),
+                    long_data["condition"].astype(str).str.casefold(),
+                )
+            ),
+            index=long_data.index,
+        )
+        long_data = long_data.loc[
+            row_pairs.map(lambda pair: pair in available_pairs)
+        ].copy()
+        if long_data.empty:
+            raise RuntimeError(
+                "No existing source workbooks contributed available-case "
+                "Summed-BCA rows."
+            )
     _raise_if_preparation_cancelled(
         cancel_check,
         stage="before_hard_dv_filter",
@@ -692,6 +745,8 @@ def _prepare_project_long_data(
         "qc_report": qc_report,
         "outlier_report": outlier_report,
         "project_input_prepared": True,
+        "analysis_scope": scope,
+        "missing_source_workbooks": missing_source_pairs,
     }
     return filtered, selected_subjects, preparation_metadata
 
@@ -782,6 +837,12 @@ def run_prepare_analysis(
                     message_emit=message_callback,
                     progress_callback=worker_progress,
                     cancel_check=cancel_check,
+                    analysis_scope=str(
+                        preparation_kwargs.get(
+                            "analysis_scope",
+                            "complete_core",
+                        )
+                    ),
                 )
                 preparation_kwargs.setdefault("dv_col", "value")
                 preparation_kwargs.setdefault("subject_col", "subject")
@@ -890,6 +951,7 @@ def run_multigroup_model_step(
             ci_level=ci_level,
             marginal_grid=marginal_grid,
             reference_group_id=reference_group_id,
+            analysis_scope=payload.analysis_scope,
         )
         corrected_omnibus = _apply_strict_omnibus_correction(
             payload,
@@ -945,7 +1007,7 @@ def run_group_cell_step(
     progress_callback: ProgressCallback | None = None,
     **_ignored: object,
 ) -> dict[str, object]:
-    """Run complete-core Welch cell contrasts for the selected group pair."""
+    """Run Welch cell contrasts under the prepared missing-data scope."""
 
     payload, progress_callback, message_callback = _resolve_step_invocation(
         progress_or_payload,
@@ -973,7 +1035,10 @@ def run_group_cell_step(
             message="Group-cell comparisons were cancelled before they started.",
         )
     _emit_progress(progress_callback, 0, 1)
-    message_callback("Running prepared complete-core group-cell comparisons.")
+    message_callback(
+        f"Running prepared {payload.analysis_scope.replace('_', '-')} "
+        "group-cell comparisons."
+    )
     selected_pair = group_pair or payload.selected_group_pair
     try:
         result = _run_group_cell_comparisons(
@@ -986,7 +1051,7 @@ def run_group_cell_step(
             group_pair=selected_pair,
             correction=correction,
             alpha=payload.run_spec.alpha if alpha is None else float(alpha),
-            analysis_scope="complete_core",
+            analysis_scope=payload.analysis_scope,
         )
     except Exception as exc:
         return _response(
@@ -1013,7 +1078,10 @@ def run_group_cell_step(
         step=step,
         status="ok",
         status_code="group_cell_comparisons_ok",
-        message="Complete-core group-cell comparisons completed.",
+        message=(
+            f"{payload.analysis_scope.replace('_', '-').title()} "
+            "group-cell comparisons completed."
+        ),
         frames=_merged_frames(payload, result.to_frames()),
         primary_object=result,
     )
@@ -1210,7 +1278,7 @@ def _stability_frames(
         "condition_col": payload.condition_col,
         "roi_col": payload.roi_col,
         "alpha": payload.run_spec.alpha,
-        "analysis_scope": "complete_core",
+        "analysis_scope": payload.analysis_scope,
     }
     if payload.mode is AnalysisMode.MULTI:
         result = run_two_group_leave_one_out_stability(
@@ -1287,12 +1355,39 @@ def run_sensitivity_step(
             name
             for name, active in (
                 ("robust", resolved.run_robust),
-                ("resampling", resolved.run_resampling),
+                (
+                    "resampling",
+                    resolved.run_resampling
+                    and payload.analysis_scope != "available_case",
+                ),
                 ("stability", resolved.run_stability),
             )
             if active
         ]
         frames = payload.to_frames()
+        resampling_suppressed = bool(
+            resolved.run_resampling
+            and payload.analysis_scope == "available_case"
+        )
+        if resampling_suppressed:
+            frames["Resampling Metadata"] = pd.DataFrame(
+                [
+                    {
+                        "overall_status": "not_run",
+                        "status_code": (
+                            "incompatible_with_available_case_scope"
+                        ),
+                        "status_message": (
+                            "The current participant-level max-|t| "
+                            "resampling method requires a complete "
+                            "participant x Condition x ROI matrix. It was "
+                            "not run on the available-case LMM cohort."
+                        ),
+                        "analysis_scope": payload.analysis_scope,
+                        "missing_values_imputed": False,
+                    }
+                ]
+            )
         primary_objects: dict[str, object] = {}
         for stage_index, method in enumerate(enabled):
             if _is_cancelled(cancel_check):
@@ -1367,6 +1462,15 @@ def run_sensitivity_step(
                 {
                     "run_robust": resolved.run_robust,
                     "run_resampling": resolved.run_resampling,
+                    "run_resampling_effective": (
+                        resolved.run_resampling
+                        and not resampling_suppressed
+                    ),
+                    "resampling_suppressed_reason": (
+                        "incompatible_with_available_case_scope"
+                        if resampling_suppressed
+                        else ""
+                    ),
                     "run_stability": resolved.run_stability,
                     "trim_fraction": resolved.trim_fraction,
                     "n_resamples": resolved.n_resamples,
@@ -1457,6 +1561,17 @@ def run_single_rm_anova_step(
     )
     if blocked is not None:
         return blocked
+    if payload.analysis_scope == "available_case":
+        return _response(
+            payload=payload,
+            step="single_rm_anova",
+            status="blocked",
+            status_code="rm_anova_requires_complete_core",
+            message=(
+                "RM-ANOVA was not run because available-case data may contain "
+                "missing participant conditions. Use the mixed model result."
+            ),
+        )
     if len(payload.complete_conditions) < 2:
         return _response(
             payload=payload,
@@ -1542,7 +1657,7 @@ def run_single_lmm_step(
     progress_callback: ProgressCallback | None = None,
     **_ignored: object,
 ) -> dict[str, object]:
-    """Run the established single-group LMM on prepared complete-core rows."""
+    """Run the single-group LMM on the prepared analysis rows."""
 
     payload, progress, message, blocked = _single_step_start(
         progress_or_payload,
@@ -1576,6 +1691,11 @@ def run_single_lmm_step(
             ci_level=float(ci_level),
             return_model=True,
             do_lrt=True,
+            analysis_scope=payload.analysis_scope,
+            cell_cols=(
+                payload.condition_col,
+                payload.roi_col,
+            ),
         )
     except Exception as exc:
         return _response(
@@ -1597,7 +1717,23 @@ def run_single_lmm_step(
     lrt_table = mixed_results.attrs.get("lrt_table")
     frames = {"Mixed Model": mixed_results}
     if isinstance(lrt_table, pd.DataFrame):
+        if payload.analysis_scope == "available_case":
+            lrt_table = _apply_strict_omnibus_correction(
+                payload,
+                lrt_table,
+                p_col="p_value_chi2",
+            )
+            lrt_table["analysis_scope"] = payload.analysis_scope
+            lrt_table["missing_values_imputed"] = False
+            mixed_results.attrs["lrt_table"] = lrt_table
+        else:
+            lrt_table = lrt_table.copy()
+            lrt_table["inference_role"] = "secondary"
+            lrt_table["headline_eligible"] = False
         frames["Mixed Model LRT"] = lrt_table
+    diagnostics = mixed_results.attrs.get("model_diagnostics")
+    if isinstance(diagnostics, pd.DataFrame):
+        frames["Mixed Model Diagnostics"] = diagnostics
     status = (
         "partial"
         if "LRT Status" in mixed_results.columns
@@ -1607,7 +1743,16 @@ def run_single_lmm_step(
     fit_status = {
         "status": status,
         "alpha": payload.run_spec.alpha if alpha is None else float(alpha),
-        "prepared_complete_core": True,
+        "analysis_scope": payload.analysis_scope,
+        "prepared_complete_core": (
+            payload.analysis_scope == "complete_core"
+        ),
+        "n_observations": int(len(payload.primary_data)),
+        "n_frozen_participants": len(payload.frozen_participants),
+        "n_contributing_participants": len(
+            payload.contributing_participants
+        ),
+        "missing_values_imputed": False,
     }
     response = _response(
         payload=payload,
@@ -1663,6 +1808,18 @@ def run_single_posthoc_step(
     )
     if blocked is not None:
         return blocked
+    if payload.analysis_scope == "available_case":
+        return _response(
+            payload=payload,
+            step="single_interaction_posthocs",
+            status="blocked",
+            status_code="paired_posthocs_require_complete_core",
+            message=(
+                "Paired interaction follow-ups were not run because "
+                "available-case participants may not share every Condition x "
+                "ROI cell. The omnibus LMM is the primary result."
+            ),
+        )
     if _is_cancelled(cancel_check):
         return _response(
             payload=payload,
@@ -1807,7 +1964,15 @@ def run_single_baseline_step(
         ),
         "correction": str(correction),
         "correction_scope": correction_scope,
-        "total_unique_subjects": len(payload.frozen_participants),
+        "analysis_scope": payload.analysis_scope,
+        "total_unique_subjects": len(
+            payload.contributing_participants
+        ),
+        "n_frozen_participants": len(payload.frozen_participants),
+        "n_contributing_participants": len(
+            payload.contributing_participants
+        ),
+        "missing_values_imputed": False,
         "harmonic_provenance": (
             payload.run_spec.harmonic_provenance.value
         ),

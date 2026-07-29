@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from Tools.Stats.analysis import mixed_effects_model as lmm
 
@@ -121,3 +123,88 @@ def test_do_lrt_keeps_failed_comparisons_visible(monkeypatch) -> None:
     assert table["LRT Status"].eq("failed").all()
     assert lrt_table["status"].eq("failed").all()
     assert lrt_table["error"].str.contains("synthetic optimizer failure").all()
+
+
+def test_available_case_lmm_uses_sparse_observed_rows_for_every_lrt() -> None:
+    rng = np.random.default_rng(20260729)
+    rows: list[dict[str, object]] = []
+    for participant_index in range(12):
+        participant = f"P{participant_index + 1:02d}"
+        participant_effect = float(rng.normal(0.0, 0.45))
+        for condition_index, condition in enumerate(("A", "B", "C")):
+            for roi_index, roi in enumerate(("left", "right")):
+                if (
+                    (participant_index == 2 and condition == "B")
+                    or (
+                        participant_index == 8
+                        and condition == "C"
+                        and roi == "right"
+                    )
+                ):
+                    continue
+                rows.append(
+                    {
+                        "subject": participant,
+                        "condition": condition,
+                        "roi": roi,
+                        "value": (
+                            1.0
+                            + participant_effect
+                            + 0.18 * condition_index
+                            + 0.09 * roi_index
+                            + float(rng.normal(0.0, 0.08))
+                        ),
+                    }
+                )
+
+    table = lmm.run_mixed_effects_model(
+        pd.DataFrame(rows),
+        dv_col="value",
+        group_col="subject",
+        fixed_effects=["condition * roi"],
+        do_lrt=True,
+        analysis_scope="available_case",
+    )
+
+    assert table["Analysis Scope"].eq("available_case").all()
+    assert table["Observations"].eq(len(rows)).all()
+    assert table["Missing Participant Cells"].eq(3).all()
+    diagnostics = table.attrs["model_diagnostics"].set_index("check_id")
+    assert diagnostics.loc["participant_cell_coverage", "status"] == "warning"
+    lrt_table = table.attrs["lrt_table"]
+    assert lrt_table["status"].eq("ok").all()
+    assert lrt_table["same_observed_rows"].all()
+    assert lrt_table["n_observations_full"].eq(len(rows)).all()
+    assert lrt_table["n_observations_reduced"].eq(len(rows)).all()
+
+
+def test_available_case_lmm_blocks_structurally_empty_factorial_cell() -> None:
+    data = pd.DataFrame(
+        [
+            {
+                "subject": participant,
+                "condition": condition,
+                "roi": roi,
+                "value": float(index),
+            }
+            for index, (participant, condition, roi) in enumerate(
+                (
+                    ("P1", "A", "left"),
+                    ("P1", "A", "right"),
+                    ("P1", "B", "left"),
+                    ("P2", "A", "left"),
+                    ("P2", "A", "right"),
+                    ("P2", "B", "left"),
+                )
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="structurally empty"):
+        lmm.run_mixed_effects_model(
+            data,
+            dv_col="value",
+            group_col="subject",
+            fixed_effects=["condition * roi"],
+            analysis_scope="available_case",
+        )

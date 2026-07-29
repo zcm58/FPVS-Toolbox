@@ -800,7 +800,18 @@ class StatsWindowPipelineMixin:
     ) -> None:
         """Map worker-local progress to one stable pipeline progress value."""
 
-        percent = overall_progress(pipeline_id, step_id, step_percent)
+        step_orders = getattr(self, "_native_step_order_by_pipeline", {})
+        step_order = (
+            tuple(step_orders.get(pipeline_id, ()))
+            if isinstance(step_orders, Mapping)
+            else ()
+        )
+        percent = overall_progress(
+            pipeline_id,
+            step_id,
+            step_percent,
+            step_order=step_order or None,
+        )
         self._progress_updates.append(percent)
         setter = getattr(self, "set_pipeline_progress", None)
         if callable(setter):
@@ -1138,18 +1149,6 @@ class StatsWindowPipelineMixin:
                 extra={"reason": "native_options_invalid"},
             )
             return False
-        if options.analysis_scope != "complete_core":
-            message = (
-                "The native primary pipeline currently requires complete-core "
-                "coverage. Choose 'Shared complete conditions' to continue."
-            )
-            self._set_status(message)
-            self.append_log(
-                self._section_label(pipeline_id),
-                message,
-                level="warning",
-            )
-            return False
         self._native_options_by_pipeline = {pipeline_id: options}
         self._log_pipeline_event(pipeline=pipeline_id, event="end")
         return True
@@ -1163,6 +1162,22 @@ class StatsWindowPipelineMixin:
         )
         self._pipeline_start_perf[pipeline_id] = time.perf_counter()
         self._active_pipeline = pipeline_id
+        controller_states = getattr(self._controller, "_states", {})
+        controller_state = (
+            controller_states.get(pipeline_id)
+            if isinstance(controller_states, Mapping)
+            else None
+        )
+        actual_step_order = tuple(
+            step.id
+            for step in getattr(controller_state, "steps", ())
+            if isinstance(getattr(step, "id", None), StepId)
+        )
+        step_orders = getattr(self, "_native_step_order_by_pipeline", None)
+        if not isinstance(step_orders, dict):
+            step_orders = {}
+            self._native_step_order_by_pipeline = step_orders
+        step_orders[pipeline_id] = actual_step_order
         self._pipeline_conditions[pipeline_id] = list(
             snapshot.get("selected_conditions")
             or self._get_selected_conditions()
@@ -1336,6 +1351,13 @@ class StatsWindowPipelineMixin:
                 },
             )
         finally:
+            step_orders = getattr(
+                self,
+                "_native_step_order_by_pipeline",
+                None,
+            )
+            if isinstance(step_orders, dict):
+                step_orders.pop(pipeline_id, None)
             try:
                 self._update_single_group_analysis_availability()
             except Exception:  # noqa: BLE001
@@ -1517,6 +1539,7 @@ class StatsWindowPipelineMixin:
                 "manual_excluded_pids": sorted(self.manual_excluded_pids),
                 "project_root": str(self._project_path),
                 "mode": options.mode.value,
+                "analysis_scope": options.analysis_scope,
                 "run_spec": run_spec,
                 "canonical_group_ids": canonical_group_ids,
                 "group_display_labels": group_display_labels,
@@ -1527,6 +1550,12 @@ class StatsWindowPipelineMixin:
             return kwargs, store
 
         if step_id is StepId.RM_ANOVA:
+            if options.analysis_scope == "available_case":
+                raise ValueError(
+                    "RM-ANOVA is not available for available-case data. "
+                    "Use the mixed-model step."
+                )
+
             def handle_rm_anova(payload: dict) -> None:
                 store(payload)
                 self._apply_rm_anova_results(payload, update_text=False)
@@ -1541,6 +1570,12 @@ class StatsWindowPipelineMixin:
             return {"alpha": options.alpha}, handle_mixed_model
 
         if step_id is StepId.INTERACTION_POSTHOCS:
+            if options.analysis_scope == "available_case":
+                raise ValueError(
+                    "Paired interaction post-hocs are not available for "
+                    "available-case data."
+                )
+
             def handle_posthocs(payload: dict) -> None:
                 store(payload)
                 self._apply_posthoc_results(payload, update_text=False)
@@ -1594,9 +1629,14 @@ class StatsWindowPipelineMixin:
                 if pipeline_id is PipelineId.MULTI
                 else "Single-Group"
             )
+            export_filename = (
+                f"Native {mode_label} Available-Case LMM Results.xlsx"
+                if options.analysis_scope == "available_case"
+                else f"Native {mode_label} Inference Results.xlsx"
+            )
             export_path = (
                 Path(self._ensure_results_dir())
-                / f"Native {mode_label} Inference Results.xlsx"
+                / export_filename
             )
 
             def handle_report(payload: dict) -> None:

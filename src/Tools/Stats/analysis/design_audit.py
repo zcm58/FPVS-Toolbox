@@ -1,9 +1,10 @@
 """GUI-neutral design auditing for single- and multi-group Stats inference.
 
-The complete-core rule implemented here is intentionally participant-first:
-the QC-eligible cohort is frozen before shared conditions are identified.
-Conditions may be excluded for incomplete/non-finite cells, but participants
-are never silently removed to recover a larger condition set.
+The QC-eligible cohort is always frozen before observations are selected.
+``complete_core`` retains Conditions shared by every frozen participant,
+whereas ``available_case`` retains every usable observation in structurally
+estimable Conditions. Neither scope silently removes participants to improve
+the apparent Condition coverage.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ import numpy as np
 import pandas as pd
 
 
-DESIGN_AUDIT_SCHEMA_VERSION = 1
+DESIGN_AUDIT_SCHEMA_VERSION = 2
+ALLOWED_ANALYSIS_SCOPES = frozenset({"complete_core", "available_case"})
 UNKNOWN_GROUP_IDS = frozenset({"", "unknown", "unassigned", "none", "nan"})
 
 
@@ -38,13 +40,19 @@ class DesignAuditResult:
     status: DesignStatus
     status_code: str
     message: str
+    analysis_scope: str
     frozen_participants: tuple[str, ...]
+    contributing_participants: tuple[str, ...]
     requested_conditions: tuple[str, ...]
     selected_rois: tuple[str, ...]
     complete_conditions: tuple[str, ...]
+    retained_conditions: tuple[str, ...]
     excluded_conditions: tuple[str, ...]
     primary_data: pd.DataFrame
     coverage: pd.DataFrame
+    model_cell_coverage: pd.DataFrame
+    participant_coverage: pd.DataFrame
+    missing_observations: pd.DataFrame
     exclusions: pd.DataFrame
     group_assignments: pd.DataFrame
 
@@ -57,6 +65,11 @@ class DesignAuditResult:
     def metadata_frame(self) -> pd.DataFrame:
         """Return one explicit, Excel-safe design metadata row."""
 
+        partial_conditions = tuple(
+            condition
+            for condition in self.retained_conditions
+            if condition not in self.complete_conditions
+        )
         return pd.DataFrame(
             [
                 {
@@ -64,17 +77,33 @@ class DesignAuditResult:
                     "status": self.status.value,
                     "status_code": self.status_code,
                     "message": self.message,
+                    "analysis_scope": self.analysis_scope,
                     "participant_scope": "frozen_before_condition_intersection",
                     "n_frozen_participants": len(self.frozen_participants),
                     "frozen_participants": "; ".join(self.frozen_participants),
+                    "n_contributing_participants": len(
+                        self.contributing_participants
+                    ),
+                    "contributing_participants": "; ".join(
+                        self.contributing_participants
+                    ),
                     "n_requested_conditions": len(self.requested_conditions),
                     "requested_conditions": "; ".join(self.requested_conditions),
                     "n_complete_conditions": len(self.complete_conditions),
                     "complete_conditions": "; ".join(self.complete_conditions),
+                    "n_retained_conditions": len(self.retained_conditions),
+                    "retained_conditions": "; ".join(self.retained_conditions),
+                    "n_partial_conditions": len(partial_conditions),
+                    "partial_conditions": "; ".join(partial_conditions),
                     "n_excluded_conditions": len(self.excluded_conditions),
                     "excluded_conditions": "; ".join(self.excluded_conditions),
                     "n_selected_rois": len(self.selected_rois),
                     "selected_rois": "; ".join(self.selected_rois),
+                    "n_missing_or_nonfinite_observations": len(
+                        self.missing_observations
+                    ),
+                    "n_observed_rows": len(self.primary_data),
+                    "missing_values_imputed": False,
                 }
             ]
         )
@@ -85,6 +114,9 @@ class DesignAuditResult:
         return {
             "Analysis Design": self.metadata_frame(),
             "Coverage": self.coverage.copy(),
+            "Model Cell Coverage": self.model_cell_coverage.copy(),
+            "Participant Coverage": self.participant_coverage.copy(),
+            "Missing Observations": self.missing_observations.copy(),
             "Exclusions": self.exclusions.copy(),
             "Group Assignments": self.group_assignments.copy(),
             "Primary Data": self.primary_data.copy(),
@@ -128,10 +160,14 @@ def _normalized_group_map(
     if canonical_group_ids is None:
         return {}
     normalized: dict[str, str] = {}
+    display_by_group_key: dict[str, str] = {}
     for raw_participant, raw_group in canonical_group_ids.items():
         participant = str(raw_participant).strip()
         group_id = "" if raw_group is None else str(raw_group).strip()
         if participant:
+            if group_id:
+                display_by_group_key.setdefault(group_id.casefold(), group_id)
+                group_id = display_by_group_key[group_id.casefold()]
             normalized[participant.casefold()] = group_id
     return normalized
 
@@ -163,7 +199,7 @@ def _duplicate_message(
     )
 
 
-def audit_complete_core_design(
+def audit_analysis_design(
     data: pd.DataFrame,
     *,
     dv_col: str,
@@ -175,17 +211,26 @@ def audit_complete_core_design(
     selected_rois: Sequence[object] | None = None,
     canonical_group_ids: Mapping[object, object] | None = None,
     require_groups: bool = False,
+    analysis_scope: str = "complete_core",
 ) -> DesignAuditResult:
-    """Audit and prepare the complete primary Condition x ROI design.
+    """Audit and prepare the requested primary Condition x ROI design.
 
     ``frozen_participants`` should already reflect canonical QC and manual
-    exclusions. When omitted, all observed participants are frozen. A selected
-    condition is complete only when every frozen participant contributes
-    exactly one finite dependent value in every selected ROI.
+    exclusions. When omitted, all observed participants are frozen.
+    ``complete_core`` retains a Condition only when every frozen participant
+    contributes exactly one finite dependent value in every selected ROI.
+    ``available_case`` retains finite observations from Conditions with an
+    observed fixed-effect cell at every selected ROI (and every canonical group
+    in multi-group mode).
     """
 
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a pandas DataFrame.")
+    scope = str(analysis_scope).strip().casefold().replace("-", "_")
+    if scope not in ALLOWED_ANALYSIS_SCOPES:
+        raise DesignAuditError(
+            "analysis_scope must be 'complete_core' or 'available_case'."
+        )
     required = (dv_col, subject_col, condition_col, roi_col)
     missing_columns = [column for column in required if column not in data.columns]
     if missing_columns:
@@ -252,6 +297,27 @@ def audit_complete_core_design(
             )
         )
 
+    group_map = _normalized_group_map(canonical_group_ids)
+    assignment_rows: list[dict[str, object]] = []
+    missing_group_participants: list[str] = []
+    assigned_group_by_participant: dict[str, str | None] = {}
+    for participant in participants:
+        group_id = group_map.get(participant.casefold(), "")
+        assigned = not _is_unknown_group_id(group_id)
+        if not assigned:
+            missing_group_participants.append(participant)
+        assigned_group_by_participant[participant.casefold()] = (
+            group_id if assigned else None
+        )
+        assignment_rows.append(
+            {
+                "participant_id": participant,
+                "group_id": group_id if assigned else None,
+                "assignment_status": "assigned" if assigned else "missing_or_unknown",
+            }
+        )
+    group_assignments = pd.DataFrame(assignment_rows)
+
     lookup = {
         (
             str(row[subject_col]).casefold(),
@@ -261,6 +327,7 @@ def audit_complete_core_design(
         for _, row in selected.iterrows()
     }
     coverage_rows: list[dict[str, object]] = []
+    missing_rows: list[dict[str, object]] = []
     condition_complete: dict[str, bool] = {}
     for condition in conditions:
         all_rois_complete = True
@@ -276,11 +343,39 @@ def audit_complete_core_design(
                     )
                 )
                 if row is None:
+                    missing_rows.append(
+                        {
+                            "participant_id": participant,
+                            "group_id": assigned_group_by_participant[
+                                participant.casefold()
+                            ],
+                            "condition": condition,
+                            "roi": roi,
+                            "missingness_type": "missing_row",
+                            "observed_value": np.nan,
+                        }
+                    )
                     continue
                 n_present += 1
                 if bool(row["_finite_dv"]):
                     n_finite += 1
-            complete = n_present == len(participants) and n_finite == len(participants)
+                else:
+                    missing_rows.append(
+                        {
+                            "participant_id": participant,
+                            "group_id": assigned_group_by_participant[
+                                participant.casefold()
+                            ],
+                            "condition": condition,
+                            "roi": roi,
+                            "missingness_type": "nonfinite_value",
+                            "observed_value": row[dv_col],
+                        }
+                    )
+            complete = (
+                n_present == len(participants)
+                and n_finite == len(participants)
+            )
             all_rois_complete = all_rois_complete and complete
             coverage_rows.append(
                 {
@@ -299,12 +394,105 @@ def audit_complete_core_design(
     complete_conditions = tuple(
         condition for condition in conditions if condition_complete[condition]
     )
-    excluded_conditions = tuple(
-        condition for condition in conditions if not condition_complete[condition]
-    )
     coverage = pd.DataFrame(coverage_rows)
-    coverage["condition_complete"] = coverage["condition"].map(condition_complete)
-    coverage["retained_primary"] = coverage["condition"].isin(complete_conditions)
+    coverage["condition_complete"] = coverage["condition"].map(
+        condition_complete
+    )
+
+    assigned_groups: list[str] = []
+    seen_group_keys: set[str] = set()
+    for participant in participants:
+        group_id = assigned_group_by_participant[participant.casefold()]
+        if group_id is None or group_id.casefold() in seen_group_keys:
+            continue
+        seen_group_keys.add(group_id.casefold())
+        assigned_groups.append(group_id)
+
+    model_cell_rows: list[dict[str, object]] = []
+    condition_structurally_observed: dict[str, bool] = {}
+    model_groups: tuple[str | None, ...] = (
+        tuple(assigned_groups) if require_groups else (None,)
+    )
+    for condition in conditions:
+        condition_observed = bool(model_groups)
+        for roi in rois:
+            for group_id in model_groups:
+                eligible_participants = [
+                    participant
+                    for participant in participants
+                    if group_id is None
+                    or (
+                        assigned_group_by_participant[
+                            participant.casefold()
+                        ]
+                        is not None
+                        and assigned_group_by_participant[
+                            participant.casefold()
+                        ].casefold()
+                        == group_id.casefold()
+                    )
+                ]
+                n_finite = 0
+                for participant in eligible_participants:
+                    row = lookup.get(
+                        (
+                            participant.casefold(),
+                            condition.casefold(),
+                            roi.casefold(),
+                        )
+                    )
+                    if row is not None and bool(row["_finite_dv"]):
+                        n_finite += 1
+                observed = n_finite > 0
+                condition_observed = condition_observed and observed
+                model_cell_rows.append(
+                    {
+                        "group_id": group_id,
+                        "condition": condition,
+                        "roi": roi,
+                        "n_eligible_participants": len(
+                            eligible_participants
+                        ),
+                        "n_finite_values": n_finite,
+                        "n_missing_or_nonfinite": (
+                            len(eligible_participants) - n_finite
+                        ),
+                        "structurally_observed": observed,
+                    }
+                )
+        condition_structurally_observed[condition] = condition_observed
+    model_cell_coverage = pd.DataFrame(
+        model_cell_rows,
+        columns=[
+            "group_id",
+            "condition",
+            "roi",
+            "n_eligible_participants",
+            "n_finite_values",
+            "n_missing_or_nonfinite",
+            "structurally_observed",
+        ],
+    )
+
+    if scope == "complete_core":
+        retained_conditions = complete_conditions
+    else:
+        retained_conditions = tuple(
+            condition
+            for condition in conditions
+            if condition_structurally_observed[condition]
+        )
+    excluded_conditions = tuple(
+        condition
+        for condition in conditions
+        if condition not in retained_conditions
+    )
+    coverage["structurally_observed"] = coverage["condition"].map(
+        condition_structurally_observed
+    )
+    coverage["retained_primary"] = coverage["condition"].isin(
+        retained_conditions
+    )
 
     exclusion_rows: list[dict[str, object]] = []
     for condition in excluded_conditions:
@@ -313,10 +501,16 @@ def audit_complete_core_design(
             {
                 "scope": "condition",
                 "condition": condition,
-                "reason": "incomplete_for_frozen_cohort",
+                "reason": (
+                    "incomplete_for_frozen_cohort"
+                    if scope == "complete_core"
+                    else "structurally_unobserved_model_cell"
+                ),
                 "n_frozen_participants": len(participants),
                 "missing_cells": int(rows["n_missing_rows"].sum()),
-                "nonfinite_cells": int(rows["n_nonfinite_values"].sum()),
+                "nonfinite_cells": int(
+                    rows["n_nonfinite_values"].sum()
+                ),
             }
         )
     exclusions = pd.DataFrame(
@@ -331,26 +525,9 @@ def audit_complete_core_design(
         ],
     )
 
-    group_map = _normalized_group_map(canonical_group_ids)
-    assignment_rows: list[dict[str, object]] = []
-    missing_group_participants: list[str] = []
-    for participant in participants:
-        group_id = group_map.get(participant.casefold(), "")
-        assigned = not _is_unknown_group_id(group_id)
-        if not assigned:
-            missing_group_participants.append(participant)
-        assignment_rows.append(
-            {
-                "participant_id": participant,
-                "group_id": group_id if assigned else None,
-                "assignment_status": "assigned" if assigned else "missing_or_unknown",
-            }
-        )
-    group_assignments = pd.DataFrame(assignment_rows)
-
     primary = selected[
         selected[condition_col].str.casefold().isin(
-            {value.casefold() for value in complete_conditions}
+            {value.casefold() for value in retained_conditions}
         )
         & selected["_finite_dv"]
     ].copy()
@@ -365,52 +542,174 @@ def audit_complete_core_design(
         kind="stable",
     ).reset_index(drop=True)
 
-    status = DesignStatus.READY
-    status_code = "complete_core_ready"
-    message = (
-        f"Complete-core design is ready with {len(participants)} participants "
-        f"and {len(complete_conditions)} shared condition(s)."
+    contributing_keys = set(
+        primary[subject_col].astype(str).str.strip().str.casefold()
     )
-    if not complete_conditions:
-        status = DesignStatus.BLOCKED
-        status_code = "no_shared_complete_condition"
-        message = (
-            "No selected condition has exactly one finite value for every "
-            "frozen participant in every selected ROI."
+    contributing_participants = tuple(
+        participant
+        for participant in participants
+        if participant.casefold() in contributing_keys
+    )
+    participant_coverage_rows: list[dict[str, object]] = []
+    for participant in participants:
+        participant_rows = selected[
+            selected[subject_col].str.casefold().eq(
+                participant.casefold()
+            )
+        ]
+        retained_rows = participant_rows[
+            participant_rows[condition_col].str.casefold().isin(
+                {
+                    condition.casefold()
+                    for condition in retained_conditions
+                }
+            )
+        ]
+        finite_selected = int(participant_rows["_finite_dv"].sum())
+        finite_retained = int(retained_rows["_finite_dv"].sum())
+        participant_coverage_rows.append(
+            {
+                "participant_id": participant,
+                "group_id": assigned_group_by_participant[
+                    participant.casefold()
+                ],
+                "n_requested_cells": len(conditions) * len(rois),
+                "n_finite_requested_cells": finite_selected,
+                "n_retained_cells": (
+                    len(retained_conditions) * len(rois)
+                ),
+                "n_finite_retained_cells": finite_retained,
+                "n_missing_retained_cells": (
+                    len(retained_conditions) * len(rois)
+                    - finite_retained
+                ),
+                "contributes_to_primary": (
+                    participant.casefold() in contributing_keys
+                ),
+            }
         )
-    elif require_groups and missing_group_participants:
+    participant_coverage = pd.DataFrame(participant_coverage_rows)
+    missing_observations = pd.DataFrame(
+        missing_rows,
+        columns=[
+            "participant_id",
+            "group_id",
+            "condition",
+            "roi",
+            "missingness_type",
+            "observed_value",
+        ],
+    )
+    if not missing_observations.empty:
+        missing_observations["condition_retained"] = (
+            missing_observations["condition"].isin(retained_conditions)
+        )
+        missing_observations["used_in_primary"] = False
+    else:
+        missing_observations["condition_retained"] = pd.Series(dtype=bool)
+        missing_observations["used_in_primary"] = pd.Series(dtype=bool)
+
+    status = DesignStatus.READY
+    status_code = f"{scope}_ready"
+    if scope == "complete_core":
+        message = (
+            f"Complete-core design is ready with {len(participants)} "
+            f"participants and {len(retained_conditions)} shared "
+            "condition(s)."
+        )
+    else:
+        message = (
+            f"Available-case design is ready with {len(primary)} observed "
+            f"rows from {len(contributing_participants)} of "
+            f"{len(participants)} frozen participants across "
+            f"{len(retained_conditions)} structurally estimable "
+            "condition(s)."
+        )
+    if require_groups and missing_group_participants:
         status = DesignStatus.BLOCKED
         status_code = "missing_group_assignments"
         message = (
             "Canonical group assignment is missing or unknown for: "
             + ", ".join(missing_group_participants)
         )
-    elif require_groups:
-        assigned_groups = {
-            str(value)
-            for value in group_assignments["group_id"].dropna().tolist()
-        }
-        if len(assigned_groups) < 2:
-            status = DesignStatus.BLOCKED
-            status_code = "insufficient_groups"
+    elif require_groups and len(assigned_groups) < 2:
+        status = DesignStatus.BLOCKED
+        status_code = "insufficient_groups"
+        message = (
+            "Multi-group inference requires at least two canonical groups "
+            "in the frozen cohort."
+        )
+    elif not retained_conditions:
+        status = DesignStatus.BLOCKED
+        if scope == "complete_core":
+            status_code = "no_shared_complete_condition"
             message = (
-                "Multi-group inference requires at least two canonical groups "
-                "in the frozen cohort."
+                "No selected condition has exactly one finite value for every "
+                "frozen participant in every selected ROI."
             )
+        else:
+            status_code = "no_structurally_estimable_condition"
+            message = (
+                "No selected condition has at least one finite observation in "
+                "every required fixed-effect cell."
+            )
+    elif primary.empty or not contributing_participants:
+        status = DesignStatus.BLOCKED
+        status_code = "no_contributing_observations"
+        message = (
+            "No frozen participant contributes a finite observation to the "
+            "retained analysis design."
+        )
 
     return DesignAuditResult(
         status=status,
         status_code=status_code,
         message=message,
+        analysis_scope=scope,
         frozen_participants=participants,
+        contributing_participants=contributing_participants,
         requested_conditions=conditions,
         selected_rois=rois,
         complete_conditions=complete_conditions,
+        retained_conditions=retained_conditions,
         excluded_conditions=excluded_conditions,
         primary_data=primary,
         coverage=coverage.reset_index(drop=True),
+        model_cell_coverage=model_cell_coverage.reset_index(drop=True),
+        participant_coverage=participant_coverage.reset_index(drop=True),
+        missing_observations=missing_observations.reset_index(drop=True),
         exclusions=exclusions,
         group_assignments=group_assignments,
+    )
+
+
+def audit_complete_core_design(
+    data: pd.DataFrame,
+    *,
+    dv_col: str,
+    subject_col: str,
+    condition_col: str,
+    roi_col: str,
+    frozen_participants: Sequence[object] | None = None,
+    selected_conditions: Sequence[object] | None = None,
+    selected_rois: Sequence[object] | None = None,
+    canonical_group_ids: Mapping[object, object] | None = None,
+    require_groups: bool = False,
+) -> DesignAuditResult:
+    """Compatibility wrapper for the participant-first complete-core audit."""
+
+    return audit_analysis_design(
+        data,
+        dv_col=dv_col,
+        subject_col=subject_col,
+        condition_col=condition_col,
+        roi_col=roi_col,
+        frozen_participants=frozen_participants,
+        selected_conditions=selected_conditions,
+        selected_rois=selected_rois,
+        canonical_group_ids=canonical_group_ids,
+        require_groups=require_groups,
+        analysis_scope="complete_core",
     )
 
 
@@ -446,10 +745,12 @@ def build_factor_cell_coverage(
 
 
 __all__ = [
+    "ALLOWED_ANALYSIS_SCOPES",
     "DESIGN_AUDIT_SCHEMA_VERSION",
     "DesignAuditError",
     "DesignAuditResult",
     "DesignStatus",
+    "audit_analysis_design",
     "audit_complete_core_design",
     "build_factor_cell_coverage",
 ]

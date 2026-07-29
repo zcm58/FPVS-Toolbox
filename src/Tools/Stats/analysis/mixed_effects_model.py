@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from statsmodels.regression.mixed_linear_model import MixedLMResults
 
 logger = logging.getLogger(__name__)
+ALLOWED_ANALYSIS_SCOPES = frozenset({"complete_core", "available_case"})
 
 
 # ----------------------------- internals -------------------------------- #
@@ -457,6 +458,171 @@ def _fit_formula_for_lrt(
         )
 
 
+def _normalize_analysis_scope(value: object) -> str:
+    """Return a supported missing-data analysis scope."""
+
+    scope = str(value).strip().casefold().replace("-", "_")
+    if scope not in ALLOWED_ANALYSIS_SCOPES:
+        raise ValueError(
+            "analysis_scope must be 'complete_core' or 'available_case'."
+        )
+    return scope
+
+
+def _model_row_labels(result: object) -> tuple[object, ...] | None:
+    """Return formula-model row labels when statsmodels exposes them."""
+
+    try:
+        labels = getattr(getattr(getattr(result, "model"), "data"), "row_labels")
+    except (AttributeError, TypeError):
+        return None
+    if labels is None:
+        return None
+    try:
+        return tuple(labels.tolist())
+    except AttributeError:
+        return tuple(labels)
+
+
+def _single_model_diagnostics(
+    df: pd.DataFrame,
+    *,
+    dv_col: str,
+    group_col: str,
+    model_vars: list[str],
+    formula: str,
+    analysis_scope: str,
+    cell_cols: tuple[str, str] | None,
+) -> tuple[pd.DataFrame, int]:
+    """Validate and summarize the participant-level fixed-effect design."""
+
+    diagnostics: list[dict[str, object]] = []
+    if df[group_col].nunique(dropna=True) < 2:
+        raise ValueError("MixedLM requires at least two contributing participants.")
+
+    factor_lookup = {column.casefold(): column for column in model_vars}
+    if cell_cols is None:
+        condition_col = factor_lookup.get("condition")
+        roi_col = factor_lookup.get("roi")
+    else:
+        condition_col, roi_col = cell_cols
+    missing_cell_count = 0
+    if condition_col is not None and roi_col is not None:
+        grain = [group_col, condition_col, roi_col]
+        duplicate_count = int(df.duplicated(grain, keep=False).sum())
+        if duplicate_count:
+            raise ValueError(
+                "Duplicate participant x Condition x ROI observations block "
+                f"MixedLM fitting ({duplicate_count} duplicate rows)."
+            )
+        condition_levels = tuple(pd.unique(df[condition_col]))
+        roi_levels = tuple(pd.unique(df[roi_col]))
+        if len(condition_levels) < 2 or len(roi_levels) < 2:
+            raise ValueError(
+                "Condition x ROI MixedLM requires at least two observed levels "
+                "of both Condition and ROI."
+            )
+        expected = {
+            (participant, condition, roi)
+            for participant in pd.unique(df[group_col])
+            for condition in condition_levels
+            for roi in roi_levels
+        }
+        observed = set(df[grain].itertuples(index=False, name=None))
+        missing_cell_count = len(expected - observed)
+        if analysis_scope == "complete_core" and missing_cell_count:
+            raise ValueError(
+                "Complete-core MixedLM requires every participant to contribute "
+                "every observed Condition x ROI cell."
+            )
+        structural = (
+            df.groupby([condition_col, roi_col], observed=False, dropna=False)
+            .size()
+            .reindex(
+                pd.MultiIndex.from_product(
+                    [condition_levels, roi_levels],
+                    names=[condition_col, roi_col],
+                ),
+                fill_value=0,
+            )
+        )
+        if bool(structural.eq(0).any()):
+            raise ValueError(
+                "A structurally empty Condition x ROI cell blocks the requested "
+                "interaction model."
+            )
+        diagnostics.append(
+            {
+                "check_id": "participant_cell_coverage",
+                "status": (
+                    "warning"
+                    if analysis_scope == "available_case" and missing_cell_count
+                    else "ok"
+                ),
+                "value": missing_cell_count,
+                "threshold": (
+                    "partial participant coverage allowed; no structural empty cells"
+                    if analysis_scope == "available_case"
+                    else 0
+                ),
+                "message": (
+                    "Missing participant cells are not imputed."
+                    if missing_cell_count
+                    else "Every contributing participant has complete cell coverage."
+                ),
+            }
+        )
+
+    try:
+        from patsy import dmatrices
+
+        _, fixed_design = dmatrices(formula, df, return_type="dataframe")
+    except Exception as exc:
+        raise ValueError(
+            f"Could not build the MixedLM fixed-effects design: {exc}"
+        ) from exc
+    rank = int(np.linalg.matrix_rank(fixed_design.to_numpy(dtype=float)))
+    columns = int(fixed_design.shape[1])
+    residual_rows = int(len(df) - rank)
+    if rank != columns or residual_rows <= 0:
+        raise ValueError(
+            "The MixedLM fixed-effects design is rank deficient or saturated "
+            f"(rank={rank}, columns={columns}, residual rows={residual_rows})."
+        )
+    diagnostics.extend(
+        [
+            {
+                "check_id": "fixed_design_rank",
+                "status": "ok",
+                "value": (
+                    f"rank={rank}; columns={columns}; "
+                    f"residual_rows={residual_rows}"
+                ),
+                "threshold": "full column rank and at least 1 residual row",
+                "message": "The fixed-effect interaction is estimable.",
+            },
+            {
+                "check_id": "observed_row_set",
+                "status": "ok",
+                "value": len(df),
+                "threshold": "",
+                "message": (
+                    "All ML full/reduced comparisons must use these same "
+                    "finite observed rows."
+                ),
+            },
+            {
+                "check_id": "contributing_participants",
+                "status": "ok",
+                "value": int(df[group_col].nunique()),
+                "threshold": "at least 2",
+                "message": "Random-intercept grouping units in the model.",
+            },
+        ]
+    )
+    return pd.DataFrame(diagnostics), missing_cell_count
+
+
 # ------------------------------- API ----------------------------------- #
 
 def run_mixed_effects_model(
@@ -470,6 +636,8 @@ def run_mixed_effects_model(
     ci_level: float = 0.95,
     return_model: bool = False,
     do_lrt: bool = False,
+    analysis_scope: str = "complete_core",
+    cell_cols: tuple[str, str] | None = None,
 ) -> pd.DataFrame | Tuple[pd.DataFrame, "MixedLMResults"]:
     """
     Run a linear mixed-effects model with robust contrasts, optional random slopes,
@@ -499,6 +667,12 @@ def run_mixed_effects_model(
     do_lrt : bool, optional
         If True, compute LRTs (ML) for: interaction, condition, roi and attach as
         table.attrs["lrt_table"].
+    analysis_scope : {"complete_core", "available_case"}, optional
+        Missing-data contract. Available-case fitting keeps finite observed rows
+        after verifying that the requested interaction remains estimable.
+    cell_cols : tuple[str, str], optional
+        Explicit (Condition, ROI) column names for coverage diagnostics when
+        project columns do not use the conventional names.
 
     Returns
     -------
@@ -510,6 +684,7 @@ def run_mixed_effects_model(
     RuntimeError: fitting failures.
     """
     # --- validate inputs ---
+    scope = _normalize_analysis_scope(analysis_scope)
     if not isinstance(fixed_effects, (list, tuple)) or len(fixed_effects) == 0:
         raise ValueError("`fixed_effects` must be a non-empty list of formula terms.")
     required_cols = [dv_col, group_col]
@@ -518,14 +693,61 @@ def run_mixed_effects_model(
     missing = [c for c in required_cols if c not in data.columns]
     if missing:
         raise ValueError(f"Missing required columns in data for MixedLM: {missing}")
+    if cell_cols is not None:
+        if (
+            len(cell_cols) != 2
+            or cell_cols[0] == cell_cols[1]
+            or any(column not in required_cols for column in cell_cols)
+        ):
+            raise ValueError(
+                "cell_cols must contain distinct Condition and ROI model columns."
+            )
 
     # Drop NA rows
-    df = data.dropna(subset=required_cols).copy()
+    df = data.dropna(subset=required_cols).copy().reset_index(drop=True)
     if df.empty:
         raise ValueError("After dropping missing values, no data remain for MixedLM.")
 
     # --- build formula with robust contrasts ---
     formula, processed_terms, final_cmap = _build_formula(dv_col, fixed_effects, df, contrast_map)
+    if scope == "available_case":
+        model_diagnostics, missing_cell_count = _single_model_diagnostics(
+            df,
+            dv_col=dv_col,
+            group_col=group_col,
+            model_vars=model_vars,
+            formula=formula,
+            analysis_scope=scope,
+            cell_cols=cell_cols,
+        )
+    else:
+        missing_cell_count = 0
+        model_diagnostics = pd.DataFrame(
+            [
+                {
+                    "check_id": "analysis_scope",
+                    "status": "ok",
+                    "value": scope,
+                    "threshold": "",
+                    "message": "Prepared complete-core rows were requested.",
+                },
+                {
+                    "check_id": "observed_row_set",
+                    "status": "ok",
+                    "value": len(df),
+                    "threshold": "",
+                    "message": "Finite rows supplied to the model.",
+                },
+                {
+                    "check_id": "contributing_participants",
+                    "status": "ok",
+                    "value": int(df[group_col].nunique()),
+                    "threshold": "",
+                    "message": "Random-effect grouping units in the model.",
+                },
+            ]
+        )
+    expected_row_labels = tuple(df.index.tolist())
 
     # --- main fit (REML or ML as requested) ---
     reml_flag = (method or "reml").strip().lower() == "reml"
@@ -551,6 +773,16 @@ def run_mixed_effects_model(
             fit = _fit_mixedlm(df, formula, group_col, "1", reml_flag)
             backed_off = True
 
+        final_row_labels = _model_row_labels(fit.model)
+        if (
+            final_row_labels is not None
+            and final_row_labels != expected_row_labels
+        ):
+            raise RuntimeError(
+                "The final MixedLM fit did not use the exact validated observed "
+                "row set."
+            )
+
         # Inject notes
         if backed_off:
             fit.table["Note"] = (fit.table["Note"].mask(fit.table["Note"].astype(bool), fit.table["Note"] + "; ")
@@ -573,11 +805,18 @@ def run_mixed_effects_model(
                     "LR": np.nan,
                     "df": np.nan,
                     "p (chi2)": np.nan,
+                    "p_value_chi2": np.nan,
                     "status": "failed",
+                    "reportable": False,
                     "error": "",
                     "Used RE": fit.used_re_formula,
                     "method": "ML likelihood-ratio test",
                     "reference_distribution": "asymptotic chi-square",
+                    "analysis_scope": scope,
+                    "n_observations_full": np.nan,
+                    "n_observations_reduced": np.nan,
+                    "same_observed_rows": False,
+                    "row_identity_status": "not_checked",
                 }
                 try:
                     full_ml = full_models.get(comparison.full_formula)
@@ -599,13 +838,54 @@ def run_mixed_effects_model(
                         raise RuntimeError("Full ML model did not converge.")
                     if not bool(getattr(reduced_ml, "converged", False)):
                         raise RuntimeError("Reduced ML model did not converge.")
+                    full_labels = _model_row_labels(full_ml)
+                    reduced_labels = _model_row_labels(reduced_ml)
+                    if full_labels is not None and reduced_labels is not None:
+                        same_rows = (
+                            full_labels == expected_row_labels
+                            and reduced_labels == expected_row_labels
+                        )
+                        row_identity_status = (
+                            "exact_match"
+                            if same_rows
+                            else "mismatch"
+                        )
+                        if not same_rows:
+                            raise RuntimeError(
+                                "Nested ML models did not use the exact same "
+                                "validated observed rows."
+                            )
+                        n_full = len(full_labels)
+                        n_reduced = len(reduced_labels)
+                    else:
+                        n_full = int(getattr(full_ml, "nobs", len(df)))
+                        n_reduced = int(
+                            getattr(reduced_ml, "nobs", len(df))
+                        )
+                        same_rows = n_full == len(df) == n_reduced
+                        row_identity_status = (
+                            "count_match_row_labels_unavailable"
+                            if same_rows
+                            else "count_mismatch"
+                        )
+                        if not same_rows:
+                            raise RuntimeError(
+                                "Nested ML model observation counts differ "
+                                "from the validated row set."
+                            )
                     lr_value, df_value, p_value = _lrt(full_ml, reduced_ml)
                     row.update(
                         {
                             "LR": lr_value,
                             "df": df_value,
                             "p (chi2)": p_value,
+                            "p_value_chi2": p_value,
                             "status": "ok",
+                            "reportable": True,
+                            "n_observations_full": n_full,
+                            "n_observations_reduced": n_reduced,
+                            "same_observed_rows": same_rows,
+                            "row_identity_status": row_identity_status,
                         }
                     )
                 except Exception as exc:  # noqa: BLE001 - exported result row
@@ -628,6 +908,7 @@ def run_mixed_effects_model(
             # Keep the established attrs attachment for compatibility while
             # also surfacing status directly in the fixed-effect table.
             fit.table.attrs["lrt_table"] = lrt_table
+            fit.table.attrs["model_diagnostics"] = model_diagnostics
             fit.table["LRT Status"] = lrt_status
             fit.table["LRT Note"] = (
                 ""
@@ -640,6 +921,19 @@ def run_mixed_effects_model(
 
     # Final tidy table (Wald), with notes retained
     table = fit.table
+    table.attrs["model_diagnostics"] = model_diagnostics
+    table.attrs["analysis_scope"] = scope
+    table.attrs["n_observations"] = int(len(df))
+    table.attrs["n_contributing_participants"] = int(
+        df[group_col].nunique()
+    )
+    table.attrs["n_missing_participant_cells"] = int(
+        missing_cell_count
+    )
+    table["Analysis Scope"] = scope
+    table["Observations"] = int(len(df))
+    table["Contributing Participants"] = int(df[group_col].nunique())
+    table["Missing Participant Cells"] = int(missing_cell_count)
 
     # Log basics
     try:

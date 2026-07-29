@@ -45,20 +45,34 @@ The tool does not offer an "ignore groups" shortcut in a multi-group project.
 If pooling everyone is scientifically justified, create or use a separately
 defined single-group project so that the design and provenance remain clear.
 
-## Complete Shared Conditions
+## Analysis Scope and Missing Conditions
 
-The primary analysis uses a participant-first **complete core**:
+The eligible participant cohort is always frozen after QC and manual
+exclusions. You can then choose one of two explicit analysis scopes:
 
-1. the eligible participant cohort is frozen after QC and manual exclusions;
-2. each requested condition is checked across all frozen participants and
-   selected ROIs; and
-3. a condition is retained only if every participant contributes exactly one
-   finite value in every selected ROI.
+- **Complete core** retains a condition only when every frozen participant
+  contributes exactly one finite value in every selected ROI. An incomplete
+  condition is excluded for everyone; participants are not silently dropped to
+  rescue it.
+- **Available-case LMM** retains finite observations from a condition when
+  every required fixed-effect Condition x ROI cell (and Group cell in
+  multi-group mode) has data. A participant may contribute some retained
+  conditions without contributing all of them.
 
-An incomplete condition is excluded for everyone. Participants are not silently
-dropped to rescue that condition. The Analysis Design panel and report list the
-frozen sample, retained conditions, excluded conditions, and coverage reasons.
-The native primary pipeline does not currently run an available-case model.
+Available-case mode does not fill, average over, or impute a missing response.
+The report distinguishes the frozen cohort from participants who contributed at
+least one usable row, lists fully complete, partially observed, and structurally
+excluded conditions, and reports the observed N for each cell/result. A
+condition is excluded when a required fixed-effect cell has no finite
+observation, because the requested factorial model is then not estimable as
+specified.
+
+Available-case likelihood inference relies on an **ignorable missingness** or
+**missing at random (MAR)** assumption after conditioning on variables in the
+model. If an exclusion still depends on the unobserved Summed BCA after those
+variables are considered—**missing not at random (MNAR)**—the estimates and
+p-values may be biased. Missingness reasons and complete-core results should be
+reviewed as sensitivity evidence rather than treating MAR as guaranteed.
 
 For a multi-group model, every canonical group must have at least two retained
 participants, and Group, Condition, and ROI must each have at least two levels.
@@ -108,7 +122,7 @@ list independent.
 
 ## Single-Group Analysis
 
-The primary single-group pipeline runs:
+In complete-core scope, the single-group pipeline runs:
 
 - a Condition x ROI repeated-measures ANOVA;
 - a sum-coded Condition x ROI linear mixed-effects model with participant as
@@ -148,6 +162,15 @@ Condition/ROI comparisons refit explicit nested models under maximum
 likelihood and use asymptotic likelihood-ratio tests. These tests are useful
 cross-checks, but they are not Kenward-Roger or Satterthwaite F tests.
 
+In available-case scope, the factorial primary analysis is the Condition x ROI
+mixed model fitted to all usable retained observations. Its explicit ML
+likelihood-ratio rows may support the primary headline after the selected
+omnibus-family correction. Raw coefficient-level Wald p-values remain
+detailed-only. Repeated-measures ANOVA and paired post-hoc tests are
+intentionally omitted because those procedures require complete
+within-participant cells; they are not made "available case" by silently
+discarding incomplete participants.
+
 ## Multi-Group Analysis
 
 The primary multi-group pipeline runs:
@@ -163,7 +186,9 @@ The primary multi-group pipeline runs:
 The model includes all retained canonical groups and uses a participant random
 intercept by default. Final coefficient estimates use REML. The omnibus tests
 compare hierarchy-preserving full and reduced models fitted with maximum
-likelihood and use an asymptotic chi-square reference.
+likelihood and use an asymptotic chi-square reference. In available-case scope,
+every nested comparison is fitted to the same finite observed row set; no
+missing response is imputed.
 
 The broad result called **Any group-related effect** jointly tests every model
 term containing Group. It is not a pure average Group main effect. The
@@ -183,8 +208,10 @@ The direct cell comparisons answer the practical question, "does the selected
 group pair differ in any Condition x ROI pair?" They use Welch's independent
 t-test, so equal group variances are not assumed. Each row reports the signed
 mean difference (`group A - group B`), a 95% confidence interval, and
-small-sample-corrected Hedges g. By default, one global Holm correction is
-applied across every complete cell in the `group_core_cells` family.
+small-sample-corrected Hedges g. In available-case scope, group Ns may vary
+across cells and are reported on each row. By default, one global Holm
+correction is applied across every estimable retained cell in the
+`group_core_cells` family.
 
 If the project contains more than two groups, choose the exact pair for the
 cell comparisons. The full mixed model still includes all groups. The pair
@@ -195,6 +222,10 @@ selector changes only the direct two-group cell contrasts.
 The report records finite-value checks, sample sizes, variance, Shapiro-Wilk
 normality diagnostics, repeated-measures sphericity, mixed-model convergence
 and singularity, and extreme residuals where available.
+
+For available-case runs, also inspect the participant-coverage, model-cell
+coverage, and missing-observation tables. The mixed model uses partial repeated
+measures under MAR; it does not make informative exclusions harmless.
 
 Normality diagnostics are **report-only**. A Shapiro-Wilk result does not
 automatically replace the planned test with a different test. This avoids
@@ -244,6 +275,10 @@ Then use **Methods & checks** for sample coverage, formulas, assumptions,
 correction families, harmonic provenance, and limitations. **Run log** contains
 processing, cancellation, and export messages. Detailed numeric results remain
 in the workbook rather than being hidden behind the simplified summary.
+
+For available-case runs, verify the frozen N, contributing N, per-cell Ns,
+partially observed conditions, no-imputation statement, and MAR/MNAR caveat
+before interpreting a p-value.
 
 ## Adolescent Samples
 

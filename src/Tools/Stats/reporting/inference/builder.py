@@ -49,10 +49,19 @@ def _run_summary_frame(
                 "report_schema_version": REPORT_SCHEMA_VERSION,
                 "mode": mode,
                 "alpha": alpha,
+                "analysis_scope": design.get("analysis_scope"),
                 "n_frozen_participants": design.get("n"),
+                "n_contributing_participants": design.get("n_contributing"),
                 "n_groups": design.get("n_groups"),
+                "retained_conditions": design.get("retained_conditions"),
                 "complete_conditions": design.get("complete_conditions"),
+                "partial_conditions": design.get("partial_conditions"),
                 "excluded_conditions": design.get("excluded_conditions"),
+                "n_observed_rows": design.get("n_observed_rows"),
+                "n_missing_retained": design.get("n_missing_retained"),
+                "imputation_method": (
+                    "none" if design.get("no_imputation") else None
+                ),
                 "n_source_frames": len(frames),
                 "n_inventory_rows": len(inventory),
                 "n_reportable_rows": int(
@@ -120,7 +129,7 @@ def build_native_inference_report(
             inventory_rows(
                 frames,
                 alpha=alpha_value,
-                default_n=design.get("n"),
+                default_n=design.get("default_n", design.get("n")),
             ),
         ),
         columns=INVENTORY_COLUMNS,

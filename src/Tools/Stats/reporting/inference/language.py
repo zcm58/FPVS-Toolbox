@@ -152,6 +152,119 @@ def finding_line(row: pd.Series) -> str:
     )
 
 
+def _design_note_lines(
+    design: Mapping[str, object],
+    *,
+    bullets: bool,
+) -> list[str]:
+    """Describe complete-core or available-case coverage without ambiguity."""
+
+    prefix = "- " if bullets else ""
+    scope = str(design.get("analysis_scope") or "").strip().casefold()
+    if scope != "available_case":
+        lines: list[str] = []
+        if design.get("n") is not None:
+            lines.append(
+                f"{prefix}The frozen analysis cohort contained "
+                f"N={design['n']} participants."
+            )
+        complete = str(design.get("complete_conditions") or "").strip()
+        if complete:
+            lines.append(
+                f"{prefix}Conditions retained for the shared analysis: {complete}."
+            )
+        excluded = str(design.get("excluded_conditions") or "").strip()
+        if excluded:
+            lines.append(
+                f"{prefix}Conditions excluded for incomplete shared coverage: "
+                f"{excluded}."
+            )
+        coverage_note = str(design.get("coverage_note") or "").strip()
+        if coverage_note:
+            lines.append(f"{prefix}{coverage_note}")
+        return lines
+
+    lines = [
+        (
+            f"{prefix}Analysis scope: available-case linear mixed model using "
+            "finite observed rows only."
+        )
+    ]
+    frozen_n = design.get("n")
+    contributing_n = design.get("n_contributing")
+    if frozen_n is not None and contributing_n is not None:
+        lines.append(
+            f"{prefix}The cohort was frozen at N={frozen_n}; "
+            f"N={contributing_n} participant(s) contributed at least one "
+            "finite retained observation."
+        )
+    elif frozen_n is not None:
+        lines.append(
+            f"{prefix}The frozen analysis cohort contained N={frozen_n} "
+            "participants."
+        )
+    retained = str(design.get("retained_conditions") or "").strip()
+    if retained:
+        lines.append(
+            f"{prefix}Conditions retained for available-case modeling: {retained}."
+        )
+    complete = str(design.get("complete_conditions") or "").strip()
+    if complete:
+        lines.append(
+            f"{prefix}Fully complete conditions: {complete}."
+        )
+    partial = str(design.get("partial_conditions") or "").strip()
+    if partial:
+        lines.append(
+            f"{prefix}Partially observed conditions retained in the model: "
+            f"{partial}."
+        )
+    excluded = str(design.get("excluded_conditions") or "").strip()
+    if excluded:
+        lines.append(
+            f"{prefix}Conditions excluded because a required fixed-effect cell "
+            f"had no finite observation: {excluded}."
+        )
+    observed_rows = design.get("n_observed_rows")
+    missing_retained = design.get("n_missing_retained")
+    if observed_rows is not None:
+        lines.append(
+            f"{prefix}The model used {observed_rows} observed row(s)."
+        )
+    missing_text = (
+        ""
+        if missing_retained is None
+        else f" ({missing_retained} retained cell(s) were missing or non-finite)"
+    )
+    lines.append(
+        f"{prefix}No imputation was performed{missing_text}; a missing cell "
+        "contributed no response value."
+    )
+    cell_n_note = str(design.get("cell_n_note") or "").strip()
+    if cell_n_note:
+        lines.append(f"{prefix}{cell_n_note}")
+    lines.extend(
+        [
+            (
+                f"{prefix}Repeated-measures ANOVA and paired post-hoc tests "
+                "were intentionally omitted because they require complete "
+                "within-participant cells."
+            ),
+            (
+                f"{prefix}Available-case likelihood inference assumes the "
+                "missingness is ignorable (missing at random, MAR) after "
+                "conditioning on variables in the model."
+            ),
+            (
+                f"{prefix}If exclusions still depend on an unobserved response "
+                "after accounting for modeled variables (missing not at "
+                "random, MNAR), estimates and p-values may be biased."
+            ),
+        ]
+    )
+    return lines
+
+
 def at_a_glance_text(
     mode: str,
     inventory: pd.DataFrame,
@@ -192,21 +305,12 @@ def at_a_glance_text(
                 f"- {finding_line(row)}" for _, row in section_rows.iterrows()
             )
     lines.extend(["", "Design and interpretation notes"])
-    if design.get("n") is not None:
+    lines.extend(_design_note_lines(design, bullets=True))
+    if mode == "multi":
         lines.append(
-            f"- The frozen analysis cohort contained N={design['n']} participants."
+            "- Between-group findings are associations in the analyzed sample; "
+            "they do not establish causation or diagnostic validity."
         )
-    complete = str(design.get("complete_conditions") or "").strip()
-    if complete:
-        lines.append(f"- Conditions retained for the shared analysis: {complete}.")
-    excluded = str(design.get("excluded_conditions") or "").strip()
-    if excluded:
-        lines.append(
-            f"- Conditions excluded for incomplete shared coverage: {excluded}."
-        )
-    coverage_note = str(design.get("coverage_note") or "").strip()
-    if coverage_note:
-        lines.append(f"- {coverage_note}")
     if limitations["code"].eq("adaptive_harmonic_selection").any():
         lines.append(f"- {ADAPTIVE_HARMONIC_WARNING}")
     workbook_location = (
@@ -279,6 +383,7 @@ def detailed_methods_text(
 ) -> str:
     """Build an auditable methods narrative with formulas, N, and caveats."""
 
+    scope = str(design.get("analysis_scope") or "").strip().casefold()
     lines = [
         "Native inference methods and checks",
         "",
@@ -286,22 +391,23 @@ def detailed_methods_text(
             f"Mode: {'single group' if mode == 'single' else 'multiple groups'}; "
             f"nominal alpha={alpha:g}."
         ),
-        (
+    ]
+    if scope == "available_case":
+        lines.append(
+            "The QC/manual-eligible cohort was frozen before available "
+            "observations were selected; no participant was silently removed "
+            "to improve apparent condition coverage."
+        )
+    else:
+        lines.append(
             "The QC/manual-eligible participant cohort was frozen before "
             "complete-condition intersection; incomplete conditions could be "
-            "excluded, but participants were not silently dropped to recover conditions."
-        ),
-    ]
-    if design.get("n") is not None:
-        lines.append(f"Frozen cohort size: N={design['n']}.")
+            "excluded, but participants were not silently dropped to recover "
+            "conditions."
+        )
+    lines.extend(_design_note_lines(design, bullets=False))
     if design.get("n_groups") is not None:
         lines.append(f"Canonical groups represented: {design['n_groups']}.")
-    if design.get("complete_conditions"):
-        lines.append(f"Retained conditions: {design['complete_conditions']}.")
-    if design.get("excluded_conditions"):
-        lines.append(f"Excluded conditions: {design['excluded_conditions']}.")
-    if design.get("coverage_note"):
-        lines.append(str(design["coverage_note"]))
     lines.extend(["", "Test inventory", *_inventory_method_lines(inventory)])
     lines.extend(["", "Assumptions and estimands"])
     if methods.empty:

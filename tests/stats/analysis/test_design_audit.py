@@ -8,6 +8,7 @@ import pytest
 
 from Tools.Stats.analysis.design_audit import (
     DesignAuditError,
+    audit_analysis_design,
     audit_complete_core_design,
     build_factor_cell_coverage,
 )
@@ -171,6 +172,9 @@ def test_design_frames_are_explicitly_serializable() -> None:
     assert set(frames) == {
         "Analysis Design",
         "Coverage",
+        "Model Cell Coverage",
+        "Participant Coverage",
+        "Missing Observations",
         "Exclusions",
         "Group Assignments",
         "Primary Data",
@@ -181,6 +185,68 @@ def test_design_frames_are_explicitly_serializable() -> None:
     assert json.loads(frames["Analysis Design"].to_json(orient="records"))[0][
         "status"
     ] == "ready"
+
+
+def test_available_case_retains_partial_condition_and_other_participant_rows() -> None:
+    result = audit_analysis_design(
+        _design_frame(),
+        dv_col="value",
+        subject_col="participant",
+        condition_col="condition",
+        roi_col="roi",
+        frozen_participants=("P1", "P2", "P3"),
+        selected_conditions=("Shared", "Optional"),
+        selected_rois=("R1", "R2"),
+        analysis_scope="available_case",
+    )
+
+    assert result.ready
+    assert result.analysis_scope == "available_case"
+    assert result.complete_conditions == ("Shared",)
+    assert result.retained_conditions == ("Shared", "Optional")
+    assert result.excluded_conditions == ()
+    assert len(result.primary_data) == 10
+    assert set(result.primary_data["participant"]) == {"P1", "P2", "P3"}
+    missing = result.missing_observations.query(
+        "participant_id == 'P3' and condition == 'Optional'"
+    )
+    assert len(missing) == 2
+    assert missing["missingness_type"].eq("missing_row").all()
+    assert missing["condition_retained"].all()
+    metadata = result.metadata_frame().iloc[0]
+    assert metadata["partial_conditions"] == "Optional"
+    assert metadata["n_observed_rows"] == 10
+    assert bool(metadata["missing_values_imputed"]) is False
+
+
+def test_available_case_multigroup_excludes_structurally_empty_condition() -> None:
+    result = audit_analysis_design(
+        _design_frame(),
+        dv_col="value",
+        subject_col="participant",
+        condition_col="condition",
+        roi_col="roi",
+        frozen_participants=("P1", "P2", "P3"),
+        selected_conditions=("Shared", "Optional"),
+        selected_rois=("R1", "R2"),
+        canonical_group_ids={
+            "P1": "control",
+            "P2": "control",
+            "P3": "anxious",
+        },
+        require_groups=True,
+        analysis_scope="available_case",
+    )
+
+    assert result.ready
+    assert result.retained_conditions == ("Shared",)
+    assert result.excluded_conditions == ("Optional",)
+    excluded = result.exclusions.iloc[0]
+    assert excluded["reason"] == "structurally_unobserved_model_cell"
+    empty_cells = result.model_cell_coverage.query(
+        "condition == 'Optional' and group_id == 'anxious'"
+    )
+    assert empty_cells["structurally_observed"].eq(False).all()
 
 
 def test_factor_cell_coverage_exposes_structural_missingness_inputs() -> None:

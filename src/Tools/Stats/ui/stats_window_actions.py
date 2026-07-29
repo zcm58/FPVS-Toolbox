@@ -127,6 +127,11 @@ class StatsWindowActionsMixin:
                 "currentIndexChanged",
                 self._refresh_analysis_design_summary,
             ),
+            (
+                "analysis_scope_combo",
+                "currentIndexChanged",
+                self._sync_analysis_scope_ui,
+            ),
         ):
             control = getattr(self, name, None)
             signal = getattr(control, signal_name, None)
@@ -135,6 +140,7 @@ class StatsWindowActionsMixin:
                 connect(callback)
         self._populate_group_pair_combo()
         self._sync_analysis_mode_ui()
+        self._sync_analysis_scope_ui()
         self._sync_analysis_profile_summary()
         self._sync_provenance_warning()
         self._refresh_analysis_design_summary()
@@ -170,6 +176,81 @@ class StatsWindowActionsMixin:
             set_visible = getattr(widget, "setVisible", None)
             if callable(set_visible):
                 set_visible(is_multi)
+
+    def _available_case_scope_selected(self) -> bool:
+        """Return whether the user selected likelihood-based available cases."""
+
+        return (
+            self._combo_value("analysis_scope_combo", "complete_core")
+            == "available_case"
+        )
+
+    def _sync_analysis_scope_ui(self, *_args) -> None:
+        """Keep scope-dependent controls and coverage language consistent."""
+
+        available_case = self._available_case_scope_selected()
+        was_available_case = bool(
+            getattr(self, "_available_case_scope_active", False)
+        )
+        resampling = getattr(self, "resampling_sensitivity_checkbox", None)
+        if resampling is not None:
+            if available_case:
+                if not was_available_case:
+                    self._complete_core_resampling_checked = bool(
+                        resampling.isChecked()
+                    )
+                resampling.setChecked(False)
+                resampling.setEnabled(False)
+                resampling.setToolTip(
+                    "Max-|t| resampling requires complete participant-by-cell "
+                    "coverage, so it is suppressed for the available-case LMM."
+                )
+            else:
+                resampling.setEnabled(True)
+                if was_available_case:
+                    resampling.setChecked(
+                        bool(
+                            getattr(
+                                self,
+                                "_complete_core_resampling_checked",
+                                True,
+                            )
+                        )
+                    )
+                resampling.setToolTip(
+                    "Run the participant-level max-|t| resampling sensitivity. "
+                    "This requires complete participant-by-cell coverage."
+                )
+        resample_count = getattr(self, "resample_count_spin", None)
+        if resample_count is not None:
+            resample_count.setEnabled(not available_case)
+            resample_count.setToolTip(
+                (
+                    "Max-|t| resampling is unavailable for the available-case "
+                    "LMM."
+                )
+                if available_case
+                else (
+                    "Requested Monte Carlo draws when exact participant-level "
+                    "enumeration is not feasible."
+                )
+            )
+        self._available_case_scope_active = available_case
+        self._refresh_analysis_design_summary()
+
+    def _block_complete_core_only_action(self, action_label: str) -> bool:
+        """Block balanced/paired actions when available-case LMM is selected."""
+
+        if not self._available_case_scope_selected():
+            return False
+        message = (
+            f"{action_label} requires complete participant-by-condition coverage. "
+            "The available-case scope uses the mixed model instead; run the "
+            "primary analysis or choose Primary complete core."
+        )
+        self._set_status(message)
+        self.append_log("Single", message, level="warning")
+        return True
 
     def _sync_analysis_profile_summary(self, *_args) -> None:
         profile_combo = getattr(self, "analysis_profile_combo", None)
@@ -385,7 +466,11 @@ class StatsWindowActionsMixin:
             profile_text=profile_text or "Published-style exploratory",
             group_text=self._group_summary_text(),
             coverage_text=format_preliminary_workbook_coverage(
-                self._preliminary_coverage
+                self._preliminary_coverage,
+                analysis_scope=self._combo_value(
+                    "analysis_scope_combo",
+                    "complete_core",
+                ),
             ),
         )
         self._sync_provenance_warning()
@@ -758,10 +843,15 @@ class StatsWindowActionsMixin:
             return
         if self._block_single_group_analysis_if_needed():
             return
+        complete_core = not self._available_case_scope_selected()
         actions = [
-            ("Run RM-ANOVA", self.on_run_rm_anova, True),
+            ("Run RM-ANOVA", self.on_run_rm_anova, complete_core),
             ("Run Mixed Model", self.on_run_mixed_model, True),
-            ("Run Interaction/Post-hocs", self.on_run_interaction_posthocs, True),
+            (
+                "Run Interaction/Post-hocs",
+                self.on_run_interaction_posthocs,
+                complete_core,
+            ),
             (
                 "Export RM-ANOVA",
                 self.on_export_rm_anova,
@@ -800,6 +890,8 @@ class StatsWindowActionsMixin:
         """Handle the on run rm anova step for the Stats workflow."""
         if self._block_single_group_analysis_if_needed():
             return
+        if self._block_complete_core_only_action("RM-ANOVA"):
+            return
         self._clear_output_views()
         self.rm_anova_results_data = None
         self._update_export_buttons()
@@ -817,6 +909,10 @@ class StatsWindowActionsMixin:
     def on_run_interaction_posthocs(self) -> None:
         """Handle the on run interaction posthocs step for the Stats workflow."""
         if self._block_single_group_analysis_if_needed():
+            return
+        if self._block_complete_core_only_action(
+            "Interaction/post-hoc testing"
+        ):
             return
         self._clear_output_views()
         self.posthoc_results_data = None

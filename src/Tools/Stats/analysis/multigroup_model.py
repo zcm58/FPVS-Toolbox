@@ -1,4 +1,4 @@
-"""GUI-neutral native multi-group mixed-model analysis for complete-core data."""
+"""GUI-neutral native multi-group mixed-model analysis."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ import pandas as pd
 from Tools.Stats.common.blas_limits import single_threaded_blas
 
 
-MULTIGROUP_MODEL_SCHEMA_VERSION = 1
+MULTIGROUP_MODEL_SCHEMA_VERSION = 2
+ALLOWED_ANALYSIS_SCOPES = frozenset({"complete_core", "available_case"})
 LRT_CAVEAT = (
     "Likelihood-ratio p-values use an asymptotic chi-square reference and can be "
     "anti-conservative in small samples."
@@ -23,7 +24,7 @@ UNKNOWN_GROUP_ID_LABELS = frozenset(
 
 
 class MultigroupModelValidationError(ValueError):
-    """Raised when complete-core data cannot identify the requested model."""
+    """Raised when observed data cannot identify the requested model."""
 
     def __init__(self, message: str, diagnostics: pd.DataFrame | None = None):
         super().__init__(message)
@@ -175,7 +176,7 @@ def _ordered_levels(series: pd.Series) -> tuple[object, ...]:
     return tuple(sorted(pd.unique(series).tolist(), key=lambda value: str(value).casefold()))
 
 
-def _validate_complete_core(
+def _validate_model_data(
     data: pd.DataFrame,
     *,
     dv_col: str,
@@ -185,8 +186,15 @@ def _validate_complete_core(
     roi_col: str,
     known_group_ids: Sequence[object] | None,
     full_formula: str,
+    analysis_scope: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, tuple[object, ...]]]:
     diagnostics: list[dict[str, object]] = []
+    scope = str(analysis_scope).strip().casefold().replace("-", "_")
+    if scope not in ALLOWED_ANALYSIS_SCOPES:
+        raise _validation_error(
+            "analysis_scope must be 'complete_core' or 'available_case'.",
+            diagnostics,
+        )
     required = [dv_col, participant_col, group_col, condition_col, roi_col]
     missing = [column for column in required if column not in data.columns]
     if missing:
@@ -201,7 +209,7 @@ def _validate_complete_core(
                 diagnostics,
             )
 
-    working = data.loc[:, required].copy()
+    working = data.loc[:, required].copy().reset_index(drop=True)
     key_columns = [participant_col, condition_col, roi_col]
     missing_keys = working[key_columns + [group_col]].isna().any(axis=1)
     blank_keys = working[key_columns + [group_col]].apply(
@@ -253,12 +261,12 @@ def _validate_complete_core(
             "status": "ok" if nonfinite_count == 0 else "failed",
             "value": nonfinite_count,
             "threshold": 0,
-            "message": "Complete-core modelling requires finite numeric DV values.",
+            "message": "Mixed-model rows require finite numeric DV values.",
         }
     )
     if nonfinite_count:
         raise _validation_error(
-            "Non-finite or non-numeric DV values block complete-core modelling.",
+            "Non-finite or non-numeric DV values block mixed modelling.",
             diagnostics,
         )
     working[dv_col] = numeric_dv.astype(float)
@@ -379,17 +387,78 @@ def _validate_complete_core(
             incomplete.loc[participant] = len(observed_pairs)
     diagnostics.append(
         {
-            "check_id": "complete_core",
-            "status": "ok" if incomplete.empty else "failed",
+            "check_id": "participant_cell_coverage",
+            "status": (
+                "ok"
+                if incomplete.empty
+                else (
+                    "warning"
+                    if scope == "available_case"
+                    else "failed"
+                )
+            ),
             "value": int(len(incomplete)),
-            "threshold": 0,
-            "message": "Every participant must contribute every observed Condition x ROI cell.",
+            "threshold": (
+                "partial participant coverage allowed; all factorial cells observed"
+                if scope == "available_case"
+                else 0
+            ),
+            "message": (
+                "Available-case rows are retained without imputation."
+                if scope == "available_case" and not incomplete.empty
+                else (
+                    "Every participant must contribute every observed "
+                    "Condition x ROI cell."
+                )
+            ),
         }
     )
-    if not incomplete.empty:
+    if scope == "complete_core" and not incomplete.empty:
         raise _validation_error(
             "Data are not a complete participant x Condition x ROI core; "
             "do not drop participants inside the model engine.",
+            diagnostics,
+        )
+
+    structural_coverage = (
+        working.groupby(
+            [group_col, condition_col, roi_col],
+            observed=False,
+            dropna=False,
+        )
+        .size()
+        .reindex(
+            pd.MultiIndex.from_product(
+                [
+                    levels["groups"],
+                    levels["conditions"],
+                    levels["rois"],
+                ],
+                names=[group_col, condition_col, roi_col],
+            ),
+            fill_value=0,
+        )
+    )
+    empty_structural_cells = structural_coverage[
+        structural_coverage.eq(0)
+    ]
+    diagnostics.append(
+        {
+            "check_id": "factorial_cells_observed",
+            "status": "ok" if empty_structural_cells.empty else "failed",
+            "value": int(len(empty_structural_cells)),
+            "threshold": 0,
+            "message": (
+                "Every Group x Condition x ROI fixed-effect cell must contain "
+                "at least one finite observation."
+            ),
+        }
+    )
+    if not empty_structural_cells.empty:
+        examples = list(empty_structural_cells.index[:5])
+        raise _validation_error(
+            "Structurally empty Group x Condition x ROI cells block the full "
+            f"interaction model. Examples: {examples}",
             diagnostics,
         )
 
@@ -439,7 +508,11 @@ def _validate_complete_core(
                 "status": "ok",
                 "value": int(len(working)),
                 "threshold": "",
-                "message": "Complete-core analysis rows.",
+                "message": (
+                    "Available finite observed rows; missing cells were not imputed."
+                    if scope == "available_case"
+                    else "Complete-core analysis rows."
+                ),
             },
             {
                 "check_id": "participant_count",
@@ -447,6 +520,18 @@ def _validate_complete_core(
                 "value": len(levels["participants"]),
                 "threshold": "",
                 "message": "Random-effect grouping units.",
+            },
+            {
+                "check_id": "analysis_scope",
+                "status": "ok",
+                "value": scope,
+                "threshold": "",
+                "message": (
+                    "Likelihood inference assumes missingness is ignorable "
+                    "conditional on the modeled variables."
+                    if scope == "available_case"
+                    else "Balanced participant-first analysis scope."
+                ),
             },
         ]
     )
@@ -618,6 +703,21 @@ def _model_parameter_count(result: object) -> int:
     return int(len(np.asarray(getattr(result, "params"))))
 
 
+def _model_row_labels(result: object) -> tuple[object, ...] | None:
+    """Return formula-model row labels when exposed by statsmodels."""
+
+    try:
+        labels = getattr(getattr(getattr(result, "model"), "data"), "row_labels")
+    except (AttributeError, TypeError):
+        return None
+    if labels is None:
+        return None
+    try:
+        return tuple(labels.tolist())
+    except AttributeError:
+        return tuple(labels)
+
+
 def _failed_omnibus_row(
     comparison: OmnibusComparison,
     error: str,
@@ -633,6 +733,10 @@ def _failed_omnibus_row(
         "p_value_chi2": np.nan,
         "status": "failed",
         "reportable": False,
+        "n_observations_full": np.nan,
+        "n_observations_reduced": np.nan,
+        "same_observed_rows": False,
+        "row_identity_status": "not_checked",
         "error": error,
         "reference_distribution": "chi-square (asymptotic)",
         "caveat": LRT_CAVEAT,
@@ -820,10 +924,28 @@ def _metadata_frame(
     levels: dict[str, tuple[object, ...]],
     marginal_grid: pd.DataFrame | None,
     reference_group_id: object | None,
+    analysis_scope: str,
+    n_observations: int,
+    n_contributing_participants: int,
 ) -> pd.DataFrame:
     rows = [
         ("schema_version", MULTIGROUP_MODEL_SCHEMA_VERSION),
         ("status", status),
+        ("analysis_scope", analysis_scope),
+        ("n_observations", int(n_observations)),
+        (
+            "n_contributing_participants",
+            int(n_contributing_participants),
+        ),
+        (
+            "missing_data_handling",
+            (
+                "finite observed rows; no imputation; likelihood inference "
+                "assumes missing at random conditional on modeled variables"
+                if analysis_scope == "available_case"
+                else "participant-first complete core"
+            ),
+        ),
         ("full_formula", comparisons[0].full_formula),
         ("fixed_contrasts", "Sum coding for Group, Condition, and ROI"),
         ("final_estimation", "REML"),
@@ -858,11 +980,20 @@ def _metadata_frame(
     return pd.DataFrame(rows, columns=["field", "value"])
 
 
-def _empty_metadata(status: str, full_formula: str, requested_re_formula: str) -> pd.DataFrame:
+def _empty_metadata(
+    status: str,
+    full_formula: str,
+    requested_re_formula: str,
+    *,
+    analysis_scope: str,
+    n_observations: int,
+) -> pd.DataFrame:
     return pd.DataFrame(
         [
             ("schema_version", MULTIGROUP_MODEL_SCHEMA_VERSION),
             ("status", status),
+            ("analysis_scope", analysis_scope),
+            ("n_observations", int(n_observations)),
             ("full_formula", full_formula),
             ("requested_re_formula", requested_re_formula),
             ("omnibus_caveat", LRT_CAVEAT),
@@ -887,8 +1018,9 @@ def run_multigroup_mixed_model(
     ci_level: float = 0.95,
     marginal_grid: pd.DataFrame | None = None,
     reference_group_id: object | None = None,
+    analysis_scope: str = "complete_core",
 ) -> MultigroupModelBundle:
-    """Fit the complete-core native multi-group model and explicit omnibus LRTs."""
+    """Fit the native multi-group model and explicit omnibus LRTs."""
 
     if not optimizers:
         raise ValueError("At least one optimizer must be supplied.")
@@ -903,7 +1035,8 @@ def run_multigroup_mixed_model(
     )
     full_formula = comparisons[0].full_formula
     requested_re_formula = random_slope_formula or "1"
-    working, diagnostics, levels = _validate_complete_core(
+    scope = str(analysis_scope).strip().casefold().replace("-", "_")
+    working, diagnostics, levels = _validate_model_data(
         data,
         dv_col=dv_col,
         participant_col=participant_col,
@@ -912,7 +1045,9 @@ def run_multigroup_mixed_model(
         roi_col=roi_col,
         known_group_ids=known_group_ids,
         full_formula=full_formula,
+        analysis_scope=scope,
     )
+    expected_row_labels = tuple(working.index.tolist())
 
     attempt_rows: list[dict[str, object]] = []
     with single_threaded_blas():
@@ -1001,11 +1136,32 @@ def run_multigroup_mixed_model(
                     "failed",
                     full_formula,
                     requested_re_formula,
+                    analysis_scope=scope,
+                    n_observations=len(working),
                 ),
                 marginal_group_contrasts=pd.DataFrame(),
             )
 
+        final_labels = _model_row_labels(final_fit.result)
+        if final_labels is not None:
+            final_rows_match = final_labels == expected_row_labels
+        else:
+            final_rows_match = (
+                int(getattr(final_fit.result, "nobs", len(working)))
+                == len(working)
+            )
+        if not final_rows_match:
+            raise RuntimeError(
+                "The final REML model did not use the exact validated "
+                "observed row set."
+            )
+
         estimates = _fixed_effect_estimates(final_fit.result, float(ci_level))
+        estimates["analysis_scope"] = scope
+        estimates["n_observations"] = int(len(working))
+        estimates["n_contributing_participants"] = int(
+            len(levels["participants"])
+        )
         formula_fits: dict[str, _AcceptedFit | None] = {}
         for formula_index, formula in enumerate(
             dict.fromkeys(
@@ -1051,6 +1207,36 @@ def run_multigroup_mixed_model(
             )
             continue
         try:
+            full_labels = _model_row_labels(full_fit.result)
+            reduced_labels = _model_row_labels(reduced_fit.result)
+            if full_labels is not None and reduced_labels is not None:
+                same_rows = (
+                    full_labels == expected_row_labels
+                    and reduced_labels == expected_row_labels
+                )
+                row_identity_status = (
+                    "exact_match" if same_rows else "mismatch"
+                )
+                n_full = len(full_labels)
+                n_reduced = len(reduced_labels)
+            else:
+                n_full = int(
+                    getattr(full_fit.result, "nobs", len(working))
+                )
+                n_reduced = int(
+                    getattr(reduced_fit.result, "nobs", len(working))
+                )
+                same_rows = n_full == len(working) == n_reduced
+                row_identity_status = (
+                    "count_match_row_labels_unavailable"
+                    if same_rows
+                    else "count_mismatch"
+                )
+            if not same_rows:
+                raise ValueError(
+                    "full and reduced ML models did not use the exact same "
+                    "validated observed rows"
+                )
             lr_statistic = 2.0 * (
                 float(getattr(full_fit.result, "llf"))
                 - float(getattr(reduced_fit.result, "llf"))
@@ -1077,6 +1263,11 @@ def run_multigroup_mixed_model(
                     "p_value_chi2": p_value,
                     "status": "ok",
                     "reportable": True,
+                    "analysis_scope": scope,
+                    "n_observations_full": n_full,
+                    "n_observations_reduced": n_reduced,
+                    "same_observed_rows": same_rows,
+                    "row_identity_status": row_identity_status,
                     "error": "",
                     "reference_distribution": "chi-square (asymptotic)",
                     "caveat": LRT_CAVEAT,
@@ -1091,6 +1282,7 @@ def run_multigroup_mixed_model(
             )
 
     omnibus = pd.DataFrame(omnibus_rows)
+    omnibus["analysis_scope"] = scope
     status = "ok" if omnibus["reportable"].all() else "partial"
     diagnostics = pd.concat(
         [
@@ -1128,6 +1320,9 @@ def run_multigroup_mixed_model(
         levels=levels,
         marginal_grid=marginal_grid,
         reference_group_id=reference_group_id,
+        analysis_scope=scope,
+        n_observations=len(working),
+        n_contributing_participants=len(levels["participants"]),
     )
     marginal_group_contrasts = _estimated_marginal_group_contrasts(
         result=final_fit.result,

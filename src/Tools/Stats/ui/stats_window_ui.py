@@ -442,11 +442,15 @@ class StatsWindowUiMixin:
             "Primary complete core",
             "complete_core",
         )
-        self.analysis_scope_combo.setEnabled(False)
+        self.analysis_scope_combo.addItem(
+            "Available-case LMM",
+            "available_case",
+        )
         self.analysis_scope_combo.setToolTip(
-            "The primary analysis retains only conditions contributed by every "
-            "included participant. A secondary available-case model is not run "
-            "by the current native pipeline."
+            "Complete core retains only conditions contributed by every included "
+            "participant. Available-case LMM retains usable observations from "
+            "participants with missing conditions, skips repeated-measures ANOVA "
+            "and paired post-hocs, and reports the missing-data assumptions."
         )
         inference_grid.addWidget(QLabel("Analysis scope:"), 2, 0)
         inference_grid.addWidget(self.analysis_scope_combo, 2, 1)
@@ -525,6 +529,11 @@ class StatsWindowUiMixin:
             "stats_resampling_sensitivity_checkbox"
         )
         self.resampling_sensitivity_checkbox.setChecked(True)
+        self.resampling_sensitivity_checkbox.setToolTip(
+            "Run the participant-level max-|t| resampling sensitivity. This "
+            "requires complete participant-by-cell coverage and is unavailable "
+            "for an available-case LMM."
+        )
         sensitivity_layout.addWidget(self.resampling_sensitivity_checkbox)
 
         self.stability_sensitivity_checkbox = QCheckBox("Leave-one-out stability")
