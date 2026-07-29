@@ -76,6 +76,7 @@ class PostProcessingPipelineWorker(QObject):
     def __init__(self, project: Any) -> None:
         super().__init__()
         self._project = project
+        self._dataset_index: Any | None = None
 
     @Slot()
     def run(self) -> None:
@@ -172,6 +173,7 @@ class PostProcessingPipelineWorker(QObject):
                 )
             )
         finally:
+            self._dataset_index = None
             cache_stack.close()
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
@@ -197,11 +199,15 @@ class PostProcessingPipelineWorker(QObject):
 
     def _run_frequency_domain_qc_review(self) -> dict[str, object]:
         self._emit_progress("FPVS Toolbox is reviewing frequency-domain QC before final harmonic selection.")
+        from Main_App.projects import load_project_dataset_index
         from Main_App.processing.frequency_domain_qc import run_frequency_domain_qc_review
 
+        project_root = Path(self._project.project_root).expanduser().resolve()
+        self._dataset_index = load_project_dataset_index(project_root)
         return run_frequency_domain_qc_review(
             self._project,
             log_func=self._emit_progress,
+            dataset_index=self._dataset_index,
         )
 
     def _sync_frequency_domain_qc_automatic_state(
@@ -225,6 +231,7 @@ class PostProcessingPipelineWorker(QObject):
             report = run_processing_harmonic_selection_qc(
                 self._project,
                 log_func=self._emit_progress,
+                dataset_index=self._dataset_index,
             )
         except PIPELINE_STEP_EXCEPTIONS as exc:
             logger.exception("post_processing_harmonic_selection_failed")
@@ -252,6 +259,7 @@ class PostProcessingPipelineWorker(QObject):
             result = write_loreta_stats_ready_workbook(
                 project_root,
                 log_callback=self._emit_progress,
+                dataset_index=self._dataset_index,
             )
         except PIPELINE_STEP_EXCEPTIONS as exc:
             logger.exception("post_processing_stats_ready_export_failed")

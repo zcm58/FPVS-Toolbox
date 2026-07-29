@@ -8,6 +8,7 @@ from pathlib import Path
 
 from Main_App import SettingsManager
 from Main_App.projects import (
+    ProjectDatasetIndex,
     STATS_SUBFOLDER_NAME,
     load_project_dataset_index,
 )
@@ -46,6 +47,7 @@ def write_loreta_stats_ready_workbook(
     project_root: str | Path,
     *,
     log_callback: Callable[[str], None] | None = None,
+    dataset_index: ProjectDatasetIndex | None = None,
 ) -> LoretaStatsReadyExportResult:
     """Generate the Stats-ready workbook needed before project source-map visualization."""
 
@@ -55,7 +57,12 @@ def write_loreta_stats_ready_workbook(
 
     log = log_callback or (lambda _message: None)
     log("Scanning processed project workbooks for the LORETA summary report...")
-    dataset_index = load_project_dataset_index(root)
+    if dataset_index is None:
+        dataset_index = load_project_dataset_index(root)
+    elif dataset_index.project_root.resolve() != root:
+        raise ValueError(
+            "The supplied dataset index belongs to a different project root."
+        )
     for diagnostic in dataset_index.diagnostics:
         log(f"Dataset index: {diagnostic.message}")
     dataset_index.require_group_assignments()

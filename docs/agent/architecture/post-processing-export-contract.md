@@ -89,6 +89,9 @@ Folders are created under `save_folder_path.get()`. If subfolder creation fails,
 For every valid data object:
 
 - Pick EEG channels, excluding bad channels for non-evoked objects.
+- Real MNE Epochs/Evoked objects may select those same ordered EEG indices
+  directly from the resident object. Custom MNE-like objects and empty
+  selections retain the established `copy().pick(...)` path.
 - Average epochs across repetitions when the object is `Epochs`.
 - Convert averaged data to microvolts before FFT and SNR metrics.
 - Use 64-channel default electrode ordering only when the channel set matches `DEFAULT_ELECTRODE_NAMES_64`.
@@ -105,6 +108,13 @@ Workbook sheets and column behavior must remain:
 
 All metric sheets insert `Electrode` as the first column. Target-frequency columns are formatted as `{frequency:.4f}_Hz`.
 
+For the normal one-object condition export, FullSNR calculation may retain
+only the bins needed by the exported interpolation grid plus the unchanged
+right-hand noise window. The retained FullSNR values and interpolated output
+must be byte-identical to calculating the complete Nyquist range. Multi-object
+conditions retain complete-spectrum accumulation because their frequency grids
+can differ while their FFT matrix shapes match.
+
 ## FFT Neighbor Export
 
 The `FFT and neighbors` sheet uses these columns in this exact order:
@@ -116,6 +126,14 @@ The target label is `1.2Hz`. Neighbor amplitudes are exported for +/-11 FFT bins
 `build_fft_neighbors_rows(...)` returns one row per electrode/channel. It resolves `k0` by the exact target-bin formula, records `fs`, `N`, `T_sec`, `df_hz`, and crop metadata, and raises if the target frequency is not exactly on an FFT bin. It must not fall back to the nearest frequency bin. `crop_mode` must be `55_onbin` and `N_step` must be present; fixed-epoch FFT fallback is not valid for normal post-export.
 
 `write_results_workbook(...)` writes each provided metric DataFrame to its existing sheet name with no index column, freezes the header row, center-aligns cells vertically and horizontally, and sets each column width from the maximum header/data string length plus four characters. The optional `FFT and neighbors` sheet is written only when the neighbor DataFrame is present and non-empty.
+
+Metric sheets whose first column is the all-string `Electrode` column and
+whose remaining columns are finite native-float64 values may let pandas create
+the exact header/style cache and then write body columns through XlsxWriter's
+column API. Every other frame retains `DataFrame.to_excel`, and `FFT and
+neighbors` always retains that path. The specialized path must preserve stable
+XLSX ZIP members, cell values/types/styles, shared-string order, sheet order,
+dimensions, widths, and freeze panes.
 
 Column-width measurement may process adjacent columns in bounded DataFrame
 blocks, but it must preserve the exact per-column `str(...)` length maximum and
@@ -141,6 +159,16 @@ that explicit worker scope remain uncached. Process-global or cross-run
 workbook caches are not allowed. On the normal path it is released after
 Stats-ready export and before the memory-intensive time-domain source-map
 producers, which do not consume the selected-XLSX reader.
+
+That same worker run may also reuse one immutable `ProjectDatasetIndex` across
+frequency-domain QC, harmonic selection, and Stats-ready export. These phases
+may update tool metadata and downstream outputs, but they must not mutate the
+processed input workbook tree, participant/group assignments, configured Excel
+root, or manual participant-condition preprocessing exclusions covered by the
+snapshot. Standalone entry points still load a fresh index, supplied indices
+must match the resolved project root, Stats-ready diagnostics retain their
+existing order, and consumers must not read the reused manifest snapshot after
+an intervening metadata write.
 
 ## Preservation Rules
 

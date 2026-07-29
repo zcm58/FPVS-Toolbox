@@ -77,6 +77,48 @@ def _apply_column_widths(
         )
 
 
+def _can_write_finite_metric_frame_direct(frame: pd.DataFrame) -> bool:
+    """Return whether direct XlsxWriter cells reproduce pandas output exactly."""
+
+    if frame.empty or len(frame.columns) < 2:
+        return False
+    if not all(isinstance(column, str) for column in frame.columns):
+        return False
+    electrode_values = frame.iloc[:, 0]
+    if frame.columns[0] != "Electrode" or not electrode_values.map(
+        lambda value: isinstance(value, str)
+    ).all():
+        return False
+    numeric = frame.iloc[:, 1:]
+    if not all(dtype == np.dtype(np.float64) for dtype in numeric.dtypes):
+        return False
+    return bool(np.all(np.isfinite(numeric.to_numpy(dtype=float, copy=False))))
+
+
+def _write_dataframe_to_excel(
+    writer: pd.ExcelWriter,
+    *,
+    sheet_name: str,
+    frame: pd.DataFrame,
+) -> Any:
+    """Write one frame, batching only the exact finite metric-sheet shape."""
+
+    if not _can_write_finite_metric_frame_direct(frame):
+        frame.to_excel(writer, sheet_name=sheet_name, index=False)
+        return writer.sheets[sheet_name]
+
+    # Let pandas create the header and its cached style exactly as before.
+    frame.iloc[:0].to_excel(writer, sheet_name=sheet_name, index=False)
+    worksheet = writer.sheets[sheet_name]
+    for column_index in range(len(frame.columns)):
+        worksheet.write_column(
+            1,
+            column_index,
+            frame.iloc[:, column_index].tolist(),
+        )
+    return worksheet
+
+
 def _path_volume(path: Path) -> str:
     absolute = path.expanduser().absolute()
     return os.path.splitdrive(os.fspath(absolute))[0].casefold()
@@ -240,7 +282,11 @@ def write_results_workbook(
                 for sheet_name, df_to_write in dataframes_to_save.items():
                     sheet_started = perf_counter()
                     write_started = perf_counter()
-                    df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                    worksheet = _write_dataframe_to_excel(
+                        writer,
+                        sheet_name=sheet_name,
+                        frame=df_to_write,
+                    )
                     _log_excel_timing(
                         "sheet_to_excel",
                         write_started,
@@ -250,7 +296,6 @@ def write_results_workbook(
                         cols=len(df_to_write.columns),
                         timing_sink=timing_sink,
                     )
-                    worksheet = writer.sheets[sheet_name]
                     worksheet.freeze_panes(1, 0)
                     widths_started = perf_counter()
                     _apply_column_widths(

@@ -926,15 +926,16 @@ def build_group_significant_harmonic_selection(
         for bin_idx, value in zip(bin_indices, grand_average.to_numpy(dtype=float))
         if np.isfinite(value)
     }
+    selected_bin_indices = set(bin_indices)
     column_by_bin = {
         int(bin_idx): str(column)
         for _freq, column, bin_idx in required.frequency_columns
-        if int(bin_idx) in set(bin_indices)
+        if int(bin_idx) in selected_bin_indices
     }
     freq_by_bin = {
         int(bin_idx): float(freq)
         for freq, _column, bin_idx in required.frequency_columns
-        if int(bin_idx) in set(bin_indices)
+        if int(bin_idx) in selected_bin_indices
     }
     rows: list[GroupSignificantHarmonicRow] = []
     harmonic_domain: list[float] = []
@@ -1832,6 +1833,51 @@ def _find_first_full_fft_columns(
     return []
 
 
+def _mean_full_fft_columns_exact(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+) -> np.ndarray:
+    """Return established finite-only column means with a guarded batch path."""
+
+    column_list = list(columns)
+    selected = (
+        frame.loc[:, column_list]
+        if column_list and all(column in frame.columns for column in column_list)
+        else pd.DataFrame()
+    )
+    if (
+        len(selected.index) > 0
+        and len(selected.columns) > 0
+        and all(dtype == np.dtype(np.float64) for dtype in selected.dtypes)
+    ):
+        matrix = selected.to_numpy(dtype=float, copy=False)
+        absolute_values = np.abs(matrix)
+        row_count = max(1, matrix.shape[0])
+        if (
+            np.all(np.isfinite(absolute_values))
+            and np.all(absolute_values != 0.0)
+            and np.all(
+                absolute_values
+                <= np.finfo(np.float64).max / float(row_count)
+            )
+        ):
+            # The transpose-copy gives each original column the same contiguous
+            # one-dimensional value order used by the scalar expression below.
+            return np.ascontiguousarray(matrix.T).mean(axis=1)
+
+    means: list[float] = []
+    for column in column_list:
+        column_values = pd.to_numeric(
+            frame.get(column, pd.Series(dtype=float)),
+            errors="coerce",
+        ).to_numpy(dtype=float)
+        finite_values = column_values[np.isfinite(column_values)]
+        means.append(
+            float(finite_values.mean()) if finite_values.size else np.nan
+        )
+    return np.asarray(means, dtype=float)
+
+
 def _load_mean_amplitude_series(
     file_path: str,
     *,
@@ -1860,10 +1906,11 @@ def _load_mean_amplitude_series(
         reference_frequency_columns=reference_frequency_columns,
         required_indices=required_indices,
     )
+    required_index_set = set(required_indices)
     required_columns = [
         str(column)
         for _freq, column, idx in reference_frequency_columns
-        if int(idx) in set(required_indices)
+        if int(idx) in required_index_set
     ]
     matched_reference_columns = {
         str(reference_column)
@@ -1882,7 +1929,16 @@ def _load_mean_amplitude_series(
             f"{missing_columns[:8]}"
         )
 
-    ordered_local_columns = [column for column in usecols[1:] if column in header_columns]
+    header_names = {
+        column
+        for column in header_columns
+        if isinstance(column, str)
+    }
+    ordered_local_columns = [
+        column
+        for column in usecols[1:]
+        if column in header_names
+    ]
     if not ordered_local_columns:
         raise RuntimeError(
             "Group-level significant harmonic selection requires matching "
@@ -1930,13 +1986,15 @@ def _load_mean_amplitude_series(
 
     values: dict[float, float] = {}
     reference_columns: list[str] = []
-    for local_column in ordered_local_columns:
-        column_values = pd.to_numeric(
-            df_fft.get(local_column, pd.Series(dtype=float)),
-            errors="coerce",
-        ).to_numpy(dtype=float)
-        finite_values = column_values[np.isfinite(column_values)]
-        value = float(finite_values.mean()) if finite_values.size else np.nan
+    column_means = _mean_full_fft_columns_exact(
+        df_fft,
+        ordered_local_columns,
+    )
+    for local_column, column_mean in zip(
+        ordered_local_columns,
+        column_means,
+    ):
+        value = float(column_mean)
         for reference_freq, reference_column in local_to_reference.get(local_column, []):
             values[reference_freq] = value
             reference_columns.append(reference_column)
@@ -1955,14 +2013,15 @@ def _plan_workbook_full_fft_usecols_from_header(
     if not local_frequency_columns:
         return ["Electrode"], {}
 
+    required_index_set = set(required_indices)
     reference_by_idx = {
         int(idx): (float(freq), str(column))
         for freq, column, idx in reference_frequency_columns
-        if int(idx) in set(required_indices)
+        if int(idx) in required_index_set
     }
     local_by_column = {str(column): float(freq) for freq, column, _idx in local_frequency_columns}
     local_to_reference: dict[str, list[tuple[float, str]]] = {}
-    for required_idx in sorted(set(required_indices)):
+    for required_idx in sorted(required_index_set):
         reference = reference_by_idx.get(int(required_idx))
         if reference is None:
             continue

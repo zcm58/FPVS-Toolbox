@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from Main_App.projects import load_project_dataset_index
+from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
     normalize_preprocessing_settings,
@@ -77,6 +77,7 @@ def run_frequency_domain_qc_review(
     project: Any,
     *,
     log_func: Callable[[str], None] | None = None,
+    dataset_index: ProjectDatasetIndex | None = None,
 ) -> dict[str, object]:
     """Build a provisional summed-BCA QC report for the active project."""
 
@@ -88,7 +89,12 @@ def run_frequency_domain_qc_review(
     thresholds = DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS
     from Tools.Stats.data.shared_rois import load_rois_from_settings
 
-    dataset_index = load_project_dataset_index(project_root)
+    if dataset_index is None:
+        dataset_index = load_project_dataset_index(project_root)
+    elif dataset_index.project_root.resolve() != project_root:
+        raise ValueError(
+            "The supplied dataset index belongs to a different project root."
+        )
     subjects = list(dataset_index.participant_ids)
     conditions = list(dataset_index.conditions)
     subject_data = dataset_index.subject_data(require_group_assignment=True)

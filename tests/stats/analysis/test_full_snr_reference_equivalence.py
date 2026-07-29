@@ -6,6 +6,7 @@ from Tools.Stats.analysis.full_snr import (
     compute_full_snr,
     compute_full_snr_df,
     compute_full_snr_from_amplitudes,
+    compute_full_snr_prefix_from_amplitudes,
 )
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 
@@ -124,3 +125,82 @@ def test_compute_full_snr_df_matches_legacy_reference_values() -> None:
         rtol=1e-12,
         atol=1e-12,
     )
+
+
+def test_full_snr_prefix_matches_full_calculation_bytes() -> None:
+    amplitudes = np.abs(
+        np.random.default_rng(20260729).normal(size=(64, 20_001))
+    )
+    output_bin_count = 3_751
+
+    expected = compute_full_snr_from_amplitudes(amplitudes)[
+        :,
+        :output_bin_count,
+    ]
+    actual = compute_full_snr_prefix_from_amplitudes(
+        amplitudes,
+        output_bin_count=output_bin_count,
+    )
+
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+    assert actual.tobytes() == expected.tobytes()
+
+
+def test_full_snr_prefix_preserves_interpolated_export_bytes() -> None:
+    amplitudes = np.abs(
+        np.random.default_rng(1776).normal(size=(8, 16_385))
+    )
+    frequencies = np.fft.rfftfreq(
+        (amplitudes.shape[1] - 1) * 2,
+        d=1.0 / 256.0,
+    )
+    export_grid = np.arange(0.5, 30.0 + 0.01, 0.01)
+    output_bin_count = min(
+        len(frequencies),
+        int(
+            np.searchsorted(
+                frequencies,
+                float(export_grid[-1]),
+                side="left",
+            )
+        )
+        + 1,
+    )
+
+    full = compute_full_snr_from_amplitudes(amplitudes)
+    prefix = compute_full_snr_prefix_from_amplitudes(
+        amplitudes,
+        output_bin_count=output_bin_count,
+    )
+    expected = np.vstack(
+        [
+            np.interp(export_grid, frequencies, channel)
+            for channel in full
+        ]
+    )
+    actual = np.vstack(
+        [
+            np.interp(
+                export_grid,
+                frequencies[:output_bin_count],
+                channel,
+            )
+            for channel in prefix
+        ]
+    )
+
+    assert prefix.tobytes() == full[:, :output_bin_count].tobytes()
+    assert actual.tobytes() == expected.tobytes()
+
+
+def test_full_snr_prefix_clamps_to_available_bins() -> None:
+    amplitudes = np.arange(36, dtype=float).reshape(3, 12)
+
+    expected = compute_full_snr_from_amplitudes(amplitudes)
+    actual = compute_full_snr_prefix_from_amplitudes(
+        amplitudes,
+        output_bin_count=10_000,
+    )
+
+    assert actual.tobytes() == expected.tobytes()

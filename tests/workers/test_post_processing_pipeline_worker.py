@@ -266,6 +266,7 @@ def test_pipeline_reports_success_with_source_cohort_warnings(tmp_path) -> None:
 
 def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
     worker = _RecordingWorker(_Project(tmp_path))
+    worker._dataset_index = object()
     progress: list[str] = []
     phase_progress: list[tuple[str, int, int, str]] = []
     logs: list[tuple[str, int]] = []
@@ -317,6 +318,75 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         "stats_ready_summed_bca",
         "l2_mne_source_psd",
         "eloreta_volume_source_psd",
+    ]
+    assert worker._dataset_index is None
+
+
+def test_base_post_processing_steps_reuse_one_dataset_index(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from Main_App import projects as projects_module
+    from Main_App.processing import frequency_domain_qc, harmonic_selection_qc
+    from Tools.LORETA_Visualizer import stats_ready_workbook
+
+    root = tmp_path.resolve()
+    sentinel_index = SimpleNamespace(project_root=root)
+    loader_calls: list[Path] = []
+    captured: list[tuple[str, object]] = []
+
+    def load_index(project_root):
+        loader_calls.append(Path(project_root))
+        return sentinel_index
+
+    def run_qc(_project, *, log_func, dataset_index):
+        assert callable(log_func)
+        captured.append(("qc", dataset_index))
+        return {"review_required": False, "review_reused": False}
+
+    def run_harmonics(_project, *, log_func, dataset_index):
+        assert callable(log_func)
+        captured.append(("harmonics", dataset_index))
+        return SimpleNamespace(workbook_path=root / "harmonics.xlsx")
+
+    def write_stats(_root, *, log_callback, dataset_index):
+        assert callable(log_callback)
+        captured.append(("stats", dataset_index))
+        return SimpleNamespace(
+            workbook_path=root / "stats.xlsx",
+            row_count=2,
+        )
+
+    monkeypatch.setattr(projects_module, "load_project_dataset_index", load_index)
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "run_frequency_domain_qc_review",
+        run_qc,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "run_processing_harmonic_selection_qc",
+        run_harmonics,
+    )
+    monkeypatch.setattr(
+        stats_ready_workbook,
+        "write_loreta_stats_ready_workbook",
+        write_stats,
+    )
+
+    worker = PostProcessingPipelineWorker(_Project(root))
+    qc_report = worker._run_frequency_domain_qc_review()
+    harmonic_result = worker._run_harmonic_selection()
+    stats_result = worker._run_stats_ready_export(root)
+
+    assert qc_report["review_required"] is False
+    assert harmonic_result.ok is True
+    assert stats_result.ok is True
+    assert loader_calls == [root]
+    assert captured == [
+        ("qc", sentinel_index),
+        ("harmonics", sentinel_index),
+        ("stats", sentinel_index),
     ]
 
 

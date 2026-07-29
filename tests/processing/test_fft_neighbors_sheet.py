@@ -4,6 +4,7 @@ import zipfile
 import pytest
 from Main_App.Shared import post_process_excel
 from Main_App.Shared.post_process_excel import (
+    _can_write_finite_metric_frame_direct,
     _column_widths,
     build_fft_neighbors_rows,
     write_results_workbook,
@@ -36,6 +37,92 @@ def test_column_width_blocks_preserve_scalar_string_length_semantics() -> None:
     )
 
     assert _column_widths(frame) == _scalar_column_widths(frame)
+
+
+def test_direct_metric_writer_guard_rejects_non_equivalent_frames() -> None:
+    normal = pd.DataFrame(
+        {
+            "Electrode": ["Oz", "POz"],
+            "1.2000_Hz": np.array([1.25, -0.5], dtype=np.float64),
+        }
+    )
+
+    assert _can_write_finite_metric_frame_direct(normal)
+    assert not _can_write_finite_metric_frame_direct(
+        normal.astype({"1.2000_Hz": np.float32})
+    )
+    assert not _can_write_finite_metric_frame_direct(
+        normal.assign(**{"1.2000_Hz": [1.25, np.nan]})
+    )
+    assert not _can_write_finite_metric_frame_direct(
+        normal.assign(Electrode=["Oz", None])
+    )
+
+
+def test_direct_metric_writer_preserves_stable_xlsx_members(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    columns = [f"{index / 100:.4f}_Hz" for index in range(257)]
+    frame = pd.DataFrame(
+        np.abs(np.random.default_rng(20260729).normal(size=(16, len(columns)))),
+        columns=columns,
+    )
+    frame.insert(
+        0,
+        "Electrode",
+        [f"E{index:02d}" for index in range(len(frame))],
+    )
+    frame.iat[0, 1] = -0.0
+    frame.iat[1, 2] = 0.0
+    neighbors = pd.DataFrame(
+        {
+            "file_name": ["demo.bdf"],
+            "condition_label": ["Condition A"],
+            "warning": [""],
+        }
+    )
+    baseline_path = tmp_path / "pandas-baseline.xlsx"
+    direct_path = tmp_path / "direct-metric.xlsx"
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_can_write_finite_metric_frame_direct",
+        lambda _frame: False,
+    )
+    write_results_workbook(
+        str(baseline_path),
+        {"FullFFT Amplitude (uV)": frame},
+        neighbors,
+    )
+
+    monkeypatch.setattr(
+        post_process_excel,
+        "_can_write_finite_metric_frame_direct",
+        _can_write_finite_metric_frame_direct,
+    )
+    write_results_workbook(
+        str(direct_path),
+        {"FullFFT Amplitude (uV)": frame},
+        neighbors,
+    )
+
+    with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(
+        direct_path
+    ) as direct:
+        assert baseline.namelist() == direct.namelist()
+        stable_members = [
+            name
+            for name in baseline.namelist()
+            if name != "docProps/core.xml"
+        ]
+        assert {
+            name: baseline.read(name)
+            for name in stable_members
+        } == {
+            name: direct.read(name)
+            for name in stable_members
+        }
 
 
 def test_cross_volume_staging_publishes_one_sequential_copy(
