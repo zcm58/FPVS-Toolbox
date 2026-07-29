@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 5 - pipeline, exports, and detailed reporting
+- Current phase: Phase 6 - GUI and non-expert workflow
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -708,22 +708,24 @@ Deliverables:
 
 Definition of done:
 
-- [ ] Single and multi pipelines run only in workers.
-- [ ] Pipeline log labels are not hard-coded to Single.
-- [ ] A full pipeline prepares the DV/design once.
-- [ ] Stale worker results cannot overwrite a newer run or newly opened
+- [x] Single and multi pipelines run only in workers.
+- [x] Pipeline log labels are not hard-coded to Single.
+- [x] A full pipeline prepares the DV/design once.
+- [x] Stale worker results cannot overwrite a newer run or newly opened
       project.
-- [ ] Cancel restores controls and does not export partial results as complete.
-- [ ] Partial/reporting failures do not falsify completed numeric exports.
-- [ ] Detailed files identify formula, N, correction, family, profile,
+- [x] Cancel restores controls and does not export partial results as complete.
+- [x] Partial/reporting failures do not falsify completed numeric exports.
+- [x] Detailed files identify formula, N, correction, family, profile,
       provenance, estimand, CI/effect size and assumption status.
-- [ ] Detailed scientific metadata and the test inventory are explicit
+- [x] Detailed scientific metadata and the test inventory are explicit
       exported tables, not attributes attached only to data frames.
-- [ ] Visible summary contains no raw-p-only headline.
-- [ ] Nonsignificant group results are not called equivalent.
-- [ ] Existing Stats-ready workbook remains compatible.
-- [ ] Focused Stats and project-I/O verification pass.
-- [ ] Plan progress is updated and committed.
+- [x] Visible summary contains no raw-p-only headline.
+- [x] Nonsignificant group results are not called equivalent.
+- [x] Existing Stats-ready workbook remains compatible.
+- [x] Focused Stats (51 registered tests), project-I/O (71 tests), Phase 5
+      pipeline/reporting (70 tests), and full reporting (31 tests)
+      verification pass.
+- [x] Plan progress is updated and committed.
 
 Commit:
 
@@ -856,7 +858,7 @@ To perform after Phase 6 in a safe visible Windows session:
 - [x] Phase 2 - Single-group inference
 - [x] Phase 3 - Native multi-group engines
 - [x] Phase 4 - Robust sensitivities and diagnostics
-- [ ] Phase 5 - Pipeline, exports, and detailed reporting
+- [x] Phase 5 - Pipeline, exports, and detailed reporting
 - [ ] Phase 6 - GUI and non-expert workflow
 - [ ] Phase 7 - Validation, documentation, and closure
 

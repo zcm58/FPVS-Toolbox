@@ -12,6 +12,7 @@ from Main_App.projects.project import STATS_SUBFOLDER_NAME
 class PipelineId(Enum):
     """Represent the PipelineId part of the Stats tool."""
     SINGLE = auto()
+    MULTI = auto()
 
 
 class StepId(Enum):
@@ -20,6 +21,11 @@ class StepId(Enum):
     MIXED_MODEL = auto()
     INTERACTION_POSTHOCS = auto()
     BASELINE_VS_ZERO = auto()
+    PREPARE_ANALYSIS = auto()
+    MULTIGROUP_MODEL = auto()
+    GROUP_CELL_COMPARISONS = auto()
+    SENSITIVITIES = auto()
+    REPORT_BUNDLE = auto()
 
 
 RESULTS_SUBFOLDER_NAME: Final[str] = STATS_SUBFOLDER_NAME

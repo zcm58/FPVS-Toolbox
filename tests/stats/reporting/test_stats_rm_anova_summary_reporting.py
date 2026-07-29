@@ -193,14 +193,19 @@ def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeyp
     )
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",
-        lambda **kwargs: {"P1": {"A": {"ROI1": 1.0}}, "P2": {"A": {"ROI1": 2.0}}},
+        lambda **kwargs: {
+            "P1": {"A": {"ROI1": 1.0}, "B": {"ROI1": 1.5}},
+            "P2": {"A": {"ROI1": 2.0}, "B": {"ROI1": 2.5}},
+        },
     )
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers._long_format_from_bca",
         lambda _data: pd.DataFrame(
             [
                 {"subject": "P1", "condition": "A", "roi": "ROI1", "value": 1.0},
+                {"subject": "P1", "condition": "B", "roi": "ROI1", "value": 1.5},
                 {"subject": "P2", "condition": "A", "roi": "ROI1", "value": float("nan")},
+                {"subject": "P2", "condition": "B", "roi": "ROI1", "value": 2.5},
             ]
         ),
     )
@@ -215,9 +220,12 @@ def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeyp
         lambda _progress: None,
         lambda _message: None,
         subjects=["P1", "P2"],
-        conditions=["A"],
-        conditions_all=["A"],
-        subject_data={"P1": {"A": {"ROI1": 1.0}}, "P2": {"A": {"ROI1": 2.0}}},
+        conditions=["A", "B"],
+        conditions_all=["A", "B"],
+        subject_data={
+            "P1": {"A": {"ROI1": 1.0}, "B": {"ROI1": 1.5}},
+            "P2": {"A": {"ROI1": 2.0}, "B": {"ROI1": 2.5}},
+        },
         base_freq=6.0,
         rois={"ROI1": ["O1"]},
         rois_all={"ROI1": ["O1"]},
