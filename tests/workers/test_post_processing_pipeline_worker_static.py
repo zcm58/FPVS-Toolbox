@@ -171,6 +171,40 @@ def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
     )
 
 
+def test_post_processing_run_reuses_and_releases_one_dataset_index() -> None:
+    tree = _worker_tree()
+    qc_method = _class_method(tree, "_run_frequency_domain_qc_review")
+    harmonic_method = _class_method(tree, "_run_harmonic_selection")
+    stats_method = _class_method(tree, "_run_stats_ready_export")
+    run_method = _class_method(tree, "run")
+
+    qc_source = ast.unparse(qc_method)
+    harmonic_source = ast.unparse(harmonic_method)
+    stats_source = ast.unparse(stats_method)
+    assert (
+        "self._dataset_index = load_project_dataset_index(project_root)"
+        in qc_source
+    )
+    assert "dataset_index=self._dataset_index" in qc_source
+    assert "dataset_index=self._dataset_index" in harmonic_source
+    assert "dataset_index=self._dataset_index" in stats_source
+
+    try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
+    assert any(
+        isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr == "_dataset_index"
+            for target in statement.targets
+        )
+        and isinstance(statement.value, ast.Constant)
+        and statement.value.value is None
+        for statement in try_node.finalbody
+    )
+
+
 def _is_named_method_call(
     statement: ast.stmt,
     object_name: str,

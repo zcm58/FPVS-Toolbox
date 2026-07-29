@@ -20,6 +20,7 @@ __all__ = [
     "compute_full_snr_df",
     "compute_full_snr",
     "compute_full_snr_from_amplitudes",
+    "compute_full_snr_prefix_from_amplitudes",
 ]
 
 
@@ -179,3 +180,37 @@ def compute_full_snr_from_amplitudes(
         amplitudes,
         window_size=window_size,
     )
+
+
+def compute_full_snr_prefix_from_amplitudes(
+    amplitudes: np.ndarray,
+    *,
+    output_bin_count: int,
+    window_size: int = 10,
+) -> np.ndarray:
+    """Return an exact leading FullSNR prefix without processing the tail.
+
+    Every retained output bin still receives the same right-hand neighboring
+    amplitudes as a full-spectrum calculation.  Only bins beyond the requested
+    prefix plus the unchanged noise window are omitted.
+    """
+
+    amplitude_matrix = np.asarray(amplitudes)
+    if amplitude_matrix.ndim != 2:
+        raise ValueError(
+            "FullSNR prefix calculation requires a 2-D channels x FFT-bins array."
+        )
+    total_bin_count = amplitude_matrix.shape[1]
+    retained_bin_count = max(
+        0,
+        min(int(output_bin_count), total_bin_count),
+    )
+    calculation_bin_count = min(
+        total_bin_count,
+        retained_bin_count + max(0, int(window_size)),
+    )
+    calculated = _compute_snr_matrix_for_amplitudes(
+        amplitude_matrix[:, :calculation_bin_count],
+        window_size=window_size,
+    )
+    return calculated[:, :retained_bin_count]

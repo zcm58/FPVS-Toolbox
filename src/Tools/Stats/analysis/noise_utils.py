@@ -24,7 +24,14 @@ from typing import Tuple
 
 import numpy as np
 
-__all__ = ["compute_noise_stats_for_bin"]
+__all__ = [
+    "compute_noise_stats_for_bin",
+    "compute_noise_stats_for_bin_channels",
+]
+
+
+_BATCH_SAFE_ABS_MIN = 1e-100
+_BATCH_SAFE_ABS_MAX = 1e100
 
 
 def compute_noise_stats_for_bin(
@@ -93,3 +100,79 @@ def compute_noise_stats_for_bin(
     noise_mean = float(noise_vals.mean())
     noise_std = float(noise_vals.std(ddof=0))
     return noise_mean, noise_std
+
+
+def compute_noise_stats_for_bin_channels(
+    amplitudes: np.ndarray,
+    target_idx: int,
+    window_size: int = 10,
+    min_bins: int = 4,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute one target-bin noise estimate for every channel, byte-exact.
+
+    Normal post-processing FFT amplitudes are native float64, finite,
+    C-contiguous, and comfortably within ordinary EEG magnitude ranges.  That
+    case can reduce the same retained values along adjacent rows in one NumPy
+    call.  Inputs with zeros, non-finite/extreme values, tied extrema, another
+    dtype, or another layout retain the scalar helper above so its values and
+    warning behavior remain unchanged.
+    """
+
+    amplitude_matrix = np.asarray(amplitudes)
+    if amplitude_matrix.ndim != 2:
+        raise ValueError(
+            "Channel noise statistics require a 2-D channels x FFT-bins array."
+        )
+
+    num_channels, num_bins = amplitude_matrix.shape
+    low = max(0, target_idx - window_size)
+    high = min(num_bins - 1, target_idx + window_size)
+    exclude = {target_idx - 1, target_idx, target_idx + 1}
+    indices = [
+        index
+        for index in range(low, high + 1)
+        if 0 <= index < num_bins and index not in exclude
+    ]
+
+    if len(indices) < min_bins:
+        return np.zeros(num_channels, dtype=float), np.zeros(
+            num_channels,
+            dtype=float,
+        )
+
+    if (
+        amplitude_matrix.dtype == np.dtype(np.float64)
+        and amplitude_matrix.flags.c_contiguous
+    ):
+        noise_values = np.ascontiguousarray(amplitude_matrix[:, indices])
+        absolute_values = np.abs(noise_values)
+        if (
+            noise_values.shape[1] > 2
+            and np.all(np.isfinite(absolute_values))
+            and np.all(absolute_values >= _BATCH_SAFE_ABS_MIN)
+            and np.all(absolute_values <= _BATCH_SAFE_ABS_MAX)
+        ):
+            max_indices = noise_values.argmax(axis=1)
+            min_indices = noise_values.argmin(axis=1)
+            if np.all(max_indices != min_indices):
+                keep = np.ones(noise_values.shape, dtype=bool)
+                channel_indices = np.arange(num_channels)
+                keep[channel_indices, max_indices] = False
+                keep[channel_indices, min_indices] = False
+                retained = np.ascontiguousarray(
+                    noise_values[keep].reshape(num_channels, -1)
+                )
+                return retained.mean(axis=1), retained.std(axis=1, ddof=0)
+
+    noise_means = np.empty(num_channels, dtype=float)
+    noise_stds = np.empty(num_channels, dtype=float)
+    for channel_index in range(num_channels):
+        noise_means[channel_index], noise_stds[channel_index] = (
+            compute_noise_stats_for_bin(
+                amplitude_matrix[channel_index],
+                target_idx,
+                window_size=window_size,
+                min_bins=min_bins,
+            )
+        )
+    return noise_means, noise_stds

@@ -2,9 +2,11 @@
 
 ## Status
 
-Implementation complete on `codex/finalize-multi-group-bitwise-speedups`,
-branched from local `codex/finalize-multi-group` at `f45512ec`. Awaiting a
-visible representative-project smoke run and merge back to that branch.
+The original pipeline work is present on local `codex/finalize-multi-group`.
+The post-processing extension is complete on
+`codex/finalize-multi-group-postprocess-speedups`, branched from that local
+branch at `72dbd412`. It is awaiting a visible representative-project smoke
+run and manual review before merge.
 
 ## Goal
 
@@ -44,6 +46,18 @@ stored on a rotational, removable, or otherwise slow drive.
 | 8 | Batch FFT multi-notch transforms over a memory-bounded channel block | Moderate; measured about 1.4-1.7x for that stage | Moderate memory/oversubscription risk in multi-process runs | Deferred pending representative recording-length profiling |
 | 9 | Serialize or pipeline main-run BDF reads per physical rotational device | Potentially very high on HDD cold runs | Moderate; hardware detection and workload interaction need real-drive measurements | Deferred for device benchmarking |
 | 10 | Reuse condition epoch means between workbook and source-ready export | Moderate | Moderate; current bad-channel pick semantics differ | Deferred |
+
+## Post-Processing Extension
+
+| Rank | Implemented change | Measured affected-stage benefit | Exact fallback |
+| --- | --- | --- | --- |
+| 1 | Write guarded finite-float64 metric-sheet bodies with XlsxWriter after pandas creates the exact headers/styles | 1.59-1.68x for a representative 64 x 5,001/6,001 sheet | Pandas writes every mixed, non-finite, non-float64, or nonstandard frame; `FFT and neighbors` always uses pandas |
+| 2 | Calculate only the FullSNR prefix required by the exported interpolation grid | 6.31x for 64 x 32,001 input bins retaining 6,001 bins; 5.33x smaller working set | Multiple data objects retain complete-spectrum accumulation |
+| 3 | Reuse one immutable project dataset index across the three downstream workbook-discovery phases | 2.70x for discovery over 384 synthetic processed workbooks | Standalone calls load a fresh index; a mismatched project root is rejected |
+| 4 | Batch exact neighboring-bin target noise reductions across channels | 20.98x for 64 channels x 20 targets | Unsafe magnitude, dtype, layout, non-finite, zero, or constant-window inputs retain the scalar channel/target loop |
+| 5 | Build a canonical Stats-ready wide matrix by validated reshape | 46-90x for the reshape helper | Any key-grid, order, length, or dtype mismatch retains the merge sequence |
+| 6 | Hoist invariant harmonic-selection sets and batch guarded FullFFT column means | 83-235x for map construction; roughly 45x for representative means | Irregular/missing/non-float64/non-finite/signed-zero/overflow-risk columns retain scalar means |
+| 7 | Select real MNE EEG data without deep-copying the entire object | 2.02x for Evoked picking and 2.76x for Epochs picking | Custom objects and empty selections retain `copy().pick(...)` |
 
 ## Explicitly Rejected
 
@@ -99,6 +113,22 @@ stored on a rotational, removable, or otherwise slow drive.
   before publication. Cross-volume staging turns those destination-volume
   writes into one final sequential copy. No rotational/external drive was
   available, so its end-to-end HDD gain remains to be measured.
+- The post-processing extension was compared directly with parent commit
+  `72dbd412` using a real MNE EpochsArray with 64 EEG plus 2 EOG input
+  channels, 3 epochs x 12,800 samples at 256 Hz, locked `N_step=640`
+  metadata, one data object, and a 40 Hz export. Three interleaved trials had
+  parent/current medians of 4.0452/2.6831 s: **33.67% less end-to-end
+  post-processing time (1.508x)**. A two-object fallback fixture measured
+  24.27% less time (1.321x).
+- Both cross-commit fixtures preserved input hashes and produced the same
+  logs after output-root normalization, timing-stage metadata after removing
+  elapsed values, worksheet order/dimensions, populated-cell coordinates,
+  values/types/styles/number formats, and every decompressed XLSX ZIP member
+  except `docProps/core.xml` creation/modification timestamps.
+- Dataset-index discovery over 96 participants x 4 conditions measured
+  0.8211 s for three scans and 0.3040 s for one scan/reuse. This local,
+  OS-warm result excludes the likely larger rotational-drive latency and is
+  not added arithmetically to the end-to-end result above.
 
 ## Verification Notes
 
@@ -106,7 +136,12 @@ stored on a rotational, removable, or otherwise slow drive.
 - Use the pinned `.venv1` environment when present.
 - Preserve current timing records and add cache/staging timing visibility where
   useful.
-- Directly affected equivalence/cache/lifecycle bundle: 98 passed.
+- Post-processing exactness bundle: 59 passed.
+- Processing focused gate: 303 passed and one skipped. Stats focused gate:
+  51 passed. LORETA focused gate: 275 passed.
+- Worker-static dataset-index/cache lifecycle coverage: 6 passed. The
+  PySide6 worker integration definition remains CI-only under the local
+  no-Qt rule.
 - Cross-commit numerical fuzzing matched raw QC v1 on 1,011/1,011 arrays, raw
   QC v2 on 1,011/1,011 arrays, and epoch averaging on 263/263 layouts. Result
   bytes, exception identity, and warning category/message/order were exact.

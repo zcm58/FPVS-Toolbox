@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from Main_App.projects import load_project_dataset_index
+from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.frequency_domain_qc import filter_frequency_domain_subjects
 from Tools.Stats.analysis.dv_policy_group_significant import (
@@ -60,6 +60,7 @@ def run_processing_harmonic_selection_qc(
     project: Any,
     *,
     log_func: Callable[[str], None] | None = None,
+    dataset_index: ProjectDatasetIndex | None = None,
 ) -> ProcessingHarmonicSelectionReport:
     """Build and persist the project harmonic-selection cache after processing."""
     messages: list[str] = []
@@ -69,7 +70,17 @@ def run_processing_harmonic_selection_qc(
         if log_func is not None:
             log_func(str(message))
 
-    inputs = _processing_harmonic_selection_inputs(project, log_func=_log)
+    if dataset_index is None:
+        inputs = _processing_harmonic_selection_inputs(
+            project,
+            log_func=_log,
+        )
+    else:
+        inputs = _processing_harmonic_selection_inputs(
+            project,
+            log_func=_log,
+            dataset_index=dataset_index,
+        )
     project_root = inputs.project_root
     subjects = list(inputs.subjects)
     ordered_conditions = list(inputs.conditions)
@@ -206,11 +217,17 @@ def _processing_harmonic_selection_inputs(
     project: Any,
     *,
     log_func: Callable[[str], None] | None = None,
+    dataset_index: ProjectDatasetIndex | None = None,
 ) -> ProcessingHarmonicSelectionInputs:
     """Resolve the canonical project-wide inputs used during processing."""
 
     project_root = Path(project.project_root).resolve()
-    dataset_index = load_project_dataset_index(project_root)
+    if dataset_index is None:
+        dataset_index = load_project_dataset_index(project_root)
+    elif dataset_index.project_root.resolve() != project_root:
+        raise ValueError(
+            "The supplied dataset index belongs to a different project root."
+        )
     subjects = list(dataset_index.participant_ids)
     conditions = list(dataset_index.conditions)
     subject_data = dataset_index.subject_data(require_group_assignment=True)

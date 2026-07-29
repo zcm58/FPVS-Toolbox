@@ -14,8 +14,14 @@ from time import perf_counter
 import config
 from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
-from Tools.Stats.analysis.full_snr import compute_full_snr_from_amplitudes
-from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
+from Tools.Stats.analysis.full_snr import (
+    compute_full_snr_from_amplitudes,
+    compute_full_snr_prefix_from_amplitudes,
+)
+from Tools.Stats.analysis.noise_utils import (
+    compute_noise_stats_for_bin,
+    compute_noise_stats_for_bin_channels,
+)
 from Main_App.Shared.fft_crop_utils import compute_onbin_N, compute_onbin_step
 from Main_App.projects.grouping import (
     resolve_group_output_directory,
@@ -51,6 +57,57 @@ def _mean_epochs_float64(epoch_data: np.ndarray) -> np.ndarray:
         # arrays, whose reduction can otherwise differ at the final bit.
         averaging_data = epoch_array.astype(np.float64)
     return np.mean(averaging_data, axis=0)
+
+
+def _eeg_pick_indices(data_object: Any, *, is_evoked: bool) -> np.ndarray:
+    """Return the same ordered EEG picks used by ``copy().pick('eeg')``."""
+
+    return mne.pick_types(
+        data_object.info,
+        meg=False,
+        eeg=True,
+        exclude=[] if is_evoked else "bads",
+    )
+
+
+def _can_batch_target_noise(
+    amplitudes: np.ndarray,
+    target_bin_indices: np.ndarray,
+    *,
+    window_size: int = 10,
+) -> bool:
+    """Return whether every target window can use the exact batch reduction."""
+
+    amplitude_matrix = np.asarray(amplitudes)
+    if (
+        amplitude_matrix.dtype != np.dtype(np.float64)
+        or not amplitude_matrix.flags.c_contiguous
+    ):
+        return False
+    num_bins = amplitude_matrix.shape[1]
+    for target_index in target_bin_indices:
+        target = int(target_index)
+        if target < 0:
+            continue
+        low = max(0, target - window_size)
+        high = min(num_bins - 1, target + window_size)
+        noise_indices = [
+            index
+            for index in range(low, high + 1)
+            if index not in {target - 1, target, target + 1}
+        ]
+        if len(noise_indices) < 4:
+            continue
+        noise_values = amplitude_matrix[:, noise_indices]
+        absolute_values = np.abs(noise_values)
+        if (
+            not np.all(np.isfinite(absolute_values))
+            or not np.all(absolute_values >= 1e-100)
+            or not np.all(absolute_values <= 1e100)
+            or np.any(np.ptp(noise_values, axis=1) == 0.0)
+        ):
+            return False
+    return True
 
 
 def _create_output_subfolder(
@@ -421,6 +478,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         # --- Metrics Calculation (largely unchanged) ---
         accum = {"fft": None, "snr": None, "z": None, "bca": None}
         full_snr_accum = None
+        full_snr_frequencies = None
         full_fft_accum = None
         fft_neighbors_rows: List[Dict[str, Any]] = []
         valid_data_count = 0
@@ -439,6 +497,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             )
             gc.collect()
             object_started = perf_counter()
+            data_eeg = None
             try:
                 if not is_evoked:  # Epochs
                     if not data_object.preload:
@@ -449,9 +508,32 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
                     # ...
                 pick_started = perf_counter()
-                data_eeg = data_object.copy().pick(
-                    "eeg", exclude="bads" if not is_evoked else []
-                )
+                eeg_pick_indices = None
+                if is_evoked or isinstance(data_object, mne.BaseEpochs):
+                    candidate_indices = _eeg_pick_indices(
+                        data_object,
+                        is_evoked=is_evoked,
+                    )
+                    if candidate_indices.size:
+                        eeg_pick_indices = candidate_indices
+                        current_ch_names_from_obj = [
+                            data_object.ch_names[int(index)]
+                            for index in eeg_pick_indices
+                        ]
+                    else:
+                        # Preserve MNE's established exception/warning behavior
+                        # for the unusual no-EEG/all-bad case.
+                        data_eeg = data_object.copy().pick(
+                            "eeg", exclude="bads" if not is_evoked else []
+                        )
+                        current_ch_names_from_obj = list(data_eeg.info["ch_names"])
+                else:
+                    # Custom MNE-like objects may implement pick semantics that
+                    # cannot be reproduced safely from their Info structure.
+                    data_eeg = data_object.copy().pick(
+                        "eeg", exclude="bads" if not is_evoked else []
+                    )
+                    current_ch_names_from_obj = list(data_eeg.info["ch_names"])
                 _log_export_timing(
                     "object_pick_eeg",
                     pick_started,
@@ -459,15 +541,26 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     condition=cond_label_from_keys,
                     object_index=data_idx + 1,
                 )
-                if not data_eeg.ch_names:
+                if not current_ch_names_from_obj:
                     app.log("    No good EEG channels. Skip.")
                     continue
 
                 if is_evoked:
-                    avg_data = data_eeg.data
+                    avg_data = (
+                        data_object.data[eeg_pick_indices, :]
+                        if data_eeg is None
+                        else data_eeg.data
+                    )
                 else:  # Epochs
                     average_started = perf_counter()
-                    ep_data = data_eeg.get_data()
+                    ep_data = (
+                        data_object.get_data(
+                            picks=eeg_pick_indices,
+                            copy=True,
+                        )
+                        if data_eeg is None
+                        else data_eeg.get_data()
+                    )
                     avg_data = _mean_epochs_float64(ep_data)
                     _log_export_timing(
                         "epochs_get_data_average",
@@ -478,7 +571,6 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     )
                 num_channels, num_times = avg_data.shape
                 # ...
-                current_ch_names_from_obj = data_eeg.info["ch_names"]
                 ordered_electrode_names_for_df = []
 
                 if num_channels == len(DEFAULT_ELECTRODE_NAMES_64) and set(
@@ -520,7 +612,11 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     app.log("    Error: Channel mismatch. Skipping object.")
                     continue
 
-                sfreq = data_eeg.info["sfreq"]
+                sfreq = (
+                    data_object.info["sfreq"]
+                    if data_eeg is None
+                    else data_eeg.info["sfreq"]
+                )
 
                 crop_mode = "missing_locked_fft_crop"
                 n55 = None
@@ -683,7 +779,45 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
                 # Full-spectrum SNR uses the already-computed FFT amplitudes.
                 full_snr_started = perf_counter()
-                full_snr_matrix = compute_full_snr_from_amplitudes(fft_amplitudes)
+                if len(data_list) == 1:
+                    full_snr_max_freq = min(
+                        configured_upper_limit,
+                        float(fft_frequencies[-1]),
+                    )
+                    full_snr_grid = np.arange(
+                        0.5,
+                        full_snr_max_freq + 0.01,
+                        0.01,
+                    )
+                    highest_full_snr_frequency = (
+                        float(full_snr_grid[-1])
+                        if len(full_snr_grid)
+                        else 0.0
+                    )
+                    full_snr_bin_count = min(
+                        len(fft_frequencies),
+                        int(
+                            np.searchsorted(
+                                fft_frequencies,
+                                highest_full_snr_frequency,
+                                side="left",
+                            )
+                        )
+                        + 1,
+                    )
+                    full_snr_matrix = compute_full_snr_prefix_from_amplitudes(
+                        fft_amplitudes,
+                        output_bin_count=full_snr_bin_count,
+                    )
+                    full_snr_frequencies = fft_frequencies[:full_snr_bin_count]
+                else:
+                    # Multiple objects can carry distinct sampling grids while
+                    # retaining the same FFT matrix shape. Keep the established
+                    # full-spectrum accumulation for that uncommon case.
+                    full_snr_matrix = compute_full_snr_from_amplitudes(
+                        fft_amplitudes
+                    )
+                    full_snr_frequencies = fft_frequencies
                 _log_export_timing(
                     "full_snr_compute",
                     full_snr_started,
@@ -700,49 +834,102 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 metrics_bca = np.zeros((final_num_channels, num_target_freqs))
 
                 target_metrics_started = perf_counter()
-                for chan_idx in range(final_num_channels):
-                    channel_amplitudes = fft_amplitudes[chan_idx, :]
+                target_bin_indices = np.full(num_target_freqs, -1, dtype=np.intp)
+                target_noise_means = np.zeros(
+                    (final_num_channels, num_target_freqs)
+                )
+                target_noise_stds = np.zeros(
+                    (final_num_channels, num_target_freqs)
+                )
+                for freq_idx, target_freq in enumerate(target_frequencies):
+                    if not (
+                        fft_frequencies[0]
+                        <= target_freq
+                        <= fft_frequencies[-1]
+                    ):
+                        if data_idx == 0:
+                            app.log(
+                                f"    Skipping target freq {target_freq} Hz."
+                            )
+                        continue
+
+                    exact_position = target_freq * num_times / sfreq
+                    exact_k = int(round(exact_position))
+                    if abs(exact_position - exact_k) >= 1e-9:
+                        raise ValueError(
+                            "Target frequency is not locked to an FFT bin: "
+                            f"condition={cond_label_from_keys}, target={target_freq}, "
+                            f"N={num_times}, fs={sfreq}, k={exact_position:.12g}. "
+                            "Nearest-bin fallback is disabled."
+                        )
+                    if not (0 <= exact_k < len(fft_frequencies)):
+                        raise ValueError(
+                            "Target frequency bin is outside the FFT frequency grid: "
+                            f"condition={cond_label_from_keys}, target={target_freq}, "
+                            f"N={num_times}, fs={sfreq}, k={exact_k}."
+                        )
+
+                    target_bin_indices[freq_idx] = exact_k
+                batch_target_noise = _can_batch_target_noise(
+                    fft_amplitudes,
+                    target_bin_indices,
+                )
+                if batch_target_noise:
                     for freq_idx, target_freq in enumerate(target_frequencies):
-                        if not (fft_frequencies[0] <= target_freq <= fft_frequencies[-1]):
-                            if chan_idx == 0 and data_idx == 0:
-                                app.log(
-                                    f"    Skipping target freq {target_freq} Hz."
-                                )
+                        target_bin_index = int(target_bin_indices[freq_idx])
+                        if target_bin_index < 0:
                             continue
-
-                        exact_position = target_freq * num_times / sfreq
-                        exact_k = int(round(exact_position))
-                        if abs(exact_position - exact_k) >= 1e-9:
-                            raise ValueError(
-                                "Target frequency is not locked to an FFT bin: "
-                                f"condition={cond_label_from_keys}, target={target_freq}, "
-                                f"N={num_times}, fs={sfreq}, k={exact_position:.12g}. "
-                                "Nearest-bin fallback is disabled."
-                            )
-                        if not (0 <= exact_k < len(fft_frequencies)):
-                            raise ValueError(
-                                "Target frequency bin is outside the FFT frequency grid: "
-                                f"condition={cond_label_from_keys}, target={target_freq}, "
-                                f"N={num_times}, fs={sfreq}, k={exact_k}."
-                            )
-                        target_bin_index = exact_k
-
-                        # Shared noise-floor logic: ±10 bins, exclude neighbors, remove 2 extremes
-                        noise_mean_val, noise_std_val = compute_noise_stats_for_bin(
-                            channel_amplitudes,
+                        (
+                            target_noise_means[:, freq_idx],
+                            target_noise_stds[:, freq_idx],
+                        ) = compute_noise_stats_for_bin_channels(
+                            fft_amplitudes,
                             target_bin_index,
                             window_size=10,
                             min_bins=4,
                         )
                         if (
-                            noise_mean_val == 0.0
-                            and noise_std_val == 0.0
+                            target_noise_means[0, freq_idx] == 0.0
+                            and target_noise_stds[0, freq_idx] == 0.0
                             and data_idx == 0
-                            and chan_idx == 0
                         ):
                             app.log(
                                 f"    Warn: Not enough noise bins near {target_freq:.1f} Hz."
                             )
+
+                for chan_idx in range(final_num_channels):
+                    channel_amplitudes = fft_amplitudes[chan_idx, :]
+                    for freq_idx, target_freq in enumerate(target_frequencies):
+                        target_bin_index = int(target_bin_indices[freq_idx])
+                        if target_bin_index < 0:
+                            continue
+
+                        # Shared noise-floor logic: ±10 bins, exclude neighbors, remove 2 extremes
+                        if batch_target_noise:
+                            noise_mean_val = float(
+                                target_noise_means[chan_idx, freq_idx]
+                            )
+                            noise_std_val = float(
+                                target_noise_stds[chan_idx, freq_idx]
+                            )
+                        else:
+                            noise_mean_val, noise_std_val = (
+                                compute_noise_stats_for_bin(
+                                    channel_amplitudes,
+                                    target_bin_index,
+                                    window_size=10,
+                                    min_bins=4,
+                                )
+                            )
+                            if (
+                                noise_mean_val == 0.0
+                                and noise_std_val == 0.0
+                                and data_idx == 0
+                                and chan_idx == 0
+                            ):
+                                app.log(
+                                    f"    Warn: Not enough noise bins near {target_freq:.1f} Hz."
+                                )
 
                         signal_amplitude = channel_amplitudes[target_bin_index]
                         peak_signal_amplitude = signal_amplitude
@@ -836,7 +1023,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     columns=freq_column_names,
                 ),
             }
-            if full_snr_avg is not None:
+            if full_snr_avg is not None and full_snr_frequencies is not None:
                 full_snr_dataframe_started = perf_counter()
                 max_freq = min(configured_upper_limit, float(fft_frequencies[-1]))
                 freq_grid = np.arange(0.5, max_freq + 0.01, 0.01)
@@ -844,7 +1031,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 interp_snr = np.zeros((full_snr_avg.shape[0], len(freq_grid)))
                 for ch_idx in range(full_snr_avg.shape[0]):
                     interp_snr[ch_idx] = np.interp(
-                        freq_grid, fft_frequencies, full_snr_avg[ch_idx]
+                        freq_grid,
+                        full_snr_frequencies,
+                        full_snr_avg[ch_idx],
                     )
 
                 freq_cols_full = [f"{f:.4f}_Hz" for f in freq_grid]

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+import numpy as np
 import pandas as pd
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
@@ -250,6 +251,68 @@ def _build_jasp_wide_frame(
     column_map = _wide_column_names(conditions, rois)
     id_columns = ["subject_id", "group_id"]
     subjects_df = long_df.loc[:, id_columns].drop_duplicates().reset_index(drop=True)
+    ordered_pairs = [
+        (condition, roi)
+        for condition in conditions
+        for roi in rois
+    ]
+    wide_columns = [column_map[pair] for pair in ordered_pairs]
+    pair_count = len(ordered_pairs)
+
+    if (
+        pair_count > 0
+        and len(long_df) == len(subjects_df) * pair_count
+        and long_df["summed_bca_uv"].dtype == np.dtype(np.float64)
+        and all(
+            long_df[column].dtype == np.dtype(object)
+            for column in ("subject_id", "group_id", "condition", "roi")
+        )
+    ):
+        expected_subjects = np.repeat(
+            subjects_df["subject_id"].to_numpy(),
+            pair_count,
+        )
+        expected_groups = np.repeat(
+            subjects_df["group_id"].to_numpy(),
+            pair_count,
+        )
+        expected_conditions = np.tile(
+            np.repeat(np.asarray(conditions, dtype=object), len(rois)),
+            len(subjects_df),
+        )
+        expected_rois = np.tile(
+            np.asarray(rois, dtype=object),
+            len(subjects_df) * len(conditions),
+        )
+        if (
+            np.array_equal(
+                long_df["subject_id"].to_numpy(),
+                expected_subjects,
+            )
+            and np.array_equal(
+                long_df["group_id"].to_numpy(),
+                expected_groups,
+            )
+            and np.array_equal(
+                long_df["condition"].to_numpy(),
+                expected_conditions,
+            )
+            and np.array_equal(
+                long_df["roi"].to_numpy(),
+                expected_rois,
+            )
+        ):
+            values = long_df["summed_bca_uv"].to_numpy(copy=False).reshape(
+                len(subjects_df),
+                pair_count,
+            )
+            return pd.concat(
+                [
+                    subjects_df,
+                    pd.DataFrame(values, columns=wide_columns),
+                ],
+                axis=1,
+            )
 
     wide = subjects_df.copy()
     for condition in conditions:
