@@ -23,11 +23,40 @@ class ProcessingHarmonicSelectionWorker(QObject):
     @Slot()
     def run(self) -> None:
         messages: list[str] = []
+        project_root = str(getattr(self._project, "project_root", "") or "")
+
+        def _record_status(message: str) -> None:
+            text = str(message).strip()
+            if not text:
+                return
+            messages.append(text)
+            logger.info(
+                "harmonic_recalculation_progress project_root=%r message=%r",
+                project_root,
+                text,
+            )
+
+        logger.info(
+            "harmonic_recalculation_started project_root=%r force_recalculate=true",
+            project_root,
+        )
         try:
             report = run_processing_harmonic_selection_qc(
                 self._project,
-                log_func=messages.append,
+                log_func=_record_status,
                 force_recalculate=True,
+            )
+            selected_harmonics = report.selection_metadata.get(
+                "selected_harmonics_hz",
+                (),
+            )
+            logger.info(
+                "harmonic_recalculation_completed project_root=%r "
+                "workbook_path=%r selected_harmonics=%r status_messages=%d",
+                project_root,
+                str(report.workbook_path),
+                selected_harmonics,
+                len(messages),
             )
             self.finished.emit(
                 {
@@ -38,7 +67,13 @@ class ProcessingHarmonicSelectionWorker(QObject):
                 }
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("processing_harmonic_selection_qc_failed")
+            logger.exception(
+                "harmonic_recalculation_failed project_root=%r "
+                "status_messages=%d error=%r",
+                project_root,
+                len(messages),
+                str(exc),
+            )
             self.finished.emit(
                 {
                     "ok": False,

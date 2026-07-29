@@ -23,10 +23,31 @@ class FullFftGridQcWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        project_root = str(self._project_root or "")
+        logger.info(
+            "harmonic_recalculation_grid_check_started project_root=%r",
+            project_root,
+        )
         try:
-            self.finished.emit(audit_project_full_fft_grids(self._project_root))
+            audit = audit_project_full_fft_grids(self._project_root)
+            logger.info(
+                "harmonic_recalculation_grid_check_completed project_root=%r "
+                "workbooks=%d review_candidates=%d unresolved_conflict=%s "
+                "reference_support=%d reference_total=%d",
+                project_root,
+                len(audit.observations),
+                len(audit.review_candidates),
+                audit.has_unresolved_grid_conflict,
+                audit.reference_support,
+                audit.reference_total,
+            )
+            self.finished.emit(audit)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("full_fft_grid_qc_failed")
+            logger.exception(
+                "harmonic_recalculation_grid_check_failed project_root=%r error=%r",
+                project_root,
+                str(exc),
+            )
             self.failed.emit(str(exc))
 
 
