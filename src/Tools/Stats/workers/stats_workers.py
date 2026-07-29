@@ -99,7 +99,7 @@ class StatsWorker(QRunnable):
     @Slot()
     def run(self) -> None:
         t0 = time.perf_counter()
-        logger.info("stats_run_start", extra={"op": self._op})
+        logger.debug("stats_run_start", extra={"op": self._op})
         try:
             result = self._fn(
                 self.signals.progress.emit,
@@ -108,7 +108,7 @@ class StatsWorker(QRunnable):
                 **self._kwargs,
             )
             payload: Dict[str, Any] = result if isinstance(result, dict) else {"result": result}
-            logger.info(
+            logger.debug(
                 "stats_worker_emit_finished_enter",
                 extra={
                     "op": self._op,
@@ -121,7 +121,7 @@ class StatsWorker(QRunnable):
             report_text = payload.get("report_text") if isinstance(payload, dict) else None
             if isinstance(report_text, str):
                 self.signals.report_ready.emit(report_text)
-            logger.info(
+            logger.debug(
                 "stats_worker_emit_finished_exit",
                 extra={"op": self._op, "step_id": self._step_id},
             )
@@ -133,7 +133,7 @@ class StatsWorker(QRunnable):
             self.signals.error.emit(str(exc))
         finally:
             dt_ms = (time.perf_counter() - t0) * 1000.0
-            logger.info("stats_run_done", extra={"op": self._op, "elapsed_ms": dt_ms})
+            logger.debug("stats_run_done", extra={"op": self._op, "elapsed_ms": dt_ms})
 
 
 def _dv_trace_enabled() -> bool:
@@ -153,7 +153,7 @@ def _log_dv_trace_policy_snapshot(
         return
     settings = normalize_dv_policy(dv_policy)
     roi_list = list(rois.keys()) if isinstance(rois, dict) else []
-    logger.info(
+    logger.debug(
         "DV_TRACE policy_snapshot policy_name=%s fixed_harmonics_hz=%s "
         "auto_exclude_base=%s base_freq=%s oddball_every_n=%s "
         "group_z_threshold=%s selected_conditions=%s selected_conditions_count=%d "
@@ -241,7 +241,7 @@ def _apply_outlier_exclusion(
             f"n_before={report.summary.n_subjects_before} "
             f"n_after={report.summary.n_subjects_after}"
         )
-    logger.info(
+    logger.debug(
         "stats_outlier_exclusion_summary",
         extra={
             "abs_limit": report.summary.abs_limit,
@@ -311,7 +311,7 @@ def _apply_manual_exclusions(
     filtered_subject_data = {pid: data for pid, data in subject_data.items() if pid not in manual_excluded}
     if message_cb:
         message_cb(f"Manual exclusions applied: {manual_excluded}")
-    logger.info(
+    logger.debug(
         "stats_manual_exclusions_applied",
         extra={"excluded_pids": manual_excluded, "n_before": len(subjects)},
     )

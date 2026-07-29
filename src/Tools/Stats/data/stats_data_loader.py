@@ -201,7 +201,7 @@ def ensure_results_dir(
 
     target.mkdir(parents=True, exist_ok=True)
 
-    logger.info("ensure_results_dir using results directory: %s", target)
+    logger.debug("ensure_results_dir using results directory: %s", target)
 
     return target
 
@@ -245,7 +245,12 @@ def _log_dataset_index_diagnostics(
     diagnostics: Iterable[DatasetDiagnostic],
 ) -> None:
     for diagnostic in diagnostics:
-        logger.warning(
+        log_func = (
+            logger.debug
+            if diagnostic.code == "excluded_participant_condition"
+            else logger.warning
+        )
+        log_func(
             "stats_dataset_index_diagnostic code=%s message=%s paths=%s",
             diagnostic.code,
             diagnostic.message,

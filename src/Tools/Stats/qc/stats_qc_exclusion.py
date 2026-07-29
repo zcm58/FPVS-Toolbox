@@ -173,7 +173,7 @@ def _log_message(log_func: Optional[Callable[[str], None]], message: str) -> Non
     if log_func:
         log_func(message)
     else:
-        logger.info(message)
+        logger.debug(message)
 
 
 def _build_qc_harmonic_domain(
@@ -275,7 +275,7 @@ def run_qc_exclusion(
         log_func,
         "QC screening all conditions/ROIs in the project (independent of selections)…",
     )
-    logger.info(
+    logger.debug(
         "stats_qc_screen_start",
         extra={
             "n_subjects": len(subjects),
@@ -523,7 +523,7 @@ def run_qc_exclusion(
         screened_conditions=screened_conditions,
         screened_rois=screened_rois,
     )
-    logger.info(
+    logger.debug(
         "stats_qc_screen_complete",
         extra={
             "n_subjects": len(subjects),

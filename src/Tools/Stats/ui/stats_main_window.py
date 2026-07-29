@@ -50,7 +50,7 @@ class StatsWindow(
 
         super().__init__(parent)
         self.setWindowTitle("FPVS Statistical Analysis Tool")
-        logger.info(
+        logger.debug(
             "stats_window_init",
             extra={
                 "window_id": id(self),
@@ -189,7 +189,7 @@ class StatsWindow(
             self._set_last_export_path(None)
         if reload_default_folder:
             self._load_default_data_folder()
-        logger.info(
+        logger.debug(
             "stats_window_project_context_rebound",
             extra={
                 "window_id": id(self),

@@ -239,7 +239,7 @@ def _build_formula(
     processed_terms = [_apply_contrasts_to_term(term, final_cmap) for term in fixed_effects]
     fixed_formula = " + ".join(processed_terms)
     formula = f"{dv_col} ~ {fixed_formula}"
-    logger.info("MixedLM formula: %s", formula)
+    logger.debug("MixedLM formula: %s", formula)
     return formula, processed_terms, final_cmap
 
 
@@ -937,7 +937,7 @@ def run_mixed_effects_model(
 
     # Log basics
     try:
-        logger.info(
+        logger.debug(
             "MixedLM %s: converged=%s; RE=%s; cov_re singular=%s; llf=%.3f; AIC=%.3f; BIC=%.3f",
             "REML" if reml_flag else "ML",
             fit.converged,
@@ -948,7 +948,7 @@ def run_mixed_effects_model(
             float(getattr(fit.model, "bic", np.nan)),
         )
         if hasattr(fit.model, "cov_re"):
-            logger.info("Random-effects covariance (cov_re):\n%s", str(fit.model.cov_re))
+            logger.debug("Random-effects covariance (cov_re):\n%s", str(fit.model.cov_re))
     except Exception:
         pass
 

@@ -57,7 +57,7 @@ def log_rm_anova_p_minima(anova_df: pd.DataFrame) -> None:
 
     min_p_unc, any_exact_zero_unc = _series_metrics("Pr > F")
     min_p_gg, any_exact_zero_gg = _series_metrics("Pr > F (GG)")
-    logger.info(
+    logger.debug(
         "rm_anova_p_min",
         extra={
             "min_p_unc": min_p_unc,
@@ -79,7 +79,7 @@ def apply_rm_anova_pvalue_number_formats(
     workbook = openpyxl.load_workbook(path)
     try:
         if sheet_name not in workbook.sheetnames:
-            logger.info(
+            logger.debug(
                 "rm_anova_sheet_not_found_for_formatting",
                 extra={"sheet_name": sheet_name, "path": str(path)},
             )

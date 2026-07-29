@@ -719,7 +719,7 @@ def prepare_all_subject_summed_bca_data(
     if roi_filter:
         rois_map = {name: chans for name, chans in rois_map.items() if name in roi_filter}
 
-    logger.info(
+    logger.debug(
         "stats_rois",
         extra={
             "roi_names": list(rois_map.keys()),

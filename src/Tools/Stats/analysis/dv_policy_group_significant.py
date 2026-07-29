@@ -1131,7 +1131,7 @@ def build_group_significant_harmonic_selection(
         f"{len(detected_freqs)} significant harmonics, "
         f"{len(selected_freqs)} included harmonics in {elapsed:.2f}s."
     )
-    logger.info(
+    logger.debug(
         "stats_group_harmonics_selection_done",
         extra={
             "elapsed_s": elapsed,

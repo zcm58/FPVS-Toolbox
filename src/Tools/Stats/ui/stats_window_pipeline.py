@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 from Tools.Stats.analysis.prepared_analysis import AnalysisMode
+from Tools.Stats.reporting.logging_policy import stats_ide_log_level
 from Tools.Stats.ui.stats_window_error_messages import build_worker_error_guidance
 from Tools.Stats.ui.inference_view_model import (
     NativeInferenceOptions,
@@ -24,8 +25,8 @@ class StatsWindowPipelineMixin:
         if hasattr(self, "output_text") and self.output_text is not None:
             self.output_text.appendPlainText(line)
             self.output_text.ensureCursorVisible()
-        level_lower = (level or "info").lower()
-        log_func = getattr(logger, level_lower, logger.info)
+        ide_level = stats_ide_log_level(message, level)
+        log_func = getattr(logger, ide_level, logger.debug)
         log_func(line)
 
     def _section_label(self, pipeline: PipelineId | None) -> str:
@@ -52,7 +53,7 @@ class StatsWindowPipelineMixin:
             payload["step_id"] = step.name
         if extra:
             payload.update(extra)
-        logger.info(format_section_header("stats_pipeline_event"), extra=payload)
+        logger.debug(format_section_header("stats_pipeline_event"), extra=payload)
 
     def _focus_self(self) -> None:
         """Handle the focus self step for the Stats workflow."""
@@ -859,7 +860,7 @@ class StatsWindowPipelineMixin:
           - Tracks workers in self._active_workers so signals can't be dropped by GC.
         """
         try:
-            logger.info(
+            logger.debug(
                 "stats_view_start_step_worker_enter",
                 extra={
                     "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
@@ -888,7 +889,7 @@ class StatsWindowPipelineMixin:
         )
 
         try:
-            logger.info(
+            logger.debug(
                 "stats_view_worker_created",
                 extra={
                     "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
@@ -905,7 +906,7 @@ class StatsWindowPipelineMixin:
             if not hasattr(self, "_active_workers"):
                 self._active_workers = []
             self._active_workers.append(worker)
-            logger.info(
+            logger.debug(
                 "stats_view_worker_tracked",
                 extra={
                     "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
@@ -926,7 +927,7 @@ class StatsWindowPipelineMixin:
                 if getattr(self, "_active_step_worker", None) is w:
                     self._active_step_worker = None
                     self._active_step_context = None
-                logger.info(
+                logger.debug(
                     "stats_view_worker_released",
                     extra={
                         "pipeline": getattr(pid, "name", str(pid)),
@@ -954,7 +955,7 @@ class StatsWindowPipelineMixin:
                 payload_type = type(payload).__name__
                 payload_keys = None
 
-            logger.info(
+            logger.debug(
                 "stats_view_finished_slot_enter",
                 extra={
                     "pipeline": getattr(pid, "name", str(pid)),
@@ -975,7 +976,7 @@ class StatsWindowPipelineMixin:
                     and isinstance(payload, dict)
                 ):
                     self._store_native_step_payload(pid, sid, payload)
-                logger.info(
+                logger.debug(
                     "stats_view_finished_before_controller",
                     extra={
                         "pipeline": getattr(pid, "name", str(pid)),
@@ -984,7 +985,7 @@ class StatsWindowPipelineMixin:
                 )
                 finished_cb(pid, sid, payload)
                 self._sync_parent_project_manifest_tools()
-                logger.info(
+                logger.debug(
                     "stats_view_finished_after_controller",
                     extra={
                         "pipeline": getattr(pid, "name", str(pid)),
@@ -1069,7 +1070,7 @@ class StatsWindowPipelineMixin:
         worker.signals.progress.connect(_on_progress)
 
         try:
-            logger.info(
+            logger.debug(
                 "stats_view_start_worker_submit",
                 extra={
                     "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
@@ -1082,7 +1083,7 @@ class StatsWindowPipelineMixin:
         self.pool.start(worker)
 
         try:
-            logger.info(
+            logger.debug(
                 "stats_view_start_step_worker_exit",
                 extra={
                     "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
@@ -1231,7 +1232,7 @@ class StatsWindowPipelineMixin:
         cancelled: bool = False,
     ) -> None:
         """Finalize native UI state without blocking dialogs or duplicate exports."""
-        logger.info(
+        logger.debug(
             "stats_analysis_finished_enter",
             extra={
                 "pipeline": pipeline_id.name,
@@ -1389,7 +1390,7 @@ class StatsWindowPipelineMixin:
 
     def closeEvent(self, event):  # type: ignore[override]
         """Handle the closeEvent step for the Stats workflow."""
-        logger.info(
+        logger.debug(
             "stats_window_close_event",
             extra={
                 "window_id": id(self),
