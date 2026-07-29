@@ -1,9 +1,21 @@
 import numpy as np
 import pandas as pd
 import pytest
+from statsmodels.stats.multitest import multipletests
 
-from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
+from Tools.Stats.analysis.baseline_vs_zero import (
+    export_baseline_vs_zero_results_to_excel,
+    run_baseline_vs_zero_tests,
+)
 from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
+from Tools.Stats.analysis.inference_contracts import (
+    Alternative,
+    AnalysisProfile,
+    AnalysisRunSpec,
+    CorrectionMethod,
+    FamilySpec,
+    HarmonicProvenance,
+)
 from Tools.Stats.controller.stats_controller import SINGLE_PIPELINE_STEPS, WORKER_FN_BY_STEP
 from Tools.Stats.common.stats_core import StepId
 from Tools.Stats.workers.stats_workers import run_baseline_vs_zero as run_baseline_worker
@@ -171,6 +183,177 @@ def test_baseline_worker_reports_fixed_predefined_dv_metadata(monkeypatch) -> No
     assert result["metadata"]["dv_policy_name"] == FIXED_PREDEFINED_POLICY_NAME
     assert result["metadata"]["selected_harmonics_hz"] == "1.2;2.4;3.6;4.8;7.2"
     assert result["metadata"]["snr_used_for_statistics"] is False
+    assert result["metadata"]["harmonic_provenance"] == "user_fixed_unverified"
+    assert result["metadata"]["inference_status"] == "provenance_unverified"
     assert result["dv_metadata"]["fixed_predefined_harmonics"][
         "applied_uniformly_across_conditions"
     ] is True
+
+
+def test_legacy_defaults_and_result_aliases_remain_compatible() -> None:
+    _, results = run_baseline_vs_zero_tests(
+        _build_df(),
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+    )
+
+    assert set(results["alternative"]) == {"greater"}
+    assert set(results["adjustment_method"]) == {"fdr_bh"}
+    np.testing.assert_allclose(
+        results["p_corr"],
+        results["p_adjusted"],
+        equal_nan=True,
+    )
+    np.testing.assert_array_equal(results["reject"], results["reject_adjusted"])
+    assert set(results["harmonic_provenance"]) == {"unknown"}
+    assert set(results["inference_status"]) == {"provenance_unverified"}
+
+
+def test_confirmatory_independent_run_uses_declared_holm_family() -> None:
+    family = FamilySpec(
+        "response_core_cells",
+        "Complete-core responses",
+        CorrectionMethod.HOLM,
+    )
+    run_spec = AnalysisRunSpec(
+        profile=AnalysisProfile.CONFIRMATORY,
+        harmonic_provenance=HarmonicProvenance.INDEPENDENTLY_SELECTED,
+        response_alternative=Alternative.TWO_SIDED,
+        families=(family,),
+    )
+
+    output, results = run_baseline_vs_zero_tests(
+        _build_df(),
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        run_spec=run_spec,
+    )
+    finite = results["p_raw"].notna()
+    expected_reject, expected_adjusted, _, _ = multipletests(
+        results.loc[finite, "p_raw"],
+        method="holm",
+    )
+
+    np.testing.assert_allclose(
+        results.loc[finite, "p_adjusted"],
+        expected_adjusted,
+    )
+    np.testing.assert_array_equal(
+        results.loc[finite, "reject_adjusted"],
+        expected_reject,
+    )
+    assert set(results["family_id"]) == {"response_core_cells"}
+    assert set(results["family_size"]) == {int(finite.sum())}
+    assert set(results["alternative"]) == {"two_sided"}
+    assert set(results["inference_status"]) == {"confirmatory"}
+    assert set(results["harmonic_provenance"]) == {"independently_selected"}
+    assert "correction=holm" in output
+
+
+def test_confirmatory_profile_does_not_override_unverified_provenance() -> None:
+    run_spec = AnalysisRunSpec(
+        profile=AnalysisProfile.CONFIRMATORY,
+        harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
+    )
+
+    _, results = run_baseline_vs_zero_tests(
+        _build_df(),
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        run_spec=run_spec,
+    )
+
+    assert set(results["adjustment_method"]) == {"holm"}
+    assert set(results["inference_status"]) == {"provenance_unverified"}
+    assert not (results["inference_status"] == "confirmatory").any()
+
+
+def test_same_sample_provenance_is_explicitly_post_selection() -> None:
+    _, results = run_baseline_vs_zero_tests(
+        _build_df(),
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        harmonic_provenance=HarmonicProvenance.SAME_SAMPLE_ADAPTIVE,
+    )
+
+    assert set(results["harmonic_provenance"]) == {"same_sample_adaptive"}
+    assert set(results["inference_status"]) == {"exploratory_post_selection"}
+
+
+def test_tiny_n_zero_variance_and_nonfinite_cells_are_non_estimable() -> None:
+    data = pd.DataFrame(
+        [
+            {"subject": "S1", "condition": "constant", "roi": "R1", "value": 1.0},
+            {"subject": "S2", "condition": "constant", "roi": "R1", "value": 1.0},
+            {"subject": "S3", "condition": "constant", "roi": "R1", "value": 1.0},
+            {"subject": "S1", "condition": "tiny", "roi": "R1", "value": 0.1},
+            {"subject": "S2", "condition": "tiny", "roi": "R1", "value": np.inf},
+        ]
+    )
+
+    _, results = run_baseline_vs_zero_tests(
+        data,
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+    )
+    constant = results.loc[results["condition"] == "constant"].iloc[0]
+    tiny = results.loc[results["condition"] == "tiny"].iloc[0]
+
+    assert constant["note"] == "zero_variance"
+    assert tiny["note"] == (
+        "nonfinite_or_nonnumeric_values_dropped;insufficient_n"
+    )
+    for row in (constant, tiny):
+        assert pd.isna(row["t"])
+        assert pd.isna(row["df"])
+        assert pd.isna(row["p_raw"])
+        assert pd.isna(row["p_adjusted"])
+        assert pd.isna(row["cohens_d"])
+        assert pd.isna(row["cohens_dz"])
+        assert pd.isna(row["ci_mean_low"])
+        assert pd.isna(row["ci_mean_high"])
+        assert not row["reject_adjusted"]
+    assert set(results["family_size"]) == {0}
+
+
+def test_baseline_export_uses_generic_holm_label_and_keeps_alias(
+    tmp_path,
+) -> None:
+    family = FamilySpec("response_core_cells", "Core responses", "holm")
+    _, results = run_baseline_vs_zero_tests(
+        _build_df(),
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        family_spec=family,
+    )
+    target = tmp_path / "baseline.xlsx"
+
+    export_baseline_vs_zero_results_to_excel(
+        {"results_df": results, "metadata": {}},
+        target,
+        lambda _message: None,
+    )
+    exported = pd.read_excel(target, sheet_name="Baseline_vs_Zero")
+    metadata = pd.read_excel(target, sheet_name="Metadata")
+    metadata_map = dict(zip(metadata["field"], metadata["value"]))
+
+    assert "p (adjusted: Holm)" in exported.columns
+    assert "p (BH-FDR corrected)" not in exported.columns
+    assert "p_corr" in exported.columns
+    assert metadata_map["corrected_p_value_column"] == "p_adjusted"
+    assert (
+        metadata_map["corrected_p_value_column_in_sheet"]
+        == "p (adjusted: Holm)"
+    )

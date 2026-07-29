@@ -13,11 +13,14 @@ import pandas as pd
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
+from Tools.Stats.analysis.design_audit import audit_complete_core_design
 from Tools.Stats.analysis.dv_policies import (
+    FIXED_PREDEFINED_POLICY_NAME,
     GROUP_SIGNIFICANT_POLICY_NAME,
     normalize_dv_policy,
     prepare_summed_bca_data,
 )
+from Tools.Stats.analysis.inference_contracts import HarmonicProvenance
 from Tools.Stats.analysis.dv_policy_fixed_predefined import build_fixed_predefined_preview_payload
 from Tools.Stats.analysis.dv_policy_group_significant import preflight_group_significant_full_fft_columns
 from Tools.Stats.analysis.dv_policy_settings import _resolve_max_freq
@@ -643,7 +646,7 @@ def run_rm_anova(
         subjects,
         subject_data,
         all_subject_bca_data,
-        _df_long,
+        df_long,
         dv_metadata,
         qc_report,
         exclusion_report,
@@ -667,6 +670,53 @@ def run_rm_anova(
         project_root=project_root,
         message_cb=message_cb,
     )
+    selected_rois = sorted(rois.keys()) if isinstance(rois, dict) else None
+    design_audit = audit_complete_core_design(
+        df_long,
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        frozen_participants=list(subjects) if subjects else None,
+        selected_conditions=list(conditions) if conditions else None,
+        selected_rois=selected_rois,
+    )
+    if not design_audit.ready:
+        return {
+            "status": "blocked",
+            "message": design_audit.message,
+            "design_audit": design_audit,
+            "design_frames": design_audit.to_frames(),
+            "dv_metadata": dv_metadata,
+        }
+    complete_conditions = list(design_audit.complete_conditions)
+    if design_audit.excluded_conditions:
+        message_cb(
+            "Primary RM-ANOVA excludes conditions that are incomplete for the "
+            "frozen participant cohort: "
+            + ", ".join(design_audit.excluded_conditions)
+        )
+    if len(complete_conditions) < 2:
+        return {
+            "status": "blocked",
+            "message": (
+                "RM-ANOVA requires at least two conditions shared by every "
+                "included participant across every selected ROI."
+            ),
+            "design_audit": design_audit,
+            "design_frames": design_audit.to_frames(),
+            "dv_metadata": dv_metadata,
+        }
+    all_subject_bca_data = {
+        participant: {
+            condition: condition_values[condition]
+            for condition in complete_conditions
+            if condition in condition_values
+        }
+        for participant, condition_values in all_subject_bca_data.items()
+        if participant in design_audit.frozen_participants
+    }
+    conditions = complete_conditions
     _diag_subject_data_structure(all_subject_bca_data, subjects, conditions, rois, message_cb)
     message_cb("Running RM-ANOVA...")
     output_text, anova_df_results = analysis_run_rm_anova(
@@ -674,7 +724,7 @@ def run_rm_anova(
         message_cb,
         subjects=list(subjects) if subjects else None,
         conditions=list(conditions) if conditions else None,
-        rois=sorted(rois.keys()) if isinstance(rois, dict) else None,
+        rois=selected_rois,
         results_dir=results_dir,
     )
     if results_dir and isinstance(anova_df_results, pd.DataFrame):
@@ -696,6 +746,8 @@ def run_rm_anova(
         "anova_df_results": anova_df_results,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
+        "design_audit": design_audit,
+        "design_frames": design_audit.to_frames(),
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
             qc_report=qc_report,
@@ -785,6 +837,7 @@ def run_lmm(
         method=method_requested,
         contrast_map=None,
         return_model=True,
+        do_lrt=True,
     )
     mixed_results_df = repair_lmm_pvalues_from_z(mixed_results_df)
     mixed_results_df = ensure_lmm_effect_columns(mixed_results_df)
@@ -951,6 +1004,14 @@ def run_posthoc(
         subject_col="subject",
         alpha=alpha,
         direction=requested_direction,
+        followup_provenance=kwargs.get(
+            "followup_provenance",
+            "exploratory_manual",
+        ),
+        omnibus_p_value=kwargs.get("omnibus_p_value"),
+        omnibus_significant=kwargs.get("omnibus_significant"),
+        enforce_omnibus_gate=bool(kwargs.get("enforce_omnibus_gate", True)),
+        family_scope=kwargs.get("family_scope", "direction"),
     )
     message_cb("Post-hoc interaction tests completed.")
     return {
@@ -988,6 +1049,7 @@ def run_baseline_vs_zero(
     alternative: str = "greater",
     correction: str = "fdr_bh",
     correction_scope: str = "global",
+    harmonic_provenance: str | HarmonicProvenance | None = None,
     max_freq: float | None = None,
     project_root: str | None = None,
 ):
@@ -1032,6 +1094,13 @@ def run_baseline_vs_zero(
     if df_long.empty:
         raise RuntimeError("No rows available for baseline-vs-zero tests after exclusions.")
 
+    if harmonic_provenance is None:
+        policy_name = normalize_dv_policy(dv_policy).name
+        harmonic_provenance = (
+            HarmonicProvenance.USER_FIXED_UNVERIFIED
+            if policy_name == FIXED_PREDEFINED_POLICY_NAME
+            else HarmonicProvenance.SAME_SAMPLE_ADAPTIVE
+        )
     message_cb("Running baseline-vs-zero tests...")
     output_text, results_df = run_baseline_vs_zero_tests(
         df_long,
@@ -1043,6 +1112,7 @@ def run_baseline_vs_zero(
         alternative=alternative,
         correction=correction,
         correction_scope=correction_scope,
+        harmonic_provenance=harmonic_provenance,
     )
     message_cb(output_text)
     result_metadata = {
@@ -1052,7 +1122,17 @@ def run_baseline_vs_zero(
         "correction": correction,
         "correction_scope": correction_scope,
         "total_unique_subjects": int(df_long["subject"].nunique()),
+        "harmonic_provenance": str(
+            harmonic_provenance.value
+            if isinstance(harmonic_provenance, HarmonicProvenance)
+            else harmonic_provenance
+        ),
     }
+    if not results_df.empty:
+        result_metadata["inference_status"] = results_df.iloc[0].get(
+            "inference_status",
+            "",
+        )
     result_metadata.update(_summarize_dv_metadata_for_export(dv_metadata))
     return {
         "results_df": results_df,

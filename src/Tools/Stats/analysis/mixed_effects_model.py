@@ -9,8 +9,8 @@ Fixes/Improvements
   to 'condition'/'roi' when reasonable).
 - Supports random slopes for condition via re_formula (with graceful fallback to
   intercept-only if singular/convergence issues occur).
-- Optional Likelihood-Ratio Tests (LRTs) under ML for interaction and main effects,
-  to avoid fragile Wald z with small N.
+- Optional hierarchy-preserving Likelihood-Ratio Tests (LRTs) under ML for the
+  Condition x ROI interaction and factor-related blocks.
 - Detects near-singular random-effects covariance and annotates results.
 
 Typical use
@@ -36,8 +36,9 @@ Notes
 -----
 - With *fully within-subject* designs, prefer including at least random slopes
   for condition if data allow: re_formula="~ C(condition, Sum)".
-- LRTs are done under ML (per nested model comparison requirements) and are
-  robust with small N; final coefficients/SEs are typically reported from REML.
+- LRTs are done under ML (per nested model comparison requirements). Their
+  chi-square reference is asymptotic and must be interpreted cautiously with
+  small samples; final coefficients/SEs are typically reported from REML.
 """
 
 from __future__ import annotations
@@ -45,12 +46,15 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from Tools.Stats.common.blas_limits import single_threaded_blas
+
+if TYPE_CHECKING:
+    from statsmodels.regression.mixed_linear_model import MixedLMResults
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,16 @@ class _FitResult:
     used_re_formula: str
     singular: bool
     converged: bool
+
+
+@dataclass(frozen=True)
+class _LRTComparison:
+    """One explicit full/reduced fixed-effect model comparison."""
+
+    effect_id: str
+    effect_label: str
+    full_formula: str
+    reduced_formula: str
 
 
 def _extract_variables(term: str) -> List[str]:
@@ -228,6 +242,119 @@ def _build_formula(
     return formula, processed_terms, final_cmap
 
 
+def _mentions_variable(var: str, term: str) -> bool:
+    """Return whether a formula term contains a bare or contrast-wrapped variable."""
+
+    return bool(
+        re.search(
+            rf"(?i)(?<![A-Za-z0-9_]){re.escape(var)}(?![A-Za-z0-9_])",
+            term,
+        )
+        or re.search(rf"(?i)C\(\s*{re.escape(var)}\s*,", term)
+    )
+
+
+def _factor_expression(processed_terms: List[str], variable: str) -> str | None:
+    """Return the contrast-preserving expression used for a model factor."""
+
+    wrapped = re.compile(
+        rf"C\(\s*{re.escape(variable)}\s*,\s*[^)]+\)",
+        flags=re.IGNORECASE,
+    )
+    bare = re.compile(
+        rf"(?<![A-Za-z0-9_]){re.escape(variable)}(?![A-Za-z0-9_])",
+        flags=re.IGNORECASE,
+    )
+    for term in processed_terms:
+        match = wrapped.search(term)
+        if match:
+            return match.group(0)
+    for term in processed_terms:
+        match = bare.search(term)
+        if match:
+            return match.group(0)
+    return None
+
+
+def _unique_formula_terms(terms: List[str]) -> List[str]:
+    """Return non-empty formula terms with case-insensitive stable deduplication."""
+
+    output: List[str] = []
+    seen: set[str] = set()
+    for raw in terms:
+        term = str(raw).strip()
+        if not term:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(term)
+    return output
+
+
+def _build_single_group_lrt_comparisons(
+    dv_col: str,
+    processed_terms: List[str],
+) -> List[_LRTComparison]:
+    """Build explicit hierarchy-preserving Condition/ROI ML comparisons."""
+
+    condition = _factor_expression(processed_terms, "condition")
+    roi = _factor_expression(processed_terms, "roi")
+    if condition is None and roi is None:
+        raise ValueError(
+            "do_lrt=True requires a Condition and/or ROI fixed-effect factor."
+        )
+
+    unrelated = [
+        term
+        for term in processed_terms
+        if not _mentions_variable("condition", term)
+        and not _mentions_variable("roi", term)
+    ]
+    full_rhs = " + ".join(_unique_formula_terms(processed_terms)) or "1"
+    full_formula = f"{dv_col} ~ {full_rhs}"
+    comparisons: List[_LRTComparison] = []
+
+    if condition is not None and roi is not None:
+        reduced_interaction = _unique_formula_terms([*unrelated, condition, roi])
+        comparisons.append(
+            _LRTComparison(
+                effect_id="condition_roi_interaction",
+                effect_label="Condition x ROI interaction",
+                full_formula=full_formula,
+                reduced_formula=f"{dv_col} ~ {' + '.join(reduced_interaction) or '1'}",
+            )
+        )
+
+    if condition is not None:
+        reduced_condition = _unique_formula_terms(
+            [*unrelated, *([roi] if roi is not None else [])]
+        )
+        comparisons.append(
+            _LRTComparison(
+                effect_id="condition_related_block",
+                effect_label="Condition-related block",
+                full_formula=full_formula,
+                reduced_formula=f"{dv_col} ~ {' + '.join(reduced_condition) or '1'}",
+            )
+        )
+
+    if roi is not None:
+        reduced_roi = _unique_formula_terms(
+            [*unrelated, *([condition] if condition is not None else [])]
+        )
+        comparisons.append(
+            _LRTComparison(
+                effect_id="roi_related_block",
+                effect_label="ROI-related block",
+                full_formula=full_formula,
+                reduced_formula=f"{dv_col} ~ {' + '.join(reduced_roi) or '1'}",
+            )
+        )
+    return comparisons
+
+
 def _make_reduced_terms(processed_terms: List[str], drop: str) -> List[str]:
     """
     Create reduced fixed-effect terms by dropping:
@@ -243,14 +370,19 @@ def _make_reduced_terms(processed_terms: List[str], drop: str) -> List[str]:
         terms = [t for t in terms if ":" not in t]
         return terms
 
-    def _mentions(var: str, term: str) -> bool:
-        # Match both raw and C(var, ...)
-        """Run the mentions helper used by the Stats workflow."""
-        return re.search(rf'(?i)(?<![A-Za-z0-9_]){var}(?![A-Za-z0-9_])', term) or \
-               re.search(rf'(?i)C\(\s*{var}\s*,', term)
-
     if drop in ("condition", "roi"):
-        return [t for t in terms if not _mentions(drop, t)]
+        kept: List[str] = []
+        other = "roi" if drop == "condition" else "condition"
+        other_expression = _factor_expression(terms, other)
+        for term in terms:
+            if not _mentions_variable(drop, term):
+                kept.append(term)
+            elif (
+                other_expression is not None
+                and _mentions_variable(other, term)
+            ):
+                kept.append(other_expression)
+        return _unique_formula_terms(kept)
     raise ValueError(f"Unknown drop target: {drop}")
 
 
@@ -258,13 +390,24 @@ def _lrt(full_ml, reduced_ml) -> Tuple[float, int, float]:
     """Compute LR test stat, df, and p-value; returns (LR, df, p)."""
     LR = 2.0 * (full_ml.llf - reduced_ml.llf)
     df_diff = int(full_ml.df_modelwc - reduced_ml.df_modelwc)
+    if df_diff <= 0:
+        raise RuntimeError(
+            "Likelihood-ratio comparison is not nested with positive degrees "
+            f"of freedom (df difference={df_diff})."
+        )
+    if LR < -1e-7:
+        raise RuntimeError(
+            "Reduced model has a materially higher likelihood than the declared "
+            f"full model (LR={LR:.6g})."
+        )
+    LR = max(float(LR), 0.0)
     try:
         from scipy.stats import chi2  # type: ignore
         p = float(chi2.sf(LR, df_diff))
     except Exception:
         # Fallback: simple exp(-x/2) approx for df>=1 is not correct; report NaN if SciPy missing
         p = np.nan
-    return float(LR), df_diff, p
+    return LR, df_diff, p
 
 
 def _fit_for_lrt(
@@ -275,14 +418,43 @@ def _fit_for_lrt(
     re_formula: str,
 ) -> "MixedLMResults":  # type: ignore[name-defined]
     """Fit an ML model for a given set of processed fixed-effect terms."""
+    fixed_formula = " + ".join(processed_terms) or "1"
+    formula = f"{dv_col} ~ {fixed_formula}"
+    return _fit_formula_for_lrt(df, formula, group_col, re_formula)
+
+
+def _fit_formula_for_lrt(
+    df: pd.DataFrame,
+    formula: str,
+    group_col: str,
+    re_formula: str,
+) -> "MixedLMResults":  # type: ignore[name-defined]
+    """Fit one explicit ML formula, retaining an optimizer fallback."""
+
     try:
         import statsmodels.formula.api as smf  # type: ignore
     except ImportError as e:
         raise ImportError("statsmodels is required. Install via `pip install statsmodels`.") from e
-    fixed_formula = " + ".join(processed_terms)
-    formula = f"{dv_col} ~ {fixed_formula}"
     model = smf.mixedlm(formula, df, groups=df[group_col], re_formula=re_formula or "1")
-    return model.fit(reml=False, method="lbfgs", maxiter=1000, full_output=True)
+    try:
+        return model.fit(
+            reml=False,
+            method="lbfgs",
+            maxiter=1000,
+            full_output=True,
+        )
+    except Exception as first_error:
+        logger.warning(
+            "ML LRT fit with lbfgs failed for %s: %s; retrying powell",
+            formula,
+            first_error,
+        )
+        return model.fit(
+            reml=False,
+            method="powell",
+            maxiter=1000,
+            full_output=True,
+        )
 
 
 # ------------------------------- API ----------------------------------- #
@@ -362,48 +534,109 @@ def run_mixed_effects_model(
         # First attempt with requested re_formula
         fit = _fit_mixedlm(df, formula, group_col, re_formula, reml_flag)
 
-        # If singular AND re_formula had slopes, back off to intercept-only
+        # If requested slopes are singular or fail to converge, back off to a
+        # random intercept. The fallback remains visible in the result table.
         backed_off = False
-        if fit.singular and re_formula.strip() != "1":
-            logger.warning("Falling back to random intercept only due to singularity.")
+        fallback_reason = ""
+        if (fit.singular or not fit.converged) and re_formula.strip() != "1":
+            fallback_reason = (
+                "singular slopes"
+                if fit.singular
+                else "nonconverged random slopes"
+            )
+            logger.warning(
+                "Falling back to random intercept only due to %s.",
+                fallback_reason,
+            )
             fit = _fit_mixedlm(df, formula, group_col, "1", reml_flag)
             backed_off = True
 
         # Inject notes
         if backed_off:
             fit.table["Note"] = (fit.table["Note"].mask(fit.table["Note"].astype(bool), fit.table["Note"] + "; ")
-                                 .fillna("") + "Fell back to random intercept (singular slopes)")
+                                 .fillna("") + f"Fell back to random intercept ({fallback_reason})")
 
         # --- optional LRTs under ML (nested models) ---
         if do_lrt:
-            try:
-                full_ml = _fit_for_lrt(df, dv_col, group_col, processed_terms, fit.used_re_formula)
-                # Interaction
-                red_int_terms = _make_reduced_terms(processed_terms, "interaction")
-                red_int_ml = _fit_for_lrt(df, dv_col, group_col, red_int_terms, fit.used_re_formula)
-                LR_int, df_int, p_int = _lrt(full_ml, red_int_ml)
+            comparisons = _build_single_group_lrt_comparisons(
+                dv_col,
+                processed_terms,
+            )
+            full_models: dict[str, object] = {}
+            lrt_rows: list[dict[str, object]] = []
+            for comparison in comparisons:
+                row: dict[str, object] = {
+                    "effect_id": comparison.effect_id,
+                    "Effect": comparison.effect_label,
+                    "full_formula": comparison.full_formula,
+                    "reduced_formula": comparison.reduced_formula,
+                    "LR": np.nan,
+                    "df": np.nan,
+                    "p (chi2)": np.nan,
+                    "status": "failed",
+                    "error": "",
+                    "Used RE": fit.used_re_formula,
+                    "method": "ML likelihood-ratio test",
+                    "reference_distribution": "asymptotic chi-square",
+                }
+                try:
+                    full_ml = full_models.get(comparison.full_formula)
+                    if full_ml is None:
+                        full_ml = _fit_formula_for_lrt(
+                            df,
+                            comparison.full_formula,
+                            group_col,
+                            fit.used_re_formula,
+                        )
+                        full_models[comparison.full_formula] = full_ml
+                    reduced_ml = _fit_formula_for_lrt(
+                        df,
+                        comparison.reduced_formula,
+                        group_col,
+                        fit.used_re_formula,
+                    )
+                    if not bool(getattr(full_ml, "converged", False)):
+                        raise RuntimeError("Full ML model did not converge.")
+                    if not bool(getattr(reduced_ml, "converged", False)):
+                        raise RuntimeError("Reduced ML model did not converge.")
+                    lr_value, df_value, p_value = _lrt(full_ml, reduced_ml)
+                    row.update(
+                        {
+                            "LR": lr_value,
+                            "df": df_value,
+                            "p (chi2)": p_value,
+                            "status": "ok",
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001 - exported result row
+                    row["error"] = f"{type(exc).__name__}: {exc}"
+                    logger.warning(
+                        "LRT comparison failed for %s: %s",
+                        comparison.effect_id,
+                        exc,
+                    )
+                lrt_rows.append(row)
 
-                # Drop condition
-                red_cond_terms = _make_reduced_terms(processed_terms, "condition")
-                red_cond_ml = _fit_for_lrt(df, dv_col, group_col, red_cond_terms, fit.used_re_formula)
-                LR_c, df_c, p_c = _lrt(full_ml, red_cond_ml)
-
-                # Drop roi
-                red_roi_terms = _make_reduced_terms(processed_terms, "roi")
-                red_roi_ml = _fit_for_lrt(df, dv_col, group_col, red_roi_terms, fit.used_re_formula)
-                LR_r, df_r, p_r = _lrt(full_ml, red_roi_ml)
-
-                lrt_table = pd.DataFrame({
-                    "Effect": ["Condition:ROI (interaction)", "Condition (all terms)", "ROI (all terms)"],
-                    "LR": [LR_int, LR_c, LR_r],
-                    "df": [df_int, df_c, df_r],
-                    "p (chi2)": [p_int, p_c, p_r],
-                    "Used RE": [fit.used_re_formula] * 3,
-                })
-                # Attach for caller visibility without breaking return type
-                fit.table.attrs["lrt_table"] = lrt_table
-            except Exception as e:
-                logger.warning("LRT computation failed: %s", e)
+            lrt_table = pd.DataFrame(lrt_rows)
+            failed_count = int(lrt_table["status"].ne("ok").sum())
+            if failed_count == 0:
+                lrt_status = "ok"
+            elif failed_count == len(lrt_table):
+                lrt_status = "failed"
+            else:
+                lrt_status = "partial_failure"
+            # Keep the established attrs attachment for compatibility while
+            # also surfacing status directly in the fixed-effect table.
+            fit.table.attrs["lrt_table"] = lrt_table
+            fit.table["LRT Status"] = lrt_status
+            fit.table["LRT Note"] = (
+                ""
+                if failed_count == 0
+                else (
+                    f"{failed_count} of {len(lrt_table)} declared ML "
+                    "comparisons failed; inspect the LRT table."
+                )
+            )
 
     # Final tidy table (Wald), with notes retained
     table = fit.table

@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 2 - single-group inference
+- Current phase: Phase 3 - native multi-group engines
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -593,22 +593,24 @@ Deliverables:
 
 Definition of done:
 
-- [ ] Independently selected harmonic response tests default to confirmatory
+- [x] Independently selected harmonic response tests default to confirmatory
       Holm; fixed-but-unverified lists do not.
-- [ ] Adaptive same-sample response tests are visibly marked exploratory.
-- [ ] The primary RM-ANOVA uses only audited complete conditions.
-- [ ] GG-corrected inference is selected and labelled when available/required.
-- [ ] A required but unavailable sphericity correction cannot silently yield
+- [x] Adaptive same-sample response tests are visibly marked exploratory.
+- [x] The primary RM-ANOVA uses only audited complete conditions.
+- [x] GG-corrected inference is selected and labelled when available/required.
+- [x] A required but unavailable sphericity correction cannot silently yield
       a primary uncorrected p-value.
-- [ ] Posthocs do not hide separate within-ROI families for a cross-ROI claim.
-- [ ] Automatic posthocs are planned or omnibus-triggered; manual unplanned
+- [x] Posthocs do not hide separate within-ROI families for a cross-ROI claim.
+- [x] Automatic posthocs are planned or omnibus-triggered; manual unplanned
       contrasts are labelled exploratory.
-- [ ] Holm output is never labelled BH.
-- [ ] `do_lrt=True` produces valid nested formulas or a visible hard failure.
-- [ ] Existing single-group public entry points and established exports remain
+- [x] Holm output is never labelled BH.
+- [x] `do_lrt=True` produces valid nested formulas or a visible failed-result
+      row and main-table status.
+- [x] Existing single-group public entry points and established exports remain
       compatible.
-- [ ] Focused Stats verification passes.
-- [ ] Plan progress is updated and committed.
+- [x] Focused Stats verification passes (51 registered tests); 34 direct
+      Phase 2 integration tests also pass.
+- [x] Plan progress is updated and committed.
 
 Commit:
 
@@ -840,7 +842,7 @@ To perform after Phase 6 in a safe visible Windows session:
 
 - [x] Phase 0 - Plan and baseline
 - [x] Phase 1 - Shared inference and design core
-- [ ] Phase 2 - Single-group inference
+- [x] Phase 2 - Single-group inference
 - [ ] Phase 3 - Native multi-group engines
 - [ ] Phase 4 - Robust sensitivities and diagnostics
 - [ ] Phase 5 - Pipeline, exports, and detailed reporting

@@ -16,6 +16,9 @@ Behavior
     'Effect', 'F Value', 'Num DF', 'Den DF', 'Pr > F', 'partial eta squared'
   and, when available from Pingouin:
     'Pr > F (GG)', 'Pr > F (HF)'
+- Appends canonical inference fields without replacing those legacy columns:
+    'p_raw_or_uncorrected', 'p_reported', 'p_correction',
+    'inference_status', 'reportable'
 
 Notes
 -----
@@ -35,6 +38,7 @@ Dependencies
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from itertools import product
 import logging
 import os
@@ -282,6 +286,268 @@ def _partial_eta_squared(F: float, df_num: float, df_den: float) -> float:
         return np.nan
 
 
+@dataclass(frozen=True)
+class RMAnovaInferenceDecision:
+    """Canonical primary-inference decision for one RM-ANOVA effect."""
+
+    p_raw_or_uncorrected: float
+    p_reported: float
+    p_correction: str
+    inference_status: str
+    reportable: bool
+
+
+@dataclass(frozen=True)
+class RMAnovaInteractionGate:
+    """Canonical gate passed to automatic Condition x ROI follow-ups."""
+
+    effect: str | None
+    p_value: float | None
+    significant: bool | None
+    reportable: bool
+    status: str
+
+
+def _finite_probability(value: object) -> float:
+    """Return a finite probability or NaN for an invalid value."""
+
+    try:
+        probability = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not np.isfinite(probability) or probability < 0.0 or probability > 1.0:
+        return float("nan")
+    return probability
+
+
+def _optional_bool(value: object) -> Optional[bool]:
+    """Normalize optional sphericity flags without treating missing values as false."""
+
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return None
+
+
+def resolve_rm_anova_inference(
+    *,
+    p_uncorrected: object,
+    numerator_df: object,
+    p_greenhouse_geisser: object = np.nan,
+    sphericity_met: object = None,
+) -> RMAnovaInferenceDecision:
+    """
+    Select the primary p-value for one repeated-measures ANOVA effect.
+
+    Sphericity is automatic for an effect with one numerator degree of freedom,
+    which includes ordinary two-level within-subject effects. For higher-order
+    effects, the uncorrected p-value is primary only when sphericity is known to
+    be met. A Greenhouse-Geisser p-value is used when sphericity is violated or
+    cannot be assessed. If that correction is required but unavailable, the
+    legacy uncorrected p-value remains in the result table for transparency but
+    is not reportable as the primary inference.
+    """
+
+    p_raw = _finite_probability(p_uncorrected)
+    p_gg = _finite_probability(p_greenhouse_geisser)
+    try:
+        df_num = float(numerator_df)
+    except (TypeError, ValueError):
+        df_num = float("nan")
+
+    two_level_effect = bool(
+        np.isfinite(df_num) and np.isclose(df_num, 1.0, rtol=0.0, atol=1e-12)
+    )
+    sphericity = _optional_bool(sphericity_met)
+
+    if two_level_effect:
+        if np.isfinite(p_raw):
+            return RMAnovaInferenceDecision(
+                p_raw_or_uncorrected=p_raw,
+                p_reported=p_raw,
+                p_correction="none_two_level_effect",
+                inference_status="primary_uncorrected_two_level_effect",
+                reportable=True,
+            )
+        return RMAnovaInferenceDecision(
+            p_raw_or_uncorrected=p_raw,
+            p_reported=float("nan"),
+            p_correction="none_two_level_effect",
+            inference_status="blocked_primary_uncorrected_p_unavailable",
+            reportable=False,
+        )
+
+    if sphericity is True:
+        if np.isfinite(p_raw):
+            return RMAnovaInferenceDecision(
+                p_raw_or_uncorrected=p_raw,
+                p_reported=p_raw,
+                p_correction="none_sphericity_met",
+                inference_status="primary_uncorrected_sphericity_met",
+                reportable=True,
+            )
+        return RMAnovaInferenceDecision(
+            p_raw_or_uncorrected=p_raw,
+            p_reported=float("nan"),
+            p_correction="none_sphericity_met",
+            inference_status="blocked_primary_uncorrected_p_unavailable",
+            reportable=False,
+        )
+
+    if np.isfinite(p_gg):
+        sphericity_label = "violated" if sphericity is False else "not_available"
+        return RMAnovaInferenceDecision(
+            p_raw_or_uncorrected=p_raw,
+            p_reported=p_gg,
+            p_correction="greenhouse_geisser",
+            inference_status=f"primary_greenhouse_geisser_sphericity_{sphericity_label}",
+            reportable=True,
+        )
+
+    return RMAnovaInferenceDecision(
+        p_raw_or_uncorrected=p_raw,
+        p_reported=float("nan"),
+        p_correction="required_but_unavailable",
+        inference_status=(
+            "blocked_primary_correction_unavailable_secondary_uncorrected_only"
+        ),
+        reportable=False,
+    )
+
+
+def _apply_reported_p_contract(table: pd.DataFrame) -> pd.DataFrame:
+    """Append canonical primary-inference fields without replacing legacy columns."""
+
+    out = table.copy()
+    decisions = [
+        resolve_rm_anova_inference(
+            p_uncorrected=row.get("Pr > F", np.nan),
+            numerator_df=row.get("Num DF", np.nan),
+            p_greenhouse_geisser=row.get("Pr > F (GG)", np.nan),
+            sphericity_met=row.get("Sphericity (bool)", None),
+        )
+        for _, row in out.iterrows()
+    ]
+    out["p_raw_or_uncorrected"] = [
+        decision.p_raw_or_uncorrected for decision in decisions
+    ]
+    out["p_reported"] = [decision.p_reported for decision in decisions]
+    out["p_correction"] = [decision.p_correction for decision in decisions]
+    out["inference_status"] = [decision.inference_status for decision in decisions]
+    out["reportable"] = pd.Series(
+        [decision.reportable for decision in decisions],
+        index=out.index,
+        dtype=bool,
+    )
+    return out
+
+
+def resolve_rm_anova_interaction_gate(
+    table: pd.DataFrame | None,
+    *,
+    alpha: float = 0.05,
+) -> RMAnovaInteractionGate:
+    """Extract a reportable Condition x ROI omnibus result for follow-up gating."""
+
+    if not 0.0 < float(alpha) < 1.0:
+        raise ValueError("alpha must be strictly between 0 and 1.")
+    if not isinstance(table, pd.DataFrame) or table.empty:
+        return RMAnovaInteractionGate(
+            effect=None,
+            p_value=None,
+            significant=None,
+            reportable=False,
+            status="omnibus_table_unavailable",
+        )
+    if "Effect" not in table.columns:
+        return RMAnovaInteractionGate(
+            effect=None,
+            p_value=None,
+            significant=None,
+            reportable=False,
+            status="omnibus_effect_column_unavailable",
+        )
+
+    effect_text = table["Effect"].astype(str)
+    factor_mask = (
+        effect_text.str.contains("condition", case=False, na=False)
+        & effect_text.str.contains("roi", case=False, na=False)
+    )
+    candidates = table.loc[factor_mask].copy()
+    if candidates.empty:
+        return RMAnovaInteractionGate(
+            effect=None,
+            p_value=None,
+            significant=None,
+            reportable=False,
+            status="condition_roi_interaction_unavailable",
+        )
+    interaction_marker = candidates["Effect"].astype(str).str.contains(
+        r":|\*|\bx\b|interaction",
+        case=False,
+        regex=True,
+        na=False,
+    )
+    row = (
+        candidates.loc[interaction_marker].iloc[0]
+        if bool(interaction_marker.any())
+        else candidates.iloc[0]
+    )
+    effect = str(row["Effect"])
+    reportable_value = row.get("reportable", False)
+    reportable = bool(reportable_value) if not pd.isna(reportable_value) else False
+    p_value = _finite_probability(row.get("p_reported", np.nan))
+    if not reportable:
+        return RMAnovaInteractionGate(
+            effect=effect,
+            p_value=None,
+            significant=None,
+            reportable=False,
+            status=str(row.get("inference_status", "omnibus_not_reportable")),
+        )
+    if not np.isfinite(p_value):
+        return RMAnovaInteractionGate(
+            effect=effect,
+            p_value=None,
+            significant=None,
+            reportable=False,
+            status="omnibus_reported_p_unavailable",
+        )
+    return RMAnovaInteractionGate(
+        effect=effect,
+        p_value=float(p_value),
+        significant=bool(p_value < float(alpha)),
+        reportable=True,
+        status="omnibus_reportable",
+    )
+
+
+def _attach_reported_p_metadata(table: pd.DataFrame) -> None:
+    """Record table-level inference metadata while preserving existing attributes."""
+
+    blocked_mask = ~table["reportable"].astype(bool)
+    table.attrs["rm_anova_inference_contract_version"] = 1
+    table.attrs["rm_anova_reported_p_column"] = "p_reported"
+    table.attrs["rm_anova_primary_reportable"] = bool(not blocked_mask.any())
+    table.attrs["rm_anova_blocked_effects"] = (
+        table.loc[blocked_mask, "Effect"].astype(str).tolist()
+        if "Effect" in table.columns
+        else []
+    )
+
+
 def _tidy_from_pingouin(pg_table: pd.DataFrame) -> pd.DataFrame:
     """
     Map Pingouin rm_anova output to the standardized table.
@@ -389,6 +655,9 @@ def run_repeated_measures_anova(
         ['Effect', 'F Value', 'Num DF', 'Den DF', 'Pr > F', 'partial eta squared']
         and when available from Pingouin:
         ['Pr > F (GG)', 'Pr > F (HF)']
+        plus canonical primary-inference fields:
+        ['p_raw_or_uncorrected', 'p_reported', 'p_correction',
+         'inference_status', 'reportable']
 
     Raises
     ------
@@ -459,9 +728,17 @@ def run_repeated_measures_anova(
         out = _tidy_from_pingouin(pg_table)
 
         # Sanity: ensure numeric columns are numeric
-        for col in ["F Value", "Num DF", "Den DF", "Pr > F", "partial eta squared"]:
+        for col in [
+            "F Value",
+            "Num DF",
+            "Den DF",
+            "Pr > F",
+            "Pr > F (GG)",
+            "partial eta squared",
+        ]:
             if col in out.columns:
                 out[col] = pd.to_numeric(out[col], errors="coerce")
+        out = _apply_reported_p_contract(out)
 
         out.attrs["rm_anova_backend"] = "pingouin"
         out.attrs["rm_anova_correction_outputs_requested"] = True
@@ -469,6 +746,7 @@ def run_repeated_measures_anova(
         out.attrs["rm_anova_pingouin_fallback_reason"] = (
             "correction kwarg not available" if not correction_outputs_available else ""
         )
+        _attach_reported_p_metadata(out)
 
         return out
 
@@ -503,6 +781,7 @@ def run_repeated_measures_anova(
         res = aov.fit()
         sm_table = res.anova_table.copy()
         out = _tidy_from_statsmodels(sm_table)
+        out = _apply_reported_p_contract(out)
         out.attrs["rm_anova_backend"] = "statsmodels"
         out.attrs["rm_anova_correction_outputs_available"] = False
         out.attrs["rm_anova_sphericity_outputs_available"] = False
@@ -518,6 +797,7 @@ def run_repeated_measures_anova(
                 "rois": int(df[within_cols[1]].nunique()) if len(within_cols) > 1 else 0,
                 "dv_missing_nonfinite": int((~finite_mask).sum()),
             }
+        _attach_reported_p_metadata(out)
         return out
     except Exception as e:
         # If we previously caught a Pingouin error, include it for context.
