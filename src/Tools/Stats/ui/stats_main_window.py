@@ -3,6 +3,7 @@
 StatsWindow keeps the import and construction surface stable while the
 implementation is split across focused internal mixin modules.
 """
+# ruff: noqa: F405
 
 from __future__ import annotations
 
@@ -80,6 +81,25 @@ class StatsWindow(
         self.selected_conditions: List[str] = []
         self._participants_map: dict[str, str] = {}
         self._subject_group_map: dict[str, str | None] = {}
+        self._participant_group_id_map: dict[str, str] = {}
+        self._group_display_labels: dict[str, str] = {}
+        self._group_participant_counts: dict[str, int] = {}
+        self._unassigned_group_participants: tuple[str, ...] = ()
+        self._preliminary_coverage = build_preliminary_workbook_coverage(
+            (),
+            (),
+            {},
+        )
+        self._native_result_payloads: dict[StepId, dict[str, object]] = {}
+        self._native_step_payloads: dict[
+            PipelineId, dict[StepId, dict[str, object]]
+        ] = {}
+        self._native_options_by_pipeline: dict[PipelineId, object] = {}
+        self._native_state_by_pipeline: dict[
+            PipelineId, dict[str, object]
+        ] = {}
+        self._prepared_analysis_payload: object | None = None
+        self._native_report_bundle: object | None = None
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
@@ -121,6 +141,7 @@ class StatsWindow(
 
         # UI
         self._init_ui()
+        self._initialize_native_analysis_controls()
         self._update_single_group_analysis_availability()
         self.results_textbox = self.summary_text
         self._update_manual_exclusion_summary()
@@ -161,8 +182,9 @@ class StatsWindow(
         old_root = getattr(self, "_project_path", None)
         if old_root is not None and Path(old_root).resolve() == new_root:
             return
+        self._invalidate_controller_context()
         self._load_project_context_from_root(new_root)
-        self._clear_project_bound_stats_state()
+        self._clear_project_bound_stats_state(invalidate_controller=False)
         if clear_last_export:
             self._set_last_export_path(None)
         if reload_default_folder:
@@ -175,20 +197,74 @@ class StatsWindow(
             },
         )
 
-    def _clear_project_bound_stats_state(self) -> None:
+    def _invalidate_controller_context(self) -> bool:
+        """Invalidate callbacks tied to a previous scan/project generation."""
+
+        controller = getattr(self, "_controller", None)
+        invalidate = getattr(controller, "invalidate_context", None)
+        if not callable(invalidate):
+            return False
+        try:
+            return bool(invalidate())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_project_context_invalidation_failed",
+                extra={"project_dir": self.project_dir, "error": str(exc)},
+            )
+            return False
+
+    def _clear_native_analysis_results(self) -> None:
+        """Clear result objects and result surfaces owned by the prior scan."""
+
+        self._native_result_payloads = {}
+        self._native_step_payloads = {}
+        self._native_options_by_pipeline = {}
+        self._native_state_by_pipeline = {}
+        self._prepared_analysis_payload = None
+        self._native_report_bundle = None
+        self.rm_anova_results_data = None
+        self.mixed_model_results_data = None
+        self.posthoc_results_data = None
+        self.baseline_vs_zero_results_payload = None
+        for name in (
+            "summary_text",
+            "reporting_summary_text",
+            "methods_checks_text",
+            "at_a_glance_text",
+            "log_text",
+            "output_text",
+        ):
+            widget = getattr(self, name, None)
+            clear = getattr(widget, "clear", None)
+            if callable(clear):
+                clear()
+
+    def _clear_project_bound_stats_state(
+        self,
+        *,
+        invalidate_controller: bool = True,
+    ) -> None:
         """Clear scanned inputs and results that belong to the previous project."""
+        if invalidate_controller:
+            self._invalidate_controller_context()
         self.subject_data = {}
         self.subjects = []
         self.conditions = []
         self.selected_conditions = []
         self._participants_map = {}
         self._subject_group_map = {}
+        self._participant_group_id_map = {}
+        self._group_display_labels = {}
+        self._group_participant_counts = {}
+        self._unassigned_group_participants = ()
+        self._preliminary_coverage = build_preliminary_workbook_coverage(
+            (),
+            (),
+            {},
+        )
         self.manual_excluded_pids.clear()
         self._manual_exclusion_candidates = []
-        self.rm_anova_results_data = None
-        self.mixed_model_results_data = None
-        self.posthoc_results_data = None
-        self.baseline_vs_zero_results_payload = None
+        self._clear_native_analysis_results()
         self._active_pipeline = None
         self._pipeline_conditions.clear()
         self._pipeline_dv_policy.clear()
@@ -212,6 +288,10 @@ class StatsWindow(
             self._update_export_buttons()
         if hasattr(self, "_update_single_group_analysis_availability"):
             self._update_single_group_analysis_availability()
+        if hasattr(self, "_populate_group_pair_combo"):
+            self._populate_group_pair_combo()
+        if hasattr(self, "_refresh_analysis_design_summary"):
+            self._refresh_analysis_design_summary()
 
     # --------- ROI + status helpers ---------
 

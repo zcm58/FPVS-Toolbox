@@ -31,8 +31,11 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     ]
     assert setup_tabs.widget(0).isAncestorOf(window.le_folder)
     assert setup_tabs.widget(0).isAncestorOf(window.manual_exclusion_group)
-    assert not setup_area.isAncestorOf(window.lbl_status)
-    assert not window.lbl_status.isVisible()
+    assert setup_area.isAncestorOf(window.lbl_status)
+    assert window.lbl_status.isVisible()
+    assert setup_area.isAncestorOf(window.provenance_warning)
+    assert not setup_tabs.isAncestorOf(window.provenance_warning)
+    assert window.provenance_warning.isVisible()
     assert not hasattr(window, "data_folder_group")
     assert not hasattr(window, "btn_copy_folder")
     assert not hasattr(window, "btn_open_results")
@@ -49,6 +52,11 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
 
     assert window.findChild(QWidget, "stats_results_selector") is None
     assert window.findChild(QWidget, "stats_results_stack") is None
+    assert window.results_tabs.objectName() == "stats_results_tabs"
+    assert [
+        window.results_tabs.tabText(index)
+        for index in range(window.results_tabs.count())
+    ] == ["At a glance", "Methods & checks", "Run log"]
     assert window.summary_text.isVisible()
     assert not window.reporting_summary_text.isVisible()
     assert not window.log_text.isVisible()

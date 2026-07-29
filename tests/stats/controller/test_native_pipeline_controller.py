@@ -216,9 +216,24 @@ def test_existing_single_pipeline_order_is_preserved() -> None:
 
     controller.run_single_group_analysis()
 
-    assert [step_id for _pipeline, step_id, _kwargs in view.worker_calls] == list(
-        SINGLE_PIPELINE_STEPS
-    )
+    assert [step_id for _pipeline, step_id, _kwargs in view.worker_calls] == [
+        StepId.PREPARE_ANALYSIS,
+        StepId.RM_ANOVA,
+        StepId.MIXED_MODEL,
+        StepId.INTERACTION_POSTHOCS,
+        StepId.BASELINE_VS_ZERO,
+        StepId.SENSITIVITIES,
+        StepId.REPORT_BUNDLE,
+    ]
+    assert list(SINGLE_PIPELINE_STEPS) == [
+        StepId.PREPARE_ANALYSIS,
+        StepId.RM_ANOVA,
+        StepId.MIXED_MODEL,
+        StepId.INTERACTION_POSTHOCS,
+        StepId.BASELINE_VS_ZERO,
+        StepId.SENSITIVITIES,
+        StepId.REPORT_BUNDLE,
+    ]
     assert all(
         kwargs["prepared_payload"] is prepared
         for _pipeline, _step_id, kwargs in view.worker_calls[1:]
@@ -228,6 +243,87 @@ def test_existing_single_pipeline_order_is_preserved() -> None:
     assert view.finished[-1]["success"] is True
     assert view.finished[-1]["cancelled"] is False
     assert {section for section, _message, _level in view.logs} == {"Single"}
+
+
+def test_manual_followups_preserve_provenance_when_omnibus_gate_is_disabled() -> None:
+    class ManualFollowupView(FakeView):
+        def get_step_config(
+            self,
+            pipeline_id: PipelineId,
+            step_id: StepId,
+        ) -> tuple[dict[str, object], Callable[[dict], None]]:
+            kwargs, handler = super().get_step_config(pipeline_id, step_id)
+            if step_id is StepId.INTERACTION_POSTHOCS:
+                kwargs.update(
+                    {
+                        "followup_provenance": "exploratory_manual",
+                        "enforce_omnibus_gate": False,
+                    }
+                )
+            return kwargs, handler
+
+    prepared = object()
+    view = ManualFollowupView(
+        {
+            StepId.PREPARE_ANALYSIS: {
+                "status": "ok",
+                "prepared_payload": prepared,
+            },
+            StepId.RM_ANOVA: {
+                "status": "ok",
+                "anova_df_results": None,
+            },
+        }
+    )
+    controller = StatsController(view)
+
+    controller.run_single_group_analysis(
+        step_ids=(
+            StepId.RM_ANOVA,
+            StepId.INTERACTION_POSTHOCS,
+        ),
+        run_exports=False,
+        run_summary=False,
+    )
+
+    posthoc_kwargs = next(
+        kwargs
+        for _pipeline, step_id, kwargs in view.worker_calls
+        if step_id is StepId.INTERACTION_POSTHOCS
+    )
+    assert posthoc_kwargs["followup_provenance"] == "exploratory_manual"
+    assert posthoc_kwargs["enforce_omnibus_gate"] is False
+    assert "omnibus_p_value" not in posthoc_kwargs
+    assert "omnibus_significant" not in posthoc_kwargs
+
+
+def test_explicit_single_queue_can_omit_all_sensitivity_work() -> None:
+    prepared = object()
+    view = FakeView(
+        {
+            StepId.PREPARE_ANALYSIS: {
+                "status": "ok",
+                "prepared_payload": prepared,
+            }
+        }
+    )
+    controller = StatsController(view)
+
+    controller.run_single_group_analysis(
+        step_ids=(
+            StepId.PREPARE_ANALYSIS,
+            StepId.RM_ANOVA,
+            StepId.MIXED_MODEL,
+            StepId.INTERACTION_POSTHOCS,
+            StepId.BASELINE_VS_ZERO,
+            StepId.REPORT_BUNDLE,
+        ),
+    )
+
+    assert StepId.SENSITIVITIES not in [
+        step_id for _pipeline, step_id, _kwargs in view.worker_calls
+    ]
+    assert view.finished[-1]["success"] is True
 
 
 def test_single_step_only_run_still_prepares_once() -> None:

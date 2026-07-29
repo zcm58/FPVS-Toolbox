@@ -2,6 +2,8 @@
 # ruff: noqa: F405
 from __future__ import annotations
 
+from PySide6.QtWidgets import QProgressBar
+
 from Main_App.gui.components import make_info_button, show_tool_info
 from Tools.Stats.ui.tool_info import STATS_TOOL_INFO
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
@@ -289,7 +291,7 @@ class StatsWindowUiMixin:
         self.analyze_single_btn.setToolTip(
             "Run the full single-group analysis pipeline using the selected settings."
         )
-        self.analyze_single_btn.clicked.connect(self.on_analyze_single_group_clicked)
+        self.analyze_single_btn.clicked.connect(self._on_primary_analysis_clicked)
 
         self.single_advanced_btn = make_action_button("Advanced...")
         self.single_advanced_btn.setToolTip(
@@ -315,10 +317,222 @@ class StatsWindowUiMixin:
         self.spinner.hide()
         self.lbl_status = StatusBanner("Select a folder containing FPVS results.", self)
         self.lbl_status.setObjectName("stats_status_internal")
-        self.lbl_status.setWordWrap(False)
-        self.lbl_status.setMaximumWidth(360)
-        self.lbl_status.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.lbl_status.hide()
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self.pipeline_phase_label = QLabel("Ready")
+        self.pipeline_phase_label.setObjectName("stats_pipeline_phase_label")
+        self.pipeline_phase_label.setMinimumWidth(150)
+        self.pipeline_phase_label.setToolTip(
+            "Current structured analysis phase. Detailed messages remain in Run log."
+        )
+
+        self.pipeline_progress_bar = QProgressBar()
+        self.pipeline_progress_bar.setObjectName("stats_pipeline_progress_bar")
+        self.pipeline_progress_bar.setRange(0, 100)
+        self.pipeline_progress_bar.setValue(0)
+        self.pipeline_progress_bar.setFormat("%p%")
+        self.pipeline_progress_bar.setTextVisible(True)
+        self.pipeline_progress_bar.setToolTip(
+            "Progress through the currently active statistical pipeline."
+        )
+
+        self.cancel_analysis_btn = make_action_button(
+            "Cancel",
+            variant="danger",
+            compact=True,
+        )
+        self.cancel_analysis_btn.setObjectName("stats_cancel_analysis_button")
+        self.cancel_analysis_btn.setEnabled(False)
+        self.cancel_analysis_btn.setToolTip(
+            "Request cancellation after the current safe worker checkpoint."
+        )
+        self.cancel_analysis_btn.clicked.connect(self._on_cancel_analysis_clicked)
+
+        self.pipeline_status_area = QWidget()
+        self.pipeline_status_area.setObjectName("stats_pipeline_status_area")
+        pipeline_status_layout = QVBoxLayout(self.pipeline_status_area)
+        pipeline_status_layout.setContentsMargins(0, 0, 0, 0)
+        pipeline_status_layout.setSpacing(6)
+        pipeline_status_layout.addWidget(self.lbl_status)
+        pipeline_progress_row = QHBoxLayout()
+        pipeline_progress_row.setContentsMargins(0, 0, 0, 0)
+        pipeline_progress_row.setSpacing(8)
+        pipeline_progress_row.addWidget(self.pipeline_phase_label)
+        pipeline_progress_row.addWidget(self.pipeline_progress_bar, 1)
+        pipeline_progress_row.addWidget(self.cancel_analysis_btn)
+        pipeline_status_layout.addLayout(pipeline_progress_row)
+
+        self.inference_settings_group = SectionCard("Inference Settings")
+        self.inference_settings_group.setObjectName("stats_inference_settings_group")
+        self.inference_settings_group.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        )
+        inference_layout = self.inference_settings_group.content_layout
+        inference_layout.setSpacing(8)
+        inference_grid = QGridLayout()
+        inference_grid.setContentsMargins(0, 0, 0, 0)
+        inference_grid.setHorizontalSpacing(10)
+        inference_grid.setVerticalSpacing(6)
+
+        self.analysis_profile_combo = QComboBox()
+        self.analysis_profile_combo.setObjectName("stats_analysis_profile_combo")
+        self.analysis_profile_combo.addItem(
+            "Published-style exploratory",
+            "published_style_exploratory",
+        )
+        self.analysis_profile_combo.addItem("Confirmatory", "confirmatory")
+        self.analysis_profile_combo.setToolTip(
+            "Choose how results will be interpreted. A profile change never overrides "
+            "the recorded harmonic-selection provenance."
+        )
+        inference_grid.addWidget(QLabel("Analysis profile:"), 0, 0)
+        inference_grid.addWidget(self.analysis_profile_combo, 0, 1)
+
+        self.group_pair_label = QLabel("Groups to compare:")
+        self.group_pair_label.setObjectName("stats_group_pair_label")
+        self.group_pair_combo = QComboBox()
+        self.group_pair_combo.setObjectName("stats_group_pair_combo")
+        self.group_pair_combo.addItem(
+            "Scan project groups to choose a comparison",
+            None,
+        )
+        self.group_pair_combo.setEnabled(False)
+        self.group_pair_combo.setToolTip(
+            "Choose the explicit canonical group pair used for cell contrasts. "
+            "A choice is required when the project contains more than two groups."
+        )
+        inference_grid.addWidget(self.group_pair_label, 0, 2)
+        inference_grid.addWidget(self.group_pair_combo, 0, 3)
+
+        self.multiplicity_combo = QComboBox()
+        self.multiplicity_combo.setObjectName("stats_multiplicity_combo")
+        self.multiplicity_combo.addItem("Holm (family-wise)", "holm")
+        self.multiplicity_combo.addItem(
+            "Benjamini-Hochberg FDR",
+            "fdr_bh",
+        )
+        self.multiplicity_combo.setToolTip(
+            "Adjust related tests as one declared family. Holm is the default "
+            "family-wise correction; FDR is an exploratory discovery option. "
+            "Max-|t| results are reported separately as a resampling sensitivity."
+        )
+        inference_grid.addWidget(QLabel("Multiplicity:"), 1, 0)
+        inference_grid.addWidget(self.multiplicity_combo, 1, 1)
+
+        self.response_alternative_combo = QComboBox()
+        self.response_alternative_combo.setObjectName(
+            "stats_response_alternative_combo"
+        )
+        self.response_alternative_combo.addItem("Two-sided", "two_sided")
+        self.response_alternative_combo.addItem(
+            "Greater than zero",
+            "greater",
+        )
+        self.response_alternative_combo.setToolTip(
+            "Use a directional response test only when it was justified before "
+            "examining these data."
+        )
+        inference_grid.addWidget(QLabel("Response alternative:"), 1, 2)
+        inference_grid.addWidget(self.response_alternative_combo, 1, 3)
+
+        self.analysis_scope_combo = QComboBox()
+        self.analysis_scope_combo.setObjectName("stats_analysis_scope_combo")
+        self.analysis_scope_combo.addItem(
+            "Primary complete core",
+            "complete_core",
+        )
+        self.analysis_scope_combo.setEnabled(False)
+        self.analysis_scope_combo.setToolTip(
+            "The primary analysis retains only conditions contributed by every "
+            "included participant. A secondary available-case model is not run "
+            "by the current native pipeline."
+        )
+        inference_grid.addWidget(QLabel("Analysis scope:"), 2, 0)
+        inference_grid.addWidget(self.analysis_scope_combo, 2, 1)
+
+        self.resample_count_spin = QSpinBox()
+        self.resample_count_spin.setObjectName("stats_resample_count_spin")
+        self.resample_count_spin.setRange(1, 100_000)
+        self.resample_count_spin.setValue(9_999)
+        self.resample_count_spin.setSingleStep(1_000)
+        self.resample_count_spin.setGroupSeparatorShown(True)
+        self.resample_count_spin.setToolTip(
+            "Requested Monte Carlo draws when exact participant-level enumeration "
+            "is not feasible."
+        )
+        inference_grid.addWidget(QLabel("Resampling draws:"), 2, 2)
+        inference_grid.addWidget(self.resample_count_spin, 2, 3)
+
+        self.strict_omnibus_family_checkbox = QCheckBox(
+            "Require a supported omnibus effect before follow-up families"
+        )
+        self.strict_omnibus_family_checkbox.setObjectName(
+            "stats_strict_omnibus_family_checkbox"
+        )
+        self.strict_omnibus_family_checkbox.setChecked(True)
+        self.strict_omnibus_family_checkbox.setToolTip(
+            "Keep follow-up interpretation within the declared omnibus-testing strategy."
+        )
+        inference_grid.addWidget(
+            self.strict_omnibus_family_checkbox,
+            3,
+            0,
+            1,
+            2,
+        )
+
+        self.independent_selection_attestation = QCheckBox(
+            "The fixed harmonic list was selected independently of these participants"
+        )
+        self.independent_selection_attestation.setObjectName(
+            "stats_independent_selection_attestation"
+        )
+        self.independent_selection_attestation.setToolTip(
+            "Use only for a prespecified or externally selected fixed list. This "
+            "cannot make the canonical same-sample adaptive list independent."
+        )
+        self.independent_selection_attestation.toggled.connect(
+            self._sync_provenance_warning
+        )
+        inference_grid.addWidget(
+            self.independent_selection_attestation,
+            3,
+            2,
+            1,
+            2,
+        )
+
+        sensitivity_row = QWidget()
+        sensitivity_row.setObjectName("stats_sensitivity_selection_row")
+        sensitivity_layout = QHBoxLayout(sensitivity_row)
+        sensitivity_layout.setContentsMargins(0, 0, 0, 0)
+        sensitivity_layout.setSpacing(12)
+        sensitivity_layout.addWidget(QLabel("Sensitivity analyses:"))
+
+        self.robust_sensitivity_checkbox = QCheckBox("Robust")
+        self.robust_sensitivity_checkbox.setObjectName(
+            "stats_robust_sensitivity_checkbox"
+        )
+        self.robust_sensitivity_checkbox.setChecked(True)
+        sensitivity_layout.addWidget(self.robust_sensitivity_checkbox)
+
+        self.resampling_sensitivity_checkbox = QCheckBox("Resampling")
+        self.resampling_sensitivity_checkbox.setObjectName(
+            "stats_resampling_sensitivity_checkbox"
+        )
+        self.resampling_sensitivity_checkbox.setChecked(True)
+        sensitivity_layout.addWidget(self.resampling_sensitivity_checkbox)
+
+        self.stability_sensitivity_checkbox = QCheckBox("Leave-one-out stability")
+        self.stability_sensitivity_checkbox.setObjectName(
+            "stats_stability_sensitivity_checkbox"
+        )
+        self.stability_sensitivity_checkbox.setChecked(True)
+        sensitivity_layout.addWidget(self.stability_sensitivity_checkbox)
+        sensitivity_layout.addStretch(1)
+        inference_layout.addLayout(inference_grid)
+        inference_layout.addWidget(sensitivity_row)
 
         export_row = QHBoxLayout()
         export_row.setSpacing(6)
@@ -411,28 +625,36 @@ class StatsWindowUiMixin:
         # output pane
         self.summary_text = QTextEdit()
         self.summary_text.setProperty("logSurface", True)
+        self.summary_text.setObjectName("stats_at_a_glance_text")
         self.summary_text.setReadOnly(True)
         self.summary_text.setAcceptRichText(True)
-        self.summary_text.setPlaceholderText("Significant results summary will appear here after analysis.")
+        self.summary_text.setPlaceholderText(
+            "A plain-language result summary will appear here after analysis."
+        )
         self.summary_text.setMinimumHeight(140)
         self.summary_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.log_text = QPlainTextEdit(self)
         self.log_text.setProperty("logSurface", True)
+        self.log_text.setObjectName("stats_run_log_text")
         self.log_text.setReadOnly(True)
-        self.log_text.setPlaceholderText("Log output")
+        self.log_text.setPlaceholderText(
+            "Worker phases, warnings, export messages, and errors will appear here."
+        )
         self.log_text.setMinimumHeight(140)
         self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.log_text.hide()
 
         self.reporting_summary_text = QPlainTextEdit(self)
         self.reporting_summary_text.setProperty("logSurface", True)
+        self.reporting_summary_text.setObjectName("stats_methods_checks_text")
         self.reporting_summary_text.setReadOnly(True)
-        self.reporting_summary_text.setPlaceholderText("Reporting Summary output")
+        self.reporting_summary_text.setPlaceholderText(
+            "Methods, assumptions, multiplicity corrections, provenance, and "
+            "diagnostic checks will appear here."
+        )
         self.reporting_summary_text.setFont(fixed_width_font())
-        self.reporting_summary_text.hide()
 
-        self.copy_summary_btn = make_action_button("Copy summary")
+        self.copy_summary_btn = make_action_button("Copy at-a-glance")
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)
 
         output_container = QWidget()
@@ -444,7 +666,7 @@ class StatsWindowUiMixin:
         output_header_layout = QHBoxLayout(output_header_widget)
         output_header_layout.setContentsMargins(0, 0, 0, 0)
         output_header_layout.setSpacing(8)
-        output_header_layout.addWidget(SubsectionHeaderLabel("Significant Results Summary:"))
+        output_header_layout.addWidget(SubsectionHeaderLabel("Analysis Results"))
         output_header_layout.addStretch(1)
 
         output_header = ActionRow(output_header_widget, alignment=Qt.AlignRight)
@@ -453,7 +675,24 @@ class StatsWindowUiMixin:
         output_header_layout.addWidget(output_header)
 
         output_layout.addWidget(output_header_widget)
-        output_layout.addWidget(self.summary_text)
+        self.results_tabs = QTabWidget()
+        self.results_tabs.setObjectName("stats_results_tabs")
+        self.results_tabs.setDocumentMode(True)
+        self.results_tabs.setStyleSheet(
+            """
+            QTabWidget#stats_results_tabs::pane {
+                border: 0;
+                background: transparent;
+            }
+            QTabWidget#stats_results_tabs > QWidget {
+                background: transparent;
+            }
+            """
+        )
+        self.results_tabs.addTab(self.summary_text, "At a glance")
+        self.results_tabs.addTab(self.reporting_summary_text, "Methods & checks")
+        self.results_tabs.addTab(self.log_text, "Run log")
+        output_layout.addWidget(self.results_tabs, 1)
 
         self.output_text = self.log_text
 
@@ -488,12 +727,62 @@ class StatsWindowUiMixin:
         file_grid.setColumnStretch(1, 1)
         file_layout.addLayout(file_grid)
 
+        self.analysis_design_group = SectionCard("Analysis Design")
+        self.analysis_design_group.setObjectName("stats_analysis_design_group")
+        self.analysis_design_group.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        )
+        analysis_design_layout = self.analysis_design_group.content_layout
+        analysis_design_layout.setSpacing(7)
+
+        self.analysis_mode_banner = StatusBanner(
+            "Single Group",
+            self.analysis_design_group,
+            variant="info",
+        )
+        self.analysis_mode_banner.setObjectName("stats_analysis_mode_banner")
+        self.analysis_mode_value = self.analysis_mode_banner.label
+        self.analysis_mode_value.setObjectName("stats_analysis_mode_value")
+        analysis_design_layout.addWidget(self.analysis_mode_banner)
+
+        analysis_design_form = make_form_layout()
+        self.analysis_profile_value = QLabel("Published-style exploratory")
+        self.analysis_profile_value.setObjectName("stats_analysis_profile_value")
+        self.analysis_profile_value.setWordWrap(True)
+        self.analysis_profile_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        analysis_design_form.addRow("Profile:", self.analysis_profile_value)
+
+        self.analysis_group_value = QLabel("One pooled group; scan to confirm participant N.")
+        self.analysis_group_value.setObjectName("stats_analysis_group_value")
+        self.analysis_group_value.setWordWrap(True)
+        self.analysis_group_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        analysis_design_form.addRow("Groups:", self.analysis_group_value)
+
+        self.analysis_coverage_value = QLabel(
+            "Scan the data folder to calculate participant and complete-core "
+            "condition coverage."
+        )
+        self.analysis_coverage_value.setObjectName("stats_analysis_coverage_value")
+        self.analysis_coverage_value.setWordWrap(True)
+        self.analysis_coverage_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        analysis_design_form.addRow("Primary coverage:", self.analysis_coverage_value)
+        analysis_design_layout.addLayout(analysis_design_form)
+
+        analysis_design_note = QLabel(
+            "Primary inference uses the frozen participant cohort and only conditions "
+            "with one finite value for every selected ROI and participant."
+        )
+        analysis_design_note.setObjectName("stats_analysis_design_note")
+        analysis_design_note.setWordWrap(True)
+        analysis_design_layout.addWidget(analysis_design_note)
+
         basic_page = QWidget()
         basic_page.setObjectName("stats_basic_setup_page")
         basic_layout = QVBoxLayout(basic_page)
         basic_layout.setContentsMargins(0, 0, 0, 0)
         basic_layout.setSpacing(8)
         basic_layout.addWidget(file_box)
+        basic_layout.addWidget(self.analysis_design_group)
 
         basic_content = QWidget()
         basic_content_layout = QHBoxLayout(basic_content)
@@ -526,6 +815,7 @@ class StatsWindowUiMixin:
         advanced_bottom_layout.addWidget(last_export_section, 1)
         advanced_bottom_layout.addWidget(roi_context_section, 1)
 
+        advanced_layout_page.addWidget(self.inference_settings_group)
         advanced_layout_page.addWidget(self.dv_group)
         advanced_layout_page.addWidget(advanced_top_row)
         advanced_layout_page.addWidget(advanced_bottom_row)
@@ -549,6 +839,18 @@ class StatsWindowUiMixin:
         self.setup_tabs.addTab(advanced_page, "Advanced")
         self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)
+
+        self.provenance_warning = StatusBanner(
+            "",
+            setup_area,
+            variant="warning",
+        )
+        self.provenance_warning.setObjectName("stats_provenance_warning")
+        self.provenance_warning.setToolTip(
+            "Harmonic-selection provenance changes how response-versus-zero "
+            "p-values may be interpreted."
+        )
+        setup_layout.addWidget(self.provenance_warning)
 
         self.stats_processing_notice = SectionCard("Stats analysis in progress")
         self.stats_processing_notice.setObjectName("stats_processing_notice")
@@ -580,6 +882,7 @@ class StatsWindowUiMixin:
         self.stats_processing_notice.hide()
         self.stats_processing_animation.stop()
         setup_layout.addWidget(self.stats_processing_notice)
+        setup_layout.addWidget(self.pipeline_status_area)
 
         self.run_action_bar = QWidget()
         self.run_action_bar.setObjectName("stats_run_action_bar")
@@ -616,17 +919,58 @@ class StatsWindowUiMixin:
         action = getattr(self, "reporting_summary_export_action", None)
         return bool(action is None or action.isChecked())
 
+    def set_pipeline_progress(
+        self,
+        phase: str,
+        completed: int | float | None = None,
+        total: int | float | None = None,
+        *,
+        percent: int | float | None = None,
+    ) -> None:
+        """Render one structured pipeline phase/progress update."""
+        self.pipeline_phase_label.setText(str(phase or "Running"))
+        if percent is None and completed is not None and total not in {None, 0}:
+            percent = (float(completed) / float(total)) * 100.0
+        if percent is None:
+            self.pipeline_progress_bar.setRange(0, 0)
+            return
+        bounded = max(0, min(100, int(round(float(percent)))))
+        self.pipeline_progress_bar.setRange(0, 100)
+        self.pipeline_progress_bar.setValue(bounded)
+
+    def set_pipeline_running(
+        self,
+        running: bool,
+        *,
+        phase: str | None = None,
+        cancellable: bool | None = None,
+    ) -> None:
+        """Update presentation state for a running or terminal pipeline."""
+        is_running = bool(running)
+        can_cancel = is_running if cancellable is None else is_running and bool(cancellable)
+        self.cancel_analysis_btn.setVisible(True)
+        self.cancel_analysis_btn.setEnabled(can_cancel)
+        if phase:
+            self.pipeline_phase_label.setText(str(phase))
+        elif is_running:
+            self.pipeline_phase_label.setText("Starting analysis")
+        else:
+            self.pipeline_phase_label.setText("Ready")
+        if is_running:
+            self.pipeline_progress_bar.setRange(0, 0)
+        elif self.pipeline_progress_bar.maximum() == 0:
+            self.pipeline_progress_bar.setRange(0, 100)
+            self.pipeline_progress_bar.setValue(0)
+
     def _sync_summary_output_visibility(self, *_args) -> None:
-        """Show Basic-only summary and run controls only on the Basic tab."""
-        tabs = getattr(self, "setup_tabs", None)
+        """Keep the shared run controls and result tabs visible in either setup tab."""
         output = getattr(self, "summary_output_container", None)
         action_bar = getattr(self, "run_action_bar", None)
         splitter = getattr(self, "root_splitter", None)
-        if tabs is None or output is None:
+        if output is None:
             return
-        show_basic_controls = tabs.currentIndex() == 0
-        output.setVisible(show_basic_controls)
+        output.setVisible(True)
         if action_bar is not None:
-            action_bar.setVisible(show_basic_controls)
+            action_bar.setVisible(True)
         if splitter is not None:
-            splitter.setSizes([620, 200] if show_basic_controls else [820, 0])
+            splitter.setSizes([620, 200])

@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 6 - GUI and non-expert workflow
+- Current phase: Phase 7 - validation, documentation, and closure
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -747,22 +747,24 @@ Deliverables:
 
 Definition of done:
 
-- [ ] A single-group project presents and runs the single pipeline.
-- [ ] A true multi-group project presents and runs the multi pipeline.
-- [ ] Canonical group labels and per-group N are shown before analysis.
-- [ ] Optional incomplete conditions are visibly excluded from the primary
+- [x] A single-group project presents and runs the single pipeline.
+- [x] A true multi-group project presents and runs the multi pipeline.
+- [x] Canonical group labels and per-group N are shown before analysis.
+- [x] Optional incomplete conditions are visibly excluded from the primary
       complete-core analysis.
-- [ ] The profile/provenance warning cannot be hidden by changing tabs.
-- [ ] Long work remains off the UI thread.
-- [ ] Visible status/progress is updated from structured worker events rather
+- [x] The profile/provenance warning cannot be hidden by changing tabs.
+- [x] Long work remains off the UI thread.
+- [x] Visible status/progress is updated from structured worker events rather
       than inferred from free-form text.
-- [ ] At-a-glance language never substitutes raw p-values for available
+- [x] At-a-glance language never substitutes raw p-values for available
       adjusted p-values.
-- [ ] Existing stable object names are preserved where required.
-- [ ] New pytest-qt files are registered and left for CI.
-- [ ] GUI import audit and focused GUI/Stats verification pass locally.
-- [ ] Manual visible smoke path is documented.
-- [ ] Plan progress is updated and committed.
+- [x] Existing stable object names are preserved where required.
+- [x] New pytest-qt files are registered and left for CI.
+- [x] GUI import audit and focused GUI/Stats verification pass locally
+      (51 registered Stats tests, 84 direct GUI-neutral integration/reporting
+      tests, and the GUI audit; Qt execution remains CI-only).
+- [x] Manual visible smoke path is documented.
+- [x] Plan progress is updated and committed.
 
 Commit:
 
@@ -859,7 +861,7 @@ To perform after Phase 6 in a safe visible Windows session:
 - [x] Phase 3 - Native multi-group engines
 - [x] Phase 4 - Robust sensitivities and diagnostics
 - [x] Phase 5 - Pipeline, exports, and detailed reporting
-- [ ] Phase 6 - GUI and non-expert workflow
+- [x] Phase 6 - GUI and non-expert workflow
 - [ ] Phase 7 - Validation, documentation, and closure
 
 ## Decision Log

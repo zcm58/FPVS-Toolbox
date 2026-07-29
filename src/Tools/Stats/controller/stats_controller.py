@@ -111,6 +111,7 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.MIXED_MODEL,
     StepId.INTERACTION_POSTHOCS,
     StepId.BASELINE_VS_ZERO,
+    StepId.SENSITIVITIES,
     StepId.REPORT_BUNDLE,
 )
 """Default ordered steps for the single-group pipeline."""
@@ -630,6 +631,10 @@ class StatsController:
         pending = state.steps[state.current_step_index + 1 :]
         for pending_step in pending:
             if pending_step.id is not StepId.INTERACTION_POSTHOCS:
+                continue
+            if not bool(
+                pending_step.kwargs.get("enforce_omnibus_gate", True)
+            ):
                 continue
             alpha = float(pending_step.kwargs.get("alpha", 0.05))
             gate = resolve_rm_anova_interaction_gate(

@@ -1,8 +1,18 @@
 """Pipeline, worker, and result-handler helpers for StatsWindow."""
+# ruff: noqa: F405
 from __future__ import annotations
 
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
+from Tools.Stats.analysis.prepared_analysis import AnalysisMode
 from Tools.Stats.ui.stats_window_error_messages import build_worker_error_guidance
+from Tools.Stats.ui.inference_view_model import (
+    NativeInferenceOptions,
+    coerce_analysis_mode,
+    infer_harmonic_provenance,
+    overall_progress,
+    phase_label,
+    pipeline_steps_for_options,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +32,8 @@ class StatsWindowPipelineMixin:
         """Handle the section label step for the Stats workflow."""
         if pipeline is PipelineId.SINGLE:
             return "Single"
+        if pipeline is PipelineId.MULTI:
+            return "Multi-group"
         return "General"
 
     def _log_pipeline_event(
@@ -84,6 +96,14 @@ class StatsWindowPipelineMixin:
                 animation.start()
             else:
                 animation.stop()
+        running_helper = getattr(self, "set_pipeline_running", None)
+        if callable(running_helper):
+            running_helper(running, cancellable=running)
+        else:
+            cancel_button = getattr(self, "cancel_analysis_btn", None)
+            if cancel_button is not None:
+                cancel_button.setVisible(running)
+                cancel_button.setEnabled(running)
 
     def _begin_run(self) -> bool:
         """Handle the begin run step for the Stats workflow."""
@@ -152,6 +172,381 @@ class StatsWindowPipelineMixin:
             QMessageBox.critical(self, "Settings Error", "Could not load QC thresholds.")
             return None
         return warn_val, critical_val
+
+    def _native_control_value(
+        self,
+        *,
+        control_name: str,
+        default: object,
+    ) -> object:
+        """Read one Qt control while keeping widget objects out of worker config."""
+
+        control = getattr(self, control_name, None)
+        if control is None:
+            return default
+        current_data = getattr(control, "currentData", None)
+        if callable(current_data):
+            data = current_data()
+            if data is not None and str(data).strip():
+                return data
+        current_text = getattr(control, "currentText", None)
+        if callable(current_text):
+            text = current_text()
+            if str(text).strip():
+                return text
+        return default
+
+    def _native_checkbox_value(self, name: str, *, default: bool) -> bool:
+        control = getattr(self, name, None)
+        getter = getattr(control, "isChecked", None)
+        return bool(getter()) if callable(getter) else bool(default)
+
+    def _native_spin_value(self, name: str, *, default: int) -> int:
+        control = getattr(self, name, None)
+        getter = getattr(control, "value", None)
+        return int(getter()) if callable(getter) else int(default)
+
+    def _native_state_snapshot(self, pipeline_id: PipelineId) -> dict[str, object]:
+        """Freeze all UI-owned native settings before controller step creation."""
+
+        snapshot_getter = getattr(self, "_native_analysis_state_snapshot", None)
+        if callable(snapshot_getter):
+            snapshot = dict(snapshot_getter())
+        else:
+            project_is_multigroup = bool(
+                getattr(self, "_project_is_multi_group", False)
+            )
+            fallback_mode = (
+                AnalysisMode.MULTI if project_is_multigroup else AnalysisMode.SINGLE
+            )
+            snapshot = {
+                "pipeline_id": (
+                    PipelineId.MULTI
+                    if fallback_mode is AnalysisMode.MULTI
+                    else PipelineId.SINGLE
+                ),
+                "mode": fallback_mode.value,
+                "analysis_profile": self._native_control_value(
+                    control_name="analysis_profile_combo",
+                    default="published_style_exploratory",
+                ),
+                "correction": self._native_control_value(
+                    control_name="multiplicity_combo",
+                    default="holm",
+                ),
+                "response_alternative": self._native_control_value(
+                    control_name="response_alternative_combo",
+                    default="two_sided",
+                ),
+                "analysis_scope": self._native_control_value(
+                    control_name="analysis_scope_combo",
+                    default="complete_core",
+                ),
+                "strict_omnibus_family": self._native_checkbox_value(
+                    "strict_omnibus_family_checkbox",
+                    default=True,
+                ),
+                "independent_selection_attested": self._native_checkbox_value(
+                    "independent_selection_attestation",
+                    default=False,
+                ),
+                "canonical_group_ids": dict(
+                    getattr(self, "_participant_group_id_map", {}) or {}
+                ),
+                "participant_display_labels": dict(
+                    getattr(self, "_subject_group_map", {}) or {}
+                ),
+                "group_display_labels": dict(
+                    getattr(self, "_group_display_labels", {}) or {}
+                ),
+                "selected_group_pair": self._coerce_group_pair(
+                    self._native_control_value(
+                        control_name="group_pair_combo",
+                        default=None,
+                    )
+                ),
+                "selected_conditions": list(self._get_selected_conditions()),
+                "sensitivity": {
+                    "run_robust": self._native_checkbox_value(
+                        "robust_sensitivity_checkbox",
+                        default=True,
+                    ),
+                    "run_resampling": self._native_checkbox_value(
+                        "resampling_sensitivity_checkbox",
+                        default=True,
+                    ),
+                    "run_stability": self._native_checkbox_value(
+                        "stability_sensitivity_checkbox",
+                        default=True,
+                    ),
+                    "n_resamples": self._native_spin_value(
+                        "resample_count_spin",
+                        default=10_000,
+                    ),
+                },
+            }
+        snapshot_pipeline = snapshot.get("pipeline_id")
+        if snapshot_pipeline is not None and snapshot_pipeline is not pipeline_id:
+            raise ValueError(
+                "The analysis controls changed while the run was being prepared. "
+                "Review the mode and run again."
+            )
+        mode = coerce_analysis_mode(
+            snapshot.get("mode"),
+            project_is_multigroup=bool(
+                getattr(self, "_project_is_multi_group", False)
+            ),
+        )
+        expected_mode = (
+            AnalysisMode.MULTI
+            if pipeline_id is PipelineId.MULTI
+            else AnalysisMode.SINGLE
+        )
+        if mode is not expected_mode:
+            raise ValueError(
+                "The analysis control snapshot does not match the requested "
+                f"{self._section_label(pipeline_id)} pipeline."
+            )
+        return snapshot
+
+    def _canonical_group_ids_for_subjects(
+        self,
+        source: Mapping[object, object] | None = None,
+    ) -> dict[str, str]:
+        source = source or getattr(self, "_participant_group_id_map", {}) or {}
+        by_key = {
+            str(participant).strip().casefold(): str(group_id).strip()
+            for participant, group_id in dict(source).items()
+            if str(participant).strip() and str(group_id).strip()
+        }
+        return {
+            str(participant): by_key[str(participant).strip().casefold()]
+            for participant in self.subjects
+            if str(participant).strip().casefold() in by_key
+        }
+
+    @staticmethod
+    def _coerce_group_pair(value: object) -> tuple[str, str] | None:
+        if isinstance(value, dict):
+            value = value.get("group_pair") or value.get("ids")
+        if isinstance(value, (tuple, list)) and len(value) == 2:
+            pair = tuple(str(item).strip() for item in value)
+            return pair if all(pair) else None
+        text = str(value or "").strip()
+        for separator in ("|", "::", " vs ", " versus "):
+            if separator in text:
+                parts = tuple(part.strip() for part in text.split(separator, 1))
+                return parts if len(parts) == 2 and all(parts) else None
+        return None
+
+    def _selected_native_group_pair(
+        self,
+        canonical_group_ids: dict[str, str],
+        raw_pair: object = None,
+    ) -> tuple[str, str] | None:
+        observed = tuple(
+            sorted(
+                {
+                    str(group_id).strip()
+                    for group_id in canonical_group_ids.values()
+                    if str(group_id).strip()
+                },
+                key=str.casefold,
+            )
+        )
+        if len(observed) < 2:
+            raise ValueError(
+                "Multi-group analysis requires at least two canonical groups "
+                "in the selected participant cohort."
+            )
+        if raw_pair is None:
+            raw_pair = self._native_control_value(
+                control_name="group_pair_combo",
+                default=None,
+            )
+        pair = self._coerce_group_pair(raw_pair)
+        if pair is None and len(observed) == 2:
+            return (observed[0], observed[1])
+        if pair is None:
+            raise ValueError(
+                "This project contains more than two groups. Select the two "
+                "canonical groups to compare before running the analysis."
+            )
+        observed_by_key = {group.casefold(): group for group in observed}
+        missing = [group for group in pair if group.casefold() not in observed_by_key]
+        if missing:
+            raise ValueError(
+                "The selected group comparison is not available in the frozen "
+                f"cohort: {', '.join(missing)}."
+            )
+        resolved = tuple(observed_by_key[group.casefold()] for group in pair)
+        if resolved[0].casefold() == resolved[1].casefold():
+            raise ValueError("Select two different canonical groups to compare.")
+        return resolved
+
+    def _build_native_options(
+        self,
+        pipeline_id: PipelineId,
+    ) -> NativeInferenceOptions:
+        snapshot = self._native_state_snapshot(pipeline_id)
+        expected_mode = (
+            AnalysisMode.MULTI
+            if pipeline_id is PipelineId.MULTI
+            else AnalysisMode.SINGLE
+        )
+        same_sample_adaptive = (
+            getattr(self, "_dv_policy_name", "") == GROUP_SIGNIFICANT_POLICY_NAME
+        )
+        if same_sample_adaptive:
+            provenance = infer_harmonic_provenance(
+                independently_selected=False,
+                same_sample_adaptive=True,
+            )
+        else:
+            provenance = snapshot.get("harmonic_provenance")
+            if not str(provenance or "").strip():
+                provenance = infer_harmonic_provenance(
+                    independently_selected=bool(
+                        snapshot.get("independent_selection_attested", False)
+                    ),
+                    same_sample_adaptive=False,
+                )
+        canonical_group_ids = self._canonical_group_ids_for_subjects(
+            snapshot.get("canonical_group_ids")  # type: ignore[arg-type]
+        )
+        if expected_mode is AnalysisMode.MULTI:
+            assigned = {
+                participant.strip().casefold()
+                for participant in canonical_group_ids
+            }
+            missing_assignments = [
+                str(participant)
+                for participant in self.subjects
+                if str(participant).strip().casefold() not in assigned
+            ]
+            if missing_assignments:
+                raise ValueError(
+                    "Canonical group assignment is missing for: "
+                    + ", ".join(missing_assignments)
+                    + ". Update project metadata, then re-scan."
+                )
+        group_pair = (
+            self._selected_native_group_pair(
+                canonical_group_ids,
+                snapshot.get("selected_group_pair"),
+            )
+            if expected_mode is AnalysisMode.MULTI
+            else None
+        )
+        sensitivity = snapshot.get("sensitivity")
+        sensitivity = sensitivity if isinstance(sensitivity, Mapping) else {}
+        options = NativeInferenceOptions(
+            mode=expected_mode,
+            profile=snapshot.get(
+                "analysis_profile",
+                "published_style_exploratory",
+            ),
+            correction=snapshot.get("correction", "holm"),
+            alternative=snapshot.get("response_alternative", "two_sided"),
+            harmonic_provenance=provenance,
+            alpha=self._current_alpha,
+            analysis_scope=snapshot.get("analysis_scope", "complete_core"),
+            strict_omnibus_family=bool(
+                snapshot.get("strict_omnibus_family", True)
+            ),
+            selected_group_pair=group_pair,
+            run_robust=bool(sensitivity.get("run_robust", True)),
+            run_resampling=bool(sensitivity.get("run_resampling", True)),
+            run_stability=bool(sensitivity.get("run_stability", True)),
+            n_resamples=int(sensitivity.get("n_resamples", 10_000)),
+        )
+        snapshots = getattr(self, "_native_state_by_pipeline", None)
+        if not isinstance(snapshots, dict):
+            snapshots = {}
+            self._native_state_by_pipeline = snapshots
+        snapshots[pipeline_id] = snapshot
+        return options
+
+    def _native_options_for(
+        self,
+        pipeline_id: PipelineId,
+    ) -> NativeInferenceOptions:
+        options_by_pipeline = getattr(self, "_native_options_by_pipeline", None)
+        if not isinstance(options_by_pipeline, dict):
+            options_by_pipeline = {}
+            self._native_options_by_pipeline = options_by_pipeline
+        options = options_by_pipeline.get(pipeline_id)
+        if not isinstance(options, NativeInferenceOptions):
+            options = self._build_native_options(pipeline_id)
+            options_by_pipeline[pipeline_id] = options
+        return options
+
+    def _native_step_store(self) -> dict[PipelineId, dict[StepId, dict]]:
+        store = getattr(self, "_native_step_payloads", None)
+        if not isinstance(store, dict):
+            store = {}
+            self._native_step_payloads = store
+        return store
+
+    def _store_native_step_payload(
+        self,
+        pipeline_id: PipelineId,
+        step_id: StepId,
+        payload: dict,
+    ) -> None:
+        self._native_step_store().setdefault(pipeline_id, {})[step_id] = payload
+        if pipeline_id is getattr(self, "_active_pipeline", None):
+            result_payloads = getattr(self, "_native_result_payloads", None)
+            if not isinstance(result_payloads, dict):
+                result_payloads = {}
+                self._native_result_payloads = result_payloads
+            result_payloads[step_id] = payload
+        if step_id is StepId.PREPARE_ANALYSIS:
+            prepared = payload.get("prepared_payload")
+            if prepared is not None:
+                self._prepared_analysis_payload = prepared
+        elif step_id is StepId.REPORT_BUNDLE:
+            bundle = payload.get("report_bundle")
+            if bundle is not None:
+                self._native_report_bundle = bundle
+
+    def run_primary_analysis(self) -> None:
+        """Dispatch the primary action according to immutable project mode."""
+
+        project_is_multigroup = bool(getattr(self, "_project_is_multi_group", False))
+        mode = AnalysisMode.MULTI if project_is_multigroup else AnalysisMode.SINGLE
+        if mode is AnalysisMode.MULTI:
+            try:
+                options = self._build_native_options(PipelineId.MULTI)
+            except Exception as exc:  # noqa: BLE001
+                self._set_status(str(exc))
+                self.append_log("Multi-group", str(exc), level="warning")
+                return
+            step_ids = pipeline_steps_for_options(options)
+            self._native_options_by_pipeline = {PipelineId.MULTI: options}
+            self._controller.run_multigroup_analysis(step_ids=step_ids)
+            return
+        try:
+            options = self._build_native_options(PipelineId.SINGLE)
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(str(exc))
+            self.append_log("Single", str(exc), level="warning")
+            return
+        self._native_options_by_pipeline = {PipelineId.SINGLE: options}
+        self._controller.run_single_group_analysis(
+            step_ids=pipeline_steps_for_options(options)
+        )
+
+    def on_cancel_analysis_clicked(self) -> None:
+        """Request cooperative cancellation without releasing busy state early."""
+
+        pipeline_id = getattr(self, "_active_pipeline", None)
+        if not self._controller.cancel_pipeline(pipeline_id):
+            return
+        self._set_status("Cancellation requested; waiting for the active step.")
+        cancel_button = getattr(self, "cancel_analysis_btn", None)
+        if cancel_button is not None:
+            cancel_button.setEnabled(False)
 
     # --------- centralized pre-run guards ---------
 
@@ -382,6 +777,59 @@ class StatsWindowPipelineMixin:
                 extra={"is_busy": is_busy, "error": str(exc)},
             )
 
+    def _native_worker_is_current(
+        self,
+        pipeline_id: PipelineId,
+        step_id: StepId,
+        worker: StatsWorker,
+    ) -> bool:
+        """Return whether a signal belongs to the current project/run step."""
+
+        return (
+            getattr(self, "_active_pipeline", None) is pipeline_id
+            and getattr(self, "_active_step_worker", None) is worker
+            and getattr(self, "_active_step_context", None)
+            == (pipeline_id, step_id, worker)
+        )
+
+    def _set_native_worker_progress(
+        self,
+        pipeline_id: PipelineId,
+        step_id: StepId,
+        step_percent: int | float,
+    ) -> None:
+        """Map worker-local progress to one stable pipeline progress value."""
+
+        percent = overall_progress(pipeline_id, step_id, step_percent)
+        self._progress_updates.append(percent)
+        setter = getattr(self, "set_pipeline_progress", None)
+        if callable(setter):
+            setter(phase_label(step_id), percent=percent)
+            return
+        phase_widget = getattr(self, "pipeline_phase_label", None)
+        if phase_widget is not None:
+            phase_widget.setText(phase_label(step_id))
+        progress_widget = getattr(self, "pipeline_progress_bar", None)
+        if progress_widget is not None:
+            progress_widget.setRange(0, 100)
+            progress_widget.setValue(percent)
+
+    def cancel_active_worker(self, pipeline_id: PipelineId) -> None:
+        """Suppress stale worker chatter after cooperative cancellation."""
+
+        suppressed = getattr(self, "_suppressed_native_pipelines", None)
+        if not isinstance(suppressed, set):
+            suppressed = set()
+            self._suppressed_native_pipelines = suppressed
+        suppressed.add(pipeline_id)
+        cancel_button = getattr(self, "cancel_analysis_btn", None)
+        if cancel_button is not None:
+            cancel_button.setEnabled(False)
+        self._set_status(
+            "Cancellation requested; waiting for the active statistical "
+            "checkpoint."
+        )
+
     def start_step_worker(
             self,
             pipeline_id: PipelineId,
@@ -420,6 +868,13 @@ class StatsWindowPipelineMixin:
             _op=step.name,
             _step_id=getattr(step.id, "name", str(step.id)),
         )
+        self._active_step_worker = worker
+        self._active_step_context = (pipeline_id, step.id, worker)
+        self._set_native_worker_progress(
+            pipeline_id,
+            step.id,
+            0,
+        )
 
         try:
             logger.info(
@@ -457,6 +912,9 @@ class StatsWindowPipelineMixin:
                 active = getattr(self, "_active_workers", None)
                 if active is not None and w in active:
                     active.remove(w)
+                if getattr(self, "_active_step_worker", None) is w:
+                    self._active_step_worker = None
+                    self._active_step_context = None
                 logger.info(
                     "stats_view_worker_released",
                     extra={
@@ -495,6 +953,17 @@ class StatsWindowPipelineMixin:
                 },
             )
             try:
+                if (
+                    self._native_worker_is_current(pid, sid, worker)
+                    and pid
+                    not in getattr(
+                        self,
+                        "_suppressed_native_pipelines",
+                        set(),
+                    )
+                    and isinstance(payload, dict)
+                ):
+                    self._store_native_step_payload(pid, sid, payload)
                 logger.info(
                     "stats_view_finished_before_controller",
                     extra={
@@ -558,10 +1027,35 @@ class StatsWindowPipelineMixin:
 
         worker.signals.finished.connect(_on_finished)
         worker.signals.error.connect(_on_error)
-        worker.signals.message.connect(self._on_worker_message)
-        if message_cb:
-            worker.signals.message.connect(message_cb)
-        worker.signals.progress.connect(self._on_worker_progress)
+
+        def _on_message(
+            message: str,
+            pid=pipeline_id,
+            sid=step.id,
+            current_worker=worker,
+        ) -> None:
+            if not self._native_worker_is_current(pid, sid, current_worker):
+                return
+            if pid in getattr(self, "_suppressed_native_pipelines", set()):
+                return
+            self._on_worker_message(message)
+            if message_cb:
+                message_cb(message)
+
+        def _on_progress(
+            value: int,
+            pid=pipeline_id,
+            sid=step.id,
+            current_worker=worker,
+        ) -> None:
+            if not self._native_worker_is_current(pid, sid, current_worker):
+                return
+            if pid in getattr(self, "_suppressed_native_pipelines", set()):
+                return
+            self._set_native_worker_progress(pid, sid, value)
+
+        worker.signals.message.connect(_on_message)
+        worker.signals.progress.connect(_on_progress)
 
         try:
             logger.info(
@@ -606,11 +1100,21 @@ class StatsWindowPipelineMixin:
     ) -> bool:
         """Handle the ensure pipeline ready step for the Stats workflow."""
         self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        if pipeline_id is PipelineId.SINGLE and self._block_single_group_analysis_if_needed():
+        project_is_multigroup = bool(getattr(self, "_project_is_multi_group", False))
+        expected_pipeline = (
+            PipelineId.MULTI if project_is_multigroup else PipelineId.SINGLE
+        )
+        if pipeline_id is not expected_pipeline:
+            message = (
+                "Analysis mode does not match the active project manifest. "
+                f"This project requires {self._section_label(expected_pipeline)} mode."
+            )
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
             self._log_pipeline_event(
                 pipeline=pipeline_id,
                 event="end",
-                extra={"reason": "single_group_disabled_for_multi_group_project"},
+                extra={"reason": "analysis_mode_project_mismatch"},
             )
             return False
         if not self._precheck(require_anova=require_anova, start_guard=False):
@@ -618,27 +1122,87 @@ class StatsWindowPipelineMixin:
                 pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"}
             )
             return False
+        try:
+            options = self._build_native_options(pipeline_id)
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc)
+            self._set_status(message)
+            self.append_log(
+                self._section_label(pipeline_id),
+                message,
+                level="warning",
+            )
+            self._log_pipeline_event(
+                pipeline=pipeline_id,
+                event="end",
+                extra={"reason": "native_options_invalid"},
+            )
+            return False
+        if options.analysis_scope != "complete_core":
+            message = (
+                "The native primary pipeline currently requires complete-core "
+                "coverage. Choose 'Shared complete conditions' to continue."
+            )
+            self._set_status(message)
+            self.append_log(
+                self._section_label(pipeline_id),
+                message,
+                level="warning",
+            )
+            return False
+        self._native_options_by_pipeline = {pipeline_id: options}
         self._log_pipeline_event(pipeline=pipeline_id, event="end")
         return True
 
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
-        """Handle the on pipeline started step for the Stats workflow."""
+        """Reset run-local result/progress state for the native pipeline."""
+
+        snapshot = getattr(self, "_native_state_by_pipeline", {}).get(
+            pipeline_id,
+            {},
+        )
         self._pipeline_start_perf[pipeline_id] = time.perf_counter()
         self._active_pipeline = pipeline_id
-        self._pipeline_conditions[pipeline_id] = self._get_selected_conditions()
+        self._pipeline_conditions[pipeline_id] = list(
+            snapshot.get("selected_conditions")
+            or self._get_selected_conditions()
+        )
         self._pipeline_dv_policy[pipeline_id] = self._get_dv_policy_payload()
         self._pipeline_base_freq[pipeline_id] = self._current_base_freq
         self._pipeline_dv_metadata[pipeline_id] = {}
         self._pipeline_outlier_config[pipeline_id] = self._get_outlier_exclusion_payload()
         self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
-        self._pipeline_qc_state[pipeline_id] = {"report": None}
+        self._pipeline_qc_state.setdefault(pipeline_id, {"report": None})
         self._pipeline_run_reports[pipeline_id] = None
+        self._native_step_store()[pipeline_id] = {}
+        self._native_result_payloads = {}
+        self._prepared_analysis_payload = None
+        self._native_report_bundle = None
+        self._active_step_worker = None
+        self._active_step_context = None
+        suppressed = getattr(self, "_suppressed_native_pipelines", None)
+        if not isinstance(suppressed, set):
+            suppressed = set()
+            self._suppressed_native_pipelines = suppressed
+        suppressed.discard(pipeline_id)
         if hasattr(self.lbl_status, "set_variant"):
             self.lbl_status.set_variant("info")
-        self._set_status("Running...")
-        btn = self.analyze_single_btn
-        if btn:
-            btn.setEnabled(False)
+        self._set_status(
+            f"Running {self._section_label(pipeline_id).lower()} analysis..."
+        )
+        running_setter = getattr(self, "set_pipeline_running", None)
+        if callable(running_setter):
+            running_setter(True, cancellable=True)
+        progress_setter = getattr(self, "set_pipeline_progress", None)
+        if callable(progress_setter):
+            progress_setter("Preparing analysis", percent=0)
+        else:
+            phase_widget = getattr(self, "pipeline_phase_label", None)
+            if phase_widget is not None:
+                phase_widget.setText("Preparing analysis")
+            progress_widget = getattr(self, "pipeline_progress_bar", None)
+            if progress_widget is not None:
+                progress_widget.setValue(0)
         self._focus_self()
         self._log_pipeline_event(pipeline=pipeline_id, event="started")
 
@@ -649,8 +1213,9 @@ class StatsWindowPipelineMixin:
         error_message: Optional[str],
         *,
         exports_ran: bool,
+        cancelled: bool = False,
     ) -> None:
-        """Handle the on analysis finished step for the Stats workflow."""
+        """Finalize native UI state without blocking dialogs or duplicate exports."""
         logger.info(
             "stats_analysis_finished_enter",
             extra={
@@ -658,39 +1223,107 @@ class StatsWindowPipelineMixin:
                 "success": success,
                 "error_message": error_message or "",
                 "exports_ran": bool(exports_ran),
+                "cancelled": bool(cancelled),
             },
         )
         try:
-            if success:
+            section = self._section_label(pipeline_id)
+            report_payload = (
+                self._native_step_store()
+                .get(pipeline_id, {})
+                .get(StepId.REPORT_BUNDLE, {})
+            )
+            export_path = str(report_payload.get("export_path") or "").strip()
+            export_confirmed = bool(
+                report_payload.get("exported")
+                or report_payload.get("numeric_exported")
+            )
+            if exports_ran and export_confirmed and export_path:
+                self._set_last_export_path(export_path)
+
+            if cancelled:
+                if hasattr(self.lbl_status, "set_variant"):
+                    self.lbl_status.set_variant("warning")
+                self._set_status("Analysis cancelled safely.")
+                phase_text = "Cancelled"
+                self.append_log(
+                    section,
+                    "Analysis cancelled; partial inferential results were not reported.",
+                    level="warning",
+                )
+            elif success:
                 ts = datetime.now().strftime("%H:%M:%S")
                 if hasattr(self.lbl_status, "set_variant"):
                     self.lbl_status.set_variant("success")
-                self._set_status(f"Last run OK at {ts}")
+                if export_path:
+                    self._set_status(
+                        f"Analysis complete at {ts}. Workbook: {export_path}"
+                    )
+                else:
+                    self._set_status(f"Analysis complete at {ts}.")
+                phase_text = "Complete"
+                if exports_ran:
+                    self.append_log(
+                        section,
+                        f"Detailed results workbook exported: {export_path}",
+                    )
+                else:
+                    self.append_log(section, "Analysis completed.")
             else:
                 if hasattr(self.lbl_status, "set_variant"):
-                    self.lbl_status.set_variant("error")
-                self._set_status("Last run error (see log)")
+                    self.lbl_status.set_variant(
+                        "warning"
+                        if error_message
+                        and "blocked" in error_message.casefold()
+                        else "error"
+                    )
+                phase_text = "Stopped"
+                self._set_status(
+                    error_message
+                    or "Analysis stopped before a report could be completed."
+                )
+                if error_message:
+                    self.append_log(
+                        section,
+                        error_message,
+                        level=(
+                            "warning"
+                            if "blocked" in error_message.casefold()
+                            else "error"
+                        ),
+                    )
+
+            progress_bar = getattr(self, "pipeline_progress_bar", None)
+            progress_value = (
+                int(progress_bar.value())
+                if progress_bar is not None
+                and callable(getattr(progress_bar, "value", None))
+                else 0
+            )
+            running_setter = getattr(self, "set_pipeline_running", None)
+            if callable(running_setter):
+                running_setter(False, cancellable=False)
+            progress_setter = getattr(self, "set_pipeline_progress", None)
+            if callable(progress_setter):
+                progress_setter(
+                    phase_text,
+                    percent=100 if success else progress_value,
+                )
+            else:
+                phase_widget = getattr(self, "pipeline_phase_label", None)
+                if phase_widget is not None:
+                    phase_widget.setText(phase_text)
+                if success and progress_bar is not None:
+                    progress_bar.setValue(100)
             self._active_pipeline = None
+            self._active_step_worker = None
+            self._active_step_context = None
+            suppressed = getattr(self, "_suppressed_native_pipelines", set())
+            suppressed.discard(pipeline_id)
             if success:
-                elapsed_ms = int((time.perf_counter() - self._pipeline_start_perf.get(pipeline_id, time.perf_counter())) * 1000)
-                section = self._section_label(pipeline_id)
-                if exports_ran:
-                    self.append_log(section, "  - Results exported for Single Group Analysis")
-                    stats_folder = Path(self._ensure_results_dir())
-                    self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
-                else:
-                    self.append_log(section, "  • Analysis completed", level="info")
-                self._start_reporting_summary_worker(pipeline_id, elapsed_ms)
-            elif error_message:
-                if "blocked" in error_message.lower():
-                    self._set_status(error_message)
-                    self.append_log(self._section_label(pipeline_id), error_message, level="warning")
-                else:
-                    try:
-                        QMessageBox.critical(self, "Analysis Error", error_message)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("Failed to display error dialog", exc_info=True)
-            self._show_outlier_exclusion_dialog(pipeline_id)
+                tabs = getattr(self, "results_tabs", None)
+                if tabs is not None:
+                    tabs.setCurrentIndex(0)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "stats_view_on_finished_error",
@@ -717,7 +1350,13 @@ class StatsWindowPipelineMixin:
                 )
             try:
                 self._log_pipeline_event(
-                    pipeline=pipeline_id, event="complete", extra={"success": success}
+                    pipeline=pipeline_id,
+                    event="complete",
+                    extra={
+                        "success": success,
+                        "cancelled": cancelled,
+                        "exports_ran": exports_ran,
+                    },
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception(
@@ -738,7 +1377,39 @@ class StatsWindowPipelineMixin:
         super().closeEvent(event)
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
-        """Handle the build and render summary step for the Stats workflow."""
+        """Render the report worker's plain-language and methods surfaces."""
+
+        report_payload = (
+            self._native_step_store()
+            .get(pipeline_id, {})
+            .get(StepId.REPORT_BUNDLE)
+        )
+        if isinstance(report_payload, dict):
+            bundle = report_payload.get("report_bundle")
+            at_a_glance = str(
+                report_payload.get("report_text")
+                or getattr(bundle, "at_a_glance", "")
+                or ""
+            ).strip()
+            detailed_methods = str(
+                report_payload.get("detailed_methods")
+                or getattr(bundle, "detailed_methods", "")
+                or ""
+            ).strip()
+            self.summary_text.setPlainText(
+                at_a_glance
+                or "The analysis completed, but no plain-language summary was generated."
+            )
+            self._reporting_summary_text = detailed_methods
+            self.reporting_summary_text.setPlainText(
+                detailed_methods
+                or "No detailed methods text was generated."
+            )
+            if bundle is not None:
+                self._native_report_bundle = bundle
+            return
+
+        # Compatibility fallback for legacy individual-step actions.
         cfg = SummaryConfig(
             alpha=0.05,
             min_effect=0.50,
@@ -752,118 +1423,202 @@ class StatsWindowPipelineMixin:
         self._render_summary(summary_text)
 
     def export_pipeline_results(self, pipeline_id: PipelineId) -> bool:
-        """Handle the export pipeline results step for the Stats workflow."""
-        if pipeline_id is PipelineId.SINGLE:
-            return self._export_single_pipeline()
-        return False
+        """Return report-worker export truth; never export on the GUI thread."""
+
+        report_payload = (
+            self._native_step_store()
+            .get(pipeline_id, {})
+            .get(StepId.REPORT_BUNDLE, {})
+        )
+        return bool(
+            report_payload.get("exported")
+            or report_payload.get("numeric_exported")
+        )
 
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]:
-        """Handle the get step config step for the Stats workflow."""
+        """Build GUI-neutral kwargs and result handlers for one native step."""
+
+        options = self._native_options_for(pipeline_id)
+        run_spec = options.build_run_spec()
+        snapshots = getattr(self, "_native_state_by_pipeline", {})
+        snapshot = snapshots.get(pipeline_id, {})
+        selected_conditions = list(
+            snapshot.get("selected_conditions")
+            or self._get_selected_conditions()
+        )
         outlier_payload = self._pipeline_outlier_config.get(
             pipeline_id, self._get_outlier_exclusion_payload()
         )
-        qc_payload = self._pipeline_qc_config.get(pipeline_id, self._get_qc_exclusion_payload())
-        qc_state = self._pipeline_qc_state.get(pipeline_id, {"report": None})
-        if pipeline_id is PipelineId.SINGLE:
-            dv_policy = self._pipeline_dv_policy.get(
-                pipeline_id, self._get_dv_policy_payload()
+        qc_payload = self._pipeline_qc_config.get(
+            pipeline_id,
+            self._get_qc_exclusion_payload(),
+        )
+        if step_id is StepId.PREPARE_ANALYSIS:
+            qc_state = {"report": None}
+            self._pipeline_qc_state[pipeline_id] = qc_state
+        else:
+            qc_state = self._pipeline_qc_state.get(
+                pipeline_id,
+                {"report": None},
             )
-            if step_id is StepId.RM_ANOVA:
-                kwargs = dict(
-                    subjects=self.subjects,
-                    conditions=self._get_selected_conditions(),
-                    conditions_all=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    dv_policy=dv_policy,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
-                    project_root=str(self._project_path),
+        dv_policy = self._pipeline_dv_policy.get(
+            pipeline_id,
+            self._get_dv_policy_payload(),
+        )
+
+        def store(payload: dict) -> None:
+            self._store_native_step_payload(pipeline_id, step_id, payload)
+
+        if step_id is StepId.PREPARE_ANALYSIS:
+            canonical_group_ids = (
+                self._canonical_group_ids_for_subjects(
+                    snapshot.get("canonical_group_ids")  # type: ignore[arg-type]
                 )
-                if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
-                    kwargs["results_dir"] = self._ensure_results_dir()
-                def handler(payload):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_rm_anova_results(payload, update_text=False)
+                if pipeline_id is PipelineId.MULTI
+                else {}
+            )
+            participant_display_labels = dict(
+                snapshot.get("participant_display_labels") or {}
+            )
+            group_display_labels = dict(
+                snapshot.get("group_display_labels") or {}
+            )
+            settings = {
+                "analysis_scope": options.analysis_scope,
+                "analysis_profile": options.profile.value,
+                "correction": options.correction.value,
+                "response_alternative": options.alternative.value,
+                "strict_omnibus_family": options.strict_omnibus_family,
+                "sensitivity": options.sensitivity_config(),
+                "preliminary_coverage": snapshot.get(
+                    "preliminary_coverage",
+                    {},
+                ),
+                "project_name": self.project_title,
+            }
+            kwargs = {
+                "subjects": list(self.subjects),
+                "conditions": selected_conditions,
+                "conditions_all": list(self.conditions),
+                "subject_data": self.subject_data,
+                "base_freq": self._current_base_freq,
+                "rois": self.rois,
+                "rois_all": self.rois,
+                "dv_policy": dv_policy,
+                "outlier_exclusion_enabled": outlier_payload.get(
+                    "enabled",
+                    True,
+                ),
+                "outlier_abs_limit": outlier_payload.get("abs_limit", 50.0),
+                "qc_config": qc_payload,
+                "qc_state": qc_state,
+                "manual_excluded_pids": sorted(self.manual_excluded_pids),
+                "project_root": str(self._project_path),
+                "mode": options.mode.value,
+                "run_spec": run_spec,
+                "canonical_group_ids": canonical_group_ids,
+                "group_display_labels": group_display_labels,
+                "participant_display_labels": participant_display_labels,
+                "selected_group_pair": options.selected_group_pair,
+                "settings": settings,
+            }
+            return kwargs, store
 
-                return kwargs, handler
-            if step_id is StepId.MIXED_MODEL:
-                kwargs = dict(
-                    subjects=self.subjects,
-                    conditions=self._get_selected_conditions(),
-                    conditions_all=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    dv_policy=dv_policy,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
-                    project_root=str(self._project_path),
+        if step_id is StepId.RM_ANOVA:
+            def handle_rm_anova(payload: dict) -> None:
+                store(payload)
+                self._apply_rm_anova_results(payload, update_text=False)
+
+            return {}, handle_rm_anova
+
+        if step_id is StepId.MIXED_MODEL:
+            def handle_mixed_model(payload: dict) -> None:
+                store(payload)
+                self._apply_mixed_model_results(payload, update_text=False)
+
+            return {"alpha": options.alpha}, handle_mixed_model
+
+        if step_id is StepId.INTERACTION_POSTHOCS:
+            def handle_posthocs(payload: dict) -> None:
+                store(payload)
+                self._apply_posthoc_results(payload, update_text=False)
+
+            return {
+                "alpha": options.alpha,
+                "correction": options.correction.value,
+                "direction": "both",
+                "followup_provenance": run_spec.followup_provenance.value,
+                "enforce_omnibus_gate": options.strict_omnibus_family,
+                "family_scope": (
+                    "direction"
+                    if options.strict_omnibus_family
+                    else "stratum"
+                ),
+            }, handle_posthocs
+
+        if step_id is StepId.BASELINE_VS_ZERO:
+            def handle_baseline(payload: dict) -> None:
+                store(payload)
+                self._apply_baseline_vs_zero_results(
+                    payload,
+                    update_text=False,
                 )
-                def handler(payload):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_mixed_model_results(payload, update_text=False)
 
-                return kwargs, handler
-            if step_id is StepId.INTERACTION_POSTHOCS:
-                kwargs = dict(
-                    subjects=self.subjects,
-                    conditions=self._get_selected_conditions(),
-                    conditions_all=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    dv_policy=dv_policy,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
-                    project_root=str(self._project_path),
-                )
-                def handler(payload):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_posthoc_results(payload, update_text=True)
+            return {
+                "alpha": options.alpha,
+                "alternative": options.alternative.value,
+                "correction": options.correction.value,
+                "correction_scope": "global",
+            }, handle_baseline
 
-                return kwargs, handler
-            if step_id is StepId.BASELINE_VS_ZERO:
-                kwargs = dict(
-                    subjects=self.subjects,
-                    conditions=self._get_selected_conditions(),
-                    conditions_all=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    dv_policy=dv_policy,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
-                    project_root=str(self._project_path),
-                )
+        if step_id is StepId.MULTIGROUP_MODEL:
+            return {
+                "reference_group_id": options.selected_group_pair[0],
+            }, store
 
-                def handler(payload):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_baseline_vs_zero_results(payload, update_text=True)
+        if step_id is StepId.GROUP_CELL_COMPARISONS:
+            return {
+                "group_pair": options.selected_group_pair,
+                "correction": options.correction.value,
+                "alpha": options.alpha,
+            }, store
 
-                return kwargs, handler
+        if step_id is StepId.SENSITIVITIES:
+            return {"config": options.sensitivity_config()}, store
+
+        if step_id is StepId.REPORT_BUNDLE:
+            mode_label = (
+                "Multi-Group"
+                if pipeline_id is PipelineId.MULTI
+                else "Single-Group"
+            )
+            export_path = (
+                Path(self._ensure_results_dir())
+                / f"Native {mode_label} Inference Results.xlsx"
+            )
+
+            def handle_report(payload: dict) -> None:
+                store(payload)
+                path = str(payload.get("export_path") or "").strip()
+                if path and (
+                    payload.get("exported")
+                    or payload.get("numeric_exported")
+                ):
+                    self._set_last_export_path(path)
+
+            return {
+                "config": {
+                    "mode": options.mode.value,
+                    "alpha": options.alpha,
+                    "analysis_scope": options.analysis_scope,
+                    "analysis_profile": options.profile.value,
+                    "correction": options.correction.value,
+                    "project_name": self.project_title,
+                },
+                "export_path": export_path,
+            }, handle_report
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:

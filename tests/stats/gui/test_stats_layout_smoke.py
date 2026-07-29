@@ -5,26 +5,44 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
+    QCheckBox,
+    QComboBox,
+    QHeaderView,
     QLabel,
     QListWidget,
-    QHeaderView,
-    QSizePolicy,
-    QWidget,
+    QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QTextEdit,
+    QWidget,
 )
 
-from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel  # noqa: E402
+from Main_App.gui.components import (  # noqa: E402
+    ActionRow,
+    SectionCard,
+    SubsectionHeaderLabel,
+)
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
+from Tools.Stats.ui.tool_info import STATS_TOOL_INFO  # noqa: E402
 
 
 @pytest.fixture
 def app(qapp):
     """Ensure a QApplication exists for qtbot interactions."""
     return qapp
+
+
+@pytest.fixture(autouse=True)
+def _stub_default_loader(monkeypatch):
+    monkeypatch.setattr(
+        StatsWindow,
+        "_load_default_data_folder",
+        lambda self: None,
+        raising=False,
+    )
 
 
 @pytest.mark.qt
@@ -36,20 +54,21 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     splitters = window.findChildren(QSplitter)
     root_splitter = next(
         (
-            sp
-            for sp in splitters
-            if sp.objectName() == "stats_root_splitter" and sp.orientation() == Qt.Vertical
+            splitter
+            for splitter in splitters
+            if splitter.objectName() == "stats_root_splitter"
+            and splitter.orientation() == Qt.Vertical
         ),
         None,
     )
     assert root_splitter is not None
-
     assert root_splitter.widget(1) is not None
+
     setup_area = root_splitter.widget(0)
     assert setup_area.objectName() == "stats_setup_area"
     setup_tabs = window.findChild(QTabWidget, "stats_setup_tabs")
     assert setup_tabs is not None
-    assert [setup_tabs.tabText(i) for i in range(setup_tabs.count())] == [
+    assert [setup_tabs.tabText(index) for index in range(setup_tabs.count())] == [
         "Basic",
         "Advanced",
     ]
@@ -66,100 +85,185 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     ]
     assert setup_scroll_areas == ["stats_conditions_scroll_area"]
 
-    group_boxes = {
-        card.header.title_label.text(): card for card in window.findChildren(SectionCard)
+    cards = {
+        card.header.title_label.text(): card
+        for card in window.findChildren(SectionCard)
     }
     for title in [
         "File I/O",
+        "Analysis Design",
         "Included Conditions",
         "Manual Exclusions",
+        "Inference Settings",
         "Summed BCA definition",
         "Outlier Flagging",
         "Exports",
         "Last Export",
         "ROI Context",
     ]:
-        assert title in group_boxes
-    for title in [
-        "Data Folder",
-        "Single Group Analysis",
-        "Review",
-    ]:
-        assert title not in group_boxes
-    assert "Multi-Group Scan Summary" not in group_boxes
-    assert "Between-Group Analysis" not in group_boxes
+        assert title in cards
+    for title in ["Data Folder", "Single Group Analysis", "Review"]:
+        assert title not in cards
+    assert "Multi-Group Scan Summary" not in cards
+    assert "Between-Group Analysis" not in cards
+
+    for card in window.findChildren(SectionCard):
+        ancestor = card.parentWidget()
+        while ancestor is not None:
+            assert not isinstance(ancestor, SectionCard)
+            ancestor = ancestor.parentWidget()
 
     basic_page = setup_tabs.widget(0)
     advanced_page = setup_tabs.widget(1)
-    assert basic_page.isAncestorOf(group_boxes["File I/O"])
-    assert basic_page.isAncestorOf(group_boxes["Included Conditions"])
-    assert basic_page.isAncestorOf(group_boxes["Manual Exclusions"])
-    assert group_boxes["Included Conditions"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    for title in [
+        "File I/O",
+        "Analysis Design",
+        "Included Conditions",
+        "Manual Exclusions",
+    ]:
+        assert basic_page.isAncestorOf(cards[title])
+    for title in [
+        "Inference Settings",
+        "Summed BCA definition",
+        "Outlier Flagging",
+        "Exports",
+        "Last Export",
+        "ROI Context",
+    ]:
+        assert advanced_page.isAncestorOf(cards[title])
+
+    assert cards["Included Conditions"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert window.conditions_scroll_area.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
-    assert advanced_page.isAncestorOf(group_boxes["Summed BCA definition"])
-    assert advanced_page.isAncestorOf(group_boxes["Outlier Flagging"])
-    assert advanced_page.isAncestorOf(group_boxes["Exports"])
-    assert advanced_page.isAncestorOf(group_boxes["Last Export"])
-    assert advanced_page.isAncestorOf(group_boxes["ROI Context"])
-    assert group_boxes["Outlier Flagging"].isAncestorOf(
+    assert cards["Outlier Flagging"].isAncestorOf(
         window.findChild(QWidget, "stats_outlier_flagging")
     )
-    assert group_boxes["Last Export"].isAncestorOf(
+    assert cards["Last Export"].isAncestorOf(
         window.findChild(QWidget, "stats_export_path_actions")
     )
-    assert group_boxes["ROI Context"].isAncestorOf(window.roi_context_text)
+    assert cards["ROI Context"].isAncestorOf(window.roi_context_text)
     assert window.lbl_rois is window.roi_context_text
     assert window.roi_context_text.objectName() == "stats_roi_context_text"
     assert isinstance(window.roi_context_text, QTextEdit)
     assert window.roi_context_text.isReadOnly()
     assert window.roi_context_text.minimumHeight() >= 120
     assert basic_page.isAncestorOf(window.le_folder)
-    assert basic_page.isAncestorOf(window.findChild(QWidget, "stats_manual_exclusion_row"))
-    assert group_boxes["Included Conditions"].header.title_label.text() == "Included Conditions"
-    assert group_boxes["Manual Exclusions"].isAncestorOf(
+    assert basic_page.isAncestorOf(
         window.findChild(QWidget, "stats_manual_exclusion_row")
     )
     assert isinstance(window.manual_exclusion_candidates_list, QListWidget)
-    assert group_boxes["Manual Exclusions"].isAncestorOf(window.manual_exclusion_candidates_list)
-    assert group_boxes["Summed BCA definition"].isAncestorOf(window.fixed_predefined_preview_table)
-    assert window.fixed_predefined_preview_table.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
-    assert window.fixed_predefined_preview_table.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
+    assert cards["Manual Exclusions"].isAncestorOf(
+        window.manual_exclusion_candidates_list
+    )
+    assert cards["Summed BCA definition"].isAncestorOf(
+        window.fixed_predefined_preview_table
+    )
+    assert (
+        window.fixed_predefined_preview_table.sizePolicy().verticalPolicy()
+        == QSizePolicy.Fixed
+    )
+    assert (
+        window.fixed_predefined_preview_table.sizePolicy().horizontalPolicy()
+        == QSizePolicy.Expanding
+    )
     assert window.fixed_predefined_preview_table.maximumHeight() <= 150
     header = window.fixed_predefined_preview_table.horizontalHeader()
     assert header.sectionResizeMode(0) == QHeaderView.Stretch
     assert header.sectionResizeMode(5) == QHeaderView.Stretch
+
+    assert window.analysis_design_group.objectName() == "stats_analysis_design_group"
+    assert window.analysis_mode_value.objectName() == "stats_analysis_mode_value"
+    assert window.analysis_mode_value.text() == "Single Group"
+    assert window.analysis_profile_value.objectName() == "stats_analysis_profile_value"
+    assert window.analysis_profile_value.text() == "Published-style exploratory"
+    assert window.analysis_group_value.objectName() == "stats_analysis_group_value"
+    assert window.analysis_coverage_value.objectName() == "stats_analysis_coverage_value"
+
+    expected_controls = {
+        "stats_analysis_profile_combo": QComboBox,
+        "stats_group_pair_combo": QComboBox,
+        "stats_multiplicity_combo": QComboBox,
+        "stats_response_alternative_combo": QComboBox,
+        "stats_analysis_scope_combo": QComboBox,
+        "stats_independent_selection_attestation": QCheckBox,
+        "stats_strict_omnibus_family_checkbox": QCheckBox,
+        "stats_robust_sensitivity_checkbox": QCheckBox,
+        "stats_resampling_sensitivity_checkbox": QCheckBox,
+        "stats_stability_sensitivity_checkbox": QCheckBox,
+    }
+    for object_name, widget_type in expected_controls.items():
+        widget = window.findChild(widget_type, object_name)
+        assert widget is not None
+        assert advanced_page.isAncestorOf(widget)
+    assert window.analysis_profile_combo.currentData() == "published_style_exploratory"
+    assert window.multiplicity_combo.currentData() == "holm"
+    assert [
+        window.multiplicity_combo.itemData(index)
+        for index in range(window.multiplicity_combo.count())
+    ] == ["holm", "fdr_bh"]
+    assert window.response_alternative_combo.currentData() == "two_sided"
+    assert window.analysis_scope_combo.currentData() == "complete_core"
+    assert window.analysis_scope_combo.count() == 1
+    assert not window.analysis_scope_combo.isEnabled()
+    assert window.resample_count_spin.objectName() == "stats_resample_count_spin"
+    assert window.resample_count_spin.value() == 9_999
+    assert window.strict_omnibus_family_checkbox.isChecked()
+    assert window.robust_sensitivity_checkbox.isChecked()
+    assert window.resampling_sensitivity_checkbox.isChecked()
+    assert window.stability_sensitivity_checkbox.isChecked()
+    assert window.group_pair_combo.isHidden()
+    assert not window.group_pair_combo.isEnabled()
+
+    assert window.provenance_warning.objectName() == "stats_provenance_warning"
+    assert setup_area.isAncestorOf(window.provenance_warning)
+    assert not setup_tabs.isAncestorOf(window.provenance_warning)
+    assert window.provenance_warning.isVisible()
+    assert "exploratory post-selection" in window.provenance_warning.text()
+    window.analysis_profile_combo.setCurrentText("Confirmatory")
+    qtbot.wait(20)
+    assert window.provenance_warning.isVisible()
+    assert "even under a confirmatory profile" in window.provenance_warning.text()
 
     assert window.findChild(QWidget, "stats_results_selector") is None
     assert window.findChild(QWidget, "stats_results_stack") is None
     output_headers = [
         label.text()
         for label in window.findChildren(SubsectionHeaderLabel)
-        if label.text() == "Significant Results Summary:"
+        if label.text() == "Analysis Results"
     ]
-    assert output_headers == ["Significant Results Summary:"]
+    assert output_headers == ["Analysis Results"]
+    results_tabs = window.findChild(QTabWidget, "stats_results_tabs")
+    assert results_tabs is window.results_tabs
+    assert [results_tabs.tabText(index) for index in range(results_tabs.count())] == [
+        "At a glance",
+        "Methods & checks",
+        "Run log",
+    ]
+    assert results_tabs.widget(0) is window.summary_text
+    assert results_tabs.widget(1) is window.reporting_summary_text
+    assert results_tabs.widget(2) is window.log_text
+    assert window.summary_text.objectName() == "stats_at_a_glance_text"
+    assert window.reporting_summary_text.objectName() == "stats_methods_checks_text"
+    assert window.log_text.objectName() == "stats_run_log_text"
     assert window.summary_output_container.isVisible()
     assert window.summary_text.isVisible()
-    assert not window.log_text.isVisible()
     assert not window.reporting_summary_text.isVisible()
+    assert not window.log_text.isVisible()
+    results_tabs.setCurrentIndex(1)
+    qtbot.wait(20)
+    assert not window.summary_text.isVisible()
+    assert window.reporting_summary_text.isVisible()
+    results_tabs.setCurrentIndex(0)
+
     assert window.run_action_bar.isVisible()
-    assert window.analyze_single_btn.isVisible()
-    assert window.single_advanced_btn.isVisible()
     setup_tabs.setCurrentIndex(1)
     qtbot.wait(20)
-    assert not window.summary_output_container.isVisible()
-    assert not window.summary_text.isVisible()
-    assert not window.run_action_bar.isVisible()
-    assert not window.analyze_single_btn.isVisible()
-    assert not window.single_advanced_btn.isVisible()
-    setup_tabs.setCurrentIndex(0)
-    qtbot.wait(20)
     assert window.summary_output_container.isVisible()
-    assert window.summary_text.isVisible()
     assert window.run_action_bar.isVisible()
-    assert window.analyze_single_btn.isVisible()
-    assert window.single_advanced_btn.isVisible()
+    assert window.provenance_warning.isVisible()
+    setup_tabs.setCurrentIndex(0)
 
     assert window.analyze_single_btn.text() == "Analyze Single Group"
+    assert window.analyze_single_btn.objectName() == "stats_analyze_single_primary"
     assert window.analyze_single_btn.property("primary") is True
     assert window.analyze_single_btn.minimumHeight() >= 36
     run_action_bar = window.findChild(QWidget, "stats_run_action_bar")
@@ -171,15 +275,50 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert run_action_layout.indexOf(window.analyze_single_btn) < run_action_layout.indexOf(
         window.single_advanced_btn
     )
-    assert not hasattr(window, "single_status_lbl")
+
+    window._project_is_multi_group = True
+    window._group_participant_counts = {"anxious": 6, "non_anxious": 7}
+    window._group_display_labels = {
+        "anxious": "Anxious",
+        "non_anxious": "Non-anxious",
+    }
+    window._populate_group_pair_combo()
+    window._sync_analysis_mode_ui()
+    assert window.analyze_single_btn.text() == "Analyze Multi-Group"
+    assert window.analysis_mode_value.text() == "Multi-Group"
+    assert not window.group_pair_combo.isHidden()
+    assert window.group_pair_combo.isEnabled()
+    assert window.group_pair_combo.currentData() == ("anxious", "non_anxious")
+    window._project_is_multi_group = False
+    window._populate_group_pair_combo()
+    window._sync_analysis_mode_ui()
+
     assert window.lbl_status.objectName() == "stats_status_internal"
-    assert not window.lbl_status.isVisible()
+    assert setup_area.isAncestorOf(window.lbl_status)
+    assert window.lbl_status.isVisible()
+    assert window.pipeline_phase_label.objectName() == "stats_pipeline_phase_label"
+    assert window.pipeline_phase_label.text() == "Ready"
+    assert isinstance(window.pipeline_progress_bar, QProgressBar)
+    assert window.pipeline_progress_bar.objectName() == "stats_pipeline_progress_bar"
+    assert window.pipeline_progress_bar.value() == 0
+    assert window.cancel_analysis_btn.objectName() == "stats_cancel_analysis_button"
+    assert not window.cancel_analysis_btn.isEnabled()
+    window.set_pipeline_progress("Resampling sensitivity", 2, 4)
+    assert window.pipeline_phase_label.text() == "Resampling sensitivity"
+    assert window.pipeline_progress_bar.value() == 50
+    window.set_pipeline_running(True, phase="Fitting models", cancellable=False)
+    assert not window.cancel_analysis_btn.isEnabled()
+    window.set_pipeline_running(True, phase="Resampling", cancellable=True)
+    assert window.cancel_analysis_btn.isEnabled()
+    assert window.pipeline_phase_label.text() == "Resampling"
+    window.set_pipeline_running(False)
+    assert not window.cancel_analysis_btn.isEnabled()
+
     assert window.stats_processing_notice.objectName() == "stats_processing_notice"
     assert not window.stats_processing_notice.isVisible()
     assert window.stats_processing_message.text().startswith(
         "FPVS Toolbox is currently calculating an average FFT spectrum"
     )
-    assert not setup_area.isAncestorOf(window.lbl_status)
     assert window.findChild(QWidget, "stats_status_chip") is None
     assert window.findChild(QWidget, "stats_status_footer") is None
     assert not hasattr(window, "btn_copy_folder")
@@ -199,9 +338,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.log_text.property("logSurface") is True
     assert window.summary_text.property("logSurface") is True
 
-    window._set_roi_status(
-        "Using 2 ROIs from Settings: Central, Left Occipito-Temporal"
-    )
+    window._set_roi_status("Using 2 ROIs from Settings: Central, Left Occipito-Temporal")
     roi_context = window.roi_context_text.toPlainText()
     assert "ROI definitions loaded from Settings." in roi_context
     assert "Central" in roi_context
@@ -212,7 +349,9 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     )
     assert "Baseline vs Zero tests completed" not in window.roi_context_text.toPlainText()
 
-    action_rows = {row.objectName(): row for row in window.findChildren(ActionRow)}
+    action_rows = {
+        row.objectName(): row for row in window.findChildren(ActionRow)
+    }
     expected_rows = {
         "stats_conditions_actions",
         "stats_manual_exclusion_actions",
@@ -222,17 +361,29 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         "stats_output_copy_actions",
     }
     assert expected_rows <= set(action_rows)
-    assert "stats_between_group_actions" not in action_rows
-    assert "stats_single_group_actions" not in action_rows
-    assert "stats_reporting_summary_actions" not in action_rows
-    assert "stats_multigroup_harmonic_actions" not in action_rows
-    assert "stats_multigroup_issue_actions" not in action_rows
     data_buttons = [
         button.text()
         for button in action_rows["stats_data_folder_actions"].findChildren(QPushButton)
     ]
     assert data_buttons == ["Browse..."]
-    assert action_rows["stats_output_copy_actions"].row_layout.indexOf(window.copy_summary_btn) >= 0
+    assert (
+        action_rows["stats_output_copy_actions"].row_layout.indexOf(
+            window.copy_summary_btn
+        )
+        >= 0
+    )
     assert not hasattr(window, "copy_log_btn")
     assert not hasattr(window, "reporting_summary_copy_btn")
     assert not hasattr(window, "reporting_summary_save_btn")
+
+
+def test_stats_tool_info_uses_expected_nonexpert_tabs():
+    assert [tab.title for tab in STATS_TOOL_INFO.tabs] == [
+        "Workflow",
+        "Analysis profiles",
+        "How to interpret results",
+    ]
+    combined_html = "\n".join(tab.html for tab in STATS_TOOL_INFO.tabs)
+    assert "complete core" in combined_html
+    assert "exploratory post-selection" in combined_html
+    assert "does <b>not</b> prove equivalence" in combined_html

@@ -1,4 +1,6 @@
 """User action handlers and general StatsWindow view helpers."""
+# ruff: noqa: F405
+
 from __future__ import annotations
 
 from html import escape
@@ -72,30 +74,404 @@ class StatsWindowActionsMixin:
         if hasattr(self, "export_copy_btn"):
             self.export_copy_btn.setEnabled(bool(self._last_export_path))
 
+    def _native_pipeline_id(self) -> PipelineId:
+        """Return the manifest-locked native pipeline mode."""
+
+        return (
+            PipelineId.MULTI
+            if bool(getattr(self, "_project_is_multi_group", False))
+            else PipelineId.SINGLE
+        )
+
+    def _native_mode_value(self) -> str:
+        return "multi" if self._native_pipeline_id() is PipelineId.MULTI else "single"
+
+    def _combo_value(self, name: str, default: str) -> str:
+        combo = getattr(self, name, None)
+        if combo is None:
+            return default
+        current_data = getattr(combo, "currentData", None)
+        value = current_data() if callable(current_data) else None
+        if value is None:
+            current_text = getattr(combo, "currentText", None)
+            value = current_text() if callable(current_text) else None
+        normalized = str(value or "").strip()
+        return normalized or default
+
+    def _checkbox_value(self, name: str, default: bool) -> bool:
+        checkbox = getattr(self, name, None)
+        checked = getattr(checkbox, "isChecked", None)
+        return bool(checked()) if callable(checked) else bool(default)
+
+    def _spin_value(self, name: str, default: int) -> int:
+        control = getattr(self, name, None)
+        value = getattr(control, "value", None)
+        return int(value()) if callable(value) else int(default)
+
+    def _initialize_native_analysis_controls(self) -> None:
+        """Initialize mode-aware labels and defensively wire state refreshes."""
+
+        for name, signal_name, callback in (
+            (
+                "dv_policy_combo",
+                "currentTextChanged",
+                self._sync_provenance_warning,
+            ),
+            (
+                "analysis_profile_combo",
+                "currentTextChanged",
+                self._sync_analysis_profile_summary,
+            ),
+            (
+                "group_pair_combo",
+                "currentIndexChanged",
+                self._refresh_analysis_design_summary,
+            ),
+        ):
+            control = getattr(self, name, None)
+            signal = getattr(control, signal_name, None)
+            connect = getattr(signal, "connect", None)
+            if callable(connect):
+                connect(callback)
+        self._populate_group_pair_combo()
+        self._sync_analysis_mode_ui()
+        self._sync_analysis_profile_summary()
+        self._sync_provenance_warning()
+        self._refresh_analysis_design_summary()
+
+    def _sync_analysis_mode_ui(self, *_args) -> None:
+        """Update the locked project mode without offering a pooled override."""
+
+        is_multi = self._native_pipeline_id() is PipelineId.MULTI
+        mode_text = "Multi-Group" if is_multi else "Single Group"
+        mode_value = getattr(self, "analysis_mode_value", None)
+        if mode_value is not None:
+            mode_value.setText(mode_text)
+            mode_value.setToolTip(
+                "Analysis mode is determined by canonical project metadata."
+            )
+        primary = getattr(self, "analyze_single_btn", None)
+        if primary is not None:
+            primary.setText(
+                "Analyze Multi-Group" if is_multi else "Analyze Single Group"
+            )
+            primary.setToolTip(
+                "Run the native multi-group inference pipeline."
+                if is_multi
+                else "Run the native single-group inference pipeline."
+            )
+        advanced = getattr(self, "single_advanced_btn", None)
+        if advanced is not None:
+            advanced.setToolTip(
+                "Open actions appropriate to the active project analysis mode."
+            )
+        for name in ("group_pair_combo", "group_pair_label"):
+            widget = getattr(self, name, None)
+            set_visible = getattr(widget, "setVisible", None)
+            if callable(set_visible):
+                set_visible(is_multi)
+
+    def _sync_analysis_profile_summary(self, *_args) -> None:
+        profile_combo = getattr(self, "analysis_profile_combo", None)
+        profile_label = getattr(self, "analysis_profile_value", None)
+        if profile_label is not None:
+            text_getter = getattr(profile_combo, "currentText", None)
+            text = (
+                str(text_getter()).strip()
+                if callable(text_getter)
+                else "Published-style exploratory"
+            )
+            profile_label.setText(text or "Published-style exploratory")
+            profile_label.setToolTip(
+                "The interpretation profile does not override harmonic-selection "
+                "provenance."
+            )
+        self._sync_provenance_warning()
+
+    def _native_harmonic_provenance(self) -> str:
+        if (
+            getattr(self, "_dv_policy_name", GROUP_SIGNIFICANT_POLICY_NAME)
+            == GROUP_SIGNIFICANT_POLICY_NAME
+        ):
+            return "same_sample_adaptive"
+        if self._checkbox_value("independent_selection_attestation", False):
+            return "independently_selected"
+        return "user_fixed_unverified"
+
+    def _sync_provenance_warning(self, *_args) -> None:
+        attestation = getattr(self, "independent_selection_attestation", None)
+        fixed_policy = (
+            getattr(self, "_dv_policy_name", GROUP_SIGNIFICANT_POLICY_NAME)
+            == FIXED_PREDEFINED_POLICY_NAME
+        )
+        if attestation is not None:
+            if not fixed_policy and attestation.isChecked():
+                was_blocked = attestation.blockSignals(True)
+                try:
+                    attestation.setChecked(False)
+                finally:
+                    attestation.blockSignals(was_blocked)
+            attestation.setEnabled(fixed_policy)
+        provenance = self._native_harmonic_provenance()
+        messages = {
+            "same_sample_adaptive": (
+                "Provenance warning: the canonical harmonics are selected from "
+                "this same sample. Response-versus-zero findings are exploratory "
+                "post-selection results, even under a confirmatory profile."
+            ),
+            "independently_selected": (
+                "Provenance: the fixed harmonic list is attested as independently "
+                "selected. Confirmatory interpretation still depends on the chosen "
+                "profile and declared analysis plan."
+            ),
+            "user_fixed_unverified": (
+                "Provenance warning: the fixed harmonic list is not attested as "
+                "independently selected. Response-versus-zero findings are not "
+                "labelled confirmatory."
+            ),
+        }
+        warning = getattr(self, "provenance_warning", None)
+        if warning is not None:
+            text = messages[provenance]
+            warning.setText(text)
+            warning.setToolTip(text)
+            warning.setVisible(True)
+
+    def _apply_scanned_group_state(
+        self,
+        participant_group_ids: Mapping[object, object] | None,
+    ) -> None:
+        state = build_native_group_state(
+            self.subjects,
+            participant_group_ids,
+            self._participants_map,
+        )
+        self._participant_group_id_map = dict(
+            state.participant_group_id_map
+        )
+        self._subject_group_map = dict(state.subject_group_display_map)
+        self._group_display_labels = dict(state.group_display_labels)
+        self._group_participant_counts = dict(
+            state.group_participant_counts
+        )
+        self._unassigned_group_participants = tuple(
+            state.unassigned_participants
+        )
+
+    def _group_pair_label_text(self, group_id: str) -> str:
+        display = self._group_display_labels.get(group_id, group_id)
+        return (
+            group_id
+            if display.casefold() == group_id.casefold()
+            else f"{display} [{group_id}]"
+        )
+
+    def _populate_group_pair_combo(self) -> None:
+        combo = getattr(self, "group_pair_combo", None)
+        if combo is None:
+            return
+        current_data = combo.currentData()
+        previous = (
+            tuple(str(value) for value in current_data)
+            if isinstance(current_data, (tuple, list))
+            and len(current_data) == 2
+            else None
+        )
+        was_blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            pairs = canonical_group_pairs(
+                tuple(self._group_participant_counts)
+            )
+            is_multi = self._native_pipeline_id() is PipelineId.MULTI
+            if not is_multi:
+                combo.addItem("Not applicable to a single-group project", None)
+                combo.setEnabled(False)
+                return
+            if len(pairs) > 1:
+                combo.addItem("Select a canonical group pair...", None)
+            elif not pairs:
+                combo.addItem("At least two canonical groups are required", None)
+            for pair in pairs:
+                left, right = pair
+                combo.addItem(
+                    (
+                        f"{self._group_pair_label_text(left)} vs "
+                        f"{self._group_pair_label_text(right)}"
+                    ),
+                    pair,
+                )
+            combo.setEnabled(bool(pairs))
+            if previous in pairs:
+                index = combo.findData(previous)
+                combo.setCurrentIndex(index)
+            elif len(pairs) == 1:
+                combo.setCurrentIndex(combo.findData(pairs[0]))
+            else:
+                combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(was_blocked)
+
+    def _selected_group_pair(self) -> tuple[str, str] | None:
+        combo = getattr(self, "group_pair_combo", None)
+        if combo is not None:
+            value = combo.currentData()
+            if isinstance(value, (tuple, list)) and len(value) == 2:
+                return str(value[0]), str(value[1])
+        pairs = canonical_group_pairs(tuple(self._group_participant_counts))
+        return pairs[0] if len(pairs) == 1 else None
+
+    def _group_summary_text(self) -> str:
+        if self._native_pipeline_id() is PipelineId.SINGLE:
+            return f"Combined cohort: N={len(self.subjects)} scanned participants"
+        if not self._group_participant_counts:
+            return "No canonical project groups were resolved."
+        pieces = [
+            (
+                f"{self._group_pair_label_text(group_id)}: "
+                f"N={self._group_participant_counts[group_id]}"
+            )
+            for group_id in self._group_participant_counts
+        ]
+        if self._unassigned_group_participants:
+            pieces.append(
+                "Unassigned: "
+                f"N={len(self._unassigned_group_participants)} "
+                f"({', '.join(self._unassigned_group_participants)})"
+            )
+        return "; ".join(pieces)
+
+    def update_analysis_design_summary(
+        self,
+        *,
+        mode_text: str,
+        profile_text: str,
+        group_text: str,
+        coverage_text: str,
+    ) -> None:
+        """Update mode/design labels without assuming the widgets exist."""
+
+        for name, text in (
+            ("analysis_mode_value", mode_text),
+            ("analysis_profile_value", profile_text),
+            ("analysis_group_value", group_text),
+            ("analysis_coverage_value", coverage_text),
+        ):
+            label = getattr(self, name, None)
+            if label is not None:
+                label.setText(text)
+                label.setToolTip(text)
+
+    def _refresh_analysis_design_summary(self, *_args) -> None:
+        selected_conditions = self._get_selected_conditions()
+        self._preliminary_coverage = build_preliminary_workbook_coverage(
+            self.subjects,
+            selected_conditions,
+            self.subject_data,
+        )
+        profile_combo = getattr(self, "analysis_profile_combo", None)
+        profile_text_getter = getattr(profile_combo, "currentText", None)
+        profile_text = (
+            str(profile_text_getter()).strip()
+            if callable(profile_text_getter)
+            else "Published-style exploratory"
+        )
+        self.update_analysis_design_summary(
+            mode_text=(
+                "Multi-Group"
+                if self._native_pipeline_id() is PipelineId.MULTI
+                else "Single Group"
+            ),
+            profile_text=profile_text or "Published-style exploratory",
+            group_text=self._group_summary_text(),
+            coverage_text=format_preliminary_workbook_coverage(
+                self._preliminary_coverage
+            ),
+        )
+        self._sync_provenance_warning()
+
+    def _native_analysis_state_snapshot(self) -> dict[str, object]:
+        """Return plain state for prepared-analysis/pipeline configuration."""
+
+        self._refresh_analysis_design_summary()
+        return {
+            "pipeline_id": self._native_pipeline_id(),
+            "mode": self._native_mode_value(),
+            "analysis_profile": self._combo_value(
+                "analysis_profile_combo",
+                "published_style_exploratory",
+            ),
+            "correction": self._combo_value(
+                "multiplicity_combo",
+                "holm",
+            ),
+            "response_alternative": self._combo_value(
+                "response_alternative_combo",
+                "two_sided",
+            ),
+            "analysis_scope": self._combo_value(
+                "analysis_scope_combo",
+                "complete_core",
+            ),
+            "strict_omnibus_family": self._checkbox_value(
+                "strict_omnibus_family_checkbox",
+                True,
+            ),
+            "harmonic_provenance": self._native_harmonic_provenance(),
+            "independent_selection_attested": self._checkbox_value(
+                "independent_selection_attestation",
+                False,
+            ),
+            "canonical_group_ids": dict(self._participant_group_id_map),
+            "participant_display_labels": dict(self._subject_group_map),
+            "group_display_labels": dict(self._group_display_labels),
+            "group_participant_counts": dict(
+                self._group_participant_counts
+            ),
+            "unassigned_group_participants": list(
+                self._unassigned_group_participants
+            ),
+            "selected_group_pair": self._selected_group_pair(),
+            "selected_conditions": list(self._get_selected_conditions()),
+            "preliminary_coverage": self._preliminary_coverage.to_dict(),
+            "sensitivity": {
+                "run_robust": self._checkbox_value(
+                    "robust_sensitivity_checkbox",
+                    True,
+                ),
+                "run_resampling": self._checkbox_value(
+                    "resampling_sensitivity_checkbox",
+                    True,
+                ),
+                "run_stability": self._checkbox_value(
+                    "stability_sensitivity_checkbox",
+                    True,
+                ),
+                "n_resamples": self._spin_value(
+                    "resample_count_spin",
+                    9_999,
+                ),
+            },
+        }
+
     def _single_group_disabled_message(self) -> str:
         return (
-            "Single-group statistical analysis is disabled for multi-group projects. "
-            "Use Export Stats-Ready Workbook and analyze group effects in external "
-            "statistics software."
+            "This individual action belongs to the single-group pipeline. "
+            "Use the primary Analyze Multi-Group action for this project."
         )
 
     def _is_single_group_analysis_disabled(self) -> bool:
         return bool(getattr(self, "_project_is_multi_group", False))
 
     def _update_single_group_analysis_availability(self, *, running: bool = False) -> None:
-        """Keep single-group controls disabled for true multi-group projects."""
-        disabled = self._is_single_group_analysis_disabled()
-        message = self._single_group_disabled_message()
-        default_tooltips = {
-            "analyze_single_btn": "Run the full single-group analysis pipeline using the selected settings.",
-            "single_advanced_btn": "Run or export individual single-group steps.",
-        }
-        for name, default_tooltip in default_tooltips.items():
+        """Keep the primary action enabled for the manifest-locked mode."""
+
+        self._sync_analysis_mode_ui()
+        for name in ("analyze_single_btn", "single_advanced_btn"):
             button = getattr(self, name, None)
             if button is None:
                 continue
-            button.setEnabled(not running and not disabled)
-            button.setToolTip(message if disabled else default_tooltip)
+            button.setEnabled(not running)
 
     def _block_single_group_analysis_if_needed(self) -> bool:
         if not self._is_single_group_analysis_disabled():
@@ -269,6 +645,7 @@ class StatsWindowActionsMixin:
     def _on_condition_toggled(self, _state: int) -> None:
         """Handle the on condition toggled step for the Stats workflow."""
         self._sync_selected_conditions()
+        self._refresh_analysis_design_summary()
 
     def _select_all_conditions(self) -> None:
         """Handle the select all conditions step for the Stats workflow."""
@@ -289,10 +666,62 @@ class StatsWindowActionsMixin:
         return list(self.conditions)
 
     def on_analyze_single_group_clicked(self) -> None:
-        """Handle the on analyze single group clicked step for the Stats workflow."""
-        if self._block_single_group_analysis_if_needed():
+        """Compatibility slot for the now mode-aware primary action."""
+
+        self._on_primary_analysis_clicked()
+
+    def _on_primary_analysis_clicked(self) -> None:
+        """Run the manifest-locked native single- or multi-group pipeline."""
+
+        self._refresh_analysis_design_summary()
+        if self._native_pipeline_id() is PipelineId.MULTI:
+            if self._unassigned_group_participants:
+                message = (
+                    "Canonical group assignment is missing for: "
+                    + ", ".join(self._unassigned_group_participants)
+                )
+                self._set_status(message)
+                self.append_log("Multi-group", message, level="warning")
+                return
+            pairs = canonical_group_pairs(tuple(self._group_participant_counts))
+            selected_pair = self._selected_group_pair()
+            if not pairs:
+                message = (
+                    "Multi-group analysis requires at least two canonical "
+                    "project groups."
+                )
+                self._set_status(message)
+                self.append_log("Multi-group", message, level="warning")
+                return
+            if len(pairs) > 1 and selected_pair is None:
+                message = (
+                    "Choose the canonical group pair for cell comparisons "
+                    "before running the multi-group pipeline."
+                )
+                self._set_status(message)
+                self.append_log("Multi-group", message, level="warning")
+                return
+        self._clear_native_analysis_results()
+        runner = getattr(self, "run_primary_analysis", None)
+        if callable(runner):
+            runner()
             return
-        self._controller.run_single_group_analysis()
+        if self._native_pipeline_id() is PipelineId.MULTI:
+            self._controller.run_multigroup_analysis()
+        else:
+            self._controller.run_single_group_analysis()
+
+    def _on_cancel_analysis_clicked(self) -> None:
+        """Delegate cancellation to the pipeline/controller implementation."""
+
+        handler = getattr(self, "on_cancel_analysis_clicked", None)
+        if callable(handler):
+            handler()
+            return
+        controller = getattr(self, "_controller", None)
+        cancel = getattr(controller, "cancel_pipeline", None)
+        if callable(cancel):
+            cancel(self._native_pipeline_id())
 
     def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
         """Handle the open advanced dialog step for the Stats workflow."""
@@ -313,7 +742,20 @@ class StatsWindowActionsMixin:
         dialog.exec()
 
     def on_single_advanced_clicked(self) -> None:
-        """Handle the on single advanced clicked step for the Stats workflow."""
+        """Open individual actions appropriate to the locked project mode."""
+
+        if self._native_pipeline_id() is PipelineId.MULTI:
+            self._open_advanced_dialog(
+                "Multi-Group – Advanced",
+                [
+                    (
+                        "Run Native Multi-Group Pipeline",
+                        self._on_primary_analysis_clicked,
+                        True,
+                    ),
+                ],
+            )
+            return
         if self._block_single_group_analysis_if_needed():
             return
         actions = [
@@ -453,22 +895,41 @@ class StatsWindowActionsMixin:
             try:
                 scan_result = load_project_scan(folder)
                 if scan_result.project_root is not None:
-                    self.rebind_project_context(scan_result.project_root)
+                    project_changed = (
+                        Path(self._project_path).resolve()
+                        != Path(scan_result.project_root).resolve()
+                    )
+                    if project_changed:
+                        self.rebind_project_context(scan_result.project_root)
+                    else:
+                        self._invalidate_controller_context()
+                        self._clear_native_analysis_results()
                     self._set_data_folder_path(folder)
+                else:
+                    self._invalidate_controller_context()
+                    self._clear_native_analysis_results()
                 self.subjects = scan_result.subjects
                 self.conditions = scan_result.conditions
                 self._populate_conditions_panel(self.conditions)
                 self.subject_data = scan_result.subject_data
                 self._participants_map = dict(scan_result.participants_map)
                 self._project_is_multi_group = bool(scan_result.project_is_multi_group)
-                self._update_single_group_analysis_availability()
-                self._subject_group_map = map_subjects_to_groups(
-                    self.subjects,
-                    self._participants_map,
+                self._apply_scanned_group_state(
+                    scan_result.participant_group_ids,
                 )
+                self._populate_group_pair_combo()
+                self._sync_analysis_mode_ui()
+                self._update_single_group_analysis_availability()
                 self._reconcile_manual_exclusions(self.subjects)
+                self._refresh_analysis_design_summary()
                 self._set_status(
-                    f"Scan complete: Found {len(scan_result.subjects)} subjects and {len(scan_result.conditions)} conditions."
+                    "Scan complete: Found "
+                    f"{len(scan_result.subjects)} subjects and "
+                    f"{len(scan_result.conditions)} conditions. "
+                    + (
+                        "Review the preliminary complete-core coverage before "
+                        "analysis."
+                    )
                 )
             except ScanError as e:
                 self._set_status(f"Scan failed: {e}")
