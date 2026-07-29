@@ -274,17 +274,22 @@ shown in the exported workbook.
 
 Start with **At a glance**:
 
-- "evidence was found" means the canonical reported or adjusted p-value met the
-  stated alpha level under that method;
-- "did not provide evidence" means the test was not significant; it does not
-  establish equivalence; and
-- "no primary conclusion" means a required test, correction, or model check
-  was unavailable or failed.
+- only questions relevant to the project mode are shown;
+- primary conclusions are translated into plain language without p-values or
+  test-inventory terminology;
+- nonsignificant test families are described as finding no clear difference,
+  without displaying a technical significant/total count;
+- positive primary findings may name up to two relevant tests; and
+- significant secondary checks are collapsed into one cautionary sentence
+  rather than listed individually.
 
-Then use **Methods & checks** for sample coverage, formulas, assumptions,
-correction families, harmonic provenance, and limitations. **Run log** contains
-processing, cancellation, and export messages. Detailed numeric results remain
-in the workbook rather than being hidden behind the simplified summary.
+At a glance also gives one short data-coverage line and the detailed workbook
+filename. It intentionally omits repeated nonsignificant cells, raw and
+adjusted p-values, estimates, confidence intervals, effect sizes, omnibus
+decompositions, and the full export path. **Run log** contains processing,
+cancellation, and export messages. Use the exported results workbook for
+sample coverage, formulas, assumptions, correction families, harmonic
+provenance, limitations, and detailed numeric results.
 
 For available-case runs, verify the frozen N, contributing N, per-cell Ns,
 partially observed conditions, no-imputation statement, and MAR/MNAR caveat

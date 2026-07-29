@@ -1,16 +1,11 @@
-"""Non-expert findings language and detailed methods narrative."""
+"""Detailed findings and methods language for native Stats inference."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.reporting.inference.bundle import (
-    ADAPTIVE_HARMONIC_WARNING,
-    METHOD_DEPENDENT_PHRASE,
-)
 from Tools.Stats.reporting.inference.frames import finite_float
 from Tools.Stats.reporting.inference.methods import human_correction
 
@@ -265,67 +260,6 @@ def _design_note_lines(
     return lines
 
 
-def at_a_glance_text(
-    mode: str,
-    inventory: pd.DataFrame,
-    limitations: pd.DataFrame,
-    design: Mapping[str, object],
-    export_path: str | Path | None = None,
-) -> str:
-    """Build a three-question non-expert findings summary."""
-
-    lines = [
-        f"Analysis mode: {'single group' if mode == 'single' else 'multiple groups'}",
-        "",
-        "Response detection",
-    ]
-    for section, heading in (
-        ("response_detection", None),
-        ("within_subject", "Within-subject comparisons"),
-        ("between_group", "Between-group comparisons"),
-    ):
-        if heading is not None:
-            lines.extend(["", heading])
-        all_section_rows = inventory[inventory["section"].eq(section)]
-        section_rows = all_section_rows[
-            all_section_rows["headline_eligible"].eq(True)
-        ]
-        if section == "between_group" and mode == "single":
-            lines.append("- Not applicable in single-group mode.")
-        elif section_rows.empty:
-            if all_section_rows.empty:
-                lines.append("- No result was available for this question.")
-            else:
-                lines.append(
-                    "- Results are available in the detailed workbook, but no "
-                    "adjusted/canonical result was eligible for a headline."
-                )
-        else:
-            lines.extend(
-                f"- {finding_line(row)}" for _, row in section_rows.iterrows()
-            )
-    lines.extend(["", "Design and interpretation notes"])
-    lines.extend(_design_note_lines(design, bullets=True))
-    if mode == "multi":
-        lines.append(
-            "- Between-group findings are associations in the analyzed sample; "
-            "they do not establish causation or diagnostic validity."
-        )
-    if limitations["code"].eq("adaptive_harmonic_selection").any():
-        lines.append(f"- {ADAPTIVE_HARMONIC_WARNING}")
-    workbook_location = (
-        "not yet selected"
-        if export_path is None
-        else str(Path(export_path))
-    )
-    lines.append(f"- Detailed workbook: {workbook_location}.")
-    lines.append(
-        f"- {METHOD_DEPENDENT_PHRASE} A finding describes evidence under the "
-        "named test, correction, estimand, and assumptions."
-    )
-    return "\n".join(lines)
-
-
 def _inventory_method_lines(inventory: pd.DataFrame) -> list[str]:
     if inventory.empty:
         return ["No inferential result rows were supplied."]
@@ -444,4 +378,4 @@ def detailed_methods_text(
     return "\n".join(lines)
 
 
-__all__ = ["at_a_glance_text", "detailed_methods_text"]
+__all__ = ["detailed_methods_text", "finding_line", "format_number"]

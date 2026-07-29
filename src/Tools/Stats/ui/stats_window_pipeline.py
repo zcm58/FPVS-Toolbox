@@ -746,16 +746,9 @@ class StatsWindowPipelineMixin:
             )
             self._set_status("Reporting summary generation failed; statistics exports are still complete.")
 
-        worker.signals.report_ready.connect(self._on_report_ready)
         worker.signals.finished.connect(_on_finished)
         worker.signals.error.connect(_on_error)
         self.pool.start(worker)
-
-    @Slot(str)
-    def _on_report_ready(self, report_text: str) -> None:
-        """Handle the on report ready step for the Stats workflow."""
-        self._reporting_summary_text = report_text or ""
-        self.reporting_summary_text.setPlainText(self._reporting_summary_text)
 
     # --------- worker signal wiring ---------
 
@@ -1400,7 +1393,7 @@ class StatsWindowPipelineMixin:
         super().closeEvent(event)
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
-        """Render the report worker's plain-language and methods surfaces."""
+        """Render the report worker's plain-language result surface."""
 
         report_payload = (
             self._native_step_store()
@@ -1414,19 +1407,9 @@ class StatsWindowPipelineMixin:
                 or getattr(bundle, "at_a_glance", "")
                 or ""
             ).strip()
-            detailed_methods = str(
-                report_payload.get("detailed_methods")
-                or getattr(bundle, "detailed_methods", "")
-                or ""
-            ).strip()
             self.summary_text.setPlainText(
                 at_a_glance
                 or "The analysis completed, but no plain-language summary was generated."
-            )
-            self._reporting_summary_text = detailed_methods
-            self.reporting_summary_text.setPlainText(
-                detailed_methods
-                or "No detailed methods text was generated."
             )
             if bundle is not None:
                 self._native_report_bundle = bundle

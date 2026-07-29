@@ -97,6 +97,12 @@ Stats grouping:
   Detectability workflow consume this API and fail clearly when the saved
   selection is missing or stale instead of recalculating it.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
+  QC screening keeps the shared dataset-index subject/condition mapping as its
+  file source. For `.xlsx` workbooks it reads only the `BCA (uV)` harmonic
+  columns and union of ROI electrodes through the selected-column reader, then
+  vectorizes the per-ROI harmonic means. Non-`.xlsx` inputs retain the
+  serialized full-reader fallback. Missing mappings/files, QC thresholds, and
+  exclusion/reporting semantics are unchanged.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - The in-app Run log retains the complete workflow audit trail. Routine
   pipeline, worker, model, QC, and export messages are DEBUG-only in the IDE
@@ -322,9 +328,9 @@ Rules:
 - Shapiro-Wilk, finite-value, sample-size, variance, residual-tail,
   convergence, and singularity checks are diagnostics. They do not
   automatically choose or replace a primary test. A normality flag belongs in
-  Methods & Checks and should be considered together with the prespecified
-  robust/resampling sensitivities, not used as a data-driven test-selection
-  switch.
+  the exported diagnostics and should be considered together with the
+  prespecified robust/resampling sensitivities, not used as a data-driven
+  test-selection switch.
 - Available-case likelihood inference assumes missingness is ignorable/MAR
   after conditioning on modeled variables. Reports must state this assumption,
   the absence of imputation, and the risk that MNAR exclusions can bias
@@ -342,10 +348,16 @@ Rules:
   only when its independent selection is explicitly attested and documented.
 - The native report must keep three scientific questions separate: evidence of
   a response, within-subject Condition/ROI effects, and between-group effects.
-  At a Glance uses only canonical/adjusted reportable p-values and says "did not
-  provide evidence" for a nonsignificant test; it must never translate
-  nonsignificance into equivalence or proof of no response. Detailed Methods
-  and the workbook retain all estimates, intervals, effects, formulas,
+  At a Glance derives conclusions only from canonical/adjusted reportable
+  p-values, but does not display those technical values. It must never
+  translate nonsignificance into equivalence or proof of no response. Keep
+  this view deliberately short: omit questions that do not apply to the
+  current mode, use one plain-language line per relevant question, omit counts
+  for wholly nonsignificant families, name at most two positive primary
+  results, and collapse significant sensitivity results into one secondary
+  caution without individual labels or p-values. Show only a concise coverage
+  line and workbook filename, not the full path. The exported Detailed Methods
+  sheet and source tables retain all estimates, intervals, effects, formulas,
   diagnostics, corrections, exclusions, frozen and contributing Ns,
   complete/partial/structurally excluded conditions, per-cell Ns, missingness
   caveats, coverage, provenance, and source frames.

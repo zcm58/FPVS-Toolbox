@@ -61,9 +61,10 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert [
         window.results_tabs.tabText(index)
         for index in range(window.results_tabs.count())
-    ] == ["At a glance", "Methods & checks", "Run log"]
+    ] == ["At a glance", "Run log"]
     assert window.summary_text.isVisible()
-    assert not window.reporting_summary_text.isVisible()
+    assert not hasattr(window, "reporting_summary_text")
+    assert window.findChild(QWidget, "stats_methods_checks_text") is None
     assert not window.log_text.isVisible()
 
     long_path = str(tmp_path / "a" / "very" / "long" / "path" / "to" / "fpvs" / "results")

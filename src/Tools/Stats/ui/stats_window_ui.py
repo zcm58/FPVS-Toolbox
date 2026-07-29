@@ -687,16 +687,6 @@ class StatsWindowUiMixin:
         self.log_text.setMinimumHeight(140)
         self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.reporting_summary_text = QPlainTextEdit(self)
-        self.reporting_summary_text.setProperty("logSurface", True)
-        self.reporting_summary_text.setObjectName("stats_methods_checks_text")
-        self.reporting_summary_text.setReadOnly(True)
-        self.reporting_summary_text.setPlaceholderText(
-            "Methods, assumptions, multiplicity corrections, provenance, and "
-            "diagnostic checks will appear here."
-        )
-        self.reporting_summary_text.setFont(fixed_width_font())
-
         self.copy_summary_btn = make_action_button("Copy at-a-glance")
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)
 
@@ -733,7 +723,6 @@ class StatsWindowUiMixin:
             """
         )
         self.results_tabs.addTab(self.summary_text, "At a glance")
-        self.results_tabs.addTab(self.reporting_summary_text, "Methods & checks")
         self.results_tabs.addTab(self.log_text, "Run log")
         output_layout.addWidget(self.results_tabs, 1)
 

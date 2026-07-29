@@ -68,7 +68,6 @@ from Main_App.gui.components import (
     SurfaceSize,
     StatusBanner,
     configure_window_surface,
-    fixed_width_font,
     make_action_button,
     make_form_layout,
 )
@@ -149,7 +148,6 @@ from Tools.Stats.reporting.reporting_summary import (
     ReportingSummaryContext,
     build_default_report_path,
     build_reporting_summary,
-    safe_project_path_join,
 )
 from Tools.Stats.widgets.elided_label import ElidedPathLabel
 

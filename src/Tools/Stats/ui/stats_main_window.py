@@ -127,7 +127,6 @@ class StatsWindow(
         self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
-        self._reporting_summary_text: str = ""
         self._pipeline_start_perf: dict[PipelineId, float] = {}
 
         # --- legacy UI proxies ---
@@ -228,8 +227,6 @@ class StatsWindow(
         self.baseline_vs_zero_results_payload = None
         for name in (
             "summary_text",
-            "reporting_summary_text",
-            "methods_checks_text",
             "at_a_glance_text",
             "log_text",
             "output_text",

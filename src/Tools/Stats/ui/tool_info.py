@@ -17,8 +17,9 @@ WORKFLOW_HTML = """
   <li><b>Run the mode-aware analysis.</b> Single-group projects assess response
       detection and within-subject Condition/ROI effects. Multi-group projects
       additionally test overall and Condition/ROI-dependent group effects.</li>
-  <li><b>Read At a glance first.</b> Methods &amp; checks contains the technical
-      audit trail, while Run log records processing and export messages.</li>
+  <li><b>Read At a glance first.</b> Run log records processing and export
+      messages. The exported results workbook retains the technical audit
+      trail.</li>
 </ol>
 
 <h3>Why some conditions may be excluded</h3>
@@ -91,8 +92,10 @@ INTERPRETATION_HTML = """
 </ul>
 <p>
 A reliable pooled response is not evidence that conditions or groups differ.
-The At a glance summary reports the relevant question, direction, effect size,
-uncertainty, corrected status, and main limitation.
+The At a glance summary translates the primary conclusions into a few
+plain-language lines. It separates primary findings from secondary checks and
+leaves p-values, effect sizes, uncertainty intervals, and test inventories in
+the exported workbook.
 </p>
 
 <h3>Read corrected evidence first</h3>
@@ -105,7 +108,7 @@ a difference; it does <b>not</b> prove equivalence or no effect.
 
 <h3>Assumptions and sensitivity analyses</h3>
 <p>
-Methods &amp; checks records normality diagnostics, sphericity or
+The exported results workbook records normality diagnostics, sphericity or
 Greenhouse-Geisser handling, mixed-model convergence/singularity, missingness,
 sample sizes, corrections, and harmonic provenance. Robust, resampling, and
 leave-one-out results are sensitivity evidence. Agreement strengthens
@@ -115,10 +118,9 @@ conclusion.
 
 <h3>Detailed exports</h3>
 <p>
-The saved workbook and reporting summary contain the complete test inventory,
-estimates, confidence intervals, effect sizes, assumptions, correction
-families, exclusions, coverage, and methods needed for review or manuscript
-reporting.
+The saved workbook contains the complete test inventory, estimates, confidence
+intervals, effect sizes, assumptions, correction families, exclusions,
+coverage, and methods needed for review or manuscript reporting.
 </p>
 """
 

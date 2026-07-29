@@ -561,52 +561,6 @@ class StatsWindowActionsMixin:
         text = self.summary_text.toPlainText()
         self._copy_text_to_clipboard(text, context="summary")
 
-    def _copy_reporting_summary_text(self) -> None:
-        """Handle the copy reporting summary text step for the Stats workflow."""
-        text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
-        self._copy_text_to_clipboard(text, context="reporting_summary")
-
-    def _save_reporting_summary_text(self) -> None:
-        """Handle the save reporting summary text step for the Stats workflow."""
-        report_text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
-        if not report_text.strip():
-            self._set_status("No reporting summary available to save yet.")
-            return
-        default_path = build_default_report_path(self._project_path, datetime.now())
-        default_path.parent.mkdir(parents=True, exist_ok=True)
-        target, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Reporting Summary",
-            str(default_path),
-            "Text Files (*.txt)",
-        )
-        if not target:
-            self._set_status("Reporting summary save canceled.")
-            return
-        try:
-            target_path = safe_project_path_join(self._project_path, Path(target).relative_to(self._project_path).as_posix())
-        except Exception:
-            self._set_status("Save canceled: selected path must be under the active project root.")
-            return
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(report_text, encoding="utf-8")
-            self._set_status(f"Reporting summary saved: {target_path}")
-            self._set_last_export_path(str(target_path))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "stats_reporting_summary_save_failed",
-                exc_info=True,
-                extra={
-                    "operation": "save_reporting_summary_dialog",
-                    "project": self.project_title,
-                    "path": str(target_path),
-                    "elapsed_ms": 0,
-                    "exception": str(exc),
-                },
-            )
-            self._set_status("Failed to save reporting summary text.")
-
     def _copy_log_text(self) -> None:
         """Handle the copy log text step for the Stats workflow."""
         text = self.log_text.toPlainText()

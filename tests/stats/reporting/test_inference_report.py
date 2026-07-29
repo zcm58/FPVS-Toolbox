@@ -279,11 +279,17 @@ def test_single_report_uses_adjusted_and_canonical_reported_p_values() -> None:
     assert bool(response["significant"]) is False
     assert within["p_value_column"] == "p_reported"
     assert within["p_value_used"] == pytest.approx(0.024)
-    assert "Holm family-wise error correction" in bundle.at_a_glance
-    assert "Greenhouse–Geisser sphericity correction" in bundle.at_a_glance
-    assert "did not provide evidence of a response" in bundle.at_a_glance
-    assert "This does not prove that the response is absent" in bundle.at_a_glance
-    assert "Not applicable in single-group mode" in bundle.at_a_glance
+    assert "p=" not in bundle.at_a_glance
+    assert (
+        "the primary analysis did not find clear evidence of a response"
+        in bundle.at_a_glance
+    )
+    assert (
+        "Conditions and brain regions: the primary analysis found evidence"
+        in bundle.at_a_glance
+    )
+    assert "not finding a clear difference does not prove" in bundle.at_a_glance
+    assert "Between-group" not in bundle.at_a_glance
     assert "there was no effect" not in bundle.at_a_glance.casefold()
 
 
@@ -299,7 +305,7 @@ def test_nonestimable_result_is_retained_but_not_headlined() -> None:
     row = bundle.test_inventory.iloc[0]
     assert bool(row["reportable"]) is False
     assert pd.isna(row["significant"])
-    assert "no primary conclusion was drawn" in bundle.at_a_glance
+    assert "no primary conclusion was available" in bundle.at_a_glance
     assert bundle.limitations["code"].eq("non_estimable_or_failed_tests").any()
 
 
@@ -315,21 +321,122 @@ def test_multigroup_report_states_joint_block_and_signed_group_contrast() -> Non
 
     text = bundle.at_a_glance
     assert "anxious - non-anxious" in text
-    assert "positive in the stated A - B direction" in text
-    assert "negative in the stated A - B direction" in text
-    assert "Hedges g=0.920" in text
-    assert "95% CI [0.180, 1.500]" in text
-    assert "joint block of all group-containing terms" in text
-    assert "not a pure group main-effect test" in text
+    assert (
+        "Groups overall: the primary analysis found evidence of an overall "
+        "difference"
+    ) in text
+    assert (
+        "Group differences by condition and brain region: 1 of 2 planned "
+        "comparisons showed evidence of a difference"
+    ) in text
+    assert "p=" not in text
+    assert "Hedges g=0.920" not in text
+    assert "95% CI [0.180, 1.500]" not in text
+    assert "positive in the stated A - B direction" not in text
+    assert "Hedges g=0.920" in bundle.detailed_methods
+    assert "95% CI [0.180, 1.500]" in bundle.detailed_methods
     assert "group main effect was found" not in text.casefold()
-    assert "does not establish group equivalence" in text
+    assert len(text.splitlines()) <= 14
     failed = bundle.test_inventory[
         bundle.test_inventory["test_label"].eq(
             "Group x Condition x ROI interaction"
         )
     ].iloc[0]
     assert bool(failed["reportable"]) is False
-    assert "no primary conclusion was drawn" in text
+    assert "Group x Condition x ROI interaction" not in text
+
+
+def test_at_a_glance_condenses_large_multigroup_inventory() -> None:
+    primary_rows: list[dict[str, object]] = []
+    sensitivity_rows: list[dict[str, object]] = []
+    template = _group_cell_results().iloc[1].to_dict()
+    roi_names = ("Central", "Left", "Right")
+    for index in range(12):
+        condition = f"C{index // 3 + 1}"
+        roi = roi_names[index % 3]
+        primary = dict(template)
+        primary.update(
+            {
+                "condition": condition,
+                "roi": roi,
+                "p_adjusted": 0.1566 if index == 7 else 1.0,
+            }
+        )
+        primary_rows.append(primary)
+
+        sensitivity = dict(primary)
+        sensitivity.pop("p_adjusted")
+        sensitivity.update(
+            {
+                "p_adjusted_max_t": 0.0276 if index == 7 else 1.0,
+                "adjustment_method": "single_step_max_abs_t_fwer",
+                "family_id": "between_group_cells",
+            }
+        )
+        sensitivity_rows.append(sensitivity)
+
+    omnibus = _omnibus_results().iloc[[0]].copy()
+    omnibus.loc[:, "p_value_chi2"] = 0.7302
+    bundle = build_native_inference_report(
+        "multigroup",
+        _prepared_design(excluded="incomplete"),
+        {
+            "group_cell_comparisons": pd.DataFrame(primary_rows),
+            "omnibus_lrt": omnibus,
+            "between_group_sensitivity": pd.DataFrame(sensitivity_rows),
+        },
+    )
+
+    text = bundle.at_a_glance
+    assert (
+        "none of the planned comparisons showed a clear difference"
+        in text
+    )
+    assert (
+        "Secondary checks: some additional analyses suggested possible "
+        "effects, but the primary analysis did not confirm them"
+    ) in text
+    assert "C3 / Left: anxious - non-anxious" not in text
+    assert "C1 / Central: anxious - non-anxious" not in text
+    assert "C1 / Central: anxious - non-anxious" in bundle.detailed_methods
+    assert len(text.splitlines()) <= 15
+
+
+def test_at_a_glance_single_summary_uses_plain_interpretation() -> None:
+    bundle = build_native_inference_report(
+        "single",
+        _prepared_design(),
+        {
+            "rm_anova": _rm_results(p_reported=0.50),
+            "robust_sensitivity": _response_results(
+                p_adjusted=0.01,
+                provenance="same_sample_adaptive",
+                status="exploratory_post_selection_sensitivity",
+            ),
+        },
+    )
+
+    text = bundle.at_a_glance
+    assert text.startswith("Single-group summary")
+    assert (
+        "Response: no primary claim was made because the harmonics were "
+        "selected from these same data"
+    ) in text
+    assert (
+        "Conditions and brain regions: no clear differences were found in "
+        "the primary analysis"
+    ) in text
+    assert (
+        "Secondary checks: some additional analyses suggested possible "
+        "effects, but the primary analysis did not confirm them"
+    ) in text
+    assert "Data: 12 participants and 2 complete conditions" in text
+    assert "Full statistical details: not yet saved." in text
+    assert "Between-group" not in text
+    assert "primary tests" not in text
+    assert "p=" not in text
+    assert "max-|t|" not in text
+    assert len(text.splitlines()) <= 10
 
 
 def test_adaptive_and_sensitivity_results_are_explicitly_caveated() -> None:
@@ -345,8 +452,12 @@ def test_adaptive_and_sensitivity_results_are_explicitly_caveated() -> None:
         },
     )
 
-    assert "Sensitivity only" in bundle.at_a_glance
-    assert ADAPTIVE_HARMONIC_WARNING in bundle.at_a_glance
+    assert "Secondary checks" in bundle.at_a_glance
+    assert (
+        "harmonics were selected from these same data"
+        in bundle.at_a_glance
+    )
+    assert ADAPTIVE_HARMONIC_WARNING in bundle.detailed_methods
     assert bundle.limitations["code"].eq("adaptive_harmonic_selection").any()
     assert (
         bundle.test_inventory.iloc[0]["harmonic_provenance"]
@@ -418,7 +529,8 @@ def test_correction_name_is_read_from_results_not_hardcoded() -> None:
 
     row = bundle.test_inventory.iloc[0]
     assert row["p_value_column"] == "p_adjusted_max_t"
-    assert "single-step max-|t| family-wise error correction" in bundle.at_a_glance
+    assert "p=" not in bundle.at_a_glance
+    assert "max-|t|" in bundle.detailed_methods
     assert "Benjamini" not in bundle.at_a_glance
 
 
@@ -651,9 +763,10 @@ def test_available_case_single_mixed_model_lrt_can_be_headlined_explicitly() -> 
     assert row["headline_reason"] == (
         "available_case_lmm_lrt_marked_headline_eligible"
     )
-    assert "condition * roi: evidence of a within-subject effect" in (
-        bundle.at_a_glance
-    )
+    assert (
+        "Conditions and brain regions: the primary analysis found evidence "
+        "that responses differed: condition * roi"
+    ) in bundle.at_a_glance
 
 
 def test_available_case_reporting_discloses_missing_data_contract() -> None:
@@ -892,7 +1005,10 @@ def test_canonical_reject_uses_inclusive_alpha_and_validates_export() -> None:
     assert row["reject_source"] == (
         "recomputed_from_selected_p_le_alpha_export_mismatch"
     )
-    assert "evidence of a response was found" in bundle.at_a_glance
+    assert (
+        "the primary analysis found evidence of a response"
+        in bundle.at_a_glance
+    )
 
 
 def test_invalid_probability_is_retained_without_a_claim() -> None:
@@ -906,7 +1022,7 @@ def test_invalid_probability_is_retained_without_a_claim() -> None:
     assert not bool(row["reportable"])
     assert pd.isna(row["p_value_used"])
     assert "invalid_p_value" in row["status"]
-    assert "no primary conclusion was drawn" in bundle.at_a_glance
+    assert "no primary conclusion was available" in bundle.at_a_glance
 
 
 def test_one_sample_resampling_is_response_detection() -> None:
@@ -936,8 +1052,10 @@ def test_one_sample_resampling_is_response_detection() -> None:
     row = bundle.test_inventory.iloc[0]
     assert row["section"] == "response_detection"
     assert row["role"] == "sensitivity"
-    assert "Sensitivity only" in bundle.at_a_glance
-    assert "evidence of a response was found" in bundle.at_a_glance
+    assert "Secondary checks" in bundle.at_a_glance
+    assert "faces / left" not in bundle.at_a_glance
+    assert "p=" not in bundle.at_a_glance
+    assert "faces / left" in bundle.detailed_methods
 
 
 def test_export_path_is_visible_and_numeric_fallback_preserves_sources(
@@ -950,7 +1068,9 @@ def test_export_path_is_visible_and_numeric_fallback_preserves_sources(
         {"response_results": _response_results()},
         export_path=requested,
     )
-    assert f"Detailed workbook: {requested}." in bundle.at_a_glance
+    assert "Full statistical details: full.xlsx." in bundle.at_a_glance
+    assert str(requested) not in bundle.at_a_glance
+    assert bundle.export_path == requested
 
     source = pd.DataFrame(
         [{"label": "=1+1", "items": {"b", "a"}, "p_adjusted": 0.2}]

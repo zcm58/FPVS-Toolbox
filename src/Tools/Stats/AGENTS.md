@@ -63,13 +63,13 @@ v2.1 project contract:
 
 IMPORTANT RULES for Codex:
 
-The Stats tool should give a non-expert a quick, accurate understanding of
-three separate questions: response detection, within-subject Condition/ROI
+The Stats tool should give a non-expert a quick, accurate understanding of the
+relevant questions among response detection, within-subject Condition/ROI
 effects, and between-group effects. At a Glance should use plain English and
-only canonical reportable p-values, while Methods & Checks and the workbook
-retain the complete audit trail. Do not hide a nonsignificant primary test:
-describe it as "did not provide evidence" and never as proof of equivalence or
-absence. Keep exploratory post-selection response tests and all robust,
-resampling, or leave-one-out findings visibly labelled. Always identify the
-detailed results workbook.
+derive conclusions only from canonical reportable p-values without displaying
+technical p-value details; the exported workbook retains the complete audit
+trail. Do not hide a nonsignificant primary test or describe it as proof of
+equivalence or absence. Collapse significant robust, resampling, or
+leave-one-out findings into one visibly secondary caution rather than listing
+them individually. Always identify the detailed results workbook by filename.
 

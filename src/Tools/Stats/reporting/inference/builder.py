@@ -12,6 +12,7 @@ from Tools.Stats.reporting.inference.bundle import (
     NativeInferenceReportBundle,
     REPORT_SCHEMA_VERSION,
 )
+from Tools.Stats.reporting.inference.at_a_glance import at_a_glance_text
 from Tools.Stats.reporting.inference.design import (
     design_summary,
     limitations_frame,
@@ -23,10 +24,7 @@ from Tools.Stats.reporting.inference.inventory import (
     inventory_rows,
     merge_declared_and_computed_rows,
 )
-from Tools.Stats.reporting.inference.language import (
-    at_a_glance_text,
-    detailed_methods_text,
-)
+from Tools.Stats.reporting.inference.language import detailed_methods_text
 from Tools.Stats.reporting.inference.methods import (
     correction_family_frame,
     methods_frame,

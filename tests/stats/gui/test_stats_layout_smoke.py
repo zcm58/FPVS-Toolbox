@@ -268,23 +268,21 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert results_tabs is window.results_tabs
     assert [results_tabs.tabText(index) for index in range(results_tabs.count())] == [
         "At a glance",
-        "Methods & checks",
         "Run log",
     ]
     assert results_tabs.widget(0) is window.summary_text
-    assert results_tabs.widget(1) is window.reporting_summary_text
-    assert results_tabs.widget(2) is window.log_text
+    assert results_tabs.widget(1) is window.log_text
     assert window.summary_text.objectName() == "stats_at_a_glance_text"
-    assert window.reporting_summary_text.objectName() == "stats_methods_checks_text"
     assert window.log_text.objectName() == "stats_run_log_text"
+    assert not hasattr(window, "reporting_summary_text")
+    assert window.findChild(QWidget, "stats_methods_checks_text") is None
     assert window.summary_output_container.isVisible()
     assert window.summary_text.isVisible()
-    assert not window.reporting_summary_text.isVisible()
     assert not window.log_text.isVisible()
     results_tabs.setCurrentIndex(1)
     qtbot.wait(20)
     assert not window.summary_text.isVisible()
-    assert window.reporting_summary_text.isVisible()
+    assert window.log_text.isVisible()
     results_tabs.setCurrentIndex(0)
 
     assert window.run_action_bar.isVisible()
