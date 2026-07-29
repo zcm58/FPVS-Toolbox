@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 3 - native multi-group engines
+- Current phase: Phase 4 - robust sensitivities and diagnostics
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -631,19 +631,22 @@ Deliverables:
 
 Definition of done:
 
-- [ ] The global model includes Group, Condition, ROI, and all interactions.
-- [ ] Group-related omnibus tests use explicitly tested full/reduced formulas.
-- [ ] `any_group_related` is not reported as a pure Group main effect; an
+- [x] The global model includes Group, Condition, ROI, and all interactions.
+- [x] Group-related omnibus tests use explicitly tested full/reduced formulas.
+- [x] `any_group_related` is not reported as a pure Group main effect; an
       average Group contrast uses an explicit marginal reference grid.
-- [ ] Cellwise tests use Welch, are two-sided, and default to global Holm.
-- [ ] Hedges' g direction is documented and tested.
-- [ ] A missing/unknown group assignment blocks inference.
-- [ ] Singular/nonconverged models cannot generate a primary-success headline.
-- [ ] Every random-structure attempt and fallback is exported, and a failed
+- [x] Cellwise tests use Welch, are two-sided, and default to global Holm.
+- [x] Hedges' g direction is documented and tested.
+- [x] A missing/unknown group assignment blocks inference.
+- [x] Singular/nonconverged models cannot generate a primary-success headline.
+- [x] Every random-structure attempt and fallback is exported, and a failed
       LRT remains visible as a failed/non-estimable row.
-- [ ] Complete-core and available-case scopes are distinguishable in output.
-- [ ] Focused Stats verification passes.
-- [ ] Plan progress is updated and committed.
+- [x] Complete-core and available-case scopes are distinguishable in output;
+      complete-core cell comparisons validate the retained participant-cell
+      matrix instead of trusting a label.
+- [x] Focused Stats verification passes (51 registered tests); 18 direct
+      Phase 3 tests also pass.
+- [x] Plan progress is updated and committed.
 
 Commit:
 
@@ -843,7 +846,7 @@ To perform after Phase 6 in a safe visible Windows session:
 - [x] Phase 0 - Plan and baseline
 - [x] Phase 1 - Shared inference and design core
 - [x] Phase 2 - Single-group inference
-- [ ] Phase 3 - Native multi-group engines
+- [x] Phase 3 - Native multi-group engines
 - [ ] Phase 4 - Robust sensitivities and diagnostics
 - [ ] Phase 5 - Pipeline, exports, and detailed reporting
 - [ ] Phase 6 - GUI and non-expert workflow
