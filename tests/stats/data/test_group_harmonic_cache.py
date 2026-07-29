@@ -71,6 +71,24 @@ def _request(project_root: Path, workbook: Path):
     )
 
 
+def _multi_request(
+    project_root: Path,
+    *,
+    subjects: list[str],
+    conditions: list[str],
+    subject_data: dict[str, dict[str, str]],
+):
+    return build_group_harmonic_cache_request(
+        project_root=project_root,
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_frequency_hz=6.0,
+        max_freq_hz=8.4,
+        settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+    )
+
+
 def _write_frequency_domain_qc_state(
     project_root: Path,
     *,
@@ -145,6 +163,154 @@ def test_group_harmonic_cache_roundtrip_and_settings_invalidation(tmp_path: Path
     stale_lookup = lookup_cached_group_harmonic_selection(_request(project_root, workbook))
     assert stale_lookup.hit is None
     assert "preprocessing/settings changed" in stale_lookup.reason
+
+
+def test_group_harmonic_cache_identity_ignores_subject_and_condition_order(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    subject_data: dict[str, dict[str, str]] = {}
+    for subject in ("S1", "S2"):
+        subject_data[subject] = {}
+        for condition in ("Face", "Object"):
+            workbook = (
+                project_root
+                / "1 - Excel Data Files"
+                / condition
+                / f"{subject}_{condition}.xlsx"
+            )
+            workbook.parent.mkdir(parents=True, exist_ok=True)
+            workbook.write_bytes(b"placeholder")
+            subject_data[subject][condition] = str(workbook)
+
+    forward = _multi_request(
+        project_root,
+        subjects=["S1", "S2"],
+        conditions=["Face", "Object"],
+        subject_data=subject_data,
+    )
+    subject_reordered = _multi_request(
+        project_root,
+        subjects=["S2", "S1"],
+        conditions=["Face", "Object"],
+        subject_data=subject_data,
+    )
+    condition_reordered = _multi_request(
+        project_root,
+        subjects=["S1", "S2"],
+        conditions=["Object", "Face"],
+        subject_data=subject_data,
+    )
+    both_reordered = _multi_request(
+        project_root,
+        subjects=["S2", "S1"],
+        conditions=["Object", "Face"],
+        subject_data=subject_data,
+    )
+
+    assert forward is not None
+    for reordered in (
+        subject_reordered,
+        condition_reordered,
+        both_reordered,
+    ):
+        assert reordered is not None
+        assert reordered.cache_key == forward.cache_key
+        assert reordered.fingerprint == forward.fingerprint
+
+
+def test_reordered_cache_inputs_still_detect_changed_workbook(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    subject_data: dict[str, dict[str, str]] = {}
+    for subject in ("S1", "S2"):
+        subject_data[subject] = {}
+        for condition in ("Face", "Object"):
+            workbook = (
+                project_root
+                / "1 - Excel Data Files"
+                / condition
+                / f"{subject}_{condition}.xlsx"
+            )
+            workbook.parent.mkdir(parents=True, exist_ok=True)
+            workbook.write_bytes(b"placeholder")
+            subject_data[subject][condition] = str(workbook)
+
+    saved_request = _multi_request(
+        project_root,
+        subjects=["S1", "S2"],
+        conditions=["Face", "Object"],
+        subject_data=subject_data,
+    )
+    assert saved_request is not None
+    save_cached_group_harmonic_selection(saved_request, _selection_metadata())
+
+    changed_workbook = Path(subject_data["S2"]["Object"])
+    changed_workbook.write_bytes(b"changed-placeholder")
+    changed_request = _multi_request(
+        project_root,
+        subjects=["S2", "S1"],
+        conditions=["Object", "Face"],
+        subject_data=subject_data,
+    )
+    lookup = lookup_cached_group_harmonic_selection(changed_request)
+
+    assert lookup.hit is None
+    assert "Source workbook files changed" in lookup.reason
+
+
+def test_lookup_accepts_legacy_cache_with_different_input_order(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_manifest(project_root)
+    subject_data: dict[str, dict[str, str]] = {}
+    for subject in ("S1", "S2"):
+        subject_data[subject] = {}
+        for condition in ("Face", "Object"):
+            workbook = (
+                project_root
+                / "1 - Excel Data Files"
+                / condition
+                / f"{subject}_{condition}.xlsx"
+            )
+            workbook.parent.mkdir(parents=True, exist_ok=True)
+            workbook.write_bytes(b"placeholder")
+            subject_data[subject][condition] = str(workbook)
+
+    request = _multi_request(
+        project_root,
+        subjects=["S1", "S2"],
+        conditions=["Face", "Object"],
+        subject_data=subject_data,
+    )
+    assert request is not None
+    save_cached_group_harmonic_selection(request, _selection_metadata())
+
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = manifest["tools"]["stats"]["group_significant_harmonics_cache"][
+        "entries"
+    ]
+    legacy_entry = entries.pop(request.cache_key)
+    legacy_fingerprint = deepcopy(legacy_entry["fingerprint"])
+    legacy_fingerprint["selection_inputs"]["subjects"].reverse()
+    legacy_fingerprint["selection_inputs"]["conditions"].reverse()
+    legacy_fingerprint["source_workbooks"].reverse()
+    legacy_key = cache_mod._hash_payload(legacy_fingerprint)
+    legacy_entry["cache_key"] = legacy_key
+    legacy_entry["fingerprint"] = legacy_fingerprint
+    entries[legacy_key] = legacy_entry
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    lookup = lookup_cached_group_harmonic_selection(request)
+
+    assert lookup.hit is not None
+    assert lookup.hit.cache_key == legacy_key
+    assert "normalizing legacy cache ordering" in lookup.reason
 
 
 def test_project_processing_signature_tracks_fft_multinotch_settings(tmp_path: Path) -> None:
@@ -270,7 +436,7 @@ def test_lookup_accepts_legacy_cache_differing_only_by_workflow_status(
     assert lookup.hit is not None
     assert lookup.hit.cache_key == legacy_key
     assert lookup.hit.selection_metadata["selected_harmonics_hz"] == [1.2, 3.6, 7.2]
-    assert "ignored legacy downstream-output workflow status" in lookup.reason
+    assert "downstream-output workflow status" in lookup.reason
 
 
 def test_cache_miss_reports_method_upgrade_before_older_workbook_drift(

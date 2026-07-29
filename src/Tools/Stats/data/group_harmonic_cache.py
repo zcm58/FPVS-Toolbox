@@ -96,8 +96,18 @@ def build_group_harmonic_cache_request(
     manifest = _read_manifest(manifest_path)
     if manifest is None:
         return None
-    subject_key = tuple(str(subject) for subject in subjects)
-    condition_key = tuple(str(condition) for condition in conditions)
+    subject_key = tuple(
+        str(subject)
+        for subject in _canonical_ordered_items(
+            [str(subject) for subject in subjects]
+        )
+    )
+    condition_key = tuple(
+        str(condition)
+        for condition in _canonical_ordered_items(
+            [str(condition) for condition in conditions]
+        )
+    )
     processing_signature = build_project_processing_signature(manifest)
     processing_signature_hash = _hash_payload(processing_signature)
     workbooks = [
@@ -243,8 +253,9 @@ def lookup_cached_group_harmonic_selection(
             return GroupHarmonicCacheLookup(
                 hit=compatible_hit,
                 reason=(
-                    "Saved harmonics match current scientific inputs; ignored "
-                    "legacy downstream-output workflow status."
+                    "Saved harmonics match current scientific inputs after "
+                    "normalizing legacy cache ordering or downstream-output "
+                    "workflow status."
                 ),
             )
     return GroupHarmonicCacheLookup(
@@ -482,7 +493,7 @@ def _cache_miss_reason(
 
 
 def _fingerprint_without_processing(fingerprint: Mapping[str, object]) -> dict[str, object]:
-    out = dict(fingerprint)
+    out = _fingerprint_with_canonical_input_order(fingerprint)
     out.pop("project_processing_signature", None)
     out.pop("project_processing_signature_hash", None)
     return _json_safe(out)
@@ -493,7 +504,7 @@ def _fingerprint_without_workflow_state(
 ) -> dict[str, object]:
     """Normalize legacy fingerprints by removing non-scientific status state."""
 
-    out = copy.deepcopy(dict(fingerprint))
+    out = _fingerprint_with_canonical_input_order(fingerprint)
     processing_signature = out.get("project_processing_signature")
     if isinstance(processing_signature, Mapping):
         normalized_signature = copy.deepcopy(dict(processing_signature))
@@ -507,8 +518,43 @@ def _fingerprint_without_workflow_state(
     return _json_safe(out)
 
 
+def _fingerprint_with_canonical_input_order(
+    fingerprint: Mapping[str, object],
+) -> dict[str, object]:
+    """Treat participant, condition, and workbook ordering as non-scientific."""
+
+    out = copy.deepcopy(dict(fingerprint))
+    selection_inputs = out.get("selection_inputs")
+    if isinstance(selection_inputs, Mapping):
+        normalized_inputs = copy.deepcopy(dict(selection_inputs))
+        for key in ("subjects", "conditions"):
+            values = normalized_inputs.get(key)
+            if isinstance(values, (list, tuple)):
+                normalized_inputs[key] = _canonical_ordered_items(values)
+        out["selection_inputs"] = normalized_inputs
+
+    source_workbooks = out.get("source_workbooks")
+    if isinstance(source_workbooks, (list, tuple)):
+        out["source_workbooks"] = _canonical_ordered_items(source_workbooks)
+    return out
+
+
+def _canonical_ordered_items(values: Sequence[object]) -> list[object]:
+    normalized = [_json_safe(value) for value in values]
+    return sorted(
+        normalized,
+        key=lambda value: json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+    )
+
+
 def _selection_inputs(fingerprint: Mapping[str, object]) -> object:
-    return _json_safe(fingerprint.get("selection_inputs"))
+    normalized = _fingerprint_with_canonical_input_order(fingerprint)
+    return _json_safe(normalized.get("selection_inputs"))
 
 
 def _method_version(fingerprint: Mapping[str, object]) -> str:
@@ -520,7 +566,8 @@ def _stats_settings(fingerprint: Mapping[str, object]) -> object:
 
 
 def _source_workbooks(fingerprint: Mapping[str, object]) -> object:
-    return _json_safe(fingerprint.get("source_workbooks"))
+    normalized = _fingerprint_with_canonical_input_order(fingerprint)
+    return _json_safe(normalized.get("source_workbooks"))
 
 
 def _cache_from_manifest(manifest: Mapping[str, object] | None) -> dict[str, object]:

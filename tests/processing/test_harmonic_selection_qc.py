@@ -9,6 +9,7 @@ import pytest
 from openpyxl import load_workbook
 
 from Main_App.processing import harmonic_selection_qc
+from Main_App.projects import Project
 from Tools.Stats.data.group_harmonic_cache import (
     clear_cached_group_harmonic_selections,
 )
@@ -100,6 +101,71 @@ def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cach
     )
     loaded = harmonic_selection_qc.load_processing_harmonic_selection(project)
     assert loaded.selected_harmonics_hz == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
+    assert loaded.selection_cache_source == "saved_processing_metadata"
+
+
+def test_processing_harmonic_selection_survives_project_event_order_reload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    disk_event_map = {"Faces": 1, "Objects": 2}
+    live_event_map = {"Objects": 2, "Faces": 1}
+    for condition in disk_event_map:
+        condition_root = excel_root / condition
+        condition_root.mkdir(parents=True, exist_ok=True)
+        _write_group_policy_workbook(
+            condition_root / f"S1_{condition}_Results.xlsx",
+            scale=1,
+        )
+        _write_group_policy_workbook(
+            condition_root / f"S2_{condition}_Results.xlsx",
+            scale=2,
+        )
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": disk_event_map,
+                "preprocessing": {},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    live_project = SimpleNamespace(
+        project_root=project_root,
+        subfolders={"excel": excel_root},
+        event_map=live_event_map,
+        preprocessing={},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_base_frequency_hz",
+        lambda: 6.0,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_bca_upper_limit_hz",
+        lambda: 8.4,
+    )
+
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(live_project)
+    reloaded_project = Project.load(project_root)
+    loaded = harmonic_selection_qc.load_processing_harmonic_selection(
+        reloaded_project
+    )
+
+    assert loaded.selected_harmonics_hz == pytest.approx(
+        [1.2, 2.4, 3.6, 4.8, 7.2]
+    )
     assert loaded.selection_cache_source == "saved_processing_metadata"
 
 
