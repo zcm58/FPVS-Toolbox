@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+import numpy as np
 import pandas as pd
 
 from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
@@ -716,8 +717,11 @@ def _prepare_project_long_data(
         cancel_check,
         stage="before_hard_dv_filter",
     )
-    filtered, outlier_report = apply_hard_dv_exclusion(
-        long_data,
+    numeric_values = pd.to_numeric(long_data["value"], errors="coerce")
+    finite_mask = np.isfinite(numeric_values.to_numpy(dtype=float))
+    finite_data = long_data.loc[finite_mask].copy()
+    _, outlier_report = apply_hard_dv_exclusion(
+        finite_data,
         float(outlier_abs_limit),
         participant_col="subject",
         condition_col="condition",
@@ -728,15 +732,18 @@ def _prepare_project_long_data(
         cancel_check,
         stage="after_hard_dv_filter",
     )
-    retained = set(filtered["subject"].astype(str).unique())
-    selected_subjects = [
-        participant
-        for participant in selected_subjects
-        if participant in retained
-    ]
-    if filtered.empty or not selected_subjects:
+    nonfinite_cells = int((~finite_mask).sum())
+    if finite_data.empty:
         raise RuntimeError(
-            "All participants were excluded by required non-finite DV checks."
+            "Summed BCA produced no finite values for the selected "
+            "conditions and ROIs."
+        )
+    if nonfinite_cells:
+        message_emit(
+            f"Summed BCA contains {nonfinite_cells} missing or non-finite "
+            "Condition x ROI cell(s). The frozen participant cohort was "
+            "preserved; the selected analysis scope will determine which "
+            "conditions and finite observations are usable."
         )
     _emit_progress(progress_callback, 4, 5)
     preparation_metadata = {
@@ -746,9 +753,11 @@ def _prepare_project_long_data(
         "outlier_report": outlier_report,
         "project_input_prepared": True,
         "analysis_scope": scope,
+        "nonfinite_dv_cells": nonfinite_cells,
+        "nonfinite_dv_handling": "analysis_scope",
         "missing_source_workbooks": missing_source_pairs,
     }
-    return filtered, selected_subjects, preparation_metadata
+    return long_data, selected_subjects, preparation_metadata
 
 
 def run_prepare_analysis(

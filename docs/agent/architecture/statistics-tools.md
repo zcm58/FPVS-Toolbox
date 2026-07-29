@@ -98,6 +98,10 @@ Stats grouping:
   selection is missing or stale instead of recalculating it.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
+- The in-app Run log retains the complete workflow audit trail. Routine
+  pipeline, worker, model, QC, and export messages are DEBUG-only in the IDE
+  console; missing-file diagnostics, genuine warnings, and errors remain
+  visible at the default application logging level.
 - `reporting/inference/`: the mode-neutral native report bundle, including
   At a Glance, detailed methods/checks, the complete test inventory, named
   correction families, limitations, and additive source-result sheets.
@@ -239,7 +243,9 @@ Rules:
   observed. Never drop participants silently to improve condition coverage,
   never impute missing responses, and always export frozen versus contributing
   participants, complete/partial/excluded conditions, participant coverage,
-  model-cell coverage, and missing observations.
+  model-cell coverage, and missing observations. Missing or non-finite Summed
+  BCA cells are passed to this scope audit; they must not trigger a
+  participant-wide DV exclusion before the audit.
 - The complete-core single-group pipeline runs a Condition x ROI
   repeated-measures ANOVA, a sum-coded Condition x ROI `statsmodels` mixed
   model, gated/declared paired follow-ups, and one-sample

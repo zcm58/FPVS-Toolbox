@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -827,7 +828,7 @@ def test_project_prepare_accepts_canonical_and_display_group_aliases(
     [float("nan"), float("inf")],
     ids=["nan", "inf"],
 )
-def test_project_adapter_reuses_qc_and_applies_manual_then_nonfinite_exclusions(
+def test_project_adapter_reuses_qc_and_defers_nonfinite_cells_to_scope_audit(
     monkeypatch,
     invalid_value,
 ) -> None:
@@ -866,11 +867,16 @@ def test_project_adapter_reuses_qc_and_applies_manual_then_nonfinite_exclusions(
     )
 
     assert seen_subjects == ["P1", "P2"]
-    assert frozen == ["P1"]
-    assert frame["subject"].tolist() == ["P1"]
+    assert frozen == ["P1", "P2"]
+    assert frame["subject"].tolist() == ["P1", "P2"]
+    assert not np.isfinite(
+        frame.loc[frame["subject"].eq("P2"), "value"].iloc[0]
+    )
     assert metadata["qc_report"] is qc_report
+    assert metadata["nonfinite_dv_cells"] == 1
+    assert metadata["nonfinite_dv_handling"] == "analysis_scope"
     outlier_report = metadata["outlier_report"]
-    assert outlier_report.summary.n_subjects_required_excluded == 1
+    assert outlier_report.summary.n_subjects_required_excluded == 0
 
 
 def test_available_case_missing_workbook_does_not_exclude_participant(
@@ -935,7 +941,7 @@ def test_available_case_missing_workbook_does_not_exclude_participant(
     )
 
 
-def test_available_case_present_workbook_nonfinite_still_excludes_participant(
+def test_available_case_present_workbook_nonfinite_preserves_frozen_participant(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -975,12 +981,50 @@ def test_available_case_present_workbook_nonfinite_still_excludes_participant(
         analysis_scope="available_case",
     )
 
-    assert frozen == ["P1"]
-    assert frame["subject"].tolist() == ["P1"]
+    assert frozen == ["P1", "P2"]
+    assert frame["subject"].tolist() == ["P1", "P2"]
+    assert frame.loc[frame["subject"].eq("P2"), "value"].isna().all()
     assert (
         metadata["outlier_report"].summary.n_subjects_required_excluded
-        == 1
+        == 0
     )
+
+
+def test_complete_core_excludes_incomplete_condition_not_participants(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        workers,
+        "prepare_summed_bca_data",
+        lambda **_kwargs: {
+            "P1": {"Shared": {"R1": 1.0}, "Partial": {"R1": 1.2}},
+            "P2": {
+                "Shared": {"R1": 0.9},
+                "Partial": {"R1": float("nan")},
+            },
+        },
+    )
+
+    result = workers.run_prepare_analysis(
+        subjects=["P1", "P2"],
+        conditions=["Shared", "Partial"],
+        conditions_all=["Shared", "Partial"],
+        subject_data={"P1": {}, "P2": {}},
+        base_freq=6.0,
+        rois={"R1": ["Oz"]},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
+        qc_state={"report": _cached_qc_report()},
+        mode="multi",
+        canonical_group_ids={"P1": "control", "P2": "anxious"},
+        analysis_scope="complete_core",
+    )
+
+    payload = result["prepared_payload"]
+    assert result["status"] == "ready"
+    assert payload.frozen_participants == ("P1", "P2")
+    assert payload.retained_conditions == ("Shared",)
+    assert payload.excluded_conditions == ("Partial",)
+    assert set(payload.primary_data["subject"]) == {"P1", "P2"}
 
 
 def test_prepare_cancellation_after_adaptive_preflight_skips_summed_bca(

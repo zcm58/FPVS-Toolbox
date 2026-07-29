@@ -59,6 +59,11 @@ exclusions. You can then choose one of two explicit analysis scopes:
   multi-group mode) has data. A participant may contribute some retained
   conditions without contributing all of them.
 
+Missing or non-finite Summed BCA cells do not automatically remove the whole
+participant. Complete-core mode excludes the affected condition for everyone;
+available-case mode uses the participant's other finite observations when the
+condition remains structurally estimable.
+
 Available-case mode does not fill, average over, or impute a missing response.
 The report distinguishes the frozen cohort from participants who contributed at
 least one usable row, lists fully complete, partially observed, and structurally
