@@ -5,12 +5,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Callable, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from Tools.Stats.io import excel_io
+from Tools.Stats.io.xlsx_selected_reader import (
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+)
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
     _match_freq_column,
@@ -194,6 +199,75 @@ def _build_qc_harmonic_domain(
     return [freq for freq, _k in oddball_list]
 
 
+def _qc_roi_electrodes_upper(rois_all: Dict[str, List[str]]) -> set[str]:
+    return {
+        str(electrode).strip().upper()
+        for electrodes in (rois_all or {}).values()
+        for electrode in (electrodes or [])
+        if str(electrode).strip()
+    }
+
+
+def _read_qc_bca_data(
+    *,
+    file_path: str,
+    base_freq: float,
+    roi_electrodes_upper: set[str],
+    log_func: Optional[Callable[[str], None]],
+) -> tuple[pd.DataFrame, list[float], dict[float, Optional[str]], str]:
+    """Read only the BCA cells required by QC when the source is `.xlsx`."""
+
+    path = Path(file_path)
+    if path.suffix.casefold() == ".xlsx":
+        header = read_xlsx_sheet_header(path, sheet_name="BCA (uV)")
+        harmonic_freqs = _build_qc_harmonic_domain(
+            header,
+            base_freq,
+            log_func,
+        )
+        col_map = {
+            freq: _match_freq_column(header, freq)
+            for freq in harmonic_freqs
+        }
+        harmonic_columns = list(
+            dict.fromkeys(
+                column
+                for column in col_map.values()
+                if column is not None
+            )
+        )
+        df_bca = read_xlsx_sheet_selected_columns(
+            path,
+            sheet_name="BCA (uV)",
+            required_columns=["Electrode", *harmonic_columns],
+            included_electrodes_upper=roi_electrodes_upper,
+        )
+        if "Electrode" not in df_bca.columns:
+            raise ValueError("BCA sheet is missing the Electrode column")
+        return (
+            df_bca.set_index("Electrode"),
+            harmonic_freqs,
+            col_map,
+            "selected_xlsx",
+        )
+
+    df_bca = excel_io.safe_read_excel(
+        path,
+        sheet_name="BCA (uV)",
+        index_col="Electrode",
+    )
+    harmonic_freqs = _build_qc_harmonic_domain(
+        df_bca.columns,
+        base_freq,
+        log_func,
+    )
+    col_map = {
+        freq: _match_freq_column(df_bca.columns, freq)
+        for freq in harmonic_freqs
+    }
+    return df_bca, harmonic_freqs, col_map, "full_fallback"
+
+
 def _robust_center_spread(values: np.ndarray) -> tuple[float, float]:
     """Handle the robust center spread step for the Stats workflow."""
     finite = values[np.isfinite(values)]
@@ -285,31 +359,60 @@ def run_qc_exclusion(
     )
 
     qc_values: dict[tuple[str, str], dict[str, dict[str, object]]] = {}
+    roi_electrodes_upper = _qc_roi_electrodes_upper(rois_all)
+    screen_started = perf_counter()
+    selected_xlsx_reads = 0
+    fallback_reads = 0
+    missing_files = 0
+    failed_reads = 0
 
     for pid in subjects:
         for cond_name in screened_conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
             if not file_path:
+                missing_files += 1
                 _log_message(log_func, f"QC: Missing file for {pid} {cond_name}: {file_path}")
                 continue
             if not Path(file_path).exists():
+                missing_files += 1
                 _log_message(log_func, f"QC: Missing file for {pid} {cond_name}: {file_path}")
                 continue
             try:
-                df_bca = excel_io.safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
+                df_bca, harmonic_freqs, col_map, read_mode = _read_qc_bca_data(
+                    file_path=file_path,
+                    base_freq=base_freq,
+                    roi_electrodes_upper=roi_electrodes_upper,
+                    log_func=log_func,
+                )
             except Exception as exc:  # noqa: BLE001
+                failed_reads += 1
                 _log_message(log_func, f"QC: Failed to read BCA sheet from {file_path}: {exc}")
                 continue
+            if read_mode == "selected_xlsx":
+                selected_xlsx_reads += 1
+            else:
+                fallback_reads += 1
 
             df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
-            harmonic_freqs = _build_qc_harmonic_domain(df_bca.columns, base_freq, log_func)
             if not harmonic_freqs:
                 _log_message(
                     log_func,
                     f"QC: No harmonic columns found for {pid} {cond_name}; skipping.",
                 )
                 continue
-            col_map = {freq: _match_freq_column(df_bca.columns, freq) for freq in harmonic_freqs}
+            harmonic_pairs = [
+                (freq, column)
+                for freq in harmonic_freqs
+                if (column := col_map.get(freq)) is not None
+            ]
+            harmonic_columns = list(
+                dict.fromkeys(column for _freq, column in harmonic_pairs)
+            )
+            numeric_bca = (
+                df_bca[harmonic_columns]
+                .apply(pd.to_numeric, errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+            )
 
             for roi_name, roi_channels in (rois_all or {}).items():
                 roi_chans = [
@@ -328,37 +431,30 @@ def run_qc_exclusion(
                     _log_message(log_func, f"QC: No BCA data for ROI {roi_name} in {file_path}.")
                     continue
 
-                mean_values: list[float] = []
-                max_abs_value = float("nan")
-                max_abs_freq: Optional[float] = None
-                max_abs_raw: Optional[float] = None
-
-                for freq_val in harmonic_freqs:
-                    col_bca = col_map.get(freq_val)
-                    if not col_bca:
-                        continue
-                    series = pd.to_numeric(df_roi[col_bca], errors="coerce").replace(
-                        [np.inf, -np.inf], np.nan
-                    )
-                    mean_val = float(series.mean(skipna=True))
-                    if not np.isfinite(mean_val):
-                        continue
-                    mean_values.append(mean_val)
-                    abs_val = abs(mean_val)
-                    if not np.isfinite(max_abs_value) or abs_val > max_abs_value:
-                        max_abs_value = abs_val
-                        max_abs_freq = float(freq_val)
-                        max_abs_raw = mean_val
-
-                if not mean_values:
+                roi_means = numeric_bca.loc[roi_chans].mean(
+                    axis=0,
+                    skipna=True,
+                )
+                finite_means = [
+                    (float(freq), float(roi_means[column]))
+                    for freq, column in harmonic_pairs
+                    if np.isfinite(roi_means[column])
+                ]
+                if not finite_means:
                     _log_message(
                         log_func,
                         f"QC: No finite harmonic means for {pid} {cond_name} {roi_name}.",
                     )
                     continue
 
-                qc_sumabs = float(np.sum(np.abs(mean_values)))
-                qc_maxabs = float(max_abs_value)
+                max_abs_freq, max_abs_raw = max(
+                    finite_means,
+                    key=lambda item: abs(item[1]),
+                )
+                qc_sumabs = float(
+                    np.sum(np.abs([mean for _freq, mean in finite_means]))
+                )
+                qc_maxabs = float(abs(max_abs_raw))
                 cell_key = (cond_name, roi_name)
                 pid_entry = qc_values.setdefault(cell_key, {}).setdefault(pid, {})
                 pid_entry["sumabs"] = qc_sumabs
@@ -530,6 +626,11 @@ def run_qc_exclusion(
             "n_flagged": len(flagged_ids),
             "n_conditions": len(screened_conditions),
             "n_rois": len(screened_rois),
+            "elapsed_seconds": round(perf_counter() - screen_started, 3),
+            "selected_xlsx_reads": selected_xlsx_reads,
+            "fallback_reads": fallback_reads,
+            "missing_files": missing_files,
+            "failed_reads": failed_reads,
         },
     )
     return report

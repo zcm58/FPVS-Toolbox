@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from Tools.Stats.io import excel_io
+import Tools.Stats.qc.stats_qc_exclusion as qc_exclusion
 from Tools.Stats.analysis.dv_policies import (
     FIXED_PREDEFINED_POLICY_NAME,
     prepare_summed_bca_data,
 )
+from Tools.Stats.io import excel_io
 from Tools.Stats.qc.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
@@ -51,16 +52,23 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
     }
     conditions_all = ["A", "B"]
     rois = {"Occipital": ["O1", "O2"]}
-    normal_df = _make_bca_df(0.1)
-    extreme_df = _make_bca_df(1000.0)
 
-    def _fake_read_excel(path, sheet_name, *, index_col=None, use_cache=True):
-        _ = sheet_name, index_col, use_cache
-        if "P3_B" in str(path):
-            return extreme_df.copy()
-        return normal_df.copy()
+    def _fail_full_workbook_read(*_args, **_kwargs):
+        raise AssertionError("QC should use the selective .xlsx reader")
 
-    monkeypatch.setattr(excel_io, "safe_read_excel", _fake_read_excel)
+    selected_electrode_filters: list[set[str] | None] = []
+    original_selected_read = qc_exclusion.read_xlsx_sheet_selected_columns
+
+    def _record_selected_read(*args, **kwargs):
+        selected_electrode_filters.append(kwargs.get("included_electrodes_upper"))
+        return original_selected_read(*args, **kwargs)
+
+    monkeypatch.setattr(excel_io, "safe_read_excel", _fail_full_workbook_read)
+    monkeypatch.setattr(
+        qc_exclusion,
+        "read_xlsx_sheet_selected_columns",
+        _record_selected_read,
+    )
 
     report = run_qc_exclusion(
         subjects=list(subject_data.keys()),
@@ -78,6 +86,11 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
         for participant in report.participants
         if participant.participant_id == "P3"
     )
+    assert selected_electrode_filters
+    assert all(
+        electrode_filter == {"O1", "O2"}
+        for electrode_filter in selected_electrode_filters
+    )
 
     dv_data = prepare_summed_bca_data(
         subjects=list(subject_data.keys()),
@@ -92,6 +105,64 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
     assert dv_data is not None
     assert set(dv_data.keys()) == set(subject_data.keys())
     assert set(dv_data["P1"].keys()) == {"A"}
+
+
+def test_qc_keeps_full_reader_fallback_for_non_xlsx(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    workbook = tmp_path / "legacy_results.xls"
+    workbook.write_bytes(b"test placeholder")
+    read_calls: list[tuple[str, str, str | None]] = []
+
+    def _fake_read_excel(path, sheet_name, *, index_col=None, use_cache=True):
+        _ = use_cache
+        read_calls.append((str(path), str(sheet_name), index_col))
+        return _make_bca_df(0.1)
+
+    monkeypatch.setattr(excel_io, "safe_read_excel", _fake_read_excel)
+
+    report = run_qc_exclusion(
+        subjects=["P1"],
+        subject_data={"P1": {"A": str(workbook)}},
+        conditions_all=["A"],
+        rois_all={"Occipital": ["O1", "O2"]},
+        base_freq=6.0,
+        log_func=None,
+    )
+
+    assert read_calls == [(str(workbook), "BCA (uV)", "Electrode")]
+    assert report.summary.n_subjects_before == 1
+    assert report.summary.n_subjects_flagged == 0
+
+
+def test_qc_reports_missing_mapping_without_attempting_a_read(
+    monkeypatch,
+) -> None:
+    messages: list[str] = []
+
+    def _fail_read(*_args, **_kwargs):
+        raise AssertionError("No workbook read should be attempted")
+
+    monkeypatch.setattr(excel_io, "safe_read_excel", _fail_read)
+    monkeypatch.setattr(
+        qc_exclusion,
+        "read_xlsx_sheet_header",
+        _fail_read,
+    )
+
+    report = run_qc_exclusion(
+        subjects=["P1"],
+        subject_data={"P1": {}},
+        conditions_all=["A"],
+        rois_all={"Occipital": ["O1", "O2"]},
+        base_freq=6.0,
+        log_func=messages.append,
+    )
+
+    assert any("QC: Missing file for P1 A" in message for message in messages)
+    assert report.summary.n_subjects_before == 1
+    assert report.summary.n_subjects_flagged == 0
 
 
 def _write_bca_workbook(path, frame: pd.DataFrame) -> None:
