@@ -176,7 +176,8 @@ class StatsWindowUiMixin:
 
         self.group_significant_note = QLabel(
             "Uses one common z-significant oddball harmonic list selected from "
-            "grand-averaged FullFFT amplitude spectra; this is the default Stats DV policy."
+            "grand-averaged FullFFT amplitude spectra; manage or recalculate this "
+            "processing-time selection in Settings > Preprocessing."
         )
         self.group_significant_note.setWordWrap(True)
         self.group_significant_note.setToolTip(
@@ -184,12 +185,13 @@ class StatsWindowUiMixin:
             "with base-rate overlaps excluded."
         )
         self.recalculate_harmonics_btn = make_action_button(
-            "Recalculate Harmonics",
+            "Open Recalculation Settings",
             compact=True,
         )
         self.recalculate_harmonics_btn.setObjectName("stats_recalculate_harmonics_button")
         self.recalculate_harmonics_btn.setToolTip(
-            "Clear saved group-level significant harmonics for this project."
+            "Open Settings > Preprocessing, where the project harmonic selection "
+            "can be reviewed and recalculated safely."
         )
         self.recalculate_harmonics_btn.clicked.connect(self.on_recalculate_harmonics_clicked)
         group_significant_row = QHBoxLayout()

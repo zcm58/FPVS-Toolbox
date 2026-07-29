@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QTextEdit,
     QWidget,
@@ -182,6 +183,8 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert cards["Summed BCA definition"].isAncestorOf(
         window.fixed_predefined_preview_table
     )
+    assert window.recalculate_harmonics_btn.text() == "Open Recalculation Settings"
+    assert "Settings > Preprocessing" in window.recalculate_harmonics_btn.toolTip()
     assert (
         window.fixed_predefined_preview_table.sizePolicy().verticalPolicy()
         == QSizePolicy.Fixed
@@ -404,6 +407,40 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert not hasattr(window, "copy_log_btn")
     assert not hasattr(window, "reporting_summary_copy_btn")
     assert not hasattr(window, "reporting_summary_save_btn")
+
+
+@pytest.mark.qt
+def test_stats_harmonic_action_opens_settings_without_clearing_cache(
+    qtbot,
+    tmp_path,
+    app,
+):
+    manifest_path = tmp_path / "project.json"
+    manifest_text = (
+        '{"tools":{"stats":{"group_significant_harmonics_cache":'
+        '{"entries":{"keep-me":{"selection_metadata":{"selected_harmonics_hz":[1.2]}}}}}}}'
+    )
+    manifest_path.write_text(manifest_text, encoding="utf-8")
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    opened: list[bool] = []
+    host.open_settings_window = lambda: opened.append(True)
+    workspace = QStackedWidget(host)
+
+    window = StatsWindow(parent=host, project_dir=str(tmp_path))
+    qtbot.addWidget(window)
+    workspace.addWidget(window)
+    window.show()
+    window.setup_tabs.setCurrentIndex(1)
+    window.advanced_tabs.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(window.recalculate_harmonics_btn, Qt.LeftButton)
+
+    assert opened == [True]
+    assert manifest_path.read_text(encoding="utf-8") == manifest_text
+    assert "Opened Settings > Preprocessing" in window.lbl_status.text()
 
 
 def test_stats_tool_info_uses_expected_nonexpert_tabs():

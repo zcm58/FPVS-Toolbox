@@ -1,4 +1,6 @@
 """DV policy, outlier, and manual exclusion helpers for StatsWindow."""
+# ruff: noqa: F405
+
 from __future__ import annotations
 
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
@@ -220,29 +222,52 @@ class StatsWindowExclusionsMixin:
             table.setRowCount(0)
 
     def on_recalculate_harmonics_clicked(self) -> None:
-        """Clear saved group-significant harmonic metadata for this project."""
-        clear_group_significant_selection_cache()
-        project_root = getattr(self, "_project_path", None)
-        try:
-            cleared = clear_cached_group_harmonic_selections(project_root)
-            self._sync_parent_project_manifest_tools()
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("stats_clear_group_harmonic_cache_failed", exc_info=True)
-            QMessageBox.warning(
+        """Open the canonical Settings workflow without deleting saved metadata."""
+
+        host = self.parentWidget()
+        open_settings = None
+        while host is not None:
+            candidate = getattr(host, "open_settings_window", None)
+            if callable(candidate):
+                open_settings = candidate
+                break
+            host = host.parentWidget()
+        if not callable(open_settings):
+            QMessageBox.information(
                 self,
-                "Recalculate Harmonics",
-                f"Saved harmonics could not be cleared: {exc}",
+                "Recalculate Harmonics in Settings",
+                (
+                    "Open the main FPVS Toolbox Settings page, choose "
+                    "Preprocessing, then use Recalculate Harmonics. Statistical "
+                    "Analysis does not recalculate or clear processing-time "
+                    "harmonic metadata."
+                ),
             )
             return
-        if cleared:
-            message = (
-                f"Cleared {cleared} saved significant-harmonics selection(s); "
-                "the next group-significant run will recalculate."
-            )
-        else:
-            message = "No saved significant-harmonics selections were found for this project."
+
+        message = (
+            "Opened Settings > Preprocessing. Use Recalculate Harmonics in the "
+            "Harmonic Selection section, then return to Statistical Analysis."
+        )
         self.append_log("General", message)
         self._set_status(message)
+        open_settings()
+
+        settings_page = getattr(host, "_settings_page", None)
+        settings_tabs = getattr(settings_page, "tabs", None)
+        set_current_index = getattr(settings_tabs, "setCurrentIndex", None)
+        if callable(set_current_index):
+            set_current_index(
+                int(getattr(settings_page, "_preproc_tab_index", 0))
+            )
+        recalculate_button = getattr(
+            settings_page,
+            "recalculate_harmonics_button",
+            None,
+        )
+        set_focus = getattr(recalculate_button, "setFocus", None)
+        if callable(set_focus):
+            set_focus()
 
     def _sync_parent_project_manifest_tools(self) -> None:
         """Keep embedded Project.manifest tools metadata aligned after Stats writes."""

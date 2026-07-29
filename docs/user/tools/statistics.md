@@ -104,7 +104,10 @@ participant, condition, and ROI.
 The processing workflow records the selection in
 `Quality Check/Harmonic_Selection_Summary.xlsx` and in project metadata. A
 missing or stale selection must be recalculated before the analysis proceeds;
-the Stats tool does not silently invent another list.
+the Stats tool does not silently invent another list. Use
+**Settings > Preprocessing > Harmonic Selection > Recalculate Harmonics**.
+The Statistical Analysis page provides a link to that Settings workflow; it
+does not delete or recalculate the processing-time selection itself.
 
 ### Why provenance changes interpretation
 

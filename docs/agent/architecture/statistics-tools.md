@@ -121,6 +121,12 @@ Rules:
   must load it; they must not derive a condition-, participant-, ROI-, or
   tool-specific replacement. A missing or stale cache is a user-actionable
   reprocess/recalculate error.
+- The Stats page may link users to
+  `Settings > Preprocessing > Harmonic Selection`, but it must not clear the
+  saved selection, claim that the next Stats run will recalculate it, or start
+  a second recalculation workflow. FFT-grid review, background calculation,
+  persistence verification, and success/failure feedback remain owned by the
+  canonical Settings workflow.
 - Stats-ready exports must stay explicit and additive. Keep
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
   BCA DV facade, preserve `subject_id` and group labels, and surface missing
