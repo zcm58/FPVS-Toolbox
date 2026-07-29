@@ -137,7 +137,7 @@ The current workflow still needs these behavioral changes:
 
 - `9fe0f180` — `fix(stats): stabilize harmonic cache identity`
 - `24b0702b` — `perf(stats): speed QC workbook screening`
-- Summary/UI baseline commit recorded below after this plan update.
+- `4f59a583` — `refactor(stats): simplify in-app result summary`
 
 ## Phase 1 — Screening Contracts and Shared LMM Contrasts
 
@@ -161,16 +161,16 @@ The current workflow still needs these behavioral changes:
 
 ### Definition of Done
 
-- [ ] Contrast estimates and signs match known synthetic fixed effects.
-- [ ] Reversing Group A and Group B reverses estimates and confidence bounds
+- [x] Contrast estimates and signs match known synthetic fixed effects.
+- [x] Reversing Group A and Group B reverses estimates and confidence bounds
       without changing two-sided p-values.
-- [ ] Missing participant cells are not imputed and do not prevent estimable
+- [x] Missing participant cells are not imputed and do not prevent estimable
       contrasts.
-- [ ] Structurally empty cells are explicitly non-estimable.
-- [ ] Every row says `LMM-derived model-estimated contrast` and identifies the
+- [x] Structurally empty cells are explicitly non-estimable.
+- [x] Every row says `LMM-derived model-estimated contrast` and identifies the
       asymptotic Wald method.
-- [ ] Existing ML-LRT formulas and final REML estimation remain intact.
-- [ ] Focused Stats verification passes.
+- [x] Existing ML-LRT formulas and final REML estimation remain intact.
+- [x] Focused Stats verification passes.
 
 ### Verification
 
@@ -179,7 +179,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Pending.
+- Phase commit recorded below after this plan update.
 
 ## Phase 2 — Single-Group Standard Screening
 
@@ -415,3 +415,8 @@ Run in a normal visible Windows session, never offscreen:
   passed. Cache identity and QC performance were committed separately; the
   simplified result-summary baseline and this plan form the closing Phase 0
   commit.
+- 2026-07-29: Phase 1 added the locked standard-screening contract and a
+  GUI-neutral fitted-LMM estimated-marginal-contrast engine. New contrast and
+  contract tests passed (13), focused model/design/multiplicity tests passed
+  (48), Stats focused verification passed (307), Ruff/compile passed, and
+  `git diff --check` found no whitespace errors.

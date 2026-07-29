@@ -111,6 +111,13 @@ class InferenceRole(_StringEnum):
     SENSITIVITY = "sensitivity"
 
 
+STANDARD_SCREENING_ALPHA = 0.05
+STANDARD_SCREENING_SCOPE = "available_case"
+STANDARD_SCREENING_RANDOM_EFFECTS = "participant_random_intercept"
+STANDARD_SCREENING_RESPONSE_ALTERNATIVE = Alternative.GREATER
+STANDARD_SCREENING_CORRECTION = CorrectionMethod.HOLM
+
+
 @dataclass(frozen=True)
 class FamilySpec:
     """Definition of one named multiple-comparison family."""
@@ -156,7 +163,7 @@ class AnalysisRunSpec:
     profile: AnalysisProfile
     harmonic_provenance: HarmonicProvenance
     alpha: float = 0.05
-    response_alternative: Alternative = Alternative.TWO_SIDED
+    response_alternative: Alternative = STANDARD_SCREENING_RESPONSE_ALTERNATIVE
     families: tuple[FamilySpec, ...] = field(default_factory=tuple)
     followup_provenance: FollowupProvenance | None = None
 
@@ -379,6 +386,67 @@ def test_inventory_frame(records: Iterable[TestMetadata]) -> pd.DataFrame:
     return result.to_frames()["Test Inventory"]
 
 
+def standard_screening_families(
+    *,
+    alpha: float = STANDARD_SCREENING_ALPHA,
+) -> tuple[FamilySpec, ...]:
+    """Return the fixed Holm families used by standard FPVS screening."""
+
+    return (
+        FamilySpec(
+            family_id="response_core_cells",
+            family_label="Positive-response Condition x ROI cells",
+            method=STANDARD_SCREENING_CORRECTION,
+            alpha=alpha,
+        ),
+        FamilySpec(
+            family_id="group_response_cells",
+            family_label="Positive responses within Group x Condition x ROI cells",
+            method=STANDARD_SCREENING_CORRECTION,
+            alpha=alpha,
+        ),
+        FamilySpec(
+            family_id="group_core_cells",
+            family_label="LMM Group contrasts across Condition x ROI cells",
+            method=STANDARD_SCREENING_CORRECTION,
+            alpha=alpha,
+        ),
+        FamilySpec(
+            family_id="planned_contrasts",
+            family_label="LMM-derived factorial follow-up contrasts",
+            method=STANDARD_SCREENING_CORRECTION,
+            alpha=alpha,
+        ),
+        FamilySpec(
+            family_id="omnibus_effects_strict",
+            family_label="Primary LMM factorial screening blocks",
+            method=STANDARD_SCREENING_CORRECTION,
+            alpha=alpha,
+        ),
+    )
+
+
+def build_standard_screening_run_spec(
+    *,
+    profile: AnalysisProfile | str,
+    harmonic_provenance: HarmonicProvenance | str,
+    alpha: float = STANDARD_SCREENING_ALPHA,
+    followup_provenance: FollowupProvenance | str = (
+        FollowupProvenance.OMNIBUS_TRIGGERED
+    ),
+) -> AnalysisRunSpec:
+    """Build the locked first-round FPVS screening inference contract."""
+
+    return AnalysisRunSpec(
+        profile=profile,
+        harmonic_provenance=harmonic_provenance,
+        alpha=alpha,
+        response_alternative=STANDARD_SCREENING_RESPONSE_ALTERNATIVE,
+        families=standard_screening_families(alpha=alpha),
+        followup_provenance=followup_provenance,
+    )
+
+
 __all__ = [
     "Alternative",
     "AnalysisProfile",
@@ -389,6 +457,13 @@ __all__ = [
     "FollowupProvenance",
     "HarmonicProvenance",
     "InferenceRole",
+    "STANDARD_SCREENING_ALPHA",
+    "STANDARD_SCREENING_CORRECTION",
+    "STANDARD_SCREENING_RANDOM_EFFECTS",
+    "STANDARD_SCREENING_RESPONSE_ALTERNATIVE",
+    "STANDARD_SCREENING_SCOPE",
     "TestMetadata",
+    "build_standard_screening_run_spec",
+    "standard_screening_families",
     "test_inventory_frame",
 ]

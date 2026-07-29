@@ -15,7 +15,12 @@ from Tools.Stats.analysis.inference_contracts import (
     FollowupProvenance,
     HarmonicProvenance,
     InferenceRole,
+    STANDARD_SCREENING_CORRECTION,
+    STANDARD_SCREENING_RANDOM_EFFECTS,
+    STANDARD_SCREENING_RESPONSE_ALTERNATIVE,
+    STANDARD_SCREENING_SCOPE,
     TestMetadata,
+    build_standard_screening_run_spec,
 )
 
 
@@ -39,6 +44,30 @@ def test_fixed_unverified_harmonics_do_not_imply_confirmatory_inference() -> Non
     assert independent_run.response_inference_status == "confirmatory"
     assert adaptive_run.response_is_confirmatory is False
     assert adaptive_run.response_inference_status == "exploratory_post_selection"
+    assert fixed_run.response_alternative is Alternative.GREATER
+
+
+def test_standard_screening_contract_locks_direction_correction_and_families() -> None:
+    run = build_standard_screening_run_spec(
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        harmonic_provenance=HarmonicProvenance.SAME_SAMPLE_ADAPTIVE,
+    )
+
+    assert STANDARD_SCREENING_RESPONSE_ALTERNATIVE is Alternative.GREATER
+    assert STANDARD_SCREENING_CORRECTION is CorrectionMethod.HOLM
+    assert STANDARD_SCREENING_SCOPE == "available_case"
+    assert STANDARD_SCREENING_RANDOM_EFFECTS == "participant_random_intercept"
+    assert run.response_alternative is Alternative.GREATER
+    assert set(run.family_map) == {
+        "response_core_cells",
+        "group_response_cells",
+        "group_core_cells",
+        "planned_contrasts",
+        "omnibus_effects_strict",
+    }
+    assert all(
+        family.method is CorrectionMethod.HOLM for family in run.families
+    )
 
 
 def test_run_spec_is_immutable_and_coerces_gui_safe_strings() -> None:
