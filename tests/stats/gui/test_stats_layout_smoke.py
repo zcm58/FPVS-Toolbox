@@ -78,12 +78,18 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert "border: 0" in setup_tabs.styleSheet()
     assert "background: transparent" in setup_tabs.styleSheet()
 
-    setup_scroll_areas = [
+    setup_scroll_areas = {
         scroll.objectName()
         for scroll in window.findChildren(QScrollArea)
         if setup_area.isAncestorOf(scroll)
-    ]
-    assert setup_scroll_areas == ["stats_conditions_scroll_area"]
+    }
+    assert setup_scroll_areas == {
+        "stats_basic_setup_page",
+        "stats_conditions_scroll_area",
+        "stats_advanced_inference_page",
+        "stats_advanced_dv_quality_page",
+        "stats_advanced_export_context_page",
+    }
 
     cards = {
         card.header.title_label.text(): card
@@ -115,6 +121,25 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
 
     basic_page = setup_tabs.widget(0)
     advanced_page = setup_tabs.widget(1)
+    assert isinstance(basic_page, QScrollArea)
+    assert basic_page.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    assert basic_page.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+    advanced_tabs = window.findChild(QTabWidget, "stats_advanced_tabs")
+    assert advanced_tabs is window.advanced_tabs
+    assert advanced_page.isAncestorOf(advanced_tabs)
+    assert [
+        advanced_tabs.tabText(index)
+        for index in range(advanced_tabs.count())
+    ] == [
+        "Inference",
+        "DV & quality",
+        "Export & context",
+    ]
+    for index in range(advanced_tabs.count()):
+        page = advanced_tabs.widget(index)
+        assert isinstance(page, QScrollArea)
+        assert page.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+        assert page.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
     for title in [
         "File I/O",
         "Analysis Design",
@@ -222,15 +247,11 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.group_pair_combo.isHidden()
     assert not window.group_pair_combo.isEnabled()
 
-    assert window.provenance_warning.objectName() == "stats_provenance_warning"
-    assert setup_area.isAncestorOf(window.provenance_warning)
-    assert not setup_tabs.isAncestorOf(window.provenance_warning)
-    assert window.provenance_warning.isVisible()
-    assert "exploratory post-selection" in window.provenance_warning.text()
+    assert not hasattr(window, "provenance_warning")
+    assert window.findChild(QWidget, "stats_provenance_warning") is None
     window.analysis_profile_combo.setCurrentText("Confirmatory")
     qtbot.wait(20)
-    assert window.provenance_warning.isVisible()
-    assert "even under a confirmatory profile" in window.provenance_warning.text()
+    assert window.analysis_profile_value.text() == "Confirmatory"
 
     assert window.findChild(QWidget, "stats_results_selector") is None
     assert window.findChild(QWidget, "stats_results_stack") is None
@@ -268,7 +289,6 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     qtbot.wait(20)
     assert window.summary_output_container.isVisible()
     assert window.run_action_bar.isVisible()
-    assert window.provenance_warning.isVisible()
     setup_tabs.setCurrentIndex(0)
 
     assert window.analyze_single_btn.text() == "Analyze Single Group"

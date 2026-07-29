@@ -33,9 +33,14 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert setup_tabs.widget(0).isAncestorOf(window.manual_exclusion_group)
     assert setup_area.isAncestorOf(window.lbl_status)
     assert window.lbl_status.isVisible()
-    assert setup_area.isAncestorOf(window.provenance_warning)
-    assert not setup_tabs.isAncestorOf(window.provenance_warning)
-    assert window.provenance_warning.isVisible()
+    assert not hasattr(window, "provenance_warning")
+    assert window.findChild(QWidget, "stats_provenance_warning") is None
+    advanced_tabs = window.findChild(QTabWidget, "stats_advanced_tabs")
+    assert advanced_tabs is window.advanced_tabs
+    assert [
+        advanced_tabs.tabText(index)
+        for index in range(advanced_tabs.count())
+    ] == ["Inference", "DV & quality", "Export & context"]
     assert not hasattr(window, "data_folder_group")
     assert not hasattr(window, "btn_copy_folder")
     assert not hasattr(window, "btn_open_results")

@@ -280,6 +280,8 @@ class StatsWindowActionsMixin:
         return "user_fixed_unverified"
 
     def _sync_provenance_warning(self, *_args) -> None:
+        """Keep fixed-list provenance controls consistent with the DV policy."""
+
         attestation = getattr(self, "independent_selection_attestation", None)
         fixed_policy = (
             getattr(self, "_dv_policy_name", GROUP_SIGNIFICANT_POLICY_NAME)
@@ -293,30 +295,6 @@ class StatsWindowActionsMixin:
                 finally:
                     attestation.blockSignals(was_blocked)
             attestation.setEnabled(fixed_policy)
-        provenance = self._native_harmonic_provenance()
-        messages = {
-            "same_sample_adaptive": (
-                "Provenance warning: the canonical harmonics are selected from "
-                "this same sample. Response-versus-zero findings are exploratory "
-                "post-selection results, even under a confirmatory profile."
-            ),
-            "independently_selected": (
-                "Provenance: the fixed harmonic list is attested as independently "
-                "selected. Confirmatory interpretation still depends on the chosen "
-                "profile and declared analysis plan."
-            ),
-            "user_fixed_unverified": (
-                "Provenance warning: the fixed harmonic list is not attested as "
-                "independently selected. Response-versus-zero findings are not "
-                "labelled confirmatory."
-            ),
-        }
-        warning = getattr(self, "provenance_warning", None)
-        if warning is not None:
-            text = messages[provenance]
-            warning.setText(text)
-            warning.setToolTip(text)
-            warning.setVisible(True)
 
     def _apply_scanned_group_state(
         self,

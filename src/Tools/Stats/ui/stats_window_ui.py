@@ -2,7 +2,7 @@
 # ruff: noqa: F405
 from __future__ import annotations
 
-from PySide6.QtWidgets import QProgressBar
+from PySide6.QtWidgets import QLayout, QProgressBar
 
 from Main_App.gui.components import make_info_button, show_tool_info
 from Tools.Stats.ui.tool_info import STATS_TOOL_INFO
@@ -19,6 +19,35 @@ class StatsWindowUiMixin:
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
+
+        def make_setup_scroll_page(
+            page_name: str,
+            content_name: str,
+        ) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
+            page = QScrollArea()
+            page.setObjectName(page_name)
+            page.setWidgetResizable(True)
+            page.setFrameShape(QScrollArea.NoFrame)
+            page.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            page.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            page.setSizePolicy(
+                QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            )
+
+            content = QWidget(page)
+            content.setObjectName(content_name)
+            content.setSizePolicy(
+                QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            )
+            page.setWidget(content)
+
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(0, 0, 6, 0)
+            content_layout.setSpacing(8)
+            content_layout.setSizeConstraint(
+                QLayout.SizeConstraint.SetMinimumSize
+            )
+            return page, content, content_layout
 
         # included conditions panel
         self.conditions_group = SectionCard("Included Conditions")
@@ -788,50 +817,81 @@ class StatsWindowUiMixin:
         analysis_design_note.setWordWrap(True)
         analysis_design_layout.addWidget(analysis_design_note)
 
-        basic_page = QWidget()
-        basic_page.setObjectName("stats_basic_setup_page")
-        basic_layout = QVBoxLayout(basic_page)
-        basic_layout.setContentsMargins(0, 0, 0, 0)
-        basic_layout.setSpacing(8)
+        basic_page, basic_page_content, basic_layout = make_setup_scroll_page(
+            "stats_basic_setup_page",
+            "stats_basic_setup_content",
+        )
         basic_layout.addWidget(file_box)
         basic_layout.addWidget(self.analysis_design_group)
 
-        basic_content = QWidget()
+        basic_content = QWidget(basic_page_content)
+        basic_content.setObjectName("stats_basic_selection_row")
+        basic_content.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        )
         basic_content_layout = QHBoxLayout(basic_content)
         basic_content_layout.setContentsMargins(0, 0, 0, 0)
         basic_content_layout.setSpacing(10)
 
         basic_content_layout.addWidget(self.conditions_group, 1)
         basic_content_layout.addWidget(self.manual_exclusion_group, 1)
-        basic_layout.addWidget(basic_content, 1)
+        basic_layout.addWidget(basic_content)
+        basic_layout.addStretch(1)
 
         advanced_page = QWidget()
         advanced_page.setObjectName("stats_advanced_setup_page")
         advanced_layout_page = QVBoxLayout(advanced_page)
         advanced_layout_page.setContentsMargins(0, 0, 0, 0)
-        advanced_layout_page.setSpacing(10)
+        advanced_layout_page.setSpacing(0)
 
-        advanced_top_row = QWidget()
-        advanced_top_row.setObjectName("stats_advanced_screening_export_row")
-        advanced_top_layout = QHBoxLayout(advanced_top_row)
-        advanced_top_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_top_layout.setSpacing(10)
-        advanced_top_layout.addWidget(outlier_section, 1)
-        advanced_top_layout.addWidget(comparison_exports_section, 1)
+        inference_page, _inference_content, inference_page_layout = (
+            make_setup_scroll_page(
+                "stats_advanced_inference_page",
+                "stats_advanced_inference_content",
+            )
+        )
+        inference_page_layout.addWidget(self.inference_settings_group)
+        inference_page_layout.addStretch(1)
 
-        advanced_bottom_row = QWidget()
-        advanced_bottom_row.setObjectName("stats_advanced_context_row")
-        advanced_bottom_layout = QHBoxLayout(advanced_bottom_row)
-        advanced_bottom_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_bottom_layout.setSpacing(10)
-        advanced_bottom_layout.addWidget(last_export_section, 1)
-        advanced_bottom_layout.addWidget(roi_context_section, 1)
+        dv_quality_page, _dv_quality_content, dv_quality_layout = (
+            make_setup_scroll_page(
+                "stats_advanced_dv_quality_page",
+                "stats_advanced_dv_quality_content",
+            )
+        )
+        dv_quality_layout.addWidget(self.dv_group)
+        dv_quality_layout.addWidget(outlier_section)
+        dv_quality_layout.addStretch(1)
 
-        advanced_layout_page.addWidget(self.inference_settings_group)
-        advanced_layout_page.addWidget(self.dv_group)
-        advanced_layout_page.addWidget(advanced_top_row)
-        advanced_layout_page.addWidget(advanced_bottom_row)
-        advanced_layout_page.addStretch(1)
+        export_context_page, _export_context_content, export_context_layout = (
+            make_setup_scroll_page(
+                "stats_advanced_export_context_page",
+                "stats_advanced_export_context_content",
+            )
+        )
+        export_context_layout.addWidget(comparison_exports_section)
+        export_context_layout.addWidget(last_export_section)
+        export_context_layout.addWidget(roi_context_section)
+        export_context_layout.addStretch(1)
+
+        self.advanced_tabs = QTabWidget()
+        self.advanced_tabs.setObjectName("stats_advanced_tabs")
+        self.advanced_tabs.setDocumentMode(True)
+        self.advanced_tabs.setStyleSheet(
+            """
+            QTabWidget#stats_advanced_tabs::pane {
+                border: 0;
+                background: transparent;
+            }
+            QTabWidget#stats_advanced_tabs > QWidget {
+                background: transparent;
+            }
+            """
+        )
+        self.advanced_tabs.addTab(inference_page, "Inference")
+        self.advanced_tabs.addTab(dv_quality_page, "DV & quality")
+        self.advanced_tabs.addTab(export_context_page, "Export & context")
+        advanced_layout_page.addWidget(self.advanced_tabs, 1)
 
         self.setup_tabs = QTabWidget()
         self.setup_tabs.setObjectName("stats_setup_tabs")
@@ -851,18 +911,6 @@ class StatsWindowUiMixin:
         self.setup_tabs.addTab(advanced_page, "Advanced")
         self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)
-
-        self.provenance_warning = StatusBanner(
-            "",
-            setup_area,
-            variant="warning",
-        )
-        self.provenance_warning.setObjectName("stats_provenance_warning")
-        self.provenance_warning.setToolTip(
-            "Harmonic-selection provenance changes how response-versus-zero "
-            "p-values may be interpreted."
-        )
-        setup_layout.addWidget(self.provenance_warning)
 
         self.stats_processing_notice = SectionCard("Stats analysis in progress")
         self.stats_processing_notice.setObjectName("stats_processing_notice")
@@ -978,11 +1026,8 @@ class StatsWindowUiMixin:
         """Keep the shared run controls and result tabs visible in either setup tab."""
         output = getattr(self, "summary_output_container", None)
         action_bar = getattr(self, "run_action_bar", None)
-        splitter = getattr(self, "root_splitter", None)
         if output is None:
             return
         output.setVisible(True)
         if action_bar is not None:
             action_bar.setVisible(True)
-        if splitter is not None:
-            splitter.setSizes([620, 200])
