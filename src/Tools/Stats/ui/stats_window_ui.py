@@ -465,14 +465,17 @@ class StatsWindowUiMixin:
         inference_grid.addWidget(self.resample_count_spin, 2, 3)
 
         self.strict_omnibus_family_checkbox = QCheckBox(
-            "Require a supported omnibus effect before follow-up families"
+            "Correct primary omnibus effects together"
         )
         self.strict_omnibus_family_checkbox.setObjectName(
             "stats_strict_omnibus_family_checkbox"
         )
         self.strict_omnibus_family_checkbox.setChecked(True)
         self.strict_omnibus_family_checkbox.setToolTip(
-            "Keep follow-up interpretation within the declared omnibus-testing strategy."
+            "Apply the selected multiplicity correction across the canonical omnibus "
+            "effects. In single-group mode, the adjusted Condition-by-ROI interaction "
+            "gates automatic paired follow-ups. In multi-group mode, direct group-cell "
+            "contrasts remain a separately corrected family."
         )
         inference_grid.addWidget(
             self.strict_omnibus_family_checkbox,

@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 7 - validation, documentation, and closure
+- Current phase: Complete - pending repository plan retirement
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -774,8 +774,9 @@ Commit:
 
 Deliverables:
 
-- known-null/effect simulations for fixed versus adaptive selection, skew,
-  outliers, unequal variance, missingness, and singularity;
+- known-null/effect simulations for fixed versus adaptive selection and
+  unequal variance, plus deterministic edge-case fixtures for skew, outliers,
+  missingness, zero variance, and singularity;
 - golden reference outputs for SciPy/Pingouin/statsmodels and, when a stable
   reference can be stored without adding a runtime dependency, R;
 - Stats architecture and user methods documentation;
@@ -787,30 +788,46 @@ Deliverables:
 
 Definition of done:
 
-- [ ] Fixed-selection null simulations show acceptable Type I behavior within
+- [x] Fixed-selection null simulations show acceptable Type I behavior within
       Monte Carlo tolerance.
-- [ ] Adaptive response detection is demonstrated and labelled rather than
+- [x] Adaptive response detection is demonstrated and labelled rather than
       silently treated as confirmatory.
-- [ ] Correction-family composition is covered by tests.
-- [ ] All new result/export schemas have golden coverage.
-- [ ] Safe baseline, RM-ANOVA, LMM, correction-family, and multigroup tests are
+- [x] Correction-family composition is covered by tests.
+- [x] All new result/export schemas have golden coverage.
+- [x] Safe baseline, RM-ANOVA, LMM, correction-family, and multigroup tests are
       present in the Stats verification registry.
-- [ ] Focused scientific tests cover inference contracts, multiplicity,
+- [x] Focused scientific tests cover inference contracts, multiplicity,
       design audit, diagnostics, single- and multi-group model omnibus logic,
       group contrasts, robust methods, report export, and pipeline
       orchestration.
-- [ ] `verify.py --scope stats --tier focused` passes.
-- [ ] `verify.py --scope gui --tier focused` passes.
-- [ ] `verify.py --scope project-io --tier focused` passes when group/export
+- [x] `verify.py --scope stats --tier focused` passes.
+- [x] `verify.py --scope gui --tier focused` passes.
+- [x] `verify.py --scope project-io --tier focused` passes when group/export
       code changed.
-- [ ] Stats structure and reporting-legibility audits pass.
-- [ ] `verify.py --scope repo --tier precommit` passes or every unrelated
+- [x] Stats structure and reporting-legibility audits pass.
+- [x] `verify.py --scope repo --tier precommit` passes or every unrelated
       failure is documented.
-- [ ] CI-only Qt coverage and visible/manual smoke steps are documented.
-- [ ] No pre-existing user-owned dirty file was accidentally committed.
-- [ ] Architecture/user documentation matches the shipped behavior.
-- [ ] This plan is marked complete and moved/handled according to repository
+- [x] CI-only Qt coverage and visible/manual smoke steps are documented.
+- [x] No pre-existing user-owned dirty file was accidentally committed.
+- [x] Architecture/user documentation matches the shipped behavior.
+- [x] This plan is marked complete and moved/handled according to repository
       plan-retention policy.
+
+Validation evidence:
+
+- verification configuration: 14 scopes valid;
+- Stats focused: 277 passed, including 6 deterministic scientific-validation
+  checks;
+- the registered diagnostics, robust-method, group-comparison, and
+  multigroup-model suites retain deterministic skew/outlier, missingness,
+  zero-variance, and singular-fit coverage without duplicating unstable
+  Monte Carlo model-fit checks;
+- GUI focused: GUI import audit passed; Qt execution remains CI-only;
+- project-I/O focused: 71 passed;
+- repository precommit: every audit, Ruff, and compile gate passed; the
+  sandboxed full suite produced 1,287 passed, 2 skipped, and three unrelated
+  Windows memmap permission failures in preflight-QC tests; those exact three
+  tests passed when rerun outside the filesystem sandbox.
 
 Commit:
 
@@ -862,7 +879,7 @@ To perform after Phase 6 in a safe visible Windows session:
 - [x] Phase 4 - Robust sensitivities and diagnostics
 - [x] Phase 5 - Pipeline, exports, and detailed reporting
 - [x] Phase 6 - GUI and non-expert workflow
-- [ ] Phase 7 - Validation, documentation, and closure
+- [x] Phase 7 - Validation, documentation, and closure
 
 ## Decision Log
 

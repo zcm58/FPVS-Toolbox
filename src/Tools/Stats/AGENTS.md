@@ -27,7 +27,17 @@ Use script output to decide what to read next.
 The stats tool should be able to calculate and output everything 
 that might be needed for a publication quality manuscript. 
 
-The stats tool currently supports single-group statistical analysis only.
+The Stats tool supports native single- and multi-group inference. Project mode
+is manifest-owned: a true multi-group project must use canonical `group_id`
+values and must not be silently pooled into the single-group pipeline. Both
+modes freeze the QC/manual-eligible participant cohort before finding the
+complete shared Condition x ROI core. Conditions may be excluded for
+incomplete coverage; participants must not be dropped inside a model to rescue
+a condition. The default strict `omnibus_effects_strict` family applies the
+selected correction (Holm by default) to canonical single-group RM-ANOVA
+effects or the four multi-group ML-LRT rows. If strict control is disabled,
+the joint "Any group-related effect" test is the sole primary multi-group
+omnibus question and the decomposition rows remain exploratory.
 
 v2.1 project contract:
 
@@ -46,8 +56,13 @@ v2.1 project contract:
 
 IMPORTANT RULES for Codex:
 
-The idea of the stats tool is to provide a quick look and understanding of the significant effects of the dataset  
-to a non-expert user. As such, the log outputs should summarize the significant effects only, and provide a plain  
-english explanation of the results. Somewhere in the log, we can write that the detailed results have been saved to 
-excel files. 
+The Stats tool should give a non-expert a quick, accurate understanding of
+three separate questions: response detection, within-subject Condition/ROI
+effects, and between-group effects. At a Glance should use plain English and
+only canonical reportable p-values, while Methods & Checks and the workbook
+retain the complete audit trail. Do not hide a nonsignificant primary test:
+describe it as "did not provide evidence" and never as proof of equivalence or
+absence. Keep exploratory post-selection response tests and all robust,
+resampling, or leave-one-out findings visibly labelled. Always identify the
+detailed results workbook.
 

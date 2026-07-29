@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 import pytest
@@ -10,6 +10,8 @@ from Tools.Stats.analysis.dv_policies import GROUP_SIGNIFICANT_POLICY_NAME
 from Tools.Stats.analysis.inference_contracts import (
     AnalysisProfile,
     AnalysisRunSpec,
+    CorrectionMethod,
+    FamilySpec,
     HarmonicProvenance,
 )
 from Tools.Stats.analysis.prepared_analysis import prepare_analysis_payload
@@ -20,10 +22,23 @@ from Tools.Stats.qc.stats_qc_exclusion import (
 from Tools.Stats.workers import multigroup_workers as workers
 
 
-def _run_spec() -> AnalysisRunSpec:
+def _run_spec(*, strict_omnibus: bool = False) -> AnalysisRunSpec:
+    families = (
+        (
+            FamilySpec(
+                family_id="omnibus_effects_strict",
+                family_label="Primary factorial omnibus effects",
+                method=CorrectionMethod.HOLM,
+                alpha=0.05,
+            ),
+        )
+        if strict_omnibus
+        else ()
+    )
     return AnalysisRunSpec(
         profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
         harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
+        families=families,
     )
 
 
@@ -56,7 +71,7 @@ def _long_data() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _payload(*, mode: str = "multi"):
+def _payload(*, mode: str = "multi", strict_omnibus: bool = False):
     groups = {
         f"P{index}": "control" if index <= 3 else "anxious"
         for index in range(1, 7)
@@ -64,7 +79,7 @@ def _payload(*, mode: str = "multi"):
     return prepare_analysis_payload(
         _long_data(),
         mode=mode,
-        run_spec=_run_spec(),
+        run_spec=_run_spec(strict_omnibus=strict_omnibus),
         dv_col="value",
         subject_col="participant",
         condition_col="condition",
@@ -97,6 +112,17 @@ def _cached_qc_report() -> QcExclusionReport:
 @dataclass
 class _FrameBundle:
     status: str = "ok"
+    omnibus: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(
+            [
+                {
+                    "effect_id": "any_group_related",
+                    "p_value_chi2": 0.04,
+                    "reportable": True,
+                }
+            ]
+        )
+    )
 
     def to_frames(self) -> dict[str, pd.DataFrame]:
         return {"Fake Results": pd.DataFrame([{"value": 1.0}])}
@@ -223,6 +249,117 @@ def test_callback_first_model_and_group_steps_reuse_payload_and_frames(
         assert "Step Status" in result["export_frames"]
     assert progress[-1] == 100
     assert messages
+
+
+def test_strict_omnibus_family_corrects_multigroup_lrt_rows(monkeypatch) -> None:
+    payload = _payload(strict_omnibus=True)
+    omnibus = pd.DataFrame(
+        {
+            "effect_id": [
+                "any_group_related",
+                "group_condition_roi_interaction",
+                "group_condition_block",
+                "group_roi_block",
+            ],
+            "p_value_chi2": [0.01, 0.03, 0.20, 0.60],
+            "reportable": [True, True, True, True],
+            "status": ["ok", "ok", "ok", "ok"],
+        }
+    )
+
+    @dataclass(frozen=True)
+    class ModelBundle:
+        status: str
+        omnibus: pd.DataFrame
+
+        def to_frames(self) -> dict[str, pd.DataFrame]:
+            return {"Omnibus LRT": self.omnibus.copy()}
+
+    monkeypatch.setattr(
+        workers,
+        "run_multigroup_mixed_model",
+        lambda *_args, **_kwargs: ModelBundle("ok", omnibus),
+    )
+
+    result = workers.run_multigroup_model_step(payload)
+    corrected = result["export_frames"]["Omnibus LRT"]
+
+    assert corrected["p_raw"].tolist() == pytest.approx(
+        omnibus["p_value_chi2"].tolist()
+    )
+    assert corrected["p_adjusted"].tolist() == pytest.approx(
+        [0.04, 0.09, 0.40, 0.60]
+    )
+    assert corrected["family_id"].eq("omnibus_effects_strict").all()
+    assert corrected["family_size"].eq(4).all()
+    assert corrected["adjustment_method"].eq("holm").all()
+    assert corrected["headline_eligible"].eq(True).all()
+
+
+def test_unadjusted_multigroup_omnibus_headlines_only_joint_block(
+    monkeypatch,
+) -> None:
+    payload = _payload(strict_omnibus=False)
+    omnibus = pd.DataFrame(
+        {
+            "effect_id": [
+                "any_group_related",
+                "group_condition_roi_interaction",
+            ],
+            "p_value_chi2": [0.04, 0.01],
+            "reportable": [True, True],
+            "status": ["ok", "ok"],
+        }
+    )
+
+    @dataclass(frozen=True)
+    class ModelBundle:
+        status: str
+        omnibus: pd.DataFrame
+
+        def to_frames(self) -> dict[str, pd.DataFrame]:
+            return {"Omnibus LRT": self.omnibus.copy()}
+
+    monkeypatch.setattr(
+        workers,
+        "run_multigroup_mixed_model",
+        lambda *_args, **_kwargs: ModelBundle("ok", omnibus),
+    )
+
+    result = workers.run_multigroup_model_step(payload)
+    labelled = result["export_frames"]["Omnibus LRT"]
+
+    assert labelled["headline_eligible"].tolist() == [True, False]
+    assert labelled["inference_role"].tolist() == ["primary", "exploratory"]
+    assert labelled["adjustment_method"].eq("none").all()
+
+
+def test_strict_omnibus_family_corrects_single_rm_anova_rows(
+    monkeypatch,
+) -> None:
+    payload = _payload(mode="single", strict_omnibus=True)
+    anova = pd.DataFrame(
+        {
+            "Effect": ["condition", "roi", "condition * roi"],
+            "p_reported": [0.01, 0.03, 0.20],
+            "reportable": [True, True, True],
+            "inference_status": ["ok", "ok", "ok"],
+        }
+    )
+    monkeypatch.setattr(
+        workers,
+        "run_repeated_measures_anova",
+        lambda *_args, **_kwargs: anova.copy(),
+    )
+
+    result = workers.run_single_rm_anova_step(payload)
+    corrected = result["anova_df_results"]
+
+    assert corrected["p_raw"].tolist() == pytest.approx([0.01, 0.03, 0.20])
+    assert corrected["p_adjusted"].tolist() == pytest.approx([0.03, 0.06, 0.20])
+    assert corrected["reject_adjusted"].tolist() == [True, False, False]
+    assert corrected["family_id"].eq("omnibus_effects_strict").all()
+    assert corrected["family_size"].eq(3).all()
 
 
 def test_blocked_audit_refuses_downstream_model(monkeypatch) -> None:

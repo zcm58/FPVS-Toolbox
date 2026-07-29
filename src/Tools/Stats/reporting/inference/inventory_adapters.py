@@ -401,12 +401,19 @@ def headline_contract(
     *,
     frame_name: str,
     p_source: str,
+    row: pd.Series | None = None,
 ) -> tuple[bool, str]:
     """Return whether the p-value contract may enter visible findings."""
 
     lowered = frame_name.casefold()
+    if row is not None:
+        explicit = first_nonmissing(row, ("headline_eligible",))
+        if explicit is not None and not bool_value(explicit, default=False):
+            return False, "analysis_marked_detailed_only"
     if "fixed effects" in lowered:
         return False, "fixed_effect_wald_estimates_are_detailed_only"
+    if "mixed model" in lowered and "lrt" in lowered:
+        return False, "single_mixed_model_lrt_is_secondary"
     if p_source in {"multiplicity_adjusted", "canonical_reported"}:
         return True, "canonical_adjusted_or_reported_p"
     if p_source == "likelihood_ratio" and (

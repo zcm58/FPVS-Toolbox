@@ -32,6 +32,7 @@ from Tools.Stats.analysis.inference_contracts import (
     HarmonicProvenance,
 )
 from Tools.Stats.analysis.mixed_effects_model import run_mixed_effects_model
+from Tools.Stats.analysis.multiple_comparisons import apply_family_correction
 from Tools.Stats.analysis.multigroup_model import (
     run_multigroup_mixed_model,
 )
@@ -83,6 +84,40 @@ MAX_SENSITIVITY_RESAMPLES = 100_000
 MAX_ROBUST_CELLS = 512
 ProgressCallback = Callable[[int, int], None]
 CancelCheck = Callable[[], bool]
+STRICT_OMNIBUS_FAMILY_ID = "omnibus_effects_strict"
+
+
+def _apply_strict_omnibus_correction(
+    payload: PreparedAnalysisPayload,
+    table: pd.DataFrame,
+    *,
+    p_col: str,
+) -> pd.DataFrame:
+    """Apply the declared omnibus family, or label unadjusted decomposition rows."""
+
+    family = payload.run_spec.family_map.get(STRICT_OMNIBUS_FAMILY_ID)
+    if family is not None:
+        corrected = apply_family_correction(table, family, p_col=p_col)
+        corrected["inference_role"] = "primary"
+        corrected["headline_eligible"] = True
+        return corrected
+
+    # The unadjusted path only appends interpretation metadata and preserves
+    # the established result-frame identity used by legacy single-step callers.
+    output = table
+    output["family_id"] = pd.NA
+    output["family_label"] = pd.NA
+    output["family_size"] = 0
+    output["adjustment_method"] = "none"
+    if "effect_id" in output.columns:
+        joint = output["effect_id"].astype(str).eq("any_group_related")
+        output["inference_role"] = "exploratory"
+        output.loc[joint, "inference_role"] = "primary"
+        output["headline_eligible"] = joint
+    else:
+        output["inference_role"] = "exploratory"
+        output["headline_eligible"] = False
+    return output
 
 
 @dataclass(frozen=True)
@@ -856,6 +891,12 @@ def run_multigroup_model_step(
             marginal_grid=marginal_grid,
             reference_group_id=reference_group_id,
         )
+        corrected_omnibus = _apply_strict_omnibus_correction(
+            payload,
+            result.omnibus,
+            p_col="p_value_chi2",
+        )
+        result = replace(result, omnibus=corrected_omnibus)
     except Exception as exc:
         return _response(
             payload=payload,
@@ -1445,6 +1486,11 @@ def run_single_rm_anova_step(
             subject_col=payload.subject_col,
             raw_df=payload.primary_data,
             log_func=message,
+        )
+        result = _apply_strict_omnibus_correction(
+            payload,
+            result,
+            p_col="p_reported",
         )
     except Exception as exc:
         return _response(

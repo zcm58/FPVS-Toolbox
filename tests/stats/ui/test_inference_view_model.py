@@ -43,6 +43,7 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
         "response_core_cells",
         "group_core_cells",
         "planned_contrasts",
+        "omnibus_effects_strict",
     }
     assert all(
         family.method is CorrectionMethod.HOLM for family in run_spec.families
@@ -55,6 +56,23 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
         "seed": 20_250_521,
         "selection_nesting_attested": False,
     }
+
+
+def test_exploratory_manual_profile_does_not_declare_strict_omnibus_family() -> None:
+    options = NativeInferenceOptions(
+        mode=AnalysisMode.SINGLE,
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        correction=CorrectionMethod.HOLM,
+        alternative=Alternative.TWO_SIDED,
+        harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
+        alpha=0.05,
+        strict_omnibus_family=False,
+    )
+
+    run_spec = options.build_run_spec()
+
+    assert "omnibus_effects_strict" not in run_spec.family_map
+    assert run_spec.followup_provenance is FollowupProvenance.EXPLORATORY_MANUAL
 
 
 def test_mode_and_harmonic_provenance_follow_explicit_contracts() -> None:

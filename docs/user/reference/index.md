@@ -48,6 +48,9 @@ performed outside the toolbox separately in the study methods.
 
 For the exact default Summed BCA harmonic rule, including the neighboring-bin
 noise window and threshold, see [Statistical Analysis](../tools/statistics.md).
+For the native single- and multi-group model, correction, diagnostic, and
+interpretation fields that must be reported, use the
+[statistical methods reporting checklist](methods-reporting-checklist.md#statistical-analysis).
 
 ## Core FPVS and Frequency-Domain Studies
 
@@ -66,6 +69,32 @@ turn exploratory tools into confirmatory analyses.
 
 - Vandenheever, D., Davidson, H., Kemp, J., Murphy, Z., Kujawa, A., Shi, J., Nadorff, M. R., Bates-Brantley, K., & Sidwell, M. (2025). [Exploring facial expression processing with fast periodic visual stimulation and diverse stimuli](https://doi.org/10.1016/j.bandc.2025.106338). *Brain and Cognition, 189*, 106338.
 - Vandenheever, D., Davidson, H., Kemp, J., Murphy, Z., Kujawa, A., Shi, J., Nadorff, M. R., Bates-Brantley, K., & Sidwell, M. (2025). [Preliminary evidence for anxiety-linked neural sensitivity to emotional faces using fast periodic visual stimulation](https://doi.org/10.1016/j.ijpsycho.2025.113212). *International Journal of Psychophysiology, 214*, 113212.
+- Van der Donck, S., Dzhelyova, M., Vettori, S., Mahdi, S. S., Claes, P.,
+  Steyaert, J., & Boets, B. (2020). [Rapid neural categorization of angry and
+  fearful faces is specifically impaired in boys with autism spectrum
+  disorder](https://doi.org/10.1111/jcpp.13201). *Journal of Child Psychology
+  and Psychiatry, 61*(9), 1019--1029.
+- Vettori, S., Van der Donck, S., Dzhelyova, M., Jacques, C., Van Wesemael, T.,
+  Steyaert, J., Rossion, B., & Boets, B. (2020). [Frequency-tagging
+  electroencephalography of superimposed social and non-social visual
+  stimulation streams reveals reduced saliency of faces in autism spectrum
+  disorder](https://doi.org/10.3389/fpsyt.2020.00332). *Frontiers in
+  Psychiatry, 11*, 332.
+- Samaey, C., Van der Donck, S., Lecei, A., Vettori, S., Qiao, Z., van Winkel,
+  R., et al. (2024). [Between faces: childhood adversity is associated with
+  reduced threat-safety discrimination during facial expression processing in
+  adolescence](https://doi.org/10.1186/s12916-024-03610-w). *BMC Medicine,
+  22*, 382.
+- Feuerriegel, D., Keage, H. A. D., Rossion, B., & Quek, G. L. (2018).
+  [Immediate stimulus repetition abolishes stimulus expectation and surprise
+  effects in fast periodic visual oddball
+  designs](https://doi.org/10.1016/j.biopsycho.2018.09.002). *Biological
+  Psychology, 138*, 110--125.
+- Keil, A., Bernat, E. M., Cohen, M. X., Ding, M., Fabiani, M., Gratton, G.,
+  et al. (2022). [Recommendations and publication guidelines for studies using
+  frequency domain and time-frequency domain analyses of neural time
+  series](https://doi.org/10.1111/psyp.14052). *Psychophysiology, 59*(5),
+  e14052.
 
 ## Source-Estimation Background
 
@@ -73,8 +102,9 @@ Source-space figures are inverse-model estimates rather than direct anatomical
 measurements. Template anatomy adds further uncertainty. Use the
 [LORETA Visualizer guide](../tools/loreta-visualizer.md) for the current
 tool-specific cautions. For the current time-domain L2-MNE source-PSD method,
-use the [methods and reporting checklist](methods-reporting-checklist.md) for
-the exact input, FFT-bin, neighboring-noise, and attribution requirements.
+use the
+[source-PSD methods and reporting checklist](methods-reporting-checklist.md#hauk-informed-source-psd-workflow)
+for the exact input, FFT-bin, neighboring-noise, and attribution requirements.
 
 - Hauk, O., Stenroos, M., & Treder, M. S. (2022). [Towards an objective evaluation of EEG/MEG source estimation methods: The linear approach](https://doi.org/10.1016/j.neuroimage.2022.119177). *NeuroImage, 255*, 119177.
 - Pascual-Marqui, R. D. (2007). [Discrete, 3D distributed, linear imaging methods of electric neuronal activity. Part 1: Exact, zero error localization](https://doi.org/10.48550/arXiv.0710.3341).

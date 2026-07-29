@@ -156,7 +156,7 @@ class NativeInferenceOptions:
     def build_run_spec(self) -> AnalysisRunSpec:
         """Build the immutable scientific settings shared by every worker."""
 
-        families = (
+        families = [
             FamilySpec(
                 family_id="response_core_cells",
                 family_label="Response-versus-zero condition × ROI tests",
@@ -175,13 +175,22 @@ class NativeInferenceOptions:
                 method=self.correction,
                 alpha=self.alpha,
             ),
-        )
+        ]
+        if self.strict_omnibus_family:
+            families.append(
+                FamilySpec(
+                    family_id="omnibus_effects_strict",
+                    family_label="Primary factorial omnibus effects",
+                    method=self.correction,
+                    alpha=self.alpha,
+                )
+            )
         return AnalysisRunSpec(
             profile=self.profile,
             harmonic_provenance=self.harmonic_provenance,
             alpha=self.alpha,
             response_alternative=self.alternative,
-            families=families,
+            families=tuple(families),
             followup_provenance=(
                 FollowupProvenance.OMNIBUS_TRIGGERED
                 if self.strict_omnibus_family

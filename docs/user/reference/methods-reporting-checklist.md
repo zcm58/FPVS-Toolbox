@@ -1,4 +1,166 @@
-# Reporting the Hauk-Informed Source-PSD Workflow
+# Methods and Reporting Checklists
+
+## Statistical Analysis
+
+Use this checklist for a manuscript, preregistration, report, or shared analysis
+that relies on the native Statistical Analysis tool.
+
+### Design and population
+
+- Report the FPVS Toolbox release or commit and whether the project ran in
+  native **single-group** or **multi-group** mode.
+- State the scientific questions and identify the primary outcome as Summed
+  baseline-corrected amplitude (Summed BCA, in microvolts).
+- Report participant age range, recruitment population, inclusion/exclusion
+  rules, every canonical group definition, and N per group.
+- Report QC and manual exclusions before the analysis. State that the eligible
+  participant cohort was frozen before shared conditions were found.
+- List every requested condition and ROI, then list the complete conditions
+  retained for all frozen participants and the incomplete conditions excluded.
+  State that participants were not dropped inside the model to rescue a
+  condition.
+- For a multi-group project, state that group assignments came from canonical
+  `project.json` `group_id` values rather than folder-name inference. If more
+  than two groups were present, identify the exact pair chosen for direct cell
+  contrasts.
+
+### Summed BCA and selection provenance
+
+- Report the exact detected and included oddball harmonics, base-rate-overlap
+  exclusions, upper limit, `z > 1.64` rule, ROI-electrode union, neighboring-bin
+  rule, and whether the isolated-highest gap guard changed the included list.
+- State whether the harmonic list was selected independently, was a fixed but
+  unverified list, or was selected adaptively from the same sample.
+- If the list was selected from the analyzed sample, label
+  response-versus-zero p-values **exploratory post-selection**. Do not call
+  them confirmatory merely because the GUI profile was changed.
+- State whether ROIs and test direction were specified before examining the
+  responses. A one-sided "greater than zero" test requires a prospective
+  directional rationale; otherwise report the two-sided test.
+
+### Primary statistical model
+
+For a single-group analysis, report:
+
+- the Condition x ROI repeated-measures ANOVA, its backend, effect degrees of
+  freedom, F statistic, partial eta squared, sphericity result, and the exact
+  canonical p-value used;
+- Greenhouse-Geisser correction for a higher-order effect when sphericity was
+  violated or unknown; if a required corrected p-value was unavailable, state
+  that the effect was not used for a primary conclusion;
+- whether the default strict omnibus family was enabled and, if so, the
+  selected adjustment applied across canonical RM-ANOVA effects in
+  `omnibus_effects_strict` (Holm by default); if strict control was disabled,
+  identify the ANOVA rows and manual follow-ups as exploratory/detailed;
+- the sum-coded Condition x ROI `statsmodels` mixed model, participant
+  grouping, requested and accepted random-effects formula, optimizer,
+  convergence/singularity status, and any random-intercept fallback;
+- that final mixed-model coefficient estimates used REML while explicit
+  hierarchy-preserving full-versus-reduced omnibus comparisons used ML
+  likelihood-ratio tests against an asymptotic chi-square reference; and
+- whether strict interaction gating was enabled; if so, state that
+  omnibus-triggered paired follow-ups used the canonical, potentially
+  Greenhouse-Geisser-corrected RM-ANOVA Condition x ROI interaction decision;
+  and
+- the provenance and multiplicity family for every paired follow-up, including
+  planned or manually requested exploratory comparisons, plus the one-sample
+  response-versus-zero alternative and correction family.
+
+For a multi-group analysis, report:
+
+- the full sum-coded
+  `Summed BCA ~ Group * Condition * ROI` fixed-effects formula, participant
+  random-effects structure, optimizer, convergence/singularity result, and any
+  fallback;
+- that final coefficient estimates used REML and the explicit nested omnibus
+  comparisons used ML likelihood-ratio tests with an asymptotic chi-square
+  reference;
+- that "Any group-related effect" jointly tests all fixed terms containing
+  Group and is not a pure average Group main-effect test;
+- whether the four group-related ML likelihood-ratio rows were adjusted
+  together in `omnibus_effects_strict`; if strict control was disabled, state
+  that the joint "Any group-related effect" test was the sole primary omnibus
+  question and the three decomposition rows were exploratory/detailed;
+- the two-sided Welch independent-samples test for each retained
+  Condition x ROI cell, the selected `group A - group B` sign convention, N per
+  group, mean difference, 95% confidence interval, and Hedges g; and
+- the exact status of the joint group-related test before interpreting
+  Condition/ROI-specific contrasts.
+
+Do not describe the Toolbox's `statsmodels` ML likelihood-ratio p-values as
+Kenward-Roger or Satterthwaite results. They are also not numerical replicas of
+the F tests with Kenward-Roger-adjusted denominator degrees of freedom reported
+in the cited R/lmer FPVS analyses. This distinction is especially important for
+small samples.
+
+### Diagnostics and multiple comparisons
+
+- Report finite-value, per-cell N, variance, Shapiro-Wilk, residual-tail,
+  convergence, and singularity diagnostics that were estimable.
+- State that normality checks were diagnostic only and did not automatically
+  select or replace the prespecified primary test.
+- Name every comparison family, its family ID and size, alpha, raw p-value,
+  adjusted p-value, and adjustment method. The native defaults are global Holm
+  families `omnibus_effects_strict`, `response_core_cells`, and
+  `group_core_cells`; paired follow-ups use their separately declared family.
+- Distinguish Greenhouse-Geisser correction for a repeated-measures sphericity
+  problem from Holm/FDR multiplicity adjustment across omnibus effects. They
+  address different problems and are not interchangeable.
+- If Benjamini-Hochberg was selected, call it exploratory FDR control. If
+  max-|t| resampling was run, report it as a separate participant-level
+  sensitivity with its permutation/sign-flip scheme, seed, exact-enumeration
+  status or draw count, and exchangeability assumption.
+- Do not call Holm "Bonferroni" or "Tukey." Published FPVS studies use all
+  three in different settings, but their adjusted p-values and contrast-family
+  definitions are not interchangeable.
+
+### Sensitivity and interpretation
+
+- List every robust, rank-based, max-|t|, and leave-one-participant-out
+  sensitivity requested, including trim fraction and resampling settings.
+- Keep sensitivity-only findings labelled as sensitivity evidence. Do not
+  promote a result because one of several methods happened to be significant.
+- Report estimates, confidence intervals, effect sizes, N, exact p-values, and
+  the correction used; do not report only "significant" or "not significant."
+- Translate a nonsignificant result as "the analysis did not provide evidence
+  of a difference." Do not infer equivalence or absence without a prespecified
+  equivalence test.
+- For an observational 13--15-year-old sample, describe group differences as
+  associations in the analyzed sample. Do not infer that anxiety caused the
+  response or that the measure is diagnostic.
+- State which covariates were and were not modeled. The native model does not
+  currently adjust for age, gender, depression, medication, recruitment site,
+  or other possible confounders. Use a prespecified external model when those
+  variables are part of the research question.
+
+### Records to retain
+
+Keep the following with the analysis record:
+
+- the native inference workbook, including At a Glance, Detailed Methods, Test
+  Inventory, Correction Families, Limitations, source result frames, coverage,
+  exclusions, and group assignments;
+- `Stats_Ready_Summed_BCA.xlsx` if external analyses were run;
+- `Quality Check/Harmonic_Selection_Summary.xlsx` and the corresponding
+  project metadata;
+- model warnings, sensitivity settings, random seed, and the FPVS Toolbox
+  release/commit; and
+- the analysis plan or preregistration that establishes ROI, harmonic,
+  direction, model, covariate, and multiplicity decisions.
+
+The core Summed BCA factorial models have direct FPVS precedent in
+[Vandenheever et al. (2025)](https://doi.org/10.1016/j.ijpsycho.2025.113212),
+[Van der Donck et al. (2020)](https://doi.org/10.1111/jcpp.13201),
+[Vettori et al. (2020)](https://doi.org/10.3389/fpsyt.2020.00332), and
+[Samaey et al. (2024)](https://doi.org/10.1186/s12916-024-03610-w).
+[Feuerriegel et al. (2018)](https://doi.org/10.1016/j.biopsycho.2018.09.002)
+provides an FPVS repeated-measures ANOVA/Greenhouse-Geisser/Holm precedent.
+[Keil et al. (2022)](https://doi.org/10.1111/psyp.14052) provide broader
+frequency-domain guidance for a priori ROIs, multiplicity correction, and
+maximum-statistic resampling. These sources support the method family; they do
+not make the Toolbox an exact reproduction of any one published pipeline.
+
+## Hauk-Informed Source-PSD Workflow
 
 This page describes the current source-localization workflow in FPVS
 Toolbox. It prepares signed time-domain EEG during normal processing and later
@@ -14,7 +176,7 @@ documented FPVS Toolbox adaptation, not a claim that the Toolbox exactly
 reproduces that study's combined EEG/MEG, individual-MRI, preprocessing, or
 neighboring-bin pipeline.
 
-## Processing-Time Derivative
+### Processing-Time Derivative
 
 After the normal condition epochs have been created and the Excel export has
 succeeded, FPVS Toolbox writes one source-ready derivative for each processed
@@ -69,7 +231,7 @@ These signed FIF/JSON derivatives are sufficient input for the source-method
 orientation changes described below. If they are already present and valid,
 you can rebuild the source maps without reprocessing the participant EEG.
 
-## Current Source Calculations
+### Current Source Calculations
 
 The normal source build is intentionally EEG-only and generates both current
 methods. They use the same signed FIF derivatives, complete-case source cohort,
@@ -160,7 +322,7 @@ the mask as unavailable because of insufficient participants, and treats the
 unmasked display as exploratory. Do not report that map as a group-level
 cluster-permutation result.
 
-## Toolbox Neighboring-Bin Rule
+### Toolbox Neighboring-Bin Rule
 
 For every selected harmonic, the target uses offset `0`. Noise candidates use
 offsets `-10..-2` and `+2..+10`, giving nine bins on each side and excluding
@@ -177,7 +339,7 @@ z = (summed target amplitude - trimmed noise mean) / trimmed noise population SD
 This exact offset and trimming policy is an intentional Toolbox rule. Report it
 explicitly rather than describing the output only as a generic Hauk z score.
 
-## Legacy And Deferred Paths
+### Legacy And Deferred Paths
 
 Existing amplitude-derived L2-MNE Hauk z-score and eLORETA prepared manifests
 remain importable in the visualizer and are labeled legacy/exploratory. They do
@@ -190,7 +352,7 @@ but records a basis-dependent orientation result. MEG fusion, individual-MRI
 modeling, and alternative phase-sensitive estimators beyond the current
 exact-bin vector eLORETA route remain possible later additions.
 
-## Manuscript Or Preregistration Checklist
+### Manuscript Or Preregistration Checklist
 
 Report at least:
 
@@ -227,7 +389,7 @@ Retain the source-ready FIF/JSON pairs, participant commit manifests, harmonic
 selection record, and prepared source-output manifest with the analysis record.
 Together they provide the provenance needed to audit the source figures.
 
-## References
+### References
 
 - Hauk, O., Rice, G. E., Volfart, A., Magnabosco, F., Lambon Ralph, M. A., &
   Rossion, B. (2021). [Face-selective responses in combined EEG/MEG recordings

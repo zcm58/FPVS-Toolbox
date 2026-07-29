@@ -510,6 +510,46 @@ def test_single_lmm_wald_alias_is_inventoried_but_never_headlined() -> None:
     assert "condition[T.B]" in bundle.detailed_methods
 
 
+def test_single_mixed_model_lrt_is_detailed_secondary() -> None:
+    lrt = pd.DataFrame(
+        [
+            {
+                "Effect": "condition * roi",
+                "p_value_chi2": 0.01,
+                "status": "ok",
+                "reportable": True,
+            }
+        ]
+    )
+
+    bundle = build_native_inference_report(
+        "single",
+        _prepared_design(excluded=""),
+        {"Mixed Model LRT": lrt},
+    )
+
+    row = bundle.test_inventory.iloc[0]
+    assert row["p_value_source"] == "likelihood_ratio"
+    assert not bool(row["headline_eligible"])
+    assert row["headline_reason"] == "single_mixed_model_lrt_is_secondary"
+
+
+def test_analysis_can_mark_unadjusted_omnibus_decomposition_detailed_only() -> None:
+    omnibus = _omnibus_results().iloc[[0]].copy()
+    omnibus["headline_eligible"] = False
+    omnibus["inference_role"] = "exploratory"
+
+    bundle = build_native_inference_report(
+        "multi",
+        step_payloads={"Omnibus LRT": omnibus},
+    )
+
+    row = bundle.test_inventory.iloc[0]
+    assert row["role"] == "exploratory"
+    assert not bool(row["headline_eligible"])
+    assert row["headline_reason"] == "analysis_marked_detailed_only"
+
+
 def test_actual_group_worker_response_is_not_duplicated() -> None:
     from Tools.Stats.analysis.inference_contracts import (
         AnalysisProfile,

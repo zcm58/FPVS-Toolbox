@@ -80,6 +80,7 @@ def inventory_rows(
             headline_eligible, headline_reason = headline_contract(
                 frame_name=frame_name,
                 p_source=p_source,
+                row=row,
             )
             estimate, ci_low, ci_high = estimate_fields(row)
             effect_label, effect_value = effect_size_fields(row)

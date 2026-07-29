@@ -508,7 +508,13 @@ def resolve_rm_anova_interaction_gate(
     effect = str(row["Effect"])
     reportable_value = row.get("reportable", False)
     reportable = bool(reportable_value) if not pd.isna(reportable_value) else False
-    p_value = _finite_probability(row.get("p_reported", np.nan))
+    adjusted_p = _finite_probability(row.get("p_adjusted", np.nan))
+    uses_family_adjustment = bool(np.isfinite(adjusted_p))
+    p_value = (
+        adjusted_p
+        if uses_family_adjustment
+        else _finite_probability(row.get("p_reported", np.nan))
+    )
     if not reportable:
         return RMAnovaInteractionGate(
             effect=effect,
@@ -523,14 +529,25 @@ def resolve_rm_anova_interaction_gate(
             p_value=None,
             significant=None,
             reportable=False,
-            status="omnibus_reported_p_unavailable",
+            status="omnibus_adjusted_or_reported_p_unavailable",
         )
+    exported_reject = row.get("reject_adjusted", None)
+    if uses_family_adjustment and exported_reject is not None and not pd.isna(
+        exported_reject
+    ):
+        significant = bool(exported_reject)
+    else:
+        significant = bool(p_value <= float(alpha))
     return RMAnovaInteractionGate(
         effect=effect,
         p_value=float(p_value),
-        significant=bool(p_value < float(alpha)),
+        significant=significant,
         reportable=True,
-        status="omnibus_reportable",
+        status=(
+            "omnibus_reportable_multiplicity_adjusted"
+            if uses_family_adjustment
+            else "omnibus_reportable"
+        ),
     )
 
 

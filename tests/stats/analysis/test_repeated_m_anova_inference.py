@@ -142,6 +142,26 @@ def test_interaction_gate_uses_only_canonical_reportable_p() -> None:
     assert blocked_gate.status == "blocked_primary_correction_unavailable"
 
 
+def test_interaction_gate_prefers_multiplicity_adjusted_omnibus_decision() -> None:
+    table = pd.DataFrame(
+        {
+            "Effect": ["condition", "roi", "condition * roi"],
+            "p_reported": [0.40, 0.30, 0.018],
+            "p_adjusted": [0.40, 0.40, 0.054],
+            "reject_adjusted": [False, False, False],
+            "reportable": [True, True, True],
+            "inference_status": ["ok", "ok", "ok"],
+        }
+    )
+
+    gate = resolve_rm_anova_interaction_gate(table, alpha=0.05)
+
+    assert gate.p_value == pytest.approx(0.054)
+    assert gate.significant is False
+    assert gate.reportable is True
+    assert gate.status == "omnibus_reportable_multiplicity_adjusted"
+
+
 def test_contract_appends_canonical_fields_without_replacing_legacy_values() -> None:
     legacy = pd.DataFrame(
         {
