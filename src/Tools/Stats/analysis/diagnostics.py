@@ -733,6 +733,176 @@ def build_group_cell_diagnostics(
     )
 
 
+def build_residual_diagnostics(
+    residuals: object,
+    *,
+    alpha: float = 0.05,
+    standardized_threshold: float = 3.0,
+    context: Mapping[str, object] | None = None,
+) -> pd.DataFrame:
+    """Build report-only residual integrity, variance, normality, and tail checks."""
+
+    if (
+        not np.isfinite(float(standardized_threshold))
+        or float(standardized_threshold) <= 0.0
+    ):
+        raise ValueError("standardized_threshold must be finite and positive")
+    residual_context = dict(context or {})
+    residual_context["diagnostic_target"] = "model_residuals"
+    summary = coerce_finite_values(residuals)
+    records = [
+        replace(
+            build_data_integrity_diagnostic(
+                residuals,
+                context=residual_context,
+            ),
+            check="residual_data_integrity",
+        ),
+        replace(
+            build_variance_diagnostic(
+                residuals,
+                context=residual_context,
+            ),
+            check="residual_variance",
+        ),
+        replace(
+            build_shapiro_diagnostic(
+                residuals,
+                alpha=alpha,
+                context=residual_context,
+            ),
+            check="residual_normality_shapiro",
+        ),
+    ]
+
+    values = summary.as_array()
+    if values.size < 2:
+        tail_record = DiagnosticRecord(
+            check="residual_extremes",
+            status=DiagnosticStatus.NOT_ESTIMABLE,
+            code="tiny_n",
+            context={
+                **residual_context,
+                "standardized_threshold": standardized_threshold,
+            },
+            n_total=summary.n_total,
+            n_finite=summary.n_finite,
+        )
+    else:
+        spread = float(np.std(values, ddof=1))
+        if not np.isfinite(spread) or spread <= 0.0:
+            tail_record = DiagnosticRecord(
+                check="residual_extremes",
+                status=DiagnosticStatus.NOT_ESTIMABLE,
+                code="zero_variance",
+                context={
+                    **residual_context,
+                    "standardized_threshold": standardized_threshold,
+                },
+                n_total=summary.n_total,
+                n_finite=summary.n_finite,
+            )
+        else:
+            standardized = np.abs((values - float(np.mean(values))) / spread)
+            maximum = float(np.max(standardized))
+            flagged = int(np.sum(standardized > standardized_threshold))
+            tail_record = DiagnosticRecord(
+                check="residual_extremes",
+                status=(
+                    DiagnosticStatus.DIAGNOSTIC
+                    if flagged
+                    else DiagnosticStatus.ESTIMABLE
+                ),
+                code="extreme_residuals_present" if flagged else "no_extreme_residuals",
+                context={
+                    **residual_context,
+                    "standardized_threshold": standardized_threshold,
+                    "flagged_count": flagged,
+                },
+                n_total=summary.n_total,
+                n_finite=summary.n_finite,
+                statistic_name="maximum_absolute_standardized_residual",
+                statistic=maximum,
+            )
+    records.append(tail_record)
+    return diagnostics_to_frame(
+        records,
+        metadata={
+            "diagnostic_scope": "model_residuals",
+            "normality_role": "diagnostic_only",
+            "automatic_test_switching": False,
+        },
+    )
+
+
+def build_influence_diagnostics(
+    influence_values: Mapping[object, object],
+    *,
+    threshold: float,
+    metric: str = "absolute_leave_one_out_estimate_change",
+    context: Mapping[str, object] | None = None,
+) -> pd.DataFrame:
+    """Label participant-level influence values against an explicit threshold."""
+
+    if not isinstance(influence_values, Mapping):
+        raise TypeError("influence_values must map participant IDs to values")
+    if not np.isfinite(float(threshold)) or float(threshold) < 0.0:
+        raise ValueError("threshold must be finite and non-negative")
+    metric_name = str(metric).strip()
+    if not metric_name:
+        raise ValueError("metric must be non-empty")
+
+    records: list[DiagnosticRecord] = []
+    base_context = dict(context or {})
+    base_context["influence_threshold"] = float(threshold)
+    for participant, raw_value in influence_values.items():
+        participant_context = {
+            **base_context,
+            "participant_id": _serializable_scalar(participant),
+        }
+        summary = coerce_finite_values([raw_value])
+        if summary.n_finite != 1:
+            records.append(
+                DiagnosticRecord(
+                    check="participant_influence",
+                    status=DiagnosticStatus.NOT_ESTIMABLE,
+                    code="invalid_influence_value",
+                    context=participant_context,
+                    n_total=1,
+                    n_finite=0,
+                    statistic_name=metric_name,
+                )
+            )
+            continue
+        value = abs(float(summary.values[0]))
+        flagged = value > float(threshold)
+        records.append(
+            DiagnosticRecord(
+                check="participant_influence",
+                status=(
+                    DiagnosticStatus.DIAGNOSTIC
+                    if flagged
+                    else DiagnosticStatus.ESTIMABLE
+                ),
+                code="influential_participant" if flagged else "within_threshold",
+                context=participant_context,
+                n_total=1,
+                n_finite=1,
+                statistic_name=metric_name,
+                statistic=value,
+            )
+        )
+    return diagnostics_to_frame(
+        records,
+        metadata={
+            "diagnostic_scope": "participant_influence",
+            "influence_metric": metric_name,
+            "influence_threshold": float(threshold),
+            "automatic_exclusion": False,
+        },
+    )
+
+
 def _serializable_scalar(value: Any) -> object:
     if value is None:
         return None
@@ -761,7 +931,9 @@ __all__ = [
     "build_confidence_interval_diagnostic",
     "build_data_integrity_diagnostic",
     "build_group_cell_diagnostics",
+    "build_influence_diagnostics",
     "build_model_fit_diagnostics",
+    "build_residual_diagnostics",
     "build_sample_size_diagnostic",
     "build_shapiro_diagnostic",
     "build_value_diagnostics",

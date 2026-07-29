@@ -7,7 +7,7 @@ Active.
 - Branch: `codex/stats-inference-overhaul`
 - Started: 2026-07-29
 - Last updated: 2026-07-29
-- Current phase: Phase 4 - robust sensitivities and diagnostics
+- Current phase: Phase 5 - pipeline, exports, and detailed reporting
 - Plan owner: Codex
 
 This plan is the explicitly approved follow-on to
@@ -346,7 +346,13 @@ Expected ownership:
   - normality, residual, zero-variance, influence, and model diagnostic
     records;
 - `analysis/robust_tests.py`
-  - trimmed, rank, permutation, max-T, and leave-one-out methods;
+  - trimmed and rank-based sensitivity methods;
+- `analysis/resampling.py`
+  - participant-level sign-flip and group-label max-T methods;
+- `analysis/stability.py`
+  - participant-level leave-one-out sensitivity summaries;
+- `analysis/sensitivity_summary.py`
+  - direction-aware agreement and method-dependence language;
 - `analysis/group_comparisons.py`
   - Welch contrasts, Hedges' g, CIs, group-cell diagnostics;
 - `analysis/multigroup_model.py`
@@ -666,19 +672,21 @@ Deliverables:
 
 Definition of done:
 
-- [ ] Robust functions match frozen reference values.
-- [ ] Permutation/max-T results are deterministic for a fixed seed.
-- [ ] One-sample max-T flips participant signs across the complete cell matrix,
+- [x] Robust functions match frozen reference values.
+- [x] Permutation/max-T results are deterministic for a fixed seed.
+- [x] One-sample max-T flips participant signs across the complete cell matrix,
       and between-group permutation shuffles labels at participant level.
-- [ ] Resampling records seed, requested/completed draws, and
+- [x] Resampling records seed, requested/completed draws, and
       exact-versus-Monte-Carlo status.
-- [ ] Same-sample harmonic selection remains flagged after resampling unless
-      selection itself is nested.
-- [ ] Shapiro results never automatically replace the primary test.
-- [ ] Sensitivity disagreement produces method-dependent language.
-- [ ] Tiny-N and all-zero inputs return explicit non-estimable records.
-- [ ] Focused Stats verification passes.
-- [ ] Plan progress is updated and committed.
+- [x] Same-sample harmonic selection remains flagged after fixed-matrix
+      resampling; an attestation alone cannot claim nested selection.
+- [x] Shapiro results never automatically replace the primary test.
+- [x] Sensitivity disagreement in threshold or direction produces
+      method-dependent language.
+- [x] Tiny-N and all-zero inputs return explicit non-estimable records.
+- [x] Focused Stats verification passes (51 registered tests); 67 direct
+      Phase 4 tests also pass after two independent numerical audits.
+- [x] Plan progress is updated and committed.
 
 Commit:
 
@@ -847,7 +855,7 @@ To perform after Phase 6 in a safe visible Windows session:
 - [x] Phase 1 - Shared inference and design core
 - [x] Phase 2 - Single-group inference
 - [x] Phase 3 - Native multi-group engines
-- [ ] Phase 4 - Robust sensitivities and diagnostics
+- [x] Phase 4 - Robust sensitivities and diagnostics
 - [ ] Phase 5 - Pipeline, exports, and detailed reporting
 - [ ] Phase 6 - GUI and non-expert workflow
 - [ ] Phase 7 - Validation, documentation, and closure

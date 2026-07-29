@@ -4,13 +4,16 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from Tools.Stats.analysis.diagnostics import (
     DiagnosticStatus,
     adjust_shapiro_family,
     build_confidence_interval_diagnostic,
     build_group_cell_diagnostics,
+    build_influence_diagnostics,
     build_model_fit_diagnostics,
+    build_residual_diagnostics,
     build_shapiro_diagnostic,
     coerce_finite_values,
     diagnostics_to_frame,
@@ -192,3 +195,49 @@ def test_group_cell_frame_has_one_diagnostic_set_per_observed_cell() -> None:
     assert result["normality_adjustment_method"].isna().all()
     assert result.attrs["group_columns"] == "group_id,condition,roi"
     assert result.attrs["normality_adjustment_method"] is None
+
+
+def test_residual_diagnostics_are_report_only_and_flag_extreme_tails() -> None:
+    residuals = [-0.2, -0.1, 0.0, 0.1, 0.15, 0.2, 4.0]
+    result = build_residual_diagnostics(
+        residuals,
+        standardized_threshold=2.0,
+        context={"model": "group_condition_roi"},
+    )
+
+    extremes = result[result["check"] == "residual_extremes"].iloc[0]
+    normality = result[
+        result["check"] == "residual_normality_shapiro"
+    ].iloc[0]
+    assert extremes["status"] == "diagnostic"
+    assert extremes["code"] == "extreme_residuals_present"
+    assert extremes["flagged_count"] == 1
+    assert normality["p_raw"] is not None
+    assert result["automatic_test_switching"].eq(False).all()
+    assert result["normality_role"].eq("diagnostic_only").all()
+
+
+def test_residual_and_influence_non_estimability_remain_explicit() -> None:
+    constant = build_residual_diagnostics([1.0, 1.0, 1.0])
+    influence = build_influence_diagnostics(
+        {"P01": 0.1, "P02": 1.5, "P03": np.nan},
+        threshold=1.0,
+    )
+
+    extremes = constant[constant["check"] == "residual_extremes"].iloc[0]
+    by_participant = influence.set_index("participant_id")
+    assert extremes["status"] == "not_estimable"
+    assert extremes["code"] == "zero_variance"
+    assert by_participant.loc["P01", "code"] == "within_threshold"
+    assert by_participant.loc["P02", "code"] == "influential_participant"
+    assert by_participant.loc["P03", "status"] == "not_estimable"
+    assert influence["automatic_exclusion"].eq(False).all()
+
+
+@pytest.mark.parametrize("threshold", [np.nan, np.inf, 0.0, -1.0])
+def test_residual_threshold_must_be_finite_and_positive(threshold: float) -> None:
+    with pytest.raises(ValueError, match="finite and positive"):
+        build_residual_diagnostics(
+            [-1.0, 0.0, 1.0],
+            standardized_threshold=threshold,
+        )
