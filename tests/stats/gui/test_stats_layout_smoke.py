@@ -51,6 +51,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     window = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(window)
     window.show()
+    assert window.windowTitle() == "Standard FPVS Screening"
 
     splitters = window.findChildren(QSplitter)
     root_splitter = next(
@@ -101,7 +102,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         "Analysis Design",
         "Included Conditions",
         "Manual Exclusions",
-        "Inference Settings",
+        "Standard FPVS Screening",
         "Summed BCA definition",
         "Outlier Flagging",
         "Exports",
@@ -132,7 +133,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         advanced_tabs.tabText(index)
         for index in range(advanced_tabs.count())
     ] == [
-        "Inference",
+        "Screening",
         "DV & quality",
         "Export & context",
     ]
@@ -149,7 +150,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     ]:
         assert basic_page.isAncestorOf(cards[title])
     for title in [
-        "Inference Settings",
+        "Standard FPVS Screening",
         "Summed BCA definition",
         "Outlier Flagging",
         "Exports",
@@ -202,7 +203,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.analysis_mode_value.objectName() == "stats_analysis_mode_value"
     assert window.analysis_mode_value.text() == "Single Group"
     assert window.analysis_profile_value.objectName() == "stats_analysis_profile_value"
-    assert window.analysis_profile_value.text() == "Published-style exploratory"
+    assert window.analysis_profile_value.text() == "Standard FPVS Screening"
     assert window.analysis_group_value.objectName() == "stats_analysis_group_value"
     assert window.analysis_coverage_value.objectName() == "stats_analysis_coverage_value"
 
@@ -222,48 +223,52 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         widget = window.findChild(widget_type, object_name)
         assert widget is not None
         assert advanced_page.isAncestorOf(widget)
+    methods = window.findChild(QLabel, "stats_standard_screening_methods")
+    assert methods is window.standard_screening_methods_label
+    assert "Primary participant-random-intercept LMM" in methods.text()
+    assert "one-sided > 0 response tests" in methods.text()
+    assert "finite observations with no imputation" in methods.text()
+    assert "Holm family-wise correction" in methods.text()
+    assert "balanced-only secondary ANOVA compatibility" in methods.text()
     assert window.analysis_profile_combo.currentData() == "published_style_exploratory"
     assert window.multiplicity_combo.currentData() == "holm"
-    assert [
-        window.multiplicity_combo.itemData(index)
-        for index in range(window.multiplicity_combo.count())
-    ] == ["holm", "fdr_bh"]
-    assert window.response_alternative_combo.currentData() == "two_sided"
-    assert window.analysis_scope_combo.currentData() == "complete_core"
-    assert window.analysis_scope_combo.count() == 2
-    assert window.analysis_scope_combo.itemData(1) == "available_case"
-    assert window.analysis_scope_combo.isEnabled()
+    assert window.multiplicity_combo.count() == 1
+    assert window.response_alternative_combo.currentData() == "greater"
+    assert window.analysis_scope_combo.currentData() == "available_case"
+    assert window.analysis_scope_combo.count() == 1
+    for locked_control in (
+        window.analysis_profile_combo,
+        window.multiplicity_combo,
+        window.response_alternative_combo,
+        window.analysis_scope_combo,
+        window.strict_omnibus_family_checkbox,
+    ):
+        assert locked_control.isHidden()
+        assert not locked_control.isEnabled()
     assert window.resample_count_spin.objectName() == "stats_resample_count_spin"
     assert window.resample_count_spin.value() == 9_999
+    assert window.resample_count_spin.isHidden()
     assert window.strict_omnibus_family_checkbox.isChecked()
     assert window.robust_sensitivity_checkbox.isChecked()
-    assert window.resampling_sensitivity_checkbox.isChecked()
-    window.analysis_scope_combo.setCurrentIndex(1)
     assert not window.resampling_sensitivity_checkbox.isChecked()
+    assert window.resampling_sensitivity_checkbox.isHidden()
     assert not window.resampling_sensitivity_checkbox.isEnabled()
     assert not window.resample_count_spin.isEnabled()
-    window.analysis_scope_combo.setCurrentIndex(0)
-    assert window.resampling_sensitivity_checkbox.isChecked()
-    assert window.resampling_sensitivity_checkbox.isEnabled()
-    assert window.resample_count_spin.isEnabled()
     assert window.stability_sensitivity_checkbox.isChecked()
     assert window.group_pair_combo.isHidden()
     assert not window.group_pair_combo.isEnabled()
+    assert "exactly two canonical groups" in window.group_pair_combo.toolTip()
 
     assert not hasattr(window, "provenance_warning")
     assert window.findChild(QWidget, "stats_provenance_warning") is None
-    window.analysis_profile_combo.setCurrentText("Confirmatory")
-    qtbot.wait(20)
-    assert window.analysis_profile_value.text() == "Confirmatory"
-
     assert window.findChild(QWidget, "stats_results_selector") is None
     assert window.findChild(QWidget, "stats_results_stack") is None
     output_headers = [
         label.text()
         for label in window.findChildren(SubsectionHeaderLabel)
-        if label.text() == "Analysis Results"
+        if label.text() == "Screening Results"
     ]
-    assert output_headers == ["Analysis Results"]
+    assert output_headers == ["Screening Results"]
     results_tabs = window.findChild(QTabWidget, "stats_results_tabs")
     assert results_tabs is window.results_tabs
     assert [results_tabs.tabText(index) for index in range(results_tabs.count())] == [
@@ -292,7 +297,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.run_action_bar.isVisible()
     setup_tabs.setCurrentIndex(0)
 
-    assert window.analyze_single_btn.text() == "Analyze Single Group"
+    assert window.analyze_single_btn.text() == "Run Standard Screening"
     assert window.analyze_single_btn.objectName() == "stats_analyze_single_primary"
     assert window.analyze_single_btn.property("primary") is True
     assert window.analyze_single_btn.minimumHeight() >= 36
@@ -314,10 +319,10 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     }
     window._populate_group_pair_combo()
     window._sync_analysis_mode_ui()
-    assert window.analyze_single_btn.text() == "Analyze Multi-Group"
+    assert window.analyze_single_btn.text() == "Run Standard Screening"
     assert window.analysis_mode_value.text() == "Multi-Group"
     assert not window.group_pair_combo.isHidden()
-    assert window.group_pair_combo.isEnabled()
+    assert not window.group_pair_combo.isEnabled()
     assert window.group_pair_combo.currentData() == ("anxious", "non_anxious")
     window._project_is_multi_group = False
     window._populate_group_pair_combo()
@@ -444,10 +449,11 @@ def test_stats_harmonic_action_opens_settings_without_clearing_cache(
 def test_stats_tool_info_uses_expected_nonexpert_tabs():
     assert [tab.title for tab in STATS_TOOL_INFO.tabs] == [
         "Workflow",
-        "Analysis profiles",
+        "Standard methods",
         "How to interpret results",
     ]
     combined_html = "\n".join(tab.html for tab in STATS_TOOL_INFO.tabs)
-    assert "complete core" in combined_html
+    assert "finite" in combined_html.casefold()
+    assert "without imputation" in combined_html
     assert "exploratory post-selection" in combined_html
     assert "does <b>not</b> prove equivalence" in combined_html

@@ -534,7 +534,9 @@ class MainWindow(QMainWindow, ProcessingMixin):
         return page
 
     def open_stats_analyzer(self) -> None:
-        if not self._frequency_domain_outputs_ready_for_tool("Statistical Analysis"):
+        if not self._frequency_domain_outputs_ready_for_tool(
+            "Standard FPVS Screening"
+        ):
             return
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)

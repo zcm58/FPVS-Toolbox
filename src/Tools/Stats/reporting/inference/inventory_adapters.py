@@ -70,7 +70,6 @@ def section_for(name: str, frame: pd.DataFrame) -> str:
         ).any()
         or
         {"group_a", "group_b"}.issubset(columns)
-        or "contrast_sign" in columns
         or "marginal group" in lowered
         or "group cell" in lowered
         or (
@@ -166,6 +165,15 @@ def label_for(section: str, row: pd.Series) -> str:
 
     condition = first_nonmissing(row, ("condition", "Condition"))
     roi = first_nonmissing(row, ("roi", "ROI"))
+    if section == "response_detection":
+        group = first_nonmissing(row, ("group", "group_id", "Group"))
+        cell = " / ".join(
+            str(value)
+            for value in (group, condition, roi)
+            if value is not None
+        )
+        if cell:
+            return cell
     if section == "between_group":
         contrast = first_nonmissing(row, ("contrast", "contrast_sign"))
         if contrast is None:
@@ -185,6 +193,16 @@ def label_for(section: str, row: pd.Series) -> str:
             return f"{cell}: {contrast}"
         if contrast is not None:
             return str(contrast)
+    comparison_level = first_nonmissing(row, ("comparison_level",))
+    reference_level = first_nonmissing(row, ("reference_level",))
+    if comparison_level is not None and reference_level is not None:
+        comparison = f"{comparison_level} - {reference_level}"
+        cell = " / ".join(
+            str(value)
+            for value in (condition, roi)
+            if value is not None
+        )
+        return f"{cell}: {comparison}" if cell else comparison
     level_a = first_nonmissing(row, ("Level_A", "level_a"))
     level_b = first_nonmissing(row, ("Level_B", "level_b"))
     stratum = first_nonmissing(row, ("Stratum", "stratum", "Slice", "slice"))
@@ -216,7 +234,13 @@ def method_for(name: str, row: pd.Series, p_source: str) -> str:
 
     explicit = first_nonmissing(
         row,
-        ("test_method", "method", "statistical_test", "inference_reference"),
+        (
+            "method_label",
+            "test_method",
+            "method",
+            "statistical_test",
+            "inference_reference",
+        ),
     )
     if explicit is not None:
         return str(explicit)

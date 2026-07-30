@@ -238,6 +238,10 @@ def _group_cell_results() -> pd.DataFrame:
                 "family_id": "group_core_cells",
                 "alpha": 0.05,
                 "inference_status": "estimated",
+                "inference_role": "primary",
+                "headline_eligible": True,
+                "method_label": "LMM-derived model-estimated contrast",
+                "inference_method": "Asymptotic Wald z test (two-sided)",
             },
             {
                 "condition": "objects",
@@ -257,6 +261,10 @@ def _group_cell_results() -> pd.DataFrame:
                 "family_id": "group_core_cells",
                 "alpha": 0.05,
                 "inference_status": "estimated",
+                "inference_role": "primary",
+                "headline_eligible": True,
+                "method_label": "LMM-derived model-estimated contrast",
+                "inference_method": "Asymptotic Wald z test (two-sided)",
             },
         ]
     )
@@ -299,6 +307,66 @@ def _omnibus_results() -> pd.DataFrame:
     )
 
 
+def _single_lmm_lrt(*, interaction_p: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "effect_id": effect_id,
+                "effect_label": effect_label,
+                "p_adjusted": p_adjusted,
+                "adjustment_method": "holm",
+                "family_id": "omnibus_effects_strict",
+                "family_size": 3,
+                "status": "ok",
+                "reportable": True,
+                "headline_eligible": True,
+                "inference_role": "primary",
+                "analysis_scope": "available_case",
+            }
+            for effect_id, effect_label, p_adjusted in (
+                ("condition", "Condition-related block", 0.02),
+                ("roi", "ROI-related block", 0.40),
+                (
+                    "condition_roi_interaction",
+                    "Condition x ROI interaction",
+                    interaction_p,
+                ),
+            )
+        ]
+    )
+
+
+def _single_lmm_contrasts() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "contrast_id": f"condition_within_roi::{roi}",
+                "comparison_level": "faces",
+                "reference_level": "objects",
+                "contrast_sign": "faces - objects",
+                "roi": roi,
+                "estimate": estimate,
+                "p_adjusted": 0.01,
+                "adjustment_method": "holm",
+                "family_id": "planned_contrasts",
+                "family_size": 3,
+                "status": "estimated",
+                "reportable": True,
+                "headline_eligible": True,
+                "inference_role": "primary",
+                "followup_provenance": "omnibus_triggered",
+                "method_label": "LMM-derived model-estimated contrast",
+                "inference_method": "Asymptotic Wald z test (two-sided)",
+            }
+            for roi, estimate in (
+                ("left", 0.8),
+                ("central", 0.6),
+                ("right", 0.5),
+            )
+        ]
+    )
+
+
 def test_single_report_uses_adjusted_and_canonical_reported_p_values() -> None:
     bundle = build_native_inference_report(
         "single",
@@ -323,15 +391,12 @@ def test_single_report_uses_adjusted_and_canonical_reported_p_values() -> None:
     assert within["p_value_column"] == "p_reported"
     assert within["p_value_used"] == pytest.approx(0.024)
     assert "p=" not in bundle.at_a_glance
+    assert "Positive oddball response: no clear evidence" in bundle.at_a_glance
     assert (
-        "the primary analysis did not find clear evidence of a response"
+        "Condition/ROI pattern (primary LMM): no primary model conclusion"
         in bundle.at_a_glance
     )
-    assert (
-        "Conditions and brain regions: the primary analysis found evidence"
-        in bundle.at_a_glance
-    )
-    assert "not finding a clear difference does not prove" in bundle.at_a_glance
+    assert "non-significant result does not prove" in bundle.at_a_glance
     assert "Between-group" not in bundle.at_a_glance
     assert "there was no effect" not in bundle.at_a_glance.casefold()
 
@@ -365,13 +430,19 @@ def test_multigroup_report_states_joint_block_and_signed_group_contrast() -> Non
     text = bundle.at_a_glance
     assert "anxious - non-anxious" in text
     assert (
-        "Groups overall: the primary analysis found evidence of an overall "
-        "difference"
+        "Direct Group A-B cell differences "
+        "(LMM-derived model-estimated contrast): 1 of 2"
     ) in text
     assert (
-        "Group differences by condition and brain region: 1 of 2 planned "
-        "comparisons showed evidence of a difference"
+        "Broader joint group pattern (primary LMM): the joint test found "
+        "evidence of a broader group-related response pattern"
     ) in text
+    assert text.index("Direct Group A-B cell differences") < text.index(
+        "Broader joint group pattern"
+    )
+    assert "non-significant group results do not prove equivalence" in text
+    assert "associations, not causes or diagnoses" in text
+    assert "first-round FPVS screen" in text
     assert "p=" not in text
     assert "Hedges g=0.920" not in text
     assert "95% CI [0.180, 1.500]" not in text
@@ -432,13 +503,10 @@ def test_at_a_glance_condenses_large_multigroup_inventory() -> None:
 
     text = bundle.at_a_glance
     assert (
-        "none of the planned comparisons showed a clear difference"
-        in text
-    )
-    assert (
-        "Secondary checks: some additional analyses suggested possible "
-        "effects, but the primary analysis did not confirm them"
+        "none of the 12 planned Condition x ROI comparisons showed a clear "
+        "difference"
     ) in text
+    assert "Secondary checks" not in text
     assert "C3 / Left: anxious - non-anxious" not in text
     assert "C1 / Central: anxious - non-anxious" not in text
     assert "C1 / Central: anxious - non-anxious" in bundle.detailed_methods
@@ -460,19 +528,16 @@ def test_at_a_glance_single_summary_uses_plain_interpretation() -> None:
     )
 
     text = bundle.at_a_glance
-    assert text.startswith("Single-group summary")
+    assert text.startswith("Standard FPVS Screening: single group")
     assert (
-        "Response: no primary claim was made because the harmonics were "
-        "selected from these same data"
+        "Exploratory positive oddball response "
+        "(harmonics selected from this sample): evidence was found"
     ) in text
     assert (
-        "Conditions and brain regions: no clear differences were found in "
-        "the primary analysis"
+        "Condition/ROI pattern (primary LMM): no primary model conclusion"
     ) in text
-    assert (
-        "Secondary checks: some additional analyses suggested possible "
-        "effects, but the primary analysis did not confirm them"
-    ) in text
+    assert "Secondary checks" not in text
+    assert "first-round FPVS screen" in text
     assert "Data: 12 participants and 2 complete conditions" in text
     assert "Full statistical details: not yet saved." in text
     assert "Between-group" not in text
@@ -495,9 +560,9 @@ def test_adaptive_and_sensitivity_results_are_explicitly_caveated() -> None:
         },
     )
 
-    assert "Secondary checks" in bundle.at_a_glance
     assert (
-        "harmonics were selected from these same data"
+        "Exploratory positive oddball response "
+        "(harmonics selected from this sample): evidence was found"
         in bundle.at_a_glance
     )
     assert ADAPTIVE_HARMONIC_WARNING in bundle.detailed_methods
@@ -507,6 +572,98 @@ def test_adaptive_and_sensitivity_results_are_explicitly_caveated() -> None:
         == "same_sample_adaptive"
     )
     assert bundle.test_inventory.iloc[0]["role"] == "sensitivity"
+
+    primary_labelled = _response_results(
+        p_adjusted=0.01,
+        provenance="same_sample_adaptive",
+        status="confirmatory",
+    )
+    primary_bundle = build_native_inference_report(
+        "single",
+        step_payloads={"Response Results": primary_labelled},
+    )
+    assert (
+        "Exploratory positive oddball response "
+        "(harmonics selected from this sample)"
+    ) in primary_bundle.at_a_glance
+
+
+def test_interaction_explanation_requires_supported_primary_lmm_interaction() -> None:
+    contrasts = _single_lmm_contrasts()
+    supported = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            "Mixed Model LRT": _single_lmm_lrt(interaction_p=0.03),
+            "LMM Contrasts": contrasts,
+            "ANOVA Compatibility": _anova_compatibility_results(
+                p_adjusted=0.001
+            ),
+        },
+    )
+    unsupported = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            "Mixed Model LRT": _single_lmm_lrt(interaction_p=0.60),
+            "LMM Contrasts": contrasts,
+        },
+    )
+    uncorrected_lrt = _single_lmm_lrt(interaction_p=0.001).drop(
+        columns=["p_adjusted", "adjustment_method", "family_id", "family_size"]
+    )
+    uncorrected_lrt.loc[:, "p_value_chi2"] = 0.001
+    uncorrected = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            "Mixed Model LRT": uncorrected_lrt,
+            "LMM Contrasts": contrasts,
+        },
+    )
+
+    method_heading = (
+        "Interaction explanation "
+        "(LMM-derived model-estimated contrast)"
+    )
+    assert method_heading in supported.at_a_glance
+    assert method_heading not in unsupported.at_a_glance
+    assert method_heading not in uncorrected.at_a_glance
+    assert "left: faces - objects" in supported.at_a_glance
+    assert "central: faces - objects" in supported.at_a_glance
+    assert "right: faces - objects" not in supported.at_a_glance
+    assert "1 more" in supported.at_a_glance
+    assert "ANOVA" not in supported.at_a_glance
+    assert "p=" not in supported.at_a_glance
+    assert supported.at_a_glance.index("Positive oddball response") < (
+        supported.at_a_glance.index("Condition/ROI pattern")
+    )
+    assert supported.at_a_glance.index("Condition/ROI pattern") < (
+        supported.at_a_glance.index(method_heading)
+    )
+
+
+def test_multigroup_response_headline_keeps_group_identity() -> None:
+    grouped = pd.concat(
+        [
+            _response_results(p_adjusted=0.01).assign(group="anxious"),
+            _response_results(p_adjusted=0.60).assign(group="non-anxious"),
+        ],
+        ignore_index=True,
+    )
+    grouped.loc[:, "family_id"] = "group_response_cells"
+    grouped.loc[:, "family_size"] = 2
+    bundle = build_native_inference_report(
+        "multi",
+        step_payloads={"Grouped Response Results": grouped},
+    )
+
+    assert (
+        "Positive oddball response: evidence was found in 1 of 2 "
+        "Group x Condition x ROI tests"
+    ) in bundle.at_a_glance
+    assert "anxious / faces / left" in bundle.at_a_glance
+    assert "non-anxious / faces / left" not in bundle.at_a_glance
 
 
 def test_report_inventory_includes_formula_n_assumptions_corrections_and_provenance() -> None:
@@ -807,8 +964,8 @@ def test_available_case_single_mixed_model_lrt_can_be_headlined_explicitly() -> 
         "available_case_lmm_lrt_marked_headline_eligible"
     )
     assert (
-        "Conditions and brain regions: the primary analysis found evidence "
-        "that responses differed: condition * roi"
+        "Condition/ROI pattern (primary LMM): evidence that responses varied "
+        "across conditions and/or ROIs: condition * roi"
     ) in bundle.at_a_glance
 
 
@@ -1196,7 +1353,8 @@ def test_declared_metadata_merges_and_schema_adapters_preserve_details() -> None
     assert row["n"] == 12
     assert row["ci_low"] == pytest.approx(0.1)
     assert row["ci_high"] == pytest.approx(0.7)
-    assert "left ROI: fear - neutral" in bundle.at_a_glance
+    assert "left ROI: fear - neutral" not in bundle.at_a_glance
+    assert "left ROI: fear - neutral" in bundle.detailed_methods
 
 
 def test_canonical_reject_uses_inclusive_alpha_and_validates_export() -> None:
@@ -1214,10 +1372,7 @@ def test_canonical_reject_uses_inclusive_alpha_and_validates_export() -> None:
     assert row["reject_source"] == (
         "recomputed_from_selected_p_le_alpha_export_mismatch"
     )
-    assert (
-        "the primary analysis found evidence of a response"
-        in bundle.at_a_glance
-    )
+    assert "Positive oddball response: evidence was found" in bundle.at_a_glance
 
 
 def test_invalid_probability_is_retained_without_a_claim() -> None:
@@ -1261,7 +1416,11 @@ def test_one_sample_resampling_is_response_detection() -> None:
     row = bundle.test_inventory.iloc[0]
     assert row["section"] == "response_detection"
     assert row["role"] == "sensitivity"
-    assert "Secondary checks" in bundle.at_a_glance
+    assert "Secondary checks" not in bundle.at_a_glance
+    assert (
+        "Positive oddball response: no primary conclusion was available"
+        in bundle.at_a_glance
+    )
     assert "faces / left" not in bundle.at_a_glance
     assert "p=" not in bundle.at_a_glance
     assert "faces / left" in bundle.detailed_methods

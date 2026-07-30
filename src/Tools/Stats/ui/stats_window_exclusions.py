@@ -238,16 +238,17 @@ class StatsWindowExclusionsMixin:
                 "Recalculate Harmonics in Settings",
                 (
                     "Open the main FPVS Toolbox Settings page, choose "
-                    "Preprocessing, then use Recalculate Harmonics. Statistical "
-                    "Analysis does not recalculate or clear processing-time "
-                    "harmonic metadata."
+                    "Preprocessing, then use Recalculate Harmonics. Standard "
+                    "FPVS Screening does not recalculate or clear processing-"
+                    "time harmonic metadata."
                 ),
             )
             return
 
         message = (
             "Opened Settings > Preprocessing. Use Recalculate Harmonics in the "
-            "Harmonic Selection section, then return to Statistical Analysis."
+            "Harmonic Selection section, then return to Standard FPVS "
+            "Screening."
         )
         self.append_log("General", message)
         self._set_status(message)

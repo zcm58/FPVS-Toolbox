@@ -1,4 +1,4 @@
-"""Concise, non-expert summary for native Stats inference."""
+"""Short, question-led summary for Standard FPVS Screening."""
 
 from __future__ import annotations
 
@@ -8,12 +8,15 @@ from pathlib import Path
 import pandas as pd
 
 
+LMM_CONTRAST_METHOD = "LMM-derived model-estimated contrast"
+
+
 def _compact_result_labels(
     rows: pd.DataFrame,
     *,
     maximum: int = 2,
 ) -> str:
-    """Name a small number of significant rows without recreating the inventory."""
+    """Name a few supported rows without recreating the test inventory."""
 
     rendered = [
         str(row["test_label"])
@@ -25,119 +28,221 @@ def _compact_result_labels(
     return "; ".join(rendered)
 
 
-def _primary_question_line(
+def _reportable_headline_rows(
     inventory: pd.DataFrame,
     *,
     section: str,
-    heading: str,
-    positive_phrase: str,
-    negative_phrase: str,
-    unavailable_phrase: str,
-) -> str:
-    """Summarize one scientific question in one line."""
+) -> pd.DataFrame:
+    rows = inventory[inventory["section"].eq(section)]
+    return rows[
+        rows["headline_eligible"].eq(True)
+        & rows["reportable"].eq(True)
+        & rows["p_value_used"].notna()
+        & ~rows["role"].eq("compatibility")
+    ]
 
-    section_rows = inventory[inventory["section"].eq(section)]
-    if section_rows.empty:
-        return f"- {heading}: {unavailable_phrase}."
-    headline = section_rows[
-        section_rows["headline_eligible"].eq(True)
-        & section_rows["role"].eq("primary")
-    ]
-    eligible = headline[
-        headline["reportable"].eq(True)
-        & headline["p_value_used"].notna()
-    ]
+
+def _response_line(
+    inventory: pd.DataFrame,
+    *,
+    adaptive_harmonics: bool,
+    mode: str,
+) -> str:
+    """Summarize one-sided positive oddball-response evidence."""
+
+    rows = _reportable_headline_rows(
+        inventory,
+        section="response_detection",
+    )
+    primary = rows[rows["role"].eq("primary")]
+    if adaptive_harmonics:
+        eligible = primary if not primary.empty else rows
+        heading = (
+            "Exploratory positive oddball response "
+            "(harmonics selected from this sample)"
+        )
+    elif not primary.empty:
+        eligible = primary
+        heading = "Positive oddball response"
+    else:
+        exploratory = rows[rows["role"].eq("exploratory")]
+        if exploratory.empty:
+            eligible = primary
+            heading = "Positive oddball response"
+        else:
+            eligible = exploratory
+            heading = "Exploratory positive oddball response"
+
     if eligible.empty:
-        return f"- {heading}: {unavailable_phrase}."
+        if adaptive_harmonics:
+            return (
+                f"- {heading}: no usable response conclusion was available; "
+                "the same-sample check remains exploratory."
+            )
+        return f"- {heading}: no primary conclusion was available."
+
     significant = eligible[eligible["significant"].eq(True)]
+    cell_label = (
+        "Group x Condition x ROI"
+        if mode == "multi"
+        else "Condition x ROI"
+    )
     if significant.empty:
-        return f"- {heading}: {negative_phrase}."
-    details = _compact_result_labels(significant)
-    if len(eligible) == 1:
-        return f"- {heading}: {positive_phrase}: {details}."
+        return (
+            f"- {heading}: no clear evidence was found in any of "
+            f"{len(eligible)} {cell_label} tests."
+        )
     return (
-        f"- {heading}: {positive_phrase} in {len(significant)} of "
-        f"{len(eligible)} planned tests: {details}."
+        f"- {heading}: evidence was found in {len(significant)} of "
+        f"{len(eligible)} {cell_label} tests: "
+        f"{_compact_result_labels(significant)}."
     )
 
 
-def _between_group_lines(inventory: pd.DataFrame) -> list[str]:
-    """Summarize the joint group test and the corrected cell-test family."""
+def _primary_lmm_rows(inventory: pd.DataFrame) -> pd.DataFrame:
+    """Select primary Condition/ROI likelihood-ratio model questions."""
 
-    rows = inventory[
-        inventory["section"].eq("between_group")
-        & inventory["headline_eligible"].eq(True)
-        & inventory["role"].eq("primary")
-        & inventory["reportable"].eq(True)
-        & inventory["p_value_used"].notna()
-    ]
-    if rows.empty:
-        return [
-            "- Groups: no primary conclusion was available."
-        ]
-
-    lines: list[str] = []
-    labels = rows["test_label"].astype(str)
-    joint = rows[
-        labels.str.casefold().str.startswith("any group-related")
-    ]
-    if joint.empty:
-        lines.append(
-            "- Groups overall: no primary conclusion was available."
+    rows = _reportable_headline_rows(
+        inventory,
+        section="within_subject",
+    )
+    source = rows["source_frame"].astype(str).str.casefold()
+    method = rows["method"].astype(str).str.casefold()
+    return rows[
+        rows["role"].eq("primary")
+        & (
+            source.str.contains("mixed model lrt", regex=False)
+            | method.str.contains("likelihood-ratio", regex=False)
         )
-    else:
-        row = joint.iloc[0]
-        conclusion = (
-            "the primary analysis found evidence of an overall difference"
-            if bool(row["significant"])
-            else "no clear overall difference was found"
-        )
-        lines.append(f"- Groups overall: {conclusion}.")
-
-    cell_rows = rows[rows["family_id"].astype(str).eq("group_core_cells")]
-    if not cell_rows.empty:
-        significant = cell_rows[cell_rows["significant"].eq(True)]
-        if significant.empty:
-            lines.append(
-                "- Group differences by condition and brain region: none of "
-                "the planned comparisons showed a clear difference."
-            )
-        else:
-            lines.append(
-                "- Group differences by condition and brain region: "
-                f"{len(significant)} of {len(cell_rows)} planned comparisons "
-                "showed evidence of a difference: "
-                f"{_compact_result_labels(significant)}."
-            )
-    return lines
-
-
-def _sensitivity_line(inventory: pd.DataFrame) -> str | None:
-    """Collapse significant secondary checks into one plain-language caution."""
-
-    rows = inventory[
-        inventory["headline_eligible"].eq(True)
-        & inventory["role"].eq("sensitivity")
-        & inventory["reportable"].eq(True)
-        & inventory["p_value_used"].notna()
+        & ~rows["method"].astype(str).eq(LMM_CONTRAST_METHOD)
     ]
-    significant = rows[rows["significant"].eq(True)]
-    if significant.empty:
-        return None
-    primary_significant = inventory[
-        inventory["headline_eligible"].eq(True)
-        & inventory["role"].eq("primary")
-        & inventory["reportable"].eq(True)
-        & inventory["significant"].eq(True)
-    ]
-    if primary_significant.empty:
+
+
+def _primary_lmm_line(lmm_rows: pd.DataFrame) -> str:
+    if lmm_rows.empty:
         return (
-            "- Secondary checks: some additional analyses suggested possible "
-            "effects, but the primary analysis did not confirm them."
+            "- Condition/ROI pattern (primary LMM): no primary model "
+            "conclusion was available."
+        )
+    significant = lmm_rows[lmm_rows["significant"].eq(True)]
+    if significant.empty:
+        return (
+            "- Condition/ROI pattern (primary LMM): no clear evidence that "
+            "responses varied across conditions or ROIs."
         )
     return (
-        "- Secondary checks: some additional analyses also suggested possible "
-        "effects, but these are not primary findings."
+        "- Condition/ROI pattern (primary LMM): evidence that responses "
+        "varied across conditions and/or ROIs: "
+        f"{_compact_result_labels(significant)}."
+    )
+
+
+def _interaction_is_supported(lmm_rows: pd.DataFrame) -> bool:
+    labels = lmm_rows["test_label"].astype(str).str.casefold()
+    interaction = (
+        labels.str.contains("condition", regex=False)
+        & labels.str.contains("roi", regex=False)
+        & lmm_rows["p_value_source"].eq("multiplicity_adjusted")
+        & lmm_rows["family_id"].astype(str).eq("omnibus_effects_strict")
+        & (
+            labels.str.contains("interaction", regex=False)
+            | labels.str.contains("*", regex=False)
+        )
+    )
+    return bool(
+        lmm_rows.loc[interaction, "significant"].eq(True).any()
+    )
+
+
+def _interaction_explanation_line(
+    inventory: pd.DataFrame,
+    *,
+    lmm_rows: pd.DataFrame,
+) -> str | None:
+    """Explain only a supported Condition x ROI interaction."""
+
+    if not _interaction_is_supported(lmm_rows):
+        return None
+    rows = _reportable_headline_rows(
+        inventory,
+        section="within_subject",
+    )
+    contrasts = rows[
+        rows["role"].eq("primary")
+        & rows["method"].astype(str).eq(LMM_CONTRAST_METHOD)
+        & rows["family_id"].astype(str).eq("planned_contrasts")
+    ]
+    if contrasts.empty:
+        return None
+    significant = contrasts[contrasts["significant"].eq(True)]
+    heading = f"Interaction explanation ({LMM_CONTRAST_METHOD})"
+    if significant.empty:
+        return (
+            f"- {heading}: the interaction was supported, but none of the "
+            f"{len(contrasts)} planned comparisons clearly explained where "
+            "the differences lay."
+        )
+    return (
+        f"- {heading}: {len(significant)} of {len(contrasts)} planned "
+        "comparisons helped explain the pattern: "
+        f"{_compact_result_labels(significant)}."
+    )
+
+
+def _direct_group_cell_line(inventory: pd.DataFrame) -> str:
+    rows = _reportable_headline_rows(
+        inventory,
+        section="between_group",
+    )
+    cells = rows[
+        rows["role"].eq("primary")
+        & rows["family_id"].astype(str).eq("group_core_cells")
+        & rows["method"].astype(str).eq(LMM_CONTRAST_METHOD)
+    ]
+    heading = (
+        "Direct Group A-B cell differences "
+        f"({LMM_CONTRAST_METHOD})"
+    )
+    if cells.empty:
+        return f"- {heading}: no primary cell comparison was available."
+    significant = cells[cells["significant"].eq(True)]
+    if significant.empty:
+        return (
+            f"- {heading}: none of the {len(cells)} planned Condition x ROI "
+            "comparisons showed a clear difference."
+        )
+    return (
+        f"- {heading}: {len(significant)} of {len(cells)} planned Condition x "
+        "ROI comparisons showed a clear difference: "
+        f"{_compact_result_labels(significant)}."
+    )
+
+
+def _joint_group_pattern_line(inventory: pd.DataFrame) -> str:
+    rows = _reportable_headline_rows(
+        inventory,
+        section="between_group",
+    )
+    joint = rows[
+        rows["role"].eq("primary")
+        & rows["test_label"]
+        .astype(str)
+        .str.casefold()
+        .str.startswith("any group-related")
+    ]
+    if joint.empty:
+        return (
+            "- Broader joint group pattern (primary LMM): no primary joint "
+            "group conclusion was available."
+        )
+    if bool(joint.iloc[0]["significant"]):
+        return (
+            "- Broader joint group pattern (primary LMM): the joint test "
+            "found evidence of a broader group-related response pattern."
+        )
+    return (
+        "- Broader joint group pattern (primary LMM): the joint test found "
+        "no clear overall difference."
     )
 
 
@@ -152,7 +257,7 @@ def _item_count(value: object) -> int:
 
 
 def _concise_design_line(design: Mapping[str, object]) -> str | None:
-    """Condense design coverage to one at-a-glance sentence."""
+    """Condense design coverage to one sentence."""
 
     frozen_n = design.get("n")
     if frozen_n is None:
@@ -214,82 +319,67 @@ def at_a_glance_text(
     design: Mapping[str, object],
     export_path: str | Path | None = None,
 ) -> str:
-    """Build a short interpretation for a non-expert reader."""
+    """Answer the fixed Standard FPVS Screening questions concisely."""
 
     mode_label = (
-        "Single-group summary"
+        "single group"
         if mode == "single"
-        else "Group-comparison summary"
+        else "two-group comparison"
     )
-    adaptive_harmonics = limitations["code"].eq(
+    limitation_codes = limitations.get(
+        "code",
+        pd.Series(dtype=object),
+    )
+    adaptive_harmonics = limitation_codes.eq(
         "adaptive_harmonic_selection"
     ).any()
-    response_unavailable = (
-        "no primary claim was made because the harmonics were selected "
-        "from these same data"
-        if adaptive_harmonics
-        else "no primary conclusion was available"
-    )
-    lines = [mode_label, ""]
+
+    lines = [f"Standard FPVS Screening: {mode_label}", ""]
     lines.append(
-        _primary_question_line(
+        _response_line(
             inventory,
-            section="response_detection",
-            heading="Response",
-            positive_phrase=(
-                "the primary analysis found evidence of a response"
-            ),
-            negative_phrase=(
-                "the primary analysis did not find clear evidence of a response"
-            ),
-            unavailable_phrase=response_unavailable,
+            adaptive_harmonics=adaptive_harmonics,
+            mode=mode,
         )
     )
-    lines.append(
-        _primary_question_line(
-            inventory,
-            section="within_subject",
-            heading="Conditions and brain regions",
-            positive_phrase=(
-                "the primary analysis found evidence that responses differed"
-            ),
-            negative_phrase=(
-                "no clear differences were found in the primary analysis"
-            ),
-            unavailable_phrase="no primary conclusion was available",
-        )
+    lmm_rows = _primary_lmm_rows(inventory)
+    lines.append(_primary_lmm_line(lmm_rows))
+    interaction_line = _interaction_explanation_line(
+        inventory,
+        lmm_rows=lmm_rows,
     )
+    if interaction_line is not None:
+        lines.append(interaction_line)
     if mode != "single":
-        lines.extend(_between_group_lines(inventory))
-    sensitivity = _sensitivity_line(inventory)
-    if sensitivity is not None:
-        lines.append(sensitivity)
+        lines.extend(
+            [
+                _direct_group_cell_line(inventory),
+                _joint_group_pattern_line(inventory),
+            ]
+        )
 
     design_line = _concise_design_line(design)
     if design_line is not None:
         lines.extend(["", design_line])
 
-    lines.append("")
-    if mode == "multi":
-        significant_primary_group = inventory[
-            inventory["section"].eq("between_group")
-            & inventory["role"].eq("primary")
-            & inventory["headline_eligible"].eq(True)
-            & inventory["reportable"].eq(True)
-            & inventory["significant"].eq(True)
+    lines.extend(
+        [
+            "",
+            (
+                "Screening boundary: this is a first-round FPVS screen, not "
+                "the final project-specific statistical model."
+            ),
         ]
-        if significant_primary_group.empty:
-            lines.append(
-                "Note: not finding a clear group difference does not prove "
-                "that the groups are identical."
-            )
+    )
+    if mode == "multi":
         lines.append(
-            "Group findings describe associations, not causes or diagnoses."
+            "Caution: non-significant group results do not prove equivalence; "
+            "group findings describe associations, not causes or diagnoses."
         )
     else:
         lines.append(
-            "Note: not finding a clear difference does not prove that no "
-            "difference exists."
+            "Caution: a non-significant result does not prove that a response "
+            "or effect is absent."
         )
     workbook_name = (
         "not yet saved"

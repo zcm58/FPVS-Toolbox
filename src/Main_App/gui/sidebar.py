@@ -38,7 +38,7 @@ CENTERED_TEXT_TRAILING_SPACER_PX = (
 DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
 
 DEFAULT_TOOL_SPECS = (
-    ("btn_data", "Statistical Analysis", "stats", "open_stats_analyzer"),
+    ("btn_data", "Standard FPVS Screening", "stats", "open_stats_analyzer"),
     ("btn_sensitivity_analysis", "Sensitivity Analysis", "sensitivity", "open_sensitivity_analysis"),
     ("btn_graphs", "SNR Plots", "chart", "open_plot_generator"),
     ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),

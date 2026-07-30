@@ -40,7 +40,7 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert [
         advanced_tabs.tabText(index)
         for index in range(advanced_tabs.count())
-    ] == ["Inference", "DV & quality", "Export & context"]
+    ] == ["Screening", "DV & quality", "Export & context"]
     assert not hasattr(window, "data_folder_group")
     assert not hasattr(window, "btn_copy_folder")
     assert not hasattr(window, "btn_open_results")

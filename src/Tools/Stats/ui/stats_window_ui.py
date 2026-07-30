@@ -314,13 +314,18 @@ class StatsWindowUiMixin:
         self.manual_exclusion_select_all_btn.clicked.connect(self._select_all_manual_exclusions)
         self.manual_exclusion_clear_btn.clicked.connect(self._clear_manual_exclusions)
 
-        self.analyze_single_btn = make_action_button("Analyze Single Group", variant="primary")
+        self.analyze_single_btn = make_action_button(
+            "Run Standard Screening",
+            variant="primary",
+        )
         self.analyze_single_btn.setObjectName("stats_analyze_single_primary")
         self.analyze_single_btn.setMinimumHeight(36)
         self.analyze_single_btn.setMinimumWidth(190)
         self.analyze_single_btn.setDefault(True)
         self.analyze_single_btn.setToolTip(
-            "Run the full single-group analysis pipeline using the selected settings."
+            "Run the standard first-round FPVS screen for positive responses "
+            "and LMM response patterns. Use a study-specific custom model for "
+            "final confirmatory inference."
         )
         self.analyze_single_btn.clicked.connect(self._on_primary_analysis_clicked)
 
@@ -394,7 +399,9 @@ class StatsWindowUiMixin:
         pipeline_progress_row.addWidget(self.cancel_analysis_btn)
         pipeline_status_layout.addLayout(pipeline_progress_row)
 
-        self.inference_settings_group = SectionCard("Inference Settings")
+        self.inference_settings_group = SectionCard(
+            "Standard FPVS Screening"
+        )
         self.inference_settings_group.setObjectName("stats_inference_settings_group")
         self.inference_settings_group.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -406,119 +413,113 @@ class StatsWindowUiMixin:
         inference_grid.setHorizontalSpacing(10)
         inference_grid.setVerticalSpacing(6)
 
-        self.analysis_profile_combo = QComboBox()
+        self.standard_screening_methods_label = QLabel(
+            "Standard screening methods\n"
+            "Primary participant-random-intercept LMM; one-sided > 0 response "
+            "tests; finite observations with no imputation; Holm family-wise "
+            "correction; balanced-only secondary ANOVA compatibility."
+        )
+        self.standard_screening_methods_label.setObjectName(
+            "stats_standard_screening_methods"
+        )
+        self.standard_screening_methods_label.setWordWrap(True)
+        self.standard_screening_methods_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse
+        )
+        self.standard_screening_methods_label.setToolTip(
+            "These methods are locked for Standard FPVS Screening. The workbook "
+            "records full model, contrast, correction, coverage, and diagnostic "
+            "details."
+        )
+        inference_layout.addWidget(self.standard_screening_methods_label)
+
+        # Compatibility-only attributes retained for older integrations. These
+        # widgets are deliberately hidden and cannot override the locked
+        # Standard FPVS Screening contract.
+        self.analysis_profile_combo = QComboBox(
+            self.inference_settings_group
+        )
         self.analysis_profile_combo.setObjectName("stats_analysis_profile_combo")
         self.analysis_profile_combo.addItem(
             "Published-style exploratory",
             "published_style_exploratory",
         )
-        self.analysis_profile_combo.addItem("Confirmatory", "confirmatory")
-        self.analysis_profile_combo.setToolTip(
-            "Choose how results will be interpreted. A profile change never overrides "
-            "the recorded harmonic-selection provenance."
-        )
-        inference_grid.addWidget(QLabel("Analysis profile:"), 0, 0)
-        inference_grid.addWidget(self.analysis_profile_combo, 0, 1)
+        self.analysis_profile_combo.setEnabled(False)
+        self.analysis_profile_combo.hide()
 
-        self.group_pair_label = QLabel("Groups to compare:")
+        self.group_pair_label = QLabel("Screening groups:")
         self.group_pair_label.setObjectName("stats_group_pair_label")
         self.group_pair_combo = QComboBox()
         self.group_pair_combo.setObjectName("stats_group_pair_combo")
         self.group_pair_combo.addItem(
-            "Scan project groups to choose a comparison",
+            "Scan project groups to identify the screening pair",
             None,
         )
         self.group_pair_combo.setEnabled(False)
         self.group_pair_combo.setToolTip(
-            "Choose the explicit canonical group pair used for cell contrasts. "
-            "A choice is required when the project contains more than two groups."
+            "Displays the exactly two canonical groups used by Standard FPVS "
+            "Screening. Projects with another group structure require a "
+            "study-specific custom model."
         )
-        inference_grid.addWidget(self.group_pair_label, 0, 2)
-        inference_grid.addWidget(self.group_pair_combo, 0, 3)
+        inference_grid.addWidget(self.group_pair_label, 0, 0)
+        inference_grid.addWidget(self.group_pair_combo, 0, 1, 1, 3)
 
-        self.multiplicity_combo = QComboBox()
+        self.multiplicity_combo = QComboBox(self.inference_settings_group)
         self.multiplicity_combo.setObjectName("stats_multiplicity_combo")
         self.multiplicity_combo.addItem("Holm (family-wise)", "holm")
-        self.multiplicity_combo.addItem(
-            "Benjamini-Hochberg FDR",
-            "fdr_bh",
-        )
-        self.multiplicity_combo.setToolTip(
-            "Adjust related tests as one declared family. Holm is the default "
-            "family-wise correction; FDR is an exploratory discovery option. "
-            "Max-|t| results are reported separately as a resampling sensitivity."
-        )
-        inference_grid.addWidget(QLabel("Multiplicity:"), 1, 0)
-        inference_grid.addWidget(self.multiplicity_combo, 1, 1)
+        self.multiplicity_combo.setEnabled(False)
+        self.multiplicity_combo.hide()
 
-        self.response_alternative_combo = QComboBox()
+        self.response_alternative_combo = QComboBox(
+            self.inference_settings_group
+        )
         self.response_alternative_combo.setObjectName(
             "stats_response_alternative_combo"
         )
-        self.response_alternative_combo.addItem("Two-sided", "two_sided")
         self.response_alternative_combo.addItem(
             "Greater than zero",
             "greater",
         )
-        self.response_alternative_combo.setToolTip(
-            "Use a directional response test only when it was justified before "
-            "examining these data."
-        )
-        inference_grid.addWidget(QLabel("Response alternative:"), 1, 2)
-        inference_grid.addWidget(self.response_alternative_combo, 1, 3)
+        self.response_alternative_combo.setEnabled(False)
+        self.response_alternative_combo.hide()
 
-        self.analysis_scope_combo = QComboBox()
+        self.analysis_scope_combo = QComboBox(
+            self.inference_settings_group
+        )
         self.analysis_scope_combo.setObjectName("stats_analysis_scope_combo")
         self.analysis_scope_combo.addItem(
-            "Primary complete core",
-            "complete_core",
-        )
-        self.analysis_scope_combo.addItem(
-            "Available-case LMM",
+            "Finite available observations",
             "available_case",
         )
-        self.analysis_scope_combo.setToolTip(
-            "Complete core retains only conditions contributed by every included "
-            "participant. Available-case LMM retains usable observations from "
-            "participants with missing conditions, skips repeated-measures ANOVA "
-            "and paired post-hocs, and reports the missing-data assumptions."
-        )
-        inference_grid.addWidget(QLabel("Analysis scope:"), 2, 0)
-        inference_grid.addWidget(self.analysis_scope_combo, 2, 1)
+        self.analysis_scope_combo.setEnabled(False)
+        self.analysis_scope_combo.hide()
 
-        self.resample_count_spin = QSpinBox()
+        self.resample_count_spin = QSpinBox(
+            self.inference_settings_group
+        )
         self.resample_count_spin.setObjectName("stats_resample_count_spin")
         self.resample_count_spin.setRange(1, 100_000)
         self.resample_count_spin.setValue(9_999)
         self.resample_count_spin.setSingleStep(1_000)
         self.resample_count_spin.setGroupSeparatorShown(True)
         self.resample_count_spin.setToolTip(
-            "Requested Monte Carlo draws when exact participant-level enumeration "
-            "is not feasible."
+            "Compatibility-only control retained for older integrations. "
+            "Max-|t| resampling is unavailable in the locked finite-observation "
+            "screening workflow."
         )
-        inference_grid.addWidget(QLabel("Resampling draws:"), 2, 2)
-        inference_grid.addWidget(self.resample_count_spin, 2, 3)
+        self.resample_count_spin.setEnabled(False)
+        self.resample_count_spin.hide()
 
         self.strict_omnibus_family_checkbox = QCheckBox(
-            "Correct primary omnibus effects together"
+            "Holm-correct primary model-effect family",
+            self.inference_settings_group,
         )
         self.strict_omnibus_family_checkbox.setObjectName(
             "stats_strict_omnibus_family_checkbox"
         )
         self.strict_omnibus_family_checkbox.setChecked(True)
-        self.strict_omnibus_family_checkbox.setToolTip(
-            "Apply the selected multiplicity correction across the canonical omnibus "
-            "effects. In single-group mode, the adjusted Condition-by-ROI interaction "
-            "gates automatic paired follow-ups. In multi-group mode, direct group-cell "
-            "contrasts remain a separately corrected family."
-        )
-        inference_grid.addWidget(
-            self.strict_omnibus_family_checkbox,
-            3,
-            0,
-            1,
-            2,
-        )
+        self.strict_omnibus_family_checkbox.setEnabled(False)
+        self.strict_omnibus_family_checkbox.hide()
 
         self.independent_selection_attestation = QCheckBox(
             "The fixed harmonic list was selected independently of these participants"
@@ -535,10 +536,10 @@ class StatsWindowUiMixin:
         )
         inference_grid.addWidget(
             self.independent_selection_attestation,
-            3,
-            2,
             1,
-            2,
+            0,
+            1,
+            4,
         )
 
         sensitivity_row = QWidget()
@@ -546,7 +547,7 @@ class StatsWindowUiMixin:
         sensitivity_layout = QHBoxLayout(sensitivity_row)
         sensitivity_layout.setContentsMargins(0, 0, 0, 0)
         sensitivity_layout.setSpacing(12)
-        sensitivity_layout.addWidget(QLabel("Sensitivity analyses:"))
+        sensitivity_layout.addWidget(QLabel("Optional sensitivity checks:"))
 
         self.robust_sensitivity_checkbox = QCheckBox("Robust")
         self.robust_sensitivity_checkbox.setObjectName(
@@ -555,17 +556,20 @@ class StatsWindowUiMixin:
         self.robust_sensitivity_checkbox.setChecked(True)
         sensitivity_layout.addWidget(self.robust_sensitivity_checkbox)
 
-        self.resampling_sensitivity_checkbox = QCheckBox("Resampling")
+        self.resampling_sensitivity_checkbox = QCheckBox(
+            "Resampling",
+            self.inference_settings_group,
+        )
         self.resampling_sensitivity_checkbox.setObjectName(
             "stats_resampling_sensitivity_checkbox"
         )
-        self.resampling_sensitivity_checkbox.setChecked(True)
+        self.resampling_sensitivity_checkbox.setChecked(False)
+        self.resampling_sensitivity_checkbox.setEnabled(False)
+        self.resampling_sensitivity_checkbox.hide()
         self.resampling_sensitivity_checkbox.setToolTip(
-            "Run the participant-level max-|t| resampling sensitivity. This "
-            "requires complete participant-by-cell coverage and is unavailable "
-            "for an available-case LMM."
+            "Max-|t| resampling requires a complete participant-by-cell matrix "
+            "and is unavailable in Standard FPVS Screening."
         )
-        sensitivity_layout.addWidget(self.resampling_sensitivity_checkbox)
 
         self.stability_sensitivity_checkbox = QCheckBox("Leave-one-out stability")
         self.stability_sensitivity_checkbox.setObjectName(
@@ -699,7 +703,9 @@ class StatsWindowUiMixin:
         output_header_layout = QHBoxLayout(output_header_widget)
         output_header_layout.setContentsMargins(0, 0, 0, 0)
         output_header_layout.setSpacing(8)
-        output_header_layout.addWidget(SubsectionHeaderLabel("Analysis Results"))
+        output_header_layout.addWidget(
+            SubsectionHeaderLabel("Screening Results")
+        )
         output_header_layout.addStretch(1)
 
         output_header = ActionRow(output_header_widget, alignment=Qt.AlignRight)
@@ -739,7 +745,7 @@ class StatsWindowUiMixin:
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         self.stats_tool_info_btn = make_info_button(
             parent=file_box,
-            tooltip="About Statistical Analysis",
+            tooltip="About Standard FPVS Screening",
             object_name="stats_tool_info_btn",
         )
         self.stats_tool_info_btn.clicked.connect(
@@ -778,11 +784,11 @@ class StatsWindowUiMixin:
         analysis_design_layout.addWidget(self.analysis_mode_banner)
 
         analysis_design_form = make_form_layout()
-        self.analysis_profile_value = QLabel("Published-style exploratory")
+        self.analysis_profile_value = QLabel("Standard FPVS Screening")
         self.analysis_profile_value.setObjectName("stats_analysis_profile_value")
         self.analysis_profile_value.setWordWrap(True)
         self.analysis_profile_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        analysis_design_form.addRow("Profile:", self.analysis_profile_value)
+        analysis_design_form.addRow("Workflow:", self.analysis_profile_value)
 
         self.analysis_group_value = QLabel("One pooled group; scan to confirm participant N.")
         self.analysis_group_value.setObjectName("stats_analysis_group_value")
@@ -791,18 +797,19 @@ class StatsWindowUiMixin:
         analysis_design_form.addRow("Groups:", self.analysis_group_value)
 
         self.analysis_coverage_value = QLabel(
-            "Scan the data folder to calculate participant and complete-core "
-            "condition coverage."
+            "Scan the data folder to preview available participant-condition "
+            "coverage."
         )
         self.analysis_coverage_value.setObjectName("stats_analysis_coverage_value")
         self.analysis_coverage_value.setWordWrap(True)
         self.analysis_coverage_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        analysis_design_form.addRow("Primary coverage:", self.analysis_coverage_value)
+        analysis_design_form.addRow("Data coverage:", self.analysis_coverage_value)
         analysis_design_layout.addLayout(analysis_design_form)
 
         analysis_design_note = QLabel(
-            "Primary inference uses the frozen participant cohort and only conditions "
-            "with one finite value for every selected ROI and participant."
+            "Standard screening uses each finite selected observation without "
+            "imputation. Balanced data also receive a secondary ANOVA "
+            "compatibility check."
         )
         analysis_design_note.setObjectName("stats_analysis_design_note")
         analysis_design_note.setWordWrap(True)
@@ -879,7 +886,7 @@ class StatsWindowUiMixin:
             }
             """
         )
-        self.advanced_tabs.addTab(inference_page, "Inference")
+        self.advanced_tabs.addTab(inference_page, "Screening")
         self.advanced_tabs.addTab(dv_quality_page, "DV & quality")
         self.advanced_tabs.addTab(export_context_page, "Export & context")
         advanced_layout_page.addWidget(self.advanced_tabs, 1)
@@ -903,7 +910,9 @@ class StatsWindowUiMixin:
         self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)
 
-        self.stats_processing_notice = SectionCard("Stats analysis in progress")
+        self.stats_processing_notice = SectionCard(
+            "Standard screening in progress"
+        )
         self.stats_processing_notice.setObjectName("stats_processing_notice")
         self.stats_processing_notice.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)

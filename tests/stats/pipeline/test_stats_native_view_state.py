@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from Tools.Stats.analysis.dv_policies import GROUP_SIGNIFICANT_POLICY_NAME
 from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.ui.stats_window_actions import StatsWindowActionsMixin
@@ -132,8 +134,8 @@ def test_native_state_snapshot_exposes_plain_pipeline_configuration() -> None:
     assert snapshot["mode"] == "multi"
     assert snapshot["analysis_profile"] == "published_style_exploratory"
     assert snapshot["correction"] == "holm"
-    assert snapshot["response_alternative"] == "two_sided"
-    assert snapshot["analysis_scope"] == "complete_core"
+    assert snapshot["response_alternative"] == "greater"
+    assert snapshot["analysis_scope"] == "available_case"
     assert snapshot["strict_omnibus_family"] is True
     assert snapshot["harmonic_provenance"] == "same_sample_adaptive"
     assert snapshot["canonical_group_ids"] == view._participant_group_id_map
@@ -167,3 +169,33 @@ def test_pipeline_progress_uses_the_actual_scope_specific_queue() -> None:
 
     assert view._progress_updates == [33]
     assert rendered["percent"] == 33
+
+
+def test_pipeline_fallback_uses_locked_standard_screening_methods() -> None:
+    view = StatsWindowPipelineMixin()
+    view._project_is_multi_group = False
+    view._get_selected_conditions = lambda: ["Faces", "Objects"]
+
+    snapshot = view._native_state_snapshot(PipelineId.SINGLE)
+
+    assert snapshot["analysis_profile"] == "published_style_exploratory"
+    assert snapshot["correction"] == "holm"
+    assert snapshot["response_alternative"] == "greater"
+    assert snapshot["analysis_scope"] == "available_case"
+    assert snapshot["strict_omnibus_family"] is True
+
+
+def test_standard_multigroup_pair_requires_exactly_two_groups() -> None:
+    view = StatsWindowPipelineMixin()
+
+    assert view._selected_native_group_pair(
+        {"P1": "control", "P2": "anxious"}
+    ) == ("anxious", "control")
+    with pytest.raises(ValueError, match="exactly two canonical groups"):
+        view._selected_native_group_pair(
+            {
+                "P1": "control",
+                "P2": "anxious",
+                "P3": "other",
+            }
+        )

@@ -84,7 +84,7 @@ def infer_harmonic_provenance(
 
 @dataclass(frozen=True, slots=True)
 class NativeInferenceOptions:
-    """Validated values collected from the Stats controls before a run."""
+    """Validated locked methods plus scientific controls for one screening."""
 
     mode: AnalysisMode
     profile: AnalysisProfile
@@ -122,6 +122,11 @@ class NativeInferenceOptions:
         # These fields remain accepted while the legacy GUI controls are
         # phased out, but standard screening has one locked scientific
         # contract in both project modes.
+        object.__setattr__(
+            self,
+            "profile",
+            AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        )
         object.__setattr__(
             self,
             "correction",

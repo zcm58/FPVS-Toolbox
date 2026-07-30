@@ -303,7 +303,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Phase commit recorded below after this plan update.
+- `7e173472` — `feat(stats): add balanced ANOVA compatibility`
 
 ## Phase 5 — GUI and Plain-Language Screening Report
 
@@ -333,17 +333,17 @@ The current workflow still needs these behavioral changes:
 
 ### Definition of Done
 
-- [ ] The GUI no longer suggests that ANOVA, direction, correction, or
+- [x] The GUI no longer suggests that ANOVA, direction, correction, or
       missing-data scope are competing primary choices.
-- [ ] The main action says `Run Standard Screening`.
-- [ ] At a Glance is short, plain-language, and contains no dense inventory or
+- [x] The main action says `Run Standard Screening`.
+- [x] At a Glance is short, plain-language, and contains no dense inventory or
       p-value dump.
-- [ ] LMM-derived contrasts are named as such wherever interpreted.
-- [ ] Same-sample response evidence remains visible but exploratory.
-- [ ] Custom-model triggers are clear and non-alarming.
-- [ ] No long work is moved onto the UI thread.
-- [ ] GUI import and reporting-legibility audits pass.
-- [ ] Focused Stats verification passes; Qt tests remain CI-only.
+- [x] LMM-derived contrasts are named as such wherever interpreted.
+- [x] Same-sample response evidence remains visible but exploratory.
+- [x] Custom-model triggers are clear and non-alarming.
+- [x] No long work is moved onto the UI thread.
+- [x] GUI import and reporting-legibility audits pass.
+- [x] Focused Stats verification passes; Qt tests remain CI-only.
 
 ### Verification
 
@@ -354,7 +354,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Pending.
+- Phase commit recorded in the Phase 6 closeout after this plan update.
 
 ## Phase 6 — Documentation, Verification Registry, and Handoff
 
@@ -443,3 +443,13 @@ Run in a normal visible Windows session, never offscreen:
   exported descriptive decision comparison that says ANOVA does not validate
   the LMM. New analysis/reporting integration tests passed (125), the real
   installed Pingouin path passed, and Stats focused verification passed (333).
+- 2026-07-29: Phase 5 replaced editable method choices with the locked
+  Standard FPVS Screening summary, made the exactly-two-group identity
+  read-only, removed unavailable resampling and stale paired-post-hoc actions
+  from the visible workflow, and recast window, sidebar, progress, completion,
+  and help language. At a Glance now answers the positive-response, primary
+  LMM Condition/ROI, supported interaction-explanation, and two-group
+  comparison questions without displaying p-values or ANOVA compatibility.
+  Focused GUI-neutral integration tests passed (121), GUI and reporting audits
+  passed, Ruff/compilation/diff-check passed, and the full Stats focused gate
+  passed (337). CI-only Qt definitions were updated but not run locally.

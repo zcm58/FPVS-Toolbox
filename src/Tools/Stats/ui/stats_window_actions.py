@@ -118,19 +118,9 @@ class StatsWindowActionsMixin:
                 self._sync_provenance_warning,
             ),
             (
-                "analysis_profile_combo",
-                "currentTextChanged",
-                self._sync_analysis_profile_summary,
-            ),
-            (
                 "group_pair_combo",
                 "currentIndexChanged",
                 self._refresh_analysis_design_summary,
-            ),
-            (
-                "analysis_scope_combo",
-                "currentIndexChanged",
-                self._sync_analysis_scope_ui,
             ),
         ):
             control = getattr(self, name, None)
@@ -158,13 +148,12 @@ class StatsWindowActionsMixin:
             )
         primary = getattr(self, "analyze_single_btn", None)
         if primary is not None:
-            primary.setText(
-                "Analyze Multi-Group" if is_multi else "Analyze Single Group"
-            )
+            primary.setText("Run Standard Screening")
             primary.setToolTip(
-                "Run the native multi-group inference pipeline."
-                if is_multi
-                else "Run the native single-group inference pipeline."
+                "Run the standard first-round FPVS screen for this "
+                f"{'multi-group' if is_multi else 'single-group'} project. "
+                "It tests positive responses and LMM response patterns; use a "
+                "study-specific custom model for final confirmatory inference."
             )
         advanced = getattr(self, "single_advanced_btn", None)
         if advanced is not None:
@@ -181,7 +170,7 @@ class StatsWindowActionsMixin:
         """Return whether the user selected likelihood-based available cases."""
 
         return (
-            self._combo_value("analysis_scope_combo", "complete_core")
+            self._combo_value("analysis_scope_combo", "available_case")
             == "available_case"
         )
 
@@ -245,27 +234,20 @@ class StatsWindowActionsMixin:
             return False
         message = (
             f"{action_label} requires complete participant-by-condition coverage. "
-            "The available-case scope uses the mixed model instead; run the "
-            "primary analysis or choose Primary complete core."
+            "Standard screening fits the primary LMM first and runs ANOVA "
+            "compatibility automatically only when the declared grid is balanced."
         )
         self._set_status(message)
         self.append_log("Single", message, level="warning")
         return True
 
     def _sync_analysis_profile_summary(self, *_args) -> None:
-        profile_combo = getattr(self, "analysis_profile_combo", None)
         profile_label = getattr(self, "analysis_profile_value", None)
         if profile_label is not None:
-            text_getter = getattr(profile_combo, "currentText", None)
-            text = (
-                str(text_getter()).strip()
-                if callable(text_getter)
-                else "Published-style exploratory"
-            )
-            profile_label.setText(text or "Published-style exploratory")
+            profile_label.setText("Standard FPVS Screening")
             profile_label.setToolTip(
-                "The interpretation profile does not override harmonic-selection "
-                "provenance."
+                "A transparent first-round screen. Use a study-specific custom "
+                "model for final confirmatory inference."
             )
         self._sync_provenance_warning()
 
@@ -329,13 +311,6 @@ class StatsWindowActionsMixin:
         combo = getattr(self, "group_pair_combo", None)
         if combo is None:
             return
-        current_data = combo.currentData()
-        previous = (
-            tuple(str(value) for value in current_data)
-            if isinstance(current_data, (tuple, list))
-            and len(current_data) == 2
-            else None
-        )
         was_blocked = combo.blockSignals(True)
         try:
             combo.clear()
@@ -347,27 +322,24 @@ class StatsWindowActionsMixin:
                 combo.addItem("Not applicable to a single-group project", None)
                 combo.setEnabled(False)
                 return
-            if len(pairs) > 1:
-                combo.addItem("Select a canonical group pair...", None)
-            elif not pairs:
-                combo.addItem("At least two canonical groups are required", None)
-            for pair in pairs:
-                left, right = pair
+            if len(self._group_participant_counts) != 2 or len(pairs) != 1:
                 combo.addItem(
-                    (
-                        f"{self._group_pair_label_text(left)} vs "
-                        f"{self._group_pair_label_text(right)}"
-                    ),
-                    pair,
+                    "Standard screening requires exactly two canonical groups",
+                    None,
                 )
-            combo.setEnabled(bool(pairs))
-            if previous in pairs:
-                index = combo.findData(previous)
-                combo.setCurrentIndex(index)
-            elif len(pairs) == 1:
-                combo.setCurrentIndex(combo.findData(pairs[0]))
-            else:
-                combo.setCurrentIndex(0)
+                combo.setEnabled(False)
+                return
+            pair = pairs[0]
+            left, right = pair
+            combo.addItem(
+                (
+                    f"{self._group_pair_label_text(left)} vs "
+                    f"{self._group_pair_label_text(right)}"
+                ),
+                pair,
+            )
+            combo.setCurrentIndex(combo.findData(pair))
+            combo.setEnabled(False)
         finally:
             combo.blockSignals(was_blocked)
 
@@ -428,27 +400,17 @@ class StatsWindowActionsMixin:
             selected_conditions,
             self.subject_data,
         )
-        profile_combo = getattr(self, "analysis_profile_combo", None)
-        profile_text_getter = getattr(profile_combo, "currentText", None)
-        profile_text = (
-            str(profile_text_getter()).strip()
-            if callable(profile_text_getter)
-            else "Published-style exploratory"
-        )
         self.update_analysis_design_summary(
             mode_text=(
                 "Multi-Group"
                 if self._native_pipeline_id() is PipelineId.MULTI
                 else "Single Group"
             ),
-            profile_text=profile_text or "Published-style exploratory",
+            profile_text="Standard FPVS Screening",
             group_text=self._group_summary_text(),
             coverage_text=format_preliminary_workbook_coverage(
                 self._preliminary_coverage,
-                analysis_scope=self._combo_value(
-                    "analysis_scope_combo",
-                    "complete_core",
-                ),
+                analysis_scope="available_case",
             ),
         )
         self._sync_provenance_warning()
@@ -460,26 +422,11 @@ class StatsWindowActionsMixin:
         return {
             "pipeline_id": self._native_pipeline_id(),
             "mode": self._native_mode_value(),
-            "analysis_profile": self._combo_value(
-                "analysis_profile_combo",
-                "published_style_exploratory",
-            ),
-            "correction": self._combo_value(
-                "multiplicity_combo",
-                "holm",
-            ),
-            "response_alternative": self._combo_value(
-                "response_alternative_combo",
-                "two_sided",
-            ),
-            "analysis_scope": self._combo_value(
-                "analysis_scope_combo",
-                "complete_core",
-            ),
-            "strict_omnibus_family": self._checkbox_value(
-                "strict_omnibus_family_checkbox",
-                True,
-            ),
+            "analysis_profile": "published_style_exploratory",
+            "correction": "holm",
+            "response_alternative": "greater",
+            "analysis_scope": "available_case",
+            "strict_omnibus_family": True,
             "harmonic_provenance": self._native_harmonic_provenance(),
             "independent_selection_attested": self._checkbox_value(
                 "independent_selection_attestation",
@@ -520,7 +467,7 @@ class StatsWindowActionsMixin:
     def _single_group_disabled_message(self) -> str:
         return (
             "This individual action belongs to the single-group pipeline. "
-            "Use the primary Analyze Multi-Group action for this project."
+            "Use Run Standard Screening for this multi-group project."
         )
 
     def _is_single_group_analysis_disabled(self) -> bool:
@@ -702,18 +649,19 @@ class StatsWindowActionsMixin:
                 return
             pairs = canonical_group_pairs(tuple(self._group_participant_counts))
             selected_pair = self._selected_group_pair()
-            if not pairs:
+            if len(self._group_participant_counts) != 2 or len(pairs) != 1:
                 message = (
-                    "Multi-group analysis requires at least two canonical "
-                    "project groups."
+                    "Standard multi-group screening requires exactly two "
+                    "canonical project groups. Use a study-specific custom "
+                    "model for projects with a different group structure."
                 )
                 self._set_status(message)
                 self.append_log("Multi-group", message, level="warning")
                 return
-            if len(pairs) > 1 and selected_pair is None:
+            if selected_pair is None:
                 message = (
-                    "Choose the canonical group pair for cell comparisons "
-                    "before running the multi-group pipeline."
+                    "The two canonical screening groups could not be resolved. "
+                    "Review project participant metadata, then re-scan."
                 )
                 self._set_status(message)
                 self.append_log("Multi-group", message, level="warning")
@@ -750,6 +698,11 @@ class StatsWindowActionsMixin:
             btn.setEnabled(enabled)
             if text.lower().startswith("export"):
                 btn.setToolTip("Export the results for this step to Excel.")
+            elif "diagnostic only" in text.casefold():
+                btn.setToolTip(
+                    "Advanced diagnostic route only; this is not a replacement "
+                    "for the full Standard FPVS Screening report."
+                )
             btn.clicked.connect(cb)
             layout.addWidget(btn)
         layout.addStretch(1)
@@ -763,10 +716,10 @@ class StatsWindowActionsMixin:
 
         if self._native_pipeline_id() is PipelineId.MULTI:
             self._open_advanced_dialog(
-                "Multi-Group – Advanced",
+                "Standard FPVS Screening - Advanced",
                 [
                     (
-                        "Run Native Multi-Group Pipeline",
+                        "Run Standard Screening",
                         self._on_primary_analysis_clicked,
                         True,
                     ),
@@ -775,32 +728,28 @@ class StatsWindowActionsMixin:
             return
         if self._block_single_group_analysis_if_needed():
             return
-        complete_core = not self._available_case_scope_selected()
         actions = [
-            ("Run RM-ANOVA", self.on_run_rm_anova, complete_core),
-            ("Run Mixed Model", self.on_run_mixed_model, True),
             (
-                "Run Interaction/Post-hocs",
-                self.on_run_interaction_posthocs,
-                complete_core,
+                "Run Standard Screening",
+                self._on_primary_analysis_clicked,
+                True,
             ),
+            ("Run LMM Diagnostic Only", self.on_run_mixed_model, True),
             (
-                "Export RM-ANOVA",
+                "Export ANOVA Compatibility",
                 self.on_export_rm_anova,
                 isinstance(self.rm_anova_results_data, pd.DataFrame) and not self.rm_anova_results_data.empty,
             ),
             (
-                "Export Mixed Model",
+                "Export LMM Diagnostic",
                 self.on_export_mixed_model,
                 isinstance(self.mixed_model_results_data, pd.DataFrame) and not self.mixed_model_results_data.empty,
             ),
-            (
-                "Export Post-hocs",
-                self.on_export_posthoc,
-                isinstance(self.posthoc_results_data, pd.DataFrame) and not self.posthoc_results_data.empty,
-            ),
         ]
-        self._open_advanced_dialog("Single Group – Advanced", actions)
+        self._open_advanced_dialog(
+            "Standard FPVS Screening - Advanced",
+            actions,
+        )
 
     def _check_for_open_excel_files(self, folder_path: str) -> bool:
         """Best-effort check to avoid writing to open Excel files."""

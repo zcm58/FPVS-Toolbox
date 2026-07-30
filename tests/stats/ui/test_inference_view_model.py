@@ -36,7 +36,8 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
 
     run_spec = options.build_run_spec()
 
-    assert run_spec.profile is AnalysisProfile.CONFIRMATORY
+    assert options.profile is AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY
+    assert run_spec.profile is AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY
     assert run_spec.response_alternative is Alternative.GREATER
     assert run_spec.followup_provenance is FollowupProvenance.OMNIBUS_TRIGGERED
     assert {family.family_id for family in run_spec.families} == {
@@ -63,7 +64,7 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
 def test_legacy_controls_cannot_override_standard_screening_contract() -> None:
     options = NativeInferenceOptions(
         mode=AnalysisMode.SINGLE,
-        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        profile=AnalysisProfile.CONFIRMATORY,
         correction=CorrectionMethod.BH_FDR,
         alternative=Alternative.TWO_SIDED,
         harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
@@ -76,6 +77,7 @@ def test_legacy_controls_cannot_override_standard_screening_contract() -> None:
 
     assert options.correction is CorrectionMethod.HOLM
     assert options.alternative is Alternative.GREATER
+    assert options.profile is AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY
     assert options.analysis_scope == "available_case"
     assert options.strict_omnibus_family is True
     assert "omnibus_effects_strict" in run_spec.family_map

@@ -227,26 +227,11 @@ class StatsWindowPipelineMixin:
                     else PipelineId.SINGLE
                 ),
                 "mode": fallback_mode.value,
-                "analysis_profile": self._native_control_value(
-                    control_name="analysis_profile_combo",
-                    default="published_style_exploratory",
-                ),
-                "correction": self._native_control_value(
-                    control_name="multiplicity_combo",
-                    default="holm",
-                ),
-                "response_alternative": self._native_control_value(
-                    control_name="response_alternative_combo",
-                    default="two_sided",
-                ),
-                "analysis_scope": self._native_control_value(
-                    control_name="analysis_scope_combo",
-                    default="complete_core",
-                ),
-                "strict_omnibus_family": self._native_checkbox_value(
-                    "strict_omnibus_family_checkbox",
-                    default=True,
-                ),
+                "analysis_profile": "published_style_exploratory",
+                "correction": "holm",
+                "response_alternative": "greater",
+                "analysis_scope": "available_case",
+                "strict_omnibus_family": True,
                 "independent_selection_attested": self._native_checkbox_value(
                     "independent_selection_attestation",
                     default=False,
@@ -355,10 +340,11 @@ class StatsWindowPipelineMixin:
                 key=str.casefold,
             )
         )
-        if len(observed) < 2:
+        if len(observed) != 2:
             raise ValueError(
-                "Multi-group analysis requires at least two canonical groups "
-                "in the selected participant cohort."
+                "Standard multi-group screening requires exactly two canonical "
+                "groups in the selected participant cohort. Use a "
+                "study-specific custom model for another group structure."
             )
         if raw_pair is None:
             raw_pair = self._native_control_value(
@@ -366,13 +352,8 @@ class StatsWindowPipelineMixin:
                 default=None,
             )
         pair = self._coerce_group_pair(raw_pair)
-        if pair is None and len(observed) == 2:
-            return (observed[0], observed[1])
         if pair is None:
-            raise ValueError(
-                "This project contains more than two groups. Select the two "
-                "canonical groups to compare before running the analysis."
-            )
+            return (observed[0], observed[1])
         observed_by_key = {group.casefold(): group for group in observed}
         missing = [group for group in pair if group.casefold() not in observed_by_key]
         if missing:
@@ -443,18 +424,13 @@ class StatsWindowPipelineMixin:
         sensitivity = sensitivity if isinstance(sensitivity, Mapping) else {}
         options = NativeInferenceOptions(
             mode=expected_mode,
-            profile=snapshot.get(
-                "analysis_profile",
-                "published_style_exploratory",
-            ),
-            correction=snapshot.get("correction", "holm"),
-            alternative=snapshot.get("response_alternative", "two_sided"),
+            profile="published_style_exploratory",
+            correction="holm",
+            alternative="greater",
             harmonic_provenance=provenance,
             alpha=self._current_alpha,
-            analysis_scope=snapshot.get("analysis_scope", "complete_core"),
-            strict_omnibus_family=bool(
-                snapshot.get("strict_omnibus_family", True)
-            ),
+            analysis_scope="available_case",
+            strict_omnibus_family=True,
             selected_group_pair=group_pair,
             run_robust=bool(sensitivity.get("run_robust", True)),
             run_resampling=bool(sensitivity.get("run_resampling", True)),
@@ -1197,7 +1173,8 @@ class StatsWindowPipelineMixin:
         if hasattr(self.lbl_status, "set_variant"):
             self.lbl_status.set_variant("info")
         self._set_status(
-            f"Running {self._section_label(pipeline_id).lower()} analysis..."
+            "Running Standard FPVS Screening "
+            f"({self._section_label(pipeline_id).lower()})..."
         )
         running_setter = getattr(self, "set_pipeline_running", None)
         if callable(running_setter):
@@ -1253,11 +1230,14 @@ class StatsWindowPipelineMixin:
             if cancelled:
                 if hasattr(self.lbl_status, "set_variant"):
                     self.lbl_status.set_variant("warning")
-                self._set_status("Analysis cancelled safely.")
+                self._set_status(
+                    "Standard FPVS Screening cancelled safely."
+                )
                 phase_text = "Cancelled"
                 self.append_log(
                     section,
-                    "Analysis cancelled; partial inferential results were not reported.",
+                    "Standard FPVS Screening was cancelled; partial results "
+                    "were not reported.",
                     level="warning",
                 )
             elif success:
@@ -1266,10 +1246,13 @@ class StatsWindowPipelineMixin:
                     self.lbl_status.set_variant("success")
                 if export_path:
                     self._set_status(
-                        f"Analysis complete at {ts}. Workbook: {export_path}"
+                        "Standard FPVS Screening complete at "
+                        f"{ts}. Workbook: {export_path}"
                     )
                 else:
-                    self._set_status(f"Analysis complete at {ts}.")
+                    self._set_status(
+                        f"Standard FPVS Screening complete at {ts}."
+                    )
                 phase_text = "Complete"
                 if exports_ran:
                     self.append_log(
@@ -1277,7 +1260,10 @@ class StatsWindowPipelineMixin:
                         f"Detailed results workbook exported: {export_path}",
                     )
                 else:
-                    self.append_log(section, "Analysis completed.")
+                    self.append_log(
+                        section,
+                        "Standard FPVS Screening completed.",
+                    )
             else:
                 if hasattr(self.lbl_status, "set_variant"):
                     self.lbl_status.set_variant(
@@ -1289,7 +1275,10 @@ class StatsWindowPipelineMixin:
                 phase_text = "Stopped"
                 self._set_status(
                     error_message
-                    or "Analysis stopped before a report could be completed."
+                    or (
+                        "Standard FPVS Screening stopped before a report "
+                        "could be completed."
+                    )
                 )
                 if error_message:
                     self.append_log(
@@ -1409,7 +1398,10 @@ class StatsWindowPipelineMixin:
             ).strip()
             self.summary_text.setPlainText(
                 at_a_glance
-                or "The analysis completed, but no plain-language summary was generated."
+                or (
+                    "Standard FPVS Screening completed, but no plain-language "
+                    "summary was generated."
+                )
             )
             if bundle is not None:
                 self._native_report_bundle = bundle
@@ -1648,8 +1640,8 @@ class StatsWindowPipelineMixin:
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
         """Handle the prompt view results step for the Stats workflow."""
         msg = QMessageBox(self)
-        msg.setWindowTitle("Statistical Analysis Complete")
-        msg.setText("Statistical analysis complete.\nView results?")
+        msg.setWindowTitle("Standard FPVS Screening Complete")
+        msg.setText("Standard FPVS Screening is complete.\nView results?")
         msg.setIcon(QMessageBox.Information)
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg.setDefaultButton(QMessageBox.Yes)

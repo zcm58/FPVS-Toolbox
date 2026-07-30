@@ -25,7 +25,7 @@ class StatsWindow(
     StatsWindowUiMixin,
     QMainWindow,
 ):
-    """PySide6 window wrapping the FPVS Statistical Analysis Tool."""
+    """PySide6 window wrapping Standard FPVS Screening."""
 
     def __init__(
         self,
@@ -49,7 +49,7 @@ class StatsWindow(
         self._load_project_context_from_root(self._project_path)
 
         super().__init__(parent)
-        self.setWindowTitle("FPVS Statistical Analysis Tool")
+        self.setWindowTitle("Standard FPVS Screening")
         logger.debug(
             "stats_window_init",
             extra={

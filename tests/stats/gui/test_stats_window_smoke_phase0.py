@@ -69,7 +69,11 @@ def test_single_group_run_smoke(qtbot, monkeypatch, app):
 
 
 @pytest.mark.qt
-def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, monkeypatch, app):
+def test_single_group_advanced_actions_keep_screening_and_diagnostics(
+    qtbot,
+    monkeypatch,
+    app,
+):
     win = StatsWindow(project_dir=str(_project_dir("single-group-advanced-actions")))
     qtbot.addWidget(win)
     _prepare_window(win, monkeypatch)
@@ -85,8 +89,13 @@ def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, monkeypatch, ap
     win.on_single_advanced_clicked()
 
     labels = [label for label, _cb, _enabled in captured["actions"]]
-    assert "Run RM-ANOVA" in labels
-    assert "Run Mixed Model" in labels
+    assert captured["title"] == "Standard FPVS Screening - Advanced"
+    assert "Run Standard Screening" in labels
+    assert "Run LMM Diagnostic Only" in labels
+    assert "Export ANOVA Compatibility" in labels
+    assert "Run RM-ANOVA" not in labels
+    assert "Run Interaction/Post-hocs" not in labels
+    assert "Export Post-hocs" not in labels
 
 
 @pytest.mark.qt
