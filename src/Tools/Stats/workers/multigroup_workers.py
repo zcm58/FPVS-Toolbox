@@ -30,14 +30,20 @@ from Tools.Stats.analysis.group_comparisons import (
 from Tools.Stats.analysis.inference_contracts import (
     AnalysisProfile,
     AnalysisRunSpec,
+    CorrectionMethod,
+    FamilySpec,
+    FollowupProvenance,
     HarmonicProvenance,
+)
+from Tools.Stats.analysis.lmm_contrasts import (
+    estimate_condition_within_roi_contrasts,
+    estimate_roi_within_condition_contrasts,
 )
 from Tools.Stats.analysis.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.analysis.multiple_comparisons import apply_family_correction
 from Tools.Stats.analysis.multigroup_model import (
     run_multigroup_mixed_model,
 )
-from Tools.Stats.analysis.posthoc_tests import run_interaction_posthocs
 from Tools.Stats.analysis.prepared_analysis import (
     AnalysisMode,
     PreparedAnalysisPayload,
@@ -86,6 +92,221 @@ MAX_ROBUST_CELLS = 512
 ProgressCallback = Callable[[int, int], None]
 CancelCheck = Callable[[], bool]
 STRICT_OMNIBUS_FAMILY_ID = "omnibus_effects_strict"
+SINGLE_FOLLOWUP_FAMILY_ID = "planned_contrasts"
+
+
+def _standard_holm_family(
+    payload: PreparedAnalysisPayload,
+    *,
+    family_id: str,
+    family_label: str,
+) -> FamilySpec:
+    """Return the declared screening family or its locked Holm fallback."""
+
+    declared = payload.run_spec.family_map.get(family_id)
+    if declared is not None:
+        return declared
+    return FamilySpec(
+        family_id=family_id,
+        family_label=family_label,
+        method=CorrectionMethod.HOLM,
+        alpha=payload.run_spec.alpha,
+    )
+
+
+def _apply_single_primary_omnibus_correction(
+    payload: PreparedAnalysisPayload,
+    table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Correct and promote the primary single-group LMM screening blocks."""
+
+    family = _standard_holm_family(
+        payload,
+        family_id=STRICT_OMNIBUS_FAMILY_ID,
+        family_label="Primary LMM factorial screening blocks",
+    )
+    corrected = apply_family_correction(
+        table,
+        family,
+        p_col="p_value_chi2",
+    )
+    corrected["inference_role"] = "primary"
+    headline = pd.to_numeric(
+        corrected["p_adjusted"],
+        errors="coerce",
+    ).notna()
+    if "reportable" in corrected.columns:
+        headline &= corrected["reportable"].fillna(False).astype(bool)
+    if "status" in corrected.columns:
+        headline &= corrected["status"].astype(str).eq("ok")
+    corrected["headline_eligible"] = headline
+    corrected["analysis_scope"] = payload.analysis_scope
+    corrected["missing_values_imputed"] = False
+    return corrected
+
+
+def _corrected_single_interaction_result(
+    lrt_table: pd.DataFrame | None,
+) -> tuple[bool, float | None, str]:
+    """Resolve the corrected Condition x ROI interaction decision."""
+
+    if not isinstance(lrt_table, pd.DataFrame) or lrt_table.empty:
+        return False, None, "omnibus_result_unavailable"
+    if "effect_id" not in lrt_table.columns:
+        return False, None, "omnibus_result_unavailable"
+    interaction = lrt_table.loc[
+        lrt_table["effect_id"].astype(str).eq(
+            "condition_roi_interaction"
+        )
+    ]
+    if len(interaction) != 1:
+        return False, None, "omnibus_result_unavailable"
+    row = interaction.iloc[0]
+    if "status" in interaction.columns and str(row["status"]) != "ok":
+        return False, None, "omnibus_result_unavailable"
+    if "reportable" in interaction.columns and not bool(row["reportable"]):
+        return False, None, "omnibus_result_unavailable"
+    adjusted = pd.to_numeric(
+        pd.Series([row.get("p_adjusted")]),
+        errors="coerce",
+    ).iloc[0]
+    p_adjusted = float(adjusted) if np.isfinite(adjusted) else None
+    if "reject_adjusted" in interaction.columns:
+        supported = bool(row["reject_adjusted"])
+    elif p_adjusted is not None:
+        alpha = pd.to_numeric(
+            pd.Series([row.get("alpha")]),
+            errors="coerce",
+        ).iloc[0]
+        supported = bool(
+            np.isfinite(alpha) and p_adjusted <= float(alpha)
+        )
+    else:
+        supported = False
+    return (
+        supported,
+        p_adjusted,
+        "omnibus_supported" if supported else "omnibus_not_significant",
+    )
+
+
+def _resolve_single_followup_provenance(
+    payload: PreparedAnalysisPayload,
+    explicit: object | None,
+) -> FollowupProvenance:
+    """Resolve why the fitted-model simple contrasts were included."""
+
+    candidate = (
+        explicit
+        if explicit is not None
+        else payload.run_spec.followup_provenance
+    )
+    if candidate is None:
+        return FollowupProvenance.OMNIBUS_TRIGGERED
+    return FollowupProvenance.coerce(candidate)
+
+
+def _single_lmm_contrast_frame(
+    payload: PreparedAnalysisPayload,
+    fitted_model: object,
+    corrected_lrt: pd.DataFrame | None,
+    *,
+    ci_level: float,
+    followup_provenance: object | None,
+) -> pd.DataFrame:
+    """Build one Holm family of simple contrasts from the fitted LMM."""
+
+    data = payload.primary_data
+    shared = {
+        "participant_col": payload.subject_col,
+        "dv_col": payload.dv_col,
+        "condition_col": payload.condition_col,
+        "roi_col": payload.roi_col,
+        "condition_levels": payload.retained_conditions,
+        "roi_levels": payload.selected_rois,
+        "ci_level": float(ci_level),
+    }
+    condition_within_roi = estimate_condition_within_roi_contrasts(
+        fitted_model,
+        data,
+        **shared,
+    )
+    roi_within_condition = estimate_roi_within_condition_contrasts(
+        fitted_model,
+        data,
+        **shared,
+    )
+    contrasts = pd.concat(
+        [condition_within_roi, roi_within_condition],
+        ignore_index=True,
+    )
+    family = _standard_holm_family(
+        payload,
+        family_id=SINGLE_FOLLOWUP_FAMILY_ID,
+        family_label="LMM-derived factorial follow-up contrasts",
+    )
+    contrasts = apply_family_correction(
+        contrasts,
+        family,
+        p_col="p_raw",
+    )
+
+    provenance = _resolve_single_followup_provenance(
+        payload,
+        followup_provenance,
+    )
+    (
+        interaction_supported,
+        interaction_p_adjusted,
+        interaction_status,
+    ) = _corrected_single_interaction_result(corrected_lrt)
+    reportable = (
+        contrasts["reportable"].fillna(False).astype(bool)
+        if "reportable" in contrasts.columns
+        else pd.Series(False, index=contrasts.index, dtype=bool)
+    )
+    if provenance is FollowupProvenance.PLANNED:
+        headline_eligible = reportable
+        gate_status = "planned_not_gated"
+    elif provenance is FollowupProvenance.OMNIBUS_TRIGGERED:
+        headline_eligible = reportable & interaction_supported
+        gate_status = interaction_status
+    else:
+        headline_eligible = pd.Series(
+            False,
+            index=contrasts.index,
+            dtype=bool,
+        )
+        gate_status = "exploratory_manual_detailed_only"
+
+    contrasts["followup_provenance"] = provenance.value
+    contrasts["omnibus_effect_id"] = "condition_roi_interaction"
+    contrasts["omnibus_p_adjusted"] = interaction_p_adjusted
+    contrasts["omnibus_significant"] = interaction_supported
+    contrasts["omnibus_gate_status"] = gate_status
+    contrasts["automatic_explanation_supported"] = (
+        interaction_supported
+    )
+    contrasts["headline_eligible"] = headline_eligible
+    contrasts["inference_role"] = np.where(
+        headline_eligible,
+        "primary",
+        "exploratory",
+    )
+    contrasts["analysis_scope"] = payload.analysis_scope
+    contrasts["missing_values_imputed"] = False
+    contrasts.attrs.update(
+        {
+            "family_scope": "all_single_factorial_followups",
+            "followup_provenance": provenance.value,
+            "omnibus_effect_id": "condition_roi_interaction",
+            "omnibus_p_adjusted": interaction_p_adjusted,
+            "omnibus_significant": interaction_supported,
+            "omnibus_gate_status": gate_status,
+            "missing_values_imputed": False,
+        }
+    )
+    return contrasts
 
 
 def _apply_strict_omnibus_correction(
@@ -1662,6 +1883,7 @@ def run_single_lmm_step(
     re_formula: str = "1",
     method: str = "reml",
     ci_level: float = 0.95,
+    followup_provenance: object | None = None,
     cancel_check: CancelCheck | None = None,
     progress_callback: ProgressCallback | None = None,
     **_ignored: object,
@@ -1726,29 +1948,61 @@ def run_single_lmm_step(
     lrt_table = mixed_results.attrs.get("lrt_table")
     frames = {"Mixed Model": mixed_results}
     if isinstance(lrt_table, pd.DataFrame):
-        if payload.analysis_scope == "available_case":
-            lrt_table = _apply_strict_omnibus_correction(
-                payload,
-                lrt_table,
-                p_col="p_value_chi2",
-            )
-            lrt_table["analysis_scope"] = payload.analysis_scope
-            lrt_table["missing_values_imputed"] = False
-            mixed_results.attrs["lrt_table"] = lrt_table
-        else:
-            lrt_table = lrt_table.copy()
-            lrt_table["inference_role"] = "secondary"
-            lrt_table["headline_eligible"] = False
+        lrt_table = _apply_single_primary_omnibus_correction(
+            payload,
+            lrt_table,
+        )
+        mixed_results.attrs["lrt_table"] = lrt_table
         frames["Mixed Model LRT"] = lrt_table
     diagnostics = mixed_results.attrs.get("model_diagnostics")
     if isinstance(diagnostics, pd.DataFrame):
         frames["Mixed Model Diagnostics"] = diagnostics
-    status = (
+    contrast_error: str | None = None
+    try:
+        lmm_contrasts = _single_lmm_contrast_frame(
+            payload,
+            fitted_model,
+            lrt_table if isinstance(lrt_table, pd.DataFrame) else None,
+            ci_level=float(ci_level),
+            followup_provenance=followup_provenance,
+        )
+    except Exception as exc:  # noqa: BLE001 - preserve the completed LMM
+        contrast_error = f"{type(exc).__name__}: {exc}"
+        lmm_contrasts = pd.DataFrame(
+            [
+                {
+                    "status": "failed",
+                    "reportable": False,
+                    "headline_eligible": False,
+                    "inference_role": "exploratory",
+                    "method_label": (
+                        "LMM-derived model-estimated contrast"
+                    ),
+                    "inference_method": (
+                        "Asymptotic Wald z test (two-sided)"
+                    ),
+                    "followup_provenance": (
+                        _resolve_single_followup_provenance(
+                            payload,
+                            followup_provenance,
+                        ).value
+                    ),
+                    "analysis_scope": payload.analysis_scope,
+                    "missing_values_imputed": False,
+                    "error": contrast_error,
+                }
+            ]
+        )
+    frames["LMM Contrasts"] = lmm_contrasts
+    mixed_results.attrs["lmm_contrasts"] = lmm_contrasts
+
+    model_has_warnings = (
         "partial"
         if "LRT Status" in mixed_results.columns
         and mixed_results["LRT Status"].astype(str).ne("ok").any()
         else "ok"
     )
+    status = "partial" if contrast_error else model_has_warnings
     fit_status = {
         "status": status,
         "alpha": payload.run_spec.alpha if alpha is None else float(alpha),
@@ -1762,6 +2016,8 @@ def run_single_lmm_step(
             payload.contributing_participants
         ),
         "missing_values_imputed": False,
+        "contrast_status": "failed" if contrast_error else "ok",
+        "contrast_error": contrast_error or "",
     }
     response = _response(
         payload=payload,
@@ -1771,7 +2027,10 @@ def run_single_lmm_step(
         message=(
             "Prepared-data single-group mixed model completed."
             if status == "ok"
-            else "The single-group mixed model completed with LRT warnings."
+            else (
+                "The single-group mixed model completed, but one or more "
+                "screening outputs require review."
+            )
         ),
         frames=_single_frames(payload, **frames),
         primary_object=(mixed_results, fitted_model),
@@ -1780,7 +2039,12 @@ def run_single_lmm_step(
         {
             "mixed_results_df": mixed_results,
             "mixed_model": fitted_model,
-            "output_text": mixed_results.to_string(index=False),
+            "lmm_contrasts_df": lmm_contrasts,
+            "output_text": (
+                mixed_results.to_string(index=False)
+                + "\n\nLMM-derived model-estimated contrasts\n"
+                + lmm_contrasts.to_string(index=False)
+            ),
             "fit_status": fit_status,
             "dv_metadata": payload.settings.get("dv_metadata", {}),
         }
@@ -1806,7 +2070,7 @@ def run_single_posthoc_step(
     progress_callback: ProgressCallback | None = None,
     **_ignored: object,
 ) -> dict[str, object]:
-    """Run interaction follow-ups on prepared single-group rows."""
+    """Return the explicit compatibility status for retired paired post-hocs."""
 
     payload, progress, message, blocked = _single_step_start(
         progress_or_payload,
@@ -1817,18 +2081,6 @@ def run_single_posthoc_step(
     )
     if blocked is not None:
         return blocked
-    if payload.analysis_scope == "available_case":
-        return _response(
-            payload=payload,
-            step="single_interaction_posthocs",
-            status="blocked",
-            status_code="paired_posthocs_require_complete_core",
-            message=(
-                "Paired interaction follow-ups were not run because "
-                "available-case participants may not share every Condition x "
-                "ROI cell. The omnibus LMM is the primary result."
-            ),
-        )
     if _is_cancelled(cancel_check):
         return _response(
             payload=payload,
@@ -1837,60 +2089,22 @@ def run_single_posthoc_step(
             status_code="cancelled_before_start",
             message="Interaction follow-ups were cancelled before they started.",
         )
-    _emit_progress(progress, 0, 1)
-    message("Running interaction follow-ups on prepared data.")
-    try:
-        output_text, results = run_interaction_posthocs(
-            data=payload.primary_data,
-            dv_col=payload.dv_col,
-            roi_col=payload.roi_col,
-            condition_col=payload.condition_col,
-            subject_col=payload.subject_col,
-            correction=correction,
-            alpha=(
-                payload.run_spec.alpha if alpha is None else float(alpha)
-            ),
-            direction=posthoc_direction or direction,
-            followup_provenance=followup_provenance,
-            omnibus_p_value=omnibus_p_value,
-            omnibus_significant=omnibus_significant,
-            enforce_omnibus_gate=bool(enforce_omnibus_gate),
-            family_scope=family_scope,
-        )
-    except Exception as exc:
-        return _response(
-            payload=payload,
-            step="single_interaction_posthocs",
-            status="failed",
-            status_code="single_posthoc_failed",
-            message=f"{type(exc).__name__}: {exc}",
-        )
-    if _is_cancelled(cancel_check):
-        return _response(
-            payload=payload,
-            step="single_interaction_posthocs",
-            status="cancelled",
-            status_code="cancelled_after_tests",
-            message="Cancellation was requested during interaction follow-ups.",
-        )
     _emit_progress(progress, 1, 1)
-    response = _response(
+    message(
+        "Paired post-hocs are superseded by contrasts from the fitted "
+        "single-group mixed model."
+    )
+    return _response(
         payload=payload,
         step="single_interaction_posthocs",
-        status="ok",
-        status_code="single_posthoc_ok",
-        message="Prepared-data interaction follow-ups completed.",
-        frames=_single_frames(payload, **{"Interaction Posthocs": results}),
-        primary_object=results,
+        status="blocked",
+        status_code="paired_posthocs_superseded_by_lmm_contrasts",
+        message=(
+            "Separate paired post-hocs were not run. Condition-within-ROI "
+            "and ROI-within-Condition follow-ups are LMM-derived "
+            "model-estimated contrasts packaged with the primary mixed model."
+        ),
     )
-    response.update(
-        {
-            "results_df": results,
-            "output_text": output_text,
-            "dv_metadata": payload.settings.get("dv_metadata", {}),
-        }
-    )
-    return response
 
 
 def run_single_baseline_step(

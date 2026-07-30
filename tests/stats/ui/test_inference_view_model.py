@@ -37,10 +37,11 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
     run_spec = options.build_run_spec()
 
     assert run_spec.profile is AnalysisProfile.CONFIRMATORY
-    assert run_spec.response_alternative is Alternative.TWO_SIDED
+    assert run_spec.response_alternative is Alternative.GREATER
     assert run_spec.followup_provenance is FollowupProvenance.OMNIBUS_TRIGGERED
     assert {family.family_id for family in run_spec.families} == {
         "response_core_cells",
+        "group_response_cells",
         "group_core_cells",
         "planned_contrasts",
         "omnibus_effects_strict",
@@ -50,7 +51,7 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
     )
     assert options.sensitivity_config() == {
         "run_robust": True,
-        "run_resampling": True,
+        "run_resampling": False,
         "run_stability": True,
         "n_resamples": 2_000,
         "seed": 20_250_521,
@@ -58,21 +59,26 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
     }
 
 
-def test_exploratory_manual_profile_does_not_declare_strict_omnibus_family() -> None:
+def test_legacy_controls_cannot_override_standard_screening_contract() -> None:
     options = NativeInferenceOptions(
         mode=AnalysisMode.SINGLE,
         profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
-        correction=CorrectionMethod.HOLM,
+        correction=CorrectionMethod.BH_FDR,
         alternative=Alternative.TWO_SIDED,
         harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
         alpha=0.05,
+        analysis_scope="complete_core",
         strict_omnibus_family=False,
     )
 
     run_spec = options.build_run_spec()
 
-    assert "omnibus_effects_strict" not in run_spec.family_map
-    assert run_spec.followup_provenance is FollowupProvenance.EXPLORATORY_MANUAL
+    assert options.correction is CorrectionMethod.HOLM
+    assert options.alternative is Alternative.GREATER
+    assert options.analysis_scope == "available_case"
+    assert options.strict_omnibus_family is True
+    assert "omnibus_effects_strict" in run_spec.family_map
+    assert run_spec.followup_provenance is FollowupProvenance.OMNIBUS_TRIGGERED
 
 
 def test_mode_and_harmonic_provenance_follow_explicit_contracts() -> None:
@@ -143,8 +149,8 @@ def test_pipeline_progress_maps_each_step_into_the_full_run() -> None:
     ).casefold()
     available_case_order = (
         StepId.PREPARE_ANALYSIS,
-        StepId.MIXED_MODEL,
         StepId.BASELINE_VS_ZERO,
+        StepId.MIXED_MODEL,
         StepId.REPORT_BUNDLE,
     )
     assert overall_progress(
@@ -184,28 +190,34 @@ def test_single_queue_omits_sensitivities_only_when_all_are_disabled() -> None:
     assert pipeline_steps_for_options(disabled)[-1] is StepId.REPORT_BUNDLE
 
 
-def test_available_case_single_queue_uses_lmm_and_suppresses_paired_steps() -> None:
+def test_standard_single_queue_runs_positive_response_before_lmm() -> None:
     options = NativeInferenceOptions(
         mode=AnalysisMode.SINGLE,
         profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
-        correction=CorrectionMethod.HOLM,
+        correction=CorrectionMethod.BH_FDR,
         alternative=Alternative.TWO_SIDED,
         harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
         alpha=0.05,
-        analysis_scope="available_case",
+        analysis_scope="complete_core",
+        strict_omnibus_family=False,
         run_resampling=True,
     )
 
     queue = pipeline_steps_for_options(options)
 
     assert options.analysis_scope == "available_case"
+    assert options.alternative is Alternative.GREATER
+    assert options.correction is CorrectionMethod.HOLM
+    assert options.strict_omnibus_family is True
     assert options.run_resampling is False
     assert options.sensitivity_config()["run_resampling"] is False
-    assert StepId.MIXED_MODEL in queue
-    assert StepId.BASELINE_VS_ZERO in queue
-    assert StepId.RM_ANOVA not in queue
-    assert StepId.INTERACTION_POSTHOCS not in queue
-    assert StepId.SENSITIVITIES in queue
+    assert queue == (
+        StepId.PREPARE_ANALYSIS,
+        StepId.BASELINE_VS_ZERO,
+        StepId.MIXED_MODEL,
+        StepId.SENSITIVITIES,
+        StepId.REPORT_BUNDLE,
+    )
 
 
 def test_available_case_multi_queue_keeps_model_and_cell_comparisons() -> None:
@@ -216,12 +228,19 @@ def test_available_case_multi_queue_keeps_model_and_cell_comparisons() -> None:
         alternative=Alternative.TWO_SIDED,
         harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
         alpha=0.05,
-        analysis_scope="available_case",
+        analysis_scope="complete_core",
         selected_group_pair=("a", "b"),
     )
 
     queue = pipeline_steps_for_options(options)
 
-    assert StepId.MULTIGROUP_MODEL in queue
-    assert StepId.GROUP_CELL_COMPARISONS in queue
+    assert queue == (
+        StepId.PREPARE_ANALYSIS,
+        StepId.MULTIGROUP_MODEL,
+        StepId.GROUP_CELL_COMPARISONS,
+        StepId.SENSITIVITIES,
+        StepId.REPORT_BUNDLE,
+    )
+    assert options.analysis_scope == "available_case"
+    assert options.alternative is Alternative.GREATER
     assert options.run_resampling is False

@@ -168,6 +168,31 @@ def test_contrasts_report_wald_method_estimand_sign_and_coverage(
     ).all()
 
 
+def test_single_group_contrasts_retain_available_rows_without_imputation() -> None:
+    data = _single_group_data()
+    missing = (
+        data["participant_id"].eq("p01")
+        & data["condition"].eq("faces")
+        & data["roi"].eq("right")
+    )
+    available = data.loc[~missing].reset_index(drop=True)
+    result = _fit(
+        "value ~ C(condition, Sum) * C(roi, Sum)",
+        available,
+    )
+
+    contrasts = estimate_condition_within_roi_contrasts(
+        result,
+        available,
+    ).set_index("roi")
+
+    assert len(available) == len(data) - 1
+    assert contrasts["status"].eq("estimated").all()
+    assert contrasts.loc["right", "n_comparison_participants"] == 23
+    assert contrasts.loc["right", "n_reference_participants"] == 24
+    assert contrasts["missing_values_imputed"].eq(False).all()
+
+
 def test_group_cell_contrasts_use_available_rows_without_imputation(
     multi_fit_and_data,
 ) -> None:

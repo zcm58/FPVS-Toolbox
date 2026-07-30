@@ -107,10 +107,8 @@ class SectionRunState:
 
 SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.PREPARE_ANALYSIS,
-    StepId.RM_ANOVA,
-    StepId.MIXED_MODEL,
-    StepId.INTERACTION_POSTHOCS,
     StepId.BASELINE_VS_ZERO,
+    StepId.MIXED_MODEL,
     StepId.SENSITIVITIES,
     StepId.REPORT_BUNDLE,
 )
@@ -126,7 +124,15 @@ MULTI_PIPELINE_STEPS: Sequence[StepId] = (
 """Default ordered steps for the native multi-group pipeline."""
 
 PIPELINE_ALLOWED_STEPS: Dict[PipelineId, frozenset[StepId]] = {
-    PipelineId.SINGLE: frozenset(SINGLE_PIPELINE_STEPS),
+    PipelineId.SINGLE: frozenset(
+        {
+            *SINGLE_PIPELINE_STEPS,
+            # Compatibility-only actions remain callable until the balanced
+            # ANOVA check replaces the legacy advanced actions.
+            StepId.RM_ANOVA,
+            StepId.INTERACTION_POSTHOCS,
+        }
+    ),
     PipelineId.MULTI: frozenset(MULTI_PIPELINE_STEPS),
 }
 

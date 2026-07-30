@@ -179,7 +179,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Phase commit recorded below after this plan update.
+- `7dab7349` — `feat(stats): add fitted LMM screening contrasts`
 
 ## Phase 2 — Single-Group Standard Screening
 
@@ -201,16 +201,16 @@ The current workflow still needs these behavioral changes:
 
 ### Definition of Done
 
-- [ ] Balanced and incomplete data both enter the same primary LMM route.
-- [ ] A participant missing one condition contributes every remaining finite
+- [x] Balanced and incomplete data both enter the same primary LMM route.
+- [x] A participant missing one condition contributes every remaining finite
       observation.
-- [ ] Positive-response tests are one-sided and Holm-corrected as one family.
-- [ ] A strong negative cell is never called a positive response.
-- [ ] Corrected LMM interaction evidence controls automatic interaction
+- [x] Positive-response tests are one-sided and Holm-corrected as one family.
+- [x] A strong negative cell is never called a positive response.
+- [x] Corrected LMM interaction evidence controls automatic interaction
       explanation.
-- [ ] Primary follow-ups are model-estimated contrasts, not paired t-tests.
-- [ ] ANOVA results cannot enter the primary single-group conclusion.
-- [ ] Focused Stats verification passes.
+- [x] Primary follow-ups are model-estimated contrasts, not paired t-tests.
+- [x] ANOVA results cannot enter the primary single-group conclusion.
+- [x] Focused Stats verification passes.
 
 ### Verification
 
@@ -220,7 +220,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Pending.
+- Phase commit recorded below after this plan update.
 
 ## Phase 3 — Two-Group Standard Screening
 
@@ -420,3 +420,10 @@ Run in a normal visible Windows session, never offscreen:
   contract tests passed (13), focused model/design/multiplicity tests passed
   (48), Stats focused verification passed (307), Ruff/compile passed, and
   `git diff --check` found no whitespace errors.
+- 2026-07-29: Phase 2 changed the standard single-group queue to preparation,
+  one-sided positive-response screening, the primary available-observation
+  LMM with packaged Holm-corrected model contrasts, optional sensitivities,
+  and reporting. Paired post-hocs are now a blocked compatibility surface.
+  Focused orchestration/worker/response tests passed (80), the real sparse
+  single-LMM contrast test passed, Stats focused verification passed (312),
+  and Ruff/compile/diff-check passed.

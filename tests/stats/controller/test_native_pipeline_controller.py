@@ -202,7 +202,7 @@ def test_multigroup_pipeline_order_and_prepared_payload_reuse() -> None:
     assert {section for section, _message, _level in view.logs} == {"Multi-group"}
 
 
-def test_existing_single_pipeline_order_is_preserved() -> None:
+def test_standard_single_pipeline_runs_positive_response_before_lmm() -> None:
     prepared = object()
     view = FakeView(
         {
@@ -218,19 +218,15 @@ def test_existing_single_pipeline_order_is_preserved() -> None:
 
     assert [step_id for _pipeline, step_id, _kwargs in view.worker_calls] == [
         StepId.PREPARE_ANALYSIS,
-        StepId.RM_ANOVA,
-        StepId.MIXED_MODEL,
-        StepId.INTERACTION_POSTHOCS,
         StepId.BASELINE_VS_ZERO,
+        StepId.MIXED_MODEL,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ]
     assert list(SINGLE_PIPELINE_STEPS) == [
         StepId.PREPARE_ANALYSIS,
-        StepId.RM_ANOVA,
-        StepId.MIXED_MODEL,
-        StepId.INTERACTION_POSTHOCS,
         StepId.BASELINE_VS_ZERO,
+        StepId.MIXED_MODEL,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ]

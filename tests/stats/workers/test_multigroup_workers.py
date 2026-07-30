@@ -13,6 +13,7 @@ from Tools.Stats.analysis.inference_contracts import (
     AnalysisRunSpec,
     CorrectionMethod,
     FamilySpec,
+    FollowupProvenance,
     HarmonicProvenance,
 )
 from Tools.Stats.analysis.prepared_analysis import prepare_analysis_payload
@@ -23,23 +24,35 @@ from Tools.Stats.qc.stats_qc_exclusion import (
 from Tools.Stats.workers import multigroup_workers as workers
 
 
-def _run_spec(*, strict_omnibus: bool = False) -> AnalysisRunSpec:
-    families = (
-        (
+def _run_spec(
+    *,
+    strict_omnibus: bool = False,
+    followup_provenance: FollowupProvenance = (
+        FollowupProvenance.OMNIBUS_TRIGGERED
+    ),
+) -> AnalysisRunSpec:
+    families = [
+        FamilySpec(
+            family_id="planned_contrasts",
+            family_label="LMM-derived factorial follow-up contrasts",
+            method=CorrectionMethod.HOLM,
+            alpha=0.05,
+        )
+    ]
+    if strict_omnibus:
+        families.append(
             FamilySpec(
                 family_id="omnibus_effects_strict",
                 family_label="Primary factorial omnibus effects",
                 method=CorrectionMethod.HOLM,
                 alpha=0.05,
-            ),
+            )
         )
-        if strict_omnibus
-        else ()
-    )
     return AnalysisRunSpec(
         profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
         harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
-        families=families,
+        families=tuple(families),
+        followup_provenance=followup_provenance,
     )
 
 
@@ -77,6 +90,9 @@ def _payload(
     mode: str = "multi",
     strict_omnibus: bool = False,
     analysis_scope: str = "complete_core",
+    followup_provenance: FollowupProvenance = (
+        FollowupProvenance.OMNIBUS_TRIGGERED
+    ),
 ):
     groups = {
         f"P{index}": "control" if index <= 3 else "anxious"
@@ -94,7 +110,10 @@ def _payload(
     return prepare_analysis_payload(
         data,
         mode=mode,
-        run_spec=_run_spec(strict_omnibus=strict_omnibus),
+        run_spec=_run_spec(
+            strict_omnibus=strict_omnibus,
+            followup_provenance=followup_provenance,
+        ),
         dv_col="value",
         subject_col="participant",
         condition_col="condition",
@@ -103,6 +122,27 @@ def _payload(
         selected_group_pair=("anxious", "control") if mode == "multi" else None,
         preparation_id=f"{mode}-prepared",
         analysis_scope=analysis_scope,
+    )
+
+
+def _fake_lmm_contrasts(
+    contrast_type: str,
+    p_values: tuple[float, ...],
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "contrast_id": f"{contrast_type}::{index}",
+                "contrast_type": contrast_type,
+                "p_raw": p_value,
+                "reportable": True,
+                "status": "estimated",
+                "method_label": "LMM-derived model-estimated contrast",
+                "inference_method": "Asymptotic Wald z test (two-sided)",
+                "missing_values_imputed": False,
+            }
+            for index, p_value in enumerate(p_values)
+        ]
     )
 
 
@@ -406,13 +446,15 @@ def test_strict_omnibus_family_corrects_single_rm_anova_rows(
     assert corrected["family_size"].eq(3).all()
 
 
-def test_available_case_single_lmm_is_corrected_and_headline_eligible(
+@pytest.mark.parametrize("analysis_scope", ["complete_core", "available_case"])
+def test_single_lmm_is_primary_and_packages_one_corrected_contrast_family(
     monkeypatch,
+    analysis_scope: str,
 ) -> None:
     payload = _payload(
         mode="single",
         strict_omnibus=True,
-        analysis_scope="available_case",
+        analysis_scope=analysis_scope,
     )
     fixed = pd.DataFrame([{"Effect": "Intercept", "Coef.": 1.0}])
     lrt = pd.DataFrame(
@@ -431,32 +473,166 @@ def test_available_case_single_lmm_is_corrected_and_headline_eligible(
     fixed.attrs["model_diagnostics"] = pd.DataFrame(
         [{"check_id": "observed_row_set", "status": "ok"}]
     )
+    fitted = object()
     monkeypatch.setattr(
         workers,
         "run_mixed_effects_model",
-        lambda **kwargs: (
-            fixed,
-            {"analysis_scope": kwargs["analysis_scope"]},
-        ),
+        lambda **_kwargs: (fixed, fitted),
+    )
+    observed_inputs: list[pd.DataFrame] = []
+
+    def condition_contrasts(model, data, **kwargs):
+        assert model is fitted
+        assert kwargs["condition_levels"] == payload.retained_conditions
+        assert kwargs["roi_levels"] == payload.selected_rois
+        observed_inputs.append(data.copy())
+        return _fake_lmm_contrasts(
+            "condition_within_roi",
+            (0.01, 0.02),
+        )
+
+    def roi_contrasts(model, data, **kwargs):
+        assert model is fitted
+        observed_inputs.append(data.copy())
+        return _fake_lmm_contrasts(
+            "roi_within_condition",
+            (0.04, 0.20),
+        )
+
+    monkeypatch.setattr(
+        workers,
+        "estimate_condition_within_roi_contrasts",
+        condition_contrasts,
+    )
+    monkeypatch.setattr(
+        workers,
+        "estimate_roi_within_condition_contrasts",
+        roi_contrasts,
     )
 
     result = workers.run_single_lmm_step(payload)
     corrected = result["export_frames"]["Mixed Model LRT"]
+    contrasts = result["export_frames"]["LMM Contrasts"]
 
     assert result["status"] == "ok"
     assert corrected["p_adjusted"].tolist() == pytest.approx(
         [0.03, 0.06, 0.20]
     )
     assert corrected["headline_eligible"].all()
-    assert corrected["analysis_scope"].eq("available_case").all()
+    assert corrected["inference_role"].eq("primary").all()
+    assert corrected["analysis_scope"].eq(analysis_scope).all()
+    assert corrected["missing_values_imputed"].eq(False).all()
+    assert contrasts["p_adjusted"].tolist() == pytest.approx(
+        [0.04, 0.06, 0.08, 0.20]
+    )
+    assert contrasts["family_id"].eq("planned_contrasts").all()
+    assert contrasts["family_size"].eq(4).all()
+    assert contrasts["adjustment_method"].eq("holm").all()
+    assert contrasts["method_label"].eq(
+        "LMM-derived model-estimated contrast"
+    ).all()
+    assert contrasts["headline_eligible"].all()
+    assert contrasts["omnibus_gate_status"].eq("omnibus_supported").all()
+    assert contrasts["missing_values_imputed"].eq(False).all()
+    pd.testing.assert_frame_equal(result["lmm_contrasts_df"], contrasts)
     assert "Mixed Model Diagnostics" in result["export_frames"]
-    assert result["fit_status"]["prepared_complete_core"] is False
+    assert result["fit_status"]["prepared_complete_core"] is (
+        analysis_scope == "complete_core"
+    )
     assert result["fit_status"]["n_observations"] == len(
         payload.primary_data
     )
+    assert len(observed_inputs) == 2
+    assert all(
+        len(observed) == len(payload.primary_data)
+        for observed in observed_inputs
+    )
+    if analysis_scope == "available_case":
+        for observed in observed_inputs:
+            missing = (
+                observed["participant"].eq("P6")
+                & observed["condition"].eq("B")
+                & observed["roi"].eq("R2")
+            )
+            assert not missing.any()
 
 
-def test_available_case_blocks_rm_anova_and_paired_posthocs(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("provenance", "expected_headline", "expected_gate"),
+    [
+        (
+            FollowupProvenance.OMNIBUS_TRIGGERED,
+            False,
+            "omnibus_not_significant",
+        ),
+        (FollowupProvenance.PLANNED, True, "planned_not_gated"),
+        (
+            FollowupProvenance.EXPLORATORY_MANUAL,
+            False,
+            "exploratory_manual_detailed_only",
+        ),
+    ],
+)
+def test_single_lmm_contrast_headlines_respect_interaction_and_provenance(
+    monkeypatch,
+    provenance: FollowupProvenance,
+    expected_headline: bool,
+    expected_gate: str,
+) -> None:
+    payload = _payload(
+        mode="single",
+        strict_omnibus=True,
+        followup_provenance=provenance,
+    )
+    fixed = pd.DataFrame([{"Effect": "Intercept", "Coef.": 1.0}])
+    fixed.attrs["lrt_table"] = pd.DataFrame(
+        {
+            "effect_id": [
+                "condition_roi_interaction",
+                "condition_related_block",
+                "roi_related_block",
+            ],
+            "p_value_chi2": [0.04, 0.50, 0.60],
+            "status": ["ok", "ok", "ok"],
+            "reportable": [True, True, True],
+        }
+    )
+    fitted = object()
+    monkeypatch.setattr(
+        workers,
+        "run_mixed_effects_model",
+        lambda **_kwargs: (fixed, fitted),
+    )
+    monkeypatch.setattr(
+        workers,
+        "estimate_condition_within_roi_contrasts",
+        lambda *_args, **_kwargs: _fake_lmm_contrasts(
+            "condition_within_roi",
+            (0.01,),
+        ),
+    )
+    monkeypatch.setattr(
+        workers,
+        "estimate_roi_within_condition_contrasts",
+        lambda *_args, **_kwargs: _fake_lmm_contrasts(
+            "roi_within_condition",
+            (0.02,),
+        ),
+    )
+
+    result = workers.run_single_lmm_step(payload)
+    contrasts = result["lmm_contrasts_df"]
+
+    assert len(contrasts) == 2
+    assert contrasts["headline_eligible"].eq(expected_headline).all()
+    assert contrasts["followup_provenance"].eq(provenance.value).all()
+    assert contrasts["omnibus_gate_status"].eq(expected_gate).all()
+    assert contrasts["automatic_explanation_supported"].eq(False).all()
+
+
+def test_available_case_blocks_rm_anova_and_retires_paired_posthocs(
+    monkeypatch,
+) -> None:
     payload = _payload(mode="single", analysis_scope="available_case")
 
     def fail_if_called(*_args, **_kwargs):
@@ -467,13 +643,16 @@ def test_available_case_blocks_rm_anova_and_paired_posthocs(monkeypatch) -> None
         "run_repeated_measures_anova",
         fail_if_called,
     )
-    monkeypatch.setattr(workers, "run_interaction_posthocs", fail_if_called)
 
     anova = workers.run_single_rm_anova_step(payload)
     posthoc = workers.run_single_posthoc_step(payload)
 
     assert anova["status_code"] == "rm_anova_requires_complete_core"
-    assert posthoc["status_code"] == "paired_posthocs_require_complete_core"
+    assert (
+        posthoc["status_code"]
+        == "paired_posthocs_superseded_by_lmm_contrasts"
+    )
+    assert posthoc["primary_object"] is None
 
 
 def test_blocked_audit_refuses_downstream_model(monkeypatch) -> None:
@@ -623,11 +802,6 @@ def test_available_case_scope_reaches_leave_one_out_stability(
             "anova_df_results",
         ),
         (
-            "run_single_posthoc_step",
-            "run_interaction_posthocs",
-            "results_df",
-        ),
-        (
             "run_single_baseline_step",
             "run_baseline_vs_zero_tests",
             "results_df",
@@ -673,6 +847,17 @@ def test_single_lmm_adapter_preserves_mixed_results_key(monkeypatch) -> None:
         "run_mixed_effects_model",
         lambda **_kwargs: (frame, fitted),
     )
+    empty = pd.DataFrame(columns=["p_raw", "reportable"])
+    monkeypatch.setattr(
+        workers,
+        "estimate_condition_within_roi_contrasts",
+        lambda *_args, **_kwargs: empty.copy(),
+    )
+    monkeypatch.setattr(
+        workers,
+        "estimate_roi_within_condition_contrasts",
+        lambda *_args, **_kwargs: empty.copy(),
+    )
 
     result = workers.run_single_lmm_step(
         prepared_payload=payload,
@@ -683,6 +868,28 @@ def test_single_lmm_adapter_preserves_mixed_results_key(monkeypatch) -> None:
     assert result["mixed_results_df"] is frame
     assert result["mixed_model"] is fitted
     assert result["prepared_payload"] is payload
+
+
+def test_single_baseline_uses_locked_greater_than_zero_run_spec(
+    monkeypatch,
+) -> None:
+    payload = _payload(mode="single")
+    captured: dict[str, object] = {}
+    frame = pd.DataFrame([{"condition": "A", "roi": "R1"}])
+
+    def fake_baseline(*_args, **kwargs):
+        captured.update(kwargs)
+        return "positive-response screening", frame
+
+    monkeypatch.setattr(workers, "run_baseline_vs_zero_tests", fake_baseline)
+
+    result = workers.run_single_baseline_step(payload)
+
+    assert result["status"] == "ok"
+    assert captured["run_spec"] is payload.run_spec
+    assert captured["alternative"] is payload.run_spec.response_alternative
+    assert payload.run_spec.response_alternative.value == "greater"
+    assert result["metadata"]["alternative"] == "greater"
 
 
 def test_project_input_prepare_path_runs_inside_callback_first_worker(

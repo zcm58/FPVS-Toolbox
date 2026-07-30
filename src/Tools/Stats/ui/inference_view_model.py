@@ -9,9 +9,11 @@ from Tools.Stats.analysis.inference_contracts import (
     AnalysisProfile,
     AnalysisRunSpec,
     CorrectionMethod,
-    FamilySpec,
-    FollowupProvenance,
     HarmonicProvenance,
+    STANDARD_SCREENING_CORRECTION,
+    STANDARD_SCREENING_RESPONSE_ALTERNATIVE,
+    STANDARD_SCREENING_SCOPE,
+    build_standard_screening_run_spec,
 )
 from Tools.Stats.analysis.prepared_analysis import AnalysisMode
 from Tools.Stats.common.stats_core import PipelineId, StepId
@@ -20,10 +22,8 @@ from Tools.Stats.common.stats_core import PipelineId, StepId
 PIPELINE_STEP_ORDER: dict[PipelineId, tuple[StepId, ...]] = {
     PipelineId.SINGLE: (
         StepId.PREPARE_ANALYSIS,
-        StepId.RM_ANOVA,
-        StepId.MIXED_MODEL,
-        StepId.INTERACTION_POSTHOCS,
         StepId.BASELINE_VS_ZERO,
+        StepId.MIXED_MODEL,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ),
@@ -39,9 +39,9 @@ PIPELINE_STEP_ORDER: dict[PipelineId, tuple[StepId, ...]] = {
 STEP_PHASE_LABELS: dict[StepId, str] = {
     StepId.PREPARE_ANALYSIS: "Preparing and checking the shared dataset",
     StepId.RM_ANOVA: "Running the repeated-measures ANOVA",
-    StepId.MIXED_MODEL: "Fitting the single-group mixed model",
+    StepId.MIXED_MODEL: "Fitting the Condition × ROI mixed model",
     StepId.INTERACTION_POSTHOCS: "Running interaction follow-up comparisons",
-    StepId.BASELINE_VS_ZERO: "Testing responses against zero",
+    StepId.BASELINE_VS_ZERO: "Testing for positive oddball responses",
     StepId.MULTIGROUP_MODEL: "Fitting the multi-group mixed model",
     StepId.GROUP_CELL_COMPARISONS: "Comparing groups within condition × ROI cells",
     StepId.SENSITIVITIES: "Running sensitivity checks",
@@ -90,7 +90,7 @@ class NativeInferenceOptions:
     alternative: Alternative
     harmonic_provenance: HarmonicProvenance
     alpha: float
-    analysis_scope: str = "complete_core"
+    analysis_scope: str = STANDARD_SCREENING_SCOPE
     strict_omnibus_family: bool = True
     selected_group_pair: tuple[str, str] | None = None
     run_robust: bool = True
@@ -117,6 +117,20 @@ class NativeInferenceOptions:
             "harmonic_provenance",
             HarmonicProvenance.coerce(self.harmonic_provenance),
         )
+        # These fields remain accepted while the legacy GUI controls are
+        # phased out, but standard screening has one locked scientific
+        # contract in both project modes.
+        object.__setattr__(
+            self,
+            "correction",
+            STANDARD_SCREENING_CORRECTION,
+        )
+        object.__setattr__(
+            self,
+            "alternative",
+            STANDARD_SCREENING_RESPONSE_ALTERNATIVE,
+        )
+        object.__setattr__(self, "strict_omnibus_family", True)
         alpha = float(self.alpha)
         if not 0.0 < alpha < 1.0:
             raise ValueError("alpha must be strictly between 0 and 1.")
@@ -126,6 +140,7 @@ class NativeInferenceOptions:
             raise ValueError(
                 "analysis_scope must be 'complete_core' or 'available_case'."
             )
+        scope = STANDARD_SCREENING_SCOPE
         object.__setattr__(self, "analysis_scope", scope)
         if scope == "available_case":
             # Max-|t| resampling currently relies on one complete participant-by-
@@ -161,46 +176,10 @@ class NativeInferenceOptions:
     def build_run_spec(self) -> AnalysisRunSpec:
         """Build the immutable scientific settings shared by every worker."""
 
-        families = [
-            FamilySpec(
-                family_id="response_core_cells",
-                family_label="Response-versus-zero condition × ROI tests",
-                method=self.correction,
-                alpha=self.alpha,
-            ),
-            FamilySpec(
-                family_id="group_core_cells",
-                family_label="Group contrasts across condition × ROI cells",
-                method=self.correction,
-                alpha=self.alpha,
-            ),
-            FamilySpec(
-                family_id="planned_contrasts",
-                family_label="Condition × ROI interaction follow-ups",
-                method=self.correction,
-                alpha=self.alpha,
-            ),
-        ]
-        if self.strict_omnibus_family:
-            families.append(
-                FamilySpec(
-                    family_id="omnibus_effects_strict",
-                    family_label="Primary factorial omnibus effects",
-                    method=self.correction,
-                    alpha=self.alpha,
-                )
-            )
-        return AnalysisRunSpec(
+        return build_standard_screening_run_spec(
             profile=self.profile,
             harmonic_provenance=self.harmonic_provenance,
             alpha=self.alpha,
-            response_alternative=self.alternative,
-            families=tuple(families),
-            followup_provenance=(
-                FollowupProvenance.OMNIBUS_TRIGGERED
-                if self.strict_omnibus_family
-                else FollowupProvenance.EXPLORATORY_MANUAL
-            ),
         )
 
     def sensitivity_config(self) -> dict[str, object]:
@@ -235,22 +214,10 @@ def pipeline_steps_for_options(
         if options.mode is AnalysisMode.MULTI
         else PipelineId.SINGLE
     )
-    excluded = (
-        {
-            StepId.RM_ANOVA,
-            StepId.INTERACTION_POSTHOCS,
-        }
-        if (
-            pipeline_id is PipelineId.SINGLE
-            and options.analysis_scope == "available_case"
-        )
-        else set()
-    )
     return tuple(
         step_id
         for step_id in PIPELINE_STEP_ORDER[pipeline_id]
-        if step_id not in excluded
-        and (enabled or step_id is not StepId.SENSITIVITIES)
+        if enabled or step_id is not StepId.SENSITIVITIES
     )
 
 

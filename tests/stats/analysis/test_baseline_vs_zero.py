@@ -15,6 +15,7 @@ from Tools.Stats.analysis.inference_contracts import (
     CorrectionMethod,
     FamilySpec,
     HarmonicProvenance,
+    build_standard_screening_run_spec,
 )
 from Tools.Stats.controller.stats_controller import SINGLE_PIPELINE_STEPS, WORKER_FN_BY_STEP
 from Tools.Stats.common.stats_core import StepId
@@ -272,6 +273,32 @@ def test_confirmatory_profile_does_not_override_unverified_provenance() -> None:
     assert set(results["adjustment_method"]) == {"holm"}
     assert set(results["inference_status"]) == {"provenance_unverified"}
     assert not (results["inference_status"] == "confirmatory").any()
+
+
+def test_standard_screening_only_calls_positive_cells_responses() -> None:
+    run_spec = build_standard_screening_run_spec(
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        harmonic_provenance=HarmonicProvenance.SAME_SAMPLE_ADAPTIVE,
+    )
+
+    _, results = run_baseline_vs_zero_tests(
+        _build_df(),
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        run_spec=run_spec,
+    )
+    negative = results.loc[
+        results["condition"].eq("B") & results["roi"].eq("R1")
+    ].iloc[0]
+
+    assert set(results["alternative"]) == {"greater"}
+    assert set(results["adjustment_method"]) == {"holm"}
+    assert negative["mean"] < 0.0
+    assert negative["t"] < 0.0
+    assert negative["p_raw"] > 0.5
+    assert not bool(negative["reject_adjusted"])
 
 
 def test_same_sample_provenance_is_explicitly_post_selection() -> None:
