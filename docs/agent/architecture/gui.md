@@ -97,7 +97,7 @@ The main app shell uses the outer `MainWindow.stacked` widget for landing vs
 application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
-Settings page, Statistical Analysis, Sensitivity Analysis, SNR Plot Generator,
+Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator,
 Individual Detectability, Ratio Calculator, and Epoch Averaging are embedded in
 this workspace stack.
 
@@ -113,7 +113,7 @@ frequency-domain exclusions marks downstream frequency-domain outputs stale and
 requires regeneration. Do not put app-level visibility or diagnostics toggles
 in the Preprocessing tab.
 
-The sidebar's default tool list is Statistical Analysis, Sensitivity Analysis,
+The sidebar's default tool list is Standard FPVS Screening, Sensitivity Analysis,
 SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence Figure, in that order.
 Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools:
 they remain embedded workspace pages, but the sidebar appends them only when

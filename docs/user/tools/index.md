@@ -8,7 +8,7 @@ only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
 
 | Tool | Sidebar status | Purpose |
 | --- | --- | --- |
-| [Statistical Analysis](statistics.md) | Default | Run mode-aware single- or multi-group Summed BCA inference with plain-language and detailed reports. |
+| [Standard FPVS Screening](statistics.md) | Default | Run the locked LMM-first single- or two-group Summed BCA screen with plain-language and detailed reports. |
 | [Sensitivity Analysis](sensitivity-analysis.md) | Default | Estimate the minimum detectable effect from manually entered design assumptions. |
 | [SNR Plots](snr-plot-generator.md) | Default | Create ROI-level SNR spectra for conditions or project groups. |
 | [Scalp Maps](publication-maps.md) | Default | Export sensor-space BCA, SNR, and z-score topographies. |

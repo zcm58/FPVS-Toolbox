@@ -8,6 +8,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
 
+from Tools.Stats.analysis.repeated_m_anova import (
+    resolve_rm_anova_interaction_gate,
+)
 from Tools.Stats.common.stats_core import PipelineId, PipelineStep, StepId
 from Tools.Stats.reporting.stats_logging import format_step_event
 from Tools.Stats.reporting.stats_run_report import StatsRunReport
@@ -621,6 +624,39 @@ class StatsController:
         state.prepared_payload = prepared_payload
         for pending_step in state.steps[state.current_step_index + 1 :]:
             pending_step.kwargs["prepared_payload"] = prepared_payload
+
+    @staticmethod
+    def _propagate_interaction_gate(
+        state: SectionRunState,
+        payload: dict[str, object],
+    ) -> None:
+        """Populate the retired RM-ANOVA gate for explicit legacy callers.
+
+        The standard screening pipeline deliberately does not call this
+        helper: balanced-only ANOVA is a compatibility check and must not gate
+        primary LMM contrasts.  Retaining the narrowly scoped transformation
+        preserves older integrations that explicitly request the legacy gate.
+        """
+
+        pending = state.steps[state.current_step_index + 1 :]
+        for pending_step in pending:
+            if pending_step.id is not StepId.INTERACTION_POSTHOCS:
+                continue
+            if not bool(pending_step.kwargs.get("enforce_omnibus_gate", True)):
+                continue
+            alpha = float(pending_step.kwargs.get("alpha", 0.05))
+            gate = resolve_rm_anova_interaction_gate(
+                payload.get("anova_df_results"),  # type: ignore[arg-type]
+                alpha=alpha,
+            )
+            pending_step.kwargs.update(
+                {
+                    "followup_provenance": "omnibus_triggered",
+                    "omnibus_p_value": gate.p_value,
+                    "omnibus_significant": gate.significant,
+                    "omnibus_gate_status": gate.status,
+                }
+            )
 
     def _on_step_error(
         self,

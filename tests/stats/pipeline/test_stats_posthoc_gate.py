@@ -3,7 +3,11 @@ from __future__ import annotations
 import pandas as pd
 
 from Tools.Stats.common.stats_core import PipelineId, PipelineStep, StepId
-from Tools.Stats.controller.stats_controller import SectionRunState, StatsController
+from Tools.Stats.controller.stats_controller import (
+    SINGLE_PIPELINE_STEPS,
+    SectionRunState,
+    StatsController,
+)
 
 
 def _step(step_id: StepId, *, alpha: float = 0.05) -> PipelineStep:
@@ -16,7 +20,14 @@ def _step(step_id: StepId, *, alpha: float = 0.05) -> PipelineStep:
     )
 
 
-def test_current_rm_interaction_gate_is_propagated_to_pending_posthocs() -> None:
+def test_standard_single_queue_is_lmm_first_without_legacy_posthocs() -> None:
+    assert StepId.INTERACTION_POSTHOCS not in SINGLE_PIPELINE_STEPS
+    assert SINGLE_PIPELINE_STEPS.index(
+        StepId.MIXED_MODEL
+    ) < SINGLE_PIPELINE_STEPS.index(StepId.RM_ANOVA)
+
+
+def test_legacy_rm_gate_can_be_resolved_for_explicit_compatibility_callers() -> None:
     rm_step = _step(StepId.RM_ANOVA)
     lmm_step = _step(StepId.MIXED_MODEL)
     posthoc_step = _step(StepId.INTERACTION_POSTHOCS)
@@ -46,7 +57,7 @@ def test_current_rm_interaction_gate_is_propagated_to_pending_posthocs() -> None
     assert posthoc_step.kwargs["omnibus_gate_status"] == "omnibus_reportable"
 
 
-def test_blocked_rm_interaction_never_falls_back_to_raw_p() -> None:
+def test_blocked_legacy_rm_gate_never_falls_back_to_raw_p() -> None:
     posthoc_step = _step(StepId.INTERACTION_POSTHOCS)
     state = SectionRunState(
         pipeline_id=PipelineId.SINGLE,

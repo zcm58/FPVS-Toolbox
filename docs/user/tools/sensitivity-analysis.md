@@ -3,7 +3,7 @@
 Sensitivity Analysis estimates the smallest standardized effect a study would
 be powered to detect under assumptions you enter manually. It is a descriptive,
 G*Power-style, idealized design-sensitivity calculator and is separate from the
-Statistical Analysis tool. Its primary result is a minimum standardized
+Standard FPVS Screening tool. Its primary result is a minimum standardized
 detectable contrast conditional on the entered assumptions.
 
 The tool does not read participant data or project settings. It does not save,

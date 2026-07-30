@@ -47,10 +47,10 @@ or an equivalent component-rejection stage. Describe any artifact procedures
 performed outside the toolbox separately in the study methods.
 
 For the exact default Summed BCA harmonic rule, including the neighboring-bin
-noise window and threshold, see [Statistical Analysis](../tools/statistics.md).
+noise window and threshold, see [Standard FPVS Screening](../tools/statistics.md).
 For the native single- and multi-group model, correction, diagnostic, and
 interpretation fields that must be reported, use the
-[statistical methods reporting checklist](methods-reporting-checklist.md#statistical-analysis).
+[statistical methods reporting checklist](methods-reporting-checklist.md#standard-fpvs-screening).
 
 ## Core FPVS and Frequency-Domain Studies
 

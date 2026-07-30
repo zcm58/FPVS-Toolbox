@@ -66,7 +66,7 @@ def build_reporting_summary(
 
     lines: list[str] = [
         "==========================",
-        "FPVS TOOLBOX — STATS REPORTING SUMMARY",
+        "FPVS TOOLBOX — STANDARD FPVS SCREENING REPORTING SUMMARY",
         "==========================",
         "",
         "RUN METADATA",
@@ -74,7 +74,7 @@ def build_reporting_summary(
         f"- Timezone: {context.timezone_label}",
         f"- Project: {context.project_name}",
         f"- Project root: {context.project_root}",
-        "- Tool: Stats",
+        "- Tool: Standard FPVS Screening",
         f"- Elapsed: {int(context.elapsed_ms)} ms",
         "",
         "DATASET COUNTS",
@@ -407,21 +407,58 @@ def _append_posthoc(
         n_cond_within_roi = int((posthoc_df["Direction"] == "condition_within_roi").sum())
         n_roi_within_cond = int((posthoc_df["Direction"] == "roi_within_condition").sum())
 
+    method_values: set[str] = set()
+    adjustment_values: set[str] = set()
+    family_values: set[str] = set()
+    if isinstance(posthoc_df, pd.DataFrame):
+        for column, destination in (
+            ("method_label", method_values),
+            ("adjustment_method", adjustment_values),
+            ("family_id", family_values),
+        ):
+            if column not in posthoc_df.columns:
+                continue
+            destination.update(
+                str(value).strip()
+                for value in posthoc_df[column].dropna()
+                if str(value).strip()
+            )
+    if "LMM-derived model-estimated contrast" in method_values:
+        section_title = "LMM FOLLOW-UP CONTRASTS"
+        results_title = "LMM CONTRAST RESULTS"
+        procedure = "LMM-derived model-estimated contrasts"
+        correction = (
+            ", ".join(sorted(adjustment_values))
+            if adjustment_values
+            else "Holm family-wise correction"
+        )
+        family_scope = (
+            ", ".join(sorted(family_values))
+            if family_values
+            else NOT_AVAILABLE
+        )
+    else:
+        section_title = "POST-HOC TESTS (LEGACY)"
+        results_title = "POST-HOC RESULTS (LEGACY)"
+        procedure = "paired t-tests (legacy compatibility results)"
+        correction = "Benjamini-Hochberg (BH) FDR"
+        family_scope = "within each simple-effects slice"
+
 
     lines.extend([
         "",
-        "POST-HOC TESTS",
-        "- Procedure: paired t-tests / model contrasts",
+        section_title,
+        f"- Procedure: {procedure}",
         "- Comparison family definition:",
-        "  - Family corrected together: within each simple-effects slice",
+        f"  - Family corrected together: {family_scope}",
         f"  - Number of tests in family: {len(posthoc_df) if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
         f"  - Conditions within ROI rows: {n_cond_within_roi if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
         f"  - ROIs within condition rows: {n_roi_within_cond if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
         "- Multiple comparison correction:",
-        "  - Method: Benjamini–Hochberg (BH) FDR",
+        f"  - Method: {correction}",
         "  - Adjusted p-values reported: YES",
         "",
-        "POST-HOC RESULTS",
+        results_title,
         "(one line per comparison)",
     ])
     if not isinstance(posthoc_df, pd.DataFrame) or posthoc_df.empty:
@@ -433,7 +470,10 @@ def _append_posthoc(
     stat_col = _find_col(posthoc_df, ["t_statistic", "t", "z", "stat"])
     df_col = _find_col(posthoc_df, ["df", "DF"])
     p_raw_col = _find_col(posthoc_df, ["p_raw", "p_value", "p"])
-    p_adj_col = _find_col(posthoc_df, ["p_fdr_bh", "p_corr", "p_adj"])
+    p_adj_col = _find_col(
+        posthoc_df,
+        ["p_adjusted", "p_fdr_bh", "p_corr", "p_adj"],
+    )
     direction_col = _find_col(posthoc_df, ["Direction", "direction"])
     slice_col = _find_col(posthoc_df, ["Stratum", "Slice", "stratum", "slice"])
     factor_col = _find_col(posthoc_df, ["FactorAnalyzed", "Factor", "factor_analyzed", "factor"])

@@ -1,88 +1,87 @@
-# Statistical Analysis
+# Standard FPVS Screening
 
-Statistical Analysis turns processed FPVS workbooks into a common Summed BCA
-dependent variable and runs a native analysis appropriate to the project's
-saved design. It supports both normal single-group projects and true
-multi-group projects.
+Standard FPVS Screening turns processed FPVS workbooks into a common Summed
+baseline-corrected amplitude (Summed BCA) outcome and runs a transparent first
+round of statistical checks. It is designed to answer a small set of common
+FPVS questions consistently. It is not the final project-specific statistical
+model for every study.
 
-## The Three Questions
+Use a planned custom analysis when the scientific question requires covariates,
+random slopes, longitudinal or nested structure, more than two groups,
+equivalence testing, a different response scale, or another specialized
+estimand.
 
-The results deliberately keep three questions separate:
+## Questions Answered
 
-1. **Response detection:** is Summed BCA different from zero?
-2. **Within-subject effects:** does Summed BCA differ by Condition, ROI, or
-   their interaction?
-3. **Between-group effects:** do canonical project groups differ overall or in
-   particular Condition x ROI cells?
+The screen keeps four questions separate:
 
-A clear response in the pooled sample does not mean that conditions or groups
-differ. Likewise, a nonsignificant test does not prove that a response or group
-difference is absent.
+1. **Positive oddball response:** is mean Summed BCA greater than zero in a
+   Condition x ROI cell?
+2. **Condition/ROI pattern:** does the primary linear mixed model (LMM) support
+   variation by Condition, ROI, or their interaction?
+3. **Interaction explanation:** when the corrected Condition x ROI interaction
+   is supported, which fitted-model comparisons help explain it?
+4. **Two-group pattern:** in a project with exactly two canonical groups, do
+   Group A and Group B differ in particular Condition x ROI cells, and is there
+   a broader joint group-related pattern?
+
+A positive response within a group is not evidence that two groups differ.
+Likewise, a nonsignificant result does not prove absence or equivalence.
 
 ## Before You Run
 
 Use this tool after preprocessing and post-processing have created one Excel
 workbook per participant and condition under the project's
-`1 - Excel Data Files` folder. For the full factorial analyses, select at least
-two conditions and two ROIs.
+`1 - Excel Data Files` folder. For factorial screening, select at least two
+conditions and two ROIs.
 
-The tool reads the processed workbooks, project settings, ROI definitions, and
-canonical participant/group assignments in `project.json`. Before a run, you
+The tool reads processed workbooks, project settings, ROI definitions, and
+canonical participant/group assignments from `project.json`. Before a run, you
 can:
 
-- choose the requested conditions;
-- review the participants and group sizes found in the project;
+- choose conditions and ROIs;
+- review participants, group sizes, and data coverage;
 - apply manual participant exclusions;
 - review quality-control and non-finite/outlier flags; and
-- check which conditions have complete shared coverage.
+- choose optional robustness or leave-one-out sensitivity checks.
 
-The project manifest determines the analysis mode:
+Project metadata determines the mode:
 
-- a normal single-group project runs the single-group pipeline;
-- a project with two or more configured groups runs the multi-group pipeline.
+- a single-group project runs single-group screening;
+- a project with exactly two canonical groups runs two-group screening; and
+- a project with three or more canonical groups is stopped with a message to
+  use a planned custom model.
 
-The tool does not offer an "ignore groups" shortcut in a multi-group project.
-If pooling everyone is scientifically justified, create or use a separately
-defined single-group project so that the design and provenance remain clear.
+The screen does not offer an "ignore groups" shortcut. If pooling participants
+is scientifically justified, create a separately defined single-group project
+so the design and provenance remain explicit.
 
-## Analysis Scope and Missing Conditions
+## Available Observations and Missing Conditions
 
-The eligible participant cohort is always frozen after QC and manual
-exclusions. You can then choose one of two explicit analysis scopes:
+The eligible cohort is frozen after QC and manual exclusions. The primary LMM
+then uses every finite retained observation from that cohort. A participant who
+is missing one condition can still contribute all other usable conditions.
 
-- **Complete core** retains a condition only when every frozen participant
-  contributes exactly one finite value in every selected ROI. An incomplete
-  condition is excluded for everyone; participants are not silently dropped to
-  rescue it.
-- **Available-case LMM** retains finite observations from a condition when
-  every required fixed-effect Condition x ROI cell (and Group cell in
-  multi-group mode) has data. A participant may contribute some retained
-  conditions without contributing all of them.
+Missing or non-finite Summed BCA values are not filled, averaged over, or
+imputed. The report distinguishes:
 
-Missing or non-finite Summed BCA cells do not automatically remove the whole
-participant. Complete-core mode excludes the affected condition for everyone;
-available-case mode uses the participant's other finite observations when the
-condition remains structurally estimable.
+- frozen participants;
+- participants contributing at least one finite retained observation;
+- fully complete and partially observed conditions;
+- missing participant-condition-ROI cells;
+- per-cell sample sizes; and
+- conditions excluded because a required fixed-effect cell had no finite data.
 
-Available-case mode does not fill, average over, or impute a missing response.
-The report distinguishes the frozen cohort from participants who contributed at
-least one usable row, lists fully complete, partially observed, and structurally
-excluded conditions, and reports the observed N for each cell/result. A
-condition is excluded when a required fixed-effect cell has no finite
-observation, because the requested factorial model is then not estimable as
-specified.
+A structurally empty fixed-effect cell blocks the requested factorial model;
+the Toolbox does not invent that cell or silently change the scientific
+question.
 
-Available-case likelihood inference relies on an **ignorable missingness** or
-**missing at random (MAR)** assumption after conditioning on variables in the
-model. If an exclusion still depends on the unobserved Summed BCA after those
-variables are considered—**missing not at random (MNAR)**—the estimates and
-p-values may be biased. Missingness reasons and complete-core results should be
-reviewed as sensitivity evidence rather than treating MAR as guaranteed.
-
-For a multi-group model, every canonical group must have at least two retained
-participants, and Group, Condition, and ROI must each have at least two levels.
-Missing or unknown group assignments block the analysis instead of being
-guessed from folder names.
+Likelihood-based use of available observations assumes missingness is
+ignorable, commonly described as **missing at random (MAR)** after conditioning
+on variables in the model. If exclusion still depends on an unobserved response
+after accounting for modeled variables - **missing not at random (MNAR)** -
+estimates and p-values may be biased. Review missingness reasons and coverage
+tables rather than treating MAR as guaranteed.
 
 ## Summed BCA and Harmonic Selection
 
@@ -108,265 +107,290 @@ participant, condition, and ROI.
 
 The processing workflow records the selection in
 `Quality Check/Harmonic_Selection_Summary.xlsx` and in project metadata. A
-missing or stale selection must be recalculated before the analysis proceeds;
-the Stats tool does not silently invent another list. Use
+missing or stale selection must be recalculated before screening proceeds; the
+Stats tool does not silently invent another list. Use
 **Settings > Preprocessing > Harmonic Selection > Recalculate Harmonics**.
-The Statistical Analysis page provides a link to that Settings workflow; it
-does not delete or recalculate the processing-time selection itself. Settings
-keeps the prior saved entry while the fresh calculation runs, so a failed or
-cancelled retry cannot erase the last completed selection.
+The screening page links to that Settings workflow but does not delete or
+recalculate the processing-time selection itself. Settings keeps the prior
+saved entry while a fresh calculation runs, so a failed or cancelled retry
+cannot erase the last completed selection.
 
-### Why provenance changes interpretation
+### Why provenance changes response interpretation
 
-If the significant harmonics were selected from the same participants whose
-response is then tested against zero, the response p-values are labelled
-**exploratory post-selection**. This is the normal
-**Published-style exploratory** profile. It does not invalidate condition or
-group contrasts automatically, but it does prevent the response-versus-zero
-test from being presented as independent confirmatory evidence.
+When significant harmonics are selected from the same participants whose
+response is tested against zero, the response p-values are labelled
+**exploratory post-selection**. At a Glance still reports the response evidence
+but identifies it as exploratory and says that the harmonics were selected from
+this sample.
 
-Use **Confirmatory** only when the cohort, hypotheses, test direction,
-comparison families, and fixed harmonic list were specified independently of
-the analyzed responses. Selecting the profile alone cannot make an adaptive
-list independent.
+A response test can be described as independently selected only when the fixed
+harmonic list was specified independently of the analyzed responses and that
+provenance is documented. Changing a label cannot make an adaptive selection
+independent.
 
-## Single-Group Analysis
+Harmonic-selection provenance affects the response-versus-zero interpretation.
+It does not automatically invalidate the Condition, ROI, or group contrasts,
+which answer different questions.
 
-In complete-core scope, the single-group pipeline runs:
+## Locked Standard Methods
 
-- a Condition x ROI repeated-measures ANOVA;
-- a sum-coded Condition x ROI linear mixed-effects model with participant as
-  the random-effect grouping unit;
-- declared paired follow-up comparisons; and
-- one-sample t-tests of Summed BCA against zero in every retained
-  Condition x ROI cell.
+The screen fixes the main statistical choices so they cannot be changed after
+seeing the data:
 
-The response tests are two-sided by default. Choose "greater than zero" only
-when that directional hypothesis was justified before examining the data. The
-default `response_core_cells` family uses one Holm correction across all
-retained Condition x ROI cells.
+| Question | Standard method | Holm family |
+| --- | --- | --- |
+| Positive response, single group | One-sample t-test of mean Summed BCA greater than zero in each Condition x ROI cell | `response_core_cells` |
+| Positive response, two groups | The same one-sided t-test within every Group x Condition x ROI cell | `group_response_cells` |
+| Primary factorial pattern | Participant-random-intercept LMM with hierarchy-preserving likelihood-ratio block tests | `omnibus_effects_strict` |
+| Single-group interaction explanation | Two-sided `LMM-derived model-estimated contrast` comparisons | `planned_contrasts` |
+| Direct Group A - Group B cells | Two-sided `LMM-derived model-estimated contrast` in every estimable Condition x ROI cell | `group_core_cells` |
+| Balanced ANOVA compatibility | Secondary ANOVA effects, only when exact balance requirements are met | `anova_compatibility_effects` |
 
-The ANOVA reports the Greenhouse-Geisser p-value when sphericity requires it.
-If a required correction cannot be calculated, the raw result stays in the
-detailed workbook but is not used as the primary conclusion.
+The nominal alpha is 0.05. Holm family-wise correction is applied separately
+within each named family. A result in one family does not change which tests
+belong to another family.
 
-By default, the canonical ANOVA effect p-values are also adjusted together in
-the `omnibus_effects_strict` family using the selected correction (Holm by
-default). This multiplicity correction is separate from the
-Greenhouse-Geisser sphericity correction; either, both, or neither may apply to
-a given effect.
+Normality and other diagnostics do not automatically select or replace the
+primary test.
 
-When strict interaction gating is enabled, omnibus-triggered paired follow-ups
-run only when that canonical RM-ANOVA Condition x ROI interaction is
-significant after any required Greenhouse-Geisser and strict-family handling.
-Planned or manually requested exploratory follow-ups keep their declared
-provenance and correction family; they are not presented as if the omnibus
-interaction triggered them.
+## Single-Group Screening
 
-If strict omnibus-family control is disabled, the ANOVA effect rows and
-manually requested follow-ups remain exploratory/detailed and are not
-headlined as an unadjusted primary family.
+The scientific formula is:
 
-The mixed model reports final REML coefficient estimates. Its omnibus
-Condition/ROI comparisons refit explicit nested models under maximum
-likelihood and use asymptotic likelihood-ratio tests. These tests are useful
-cross-checks, but they are not Kenward-Roger or Satterthwaite F tests.
+```text
+Summed BCA ~ Condition * ROI + (1 | Participant)
+```
 
-In available-case scope, the factorial primary analysis is the Condition x ROI
-mixed model fitted to all usable retained observations. Its explicit ML
-likelihood-ratio rows may support the primary headline after the selected
-omnibus-family correction. Raw coefficient-level Wald p-values remain
-detailed-only. Repeated-measures ANOVA and paired post-hoc tests are
-intentionally omitted because those procedures require complete
-within-participant cells; they are not made "available case" by silently
-discarding incomplete participants.
+Condition and ROI use sum coding. The accepted final model is fitted with REML
+to estimate coefficients. The primary Condition, ROI, and Condition x ROI
+questions use explicit hierarchy-preserving full-versus-reduced models refitted
+with maximum likelihood and asymptotic chi-square likelihood-ratio tests. These
+block tests must be reported using their exported labels; they are not
+Kenward-Roger or Satterthwaite F tests and should not be relabelled as pure
+Type-III effects.
 
-## Multi-Group Analysis
+The three primary LMM block p-values are corrected together with Holm in
+`omnibus_effects_strict`.
 
-The primary multi-group pipeline runs:
+Positive-response one-sample t-tests are prespecified as one-sided:
 
-- a sum-coded `Group x Condition x ROI` linear mixed-effects model;
-- explicit omnibus likelihood-ratio comparisons for the joint group-related
-  block and its Condition/ROI-dependent components;
-- two-sided Welch group comparisons in every retained Condition x ROI cell;
-  and
-- requested robust, resampling, and leave-one-participant-out sensitivity
-  checks.
+```text
+H1: mean Summed BCA > 0
+```
 
-The model includes all retained canonical groups and uses a participant random
-intercept by default. Final coefficient estimates use REML. The omnibus tests
-compare hierarchy-preserving full and reduced models fitted with maximum
-likelihood and use an asymptotic chi-square reference. In available-case scope,
-every nested comparison is fitted to the same finite observed row set; no
-missing response is imputed.
+All estimable Condition x ROI response cells are corrected together with Holm
+in `response_core_cells`. A negative response cannot satisfy this directional
+hypothesis.
 
-The broad result called **Any group-related effect** jointly tests every model
-term containing Group. It is not a pure average Group main effect. The
-Group x Condition x ROI, Group x Condition-related, and Group x ROI-related
-rows help decompose that broad question.
+When the corrected primary Condition x ROI interaction is supported, the tool
+uses two-sided `LMM-derived model-estimated contrast` comparisons to explain the
+pattern:
 
-With the default strict omnibus-family option enabled, the four likelihood-
-ratio rows are adjusted together in `omnibus_effects_strict` using the selected
-correction (Holm by default), and the adjusted decisions control primary
-omnibus interpretation. The direct group-cell tests retain their own separately
-adjusted family. If strict control is disabled,
-**Any group-related effect** is the sole primary omnibus test; the three
-decomposition rows remain exploratory details, not extra unadjusted primary
-claims.
+- Condition differences within each ROI; and
+- ROI differences within each Condition.
 
-The direct cell comparisons answer the practical question, "does the selected
-group pair differ in any Condition x ROI pair?" They use Welch's independent
-t-test, so equal group variances are not assumed. Each row reports the signed
-mean difference (`group A - group B`), a 95% confidence interval, and
-small-sample-corrected Hedges g. In available-case scope, group Ns may vary
-across cells and are reported on each row. By default, one global Holm
-correction is applied across every estimable retained cell in the
-`group_core_cells` family.
+These fitted-model Wald contrasts report signed estimates, standard errors,
+95% confidence intervals, asymptotic z statistics, and two-sided p-values. The
+`planned_contrasts` family is Holm-corrected. Automatic interaction
+explanations are not shown when the corrected primary interaction is
+unsupported.
 
-If the project contains more than two groups, choose the exact pair for the
-cell comparisons. The full mixed model still includes all groups. The pair
-selector changes only the direct two-group cell contrasts.
+### Single-group ANOVA compatibility
 
-## Assumptions, Normality, and Sensitivity Checks
+Repeated-measures ANOVA is a secondary compatibility check, not the primary
+analysis. It runs automatically only when every included participant has
+exactly one finite value in every declared Condition x ROI cell. Missing,
+duplicate, or non-finite cells skip ANOVA without failing the LMM screen.
 
-The report records finite-value checks, sample sizes, variance, Shapiro-Wilk
-normality diagnostics, repeated-measures sphericity, mixed-model convergence
-and singularity, and extreme residuals where available.
+When it runs, the ANOVA reports its canonical sphericity and
+Greenhouse-Geisser handling. Its effects are Holm-corrected in
+`anova_compatibility_effects`. Compatibility results never gate, replace, or
+change the primary LMM conclusion.
 
-For available-case runs, also inspect the participant-coverage, model-cell
-coverage, and missing-observation tables. The mixed model uses partial repeated
-measures under MAR; it does not make informative exclusions harmless.
+## Two-Group Screening
 
-Normality diagnostics are **report-only**. A Shapiro-Wilk result does not
-automatically replace the planned test with a different test. This avoids
-choosing a method after seeing which result is more favorable.
+Standard two-group screening requires exactly two canonical groups with valid
+`project.json` assignments, at least two retained participants contributing
+data in each group, and finite observations in every required fixed-effect
+cell. Missing or unknown group assignments are not guessed from folders.
 
-Sensitivity analyses can include:
+The scientific formula is:
 
-- 20% trimmed-mean tests and rank-based checks;
-- participant-level sign-flip or group-label max-|t| resampling, which adjusts
-  a complete family jointly; and
-- leave-one-participant-out stability.
+```text
+Summed BCA ~ Group * Condition * ROI + (1 | Participant)
+```
 
-These are supporting checks, not extra opportunities to declare significance.
-Agreement can increase confidence in a primary finding. A sensitivity-only
-finding remains labelled as such.
+Group, Condition, and ROI use sum coding. Final estimates use REML. The
+hierarchy-preserving omnibus comparisons refit full and reduced models with
+maximum likelihood on the same finite observed row set and use an asymptotic
+chi-square reference.
 
-## Multiple-Comparison Choices
+Four group-related LMM rows are Holm-corrected together in
+`omnibus_effects_strict`:
 
-- **Holm** is the default for a family-wise "at least one result" claim. It
-  controls the family-wise error rate across the declared family.
-- **Benjamini-Hochberg FDR** is an explicitly exploratory discovery option.
-- **Max-|t|** appears separately as a participant-level resampling
-  sensitivity, not as a relabelled Holm result.
+- **Any group-related effect**, a joint test of all fixed terms containing
+  Group, not a pure average Group main effect;
+- **Group x Condition x ROI interaction**, the three-way term;
+- **Group x Condition-related block**, which jointly includes the
+  Group x Condition and three-way terms; and
+- **Group x ROI-related block**, which jointly includes the Group x ROI and
+  three-way terms.
 
-Under the default strict setting, `omnibus_effects_strict` adjusts the
-canonical ANOVA effects in single-group mode or the four group-related
-likelihood-ratio rows in multi-group mode. It is separate from the
-`response_core_cells`, `group_core_cells`, and paired-follow-up families.
+Positive responses are also tested with a one-sample t-test within every
+Group x Condition x ROI cell using the one-sided greater-than-zero question.
+Holm correction is applied once across the complete `group_response_cells`
+family. Comparing whether one group is significant and another is not is not a
+test of a group difference.
 
-Published FPVS studies have often used Bonferroni or Tukey adjustments. Holm
-also controls family-wise error, but it is not numerically identical to either
-method and may define a different comparison family. Report the exact method
-shown in the exported workbook.
+### Direct group-cell differences
 
-## Reading the Results
+The direct prespecified comparison is Group A minus Group B in every estimable
+Condition x ROI cell. Each is a two-sided
+`LMM-derived model-estimated contrast` from the same accepted LMM used for the
+omnibus inference. Rows report the signed estimate, standard error, 95%
+confidence interval, asymptotic Wald z statistic, two-sided p-value, and
+observed coverage. Missing responses are not imputed.
 
-Start with **At a glance**:
+All estimable cells are Holm-corrected together in `group_core_cells`. This
+family always runs when its cells are estimable. It is **not gated** by the
+joint group-related test. A localized cell difference and a nonsignificant
+joint group pattern can therefore coexist; neither result proves equivalence,
+causation, or diagnostic value.
 
-- only questions relevant to the project mode are shown;
-- primary conclusions are translated into plain language without p-values or
-  test-inventory terminology;
-- nonsignificant test families are described as finding no clear difference,
-  without displaying a technical significant/total count;
-- positive primary findings may name up to two relevant tests; and
-- significant secondary checks are collapsed into one cautionary sentence
-  rather than listed individually.
+### Two-group ANOVA compatibility
 
-At a glance also gives one short data-coverage line and the detailed workbook
-filename. It intentionally omits repeated nonsignificant cells, raw and
-adjusted p-values, estimates, confidence intervals, effect sizes, omnibus
-decompositions, and the full export path. **Run log** contains processing,
-cancellation, and export messages. Use the exported results workbook for
-sample coverage, formulas, assumptions, correction families, harmonic
-provenance, limitations, and detailed numeric results.
+The secondary multi-group ANOVA check requires:
 
-For available-case runs, verify the frozen N, contributing N, per-cell Ns,
-partially observed conditions, no-imputation statement, and MAR/MNAR caveat
-before interpreting a p-value.
+- exactly two groups;
+- equal group sizes; and
+- one finite, unique value for every participant x Condition x ROI cell.
 
-## Adolescent Samples
+It collapses each declared Condition x ROI combination into a within-participant
+`response-cell` factor and tests a broad Group x response-cell mixed-ANOVA
+compatibility question. It does **not** separately decompose
+Group x Condition, Group x ROI, or Group x Condition x ROI. Failure to meet
+these balance requirements skips the compatibility check without changing the
+primary LMM screen.
 
-FPVS mixed-model work has been published in adolescents aged 12--16, so a
-13--15-year-old sample is age-relevant to that literature. This does not remove
-the limitations of a small observational sample. In particular, the native
-group model does not currently adjust for age, gender, medication, depression,
-recruitment source, or other possible confounders.
+## Diagnostics and Sensitivity Checks
 
-Describe group results as **associations in this analyzed sample**, not as
-evidence that anxiety caused the neural difference or that the result is
+The detailed workbook records finite-value and per-cell N checks, variance and
+normality diagnostics, residual tails, LMM convergence and singularity, exact
+coverage, and ANOVA sphericity when compatibility ANOVA runs.
+
+Shapiro-Wilk and other normality checks are diagnostic only. They do not
+automatically switch the primary analysis.
+
+Optional supporting checks can include robust or rank-based summaries and
+leave-one-participant-out stability. These remain labelled as sensitivity
+evidence. A sensitivity-only finding is not promoted to a primary conclusion.
+
+The standard available-observation route does not queue the current max-|t|
+resampling procedure because that implementation requires a complete
+participant-by-cell matrix. Treat any max-|t| result from a legacy or separate
+custom complete-design analysis as additional sensitivity evidence, not part
+of Standard FPVS Screening.
+
+Mixed-model likelihood-ratio and Wald p-values use asymptotic reference
+distributions. This deserves particular caution in small samples. Inspect
+estimates, confidence intervals, model warnings, and stability rather than
+reducing the analysis to significant/nonsignificant labels.
+
+## Reading At a Glance
+
+At a Glance answers the screening questions in this order:
+
+1. positive oddball-response evidence;
+2. the primary LMM Condition/ROI pattern;
+3. `LMM-derived model-estimated contrast` explanations when the corrected
+   interaction supports them; and
+4. in two-group mode, direct Group A - Group B cell differences followed by
+   the broader joint group-related pattern.
+
+It names at most two supported rows and does not reproduce p-values or the test
+inventory. Balanced-only compatibility ANOVA never enters the headline.
+
+At a Glance also states the first-round/custom-model boundary. A nonsignificant
+group result does not prove equivalence, and group results describe
+associations in the analyzed sample, not causes or diagnoses.
+
+Use the workbook for exact estimates, intervals, p-values, formulas,
+correction-family membership, coverage, assumptions, diagnostics, and
+limitations.
+
+## Adolescent and Observational Samples
+
+For a sample of 13--15-year-old students, report the exact age range,
+recruitment population, group definitions, and exclusions. The standard model
+does not adjust for age, gender, medication, depression, recruitment source, or
+other potential confounders.
+
+Describe group results as associations in this analyzed student sample. Do not
+claim that anxiety caused a neural difference or that an FPVS response is
 diagnostic. If covariates are part of the scientific question, specify them in
-advance and use the Stats-Ready export with validated external software.
+advance and use the Stats-Ready export with a validated custom model.
 
 ## Outputs
 
 Results are written under `3 - Statistical Analysis Results` in the active
-project. The native report workbook is named
-`Native Single-Group Inference Results.xlsx` or
-`Native Multi-Group Inference Results.xlsx` and includes:
+project. The current standard report is named:
+
+- `Native Single-Group Available-Case LMM Results.xlsx`; or
+- `Native Multi-Group Available-Case LMM Results.xlsx`.
+
+It includes:
 
 - At a Glance and Detailed Methods;
 - the complete test inventory and correction families;
-- estimates, confidence intervals, effect sizes, and p-value provenance;
+- LMM estimates, confidence intervals, Wald contrasts, and p-value provenance;
 - design coverage, exclusions, group assignments, and analysis settings;
+- ANOVA compatibility status, balance audit, and numeric results when eligible;
 - diagnostics, sensitivities, warnings, and limitations; and
 - the underlying source result tables.
 
 If narrative assembly fails after the statistical steps finish, the tool
-attempts to preserve the numeric frames in a fallback workbook and labels the
+attempts to preserve numeric frames in a fallback workbook and labels the
 report failure explicitly.
 
-**Export Stats-Ready Workbook** remains available for JASP, R/RStudio, SAS, or
-another package. It writes `Stats_Ready_Summed_BCA.xlsx` with long and wide
-data, subject and group identifiers, and harmonic-selection evidence. Use it
-for prespecified covariates, alternative random-effects structures,
-Kenward-Roger/Satterthwaite inference, equivalence tests, or another model not
-offered natively.
+**Export Stats-Ready Workbook** writes `Stats_Ready_Summed_BCA.xlsx` for JASP,
+R/RStudio, SAS, or another package. It contains long and wide Summed BCA data,
+participant and canonical group identifiers, and harmonic-selection evidence.
+Use it for covariates, other random-effects structures, more than two groups,
+Kenward-Roger/Satterthwaite inference, equivalence tests, or another final
+model not offered by Standard FPVS Screening.
 
-## Published-Method Validation
+Retain `Quality Check/Harmonic_Selection_Summary.xlsx` and the corresponding
+project metadata with the analysis record.
+
+## Published-Method Context
 
 The core approach has direct FPVS precedent:
 
 - [Vandenheever et al. (2025)](https://doi.org/10.1016/j.ijpsycho.2025.113212)
-  analyzed summed BCA in an adult sample aged 18--28 using a separate ROI x
-  Anxiety Group model for each emotional expression, a participant random
-  intercept, and Bonferroni-adjusted planned contrasts.
-- [Van der Donck et al. (2020)](https://doi.org/10.1111/jcpp.13201) used
-  REML mixed models of expression, ROI, and group with a participant random
-  intercept, Kenward-Roger degrees of freedom, Bonferroni post-hoc correction,
-  and residual-assumption checks.
+  analyzed summed BCA with ROI and anxiety-group models, a participant random
+  intercept, and multiplicity-adjusted planned contrasts.
+- [Van der Donck et al. (2020)](https://doi.org/10.1111/jcpp.13201) used REML
+  mixed models of expression, ROI, and group with participant random
+  intercepts and residual-assumption checks.
 - [Vettori et al. (2020)](https://doi.org/10.3389/fpsyt.2020.00332) used a
-  Group x Stimulus x ROI mixed model, a participant random intercept, and
-  fitted-model post-hoc tests with Tukey correction.
+  Group x Stimulus x ROI mixed model, participant random intercepts, and
+  fitted-model post-hoc tests.
 - [Samaey et al. (2024)](https://doi.org/10.1186/s12916-024-03610-w) analyzed
-  FPVS baseline-corrected amplitudes in 120 adolescents aged 12--16 using
-  mixed models, participant random effects, age/gender covariates,
-  Kenward-Roger degrees of freedom, and Bonferroni contrasts.
+  FPVS amplitudes in adolescents aged 12--16 using mixed models, participant
+  random effects, covariates, and multiplicity-adjusted contrasts.
 - [Feuerriegel et al. (2018)](https://doi.org/10.1016/j.biopsycho.2018.09.002)
   provides FPVS precedent for repeated-measures ANOVA on summed harmonics with
-  Greenhouse-Geisser handling and Holm correction across prespecified F tests.
+  Greenhouse-Geisser handling and Holm correction.
 - [Keil et al. (2022)](https://doi.org/10.1111/psyp.14052) recommend a priori
-  ROIs, multiplicity control across multiple ROIs, and maximum-statistic
-  permutation methods for joint frequency-domain inference.
+  ROIs, multiplicity control across ROIs, and maximum-statistic permutation
+  methods for joint frequency-domain inference.
 
-The Toolbox adapts these practices; it does not claim an exact reanalysis of
-any paper. In particular, `statsmodels` ML likelihood-ratio tests plus REML
-estimates are not the same as F tests using Kenward-Roger-adjusted denominator
-degrees of freedom, Holm is not the same calculation as Bonferroni or Tukey,
-and the robust/max-|t|/stability analyses are supplementary Toolbox
-sensitivities rather than a universal FPVS standard. The unified Group x
-Condition x ROI model also generalizes the four separate expression models used
-in the anxiety paper rather than reproducing them.
+The Toolbox adapts these practices; it does not exactly reproduce any one
+paper. In particular, `statsmodels` asymptotic ML likelihood-ratio tests and
+Wald contrasts are not Kenward-Roger or Satterthwaite F tests. Holm is not
+numerically identical to Bonferroni or Tukey. Compatibility ANOVA and optional
+sensitivity checks remain secondary to the primary LMM.
 
-See the [statistical methods reporting checklist](../reference/methods-reporting-checklist.md#statistical-analysis)
+See the
+[statistical methods reporting checklist](../reference/methods-reporting-checklist.md#standard-fpvs-screening)
 before writing a manuscript or preregistration.

@@ -54,7 +54,7 @@ data collection.
 ## Tool Pages
 
 The **Workspace Tools** section of the app sidebar shows these default tools:
-Statistical Analysis, Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA
+Standard FPVS Screening, Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA
 Visualizer, and Sequence Figure.
 
 Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools.
@@ -63,7 +63,7 @@ and reopen FPVS Toolbox.
 
 See the following sections for more information regarding each tool provided in FPVS Toolbox.
 
-- [Statistical Analysis](tools/statistics.md)
+- [Standard FPVS Screening](tools/statistics.md)
 - [Sensitivity Analysis](tools/sensitivity-analysis.md)
 - [SNR Plots](tools/snr-plot-generator.md)
 - [Scalp Maps](tools/publication-maps.md)

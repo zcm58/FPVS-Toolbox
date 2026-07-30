@@ -127,6 +127,7 @@ manual_smoke = ["Open Sensitivity Analysis from the Main App, calculate the two 
 [scopes.stats]
 audits = ["stats-structure", "stats-reporting-legibility"]
 tests = [
+  "tests/stats/analysis/test_anova_compatibility.py",
   "tests/stats/analysis/test_baseline_vs_zero.py",
   "tests/stats/analysis/test_design_audit.py",
   "tests/stats/analysis/test_diagnostics.py",
@@ -134,6 +135,7 @@ tests = [
   "tests/stats/analysis/test_full_snr_reference_equivalence.py",
   "tests/stats/analysis/test_group_comparisons.py",
   "tests/stats/analysis/test_inference_contracts.py",
+  "tests/stats/analysis/test_lmm_contrasts.py",
   "tests/stats/analysis/test_mixed_effects_model_omnibus.py",
   "tests/stats/analysis/test_multigroup_model.py",
   "tests/stats/analysis/test_multiple_comparisons.py",
@@ -152,12 +154,15 @@ tests = [
   "tests/stats/io/test_stats_ready_export.py",
   "tests/stats/pipeline/test_stats_file_scanner.py",
   "tests/stats/pipeline/test_stats_native_view_state.py",
+  "tests/stats/pipeline/test_stats_posthoc_gate.py",
+  "tests/stats/reporting/test_anova_comparison.py",
   "tests/stats/reporting/test_inference_report.py",
+  "tests/stats/reporting/test_stats_reporting_summary_posthoc_direction.py",
   "tests/stats/ui/test_inference_view_model.py",
   "tests/stats/workers/test_multigroup_workers.py",
 ]
 include = ["src/Tools/Stats/**", "tests/stats/**"]
-manual_smoke = ["Open Statistical Analysis from the Main App and exercise changed GUI/pipeline controls in a visible session when applicable."]
+manual_smoke = ["Open Standard FPVS Screening from the Main App and exercise the changed GUI/pipeline controls in a visible session when applicable."]
 
 [scopes.loreta]
 audits = ["source-localization", "source-localization-refs", "gui", "paths"]

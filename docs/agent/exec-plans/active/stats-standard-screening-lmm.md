@@ -2,7 +2,7 @@
 
 ## Status
 
-Active on branch `codex/stats-screening-lmm-default`.
+Complete on branch `codex/stats-screening-lmm-default`.
 
 Started 2026-07-29. This plan must be updated after every phase with the
 verification result and phase commit hash.
@@ -354,7 +354,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Phase commit recorded in the Phase 6 closeout after this plan update.
+- `eebe90d5` — `refactor(stats): present standard screening workflow`
 
 ## Phase 6 — Documentation, Verification Registry, and Handoff
 
@@ -374,13 +374,13 @@ The current workflow still needs these behavioral changes:
 
 ### Definition of Done
 
-- [ ] Architecture, Stats AGENTS, user documentation, and implementation agree.
-- [ ] The Stats verification registry includes all new screening contracts.
-- [ ] All focused non-Qt tests and audits pass.
-- [ ] Repository precommit verification passes.
-- [ ] `git diff --check` is clean.
-- [ ] The worktree is clean and every phase has a dedicated commit.
-- [ ] The plan records the final manual visible smoke path and residual risk.
+- [x] Architecture, Stats AGENTS, user documentation, and implementation agree.
+- [x] The Stats verification registry includes all new screening contracts.
+- [x] All focused non-Qt tests and audits pass.
+- [x] Repository precommit verification passes.
+- [x] `git diff --check` is clean.
+- [x] The worktree is clean and every phase has a dedicated commit.
+- [x] The plan records the final manual visible smoke path and residual risk.
 
 ### Final Visible Smoke Path
 
@@ -403,7 +403,25 @@ Run in a normal visible Windows session, never offscreen:
 
 ### Commit
 
-- Pending.
+- Closing Phase 6 commit: `feat(stats): finalize standard screening contract`
+  (hash recorded in the final handoff because a commit cannot contain its own
+  hash).
+
+### Residual Risk
+
+- Registered Qt smoke tests were not run locally because repository policy
+  reserves Qt execution for CI or an explicitly approved visible Windows
+  session. The manual visible path above remains the release smoke procedure.
+- Fixed-effect likelihood-ratio tests and model-estimated contrasts use
+  asymptotic inference. Small samples, sparse cells, convergence warnings, or
+  boundary fits still require expert review of the workbook diagnostics.
+- Available-observation LMM inference assumes missingness is adequately
+  explained under a missing-at-random interpretation. It does not solve
+  missing-not-at-random bias.
+- Response-versus-zero evidence remains exploratory when significant
+  harmonics were selected from the same participant sample.
+- The standard screen deliberately omits project-specific covariates, random
+  slopes, longitudinal structure, trial/item effects, and three-group models.
 
 ## Progress Log
 
@@ -453,3 +471,15 @@ Run in a normal visible Windows session, never offscreen:
   Focused GUI-neutral integration tests passed (121), GUI and reporting audits
   passed, Ruff/compilation/diff-check passed, and the full Stats focused gate
   passed (337). CI-only Qt definitions were updated but not run locally.
+- 2026-07-29: Phase 6 synchronized the package contract, architecture guide,
+  user guide, methods checklist, help navigation, reporting summary, and
+  verification registry with the LMM-first standard-screening workflow. The
+  legacy RM-ANOVA gate remains available only for explicit compatibility
+  callers and is not connected to the standard queue. MkDocs strict build,
+  Stats structure/reporting audits, GUI import audit, Ruff, compilation, and
+  `git diff --check` passed. The expanded Stats gate passed 366 tests. The
+  repository precommit gate passed all audits and 1,379 tests with 2 expected
+  skips. Three preprocessing memmap tests that fail under the managed
+  filesystem sandbox passed outside it; this was traced to sandbox ACL
+  handling of Python 3.13 temporary directories, so no preprocessing behavior
+  was changed.
