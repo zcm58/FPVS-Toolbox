@@ -8,9 +8,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
 
-from Tools.Stats.analysis.repeated_m_anova import (
-    resolve_rm_anova_interaction_gate,
-)
 from Tools.Stats.common.stats_core import PipelineId, PipelineStep, StepId
 from Tools.Stats.reporting.stats_logging import format_step_event
 from Tools.Stats.reporting.stats_run_report import StatsRunReport
@@ -109,6 +106,7 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.PREPARE_ANALYSIS,
     StepId.BASELINE_VS_ZERO,
     StepId.MIXED_MODEL,
+    StepId.RM_ANOVA,
     StepId.SENSITIVITIES,
     StepId.REPORT_BUNDLE,
 )
@@ -118,6 +116,7 @@ MULTI_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.PREPARE_ANALYSIS,
     StepId.BASELINE_VS_ZERO,
     StepId.MULTIGROUP_MODEL,
+    StepId.RM_ANOVA,
     StepId.SENSITIVITIES,
     StepId.REPORT_BUNDLE,
 )
@@ -150,7 +149,7 @@ CANCELLABLE_STEPS: frozenset[StepId] = frozenset(
 )
 
 STEP_LABELS: Dict[StepId, str] = {
-    StepId.RM_ANOVA: "RM-ANOVA",
+    StepId.RM_ANOVA: "ANOVA Compatibility",
     StepId.MIXED_MODEL: "Mixed Model",
     StepId.INTERACTION_POSTHOCS: "Interaction Post-hocs",
     StepId.BASELINE_VS_ZERO: "Baseline vs Zero",
@@ -163,7 +162,7 @@ STEP_LABELS: Dict[StepId, str] = {
 
 WORKER_FN_BY_STEP: Dict[StepId, Callable[..., Any]] = {
     StepId.PREPARE_ANALYSIS: multigroup_workers.run_prepare_analysis,
-    StepId.RM_ANOVA: multigroup_workers.run_single_rm_anova_step,
+    StepId.RM_ANOVA: multigroup_workers.run_anova_compatibility_step,
     StepId.MIXED_MODEL: multigroup_workers.run_single_lmm_step,
     StepId.INTERACTION_POSTHOCS: multigroup_workers.run_single_posthoc_step,
     StepId.BASELINE_VS_ZERO: multigroup_workers.run_baseline_step,
@@ -544,8 +543,6 @@ class StatsController:
             state.results[step_id] = self._result_mapping(payload)
             if step_id is StepId.PREPARE_ANALYSIS:
                 self._propagate_prepared_payload(state, payload)
-            if step_id is StepId.RM_ANOVA and isinstance(payload, dict):
-                self._propagate_interaction_gate(state, payload)
             run_report = payload.get("run_report") if isinstance(payload, dict) else None
             if isinstance(run_report, StatsRunReport):
                 self._view.store_run_report(pipeline_id, run_report)
@@ -624,35 +621,6 @@ class StatsController:
         state.prepared_payload = prepared_payload
         for pending_step in state.steps[state.current_step_index + 1 :]:
             pending_step.kwargs["prepared_payload"] = prepared_payload
-
-    @staticmethod
-    def _propagate_interaction_gate(
-        state: SectionRunState,
-        payload: dict[str, object],
-    ) -> None:
-        """Pass the current RM-ANOVA interaction result to pending follow-ups."""
-
-        pending = state.steps[state.current_step_index + 1 :]
-        for pending_step in pending:
-            if pending_step.id is not StepId.INTERACTION_POSTHOCS:
-                continue
-            if not bool(
-                pending_step.kwargs.get("enforce_omnibus_gate", True)
-            ):
-                continue
-            alpha = float(pending_step.kwargs.get("alpha", 0.05))
-            gate = resolve_rm_anova_interaction_gate(
-                payload.get("anova_df_results"),  # type: ignore[arg-type]
-                alpha=alpha,
-            )
-            pending_step.kwargs.update(
-                {
-                    "followup_provenance": "omnibus_triggered",
-                    "omnibus_p_value": gate.p_value,
-                    "omnibus_significant": gate.significant,
-                    "omnibus_gate_status": gate.status,
-                }
-            )
 
     def _on_step_error(
         self,

@@ -9,6 +9,7 @@ import pytest
 
 from Tools.Stats.analysis.repeated_m_anova import (
     _apply_reported_p_contract,
+    _check_balance,
     resolve_rm_anova_interaction_gate,
     resolve_rm_anova_inference,
     run_repeated_measures_anova,
@@ -31,6 +32,18 @@ def _balanced_three_level_data() -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def test_constant_participant_is_not_misclassified_as_unbalanced() -> None:
+    data = _balanced_three_level_data()
+    data.loc[data["subject"].eq("S1"), "value"] = 1.0
+
+    _check_balance(
+        data,
+        subject_col="subject",
+        within_cols=["condition"],
+        dv_col="value",
+    )
 
 
 def test_two_level_effect_reports_uncorrected_p_even_if_sphericity_flag_is_false() -> None:

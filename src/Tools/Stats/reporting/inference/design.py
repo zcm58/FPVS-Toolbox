@@ -10,6 +10,9 @@ from Tools.Stats.reporting.inference.bundle import (
     ADAPTIVE_HARMONIC_WARNING,
     METHOD_DEPENDENT_PHRASE,
 )
+from Tools.Stats.reporting.inference.anova_compatibility import (
+    anova_compatibility_limitation_entries,
+)
 from Tools.Stats.reporting.inference.frames import (
     bool_value,
     column,
@@ -383,15 +386,6 @@ def _add_available_case_limitations(
             "accounting for modeled variables (missing not at random, MNAR), "
             "estimates and p-values may be biased.",
         ),
-        (
-            "information",
-            "method",
-            "balanced_methods_omitted",
-            "Repeated-measures ANOVA and paired post-hoc tests were "
-            "intentionally omitted because they require complete "
-            "within-participant cells; the mixed model used the available "
-            "observations instead.",
-        ),
     )
     for entry in entries:
         _add_limitation(rows, *entry)
@@ -500,7 +494,11 @@ def _add_inventory_limitations(
 def _add_frame_limitations(
     rows: LimitationRows,
     frames: Mapping[str, pd.DataFrame],
+    *,
+    mode: str,
 ) -> None:
+    for entry in anova_compatibility_limitation_entries(frames, mode=mode):
+        _add_limitation(rows, *entry)
     for name, frame in frames.items():
         if "diagnostic" in name.casefold() and column(
             frame, "test_method", "method"
@@ -534,6 +532,8 @@ def limitations_frame(
     inventory: pd.DataFrame,
     frames: Mapping[str, pd.DataFrame],
     design: Mapping[str, object],
+    *,
+    mode: str = "single",
 ) -> pd.DataFrame:
     """Build deduplicated caveats for provenance, estimability, and model fit."""
 
@@ -541,7 +541,7 @@ def limitations_frame(
     _add_harmonic_limitations(rows, inventory)
     _add_design_limitations(rows, design)
     _add_inventory_limitations(rows, inventory)
-    _add_frame_limitations(rows, frames)
+    _add_frame_limitations(rows, frames, mode=mode)
     _add_limitation(
         rows,
         "information",

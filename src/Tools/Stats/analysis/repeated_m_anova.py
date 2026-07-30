@@ -262,12 +262,6 @@ def _check_balance(
             ndup = int(grp.loc[(grp[within_cols] == pd.Series(combo, index=within_cols)).all(axis=1), "_one"])
             issues.append(f"Subject {subject} has {ndup} duplicates for {cond_str}")
 
-    if dv_col:
-        for subject, g in df.groupby(subject_col, dropna=False):
-            # Near-zero variance across conditions can produce unstable F
-            if g[dv_col].var(ddof=1) is not None and g[dv_col].var(ddof=1) < np.finfo(float).eps:
-                issues.append(f"Subject {subject} has nearly zero variance across conditions")
-
     if issues:
         raise ValueError("Data is unbalanced. " + "; ".join(issues))
 

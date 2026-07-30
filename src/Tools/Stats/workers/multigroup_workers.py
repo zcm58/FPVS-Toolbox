@@ -15,6 +15,10 @@ from typing import Callable, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from Tools.Stats.analysis.anova_compatibility import (
+    run_multigroup_anova_compatibility,
+    run_single_anova_compatibility,
+)
 from Tools.Stats.analysis.baseline_vs_zero import (
     run_baseline_vs_zero_tests,
     run_grouped_baseline_vs_zero_tests,
@@ -1920,6 +1924,197 @@ def run_single_rm_anova_step(
     return response
 
 
+def run_anova_compatibility_step(
+    progress_or_payload: object | None = None,
+    message_emit: Callable[[str], None] | None = None,
+    *,
+    prepared_payload: PreparedAnalysisPayload | None = None,
+    alpha: float | None = None,
+    cancel_check: CancelCheck | None = None,
+    progress_callback: ProgressCallback | None = None,
+    **_ignored: object,
+) -> dict[str, object]:
+    """Run the balanced-only ANOVA check without gating primary inference."""
+
+    payload, progress, message = _resolve_step_invocation(
+        progress_or_payload,
+        message_emit,
+        prepared_payload=prepared_payload,
+        progress_callback=progress_callback,
+    )
+    step = "anova_compatibility"
+    blocked = _blocked_response(payload, step=step)
+    if blocked is not None:
+        return blocked
+    if _is_cancelled(cancel_check):
+        return _response(
+            payload=payload,
+            step=step,
+            status="cancelled",
+            status_code="cancelled_before_start",
+            message="The ANOVA compatibility check was cancelled before it started.",
+        )
+
+    _emit_progress(progress, 0, 1)
+    message("Checking whether the prepared data support balanced-only ANOVA.")
+    effective_alpha = payload.run_spec.alpha if alpha is None else float(alpha)
+    common_kwargs = {
+        "dv_col": payload.dv_col,
+        "subject_col": payload.subject_col,
+        "condition_col": payload.condition_col,
+        "roi_col": payload.roi_col,
+        "frozen_participants": payload.frozen_participants,
+        "retained_conditions": payload.retained_conditions,
+        "selected_rois": payload.selected_rois,
+        "alpha": effective_alpha,
+        "log_func": message,
+    }
+    try:
+        if payload.mode is AnalysisMode.MULTI:
+            bundle = run_multigroup_anova_compatibility(
+                payload.primary_data,
+                group_col=payload.group_col,
+                canonical_group_ids=payload.canonical_group_ids,
+                group_pair=payload.selected_group_pair,
+                **common_kwargs,
+            )
+        else:
+            bundle = run_single_anova_compatibility(
+                payload.primary_data,
+                **common_kwargs,
+            )
+
+        compatibility_status = str(
+            getattr(
+                getattr(bundle, "status", ""),
+                "value",
+                getattr(bundle, "status", ""),
+            )
+        ).strip().casefold()
+        response_status = {
+            "completed": "ok",
+            "partial": "partial",
+            "skipped": "skipped",
+        }.get(compatibility_status)
+        if response_status is None:
+            raise ValueError(
+                "ANOVA compatibility returned an unsupported status "
+                f"{compatibility_status!r}."
+            )
+
+        raw_results = getattr(bundle, "results", None)
+        if not isinstance(raw_results, pd.DataFrame):
+            raise TypeError(
+                "ANOVA compatibility results must be a pandas DataFrame."
+            )
+        results = raw_results.copy(deep=True)
+        results["compatibility_only"] = True
+        results["inference_role"] = "compatibility"
+        results["headline_eligible"] = False
+        results["gates_primary_inference"] = False
+        results["missing_values_imputed"] = False
+        results["analysis_scope"] = payload.analysis_scope
+        results["analysis_mode"] = payload.mode.value
+
+        bundle_frames = getattr(bundle, "to_frames")()
+        if not isinstance(bundle_frames, Mapping):
+            raise TypeError(
+                "ANOVA compatibility frames must be returned as a mapping."
+            )
+        frames = _copy_frames(bundle_frames)
+        if results.empty:
+            frames.pop("ANOVA Compatibility", None)
+        else:
+            frames["ANOVA Compatibility"] = results
+
+        status_code = str(
+            getattr(bundle, "status_code", "")
+            or f"anova_compatibility_{compatibility_status}"
+        )
+        result_message = str(
+            getattr(bundle, "message", "")
+            or "ANOVA compatibility check completed."
+        )
+        ran = bool(getattr(bundle, "ran", False))
+        status_frame = frames.get(
+            "ANOVA Compatibility Status",
+            pd.DataFrame(
+                [
+                    {
+                        "status": compatibility_status,
+                        "status_code": status_code,
+                        "message": result_message,
+                        "ran": ran,
+                    }
+                ]
+            ),
+        ).copy(deep=True)
+        status_frame["compatibility_only"] = True
+        status_frame["inference_role"] = "compatibility"
+        status_frame["headline_eligible"] = False
+        status_frame["gates_primary_inference"] = False
+        frames["ANOVA Compatibility Status"] = status_frame
+    except Exception as exc:
+        return _response(
+            payload=payload,
+            step=step,
+            status="failed",
+            status_code="anova_compatibility_failed",
+            message=f"{type(exc).__name__}: {exc}",
+        )
+
+    if _is_cancelled(cancel_check):
+        return _response(
+            payload=payload,
+            step=step,
+            status="cancelled",
+            status_code="cancelled_after_check",
+            message=(
+                "Cancellation was requested during the ANOVA compatibility "
+                "check."
+            ),
+        )
+
+    _emit_progress(progress, 1, 1)
+    metadata = {
+        "mode": payload.mode.value,
+        "analysis_scope": payload.analysis_scope,
+        "alpha": effective_alpha,
+        "compatibility_status": compatibility_status,
+        "status_code": status_code,
+        "ran": ran,
+        "compatibility_only": True,
+        "inference_role": "compatibility",
+        "headline_eligible": False,
+        "gates_primary_inference": False,
+        "missing_values_imputed": False,
+        "preparation_id": payload.preparation_id,
+    }
+    output_text = result_message
+    if not results.empty:
+        output_text = f"{result_message}\n\n{results.to_string(index=False)}"
+    response = _response(
+        payload=payload,
+        step=step,
+        status=response_status,
+        status_code=status_code,
+        message=result_message,
+        frames=_merged_frames(payload, frames),
+        primary_object=bundle,
+    )
+    response.update(
+        {
+            "anova_df_results": results,
+            "compatibility_status": compatibility_status,
+            "output_text": output_text,
+            "metadata": metadata,
+            "response_cell_map": getattr(bundle, "response_cell_map", None),
+            "dv_metadata": payload.settings.get("dv_metadata", {}),
+        }
+    )
+    return response
+
+
 def run_single_lmm_step(
     progress_or_payload: object | None = None,
     message_emit: Callable[[str], None] | None = None,
@@ -2591,6 +2786,7 @@ __all__ = [
     "SensitivityConfig",
     "run_group_cell_comparisons",
     "run_group_cell_step",
+    "run_anova_compatibility_step",
     "run_multigroup_model",
     "run_multigroup_model_step",
     "run_prepare_analysis",

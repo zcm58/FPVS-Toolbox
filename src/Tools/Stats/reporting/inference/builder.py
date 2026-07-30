@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from Tools.Stats.reporting.inference.anova_comparison import (
+    build_anova_lmm_decision_comparison,
+)
 from Tools.Stats.reporting.inference.bundle import (
     METHOD_DEPENDENT_PHRASE,
     NativeInferenceReportBundle,
@@ -144,9 +147,20 @@ def build_native_inference_report(
             ],
             keep="last",
         ).reset_index(drop=True)
+    anova_lmm_comparison = build_anova_lmm_decision_comparison(
+        normalized_mode,
+        inventory,
+    )
+    if not anova_lmm_comparison.empty:
+        frames["ANOVA-LMM Decision Comparison"] = anova_lmm_comparison
     correction_families = correction_family_frame(inventory, frames)
     methods = methods_frame(inventory)
-    limitations = limitations_frame(inventory, frames, design)
+    limitations = limitations_frame(
+        inventory,
+        frames,
+        design,
+        mode=normalized_mode,
+    )
     return NativeInferenceReportBundle(
         mode=normalized_mode,
         named_frames=frames,

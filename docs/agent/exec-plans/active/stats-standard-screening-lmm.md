@@ -262,7 +262,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Phase commit recorded below after this plan update.
+- `aec4005f` — `feat(stats): add two-group LMM screening`
 
 ## Phase 4 — Balanced-Only ANOVA Compatibility
 
@@ -278,22 +278,22 @@ The current workflow still needs these behavioral changes:
 - Label all ANOVA output secondary and compatibility-only.
 - If requirements or the supported backend are unavailable, return a concise
   reason without affecting the primary LMM.
-- Compare compatibility direction/decisions with the corresponding broad LMM
-  questions without presenting numerical identity as a requirement.
+- Compare compatibility decisions with the corresponding broad LMM questions
+  without implying direction, numerical identity, or model validation.
 
 ### Definition of Done
 
-- [ ] Missing, duplicate, or non-finite cells skip ANOVA without failing the
+- [x] Missing, duplicate, or non-finite cells skip ANOVA without failing the
       LMM screen.
-- [ ] Single compatibility output retains canonical GG/sphericity handling.
-- [ ] Multi compatibility requires two groups, complete cells, and equal group
+- [x] Single compatibility output retains canonical GG/sphericity handling.
+- [x] Multi compatibility requires two groups, complete cells, and equal group
       sizes.
-- [ ] Multi compatibility is labelled `Group x response-cell mixed-ANOVA
+- [x] Multi compatibility is labelled `Group x response-cell mixed-ANOVA
       compatibility check`.
-- [ ] Multi compatibility explicitly says it does not decompose separate
+- [x] Multi compatibility explicitly says it does not decompose separate
       Group x Condition x ROI terms.
-- [ ] ANOVA never changes, gates, or replaces a primary LMM conclusion.
-- [ ] Focused Stats verification passes.
+- [x] ANOVA never changes, gates, or replaces a primary LMM conclusion.
+- [x] Focused Stats verification passes.
 
 ### Verification
 
@@ -303,7 +303,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Pending.
+- Phase commit recorded below after this plan update.
 
 ## Phase 5 — GUI and Plain-Language Screening Report
 
@@ -434,3 +434,12 @@ Run in a normal visible Windows session, never offscreen:
   Phase 3 integration suite passed (102), reporting integration passed (26),
   and Stats focused verification passed (316), including Ruff, compilation,
   structure, and reporting-legibility audits.
+- 2026-07-29: Phase 4 added an exact declared-grid audit and automatic,
+  nonfatal ANOVA compatibility after the primary LMM. Single mode uses the
+  existing canonical GG/sphericity contract only for a complete unique grid;
+  multi mode requires equal-sized complete groups and uses the explicitly
+  broad Group x response-cell Pingouin check. Compatibility effects use their
+  own planned three-test Holm family, never enter At a Glance, and have an
+  exported descriptive decision comparison that says ANOVA does not validate
+  the LMM. New analysis/reporting integration tests passed (125), the real
+  installed Pingouin path passed, and Stats focused verification passed (333).

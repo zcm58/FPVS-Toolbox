@@ -423,6 +423,12 @@ def standard_screening_families(
             method=STANDARD_SCREENING_CORRECTION,
             alpha=alpha,
         ),
+        FamilySpec(
+            family_id="anova_compatibility_effects",
+            family_label="Balanced-design ANOVA compatibility effects",
+            method=STANDARD_SCREENING_CORRECTION,
+            alpha=alpha,
+        ),
     )
 
 

@@ -58,6 +58,8 @@ def estimate_clause(row: pd.Series) -> str:
 
 def _role_prefix(row: pd.Series) -> str:
     role = str(row["role"])
+    if role == "compatibility":
+        return "Compatibility-only — "
     if role == "sensitivity":
         return "Sensitivity only — "
     if role == "exploratory":
@@ -240,11 +242,6 @@ def _design_note_lines(
         lines.append(f"{prefix}{cell_n_note}")
     lines.extend(
         [
-            (
-                f"{prefix}Repeated-measures ANOVA and paired post-hoc tests "
-                "were intentionally omitted because they require complete "
-                "within-participant cells."
-            ),
             (
                 f"{prefix}Available-case likelihood inference assumes the "
                 "missingness is ignorable (missing at random, MAR) after "

@@ -45,6 +45,7 @@ def test_native_options_build_one_shared_run_spec_and_sensitivity_config() -> No
         "group_core_cells",
         "planned_contrasts",
         "omnibus_effects_strict",
+        "anova_compatibility_effects",
     }
     assert all(
         family.method is CorrectionMethod.HOLM for family in run_spec.families
@@ -138,7 +139,7 @@ def test_pipeline_progress_maps_each_step_into_the_full_run() -> None:
         PipelineId.MULTI,
         StepId.PREPARE_ANALYSIS,
         100,
-    ) == 20
+    ) == 17
     assert overall_progress(
         PipelineId.MULTI,
         StepId.REPORT_BUNDLE,
@@ -147,6 +148,7 @@ def test_pipeline_progress_maps_each_step_into_the_full_run() -> None:
     assert "condition" in phase_label(
         StepId.GROUP_CELL_COMPARISONS
     ).casefold()
+    assert "compatibility" in phase_label(StepId.RM_ANOVA).casefold()
     available_case_order = (
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
@@ -215,6 +217,7 @@ def test_standard_single_queue_runs_positive_response_before_lmm() -> None:
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
         StepId.MIXED_MODEL,
+        StepId.RM_ANOVA,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     )
@@ -238,6 +241,7 @@ def test_standard_multi_queue_runs_grouped_response_before_model() -> None:
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
         StepId.MULTIGROUP_MODEL,
+        StepId.RM_ANOVA,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     )

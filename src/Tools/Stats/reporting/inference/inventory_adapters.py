@@ -58,7 +58,17 @@ def section_for(name: str, frame: pd.DataFrame) -> str:
 
     lowered = name.casefold()
     columns = {str(item).casefold() for item in frame.columns}
+    compatibility_scope = frame.get(
+        "compatibility_scope",
+        pd.Series(dtype=object),
+    ).astype(str)
     if (
+        compatibility_scope.str.contains(
+            "between_group",
+            case=False,
+            regex=False,
+        ).any()
+        or
         {"group_a", "group_b"}.issubset(columns)
         or "contrast_sign" in columns
         or "marginal group" in lowered
@@ -101,7 +111,7 @@ def section_for(name: str, frame: pd.DataFrame) -> str:
 
 
 def role_for(name: str, row: pd.Series) -> str:
-    """Resolve primary, exploratory, or sensitivity interpretation role."""
+    """Resolve primary, compatibility, exploratory, or sensitivity role."""
 
     value = first_nonmissing(
         row,
@@ -115,6 +125,8 @@ def role_for(name: str, row: pd.Series) -> str:
     )
     status = first_nonmissing(row, ("inference_status",)) or ""
     lowered = f"{name} {value or ''} {status}".casefold()
+    if "compatibility" in lowered or "secondary" in lowered:
+        return "compatibility"
     if "sensitivity" in lowered or any(
         token in name.casefold()
         for token in ("robust", "resampling", "stability", "leave one out")
@@ -409,6 +421,27 @@ def headline_contract(
     explicit = None
     analysis_scope = ""
     if row is not None:
+        compatibility_only = first_nonmissing(row, ("compatibility_only",))
+        role_value = first_nonmissing(
+            row,
+            (
+                "inference_role",
+                "interpretation_role",
+                "role",
+                "analysis_profile",
+            ),
+        )
+        role_token = str(role_value or "").strip().casefold()
+        if (
+            "compatibility" in lowered
+            or "compatibility" in role_token
+            or "secondary" in role_token
+            or (
+                compatibility_only is not None
+                and bool_value(compatibility_only, default=False)
+            )
+        ):
+            return False, "anova_compatibility_is_secondary"
         explicit = first_nonmissing(row, ("headline_eligible",))
         if explicit is not None and not bool_value(explicit, default=False):
             return False, "analysis_marked_detailed_only"
@@ -417,6 +450,8 @@ def headline_contract(
             analysis_scope = (
                 str(scope_value).strip().casefold().replace("-", "_")
             )
+    elif "compatibility" in lowered:
+        return False, "anova_compatibility_is_secondary"
     if "fixed effects" in lowered:
         return False, "fixed_effect_wald_estimates_are_detailed_only"
     if p_source == "wald":

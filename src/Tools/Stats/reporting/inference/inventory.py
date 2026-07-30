@@ -85,7 +85,10 @@ def inventory_rows(
             estimate, ci_low, ci_high = estimate_fields(row)
             effect_label, effect_value = effect_size_fields(row)
             observed_n = n_for(row)
-            explicit_test_id = first_nonmissing(row, ("test_id",))
+            explicit_test_id = first_nonmissing(
+                row,
+                ("test_id", "effect_id", "contrast_id"),
+            )
             condition = first_nonmissing(row, ("condition", "Condition"))
             roi = first_nonmissing(row, ("roi", "ROI"))
             assumption_status = first_nonmissing(

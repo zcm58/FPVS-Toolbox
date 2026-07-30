@@ -24,6 +24,7 @@ PIPELINE_STEP_ORDER: dict[PipelineId, tuple[StepId, ...]] = {
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
         StepId.MIXED_MODEL,
+        StepId.RM_ANOVA,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ),
@@ -31,6 +32,7 @@ PIPELINE_STEP_ORDER: dict[PipelineId, tuple[StepId, ...]] = {
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
         StepId.MULTIGROUP_MODEL,
+        StepId.RM_ANOVA,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ),
@@ -38,7 +40,7 @@ PIPELINE_STEP_ORDER: dict[PipelineId, tuple[StepId, ...]] = {
 
 STEP_PHASE_LABELS: dict[StepId, str] = {
     StepId.PREPARE_ANALYSIS: "Preparing and checking the shared dataset",
-    StepId.RM_ANOVA: "Running the repeated-measures ANOVA",
+    StepId.RM_ANOVA: "Checking balanced-data ANOVA compatibility",
     StepId.MIXED_MODEL: "Fitting the Condition × ROI mixed model",
     StepId.INTERACTION_POSTHOCS: "Running interaction follow-up comparisons",
     StepId.BASELINE_VS_ZERO: "Testing for positive oddball responses",

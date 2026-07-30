@@ -184,6 +184,39 @@ class _FrameBundle:
         return {"Fake Results": pd.DataFrame([{"value": 1.0}])}
 
 
+@dataclass
+class _CompatibilityBundle:
+    status: str = "completed"
+    status_code: str = "anova_compatibility_completed"
+    message: str = "Compatibility check completed."
+    ran: bool = True
+    results: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(
+            [{"effect": "Condition", "p_reported": 0.04}]
+        )
+    )
+    response_cell_map: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(
+            [{"response_cell": "A | R1", "condition": "A", "roi": "R1"}]
+        )
+    )
+
+    def to_frames(self) -> dict[str, pd.DataFrame]:
+        return {
+            "Module Compatibility Detail": pd.DataFrame([{"value": 1.0}]),
+            "ANOVA Compatibility Status": pd.DataFrame(
+                [
+                    {
+                        "status": self.status,
+                        "status_code": self.status_code,
+                        "message": self.message,
+                        "ran": self.ran,
+                    }
+                ]
+            ),
+        }
+
+
 def test_prepare_reuses_exact_payload_without_calling_audit(monkeypatch) -> None:
     payload = _payload()
 
@@ -542,6 +575,174 @@ def test_strict_omnibus_family_corrects_single_rm_anova_rows(
     assert corrected["reject_adjusted"].tolist() == [True, False, False]
     assert corrected["family_id"].eq("omnibus_effects_strict").all()
     assert corrected["family_size"].eq(3).all()
+
+
+def test_single_anova_compatibility_uses_declared_grid_and_available_rows(
+    monkeypatch,
+) -> None:
+    payload = _payload(mode="single", analysis_scope="available_case")
+    bundle = _CompatibilityBundle()
+    captured: dict[str, object] = {}
+
+    def fake_single(data, **kwargs):
+        captured["data"] = data.copy(deep=True)
+        captured["kwargs"] = dict(kwargs)
+        return bundle
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("the wrong compatibility path was called")
+
+    monkeypatch.setattr(workers, "run_single_anova_compatibility", fake_single)
+    monkeypatch.setattr(
+        workers,
+        "run_multigroup_anova_compatibility",
+        fail_if_called,
+    )
+    monkeypatch.setattr(
+        workers,
+        "_apply_strict_omnibus_correction",
+        fail_if_called,
+    )
+    progress: list[int] = []
+    messages: list[str] = []
+
+    result = workers.run_anova_compatibility_step(
+        progress.append,
+        messages.append,
+        prepared_payload=payload,
+    )
+
+    kwargs = captured["kwargs"]
+    assert result["status"] == "ok"
+    assert result["compatibility_status"] == "completed"
+    assert result["primary_object"] is bundle
+    assert kwargs["dv_col"] == payload.dv_col
+    assert kwargs["subject_col"] == payload.subject_col
+    assert kwargs["condition_col"] == payload.condition_col
+    assert kwargs["roi_col"] == payload.roi_col
+    assert kwargs["frozen_participants"] == payload.frozen_participants
+    assert kwargs["retained_conditions"] == payload.retained_conditions
+    assert kwargs["selected_rois"] == payload.selected_rois
+    assert kwargs["alpha"] == pytest.approx(payload.run_spec.alpha)
+    assert callable(kwargs["log_func"])
+    pd.testing.assert_frame_equal(captured["data"], payload.primary_data)
+    assert len(captured["data"]) < (
+        len(payload.frozen_participants)
+        * len(payload.retained_conditions)
+        * len(payload.selected_rois)
+    )
+    assert progress == [0, 100]
+    assert messages
+
+    results = result["anova_df_results"]
+    assert results["compatibility_only"].eq(True).all()
+    assert results["inference_role"].eq("compatibility").all()
+    assert results["headline_eligible"].eq(False).all()
+    assert results["gates_primary_inference"].eq(False).all()
+    assert results["missing_values_imputed"].eq(False).all()
+    assert result["metadata"]["analysis_scope"] == "available_case"
+    assert result["metadata"]["compatibility_only"] is True
+    assert result["metadata"]["gates_primary_inference"] is False
+    assert "ANOVA Compatibility" in result["export_frames"]
+    assert "ANOVA Compatibility Status" in result["export_frames"]
+
+
+@pytest.mark.parametrize(
+    ("bundle_status", "expected_status", "ran"),
+    [
+        ("partial", "partial", True),
+        ("skipped", "skipped", False),
+    ],
+)
+def test_multigroup_anova_compatibility_dispatches_identity_and_nonfatal_status(
+    monkeypatch,
+    bundle_status: str,
+    expected_status: str,
+    ran: bool,
+) -> None:
+    payload = _payload(mode="multi", analysis_scope="available_case")
+    bundle = _CompatibilityBundle(
+        status=bundle_status,
+        status_code=f"compatibility_{bundle_status}",
+        message=f"Compatibility {bundle_status}.",
+        ran=ran,
+        results=(
+            pd.DataFrame([{"effect": "Group x response-cell", "p_reported": 0.1}])
+            if ran
+            else pd.DataFrame()
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_multi(data, **kwargs):
+        captured["data"] = data.copy(deep=True)
+        captured["kwargs"] = dict(kwargs)
+        return bundle
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("single-group compatibility was called")
+
+    monkeypatch.setattr(
+        workers,
+        "run_multigroup_anova_compatibility",
+        fake_multi,
+    )
+    monkeypatch.setattr(workers, "run_single_anova_compatibility", fail_if_called)
+
+    result = workers.run_anova_compatibility_step(payload)
+
+    kwargs = captured["kwargs"]
+    assert result["status"] == expected_status
+    assert result["compatibility_status"] == bundle_status
+    assert result["status_code"] == f"compatibility_{bundle_status}"
+    assert result["primary_object"] is bundle
+    assert kwargs["group_col"] == payload.group_col
+    assert kwargs["canonical_group_ids"] == payload.canonical_group_ids
+    assert kwargs["group_pair"] == payload.selected_group_pair
+    assert kwargs["frozen_participants"] == payload.frozen_participants
+    assert kwargs["retained_conditions"] == payload.retained_conditions
+    assert kwargs["selected_rois"] == payload.selected_rois
+    pd.testing.assert_frame_equal(captured["data"], payload.primary_data)
+    assert result["metadata"]["mode"] == "multi"
+    assert result["metadata"]["ran"] is ran
+    assert result["metadata"]["inference_role"] == "compatibility"
+    assert result["output_text"].startswith(bundle.message)
+
+
+@pytest.mark.parametrize(
+    ("cancel_check", "expected_code"),
+    [
+        (lambda: True, "cancelled_before_start"),
+        (
+            (lambda calls=iter((False, True)): lambda: next(calls))(),
+            "cancelled_after_check",
+        ),
+    ],
+)
+def test_anova_compatibility_cancellation_remains_cancellation(
+    monkeypatch,
+    cancel_check,
+    expected_code: str,
+) -> None:
+    payload = _payload(mode="single")
+    calls = 0
+
+    def fake_single(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return _CompatibilityBundle()
+
+    monkeypatch.setattr(workers, "run_single_anova_compatibility", fake_single)
+
+    result = workers.run_anova_compatibility_step(
+        payload,
+        cancel_check=cancel_check,
+    )
+
+    assert result["status"] == "cancelled"
+    assert result["status_code"] == expected_code
+    assert result["primary_object"] is None
+    assert calls == (0 if expected_code == "cancelled_before_start" else 1)
 
 
 @pytest.mark.parametrize("analysis_scope", ["complete_core", "available_case"])

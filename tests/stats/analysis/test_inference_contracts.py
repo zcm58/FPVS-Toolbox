@@ -64,6 +64,7 @@ def test_standard_screening_contract_locks_direction_correction_and_families() -
         "group_core_cells",
         "planned_contrasts",
         "omnibus_effects_strict",
+        "anova_compatibility_effects",
     }
     assert all(
         family.method is CorrectionMethod.HOLM for family in run.families

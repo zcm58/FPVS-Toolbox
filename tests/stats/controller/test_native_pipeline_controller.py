@@ -9,8 +9,11 @@ from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.controller.stats_controller import (
     MULTI_PIPELINE_STEPS,
     SINGLE_PIPELINE_STEPS,
+    STEP_LABELS,
+    WORKER_FN_BY_STEP,
     StatsController,
 )
+from Tools.Stats.workers import multigroup_workers
 
 
 class FakeView:
@@ -153,6 +156,10 @@ def _multigroup_payloads(prepared_payload: object) -> dict[StepId, object]:
             "responses": "grouped-response-result",
         },
         StepId.MULTIGROUP_MODEL: {"status": "ok", "model": "model-result"},
+        StepId.RM_ANOVA: {
+            "status": "skipped",
+            "message": "ANOVA compatibility requirements were not met.",
+        },
         StepId.SENSITIVITIES: {"status": "ok", "sensitivity": "robust-result"},
         StepId.REPORT_BUNDLE: {
             "status": "ok",
@@ -173,6 +180,14 @@ def test_multigroup_pipeline_order_and_prepared_payload_reuse() -> None:
     assert [step_id for _pipeline, step_id, _kwargs in view.worker_calls] == list(
         MULTI_PIPELINE_STEPS
     )
+    assert list(MULTI_PIPELINE_STEPS) == [
+        StepId.PREPARE_ANALYSIS,
+        StepId.BASELINE_VS_ZERO,
+        StepId.MULTIGROUP_MODEL,
+        StepId.RM_ANOVA,
+        StepId.SENSITIVITIES,
+        StepId.REPORT_BUNDLE,
+    ]
     assert all(
         callable(kwargs["cancel_check"])
         for _pipeline, _step_id, kwargs in view.worker_calls
@@ -184,6 +199,7 @@ def test_multigroup_pipeline_order_and_prepared_payload_reuse() -> None:
     prior_results = report_kwargs["prior_results"]
     assert list(prior_results) == list(MULTI_PIPELINE_STEPS[:-1])
     assert prior_results[StepId.MULTIGROUP_MODEL]["model"] == "model-result"
+    assert prior_results[StepId.RM_ANOVA]["status"] == "skipped"
     assert view.handlers == list(MULTI_PIPELINE_STEPS)
     assert view.export_calls == []
     assert view.summary_calls == [PipelineId.MULTI]
@@ -220,6 +236,7 @@ def test_standard_single_pipeline_runs_positive_response_before_lmm() -> None:
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
         StepId.MIXED_MODEL,
+        StepId.RM_ANOVA,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ]
@@ -227,9 +244,15 @@ def test_standard_single_pipeline_runs_positive_response_before_lmm() -> None:
         StepId.PREPARE_ANALYSIS,
         StepId.BASELINE_VS_ZERO,
         StepId.MIXED_MODEL,
+        StepId.RM_ANOVA,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ]
+    assert STEP_LABELS[StepId.RM_ANOVA] == "ANOVA Compatibility"
+    assert (
+        WORKER_FN_BY_STEP[StepId.RM_ANOVA]
+        is multigroup_workers.run_anova_compatibility_step
+    )
     assert all(
         kwargs["prepared_payload"] is prepared
         for _pipeline, _step_id, kwargs in view.worker_calls[1:]
@@ -241,7 +264,7 @@ def test_standard_single_pipeline_runs_positive_response_before_lmm() -> None:
     assert {section for section, _message, _level in view.logs} == {"Single"}
 
 
-def test_manual_followups_preserve_provenance_when_omnibus_gate_is_disabled() -> None:
+def test_anova_compatibility_does_not_propagate_a_legacy_followup_gate() -> None:
     class ManualFollowupView(FakeView):
         def get_step_config(
             self,
@@ -253,7 +276,7 @@ def test_manual_followups_preserve_provenance_when_omnibus_gate_is_disabled() ->
                 kwargs.update(
                     {
                         "followup_provenance": "exploratory_manual",
-                        "enforce_omnibus_gate": False,
+                        "enforce_omnibus_gate": True,
                     }
                 )
             return kwargs, handler
@@ -267,7 +290,9 @@ def test_manual_followups_preserve_provenance_when_omnibus_gate_is_disabled() ->
             },
             StepId.RM_ANOVA: {
                 "status": "ok",
-                "anova_df_results": None,
+                "anova_df_results": [
+                    {"Source": "Condition * ROI", "p-GG-corr": 0.001}
+                ],
             },
         }
     )
@@ -288,9 +313,49 @@ def test_manual_followups_preserve_provenance_when_omnibus_gate_is_disabled() ->
         if step_id is StepId.INTERACTION_POSTHOCS
     )
     assert posthoc_kwargs["followup_provenance"] == "exploratory_manual"
-    assert posthoc_kwargs["enforce_omnibus_gate"] is False
+    assert posthoc_kwargs["enforce_omnibus_gate"] is True
     assert "omnibus_p_value" not in posthoc_kwargs
     assert "omnibus_significant" not in posthoc_kwargs
+    assert "omnibus_gate_status" not in posthoc_kwargs
+
+
+@pytest.mark.parametrize("pipeline_id", [PipelineId.SINGLE, PipelineId.MULTI])
+@pytest.mark.parametrize("compatibility_status", ["skipped", "partial"])
+def test_anova_compatibility_nonfatal_status_continues_pipeline(
+    pipeline_id: PipelineId,
+    compatibility_status: str,
+) -> None:
+    prepared = object()
+    view = FakeView(
+        {
+            StepId.PREPARE_ANALYSIS: {
+                "status": "ok",
+                "prepared_payload": prepared,
+            },
+            StepId.RM_ANOVA: {
+                "status": compatibility_status,
+                "message": "Compatibility evidence is secondary.",
+            },
+        }
+    )
+    controller = StatsController(view)
+
+    if pipeline_id is PipelineId.SINGLE:
+        controller.run_single_group_analysis(
+            step_ids=(StepId.RM_ANOVA,),
+            run_exports=False,
+            run_summary=False,
+        )
+    else:
+        controller.run_multigroup_analysis(
+            step_ids=(StepId.RM_ANOVA,),
+            run_exports=False,
+            run_summary=False,
+        )
+
+    assert view.handlers == [StepId.PREPARE_ANALYSIS, StepId.RM_ANOVA]
+    assert view.finished[-1]["success"] is True
+    assert view.finished[-1]["error_message"] is None
 
 
 def test_explicit_single_queue_can_omit_all_sensitivity_work() -> None:
@@ -507,7 +572,7 @@ def test_report_failure_preserves_requested_numeric_export() -> None:
             "REPORT_BUNDLE must be the last",
         ),
         (
-            (StepId.RM_ANOVA,),
+            (StepId.INTERACTION_POSTHOCS,),
             "MULTI does not support",
         ),
     ],

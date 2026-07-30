@@ -16,6 +16,7 @@ from Tools.Stats.reporting.inference_report import (
     write_native_inference_workbook,
     write_native_numeric_workbook,
 )
+from Tools.Stats.reporting.inference.language import finding_line
 
 
 def _prepared_design(*, excluded: str = "incomplete") -> dict[str, pd.DataFrame]:
@@ -169,6 +170,48 @@ def _rm_results(*, p_reported: float = 0.024) -> pd.DataFrame:
                 "p_correction": "greenhouse_geisser",
                 "inference_status": "primary_greenhouse_geisser_sphericity_violated",
                 "reportable": True,
+            }
+        ]
+    )
+
+
+def _anova_compatibility_results(
+    *,
+    p_adjusted: float = 0.024,
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "effect_id": "condition_roi_interaction",
+                "effect_label": "Condition x ROI interaction",
+                "test_method": (
+                    "Repeated-measures ANOVA compatibility check"
+                ),
+                "p_adjusted": p_adjusted,
+                "adjustment_method": "holm",
+                "family_id": "anova_compatibility_effects",
+                "family_size": 3,
+                "inference_role": "compatibility",
+                "compatibility_only": True,
+                "headline_eligible": False,
+                "status": "estimated",
+                "reportable": True,
+            }
+        ]
+    )
+
+
+def _anova_compatibility_status(
+    *,
+    status: str,
+    message: str,
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "status": status,
+                "message": message,
+                "compatibility_only": True,
             }
         ]
     )
@@ -785,7 +828,11 @@ def test_available_case_reporting_discloses_missing_data_contract() -> None:
                         "analysis_scope": "available_case",
                     }
                 ]
-            )
+            ),
+            "ANOVA Compatibility Status": _anova_compatibility_status(
+                status="skipped",
+                message="participant cells were incomplete",
+            ),
         },
     )
 
@@ -798,14 +845,16 @@ def test_available_case_reporting_discloses_missing_data_contract() -> None:
     assert "required fixed-effect cell" in text
     assert "No imputation was performed" in text
     assert "varied from N=8 to N=10" in text
-    assert "Repeated-measures ANOVA and paired post-hoc tests" in text
+    assert "secondary ANOVA compatibility check was skipped" in text
+    assert "participant cells were incomplete" in text
+    assert "Repeated-measures ANOVA and paired post-hoc tests" not in text
     assert "missing at random, MAR" in text
     assert "missing not at random, MNAR" in text
     assert {
         "available_case_no_imputation",
         "available_case_mar_assumption",
         "available_case_mnar_bias",
-        "balanced_methods_omitted",
+        "anova_compatibility_skipped",
         "frozen_vs_contributing_participants",
         "varying_cell_sample_sizes",
     }.issubset(set(bundle.limitations["code"]))
@@ -815,6 +864,170 @@ def test_available_case_reporting_discloses_missing_data_contract() -> None:
     assert summary["n_contributing_participants"] == 10
     assert summary["partial_conditions"] == "objects"
     assert summary["imputation_method"] == "none"
+
+
+def test_anova_compatibility_is_secondary_and_never_headlined() -> None:
+    bundle = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            "ANOVA Compatibility": _anova_compatibility_results(
+                p_adjusted=0.001
+            ),
+            "ANOVA Compatibility Status": _anova_compatibility_status(
+                status="completed",
+                message="balanced design requirements were met",
+            ),
+        },
+    )
+
+    row = bundle.test_inventory.iloc[0]
+    assert row["role"] == "compatibility"
+    assert not bool(row["headline_eligible"])
+    assert row["headline_reason"] == "anova_compatibility_is_secondary"
+    assert finding_line(row).startswith("Compatibility-only")
+    assert "Condition x ROI interaction" not in bundle.at_a_glance
+    limitation = bundle.limitations[
+        bundle.limitations["code"].eq("anova_compatibility_secondary")
+    ].iloc[0]
+    assert limitation["severity"] == "information"
+    assert "do not gate, replace, or change the primary LMM" in limitation[
+        "message"
+    ]
+
+
+@pytest.mark.parametrize(
+    "declared_role",
+    ["compatibility", "secondary", "secondary_compatibility"],
+)
+def test_declared_secondary_roles_use_compatibility_contract(
+    declared_role: str,
+) -> None:
+    result = _anova_compatibility_results()
+    result.loc[:, "inference_role"] = declared_role
+    result.loc[:, "compatibility_only"] = False
+    result.loc[:, "headline_eligible"] = True
+    bundle = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {"Balanced ANOVA Check": result},
+    )
+
+    row = bundle.test_inventory.iloc[0]
+    assert row["role"] == "compatibility"
+    assert not bool(row["headline_eligible"])
+    assert row["headline_reason"] == "anova_compatibility_is_secondary"
+
+
+def test_anova_compatibility_p_value_cannot_change_at_a_glance() -> None:
+    primary = {
+        "Mixed Model LRT": pd.DataFrame(
+            [
+                {
+                    "Effect": "condition * roi",
+                    "p_value_chi2": 0.40,
+                    "p_adjusted": 0.60,
+                    "adjustment_method": "holm",
+                    "family_id": "omnibus_effects_strict",
+                    "family_size": 3,
+                    "status": "ok",
+                    "reportable": True,
+                    "headline_eligible": True,
+                    "analysis_scope": "available_case",
+                }
+            ]
+        ),
+        "ANOVA Compatibility Status": _anova_compatibility_status(
+            status="completed",
+            message="balanced design requirements were met",
+        ),
+    }
+    significant = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            **primary,
+            "ANOVA Compatibility": _anova_compatibility_results(
+                p_adjusted=0.001
+            ),
+        },
+    )
+    nonsignificant = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {
+            **primary,
+            "ANOVA Compatibility": _anova_compatibility_results(
+                p_adjusted=0.90
+            ),
+        },
+    )
+
+    assert significant.at_a_glance.encode("utf-8") == (
+        nonsignificant.at_a_glance.encode("utf-8")
+    )
+
+
+def test_skipped_anova_status_is_exported_but_not_inventoried_or_alarming() -> None:
+    status = _anova_compatibility_status(
+        status="skipped",
+        message="duplicate participant cells prevented exact balance",
+    )
+    bundle = build_native_inference_report(
+        "single",
+        _available_case_design(),
+        {"ANOVA Compatibility Status": status},
+    )
+
+    assert bundle.test_inventory.empty
+    status_name = next(
+        name
+        for name in bundle.named_frames
+        if name.casefold() == "anova compatibility status"
+    )
+    assert bundle.named_frames[status_name].equals(status)
+    assert any(
+        name.casefold() == "anova compatibility status"
+        for name in bundle.to_frames()
+    )
+    skipped = bundle.limitations[
+        bundle.limitations["code"].eq("anova_compatibility_skipped")
+    ].iloc[0]
+    assert skipped["severity"] == "information"
+    assert "primary LMM screening was unaffected" in skipped["message"]
+    assert not bundle.limitations["code"].eq(
+        "non_estimable_or_failed_tests"
+    ).any()
+
+
+def test_multi_anova_compatibility_states_broad_non_decomposition_scope() -> None:
+    compatibility = _anova_compatibility_results(p_adjusted=0.02)
+    compatibility.loc[:, "effect_id"] = "group_response_cell_interaction"
+    compatibility.loc[:, "effect_label"] = "Group x response-cell interaction"
+    compatibility.loc[:, "test_method"] = (
+        "Group x response-cell mixed-ANOVA compatibility check"
+    )
+    bundle = build_native_inference_report(
+        "multi",
+        _available_case_design(),
+        {
+            "ANOVA Compatibility": compatibility,
+            "ANOVA Compatibility Status": _anova_compatibility_status(
+                status="completed",
+                message="balanced two-group design requirements were met",
+            ),
+        },
+    )
+
+    limitation = bundle.limitations[
+        bundle.limitations["code"].eq("anova_multi_broad_response_cell")
+    ].iloc[0]
+    assert limitation["severity"] == "information"
+    assert (
+        "does not decompose Group x Condition, Group x ROI, or "
+        "Group x Condition x ROI"
+    ) in limitation["message"]
+    assert "Group x response-cell interaction" not in bundle.at_a_glance
 
 
 def test_available_case_wald_row_remains_detailed_only_when_explicitly_marked() -> None:
