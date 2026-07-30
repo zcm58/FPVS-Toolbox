@@ -65,6 +65,19 @@ def _find_response_family(run_spec: AnalysisRunSpec) -> FamilySpec | None:
     return None
 
 
+def _find_declared_family(
+    run_spec: AnalysisRunSpec,
+    family_id: str,
+) -> FamilySpec | None:
+    """Return one named family from an immutable run specification."""
+
+    family_key = str(family_id).strip().casefold()
+    for spec in run_spec.families:
+        if spec.family_id.casefold() == family_key:
+            return spec
+    return None
+
+
 def _resolve_contract(
     *,
     alpha: float,
@@ -390,6 +403,186 @@ def run_baseline_vs_zero_tests(
         "significant after correction.\n"
         "Corrected significant findings:\n"
         f"{significant_text}"
+    )
+    return log_text, results_df
+
+
+def run_grouped_baseline_vs_zero_tests(
+    data: pd.DataFrame,
+    dv_col: str,
+    subject_col: str,
+    group_col: str,
+    condition_col: str,
+    roi_col: str,
+    alpha: float = 0.05,
+    alternative: str | Alternative = "greater",
+    correction: str | CorrectionMethod = "holm",
+    *,
+    family_spec: FamilySpec | None = None,
+    run_spec: AnalysisRunSpec | None = None,
+    harmonic_provenance: HarmonicProvenance | str | None = None,
+) -> tuple[str, pd.DataFrame]:
+    """Test positive responses within every Group x Condition x ROI cell.
+
+    The returned raw p-values are adjusted once across every estimable cell in
+    the combined multi-group response family.  Within-group significance is
+    response evidence only; it is not a test of a difference between groups.
+    """
+
+    required_cols = [
+        dv_col,
+        subject_col,
+        group_col,
+        condition_col,
+        roi_col,
+    ]
+    missing_cols = [column for column in required_cols if column not in data.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    group_values = data[group_col].map(
+        lambda value: "" if pd.isna(value) else str(value).strip()
+    )
+    if bool(group_values.eq("").any()):
+        participants = sorted(
+            {
+                str(value).strip()
+                for value in data.loc[group_values.eq(""), subject_col]
+            },
+            key=str.casefold,
+        )
+        raise ValueError(
+            "Canonical group assignment is missing for participant(s): "
+            + ", ".join(participants)
+        )
+    assignment_counts = (
+        pd.DataFrame(
+            {
+                "participant": data[subject_col].map(
+                    lambda value: str(value).strip()
+                ),
+                "group": group_values,
+            }
+        )
+        .drop_duplicates()
+        .groupby("participant", dropna=False)["group"]
+        .nunique()
+    )
+    inconsistent = sorted(
+        assignment_counts[assignment_counts.ne(1)].index.astype(str).tolist(),
+        key=str.casefold,
+    )
+    if inconsistent:
+        raise ValueError(
+            "Each participant must have one canonical group ID; inconsistent "
+            "assignments were found for: "
+            + ", ".join(inconsistent)
+        )
+
+    if family_spec is not None and not isinstance(family_spec, FamilySpec):
+        raise TypeError("family_spec must be a FamilySpec.")
+    if run_spec is not None and not isinstance(run_spec, AnalysisRunSpec):
+        raise TypeError("run_spec must be an AnalysisRunSpec.")
+    declared_family = (
+        None
+        if run_spec is None
+        else _find_declared_family(run_spec, "group_response_cells")
+    )
+    effective_family = family_spec or declared_family
+    if effective_family is None:
+        effective_family = FamilySpec(
+            family_id="group_response_cells",
+            family_label=(
+                "Positive responses within Group x Condition x ROI cells"
+            ),
+            method=CorrectionMethod.coerce(correction),
+            alpha=run_spec.alpha if run_spec is not None else alpha,
+        )
+
+    pieces: list[pd.DataFrame] = []
+    normalized = data.copy()
+    normalized[group_col] = group_values
+    group_levels = sorted(group_values.unique().tolist(), key=str.casefold)
+    for group in group_levels:
+        group_data = normalized.loc[normalized[group_col].eq(group)]
+        _, group_results = run_baseline_vs_zero_tests(
+            group_data,
+            dv_col=dv_col,
+            subject_col=subject_col,
+            condition_col=condition_col,
+            roi_col=roi_col,
+            alpha=alpha,
+            alternative=alternative,
+            correction=correction,
+            correction_scope="global",
+            family_spec=effective_family,
+            run_spec=run_spec,
+            harmonic_provenance=harmonic_provenance,
+        )
+        group_results.insert(0, "group", group)
+        pieces.append(group_results)
+
+    if pieces:
+        results_df = pd.concat(pieces, axis=0, ignore_index=True)
+        results_df = apply_family_correction(
+            results_df,
+            effective_family,
+            p_col="p_raw",
+        )
+        results_df["p_corr"] = results_df["p_adjusted"]
+        results_df["reject"] = results_df["reject_adjusted"]
+    else:
+        results_df = pd.DataFrame(columns=["group", "condition", "roi"])
+
+    significant = results_df.loc[
+        results_df.get(
+            "reject_adjusted",
+            pd.Series(False, index=results_df.index, dtype=bool),
+        ).fillna(False)
+    ]
+    significant_lines = [
+        (
+            f"{index}. {row['group']}, {row['condition']} in {row['roi']}: "
+            f"mean={row['mean']:.6g}, corrected p={row['p_adjusted']:.6g}"
+        )
+        for index, (_, row) in enumerate(significant.iterrows(), start=1)
+        if pd.notna(row.get("p_adjusted"))
+    ]
+    significant_text = (
+        "\n".join(significant_lines)
+        if significant_lines
+        else "No Group/Condition/ROI cells supported a positive response after correction."
+    )
+    inference_status = _first_result_value(
+        results_df,
+        "inference_status",
+        "provenance_unverified",
+    )
+    provenance = _first_result_value(
+        results_df,
+        "harmonic_provenance",
+        "unknown",
+    )
+    alternative_label = _first_result_value(
+        results_df,
+        "alternative",
+        Alternative.coerce(alternative).value,
+    )
+    log_text = (
+        "Grouped baseline vs Zero tests completed.\n"
+        f"Test settings: alpha={effective_family.alpha}; "
+        f"alternative={alternative_label}; "
+        f"correction={effective_family.method.value}; scope=global.\n"
+        f"Inference status: {inference_status}; "
+        f"harmonic provenance={provenance}.\n"
+        f"Summary: {len(results_df)} Group/Condition/ROI cells tested; "
+        f"{int(results_df.get('p_raw', pd.Series(dtype=float)).notna().sum())} "
+        "valid p-values; "
+        f"{int(results_df.get('reject_adjusted', pd.Series(dtype=bool)).fillna(False).sum())} "
+        "supported positive responses after correction.\n"
+        "Corrected positive-response findings:\n"
+        f"{significant_text}\n"
+        "These within-group response tests do not test whether the groups differ."
     )
     return log_text, results_df
 

@@ -116,8 +116,8 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
 
 MULTI_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.PREPARE_ANALYSIS,
+    StepId.BASELINE_VS_ZERO,
     StepId.MULTIGROUP_MODEL,
-    StepId.GROUP_CELL_COMPARISONS,
     StepId.SENSITIVITIES,
     StepId.REPORT_BUNDLE,
 )
@@ -144,7 +144,6 @@ CANCELLABLE_STEPS: frozenset[StepId] = frozenset(
         StepId.INTERACTION_POSTHOCS,
         StepId.BASELINE_VS_ZERO,
         StepId.MULTIGROUP_MODEL,
-        StepId.GROUP_CELL_COMPARISONS,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     }
@@ -167,9 +166,8 @@ WORKER_FN_BY_STEP: Dict[StepId, Callable[..., Any]] = {
     StepId.RM_ANOVA: multigroup_workers.run_single_rm_anova_step,
     StepId.MIXED_MODEL: multigroup_workers.run_single_lmm_step,
     StepId.INTERACTION_POSTHOCS: multigroup_workers.run_single_posthoc_step,
-    StepId.BASELINE_VS_ZERO: multigroup_workers.run_single_baseline_step,
+    StepId.BASELINE_VS_ZERO: multigroup_workers.run_baseline_step,
     StepId.MULTIGROUP_MODEL: multigroup_workers.run_multigroup_model_step,
-    StepId.GROUP_CELL_COMPARISONS: multigroup_workers.run_group_cell_step,
     StepId.SENSITIVITIES: multigroup_workers.run_sensitivity_step,
     StepId.REPORT_BUNDLE: multigroup_workers.run_report_bundle_step,
 }

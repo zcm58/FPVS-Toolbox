@@ -858,7 +858,7 @@ def test_analysis_can_mark_unadjusted_omnibus_decomposition_detailed_only() -> N
     assert row["headline_reason"] == "analysis_marked_detailed_only"
 
 
-def test_actual_group_worker_response_is_not_duplicated() -> None:
+def test_superseded_group_worker_does_not_add_legacy_contrasts() -> None:
     from Tools.Stats.analysis.inference_contracts import (
         AnalysisProfile,
         AnalysisRunSpec,
@@ -917,12 +917,8 @@ def test_actual_group_worker_response_is_not_duplicated() -> None:
     contrasts = bundle.test_inventory[
         bundle.test_inventory["source_frame"].eq("Group Cell Contrasts")
     ]
-    assert len(contrasts) == 2
-    assert contrasts["test_label"].is_unique
-    assert not bundle.test_inventory["source_frame"].str.contains(
-        r"\(\d+\)$",
-        regex=True,
-    ).any()
+    assert worker_result["status"] == "superseded"
+    assert contrasts.empty
 
 
 def test_declared_metadata_merges_and_schema_adapters_preserve_details() -> None:

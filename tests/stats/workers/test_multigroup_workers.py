@@ -271,13 +271,7 @@ def test_callback_first_model_and_group_steps_reuse_payload_and_frames(
         assert set(data["condition"]) == {"A", "B"}
         return _FrameBundle()
 
-    def fake_cells(data, **kwargs):
-        seen.append(("cells", kwargs["subject_col"]))
-        assert kwargs["group_pair"] == ("anxious", "control")
-        return _FrameBundle()
-
     monkeypatch.setattr(workers, "run_multigroup_mixed_model", fake_model)
-    monkeypatch.setattr(workers, "_run_group_cell_comparisons", fake_cells)
     progress: list[int] = []
     messages: list[str] = []
 
@@ -293,16 +287,19 @@ def test_callback_first_model_and_group_steps_reuse_payload_and_frames(
         prepared_payload=payload,
     )
 
-    assert seen == [
-        ("model", "participant"),
-        ("cells", "participant"),
-    ]
+    assert seen == [("model", "participant")]
     for result in (model, cells):
-        assert result["status"] == "ok"
         assert result["prepared_payload"] is payload
         assert result["preparation_id"] == "multi-prepared"
-        assert "Fake Results" in result["export_frames"]
         assert "Step Status" in result["export_frames"]
+    assert model["status"] == "ok"
+    assert "Fake Results" in model["export_frames"]
+    assert "Group Cell Contrasts" in model["export_frames"]
+    assert cells["status"] == "superseded"
+    assert (
+        cells["status_code"]
+        == "group_cell_comparisons_packaged_with_lmm"
+    )
     assert progress[-1] == 100
     assert messages
 
@@ -317,22 +314,123 @@ def test_available_case_scope_reaches_multigroup_model_and_cell_tests(
         captured["model_scope"] = kwargs["analysis_scope"]
         return _FrameBundle()
 
-    def fake_cells(_data, **kwargs):
-        captured["cell_scope"] = kwargs["analysis_scope"]
-        return _FrameBundle()
-
     monkeypatch.setattr(workers, "run_multigroup_mixed_model", fake_model)
-    monkeypatch.setattr(workers, "_run_group_cell_comparisons", fake_cells)
 
     model_result = workers.run_multigroup_model_step(payload)
     cell_result = workers.run_group_cell_step(payload)
 
     assert model_result["status"] == "ok"
-    assert cell_result["status"] == "ok"
-    assert captured == {
-        "model_scope": "available_case",
-        "cell_scope": "available_case",
-    }
+    assert cell_result["status"] == "superseded"
+    assert captured == {"model_scope": "available_case"}
+
+
+def test_multigroup_model_packages_ungated_holm_lmm_group_cells(
+    monkeypatch,
+) -> None:
+    payload = _payload(strict_omnibus=True)
+    fitted_model = object()
+    omnibus = pd.DataFrame(
+        {
+            "effect_id": [
+                "any_group_related",
+                "group_condition_roi_interaction",
+                "group_condition_block",
+                "group_roi_block",
+            ],
+            "p_value_chi2": [0.8, 0.9, 0.7, 0.6],
+            "reportable": [True, True, True, True],
+            "status": ["ok", "ok", "ok", "ok"],
+        }
+    )
+
+    @dataclass(frozen=True)
+    class ModelBundle:
+        status: str
+        omnibus: pd.DataFrame
+        fitted_model: object
+
+        @property
+        def reportable(self) -> bool:
+            return True
+
+        def to_frames(self) -> dict[str, pd.DataFrame]:
+            return {"Omnibus LRT": self.omnibus.copy()}
+
+    captured: dict[str, object] = {}
+
+    def fake_group_cells(model, observed, **kwargs):
+        captured["model"] = model
+        captured["observed"] = observed.copy()
+        captured.update(kwargs)
+        return pd.DataFrame(
+            [
+                {
+                    "condition": condition,
+                    "roi": roi,
+                    "group_a": "anxious",
+                    "group_b": "control",
+                    "p_raw": p_value,
+                    "reportable": True,
+                    "status": "estimated",
+                    "coverage": "available observations; no imputation",
+                    "method_label": (
+                        "LMM-derived model-estimated contrast"
+                    ),
+                    "inference_method": (
+                        "Asymptotic Wald z test (two-sided)"
+                    ),
+                }
+                for (condition, roi), p_value in zip(
+                    (("A", "R1"), ("A", "R2"), ("B", "R1"), ("B", "R2")),
+                    (0.01, 0.03, 0.20, 0.60),
+                    strict=True,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        workers,
+        "run_multigroup_mixed_model",
+        lambda *_args, **_kwargs: ModelBundle(
+            "ok",
+            omnibus,
+            fitted_model,
+        ),
+    )
+    monkeypatch.setattr(
+        workers,
+        "estimate_group_cell_contrasts",
+        fake_group_cells,
+    )
+
+    result = workers.run_multigroup_model_step(payload)
+    cells = result["export_frames"]["Group Cell Contrasts"]
+
+    assert result["status"] == "ok"
+    assert captured["model"] is fitted_model
+    assert captured["observed"].equals(payload.primary_data)
+    assert (captured["group_a"], captured["group_b"]) == (
+        "anxious",
+        "control",
+    )
+    assert tuple(captured["condition_levels"]) == ("A", "B")
+    assert tuple(captured["roi_levels"]) == ("R1", "R2")
+    assert cells["p_adjusted"].tolist() == pytest.approx(
+        [0.04, 0.09, 0.40, 0.60]
+    )
+    assert cells["family_id"].eq("group_core_cells").all()
+    assert cells["family_size"].eq(4).all()
+    assert cells["adjustment_method"].eq("holm").all()
+    assert cells["omnibus_gated"].eq(False).all()
+    assert cells["headline_eligible"].eq(True).all()
+    assert cells["coverage"].str.contains("no imputation").all()
+    assert cells["method_label"].eq(
+        "LMM-derived model-estimated contrast"
+    ).all()
+    assert cells["inference_method"].eq(
+        "Asymptotic Wald z test (two-sided)"
+    ).all()
+    assert result["group_cell_contrasts"].equals(cells)
 
 
 def test_strict_omnibus_family_corrects_multigroup_lrt_rows(monkeypatch) -> None:
@@ -892,6 +990,38 @@ def test_single_baseline_uses_locked_greater_than_zero_run_spec(
     assert result["metadata"]["alternative"] == "greater"
 
 
+def test_multi_baseline_dispatches_to_grouped_global_response_family(
+    monkeypatch,
+) -> None:
+    payload = _payload(mode="multi")
+    captured: dict[str, object] = {}
+    frame = pd.DataFrame(
+        [{"group": "anxious", "condition": "A", "roi": "R1"}]
+    )
+
+    def fake_grouped(*_args, **kwargs):
+        captured.update(kwargs)
+        return "grouped positive-response screening", frame
+
+    monkeypatch.setattr(
+        workers,
+        "run_grouped_baseline_vs_zero_tests",
+        fake_grouped,
+    )
+
+    result = workers.run_baseline_step(payload)
+
+    assert result["status"] == "ok"
+    assert result["status_code"] == "multigroup_baseline_vs_zero_ok"
+    assert captured["group_col"] == payload.group_col
+    assert captured["run_spec"] is payload.run_spec
+    assert captured["alternative"] is payload.run_spec.response_alternative
+    assert result["metadata"]["mode"] == "multi"
+    assert "does not test whether the groups differ" in result["metadata"][
+        "response_interpretation"
+    ]
+
+
 def test_project_input_prepare_path_runs_inside_callback_first_worker(
     monkeypatch,
 ) -> None:
@@ -1223,6 +1353,7 @@ def test_complete_core_excludes_incomplete_condition_not_participants(
         qc_state={"report": _cached_qc_report()},
         mode="multi",
         canonical_group_ids={"P1": "control", "P2": "anxious"},
+        selected_group_pair=("anxious", "control"),
         analysis_scope="complete_core",
     )
 

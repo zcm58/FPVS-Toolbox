@@ -212,3 +212,27 @@ def test_selected_group_pair_must_reference_frozen_canonical_groups() -> None:
             },
             selected_group_pair=("anxious", "small_group"),
         )
+
+
+def test_standard_multigroup_payload_blocks_three_groups() -> None:
+    payload = prepare_analysis_payload(
+        _data(),
+        mode="multi",
+        run_spec=_run_spec(),
+        dv_col="summed",
+        subject_col="pid",
+        condition_col="task",
+        roi_col="region",
+        selected_conditions=("shared",),
+        canonical_group_ids={
+            "P1": "control",
+            "P2": "control",
+            "P3": "anxious",
+            "P4": "third",
+        },
+        selected_group_pair=("anxious", "control"),
+    )
+
+    assert not payload.ready
+    assert payload.status_code == "standard_screening_requires_two_groups"
+    assert "custom statistical model" in payload.message

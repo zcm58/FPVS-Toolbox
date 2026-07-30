@@ -220,7 +220,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Phase commit recorded below after this plan update.
+- `7f2a0745` — `feat(stats): make single screening LMM first`
 
 ## Phase 3 — Two-Group Standard Screening
 
@@ -241,18 +241,18 @@ The current workflow still needs these behavioral changes:
 
 ### Definition of Done
 
-- [ ] A third canonical group blocks standard multi-group screening with a
+- [x] A third canonical group blocks standard multi-group screening with a
       custom-analysis message.
-- [ ] Within-group response evidence never substitutes for a direct group
+- [x] Within-group response evidence never substitutes for a direct group
       comparison.
-- [ ] Group-cell estimates come from the same fitted LMM used for omnibus
+- [x] Group-cell estimates come from the same fitted LMM used for omnibus
       inference.
-- [ ] Group-cell Holm correction covers every estimable retained cell.
-- [ ] Cell contrasts run even when the joint group-pattern test is
+- [x] Group-cell Holm correction covers every estimable retained cell.
+- [x] Cell contrasts run even when the joint group-pattern test is
       nonsignificant.
-- [ ] Sparse participants retain all usable observations without imputation.
-- [ ] Empty fixed-effect cells block inference clearly.
-- [ ] Focused Stats verification passes.
+- [x] Sparse participants retain all usable observations without imputation.
+- [x] Empty fixed-effect cells block inference clearly.
+- [x] Focused Stats verification passes.
 
 ### Verification
 
@@ -262,7 +262,7 @@ The current workflow still needs these behavioral changes:
 
 ### Commit
 
-- Pending.
+- Phase commit recorded below after this plan update.
 
 ## Phase 4 — Balanced-Only ANOVA Compatibility
 
@@ -427,3 +427,10 @@ Run in a normal visible Windows session, never offscreen:
   Focused orchestration/worker/response tests passed (80), the real sparse
   single-LMM contrast test passed, Stats focused verification passed (312),
   and Ruff/compile/diff-check passed.
+- 2026-07-29: Phase 3 locked standard multi-group screening to exactly two
+  canonical groups, added one global Holm family for one-sided within-group
+  response tests, and replaced standalone Welch cell tests with ungated
+  Group A minus Group B contrasts from the accepted REML LMM. The combined
+  Phase 3 integration suite passed (102), reporting integration passed (26),
+  and Stats focused verification passed (316), including Ruff, compilation,
+  structure, and reporting-legibility audits.

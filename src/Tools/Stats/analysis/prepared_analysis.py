@@ -442,6 +442,41 @@ def prepare_analysis_payload(
             observed_by_key[group.casefold()] for group in resolved_pair
         )
 
+    effective_status = audit.status
+    effective_status_code = audit.status_code
+    effective_message = audit.message
+    if resolved_mode is AnalysisMode.MULTI and audit.ready:
+        canonical_levels = tuple(
+            sorted(set(canonical_assignments.values()), key=str.casefold)
+        )
+        if len(canonical_levels) != 2:
+            effective_status = DesignStatus.BLOCKED
+            effective_status_code = "standard_screening_requires_two_groups"
+            effective_message = (
+                "Standard FPVS multi-group screening currently supports exactly "
+                "two canonical groups. This project has "
+                f"{len(canonical_levels)} groups; use a custom statistical model "
+                "or wait for the planned three-group workflow."
+            )
+        elif resolved_pair is None:
+            effective_status = DesignStatus.BLOCKED
+            effective_status_code = "selected_group_pair_required"
+            effective_message = (
+                "Standard FPVS multi-group screening requires the two canonical "
+                "groups to be selected as Group A and Group B."
+            )
+        elif {
+            group.casefold() for group in resolved_pair
+        } != {
+            group.casefold() for group in canonical_levels
+        }:
+            effective_status = DesignStatus.BLOCKED
+            effective_status_code = "selected_group_pair_mismatch"
+            effective_message = (
+                "The selected Group A and Group B pair must contain both "
+                "canonical groups in the frozen cohort."
+            )
+
     identifier = str(preparation_id or uuid4().hex).strip()
     if not identifier:
         raise PreparedAnalysisError("preparation_id must be non-empty.")
@@ -457,9 +492,9 @@ def prepare_analysis_payload(
         roi_col=roi_name,
         group_col=group_name,
         analysis_scope=audit.analysis_scope,
-        status=audit.status,
-        status_code=audit.status_code,
-        message=audit.message,
+        status=effective_status,
+        status_code=effective_status_code,
+        message=effective_message,
         frozen_participants=tuple(audit.frozen_participants),
         contributing_participants=tuple(
             audit.contributing_participants

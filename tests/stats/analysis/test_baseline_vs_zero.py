@@ -6,6 +6,7 @@ from statsmodels.stats.multitest import multipletests
 from Tools.Stats.analysis.baseline_vs_zero import (
     export_baseline_vs_zero_results_to_excel,
     run_baseline_vs_zero_tests,
+    run_grouped_baseline_vs_zero_tests,
 )
 from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
 from Tools.Stats.analysis.inference_contracts import (
@@ -99,6 +100,50 @@ def test_baseline_vs_zero_output_uses_readable_summary_text() -> None:
     assert "corrected p=" in output_text
     assert "condition=" not in output_text
     assert "roi=" not in output_text
+
+
+def test_grouped_positive_response_uses_one_global_holm_family() -> None:
+    data = pd.concat(
+        [
+            _build_df().assign(group="A"),
+            _build_df().assign(
+                subject=lambda frame: "B_" + frame["subject"],
+                group="B",
+            ),
+        ],
+        ignore_index=True,
+    )
+    run_spec = build_standard_screening_run_spec(
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        harmonic_provenance=HarmonicProvenance.USER_FIXED_UNVERIFIED,
+    )
+
+    output, results = run_grouped_baseline_vs_zero_tests(
+        data,
+        dv_col="value",
+        subject_col="subject",
+        group_col="group",
+        condition_col="condition",
+        roi_col="roi",
+        run_spec=run_spec,
+    )
+
+    assert len(results) == 8
+    assert set(results["group"]) == {"A", "B"}
+    assert set(results["alternative"]) == {"greater"}
+    assert set(results["family_id"]) == {"group_response_cells"}
+    assert set(results["adjustment_method"]) == {"holm"}
+    assert set(results["family_size"]) == {8}
+    expected = multipletests(
+        results["p_raw"].dropna(),
+        alpha=0.05,
+        method="holm",
+    )[1]
+    np.testing.assert_allclose(
+        results.loc[results["p_raw"].notna(), "p_adjusted"],
+        expected,
+    )
+    assert "do not test whether the groups differ" in output
 
 
 def test_single_pipeline_registers_baseline_vs_zero_step() -> None:

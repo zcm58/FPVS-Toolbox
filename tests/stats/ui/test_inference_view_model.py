@@ -220,7 +220,7 @@ def test_standard_single_queue_runs_positive_response_before_lmm() -> None:
     )
 
 
-def test_available_case_multi_queue_keeps_model_and_cell_comparisons() -> None:
+def test_standard_multi_queue_runs_grouped_response_before_model() -> None:
     options = NativeInferenceOptions(
         mode=AnalysisMode.MULTI,
         profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
@@ -236,8 +236,8 @@ def test_available_case_multi_queue_keeps_model_and_cell_comparisons() -> None:
 
     assert queue == (
         StepId.PREPARE_ANALYSIS,
+        StepId.BASELINE_VS_ZERO,
         StepId.MULTIGROUP_MODEL,
-        StepId.GROUP_CELL_COMPARISONS,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     )

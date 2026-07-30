@@ -272,6 +272,8 @@ def test_unacceptable_random_slope_falls_back_and_exports_every_attempt(
     )
 
     assert result.status == "ok"
+    assert result.fitted_model is not None
+    assert "fitted_model" not in result.to_frames()
     assert not result.estimates.empty
     assert result.omnibus["status"].eq("ok").all()
     assert result.omnibus["reportable"].all()
@@ -375,6 +377,8 @@ def test_failed_final_reml_fit_returns_explicit_failed_bundle(monkeypatch) -> No
     result = model.run_multigroup_mixed_model(_complete_core_data())
 
     assert result.status == "failed"
+    assert result.fitted_model is None
+    assert "fitted_model" not in result.to_frames()
     assert result.estimates.empty
     assert len(result.omnibus) == 4
     assert result.omnibus["status"].eq("failed").all()

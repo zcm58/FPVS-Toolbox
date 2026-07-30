@@ -15,7 +15,10 @@ from typing import Callable, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
+from Tools.Stats.analysis.baseline_vs_zero import (
+    run_baseline_vs_zero_tests,
+    run_grouped_baseline_vs_zero_tests,
+)
 from Tools.Stats.analysis.dv_policies import (
     GROUP_SIGNIFICANT_POLICY_NAME,
     normalize_dv_policy,
@@ -23,9 +26,6 @@ from Tools.Stats.analysis.dv_policies import (
 )
 from Tools.Stats.analysis.dv_policy_group_significant import (
     preflight_group_significant_full_fft_columns,
-)
-from Tools.Stats.analysis.group_comparisons import (
-    run_group_cell_comparisons as _run_group_cell_comparisons,
 )
 from Tools.Stats.analysis.inference_contracts import (
     AnalysisProfile,
@@ -37,6 +37,7 @@ from Tools.Stats.analysis.inference_contracts import (
 )
 from Tools.Stats.analysis.lmm_contrasts import (
     estimate_condition_within_roi_contrasts,
+    estimate_group_cell_contrasts,
     estimate_roi_within_condition_contrasts,
 )
 from Tools.Stats.analysis.mixed_effects_model import run_mixed_effects_model
@@ -93,6 +94,7 @@ ProgressCallback = Callable[[int, int], None]
 CancelCheck = Callable[[], bool]
 STRICT_OMNIBUS_FAMILY_ID = "omnibus_effects_strict"
 SINGLE_FOLLOWUP_FAMILY_ID = "planned_contrasts"
+GROUP_CELL_FAMILY_ID = "group_core_cells"
 
 
 def _standard_holm_family(
@@ -340,6 +342,63 @@ def _apply_strict_omnibus_correction(
         output["inference_role"] = "exploratory"
         output["headline_eligible"] = False
     return output
+
+
+def _multigroup_lmm_cell_contrasts(
+    payload: PreparedAnalysisPayload,
+    fitted_model: object,
+    *,
+    ci_level: float,
+) -> pd.DataFrame:
+    """Return the prespecified Holm family from the accepted multi-group LMM."""
+
+    pair = payload.selected_group_pair
+    if pair is None:
+        raise ValueError(
+            "Standard multi-group screening requires one explicit two-group pair."
+        )
+    group_a, group_b = pair
+    contrasts = estimate_group_cell_contrasts(
+        fitted_model,
+        payload.primary_data,
+        group_a=group_a,
+        group_b=group_b,
+        participant_col=payload.subject_col,
+        dv_col=payload.dv_col,
+        group_col=payload.group_col,
+        condition_col=payload.condition_col,
+        roi_col=payload.roi_col,
+        condition_levels=payload.retained_conditions,
+        roi_levels=payload.selected_rois,
+        ci_level=float(ci_level),
+    )
+    family = _standard_holm_family(
+        payload,
+        family_id=GROUP_CELL_FAMILY_ID,
+        family_label="LMM Group contrasts across Condition x ROI cells",
+    )
+    contrasts = apply_family_correction(
+        contrasts,
+        family,
+        p_col="p_raw",
+    )
+    reportable = contrasts["reportable"].fillna(False).astype(bool)
+    contrasts["headline_eligible"] = reportable
+    contrasts["inference_role"] = "primary"
+    contrasts["omnibus_gated"] = False
+    contrasts["omnibus_gate_status"] = "not_gated_prespecified_family"
+    contrasts["analysis_scope"] = payload.analysis_scope
+    contrasts["missing_values_imputed"] = False
+    contrasts.attrs.update(
+        {
+            "family_scope": "all_retained_condition_roi_cells",
+            "group_pair": pair,
+            "omnibus_gated": False,
+            "model_source": "accepted final REML multi-group LMM",
+            "missing_values_imputed": False,
+        }
+    )
+    return contrasts
 
 
 @dataclass(frozen=True)
@@ -1189,6 +1248,23 @@ def run_multigroup_model_step(
             p_col="p_value_chi2",
         )
         result = replace(result, omnibus=corrected_omnibus)
+        fitted_model = getattr(result, "fitted_model", None)
+        reportable = bool(
+            getattr(
+                result,
+                "reportable",
+                str(getattr(result, "status", "")).casefold()
+                in {"ok", "partial"},
+            )
+        )
+        if reportable and fitted_model is not None:
+            group_cell_contrasts = _multigroup_lmm_cell_contrasts(
+                payload,
+                fitted_model,
+                ci_level=ci_level,
+            )
+        else:
+            group_cell_contrasts = pd.DataFrame()
     except Exception as exc:
         return _response(
             payload=payload,
@@ -1214,15 +1290,19 @@ def run_multigroup_model_step(
         if result.status == "ok"
         else f"The multi-group mixed model completed with status {result.status!r}."
     )
-    return _response(
+    frames = result.to_frames()
+    frames["Group Cell Contrasts"] = group_cell_contrasts
+    response = _response(
         payload=payload,
         step=step,
         status=result.status,
         status_code=f"multigroup_model_{result.status}",
         message=message,
-        frames=_merged_frames(payload, result.to_frames()),
+        frames=_merged_frames(payload, frames),
         primary_object=result,
     )
+    response["group_cell_contrasts"] = group_cell_contrasts.copy(deep=True)
+    return response
 
 
 def run_group_cell_step(
@@ -1237,7 +1317,7 @@ def run_group_cell_step(
     progress_callback: ProgressCallback | None = None,
     **_ignored: object,
 ) -> dict[str, object]:
-    """Run Welch cell contrasts under the prepared missing-data scope."""
+    """Report that group-cell inference is packaged with the primary LMM."""
 
     payload, progress_callback, message_callback = _resolve_step_invocation(
         progress_or_payload,
@@ -1264,56 +1344,22 @@ def run_group_cell_step(
             status_code="cancelled_before_start",
             message="Group-cell comparisons were cancelled before they started.",
         )
-    _emit_progress(progress_callback, 0, 1)
-    message_callback(
-        f"Running prepared {payload.analysis_scope.replace('_', '-')} "
-        "group-cell comparisons."
-    )
-    selected_pair = group_pair or payload.selected_group_pair
-    try:
-        result = _run_group_cell_comparisons(
-            payload.primary_data,
-            dv_col=payload.dv_col,
-            subject_col=payload.subject_col,
-            group_col=payload.group_col,
-            condition_col=payload.condition_col,
-            roi_col=payload.roi_col,
-            group_pair=selected_pair,
-            correction=correction,
-            alpha=payload.run_spec.alpha if alpha is None else float(alpha),
-            analysis_scope=payload.analysis_scope,
-        )
-    except Exception as exc:
-        return _response(
-            payload=payload,
-            step=step,
-            status="failed",
-            status_code="group_cell_comparisons_failed",
-            message=f"{type(exc).__name__}: {exc}",
-        )
-    if _is_cancelled(cancel_check):
-        return _response(
-            payload=payload,
-            step=step,
-            status="cancelled",
-            status_code="cancelled_after_comparisons",
-            message=(
-                "Cancellation was requested during group-cell comparisons; "
-                "inferential results were not returned."
-            ),
-        )
     _emit_progress(progress_callback, 1, 1)
+    message_callback(
+        "Standalone Welch group-cell tests are superseded by contrasts from "
+        "the fitted multi-group mixed model."
+    )
     return _response(
         payload=payload,
         step=step,
-        status="ok",
-        status_code="group_cell_comparisons_ok",
+        status="superseded",
+        status_code="group_cell_comparisons_packaged_with_lmm",
         message=(
-            f"{payload.analysis_scope.replace('_', '-').title()} "
-            "group-cell comparisons completed."
+            "Separate Welch tests were not run. Two-sided Group A minus "
+            "Group B contrasts for every retained Condition x ROI cell are "
+            "LMM-derived model-estimated contrasts packaged with the primary "
+            "multi-group mixed model."
         ),
-        frames=_merged_frames(payload, result.to_frames()),
-        primary_object=result,
     )
 
 
@@ -2107,7 +2153,7 @@ def run_single_posthoc_step(
     )
 
 
-def run_single_baseline_step(
+def run_baseline_step(
     progress_or_payload: object | None = None,
     message_emit: Callable[[str], None] | None = None,
     *,
@@ -2120,58 +2166,71 @@ def run_single_baseline_step(
     progress_callback: ProgressCallback | None = None,
     **_ignored: object,
 ) -> dict[str, object]:
-    """Run baseline-versus-zero tests on prepared single-group rows."""
+    """Run positive-response tests for the prepared single or multi design."""
 
-    payload, progress, message, blocked = _single_step_start(
+    payload, progress, message = _resolve_step_invocation(
         progress_or_payload,
         message_emit,
         prepared_payload=prepared_payload,
         progress_callback=progress_callback,
-        step="single_baseline_vs_zero",
     )
+    step = (
+        "multigroup_baseline_vs_zero"
+        if payload.mode is AnalysisMode.MULTI
+        else "single_baseline_vs_zero"
+    )
+    blocked = _blocked_response(payload, step=step)
     if blocked is not None:
         return blocked
     if _is_cancelled(cancel_check):
         return _response(
             payload=payload,
-            step="single_baseline_vs_zero",
+            step=step,
             status="cancelled",
             status_code="cancelled_before_start",
             message="Baseline tests were cancelled before they started.",
         )
     _emit_progress(progress, 0, 1)
-    message("Running baseline-versus-zero tests on prepared data.")
+    message("Testing for positive oddball responses in the prepared data.")
     try:
-        output_text, results = run_baseline_vs_zero_tests(
-            payload.primary_data,
-            dv_col=payload.dv_col,
-            subject_col=payload.subject_col,
-            condition_col=payload.condition_col,
-            roi_col=payload.roi_col,
-            alpha=(
-                payload.run_spec.alpha if alpha is None else float(alpha)
-            ),
-            alternative=(
+        common_kwargs = {
+            "dv_col": payload.dv_col,
+            "subject_col": payload.subject_col,
+            "condition_col": payload.condition_col,
+            "roi_col": payload.roi_col,
+            "alpha": payload.run_spec.alpha if alpha is None else float(alpha),
+            "alternative": (
                 payload.run_spec.response_alternative
                 if alternative is None
                 else alternative
             ),
-            correction=correction,
-            correction_scope=correction_scope,
-            run_spec=payload.run_spec,
-        )
+            "correction": correction,
+            "run_spec": payload.run_spec,
+        }
+        if payload.mode is AnalysisMode.MULTI:
+            output_text, results = run_grouped_baseline_vs_zero_tests(
+                payload.primary_data,
+                group_col=payload.group_col,
+                **common_kwargs,
+            )
+        else:
+            output_text, results = run_baseline_vs_zero_tests(
+                payload.primary_data,
+                correction_scope=correction_scope,
+                **common_kwargs,
+            )
     except Exception as exc:
         return _response(
             payload=payload,
-            step="single_baseline_vs_zero",
+            step=step,
             status="failed",
-            status_code="single_baseline_failed",
+            status_code=f"{step}_failed",
             message=f"{type(exc).__name__}: {exc}",
         )
     if _is_cancelled(cancel_check):
         return _response(
             payload=payload,
-            step="single_baseline_vs_zero",
+            step=step,
             status="cancelled",
             status_code="cancelled_after_tests",
             message="Cancellation was requested during baseline tests.",
@@ -2200,13 +2259,23 @@ def run_single_baseline_step(
             payload.run_spec.harmonic_provenance.value
         ),
         "preparation_id": payload.preparation_id,
+        "mode": payload.mode.value,
+        "group_col": (
+            payload.group_col if payload.mode is AnalysisMode.MULTI else ""
+        ),
+        "response_interpretation": (
+            "Within-group positive-response evidence does not test whether "
+            "the groups differ."
+            if payload.mode is AnalysisMode.MULTI
+            else "Positive-response evidence within each Condition x ROI cell."
+        ),
     }
     response = _response(
         payload=payload,
-        step="single_baseline_vs_zero",
+        step=step,
         status="ok",
-        status_code="single_baseline_ok",
-        message="Prepared-data baseline-versus-zero tests completed.",
+        status_code=f"{step}_ok",
+        message="Prepared-data positive-response tests completed.",
         frames=_single_frames(payload, **{"Baseline vs Zero": results}),
         primary_object=results,
     )
@@ -2219,6 +2288,10 @@ def run_single_baseline_step(
         }
     )
     return response
+
+
+# Backward-compatible callable retained for tests and external integrations.
+run_single_baseline_step = run_baseline_step
 
 
 def run_report_bundle_step(
@@ -2522,6 +2595,7 @@ __all__ = [
     "run_multigroup_model_step",
     "run_prepare_analysis",
     "run_report_bundle_step",
+    "run_baseline_step",
     "run_sensitivities",
     "run_sensitivity_step",
     "run_single_baseline_step",

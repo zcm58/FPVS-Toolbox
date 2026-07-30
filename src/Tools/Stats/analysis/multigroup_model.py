@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import warnings
 
 import numpy as np
@@ -57,6 +57,11 @@ class MultigroupModelBundle:
     diagnostics: pd.DataFrame
     metadata: pd.DataFrame
     marginal_group_contrasts: pd.DataFrame
+    fitted_model: object | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def reportable(self) -> bool:
@@ -1140,6 +1145,7 @@ def run_multigroup_mixed_model(
                     n_observations=len(working),
                 ),
                 marginal_group_contrasts=pd.DataFrame(),
+                fitted_model=None,
             )
 
         final_labels = _model_row_labels(final_fit.result)
@@ -1343,4 +1349,5 @@ def run_multigroup_mixed_model(
         diagnostics=diagnostics,
         metadata=metadata,
         marginal_group_contrasts=marginal_group_contrasts,
+        fitted_model=final_fit.result,
     )

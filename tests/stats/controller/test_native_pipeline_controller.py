@@ -148,11 +148,11 @@ def _multigroup_payloads(prepared_payload: object) -> dict[StepId, object]:
             "status": "ok",
             "prepared_payload": prepared_payload,
         },
-        StepId.MULTIGROUP_MODEL: {"status": "ok", "model": "model-result"},
-        StepId.GROUP_CELL_COMPARISONS: {
+        StepId.BASELINE_VS_ZERO: {
             "status": "ok",
-            "cells": "cell-result",
+            "responses": "grouped-response-result",
         },
+        StepId.MULTIGROUP_MODEL: {"status": "ok", "model": "model-result"},
         StepId.SENSITIVITIES: {"status": "ok", "sensitivity": "robust-result"},
         StepId.REPORT_BUNDLE: {
             "status": "ok",

@@ -29,8 +29,8 @@ PIPELINE_STEP_ORDER: dict[PipelineId, tuple[StepId, ...]] = {
     ),
     PipelineId.MULTI: (
         StepId.PREPARE_ANALYSIS,
+        StepId.BASELINE_VS_ZERO,
         StepId.MULTIGROUP_MODEL,
-        StepId.GROUP_CELL_COMPARISONS,
         StepId.SENSITIVITIES,
         StepId.REPORT_BUNDLE,
     ),
