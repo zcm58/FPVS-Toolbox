@@ -13,7 +13,12 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Prefer executable checks over broad reading. Activate the repo environment first (`.\.venv1` when present, otherwise `.\.venv`), then run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` before reading only the focused docs needed for failures or context.
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
 - Start with [docs/agent/agent-index.md](docs/agent/agent-index.md) when choosing skills, scripts, and focused tests.
-- Do not read or route work through `src/Standalone_Scripts/**` unless the user explicitly asks. These scripts are developer-only scratch/manual utilities, not active runtime, not user-facing behavior, and not precedent for app architecture.
+- Treat `src/Standalone_Scripts/**` as an opt-in boundary. Do not list, search,
+  read, run, import, edit, or use those scripts as precedent unless the current
+  user request explicitly scopes that directory or the user approves access
+  after the agent asks. See `src/Standalone_Scripts/AGENTS.md` after access is
+  authorized. These scripts are developer-only manual utilities, not active
+  runtime or user-facing application behavior.
 - For non-trivial refactors, read the active execution plan first. Update architecture docs or the nearest scoped `AGENTS.md` when structure, ownership, boundaries, or workflows change; otherwise state why no doc update was needed.
 
 ## Non-Negotiables
