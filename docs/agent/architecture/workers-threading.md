@@ -26,18 +26,21 @@ Common long-running work:
   condition-first/group-second Excel tree.
 - After a successful Main App processing run, `PostProcessingPipelineWorker`
   orchestrates downstream analysis prep in a background `QThread`: frequency
-  QC/harmonic selection, Stats-ready Summed BCA export, and time-domain L2-MNE
-  source-PSD generation. Stats export and source generation are sibling
+  QC/harmonic selection, the standard Stats-ready Summed BCA export, the
+  additive full-audit analysis-ready export, and time-domain L2-MNE source-PSD
+  generation. Both spreadsheet exports and source generation are sibling
   consumers after harmonic selection; one failure must be reported without
   making the other scientifically invalid. This worker is orchestration only;
-  harmonic selection, Summed BCA export, and source-estimation logic remain
-  owned by their existing processing, Stats, and LORETA source-producer
-  modules.
+  harmonic selection, standard Summed BCA export, full-audit workbook
+  generation, and source-estimation logic remain owned by their processing,
+  Stats, `Main_App.exports`, and LORETA source-producer modules.
 - The GUI marks frequency-domain outputs current when frequency-domain QC,
-  harmonic selection, and Stats-ready Summed BCA export all succeed. Optional
-  L2-MNE/eLORETA source-map failures remain logged warnings and keep those
-  source outputs unavailable, but they must not leave SNR or Stats locked
-  behind a stale-frequency-domain gate.
+  harmonic selection, and the standard Stats-ready Summed BCA export all
+  succeed. The additive full-audit workbook reports its own failure without
+  making those standard outputs stale. Optional L2-MNE/eLORETA source-map
+  failures remain logged warnings and keep those source outputs unavailable,
+  but they must not leave SNR or Stats locked behind a stale-frequency-domain
+  gate.
 - Downstream post-processing starts only after the processing ledger update
   succeeds. A ledger-write failure skips source generation so the exporter
   cannot infer a participant cohort from stale or partial state.

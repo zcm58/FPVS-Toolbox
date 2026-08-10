@@ -46,6 +46,16 @@ class _RecordingWorker(PostProcessingPipelineWorker):
         self._emit_progress("stats ready done")
         return PostProcessingStepResult("stats_ready_summed_bca", True, "stats ok", "stats.xlsx")
 
+    def _run_analysis_ready_export(self, project_root: Path) -> PostProcessingStepResult:
+        self.calls.append(f"audit:{project_root.name}")
+        self._emit_progress("full audit ready done")
+        return PostProcessingStepResult(
+            "analysis_ready_full_audit",
+            True,
+            "full audit ok",
+            "analysis_ready.xlsx",
+        )
+
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
         self.calls.append(f"source:{project_root.name}")
         return super()._run_source_maps(project_root)
@@ -64,6 +74,16 @@ class _StatsFailureWorker(_RecordingWorker):
     def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
         self.calls.append(f"stats:{project_root.name}")
         return PostProcessingStepResult("stats_ready_summed_bca", False, "stats failed")
+
+
+class _AuditFailureWorker(_RecordingWorker):
+    def _run_analysis_ready_export(self, project_root: Path) -> PostProcessingStepResult:
+        self.calls.append(f"audit:{project_root.name}")
+        return PostProcessingStepResult(
+            "analysis_ready_full_audit",
+            False,
+            "full audit failed",
+        )
 
 
 class _ReviewRequiredWorker(_RecordingWorker):
@@ -285,6 +305,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         f"sync:{tmp_path.name}",
         "harmonics",
         f"stats:{tmp_path.name}",
+        f"audit:{tmp_path.name}",
         f"source:{tmp_path.name}",
         f"source_mode:l2_mne_source_psd:{tmp_path.name}",
         f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
@@ -293,6 +314,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         "qc done",
         "harmonics done",
         "stats ready done",
+        "full audit ready done",
         "Generating Hauk-informed time-domain source-space maps for 3D visualization of oddball responses.",
     ]
     assert [message for message, _level in logs] == progress
@@ -316,6 +338,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
         "frequency_domain_qc",
         "harmonic_selection",
         "stats_ready_summed_bca",
+        "analysis_ready_full_audit",
         "l2_mne_source_psd",
         "eloreta_volume_source_psd",
     ]
@@ -327,6 +350,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     monkeypatch,
 ) -> None:
     from Main_App import projects as projects_module
+    from Main_App import exports as exports_module
     from Main_App.processing import frequency_domain_qc, harmonic_selection_qc
     from Tools.LORETA_Visualizer import stats_ready_workbook
 
@@ -347,7 +371,10 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     def run_harmonics(_project, *, log_func, dataset_index):
         assert callable(log_func)
         captured.append(("harmonics", dataset_index))
-        return SimpleNamespace(workbook_path=root / "harmonics.xlsx")
+        return SimpleNamespace(
+            workbook_path=root / "harmonics.xlsx",
+            selection_metadata={"selected_harmonics_hz": [1.2, 2.4]},
+        )
 
     def write_stats(_root, *, log_callback, dataset_index):
         assert callable(log_callback)
@@ -355,6 +382,21 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         return SimpleNamespace(
             workbook_path=root / "stats.xlsx",
             row_count=2,
+        )
+
+    def write_audit(
+        _root,
+        *,
+        log_callback,
+        dataset_index,
+        selection_metadata,
+    ):
+        assert callable(log_callback)
+        assert selection_metadata == {"selected_harmonics_hz": [1.2, 2.4]}
+        captured.append(("audit", dataset_index))
+        return SimpleNamespace(
+            workbook_path=root / "analysis_ready.xlsx",
+            roi_row_count=2,
         )
 
     monkeypatch.setattr(projects_module, "load_project_dataset_index", load_index)
@@ -373,20 +415,24 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         "write_loreta_stats_ready_workbook",
         write_stats,
     )
+    monkeypatch.setattr(exports_module, "write_analysis_ready_workbook", write_audit)
 
     worker = PostProcessingPipelineWorker(_Project(root))
     qc_report = worker._run_frequency_domain_qc_review()
     harmonic_result = worker._run_harmonic_selection()
     stats_result = worker._run_stats_ready_export(root)
+    audit_result = worker._run_analysis_ready_export(root)
 
     assert qc_report["review_required"] is False
     assert harmonic_result.ok is True
     assert stats_result.ok is True
+    assert audit_result.ok is True
     assert loader_calls == [root]
     assert captured == [
         ("qc", sentinel_index),
         ("harmonics", sentinel_index),
         ("stats", sentinel_index),
+        ("audit", sentinel_index),
     ]
 
 
@@ -406,6 +452,7 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         f"sync:{tmp_path.name}",
         "harmonics",
         f"stats:{tmp_path.name}",
+        f"audit:{tmp_path.name}",
         f"source:{tmp_path.name}",
         f"source_mode:l2_mne_source_psd:{tmp_path.name}",
         f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
@@ -415,6 +462,7 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         "frequency_domain_qc",
         "harmonic_selection",
         "stats_ready_summed_bca",
+        "analysis_ready_full_audit",
         "l2_mne_source_psd",
         "eloreta_volume_source_psd",
     ]
@@ -425,6 +473,36 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
         ("eloreta_source_maps", 4, 5),
         ("eloreta_source_maps", 5, 5),
         ("post_processing_complete", 5, 5),
+    ]
+
+
+def test_post_processing_pipeline_runs_source_psd_when_full_audit_export_fails(
+    tmp_path,
+) -> None:
+    worker = _AuditFailureWorker(_Project(tmp_path))
+    finished: list[dict] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert worker.calls == [
+        "qc",
+        f"sync:{tmp_path.name}",
+        "harmonics",
+        f"stats:{tmp_path.name}",
+        f"audit:{tmp_path.name}",
+        f"source:{tmp_path.name}",
+        f"source_mode:l2_mne_source_psd:{tmp_path.name}",
+        f"source_mode:eloreta_volume_source_psd:{tmp_path.name}",
+    ]
+    assert finished and finished[0]["ok"] is False
+    assert [step["name"] for step in finished[0]["steps"]] == [
+        "frequency_domain_qc",
+        "harmonic_selection",
+        "stats_ready_summed_bca",
+        "analysis_ready_full_audit",
+        "l2_mne_source_psd",
+        "eloreta_volume_source_psd",
     ]
 
 

@@ -125,6 +125,12 @@ Stats grouping:
 - `io/`: Excel/dataframe I/O helpers. `stats_ready_export.py` owns the optional
   `Stats_Ready_Summed_BCA.xlsx` workbook builder/writer used for external
   JASP, R/RStudio, and SAS workflows.
+- `Main_App.exports.analysis_ready_workbook` owns the automatic additive
+  `Analysis_Ready_Summed_BCA_Full_Audit.xlsx` export. It preserves the standard
+  filtered Stats-ready workbook, uses the accepted processing-time harmonics,
+  includes every canonical available workbook and electrode, and represents
+  QC decisions as flags for independently specified R, JASP, SAS, or Python
+  models.
 
 Rules:
 

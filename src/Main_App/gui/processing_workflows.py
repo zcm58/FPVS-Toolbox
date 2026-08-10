@@ -688,15 +688,16 @@ def _start_post_processing_pipeline_after_processing(
                     )
                 else:
                     host.log(
-                        "Post-processing pipeline finished: harmonics, Stats-ready Summed BCA, "
-                        "and LORETA source-map generation steps completed.",
+                        "Post-processing pipeline finished: harmonics, standard Stats-ready "
+                        "Summed BCA, the full-audit analysis-ready workbook, and LORETA "
+                        "source-map generation steps completed.",
                         level=logging.INFO,
                     )
             elif frequency_domain_outputs_ready:
                 host.log(
-                    "Frequency-domain post-processing completed; SNR and Stats "
-                    "outputs are ready. One or more LORETA source-map exports "
-                    "failed and remain unavailable; review the logged source error.",
+                    "Core frequency-domain post-processing completed; SNR and standard "
+                    "Stats outputs are ready. One or more optional downstream exports "
+                    "failed; review the logged export error.",
                     level=logging.WARNING,
                 )
             else:
@@ -752,7 +753,7 @@ def _start_post_processing_pipeline_after_processing(
     worker.finished.connect(bridge.handle_finished)
     thread.finished.connect(thread.deleteLater)
     host.log(
-        "Processing finished; preparing harmonics, Stats-ready Summed BCA, and LORETA source maps...",
+        "Processing finished; preparing harmonics, analysis-ready workbooks, and LORETA source maps...",
         level=logging.INFO,
     )
     thread.start()

@@ -359,6 +359,24 @@ Use it for covariates, other random-effects structures, more than two groups,
 Kenward-Roger/Satterthwaite inference, equivalence tests, or another final
 model not offered by Standard FPVS Screening.
 
+Every completed data-processing run also writes
+`Analysis_Ready_Summed_BCA_Full_Audit.xlsx` automatically. This second workbook
+is designed for an outside statistician or a custom RStudio workflow. Its
+primary `ROI Long` sheet contains all available processed participants and
+conditions, including observations currently excluded by Toolbox QC. Those
+decisions appear as `Current Toolbox Exclusion`, `QC Flag`, and `QC Notes`
+fields; they do not remove values. Separate sheets provide raw, RMS-normalized,
+and signed-mean-normalized wide data, electrode-level values, whole-scalp
+normalizers, ROI definitions, and the harmonic-selection record. Missing
+conditions stay missing rather than being filled with zero.
+
+The full-audit workbook uses the harmonic list already accepted at processing
+time. Including flagged observations does not cause the Toolbox to select a
+different harmonic list. `ROI Long` is the recommended starting sheet for R;
+the wide sheets are convenient for software that expects one participant per
+row. Any exclusions or alternate models remain the external analyst's explicit
+decision.
+
 Retain `Quality Check/Harmonic_Selection_Summary.xlsx` and the corresponding
 project metadata with the analysis record.
 

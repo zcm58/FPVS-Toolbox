@@ -78,6 +78,18 @@ def test_stats_and_source_exports_are_unconditional_sibling_steps() -> None:
         and isinstance(statement.value.func, ast.Attribute)
         and statement.value.func.attr == "_run_stats_ready_export"
     )
+    audit_index = next(
+        index
+        for index, statement in enumerate(try_node.body)
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Attribute)
+        and statement.value.func.attr == "append"
+        and statement.value.args
+        and isinstance(statement.value.args[0], ast.Call)
+        and isinstance(statement.value.args[0].func, ast.Attribute)
+        and statement.value.args[0].func.attr == "_run_analysis_ready_export"
+    )
     source_index = next(
         index
         for index, statement in enumerate(try_node.body)
@@ -91,7 +103,7 @@ def test_stats_and_source_exports_are_unconditional_sibling_steps() -> None:
         and statement.value.args[0].func.attr == "_run_source_maps"
     )
 
-    assert source_index > stats_index
+    assert stats_index < audit_index < source_index
 
 
 def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
@@ -176,11 +188,13 @@ def test_post_processing_run_reuses_and_releases_one_dataset_index() -> None:
     qc_method = _class_method(tree, "_run_frequency_domain_qc_review")
     harmonic_method = _class_method(tree, "_run_harmonic_selection")
     stats_method = _class_method(tree, "_run_stats_ready_export")
+    audit_method = _class_method(tree, "_run_analysis_ready_export")
     run_method = _class_method(tree, "run")
 
     qc_source = ast.unparse(qc_method)
     harmonic_source = ast.unparse(harmonic_method)
     stats_source = ast.unparse(stats_method)
+    audit_source = ast.unparse(audit_method)
     assert (
         "self._dataset_index = load_project_dataset_index(project_root)"
         in qc_source
@@ -188,6 +202,8 @@ def test_post_processing_run_reuses_and_releases_one_dataset_index() -> None:
     assert "dataset_index=self._dataset_index" in qc_source
     assert "dataset_index=self._dataset_index" in harmonic_source
     assert "dataset_index=self._dataset_index" in stats_source
+    assert "dataset_index=self._dataset_index" in audit_source
+    assert "selection_metadata=self._harmonic_selection_metadata" in audit_source
 
     try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
     assert any(

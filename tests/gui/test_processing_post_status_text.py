@@ -202,6 +202,22 @@ def test_frequency_domain_readiness_ignores_optional_loreta_failures() -> None:
     assert _post_processing_frequency_domain_outputs_ready(result) is True
 
 
+def test_frequency_domain_readiness_does_not_hide_core_outputs_when_full_audit_fails() -> None:
+    result = {
+        "ok": False,
+        "steps": [
+            {"name": "frequency_domain_qc", "ok": True},
+            {"name": "harmonic_selection", "ok": True},
+            {"name": "stats_ready_summed_bca", "ok": True},
+            {"name": "analysis_ready_full_audit", "ok": False},
+            {"name": "l2_mne_source_psd", "ok": True},
+            {"name": "eloreta_volume_source_psd", "ok": True},
+        ],
+    }
+
+    assert _post_processing_frequency_domain_outputs_ready(result) is True
+
+
 def test_frequency_domain_readiness_requires_every_core_step() -> None:
     result = {
         "ok": False,

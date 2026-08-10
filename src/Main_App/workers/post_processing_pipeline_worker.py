@@ -77,6 +77,7 @@ class PostProcessingPipelineWorker(QObject):
         super().__init__()
         self._project = project
         self._dataset_index: Any | None = None
+        self._harmonic_selection_metadata: dict[str, object] | None = None
 
     @Slot()
     def run(self) -> None:
@@ -153,6 +154,7 @@ class PostProcessingPipelineWorker(QObject):
             )
             stats_step = self._run_stats_ready_export(project_root)
             steps.append(stats_step)
+            steps.append(self._run_analysis_ready_export(project_root))
             self._emit_phase_progress(
                 _PHASE_STATS_READY_EXPORT,
                 3,
@@ -174,6 +176,7 @@ class PostProcessingPipelineWorker(QObject):
             )
         finally:
             self._dataset_index = None
+            self._harmonic_selection_metadata = None
             cache_stack.close()
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
@@ -233,8 +236,13 @@ class PostProcessingPipelineWorker(QObject):
                 log_func=self._emit_progress,
                 dataset_index=self._dataset_index,
             )
+            metadata = getattr(report, "selection_metadata", None)
+            self._harmonic_selection_metadata = (
+                dict(metadata) if isinstance(metadata, dict) else None
+            )
         except PIPELINE_STEP_EXCEPTIONS as exc:
             logger.exception("post_processing_harmonic_selection_failed")
+            self._harmonic_selection_metadata = None
             return PostProcessingStepResult("harmonic_selection", False, str(exc))
         return PostProcessingStepResult(
             "harmonic_selection",
@@ -268,6 +276,49 @@ class PostProcessingPipelineWorker(QObject):
             "stats_ready_summed_bca",
             True,
             f"Stats-ready Summed BCA workbook generated with {result.row_count} row(s).",
+            str(result.workbook_path),
+        )
+
+    def _run_analysis_ready_export(
+        self,
+        project_root: Path,
+    ) -> PostProcessingStepResult:
+        self._emit_progress(
+            "FPVS Toolbox is preparing the full-audit analysis-ready workbook."
+        )
+        if self._harmonic_selection_metadata is None:
+            return PostProcessingStepResult(
+                "analysis_ready_full_audit",
+                False,
+                (
+                    "Full-audit analysis-ready workbook was not generated because "
+                    "the current processing-time harmonic selection was unavailable."
+                ),
+            )
+        try:
+            from Main_App.exports import write_analysis_ready_workbook
+
+            result = write_analysis_ready_workbook(
+                project_root,
+                dataset_index=self._dataset_index,
+                selection_metadata=self._harmonic_selection_metadata,
+                log_callback=self._emit_progress,
+            )
+        except PIPELINE_STEP_EXCEPTIONS as exc:
+            logger.exception("post_processing_analysis_ready_export_failed")
+            return PostProcessingStepResult(
+                "analysis_ready_full_audit",
+                False,
+                f"Full-audit analysis-ready workbook failed: {exc}",
+            )
+        return PostProcessingStepResult(
+            "analysis_ready_full_audit",
+            True,
+            (
+                "Full-audit analysis-ready workbook generated with "
+                f"{result.roi_row_count} ROI row(s); QC decisions were retained "
+                "as flags rather than exclusions."
+            ),
             str(result.workbook_path),
         )
 

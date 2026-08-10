@@ -51,6 +51,34 @@ point. It must reuse the already-validated exact `55_onbin` crop metadata and
 must not calculate FFT amplitudes, neighboring-bin metrics, source estimates,
 or modify the existing Excel output paths/sheets.
 
+## Full-Audit Analysis-Ready Workbook
+
+After processing-end QC and harmonic selection are accepted, the project-wide
+post-processing worker writes the additive workbook
+`3 - Statistical Analysis Results/Analysis_Ready_Summed_BCA_Full_Audit.xlsx`.
+`Main_App.exports.analysis_ready_workbook` owns this export. It runs once per
+completed project processing run in the existing background worker and shared
+run-scoped XLSX-read cache.
+
+This workbook is deliberately distinct from the filtered
+`Stats_Ready_Summed_BCA.xlsx` compatibility artifact. It uses the canonical
+union of `ProjectDatasetIndex.workbooks` and `excluded_workbooks`, includes all
+available electrodes when computing each value, and converts current manual,
+participant-condition, frequency-domain participant, and frequency-domain
+electrode exclusions into explicit flags. It must never recompute harmonics on
+that expanded cohort: the accepted processing-time harmonic metadata is the
+only selection source.
+
+The primary `ROI Long` sheet provides one observed participant x condition x
+configured-ROI row with raw Summed BCA, RMS-normalized BCA, signed-mean-
+normalized BCA, canonical group label, and concise QC fields. Supporting wide,
+electrode-level, whole-scalp normalizer, QC, ROI-definition, and harmonic
+selection sheets make the aggregation auditable without adding source paths or
+file hashes to the statistical table. Missing values remain blank and are not
+imputed or replaced by zero. The writer publishes through a same-directory
+temporary workbook and atomic replacement so a failed rebuild cannot leave a
+partially written XLSX file.
+
 ## Analysis Settings
 
 Target frequencies come from `settings["analysis"]`, `settings.get("analysis", key, fallback)`, flat dict keys, or attributes:

@@ -72,6 +72,15 @@ FPVS Toolbox uses a strict hybrid settings model:
   and saves the matching harmonic-selection metadata into
   `tools.stats.group_significant_harmonics_cache`. The raw data and generated
   condition workbooks are not altered by this QC export.
+- After accepted processing-end harmonic selection, the background
+  post-processing pipeline also writes
+  `3 - Statistical Analysis Results/Analysis_Ready_Summed_BCA_Full_Audit.xlsx`.
+  This additive external-analysis export uses the canonical union of active
+  and manually excluded processed workbooks. It retains every available
+  participant, condition, and electrode value; project and frequency-domain
+  QC decisions are recorded as flags rather than applied as filters. Group
+  labels still come only from `project.json`, and the already accepted
+  processing-time harmonic list is not recalculated on the audit cohort.
 - Processing-end frequency-domain QC writes reviewed summed-BCA plausibility
   decisions into `project.json` under `tools.frequency_domain_qc` and writes
   `Quality Check/Frequency_Domain_QC_Review.txt` after user acceptance. This

@@ -52,6 +52,23 @@ testing, or another specialized estimand.
   `H1: mean Summed BCA > 0`. A negative response cannot satisfy that
   directional hypothesis.
 
+### External full-audit dataset
+
+- When analyzing `Analysis_Ready_Summed_BCA_Full_Audit.xlsx`, state that the
+  workbook retains all available processed participant, condition, ROI, and
+  electrode values. Toolbox QC decisions are flags, not automatic exclusions
+  in this file.
+- Report which flagged observations, if any, the external analysis excluded
+  and give the prespecified rule. Do not describe the full-audit row count as
+  the inferential sample size if the external model used a subset.
+- State that raw ROI Summed BCA is the mean, across available ROI electrodes,
+  of each electrode's BCA summed over the accepted processing-time harmonics.
+  RMS normalization divides by the whole-scalp RMS of those electrode sums;
+  signed-mean normalization divides by their whole-scalp signed mean.
+- Retain the workbook's ROI definitions and harmonic-selection sheets with the
+  analysis record. Missing conditions are blank and must not be recoded as
+  zero.
+
 ### Primary statistical model
 
 The standard contract is fixed at alpha 0.05, finite available observations,

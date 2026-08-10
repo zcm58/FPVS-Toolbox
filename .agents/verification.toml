@@ -72,6 +72,8 @@ include = [
   "src/Main_App/Shared/fft_crop_utils.py",
   "src/Main_App/Shared/load_utils.py",
   "src/Main_App/io/load_utils.py",
+  "src/Main_App/exports/__init__.py",
+  "src/Main_App/exports/analysis_ready_workbook.py",
   "src/Main_App/gui/processing_inputs.py",
   "src/Main_App/gui/processing_workflows.py",
   "src/Main_App/gui/preprocessing_qc_workflow.py",
