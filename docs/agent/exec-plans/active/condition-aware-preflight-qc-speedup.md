@@ -11,14 +11,13 @@ its filter order, or any generated scientific output.
 - The normal preprocessing path remains unchanged and continues to load the
   complete selected BDF channel set before the locked FIR, optional smart FFT
   multi-notch, and 256 Hz downsample stages.
-- Preflight QC v2 reads the complete Status channel, but reads EEG samples only
-  from configured condition-onset through condition completion. Samples outside
-  configured conditions are not scored.
-- Condition completion uses an internal fixed 125-second QC minimum and extends
-  through the exact locked FFT span when normal processing will use a longer
-  interval. It does not follow a discontinuous oddball-marker stream beyond
-  that crop and never crosses the next configured condition onset or recording
-  end.
+- Preflight QC v3 reads the complete Status channel, but reads EEG samples only
+  from the exact shared marker-derived locked FFT spans. Samples outside the
+  spans analyzed by normal processing are not scored.
+- Time-domain and spectral QC use identical locked spans. There is no fixed
+  minimum or maximum condition duration; a present condition without a valid
+  on-bin crop fails explicitly instead of using an onset-based or fixed-duration
+  substitute.
 - Time-domain QC examines every sequential 10-second block plus the final
   partial block in every relevant condition occurrence.
 - Only channels flagged consistently across every relevant condition occurrence
@@ -45,8 +44,10 @@ its filter order, or any generated scientific output.
   does not silently create new automatic hard-exclusion rules.
 - Cache state lives only under the active project root at
   `.fpvs_processing/preflight_qc/v2`, is written atomically, and treats missing,
-  corrupt, or stale entries as cache misses.
-- The v2 fast path requires an explicit active project root and complete event
+  corrupt, or stale entries as cache misses. The stable directory is retained;
+  the v3 method and locked-span policy identities invalidate fixed-minimum
+  entries.
+- The v3 fast path requires an explicit active project root and complete event
   map. The existing preflight API remains a compatibility fallback when those
   inputs are absent.
 - QC concurrency is bounded independently from processing concurrency: at most

@@ -4,6 +4,7 @@ import zipfile
 import pytest
 from Main_App.Shared import post_process_excel
 from Main_App.Shared.post_process_excel import (
+    FFT_METADATA_SHEET_NAME,
     _can_write_finite_metric_frame_direct,
     _column_widths,
     build_fft_neighbors_rows,
@@ -265,6 +266,13 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
         "df_hz",
         "k0",
         "f_bin_hz",
+        "crop_mode",
+        "n55",
+        "first55_samp",
+        "last55_samp",
+        "N_step",
+        "N_mod_step",
+        "fallback_reason",
         *[f"amp_m{i}" for i in range(11, 0, -1)],
         *[f"amp_p{i}" for i in range(1, 12)],
         "warning",
@@ -283,10 +291,11 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
     )
 
     wb = load_workbook(workbook_path)
-    assert "FFT and neighbors" in wb.sheetnames
+    assert wb.sheetnames[-2:] == ["FFT and neighbors", FFT_METADATA_SHEET_NAME]
 
     ws = wb["FFT and neighbors"]
     header = [cell.value for cell in ws[1]]
+    assert header == neighbor_columns
 
     expected_neighbor_cols = [
         *[f"amp_m{i}" for i in range(11, 0, -1)],
@@ -297,6 +306,30 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
         assert col_name in header
     assert len([c for c in header if c.startswith("amp_")]) == 22
     assert "amp_0" not in header
+
+    metadata_ws = wb[FFT_METADATA_SHEET_NAME]
+    assert [cell.value for cell in metadata_ws[1]] == [
+        "Source File",
+        "Condition",
+        "FFT Input Index",
+        "Sampling Frequency (Hz)",
+        "FFT Sample Count (N)",
+        "FFT Duration (s)",
+        "FFT Bin Width (Hz)",
+        "Crop Mode",
+    ]
+    assert metadata_ws.max_row == 2
+    assert [cell.value for cell in metadata_ws[2]] == [
+        "demo.bdf",
+        "Condition A",
+        "1",
+        fs,
+        n_samples,
+        n_samples / fs,
+        fs / n_samples,
+        "55_onbin",
+    ]
+    assert metadata_ws.freeze_panes == "A2"
     assert "[EXCEL TIMING]" not in caplog.text
     assert "[EXCEL STAGE]" not in caplog.text
     assert {record["stage"] for record in timing_records} >= {

@@ -1740,6 +1740,15 @@ def _preflight_required_full_fft_columns(
     required: RequiredFullFftColumns,
     log_func: Callable[[str], None],
 ) -> int:
+    reference_grid = _locked_full_fft_grid_identity(required.frequency_columns)
+    if reference_grid is None:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires matching FullFFT "
+            "candidate and neighboring-noise columns on one common locked FFT "
+            "grid/bin spacing in every included workbook before reading amplitude "
+            "or BCA data. The reference FullFFT header is not a valid uniform "
+            "zero-based grid with one exact 1.2000 Hz bin."
+        )
     candidate_columns = _columns_for_required_indices(
         required.frequency_columns,
         required.candidate_indices,
@@ -1788,6 +1797,31 @@ def _preflight_required_full_fft_columns(
                     "FullFFT candidate and neighboring-noise columns in every "
                     "included workbook before reading amplitude or BCA data. "
                     f"Missing columns in {file_path}: {missing_required[:8]}"
+                )
+
+            workbook_frequency_columns = _parse_frequency_columns(header_columns)
+            workbook_grid = _locked_full_fft_grid_identity(
+                workbook_frequency_columns
+            )
+            if workbook_grid != reference_grid:
+                reference_bin, reference_spacing = reference_grid
+                observed_grid = (
+                    "invalid or non-uniform"
+                    if workbook_grid is None
+                    else (
+                        f"1.2000 Hz bin={workbook_grid[0]}, "
+                        f"df={workbook_grid[1]:.9g} Hz"
+                    )
+                )
+                raise RuntimeError(
+                    "Group-level significant harmonic selection requires matching "
+                    "FullFFT candidate and neighboring-noise columns on one common "
+                    "locked FFT grid/bin spacing in every included workbook before "
+                    "reading amplitude or BCA data. "
+                    f"Reference grid: 1.2000 Hz bin={reference_bin}, "
+                    f"df={reference_spacing:.9g} Hz; grid in {file_path}: "
+                    f"{observed_grid}. Reprocess or exclude participant-condition "
+                    "workbooks with a different usable FFT crop length."
                 )
 
     if planned_workbooks <= 0:
@@ -2347,6 +2381,34 @@ def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str
         except ValueError:
             continue
     return sorted(out, key=lambda item: item[0])
+
+
+def _locked_full_fft_grid_identity(
+    frequency_columns: Sequence[tuple[float, str, int]],
+) -> tuple[int, float] | None:
+    """Return the exact oddball-bin index and spacing for one valid FullFFT grid."""
+
+    frequencies = [float(freq) for freq, _column, _idx in frequency_columns]
+    if len(frequencies) < 2 or abs(frequencies[0]) > 5e-5:
+        return None
+
+    oddball_hz = float(LOCKED_ODDBALL_FREQUENCY_HZ)
+    target_positions = [
+        index
+        for index, frequency in enumerate(frequencies)
+        if abs(frequency - oddball_hz) <= 5e-5
+    ]
+    if len(target_positions) != 1 or target_positions[0] <= 0:
+        return None
+
+    oddball_bin = int(target_positions[0])
+    spacing_hz = oddball_hz / oddball_bin
+    if any(
+        abs(frequency - index * spacing_hz) > 6e-5
+        for index, frequency in enumerate(frequencies)
+    ):
+        return None
+    return oddball_bin, spacing_hz
 
 
 def _find_exact_frequency_column(

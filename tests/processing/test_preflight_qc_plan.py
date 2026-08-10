@@ -13,7 +13,7 @@ def _events(*rows: tuple[int, int]) -> np.ndarray:
     return np.asarray([(sample, 0, code) for sample, code in rows], dtype=int)
 
 
-def test_plan_uses_fixed_qc_completion_and_locked_onbin_crop() -> None:
+def test_plan_uses_locked_onbin_crop_for_time_and_spectral_qc() -> None:
     events = _events(
         (100, 1),
         (300, 55),
@@ -36,8 +36,8 @@ def test_plan_uses_fixed_qc_completion_and_locked_onbin_crop() -> None:
 
     assert plan.n_step == 640
     assert [(span.time_start_sample, span.time_stop_sample) for span in plan.spans] == [
-        (100, 32_100),
-        (40_000, 72_000),
+        (300, 940),
+        (40_200, 40_840),
     ]
     assert [span.spectral_sample_count for span in plan.spans] == [640, 640]
     assert [(span.spectral_start_sample, span.spectral_stop_sample) for span in plan.spans] == [
@@ -46,7 +46,7 @@ def test_plan_uses_fixed_qc_completion_and_locked_onbin_crop() -> None:
     ]
 
 
-def test_plan_clamps_condition_completion_to_next_onset_and_recording_end() -> None:
+def test_plan_excludes_onset_lead_in_and_post_crop_samples() -> None:
     plan = plan_preflight_qc_events(
         events=_events(
             (100, 1),
@@ -62,8 +62,8 @@ def test_plan_clamps_condition_completion_to_next_onset_and_recording_end() -> N
     )
 
     assert [(span.condition_label, span.time_start_sample, span.time_stop_sample) for span in plan.spans] == [
-        ("First", 100, 1_000),
-        ("Second", 1_000, 2_000),
+        ("First", 300, 940),
+        ("Second", 1_100, 1_740),
     ]
 
 
@@ -81,19 +81,14 @@ def test_locked_crop_extends_completion_without_following_a_marker_gap() -> None
         event_map={"Short": 1},
         sfreq=256.0,
         n_times=20_000,
-        minimum_completion_s=1.0,
     )
 
     first, second = plan.spans
-    assert (first.time_start_sample, first.time_stop_sample) == (100, 940)
+    assert (first.time_start_sample, first.time_stop_sample) == (300, 940)
     assert (first.spectral_start_sample, first.spectral_stop_sample) == (300, 940)
     assert first.last_oddball_sample == 5_000
     assert first.spectral_fallback_reason is None
-    assert (second.time_start_sample, second.time_stop_sample) == (10_000, 10_840)
-    assert (
-        "condition=1:rep=0:completion_extended_to_locked_spectral_span"
-        in plan.warnings
-    )
+    assert (second.time_start_sample, second.time_stop_sample) == (10_200, 10_840)
 
 
 def test_plan_is_deterministic_for_unsorted_event_input() -> None:
@@ -111,18 +106,77 @@ def test_plan_is_deterministic_for_unsorted_event_input() -> None:
         event_map={"Condition": 1},
         sfreq=256.0,
         n_times=2_000,
-        minimum_completion_s=5.0,
     )
     second = plan_preflight_qc_events(
         events=reversed_events,
         event_map={"Condition": 1},
         sfreq=256.0,
         n_times=2_000,
-        minimum_completion_s=5.0,
     )
 
     assert second == first
     assert second.to_payload() == first.to_payload()
+
+
+@pytest.mark.parametrize("duration_s", [30.0, 90.0, 180.0])
+def test_plan_accepts_arbitrary_marker_derived_onbin_durations(
+    duration_s: float,
+) -> None:
+    sfreq = 256.0
+    start = 300
+    n_samples = int(duration_s * sfreq)
+
+    plan = plan_preflight_qc_events(
+        events=_events(
+            (100, 1),
+            (start, 55),
+            (start + n_samples, 55),
+        ),
+        event_map={"Condition": 1},
+        sfreq=sfreq,
+        n_times=start + n_samples + 1_000,
+    )
+
+    assert len(plan.spans) == 1
+    span = plan.spans[0]
+    assert span.time_sample_count == n_samples
+    assert span.spectral_sample_count == n_samples
+    assert (span.time_start_sample, span.time_stop_sample) == (
+        span.spectral_start_sample,
+        span.spectral_stop_sample,
+    )
+
+
+def test_plan_hard_fails_present_condition_without_valid_marker_crop() -> None:
+    with pytest.raises(ValueError, match="Locked FFT crop required.*insufficient_55"):
+        plan_preflight_qc_events(
+            events=_events((100, 1), (300, 55)),
+            event_map={"Condition": 1},
+            sfreq=256.0,
+            n_times=2_000,
+        )
+
+
+def test_plan_hard_fails_when_sampling_rate_has_no_onbin_step() -> None:
+    with pytest.raises(ValueError, match="no valid N_step.*non_integer_fs"):
+        plan_preflight_qc_events(
+            events=_events((100, 1), (300, 55), (940, 55)),
+            event_map={"Condition": 1},
+            sfreq=256.5,
+            n_times=2_000,
+        )
+
+
+def test_plan_tolerates_configured_condition_absent_from_recording() -> None:
+    plan = plan_preflight_qc_events(
+        events=_events((100, 1), (300, 55), (940, 55)),
+        event_map={"Present": 1, "Absent": 2},
+        sfreq=256.0,
+        n_times=2_000,
+    )
+
+    assert [span.condition_label for span in plan.spans] == ["Present"]
+    assert "condition=2:missing_onset" in plan.warnings
 
 
 def test_plan_requires_at_least_one_configured_condition_onset() -> None:

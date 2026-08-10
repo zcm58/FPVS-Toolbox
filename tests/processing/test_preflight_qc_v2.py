@@ -93,7 +93,7 @@ def _install_lazy_fakes(monkeypatch, raws: list[_LazyRaw], events: np.ndarray) -
     return stim_arguments
 
 
-def test_v2_accepts_canonical_project_reference_keys() -> None:
+def test_v3_accepts_canonical_project_reference_keys() -> None:
     settings = {"ref_chan1": "M1", "ref_chan2": "M2"}
 
     assert preflight_qc._configured_ref_pair(settings) == ("M1", "M2")
@@ -103,11 +103,12 @@ def test_v2_accepts_canonical_project_reference_keys() -> None:
     ]
     assert "epoch_end" not in preflight_qc._preflight_cache_settings(settings)
     method = preflight_qc._preflight_cache_method()
-    assert method["condition_completion_policy"] == "fixed_minimum_v1"
-    assert method["condition_minimum_completion_s"] == 125.0
+    assert method["version"] == "v3"
+    assert method["condition_completion_policy"] == "locked_fft_span_v1"
+    assert "condition_minimum_completion_s" not in method
 
 
-def test_v2_reads_only_condition_samples_and_reuses_cache(
+def test_v3_reads_exact_locked_condition_samples_and_reuses_cache(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -134,14 +135,17 @@ def test_v2_reads_only_condition_samples_and_reuses_cache(
     )
 
     assert first.cancelled is False
-    assert first_raw.reads == [(tuple(range(len(names) - 1)), 100, 5_000)]
-    assert first.results[0].condition_qc["samples_read_per_channel"] == 4_900
+    assert first_raw.reads == [(tuple(range(len(names) - 1)), 300, 940)]
+    assert first.results[0].condition_qc["samples_read_per_channel"] == 640
     assert first.results[0].condition_qc["recording_samples_per_channel"] == 5_000
     assert first.results[0].condition_qc["disk_buffered_condition_count"] == 0
     assert first.results[0].condition_qc["cache_status"] == "miss"
     assert "P9" in first.results[0].auto_removed_electrodes
     assert first.results[0].raw_spectral_qc["review_only"] is True
     assert first.results[0].raw_spectral_qc["widespread"] is False
+    assert first.results[0].raw_spectral_qc["condition_results"][0][
+        "fft_bin_spacing_hz"
+    ] == pytest.approx(0.4)
     assert any("Faces 1/1" in message for message, _done, _total in progress)
 
     settings_with_ignored_legacy_window = _settings()
@@ -156,6 +160,41 @@ def test_v2_reads_only_condition_samples_and_reuses_cache(
     assert second.results[0].condition_qc["cache_status"] == "hit"
     assert second_raw.reads == []
     assert stim_arguments == ["Trigger", "Trigger"]
+
+
+def test_v3_invalid_locked_crop_is_a_file_error_without_sample_read_or_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(
+        monkeypatch,
+        [raw],
+        np.asarray([(100, 0, 1), (300, 0, 55)], dtype=int),
+    )
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        _settings(),
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    result = scan.results[0]
+    assert result.load_error is not None
+    assert "Locked FFT crop required" in result.load_error
+    assert "insufficient_55" in result.load_error
+    assert result.condition_qc == {
+        "method_name": "condition_aware_preflight_qc",
+        "method_version": "v3",
+        "cache_status": "error",
+    }
+    assert raw.reads == []
+    cache_directory = tmp_path / ".fpvs_processing" / "preflight_qc" / "v2"
+    assert not list(cache_directory.glob("*.json"))
 
 
 def test_condition_data_buffer_uses_chunked_condition_only_memmap(

@@ -33,7 +33,6 @@ from Main_App.processing.preflight_qc_plan import (
     PREFLIGHT_QC_MAX_WORKERS,
     PREFLIGHT_QC_METHOD_NAME,
     PREFLIGHT_QC_METHOD_VERSION,
-    PREFLIGHT_QC_MINIMUM_COMPLETION_S,
     ConditionQcSpan,
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
@@ -644,7 +643,7 @@ def _preflight_scalp_picks(
     )
     names = tuple(str(raw.ch_names[index]) for index in picks)
     if not picks:
-        raise RuntimeError("Preflight QC v2 found no scalp EEG channels.")
+        raise RuntimeError("Preflight QC v3 found no scalp EEG channels.")
     return picks, names
 
 
@@ -828,8 +827,7 @@ def _preflight_cache_method() -> dict[str, object]:
         "raw_channel_method": CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
         "raw_spectral_method": CONDITION_SPECTRAL_QC_METHOD_VERSION,
         "condition_block_duration_s": PREFLIGHT_QC_BLOCK_DURATION_S,
-        "condition_completion_policy": "fixed_minimum_v1",
-        "condition_minimum_completion_s": PREFLIGHT_QC_MINIMUM_COMPLETION_S,
+        "condition_completion_policy": "locked_fft_span_v1",
         "numpy_version": str(np.__version__),
         "mne_version": str(mne.__version__),
     }
@@ -1037,7 +1035,7 @@ def _scan_one_preflight_file_v2(
         )
         _record_timing("events_and_plan", event_started)
         if not event_plan.spans:
-            raise RuntimeError("Preflight QC v2 planned no relevant condition intervals.")
+            raise RuntimeError("Preflight QC v3 planned no relevant condition intervals.")
 
         file_identity = _preflight_file_identity(file_path)
         cache_settings = _preflight_cache_settings(qc_settings)
@@ -1226,7 +1224,7 @@ def _scan_one_preflight_file_v2(
             "spectral_upper_frequency_hz": upper_hz,
             "timings_ms": dict(timings_ms),
             "hard_exclusion_policy": (
-                "review_only_in_preflight_v2; established hard rules remain "
+                "review_only_in_preflight_v3; established hard rules remain "
                 "unchanged in the normal processing runner"
             ),
         }
@@ -1536,9 +1534,9 @@ def scan_preprocessing_qc(
     project_root: Path | None = None,
     event_map: Mapping[str, int] | None = None,
 ) -> PreflightQcScan:
-    """Run deterministic preflight QC, using condition-aware v2 when scoped.
+    """Run deterministic preflight QC, using condition-aware v3 when scoped.
 
-    The v2 path is opt-in and requires both an explicit project root and event
+    The v3 path is opt-in and requires both an explicit project root and event
     map. Existing callers without either input retain the legacy scan behavior.
     """
 

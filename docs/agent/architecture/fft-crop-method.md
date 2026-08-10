@@ -137,13 +137,22 @@ owner of repetition ordering, the shortest valid common on-bin length, aligned
 The normal process runner consumes this plan and retains its existing hard-fail
 messages and behavior.
 
-Condition-aware preflight spectral QC also consumes this exact plan at the raw
-source sampling rate. It may report a review-only skipped spectrum when a
-locked span is unavailable or falls outside the configured condition completion
-interval, but it must not invent a 90-second crop, use the whole arbitrary
-condition duration, or duplicate the common-length calculation. This reuse is
-what keeps preflight bin spacing aligned with the existing FPVS crop contract
-without changing the later 256 Hz preprocessing/downsample path.
+Condition-aware preflight QC also consumes this exact plan at the raw source
+sampling rate. Its time-domain and spectral checks use the same locked span that
+normal processing will analyze. A present condition without a valid locked span
+fails preflight explicitly; preflight must not invent an onset-based or fixed-
+duration interval, use the whole arbitrary condition block, or duplicate the
+common-length calculation. This reuse keeps preflight aligned with the FPVS crop
+contract without changing the later 256 Hz preprocessing/downsample path.
+
+Normal condition workbooks report the realized grid in the `FFT Metadata`
+sheet. `FFT Bin Width (Hz)` is the exact `fs / N` for each exported FFT input;
+the existing `df_hz` field in `FFT and neighbors` remains available for
+machine-readable compatibility. Projects may use any valid common locked crop
+length, while downstream group analysis requires one bin width/grid across all
+included participant-condition workbooks.
+The group-harmonic cache method identity includes this common-grid guard, so
+selections saved before the guard are cache misses and are validated again.
 
 Run-level warnings are exactly `empty_events`, `no_onsets`, or `non_integer_fs:{fs}` where applicable.
 

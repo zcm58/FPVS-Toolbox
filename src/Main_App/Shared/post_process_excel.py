@@ -12,6 +12,17 @@ import pandas as pd
 
 NEIGHBOR_OFFSETS = [*range(-11, 0), *range(1, 12)]
 _COLUMN_WIDTH_CHUNK_SIZE = 1024
+FFT_METADATA_SHEET_NAME = "FFT Metadata"
+FFT_METADATA_COLUMN_MAP = {
+    "file_name": "Source File",
+    "condition_label": "Condition",
+    "repetition_index": "FFT Input Index",
+    "fs": "Sampling Frequency (Hz)",
+    "N": "FFT Sample Count (N)",
+    "T_sec": "FFT Duration (s)",
+    "df_hz": "FFT Bin Width (Hz)",
+    "crop_mode": "Crop Mode",
+}
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -262,6 +273,21 @@ def build_fft_neighbors_rows(
     return rows
 
 
+def build_fft_metadata_frame(fft_neighbors_df: pd.DataFrame) -> pd.DataFrame:
+    """Return one user-facing FFT-grid row per exported FFT input."""
+
+    source_columns = tuple(FFT_METADATA_COLUMN_MAP)
+    if fft_neighbors_df.empty or any(
+        column not in fft_neighbors_df.columns for column in source_columns
+    ):
+        return pd.DataFrame(columns=tuple(FFT_METADATA_COLUMN_MAP.values()))
+    return (
+        fft_neighbors_df.loc[:, source_columns]
+        .drop_duplicates(ignore_index=True)
+        .rename(columns=FFT_METADATA_COLUMN_MAP)
+    )
+
+
 def write_results_workbook(
     full_excel_path: str,
     dataframes_to_save: Dict[str, pd.DataFrame],
@@ -366,6 +392,52 @@ def write_results_workbook(
                         cols=len(fft_neighbors_df.columns),
                         timing_sink=timing_sink,
                     )
+
+                    fft_metadata_df = build_fft_metadata_frame(fft_neighbors_df)
+                    if not fft_metadata_df.empty:
+                        sheet_name = FFT_METADATA_SHEET_NAME
+                        sheet_started = perf_counter()
+                        write_started = perf_counter()
+                        fft_metadata_df.to_excel(
+                            writer,
+                            sheet_name=sheet_name,
+                            index=False,
+                        )
+                        _log_excel_timing(
+                            "sheet_to_excel",
+                            write_started,
+                            path=full_excel_path,
+                            sheet_name=sheet_name,
+                            rows=len(fft_metadata_df),
+                            cols=len(fft_metadata_df.columns),
+                            timing_sink=timing_sink,
+                        )
+                        worksheet = writer.sheets[sheet_name]
+                        worksheet.freeze_panes(1, 0)
+                        widths_started = perf_counter()
+                        _apply_column_widths(
+                            worksheet,
+                            fft_metadata_df,
+                            center_fmt,
+                        )
+                        _log_excel_timing(
+                            "sheet_column_widths",
+                            widths_started,
+                            path=full_excel_path,
+                            sheet_name=sheet_name,
+                            rows=len(fft_metadata_df),
+                            cols=len(fft_metadata_df.columns),
+                            timing_sink=timing_sink,
+                        )
+                        _log_excel_timing(
+                            "sheet_total",
+                            sheet_started,
+                            path=full_excel_path,
+                            sheet_name=sheet_name,
+                            rows=len(fft_metadata_df),
+                            cols=len(fft_metadata_df.columns),
+                            timing_sink=timing_sink,
+                        )
     finally:
         _log_excel_timing(
             "workbook_write_total",

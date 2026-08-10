@@ -184,18 +184,20 @@ those defaults.
 `src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
 scan without importing Qt. The normal GUI route supplies an explicit active
 project root and condition event map, which enables condition-aware preflight
-QC v2. The compatibility v1 route remains available to callers that do not
+QC v3. The compatibility v1 route remains available to callers that do not
 supply both inputs.
 
-V2 reads the complete configured Status channel to plan events, then requests
-EEG samples only from each configured condition onset through the earliest of
-the planned condition completion, the next configured condition onset, or the
-recording boundary. An internal fixed 125-second QC policy is the minimum
-completion; it is not an epoch-extraction setting. When
-the shared locked FFT plan proves that normal processing will use a longer
-interval, completion extends through that exact spectral span rather than
-following a discontinuous oddball stream beyond the crop. It never scores EEG
-outside those intervals. Time-domain
+V3 reads the complete configured Status channel to plan events, then requests
+EEG samples only from each shared marker-derived locked FFT span. The
+time-domain and spectral intervals are identical to the samples that normal
+processing will analyze; there is no fixed minimum or maximum condition
+duration. Repetitions of one condition retain the shared shortest valid on-bin
+length selected by the FFT crop contract. A present condition with an invalid
+marker-derived crop fails that participant's condition-aware preflight result
+explicitly without reading a substitute onset-based or fixed-duration interval.
+A condition configured in the project but absent from one recording retains the
+normal processing path's existing missing-condition warning behavior.
+Time-domain
 QC examines every consecutive 10-second block plus the final partial block and
 retains exact float64 full-condition metrics plus transient worst-block
 provenance. Only channels classified consistently across every relevant
@@ -213,7 +215,7 @@ values, project loading moves them to
 ledger and source-ready sidecar identities. That compatibility metadata must
 never control extraction, preprocessing, or QC.
 
-V2 spectral QC uses the same shared per-condition, shortest-repetition,
+V3 spectral QC uses the same shared per-condition, shortest-repetition,
 integer-oddball-cycle FFT span planner as normal processing. It evaluates the
 Hann-windowed FFT for every channel in deterministic memory-bounded batches;
 focused parity tests require byte-identical per-channel amplitudes relative to
@@ -227,21 +229,24 @@ minimum and maximum, leaving 20 bins for the mean and population standard
 deviation. Expected FPVS harmonics, effective configured mains-notch centers,
 their collisions, and unexpected off-harmonic peaks are reported separately.
 
-Condition-aware findings are review-only in preflight v2. They do not create a
+Condition-aware findings are review-only in preflight v3. They do not create a
 new hard-exclusion rule; the established hard raw-channel rules remain
 unchanged in the normal process runner. A review-only condition finding can
 therefore be deferred to the existing processing-time decision rather than
-silently changing that calibrated rule. V2 caps participant workers at four,
+silently changing that calibrated rule. V3 caps participant workers at four,
 simultaneous BDF reads at two, and simultaneous spectral evaluators at two. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
-created. V2 preserves deterministic result order and checks cancellation
+created. V3 preserves deterministic result order and checks cancellation
 between condition reads, time blocks, FFT channel batches, and cache writes.
 Successful participant results
 are cached atomically under the active project root at
 `.fpvs_processing/preflight_qc/v2`; a missing, corrupt, or fingerprint-stale
 entry is a cache miss. The key includes raw path/size/mtime, relevant settings,
-method and dependency versions, and the resolved event/span plan.
+method and dependency versions, and the resolved event/span plan. The stable
+cache directory name is retained, while the v3 method identity and
+`locked_fft_span_v1` completion policy invalidate results produced under the
+former fixed-minimum coverage.
 
 The project lifecycle action **File > Reset Project Processing Cache...**
 forces the next run through a cold data-quality, raw-preprocessing, and

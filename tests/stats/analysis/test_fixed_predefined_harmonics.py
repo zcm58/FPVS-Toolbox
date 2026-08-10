@@ -766,6 +766,60 @@ def test_group_significant_policy_rejects_offgrid_fullfft_frequency_grids(
     group_policy.clear_group_significant_selection_cache()
 
 
+def test_group_significant_policy_rejects_commensurate_mixed_fullfft_grids_before_row_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    first_path = tmp_path / "coarse_grid.xlsx"
+    second_path = tmp_path / "fine_grid.xlsx"
+    _write_group_policy_workbook(first_path, scale=1, frequency_step=0.3)
+    _write_group_policy_workbook(second_path, scale=1, frequency_step=0.15)
+    subject_data = {
+        "S1": {
+            "C1": str(first_path),
+            "C2": str(second_path),
+        }
+    }
+    fullfft_row_reads: list[str] = []
+    bca_reads: list[str] = []
+
+    def _unexpected_fullfft_row_read(*_args, **_kwargs):
+        fullfft_row_reads.append("called")
+        raise AssertionError("FullFFT row loading must follow grid preflight")
+
+    def _unexpected_selected_read(path, *, sheet_name, **_kwargs):
+        bca_reads.append(f"{path}:{sheet_name}")
+        raise AssertionError("BCA row loading must follow grid preflight")
+
+    monkeypatch.setattr(
+        group_policy,
+        "_load_mean_amplitude_series",
+        _unexpected_fullfft_row_read,
+    )
+    monkeypatch.setattr(
+        group_policy,
+        "read_xlsx_sheet_selected_columns",
+        _unexpected_selected_read,
+    )
+
+    with pytest.raises(RuntimeError, match="one common locked FFT grid/bin spacing"):
+        build_group_significant_harmonic_selection(
+            subjects=["S1"],
+            conditions=["C1", "C2"],
+            subject_data=subject_data,
+            base_frequency_hz=6.0,
+            log_func=lambda _message: None,
+            rois={"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+            max_freq=3.6,
+        )
+
+    assert fullfft_row_reads == []
+    assert bca_reads == []
+    group_policy.clear_group_significant_selection_cache()
+
+
 def test_group_significant_policy_fails_fast_when_any_workbook_lacks_exact_harmonic_columns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

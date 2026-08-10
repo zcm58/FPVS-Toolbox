@@ -17,9 +17,8 @@ from Main_App.Shared.fft_crop_utils import (
 )
 
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
-PREFLIGHT_QC_METHOD_VERSION = "v2"
+PREFLIGHT_QC_METHOD_VERSION = "v3"
 PREFLIGHT_QC_BLOCK_DURATION_S = 10.0
-PREFLIGHT_QC_MINIMUM_COMPLETION_S = 125.0
 PREFLIGHT_QC_MAX_WORKERS = 4
 PREFLIGHT_QC_MAX_IO_READERS = 2
 PREFLIGHT_QC_MAX_SPECTRAL_WORKERS = 2
@@ -109,27 +108,21 @@ def plan_preflight_qc_events(
     event_map: Mapping[str, int],
     sfreq: float,
     n_times: int,
-    minimum_completion_s: float = PREFLIGHT_QC_MINIMUM_COMPLETION_S,
 ) -> PreflightQcEventPlan:
     """Plan every relevant condition interval without reading EEG data.
 
-    The time-domain interval begins at the configured condition onset. Its
-    minimum completion follows the internal preflight-QC policy; when the
-    locked FPVS crop proves that normal processing will use a longer interval,
-    it extends only through that exact crop. It never follows a discontinuous
-    oddball stream past the crop or crosses the next configured onset/recording
-    boundary.
+    Time-domain and spectral QC both use the exact shared, marker-derived,
+    integer-oddball-cycle FFT crop that normal processing will analyze. A
+    present condition with no valid locked crop is an explicit planning error;
+    preflight QC must not substitute an onset-based or fixed-duration interval.
     """
 
     sample_rate = float(sfreq)
     sample_count = int(n_times)
-    completion_s = float(minimum_completion_s)
     if not np.isfinite(sample_rate) or sample_rate <= 0.0:
         raise ValueError("sfreq must be a positive finite value")
     if sample_count <= 0:
         raise ValueError("n_times must be positive")
-    if not np.isfinite(completion_s) or completion_s <= 0.0:
-        raise ValueError("minimum_completion_s must be a positive finite value")
 
     labels_by_code: dict[int, list[str]] = defaultdict(list)
     for label, value in event_map.items():
@@ -138,13 +131,14 @@ def plan_preflight_qc_events(
             continue
         labels_by_code[int(value)].append(clean_label)
     if not labels_by_code:
-        raise ValueError("A non-empty condition event map is required for preflight QC v2.")
+        raise ValueError("A non-empty condition event map is required for preflight QC v3.")
 
     normalized_events = _normalized_events(events)
     onset_ids = set(labels_by_code)
     onset_rows = [row for row in normalized_events if int(row[2]) in onset_ids]
     if not onset_rows:
         raise ValueError("No configured condition onset events were found in the recording.")
+    present_onset_ids = {int(row[2]) for row in onset_rows}
 
     oddball_ids = resolve_oddball_ids_by_condition(
         events=normalized_events,
@@ -159,31 +153,42 @@ def plan_preflight_qc_events(
         stream_end_sample=sample_count,
     )
 
-    spectral_by_key: dict[tuple[int, int], tuple[int, int]] = {}
-    fallback_by_key: dict[tuple[int, int], str] = {}
     warnings = list(crop_warnings)
-    for condition_id in sorted(onset_ids):
+    if not n_step:
+        details = "; ".join(crop_warnings) or "unknown"
+        raise ValueError(
+            "Locked FFT crop required for preflight QC but no valid N_step is "
+            f"available: {details}. Fixed-duration fallback is disabled."
+        )
+
+    spectral_by_key: dict[tuple[int, int], tuple[int, int]] = {}
+    for condition_id in sorted(present_onset_ids):
         span_plan = plan_condition_fft_spans(
             crop_results=crop_results,
             condition_id=condition_id,
             n_step=n_step,
         )
+        condition_label = labels_by_code[condition_id][0]
         if span_plan.fallback_repetition_reasons:
-            warnings.extend(
-                f"condition={condition_id}:{reason}"
-                for reason in span_plan.fallback_repetition_reasons
+            raise ValueError(
+                "Locked FFT crop required for preflight QC but one or more "
+                f"repetitions could not be cropped on-bin for condition="
+                f"{condition_label}: "
+                f"{'; '.join(span_plan.fallback_repetition_reasons)}. "
+                "Fixed-duration fallback is disabled."
             )
         if span_plan.n_common is None:
-            for key in span_plan.repetition_keys:
-                crop = crop_results[key]
-                fallback_by_key[key] = crop.fallback_reason or "no_common_onbin_length"
-            continue
-        if span_plan.fallback_repetition_reasons:
-            for key in span_plan.repetition_keys:
-                crop = crop_results[key]
-                if crop.fallback:
-                    fallback_by_key[key] = crop.fallback_reason or "locked_crop_fallback"
-            continue
+            raise ValueError(
+                "Locked FFT crop required for preflight QC but no common on-bin "
+                f"length could be computed for condition={condition_label}. "
+                "Fixed-duration fallback is disabled."
+            )
+        if int(span_plan.n_common) % int(n_step) != 0:
+            raise ValueError(
+                "Locked FFT crop invariant failed during preflight planning: "
+                f"N_common={span_plan.n_common}, N_step={n_step}, "
+                f"condition={condition_label}."
+            )
         for key, spectral_span in zip(
             span_plan.repetition_keys,
             span_plan.repetition_spans,
@@ -191,58 +196,35 @@ def plan_preflight_qc_events(
         ):
             spectral_by_key[key] = (int(spectral_span[0]), int(spectral_span[1]))
 
-    completion_samples = max(1, int(round(completion_s * sample_rate)))
     repetition_counts: dict[int, int] = defaultdict(int)
     planned_spans: list[ConditionQcSpan] = []
-    for onset_index, onset_row in enumerate(onset_rows):
+    for onset_row in onset_rows:
         onset_sample = max(0, int(onset_row[0]))
         condition_id = int(onset_row[2])
         repetition_index = repetition_counts[condition_id]
         repetition_counts[condition_id] += 1
-        next_onset_sample = (
-            max(0, int(onset_rows[onset_index + 1][0]))
-            if onset_index + 1 < len(onset_rows)
-            else sample_count
-        )
-        configured_time_stop = min(
-            sample_count,
-            onset_sample + completion_samples,
-            next_onset_sample,
-        )
         key = (condition_id, repetition_index)
         crop = crop_results.get(key)
         spectral_span = spectral_by_key.get(key)
-        time_stop = configured_time_stop
-        if spectral_span is not None:
-            time_stop = min(
-                sample_count,
-                next_onset_sample,
-                max(configured_time_stop, int(spectral_span[1])),
+        if crop is None or spectral_span is None:
+            raise ValueError(
+                "Locked FFT crop planning produced no span for a present condition: "
+                f"condition={labels_by_code[condition_id][0]}, "
+                f"rep={repetition_index}."
             )
-            if time_stop > configured_time_stop:
-                warnings.append(
-                    f"condition={condition_id}:rep={repetition_index}:"
-                    "completion_extended_to_locked_spectral_span"
-                )
-        if time_stop <= onset_sample:
-            warnings.append(
-                f"condition={condition_id}:rep={repetition_index}:empty_time_span"
+        spectral_start, spectral_stop = spectral_span
+        if (
+            spectral_start < onset_sample
+            or spectral_stop > sample_count
+            or spectral_stop <= spectral_start
+        ):
+            raise ValueError(
+                "Locked FFT crop bounds are invalid for preflight QC: "
+                f"condition={labels_by_code[condition_id][0]}, "
+                f"rep={repetition_index}, onset={onset_sample}, "
+                f"start={spectral_start}, stop={spectral_stop}, "
+                f"n_times={sample_count}."
             )
-            continue
-
-        fallback_reason = fallback_by_key.get(key)
-        if spectral_span is not None:
-            spectral_start, spectral_stop = spectral_span
-            if (
-                spectral_start < onset_sample
-                or spectral_stop > time_stop
-                or spectral_stop <= spectral_start
-            ):
-                fallback_reason = "locked_spectral_span_outside_condition_completion"
-                warnings.append(
-                    f"condition={condition_id}:rep={repetition_index}:{fallback_reason}"
-                )
-                spectral_span = None
 
         labels = labels_by_code[condition_id]
         if len(labels) > 1:
@@ -255,17 +237,17 @@ def plan_preflight_qc_events(
                 condition_id=condition_id,
                 repetition_index=repetition_index,
                 onset_sample=onset_sample,
-                time_start_sample=onset_sample,
-                time_stop_sample=time_stop,
-                spectral_start_sample=(spectral_span[0] if spectral_span else None),
-                spectral_stop_sample=(spectral_span[1] if spectral_span else None),
+                time_start_sample=spectral_start,
+                time_stop_sample=spectral_stop,
+                spectral_start_sample=spectral_start,
+                spectral_stop_sample=spectral_stop,
                 oddball_id=(int(crop.oddball_id) if crop and crop.oddball_id else None),
                 last_oddball_sample=(
                     int(crop.last55_sample)
                     if crop is not None and crop.last55_sample is not None
                     else None
                 ),
-                spectral_fallback_reason=fallback_reason,
+                spectral_fallback_reason=None,
             )
         )
 

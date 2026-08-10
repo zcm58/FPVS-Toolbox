@@ -59,7 +59,7 @@ Primary paths:
   displays the manifest group label. Exclusion and removed-electrode settings
   remain keyed by globally unique participant ID. The normal scan passes the
   active project root and complete event map to the GUI-neutral worker so the
-  condition-aware v2 path and its project-local cache are used. Live status
+  condition-aware v3 path and its project-local cache are used. Live status
   distinguishes planning, condition/time-block scanning, exact on-bin spectral
   scanning, cache reuse, and participant completion while the progress value
   counts completed participant files. The GUI caps the displayed worker count
