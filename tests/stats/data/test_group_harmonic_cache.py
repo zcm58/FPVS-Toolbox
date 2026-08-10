@@ -35,8 +35,6 @@ def _write_manifest(project_root: Path, *, high_pass: float = 0.1) -> None:
             "high_pass": high_pass,
             "downsample": 256,
             "rejection_z": 5.0,
-            "epoch_start_s": -1.0,
-            "epoch_end_s": 125.0,
             "ref_chan1": "EXG1",
             "ref_chan2": "EXG2",
             "max_chan_idx_keep": 64,

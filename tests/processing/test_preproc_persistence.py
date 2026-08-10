@@ -12,6 +12,14 @@ from Main_App.projects.preprocessing_settings import PREPROCESSING_CANONICAL_KEY
 from Main_App.Shared.settings_manager import SettingsManager
 
 
+_RETIRED_EPOCH_KEYS = {
+    "epoch_start_s",
+    "epoch_end_s",
+    "epoch_start",
+    "epoch_end",
+}
+
+
 def test_normalization_and_roundtrip(tmp_path):
     manifest_path = Path(tmp_path) / "project.json"
     manifest_path.write_text(
@@ -45,8 +53,7 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["line_noise_filter_enabled"] is True
     assert normalized["line_noise_frequency_hz"] == 60
     assert normalized["rejection_z"] == 4.2
-    assert normalized["epoch_start_s"] == -0.5
-    assert normalized["epoch_end_s"] == 110.0
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
     assert normalized["ref_chan1"] == "Cz"
     assert normalized["ref_chan2"] == "Pz"
     assert normalized["max_chan_idx_keep"] == 32
@@ -67,8 +74,6 @@ def test_normalization_and_roundtrip(tmp_path):
             "line_noise_filter_enabled": False,
             "line_noise_frequency_hz": 50,
             "rejection_z": 3.0,
-            "epoch_start_s": -1.0,
-            "epoch_end_s": 120.0,
             "ref_chan1": "EXG1",
             "ref_chan2": "EXG2",
             "max_chan_idx_keep": 64,
@@ -99,8 +104,18 @@ def test_normalization_and_roundtrip(tmp_path):
         "P01": ["Negative Valence"]
     }
     assert "downsample_rate" not in saved["preprocessing"]
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(saved["preprocessing"])
+    assert saved["compatibility"]["processing_fingerprint_v9"] == {
+        "epoch_start_s": -0.5,
+        "epoch_end_s": 110.0,
+    }
 
     fresh = Project.load(tmp_path)
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(fresh.preprocessing)
+    assert fresh.processing_fingerprint_v9_compatibility == {
+        "epoch_start_s": -0.5,
+        "epoch_end_s": 110.0,
+    }
     assert fresh.preprocessing["high_pass"] == 0.5
     assert fresh.preprocessing["low_pass"] == 30.0
     assert fresh.preprocessing["line_noise_filter_enabled"] is False
@@ -122,6 +137,8 @@ def test_project_loads_legacy_inverted_bandpass(tmp_path):
                 "preprocessing": {
                     "low_pass": "0.1",
                     "high_pass": "50.0",
+                    "epoch_start_s": "-0.25",
+                    "epoch_end_s": "95",
                 }
             }
         )
@@ -130,6 +147,23 @@ def test_project_loads_legacy_inverted_bandpass(tmp_path):
     project = Project.load(tmp_path)
     assert project.preprocessing["low_pass"] == 50.0
     assert project.preprocessing["high_pass"] == 0.1
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(project.preprocessing)
+
+    rewritten = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(rewritten["preprocessing"])
+    assert rewritten["compatibility"]["processing_fingerprint_v9"] == {
+        "epoch_start_s": -0.25,
+        "epoch_end_s": 95.0,
+    }
+
+
+def test_default_project_does_not_persist_retired_epoch_window(tmp_path):
+    project = Project.load(tmp_path)
+    project.save()
+
+    saved = json.loads((Path(tmp_path) / "project.json").read_text(encoding="utf-8"))
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(saved["preprocessing"])
+    assert "compatibility" not in saved
 
 
 def test_app_settings_line_noise_defaults_and_roundtrip(tmp_path):

@@ -33,6 +33,7 @@ from Main_App.processing.preflight_qc_plan import (
     PREFLIGHT_QC_MAX_WORKERS,
     PREFLIGHT_QC_METHOD_NAME,
     PREFLIGHT_QC_METHOD_VERSION,
+    PREFLIGHT_QC_MINIMUM_COMPLETION_S,
     ConditionQcSpan,
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
@@ -804,7 +805,6 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "low_pass",
         "downsample",
         "downsample_rate",
-        "epoch_end",
         "base_freq",
         "oddball_freq",
         "line_noise_filter_enabled",
@@ -828,6 +828,8 @@ def _preflight_cache_method() -> dict[str, object]:
         "raw_channel_method": CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
         "raw_spectral_method": CONDITION_SPECTRAL_QC_METHOD_VERSION,
         "condition_block_duration_s": PREFLIGHT_QC_BLOCK_DURATION_S,
+        "condition_completion_policy": "fixed_minimum_v1",
+        "condition_minimum_completion_s": PREFLIGHT_QC_MINIMUM_COMPLETION_S,
         "numpy_version": str(np.__version__),
         "mne_version": str(mne.__version__),
     }
@@ -1032,7 +1034,6 @@ def _scan_one_preflight_file_v2(
             event_map=event_map,
             sfreq=float(raw.info["sfreq"]),
             n_times=int(raw.n_times),
-            epoch_end_s=float(qc_settings.get("epoch_end", 125.0)),
         )
         _record_timing("events_and_plan", event_started)
         if not event_plan.spans:

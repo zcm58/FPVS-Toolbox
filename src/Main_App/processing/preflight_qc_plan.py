@@ -19,6 +19,7 @@ from Main_App.Shared.fft_crop_utils import (
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
 PREFLIGHT_QC_METHOD_VERSION = "v2"
 PREFLIGHT_QC_BLOCK_DURATION_S = 10.0
+PREFLIGHT_QC_MINIMUM_COMPLETION_S = 125.0
 PREFLIGHT_QC_MAX_WORKERS = 4
 PREFLIGHT_QC_MAX_IO_READERS = 2
 PREFLIGHT_QC_MAX_SPECTRAL_WORKERS = 2
@@ -108,26 +109,27 @@ def plan_preflight_qc_events(
     event_map: Mapping[str, int],
     sfreq: float,
     n_times: int,
-    epoch_end_s: float,
+    minimum_completion_s: float = PREFLIGHT_QC_MINIMUM_COMPLETION_S,
 ) -> PreflightQcEventPlan:
     """Plan every relevant condition interval without reading EEG data.
 
     The time-domain interval begins at the configured condition onset. Its
-    minimum completion is the configured epoch end; when the locked FPVS crop
-    proves that normal processing will use a longer interval, it extends only
-    through that exact crop. It never follows a discontinuous oddball stream
-    past the crop or crosses the next configured onset/recording boundary.
+    minimum completion follows the internal preflight-QC policy; when the
+    locked FPVS crop proves that normal processing will use a longer interval,
+    it extends only through that exact crop. It never follows a discontinuous
+    oddball stream past the crop or crosses the next configured onset/recording
+    boundary.
     """
 
     sample_rate = float(sfreq)
     sample_count = int(n_times)
-    completion_s = float(epoch_end_s)
+    completion_s = float(minimum_completion_s)
     if not np.isfinite(sample_rate) or sample_rate <= 0.0:
         raise ValueError("sfreq must be a positive finite value")
     if sample_count <= 0:
         raise ValueError("n_times must be positive")
     if not np.isfinite(completion_s) or completion_s <= 0.0:
-        raise ValueError("epoch_end_s must be a positive finite value")
+        raise ValueError("minimum_completion_s must be a positive finite value")
 
     labels_by_code: dict[int, list[str]] = defaultdict(list)
     for label, value in event_map.items():

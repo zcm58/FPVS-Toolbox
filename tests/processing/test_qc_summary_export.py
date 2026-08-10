@@ -46,8 +46,6 @@ def _settings() -> dict[str, object]:
         "high_pass": 0.1,
         "low_pass": 50.0,
         "downsample": 256,
-        "epoch_start": -1.0,
-        "epoch_end": 125.0,
         "base_freq": 6.0,
         "oddball_freq": 1.2,
         "bca_upper_limit": 14.4,

@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import queue
 from types import SimpleNamespace
 
 import mne
 import numpy as np
 import pytest
 
+import Main_App.Shared.processing_mixin as compatibility_processing
 from Main_App.Shared.fft_crop_utils import CropResult
 from Main_App.processing.raw_channel_qc import (
     LEFT_HEMISPHERE_CHANNELS,
@@ -16,6 +18,207 @@ from Main_App.processing.raw_channel_qc import (
     RIGHT_HEMISPHERE_CHANNELS,
 )
 from Main_App.workers import process_runner
+
+
+class _CompatibilitySettings:
+    @staticmethod
+    def debug_enabled() -> bool:
+        return False
+
+
+def _compatibility_raw() -> mne.io.RawArray:
+    info = mne.create_info(
+        ["Cz", "Status"],
+        sfreq=256.0,
+        ch_types=["eeg", "stim"],
+    )
+    return mne.io.RawArray(np.zeros((2, 3_000)), info, verbose=False)
+
+
+def _run_compatibility_worker(
+    monkeypatch,
+    tmp_path,
+    *,
+    events_by_file: list[np.ndarray],
+    event_map: dict[str, int],
+):
+    raw = _compatibility_raw()
+    post_calls: list[dict[str, object]] = []
+
+    class Host(compatibility_processing.ProcessingMixin):
+        pass
+
+    host = Host()
+    source_paths = [
+        str(tmp_path / f"P{index:02d}.bdf")
+        for index in range(1, len(events_by_file) + 1)
+    ]
+    host.data_paths = list(source_paths)
+    host.preprocessed_data = {}
+    host.save_folder_path = SimpleNamespace(get=lambda: str(tmp_path))
+    host.settings = _CompatibilitySettings()
+    host.load_eeg_file = lambda _path: raw.copy()
+
+    def _post_process(labels):
+        post_calls.append(
+            {
+                "labels": list(labels),
+                "metadata": {
+                    label: epochs_list[0].metadata.copy()
+                    for label, epochs_list in host.preprocessed_data.items()
+                },
+            }
+        )
+
+    host.post_process = _post_process
+    monkeypatch.setattr(
+        compatibility_processing,
+        "perform_preprocessing",
+        lambda raw_input, **_kwargs: (raw_input, 0),
+    )
+    monkeypatch.setattr(
+        compatibility_processing.mne,
+        "find_events",
+        lambda *_args, **_kwargs: np.array(events_by_file.pop(0), copy=True),
+    )
+
+    output_queue: queue.Queue = queue.Queue()
+    host._processing_thread_func(
+        source_paths,
+        {
+            "event_id_map": event_map,
+            "stim_channel": "Status",
+            "max_bad_channels_alert_thresh": 20,
+        },
+        output_queue,
+    )
+    messages = []
+    while not output_queue.empty():
+        messages.append(output_queue.get_nowait())
+    return messages, post_calls
+
+
+def test_compatibility_worker_requires_locked_marker_crop_and_skips_export(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    messages, post_calls = _run_compatibility_worker(
+        monkeypatch,
+        tmp_path,
+        events_by_file=[
+            np.asarray(
+                [
+                    (100, 0, 1),
+                    (300, 0, 55),
+                    (940, 0, 55),
+                    (1_500, 0, 2),
+                    (1_700, 0, 55),
+                ],
+                dtype=int,
+            )
+        ],
+        event_map={"Valid": 1, "Invalid": 2},
+    )
+
+    errors = [message["message"] for message in messages if message["type"] == "error"]
+    assert len(errors) == 1
+    assert "Locked FFT crop required" in errors[0]
+    assert "Fixed-epoch fallback is disabled" in errors[0]
+    assert post_calls == []
+
+
+def test_compatibility_worker_exports_only_55_onbin_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    messages, post_calls = _run_compatibility_worker(
+        monkeypatch,
+        tmp_path,
+        events_by_file=[
+            np.asarray(
+                [
+                    (100, 0, 1),
+                    (300, 0, 55),
+                    (940, 0, 55),
+                ],
+                dtype=int,
+            )
+        ],
+        event_map={"Valid": 1},
+    )
+
+    assert not [message for message in messages if message["type"] == "error"]
+    assert len(post_calls) == 1
+    metadata = post_calls[0]["metadata"]["Valid"]
+    assert metadata["crop_mode"].tolist() == ["55_onbin"]
+    assert metadata["N_mod_step"].tolist() == [0]
+
+
+def test_compatibility_worker_continues_after_invalid_file(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    messages, post_calls = _run_compatibility_worker(
+        monkeypatch,
+        tmp_path,
+        events_by_file=[
+            np.asarray(
+                [
+                    (100, 0, 1),
+                    (300, 0, 55),
+                ],
+                dtype=int,
+            ),
+            np.asarray(
+                [
+                    (100, 0, 1),
+                    (300, 0, 55),
+                    (940, 0, 55),
+                ],
+                dtype=int,
+            ),
+        ],
+        event_map={"Condition": 1},
+    )
+
+    assert len(post_calls) == 1
+    assert [
+        message["value"] for message in messages if message["type"] == "progress"
+    ] == [1, 2]
+    errors = [message for message in messages if message["type"] == "error"]
+    assert len(errors) == 1
+    assert "P01.bdf" in errors[0]["message"]
+
+
+def test_compatibility_queue_error_finalizes_unsuccessfully() -> None:
+    finalized: list[bool] = []
+    host = SimpleNamespace(
+        gui_queue=queue.Queue(),
+        processing_thread=None,
+        log=lambda *_args, **_kwargs: None,
+        _finalize_processing=finalized.append,
+    )
+    host.gui_queue.put({"type": "error", "message": "crop failed"})
+    host.gui_queue.put({"type": "done"})
+
+    compatibility_processing.ProcessingMixin._periodic_queue_check(host)
+
+    assert finalized == [False]
+
+
+def test_compatibility_queue_done_finalizes_successfully() -> None:
+    finalized: list[bool] = []
+    host = SimpleNamespace(
+        gui_queue=queue.Queue(),
+        processing_thread=None,
+        log=lambda *_args, **_kwargs: None,
+        _finalize_processing=finalized.append,
+    )
+    host.gui_queue.put({"type": "done"})
+
+    compatibility_processing.ProcessingMixin._periodic_queue_check(host)
+
+    assert finalized == [True]
 
 
 def test_source_epoch_set_keeps_available_configured_conditions() -> None:
@@ -353,8 +556,6 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
         file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
-            "epoch_start": 0.0,
-            "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
@@ -426,8 +627,6 @@ def test_run_full_pipeline_auto_marks_removed_electrode_before_preprocessing(
         file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
-            "epoch_start": 0.0,
-            "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
@@ -499,8 +698,6 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
         file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
-            "epoch_start": 0.0,
-            "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
@@ -631,8 +828,6 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
-            "epoch_start": 0.0,
-            "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
@@ -755,8 +950,6 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
         file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
-            "epoch_start": -1.0,
-            "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
@@ -866,8 +1059,6 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
         file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
-            "epoch_start": 0.0,
-            "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,

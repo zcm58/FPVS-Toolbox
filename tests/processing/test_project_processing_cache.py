@@ -113,8 +113,6 @@ def test_cache_reset_makes_completed_inputs_new_without_removing_outputs_or_hist
         "high_pass": 0.1,
         "low_pass": 50.0,
         "downsample": 256,
-        "epoch_start": -1.0,
-        "epoch_end": 125.0,
     }
     initial = classify_processing_inputs(
         project,

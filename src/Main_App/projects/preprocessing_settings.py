@@ -62,8 +62,6 @@ _FIELDS: tuple[_Field, ...] = (
         _LINE_NOISE_FREQUENCY,
     ),
     _Field("rejection_z", ("rejection_z", "reject_thresh", "rejection_thresh"), 5.0, _FLOAT),
-    _Field("epoch_start_s", ("epoch_start_s", "epoch_start"), -1.0, _FLOAT),
-    _Field("epoch_end_s", ("epoch_end_s", "epoch_end"), 125.0, _FLOAT),
     _Field("ref_chan1", ("ref_chan1", "ref_channel1"), "EXG1", _STR),
     _Field("ref_chan2", ("ref_chan2", "ref_channel2"), "EXG2", _STR),
     _Field(
@@ -175,8 +173,6 @@ PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in
 _ALIASES_FOR_OUTPUT: dict[str, Iterable[str]] = {
     "downsample": ("downsample_rate",),
     "rejection_z": ("reject_thresh",),
-    "epoch_start_s": ("epoch_start",),
-    "epoch_end_s": ("epoch_end",),
     "max_chan_idx_keep": ("max_idx_keep",),
     "max_bad_chans": ("max_bad_channels_alert_thresh",),
     "auto_detect_removed_electrodes": (

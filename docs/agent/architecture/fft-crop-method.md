@@ -122,12 +122,12 @@ The helper still records fallback diagnostics for invalid repetition blocks:
   `insufficient_<marker>`, for example `insufficient_55` or `insufficient_51`.
 - computed `n_samples <= 0`: fallback, reason `nonpositive_N`.
 
-These fallback flags are diagnostic only for the active normal processing
-pipeline. `Main_App.Performance.process_runner` must hard-fail when any selected
-condition repetition falls back, when `n_step` is unavailable, or when no common
-on-bin `N` can be computed. Do not convert these diagnostics into
-`fixed_epoch_fallback` epochs, skip repetitions, use fixed epoch windows, or let
-post-processing choose nearest FFT bins.
+These fallback flags are diagnostic only. `Main_App.Performance.process_runner`
+and the public compatibility `Main_App.Shared.processing_mixin` worker must
+hard-fail when any selected condition repetition falls back, when `n_step` is
+unavailable, or when no common on-bin `N` can be computed. Do not convert these
+diagnostics into `fixed_epoch_fallback` epochs, skip repetitions, use fixed
+epoch windows, or let post-processing choose nearest FFT bins.
 
 ## Shared Condition Span Plan
 

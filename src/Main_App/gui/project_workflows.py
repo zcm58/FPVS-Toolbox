@@ -516,8 +516,6 @@ def load_project(
     host.low_pass_entry = make_entry(p.get("low_pass"))
     host.high_pass_entry = make_entry(p.get("high_pass"))
     host.downsample_entry = make_entry(p.get("downsample"))
-    host.epoch_start_entry = make_entry(p.get("epoch_start_s"))
-    host.epoch_end_entry = make_entry(p.get("epoch_end_s"))
     host.reject_thresh_entry = make_entry(p.get("rejection_z"))
     host.ref_channel1_entry = make_entry(p.get("ref_chan1"))
     host.ref_channel2_entry = make_entry(p.get("ref_chan2"))

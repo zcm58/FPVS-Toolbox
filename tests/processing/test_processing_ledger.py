@@ -27,8 +27,13 @@ from Main_App.projects.project import Project
 from Main_App.workers import process_runner
 
 
-def _project_with_raw(tmp_path):
-    project = Project.load(tmp_path / "project")
+def _project_with_raw(tmp_path, *, preprocessing=None):
+    manifest = (
+        {"preprocessing": dict(preprocessing)}
+        if preprocessing is not None
+        else None
+    )
+    project = Project.load(tmp_path / "project", manifest=manifest)
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
     raw_file = raw_dir / "P01.bdf"
@@ -50,12 +55,113 @@ def _settings() -> dict[str, object]:
         "high_pass": 0.1,
         "low_pass": 50.0,
         "downsample": 256,
-        "epoch_start": -1.0,
-        "epoch_end": 125.0,
         "base_freq": 6.0,
         "oddball_freq": 1.2,
         "bca_upper_limit": 14.4,
     }
+
+
+@pytest.mark.parametrize(
+    ("epoch_start", "epoch_end"),
+    [(-1.0, 125.0), (-0.5, 95.0)],
+)
+def test_removed_runtime_epoch_window_preserves_existing_fingerprint(
+    tmp_path: Path,
+    epoch_start: float,
+    epoch_end: float,
+) -> None:
+    project, _raw_info = _project_with_raw(
+        tmp_path,
+        preprocessing={
+            "epoch_start_s": epoch_start,
+            "epoch_end_s": epoch_end,
+        },
+    )
+    legacy_settings = {
+        **_settings(),
+        "epoch_start": epoch_start,
+        "epoch_end": epoch_end,
+    }
+    legacy_project = SimpleNamespace(
+        preprocessing={
+            **project.preprocessing,
+            "epoch_start_s": epoch_start,
+            "epoch_start": epoch_start,
+            "epoch_end_s": epoch_end,
+            "epoch_end": epoch_end,
+        },
+        options=project.options,
+        subfolders=project.subfolders,
+        groups=project.groups,
+    )
+
+    legacy = build_processing_fingerprint(
+        legacy_project,
+        legacy_settings,
+        project.event_map,
+    )
+    without_runtime_window = build_processing_fingerprint(
+        project,
+        _settings(),
+        project.event_map,
+    )
+
+    assert without_runtime_window == legacy
+    assert {
+        "epoch_start_s",
+        "epoch_start",
+        "epoch_end_s",
+        "epoch_end",
+    }.isdisjoint(project.preprocessing)
+
+
+@pytest.mark.parametrize(
+    ("epoch_start", "epoch_end"),
+    [(-1.0, 125.0), (-0.5, 95.0)],
+)
+def test_completed_legacy_epoch_window_entry_remains_reusable(
+    tmp_path: Path,
+    epoch_start: float,
+    epoch_end: float,
+) -> None:
+    project, info = _project_with_raw(
+        tmp_path,
+        preprocessing={
+            "epoch_start_s": epoch_start,
+            "epoch_end_s": epoch_end,
+        },
+    )
+    legacy_settings = {
+        **_settings(),
+        "epoch_start": epoch_start,
+        "epoch_end": epoch_end,
+    }
+    initial_plan = classify_processing_inputs(
+        project,
+        [info],
+        legacy_settings,
+        project.event_map,
+    )
+    _write_expected_outputs(initial_plan)
+    record_processing_results(
+        project,
+        initial_plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    current_plan = classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    )
+
+    assert current_plan.completed_count == 1
+    assert current_plan.incremental_files == ()
+    assert current_plan.states[0].status == "completed"
 
 
 def test_participant_condition_exclusions_do_not_change_raw_processing_fingerprint(

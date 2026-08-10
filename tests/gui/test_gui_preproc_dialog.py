@@ -9,7 +9,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects.project import Project
@@ -26,9 +26,28 @@ import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
 
 
+_RETIRED_EPOCH_KEYS = {
+    "epoch_start_s",
+    "epoch_end_s",
+    "epoch_start",
+    "epoch_end",
+}
+
+
 def _prep_project(root):
     proj_root = root / "project"
     proj_root.mkdir()
+    (proj_root / "project.json").write_text(
+        json.dumps(
+            {
+                "preprocessing": {
+                    "epoch_start_s": -0.25,
+                    "epoch_end_s": 95.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     project = Project.load(proj_root)
     project.update_preprocessing(
         {
@@ -38,8 +57,6 @@ def _prep_project(root):
             "line_noise_filter_enabled": True,
             "line_noise_frequency_hz": 60,
             "rejection_z": 4.0,
-            "epoch_start_s": -0.25,
-            "epoch_end_s": 95.0,
             "ref_chan1": "Cz",
             "ref_chan2": "Pz",
             "max_chan_idx_keep": 32,
@@ -76,6 +93,11 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     qtbot.addWidget(dlg)
 
     assert dlg.preproc_edits[2].text() == "512"
+    preproc_labels = {
+        label.text() for label in dlg.group_preproc.findChildren(QLabel)
+    }
+    assert "Epoch Start (s):" not in preproc_labels
+    assert "Epoch End (s):" not in preproc_labels
     assert not hasattr(dlg, "stim_edit")
     assert not hasattr(dlg, "save_fif_check")
     assert dlg.line_noise_filter_enabled_check.isChecked() is True
@@ -83,8 +105,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert dlg.line_noise_frequency_combo.isEnabled() is True
 
     dlg.preproc_edits[2].setText("256")
-    dlg.preproc_edits[4].setText("3.5")
-    dlg.preproc_edits[5].setText("100")
+    dlg.preproc_edits[3].setText("3.5")
     significant_only_index = dlg.harmonic_summation_method_combo.findData("significant_only")
     dlg.harmonic_summation_method_combo.setCurrentIndex(significant_only_index)
     all_electrodes_index = dlg.harmonic_electrode_scope_combo.findData("all_scalp_electrodes")
@@ -103,7 +124,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     reloaded = Project.load(project.project_root)
     assert reloaded.preprocessing["downsample"] == 256
     assert reloaded.preprocessing["rejection_z"] == 3.5
-    assert reloaded.preprocessing["epoch_end_s"] == 100.0
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(reloaded.preprocessing)
     assert reloaded.preprocessing["line_noise_filter_enabled"] is False
     assert reloaded.preprocessing["line_noise_frequency_hz"] == 50
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
@@ -116,6 +137,14 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["group_significant_electrode_scope"] == "all_scalp_electrodes"
     assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
+    saved_manifest = json.loads(
+        (project.project_root / "project.json").read_text(encoding="utf-8")
+    )
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(saved_manifest["preprocessing"])
+    assert saved_manifest["compatibility"]["processing_fingerprint_v9"] == {
+        "epoch_start_s": -0.25,
+        "epoch_end_s": 95.0,
+    }
 
     dlg2 = SettingsDialog(win.settings, win, reloaded)
     qtbot.addWidget(dlg2)
@@ -134,7 +163,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     params = win._build_validated_params()
     assert params["downsample"] == 256
     assert params["reject_thresh"] == 3.5
-    assert params["epoch_end"] == 100.0
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(params)
     assert params["line_noise_filter_enabled"] is False
     assert params["line_noise_frequency_hz"] == 50
     assert params["auto_detect_removed_electrodes"] is False
@@ -669,7 +698,7 @@ def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, mon
 
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    dlg.preproc_edits[10].setText("6")
+    dlg.preproc_edits[8].setText("6")
     dlg._save()
 
     reloaded = Project.load(project.project_root)
@@ -697,7 +726,7 @@ def test_parallel_worker_override_warning_allows_save_on_yes(tmp_path, qtbot, mo
 
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    dlg.preproc_edits[10].setText("6")
+    dlg.preproc_edits[8].setText("6")
     dlg._save()
 
     reloaded = Project.load(project.project_root)

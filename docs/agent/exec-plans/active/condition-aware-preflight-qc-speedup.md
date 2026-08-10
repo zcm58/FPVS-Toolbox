@@ -14,10 +14,11 @@ its filter order, or any generated scientific output.
 - Preflight QC v2 reads the complete Status channel, but reads EEG samples only
   from configured condition-onset through condition completion. Samples outside
   configured conditions are not scored.
-- Condition completion is at least the configured epoch end and extends through
-  the exact locked FFT span when normal processing will use a longer interval.
-  It does not follow a discontinuous oddball-marker stream beyond that crop and
-  never crosses the next configured condition onset or recording end.
+- Condition completion uses an internal fixed 125-second QC minimum and extends
+  through the exact locked FFT span when normal processing will use a longer
+  interval. It does not follow a discontinuous oddball-marker stream beyond
+  that crop and never crosses the next configured condition onset or recording
+  end.
 - Time-domain QC examines every sequential 10-second block plus the final
   partial block in every relevant condition occurrence.
 - Only channels flagged consistently across every relevant condition occurrence

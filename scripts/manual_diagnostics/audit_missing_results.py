@@ -157,8 +157,6 @@ def _build_params(project: Project) -> Dict[str, object]:
     """Return preprocessing parameters identical to the GUI pipeline."""
 
     normalized = normalize_preprocessing_settings(project.preprocessing)
-    epoch_start = float(normalized.get("epoch_start_s", -1.0))
-    epoch_end = float(normalized.get("epoch_end_s", 125.0))
 
     params: Dict[str, object] = {
         "low_pass": float(normalized.get("low_pass")),
@@ -170,8 +168,6 @@ def _build_params(project: Project) -> Dict[str, object]:
         "ref_channel2": normalized.get("ref_chan2") or "EXG2",
         "max_idx_keep": int(normalized.get("max_chan_idx_keep")),
         "max_bad_channels_alert_thresh": int(normalized.get("max_bad_chans")),
-        "epoch_start": epoch_start,
-        "epoch_end": epoch_end,
         "stim_channel": normalized.get("stim_channel"),
         "save_preprocessed_fif": bool(normalized.get("save_preprocessed_fif", False)),
     }

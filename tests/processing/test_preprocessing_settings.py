@@ -3,10 +3,19 @@ import pytest
 pytest.importorskip("PySide6")
 
 from Main_App.projects.preprocessing_settings import (
+    PREPROCESSING_CANONICAL_KEYS,
     is_participant_condition_excluded,
     normalize_manual_excluded_participant_conditions,
     normalize_preprocessing_settings,
 )
+
+
+_RETIRED_EPOCH_KEYS = {
+    "epoch_start_s",
+    "epoch_end_s",
+    "epoch_start",
+    "epoch_end",
+}
 
 
 def test_defaults_use_expected_bandpass():
@@ -20,6 +29,21 @@ def test_defaults_use_expected_bandpass():
     assert normalized["manual_removed_electrodes"] == {}
     assert normalized["manual_excluded_participants"] == []
     assert normalized["manual_excluded_participant_conditions"] == {}
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(PREPROCESSING_CANONICAL_KEYS)
+
+
+def test_retired_epoch_window_inputs_are_not_preprocessing_settings():
+    normalized = normalize_preprocessing_settings(
+        {
+            "epoch_start_s": -0.5,
+            "epoch_end_s": 95.0,
+            "epoch_start": -0.25,
+            "epoch_end": 110.0,
+        }
+    )
+
+    assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
 
 
 def test_line_noise_settings_normalize_to_typed_values():

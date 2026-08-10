@@ -13,7 +13,7 @@ def _events(*rows: tuple[int, int]) -> np.ndarray:
     return np.asarray([(sample, 0, code) for sample, code in rows], dtype=int)
 
 
-def test_plan_uses_onset_to_configured_completion_and_locked_onbin_crop() -> None:
+def test_plan_uses_fixed_qc_completion_and_locked_onbin_crop() -> None:
     events = _events(
         (100, 1),
         (300, 55),
@@ -32,7 +32,6 @@ def test_plan_uses_onset_to_configured_completion_and_locked_onbin_crop() -> Non
         event_map={"Faces": 1},
         sfreq=256.0,
         n_times=100_000,
-        epoch_end_s=125.0,
     )
 
     assert plan.n_step == 640
@@ -60,7 +59,6 @@ def test_plan_clamps_condition_completion_to_next_onset_and_recording_end() -> N
         event_map={"First": 1, "Second": 2},
         sfreq=256.0,
         n_times=2_000,
-        epoch_end_s=125.0,
     )
 
     assert [(span.condition_label, span.time_start_sample, span.time_stop_sample) for span in plan.spans] == [
@@ -83,7 +81,7 @@ def test_locked_crop_extends_completion_without_following_a_marker_gap() -> None
         event_map={"Short": 1},
         sfreq=256.0,
         n_times=20_000,
-        epoch_end_s=1.0,
+        minimum_completion_s=1.0,
     )
 
     first, second = plan.spans
@@ -113,14 +111,14 @@ def test_plan_is_deterministic_for_unsorted_event_input() -> None:
         event_map={"Condition": 1},
         sfreq=256.0,
         n_times=2_000,
-        epoch_end_s=5.0,
+        minimum_completion_s=5.0,
     )
     second = plan_preflight_qc_events(
         events=reversed_events,
         event_map={"Condition": 1},
         sfreq=256.0,
         n_times=2_000,
-        epoch_end_s=5.0,
+        minimum_completion_s=5.0,
     )
 
     assert second == first
@@ -134,7 +132,6 @@ def test_plan_requires_at_least_one_configured_condition_onset() -> None:
             event_map={"Condition": 1},
             sfreq=256.0,
             n_times=2_000,
-            epoch_end_s=125.0,
         )
 
 

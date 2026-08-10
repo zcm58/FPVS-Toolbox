@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
-from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.io.load_utils import load_eeg_file as _load_eeg_file
 from Main_App.projects import Project
 from Main_App.processing.processing_controller import (
     _animate_progress_to,
@@ -69,6 +69,7 @@ from Main_App.gui import processing_inputs
 from Main_App.gui import post_export_workflows
 from Main_App.gui import tool_workflows
 from Main_App.gui import shell_status
+from Main_App.gui.processing_completion import finalize_processing_host_state
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,  # noqa: F401 - compatibility re-export
     should_show_no_excel_popup as _should_show_no_excel_popup,  # noqa: F401 - compatibility re-export
@@ -97,10 +98,9 @@ class _QtEntryAdapter:
     def focus_set(self) -> None:  # type: ignore[override]
         self._edit.setFocus()
 
-    # ---------- legacy mixin hook: enable/disable controls during run ---------- #
+    # ---------- enable/disable controls during a run ---------- #
     def _set_controls_enabled(self, enabled: bool) -> None:
         """
-        Required by Main_App.Shared.processing_mixin.
         Disables common inputs while a run is active. No-ops if widgets missing.
         """
         self.busy = not enabled
@@ -135,15 +135,13 @@ class _QtEntryAdapter:
                 self.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
 
 
-class MainWindow(QMainWindow, ProcessingMixin):
+class MainWindow(QMainWindow):
     """Main application window implemented with PySide6.
 
     Notes
     -----
-    * We **do not** inherit the old validation mixin anymore.
-      ProcessingMixin expects ``_validate_inputs()``; we provide a
-      modern implementation that collects inputs from the current
-      Project + GUI and sets ``self.validated_params``.
+    * Validation collects inputs from the current Project + GUI and sets
+      ``self.validated_params``.
     * Queue polling uses a QTimer to keep the GUI responsive while the
       worker thread runs.
     """
@@ -270,7 +268,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
             except Exception:
                 pass
 
-        # Compatibility fields used by ProcessingMixin
+        # Processing workflow compatibility fields
         self.gui_queue: queue.Queue = queue.Queue()
         self.processing_thread = None
         self.detection_thread = None
@@ -354,6 +352,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
     def start_processing(self) -> None:
         processing_workflows.start_processing(self, log=logger)
 
+    def load_eeg_file(self, filepath):
+        """Load EEG through the canonical current-app loader."""
+        return _load_eeg_file(self, filepath)
+
     # --- Busy spinner helpers ---
     def _busy_start(self) -> None:
         shell_status.busy_start(self)
@@ -401,7 +403,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
         processing_workflows.finalize_processing(
             self,
             *args,
-            parent_finalize=super()._finalize_processing,
+            parent_finalize=lambda success: finalize_processing_host_state(
+                self,
+                success,
+            ),
             **kwargs,
         )
 
@@ -434,8 +439,8 @@ class MainWindow(QMainWindow, ProcessingMixin):
             t.stop()
             t.deleteLater()
 
-    # The ProcessingMixin looks for this; validation now lives in processing_inputs.
-    def _validate_inputs(self) -> bool:  # called inside ProcessingMixin.start_processing
+    # Validation lives in processing_inputs.
+    def _validate_inputs(self) -> bool:
         return processing_inputs.validate_inputs(self)
 
     def _build_validated_params(self) -> dict | None:

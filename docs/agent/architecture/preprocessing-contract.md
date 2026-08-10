@@ -190,7 +190,8 @@ supply both inputs.
 V2 reads the complete configured Status channel to plan events, then requests
 EEG samples only from each configured condition onset through the earliest of
 the planned condition completion, the next configured condition onset, or the
-recording boundary. The configured epoch end is the minimum completion. When
+recording boundary. An internal fixed 125-second QC policy is the minimum
+completion; it is not an epoch-extraction setting. When
 the shared locked FFT plan proves that normal processing will use a longer
 interval, completion extends through that exact spectral span rather than
 following a discontinuous oddball stream beyond the crop. It never scores EEG
@@ -204,6 +205,13 @@ remain separately identified provenance. A channel's quietest 10-second block
 is recorded, but the persistent relative low-variance calibration is not
 misapplied to that isolated block as a removed-electrode flag. Extreme
 high-amplitude and rare-burst block findings remain review signals.
+
+The retired project epoch-window fields are not part of normalized
+preprocessing or runtime parameters. When an older manifest contains custom
+values, project loading moves them to
+`compatibility.processing_fingerprint_v9` solely to reproduce existing v9
+ledger and source-ready sidecar identities. That compatibility metadata must
+never control extraction, preprocessing, or QC.
 
 V2 spectral QC uses the same shared per-condition, shortest-repetition,
 integer-oddball-cycle FFT span planner as normal processing. It evaluates the

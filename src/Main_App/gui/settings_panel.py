@@ -255,9 +255,7 @@ class SettingsDialog(QDialog):
             "Low Pass (Hz):",
             "High Pass (Hz):",
             "Downsample (Hz):",
-            "Epoch Start (s):",
             "Rejection Z-Thresh:",
-            "Epoch End (s):",
             "Ref Chan 1:",
             "Ref Chan 2:",
             "Max Chan Idx Keep:",
@@ -277,9 +275,7 @@ class SettingsDialog(QDialog):
             ("preprocessing", "low_pass", str(PREPROCESSING_DEFAULTS["low_pass"]), "low_pass"),
             ("preprocessing", "high_pass", str(PREPROCESSING_DEFAULTS["high_pass"]), "high_pass"),
             ("preprocessing", "downsample", str(PREPROCESSING_DEFAULTS["downsample"]), "downsample"),
-            ("preprocessing", "epoch_start", str(PREPROCESSING_DEFAULTS["epoch_start_s"]), "epoch_start_s"),
             ("preprocessing", "reject_thresh", str(PREPROCESSING_DEFAULTS["rejection_z"]), "rejection_z"),
-            ("preprocessing", "epoch_end", str(PREPROCESSING_DEFAULTS["epoch_end_s"]), "epoch_end_s"),
             ("preprocessing", "ref_chan1", str(PREPROCESSING_DEFAULTS["ref_chan1"]), "ref_chan1"),
             ("preprocessing", "ref_chan2", str(PREPROCESSING_DEFAULTS["ref_chan2"]), "ref_chan2"),
             ("preprocessing", "max_idx_keep", str(PREPROCESSING_DEFAULTS["max_chan_idx_keep"]), "max_chan_idx_keep"),
@@ -375,9 +371,7 @@ class SettingsDialog(QDialog):
             "low_pass",
             "high_pass",
             "downsample",
-            "epoch_start_s",
             "rejection_z",
-            "epoch_end_s",
             "ref_chan1",
             "ref_chan2",
             "max_chan_idx_keep",
@@ -1744,7 +1738,7 @@ class SettingsDialog(QDialog):
         elif "high-pass" in msg_lower or "'high_pass'" in msg_lower:
             target_idx = 1
         elif "'max_parallel_workers_override'" in msg_lower:
-            target_idx = 10
+            target_idx = 8
         if target_idx is not None and target_idx < len(self.preproc_edits):
             edit = self.preproc_edits[target_idx]
             edit.setFocus()
@@ -1793,8 +1787,8 @@ class SettingsDialog(QDialog):
             QMessageBox.No,
         )
         if choice != QMessageBox.Yes:
-            if len(self.preproc_edits) > 10:
-                field = self.preproc_edits[10]
+            if len(self.preproc_edits) > 8:
+                field = self.preproc_edits[8]
                 field.setFocus()
                 field.selectAll()
             return False
@@ -1861,9 +1855,7 @@ class SettingsDialog(QDialog):
             ("preprocessing", "low_pass", "low_pass"),
             ("preprocessing", "high_pass", "high_pass"),
             ("preprocessing", "downsample", "downsample"),
-            ("preprocessing", "epoch_start", "epoch_start_s"),
             ("preprocessing", "reject_thresh", "rejection_z"),
-            ("preprocessing", "epoch_end", "epoch_end_s"),
             ("preprocessing", "ref_chan1", "ref_chan1"),
             ("preprocessing", "ref_chan2", "ref_chan2"),
             ("preprocessing", "max_idx_keep", "max_chan_idx_keep"),
@@ -2001,9 +1993,7 @@ class SettingsDialog(QDialog):
             "low_pass",
             "high_pass",
             "downsample",
-            "epoch_start_s",
             "rejection_z",
-            "epoch_end_s",
             "ref_chan1",
             "ref_chan2",
             "max_chan_idx_keep",

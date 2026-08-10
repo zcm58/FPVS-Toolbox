@@ -32,7 +32,6 @@ def _settings() -> dict[str, object]:
         "ref_channel1": "EXG1",
         "ref_channel2": "EXG2",
         "max_bad_chans": 20,
-        "epoch_end": 5.0,
         "high_pass": 1.0,
         "low_pass": 50.0,
         "downsample": 256,
@@ -102,6 +101,10 @@ def test_v2_accepts_canonical_project_reference_keys() -> None:
         "M1",
         "M2",
     ]
+    assert "epoch_end" not in preflight_qc._preflight_cache_settings(settings)
+    method = preflight_qc._preflight_cache_method()
+    assert method["condition_completion_policy"] == "fixed_minimum_v1"
+    assert method["condition_minimum_completion_s"] == 125.0
 
 
 def test_v2_reads_only_condition_samples_and_reuses_cache(
@@ -131,8 +134,8 @@ def test_v2_reads_only_condition_samples_and_reuses_cache(
     )
 
     assert first.cancelled is False
-    assert first_raw.reads == [(tuple(range(len(names) - 1)), 100, 1_380)]
-    assert first.results[0].condition_qc["samples_read_per_channel"] == 1_280
+    assert first_raw.reads == [(tuple(range(len(names) - 1)), 100, 5_000)]
+    assert first.results[0].condition_qc["samples_read_per_channel"] == 4_900
     assert first.results[0].condition_qc["recording_samples_per_channel"] == 5_000
     assert first.results[0].condition_qc["disk_buffered_condition_count"] == 0
     assert first.results[0].condition_qc["cache_status"] == "miss"
@@ -141,9 +144,11 @@ def test_v2_reads_only_condition_samples_and_reuses_cache(
     assert first.results[0].raw_spectral_qc["widespread"] is False
     assert any("Faces 1/1" in message for message, _done, _total in progress)
 
+    settings_with_ignored_legacy_window = _settings()
+    settings_with_ignored_legacy_window["epoch_end"] = 1.0
     second = preflight_qc.scan_preprocessing_qc(
         [RawFileInfo(raw_path, "P06", "control")],
-        _settings(),
+        settings_with_ignored_legacy_window,
         project_root=tmp_path,
         event_map={"Faces": 1},
     )

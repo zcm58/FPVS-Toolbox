@@ -266,7 +266,7 @@ def _attempt_legacy_55_onbin_crop(
     onset_ids: list[int],
     global_events: np.ndarray,
     stream_end_sample: int,
-    epoch_start_sec: float,
+    epoch_tmin_sec: float,
 ):
     num_channels, num_times = avg_data.shape
     samples_55 = []
@@ -304,8 +304,8 @@ def _attempt_legacy_55_onbin_crop(
 
     available_samples = int(block_end - first55_samp)
     n_used = int(compute_onbin_N(available_samples=available_samples, N_step=n_step))
-    epoch_start_sample = int(round(block_start + epoch_start_sec * sfreq))
-    crop_start_idx = int(max(0, first55_samp - epoch_start_sample))
+    data_start_sample = int(round(block_start + epoch_tmin_sec * sfreq))
+    crop_start_idx = int(max(0, first55_samp - data_start_sample))
     max_available_from_epoch = int(max(0, num_times - crop_start_idx))
     n_used = int(compute_onbin_N(available_samples=min(n_used, max_available_from_epoch), N_step=n_step))
 
@@ -631,7 +631,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     event_id_map = validated_params.get("event_id_map", {})
                     condition_id = _resolve_condition_id(event_id_map, cond_label_from_keys)
                     onset_ids = sorted({int(v) for v in event_id_map.values() if str(v).isdigit()})
-                    epoch_start_sec = float(validated_params.get("epoch_start", 0.0))
+                    epoch_tmin_sec = float(data_object.times[0])
                     if condition_id is None:
                         fallback_reason = "missing_condition_id"
                     elif not onset_ids:
@@ -651,7 +651,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 onset_ids=onset_ids,
                                 global_events=global_events,
                                 stream_end_sample=int(stream_end_sample),
-                                epoch_start_sec=float(epoch_start_sec),
+                                epoch_tmin_sec=float(epoch_tmin_sec),
                             )
                             num_channels, num_times = avg_data.shape
                         except Exception as crop_err:

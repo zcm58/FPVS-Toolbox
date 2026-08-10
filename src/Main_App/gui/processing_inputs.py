@@ -197,9 +197,7 @@ def validate_inputs(host: Any) -> bool:
             "low_pass",
             "high_pass",
             "downsample",
-            "epoch_start",
             "reject_thresh",
-            "epoch_end",
             "ref_chan1",
             "ref_chan2",
             "max_idx_keep",
@@ -225,18 +223,12 @@ def validate_inputs(host: Any) -> bool:
                 "low_pass",
                 "high_pass",
                 "downsample",
-                "epoch_start",
                 "reject_thresh",
-                "epoch_end",
                 "ref_chan1",
                 "ref_chan2",
                 "max_idx_keep",
                 "max_bad_chans",
-                "auto_detect_removed_electrodes",
-                "removed_electrode_detection_mode",
-                "manual_removed_electrodes",
-                "manual_excluded_participants",
-                "manual_excluded_participant_conditions",
+                "max_parallel_workers",
             )
             dialog_snapshot = {
                 key: edit.text()
@@ -289,7 +281,6 @@ def validate_inputs(host: Any) -> bool:
     ds = params.get("downsample")
     rz = params.get("reject_thresh")
     r1, r2 = params.get("ref_channel1"), params.get("ref_channel2")
-    ep = (params.get("epoch_start"), params.get("epoch_end"))
     stim = params.get("stim_channel")
     line_noise_summary = (
         f"{fp_line_noise_frequency}Hz smart FFT"
@@ -299,7 +290,7 @@ def validate_inputs(host: Any) -> bool:
     host.log(
         f"Preproc params → HPF={hp if hp is not None else 'DC'}Hz, "
         f"LPF={lp if lp is not None else 'Nyq'}Hz, DS={ds}Hz, "
-        f"Zreject={rz}, ref=({r1},{r2}), epoch=[{ep[0]}, {ep[1]}], "
+        f"Zreject={rz}, ref=({r1},{r2}), "
         f"line-notch={line_noise_summary}, stim='{stim}', "
         f"events={len(params.get('event_id_map', {}))}"
     )
@@ -428,16 +419,6 @@ def build_validated_params(host: Any) -> dict | None:
         QMessageBox.warning(host, "No Events", "Please add at least one event map entry.")
         return None
 
-    epoch_start = float(normalized.get("epoch_start_s", -1.0))
-    epoch_end = float(normalized.get("epoch_end_s", 125.0))
-    if epoch_end <= epoch_start:
-        QMessageBox.warning(
-            host,
-            "Invalid Epoch Window",
-            "Epoch end must be greater than epoch start.",
-        )
-        return None
-
     stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
     try:
         base_freq = float(host.settings.get("analysis", "base_freq", "6.0"))
@@ -492,8 +473,6 @@ def build_validated_params(host: Any) -> dict | None:
         "manual_excluded_participant_conditions": dict(
             normalized.get("manual_excluded_participant_conditions") or {}
         ),
-        "epoch_start": epoch_start,
-        "epoch_end": epoch_end,
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,
         "event_id_map": event_map,
@@ -600,7 +579,6 @@ def on_mode_changed(host: Any, mode: str) -> None:
 
 def set_controls_enabled(host: Any, enabled: bool) -> None:
     """
-    Required by Main_App.Shared.processing_mixin.
     Disables common inputs while a run is active. No-ops if widgets missing.
 
     The main Start/Stop button is intentionally left enabled so the user can

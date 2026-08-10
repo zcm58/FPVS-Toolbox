@@ -32,6 +32,10 @@ PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v9_source_ready_time_do
 _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
     {"manual_excluded_participant_conditions"}
 )
+_FINGERPRINT_V9_EPOCH_DEFAULTS = {
+    "epoch_start_s": -1.0,
+    "epoch_end_s": 125.0,
+}
 GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 MISSING_EXPECTED_OUTPUTS_WARNING = "missing_expected_outputs"
 NO_EXPECTED_OUTPUTS_FAILURE = "no_expected_outputs"
@@ -411,17 +415,50 @@ def build_processing_fingerprint(
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
 ) -> str:
+    project_preprocessing = getattr(project, "preprocessing", {}) or {}
     fingerprint_settings = {
         key: value
         for key, value in settings.items()
         if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
     }
-    project_preprocessing = getattr(project, "preprocessing", {}) or {}
+    compatibility = getattr(
+        project,
+        "processing_fingerprint_v9_compatibility",
+        {},
+    )
+    compatibility_source = compatibility if isinstance(compatibility, Mapping) else {}
+    replay_values: dict[str, float] = {}
+    for runtime_key, canonical_key in (
+        ("epoch_start", "epoch_start_s"),
+        ("epoch_end", "epoch_end_s"),
+    ):
+        raw_value = compatibility_source.get(canonical_key)
+        if raw_value in (None, ""):
+            raw_value = project_preprocessing.get(canonical_key)
+        if raw_value in (None, ""):
+            raw_value = project_preprocessing.get(runtime_key)
+        if raw_value in (None, ""):
+            raw_value = _FINGERPRINT_V9_EPOCH_DEFAULTS[canonical_key]
+        replay_values[canonical_key] = float(raw_value)
+        if runtime_key in fingerprint_settings:
+            continue
+        fingerprint_settings[runtime_key] = replay_values[canonical_key]
     fingerprint_project_preprocessing = {
         key: value
         for key, value in project_preprocessing.items()
         if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
     }
+    # Reconstruct only the retired fields in the temporary hash payload. Active
+    # project preprocessing remains clean while existing v9 ledger/sidecar
+    # identities retain their exact historical shape.
+    fingerprint_project_preprocessing.update(
+        {
+            "epoch_start_s": replay_values["epoch_start_s"],
+            "epoch_start": replay_values["epoch_start_s"],
+            "epoch_end_s": replay_values["epoch_end_s"],
+            "epoch_end": replay_values["epoch_end_s"],
+        }
+    )
     payload = {
         "version": PROCESSING_FINGERPRINT_VERSION,
         "settings": fingerprint_settings,

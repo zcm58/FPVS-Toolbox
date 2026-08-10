@@ -33,8 +33,6 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
         "high_pass": 0.1,
         "downsample": 256,
         "rejection_z": 5.0,
-        "epoch_start_s": -1.0,
-        "epoch_end_s": 125.0,
         "ref_chan1": "EXG1",
         "ref_chan2": "EXG2",
         "max_chan_idx_keep": 64,
@@ -44,6 +42,7 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
     }
 
     win = MainWindow()
+    assert ProcessingMixin not in MainWindow.__mro__
     qtbot.addWidget(win)
     win.currentProject = SimpleNamespace(
         project_root=project_root,
@@ -119,8 +118,6 @@ def test_batch_non_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkey
         "high_pass": 0.1,
         "downsample": 256,
         "rejection_z": 5.0,
-        "epoch_start_s": -1.0,
-        "epoch_end_s": 125.0,
         "ref_chan1": "EXG1",
         "ref_chan2": "EXG2",
         "max_chan_idx_keep": 64,

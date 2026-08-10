@@ -1379,8 +1379,6 @@ def _run_full_pipeline_for_file(
         # 5) Epochs per label/code (tolerant of missing runs)
         stage = "epochs"
         section_started = time.perf_counter()
-        tmin = float(settings.get("epoch_start", -1.0))
-        tmax = float(settings.get("epoch_end", 1.0))
         sfreq = float(raw_proc.info["sfreq"])
         _, n_step, step_err = compute_onbin_step(fs=sfreq, f_oddball=ODDBALL_FREQ)
         if step_err:
@@ -1597,7 +1595,8 @@ def _run_full_pipeline_for_file(
         if total_epochs == 0:
             raise RuntimeError(
                 f"No epochs created for any configured labels in {file_path.name}. "
-                f"Check event_map, epoch window (tmin={tmin}, tmax={tmax}), and triggers."
+                "Check the event map and triggers; valid marker-derived locked FFT "
+                "crops are required."
             )
 
         logger.debug(

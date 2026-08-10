@@ -21,16 +21,66 @@ import re
 import config
 from Main_App.Shared import user_messages
 from Main_App.Shared.post_process import post_process as _external_post_process
+from Main_App.gui.processing_completion import finalize_processing_host_state
 from Main_App.processing.preprocess import perform_preprocessing
 from Main_App.io.load_utils import load_eeg_file
 from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
     compute_onbin_step,
     ODDBALL_FREQ,
+    plan_condition_fft_spans,
     resolve_oddball_ids_by_condition,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _LockedFFTCropError(RuntimeError):
+    """A compatibility-worker crop failure that must abort the file."""
+
+
+def _require_locked_fft_span_plan(
+    *,
+    crop_results,
+    condition_id,
+    n_step,
+    file_name,
+    label,
+):
+    span_plan = plan_condition_fft_spans(
+        crop_results=crop_results,
+        condition_id=int(condition_id),
+        n_step=n_step,
+    )
+    fallback_rep_reasons = list(span_plan.fallback_repetition_reasons)
+    n_common = span_plan.n_common
+
+    if not n_step:
+        raise _LockedFFTCropError(
+            "Locked FFT crop required but no valid N_step is available "
+            f"for {file_name} condition={label}. "
+            "Fixed-epoch fallback is disabled for the compatibility processing path."
+        )
+    if fallback_rep_reasons:
+        raise _LockedFFTCropError(
+            "Locked FFT crop required but one or more repetitions could not be "
+            f"cropped on-bin for {file_name} condition={label}: "
+            f"{'; '.join(fallback_rep_reasons)}. "
+            "Fixed-epoch fallback is disabled for the compatibility processing path."
+        )
+    if n_common is None:
+        raise _LockedFFTCropError(
+            "Locked FFT crop required but no common on-bin epoch length could be "
+            f"computed for {file_name} condition={label}. "
+            "Fixed-epoch fallback is disabled for the compatibility processing path."
+        )
+    if int(n_common) % int(n_step) != 0:
+        raise _LockedFFTCropError(
+            "Locked FFT crop invariant failed before epoching: "
+            f"N_common={n_common}, N_step={n_step}, "
+            f"file={file_name}, condition={label}."
+        )
+    return span_plan
 
 
 class ProcessingMixin:
@@ -87,6 +137,7 @@ class ProcessingMixin:
 
     def _periodic_queue_check(self):
         done = False
+        failed = False
         try:
             while True:
                 msg = self.gui_queue.get_nowait()
@@ -128,6 +179,7 @@ class ProcessingMixin:
                     if tb := msg.get('traceback'):
                         # Log the traceback through the standard logger
                         self.log(tb)
+                    failed = True
                     done = True
 
                 elif t == 'done':
@@ -139,74 +191,11 @@ class ProcessingMixin:
         if not done and self.processing_thread and self.processing_thread.is_alive():
             self._queue_job_id = self.after(100, self._periodic_queue_check)
         else:
-            self._finalize_processing(done)
+            self._finalize_processing(done and not failed)
 
     def _finalize_processing(self, success):
-        """Finalize the batch/single processing: show completion dialog and reset state."""
-        # PySide6 sets _suppress_completion_dialogs only when the user cancels a run.
-        # Treat this flag as the indicator that a cancellation occurred so we don't
-        # mis-report the run as an error when the user explicitly cancelled it.
-        cancelled = bool(getattr(self, "_suppress_completion_dialogs", False))
-
-        if cancelled and not success:
-            self.log("--- Processing Run Cancelled by User ---")
-            return
-
-        if success:
-            self.log("--- Processing Run Completed Successfully ---")
-            if self.validated_params and self.data_paths:
-                output_folder = self.save_folder_path.get()
-                n = len(self.data_paths)
-                user_messages.show_info(
-                    "Processing Complete",
-                    f"Analysis finished for {n} file{'s' if n!=1 else ''}.\n"\
-                    f"Excel files saved to:\n{output_folder}",
-                    self,
-                )
-            else:
-                user_messages.show_info(
-                    "Processing Finished",
-                    "Processing run finished. Check logs for details.",
-                    self,
-                )
-        else:
-            self.log("--- Processing Run Finished with ERRORS ---")
-            user_messages.show_error(
-                "Processing Error",
-                "An error occurred during processing. Please check the log for details.",
-                self,
-            )
-
-        self.busy = False
-        self._set_controls_enabled(True)
-        self.log(f"--- GUI Controls Re-enabled at {pd.Timestamp.now()} ---")
-
-        self.data_paths = []
-        self._max_progress = 1
-        self.progress_bar.set(0.0)
-        self._current_progress = 0.0
-        self._target_progress = 0.0
-        self._start_time = None
-        self._processed_count = 0
-        if hasattr(self, 'remaining_time_var') and self.remaining_time_var is not None:
-            self.remaining_time_var.set("")
-        self.preprocessed_data = {}
-
-        if hasattr(self, 'log_text') and self.log_text.winfo_exists():
-            self.log_text.configure(state="normal")
-            ready_msg = (
-                f"{pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]} [GUI]: "
-                "Ready for next file selection...\n"
-            )
-            self.log_text.insert("end", ready_msg)
-            self.log_text.see("end")
-            self.log_text.configure(state="disabled")
-
-        self.processing_thread = None
-        self._queue_job_id = None
-        gc.collect()
-
-        self.log("--- State Reset. Ready for next run. ---")
+        """Finalize the compatibility processing host."""
+        finalize_processing_host_state(self, bool(success))
 
     def _animate_progress_to(self, target: float) -> None:
         self._target_progress = max(0.0, min(1.0, target))
@@ -267,6 +256,7 @@ class ProcessingMixin:
         original_app_preprocessed_data = dict(self.preprocessed_data)
 
         quality_flagged_files_info_for_run = []
+        locked_fft_crop_errors = []
 
         try:
             with open(fft_crop_log_path, "w", encoding="utf-8") as fp:
@@ -283,6 +273,7 @@ class ProcessingMixin:
                 num_kurtosis_bads = 0
                 file_epochs = {}
                 events = np.array([])
+                locked_fft_crop_failed = False
 
                 extracted_pid_for_flagging = "UnknownPID"  # PID for quality_review_suggestions.txt
                 pid_base_for_flagging = os.path.splitext(f_name)[0]
@@ -463,48 +454,39 @@ class ProcessingMixin:
                                            'message': f"DEBUG [{f_name}]: Attempting to epoch for GUI label '{lbl}' (using Int ID: {num_id_val_gui}). Events array shape: {events.shape}"})
                         if events.size > 0 and num_id_val_gui in events[:, 2]:
                             try:
-                                rep_keys = sorted([k for k in crop_results if k[0] == int(num_id_val_gui)], key=lambda x: x[1])
+                                span_plan = _require_locked_fft_span_plan(
+                                    crop_results=crop_results,
+                                    condition_id=int(num_id_val_gui),
+                                    n_step=n_step,
+                                    file_name=f_name,
+                                    label=lbl,
+                                )
+                                rep_keys = list(span_plan.repetition_keys)
                                 rep_segments = []
                                 rep_events = []
                                 rep_diagnostics = []
-                                rep_fallback_count = 0
-                                n_common = None
+                                n_common = int(span_plan.n_common)
                                 for rep_key in rep_keys:
                                     crop = crop_results[rep_key]
                                     for w in crop.warnings:
                                         fft_crop_log("WARN", f"file={f_name} condition={lbl} rep={rep_key[1]} warn={w}")
+                                n_common_by_label[lbl] = n_common
 
-                                    if not crop.fallback and crop.n_samples > 0:
-                                        n_common = crop.n_samples if n_common is None else min(n_common, crop.n_samples)
-
-                                if n_common is not None and n_step is not None:
-                                    n_common = (n_common // n_step) * n_step
-                                    if n_common <= 0:
-                                        n_common = None
-
-                                if n_common_by_label.get(lbl) is None and n_common is not None:
-                                    n_common_by_label[lbl] = n_common
-
-                                for rep_key in rep_keys:
+                                for rep_key, planned_span in zip(
+                                    rep_keys,
+                                    span_plan.repetition_spans,
+                                    strict=True,
+                                ):
                                     crop = crop_results[rep_key]
-                                    use_fallback = crop.fallback or n_common is None
-                                    if use_fallback:
-                                        rep_fallback_count += 1
-                                        start_samp = int(crop.block_start_sample + params['epoch_start'] * sfreq)
-                                        stop_samp = int(crop.block_start_sample + params['epoch_end'] * sfreq)
-                                        start_samp = max(0, start_samp)
-                                        stop_samp = min(int(raw_proc.n_times), stop_samp)
-                                        n_used = max(0, stop_samp - start_samp)
-                                        fallback_reason = crop.fallback_reason or "no_nonfallback_n_common"
-                                    else:
-                                        start_samp = int(crop.crop_start_sample)
-                                        stop_samp = int(start_samp + n_common)
-                                        n_used = int(n_common)
-                                        fallback_reason = None
+                                    start_samp, stop_samp = map(int, planned_span)
+                                    n_used = int(n_common)
+                                    fallback_reason = None
 
                                     if n_used <= 0 or stop_samp <= start_samp:
-                                        fft_crop_log("WARN", f"file={f_name} condition={lbl} rep={rep_key[1]} skipped=true reason=empty_segment")
-                                        continue
+                                        raise _LockedFFTCropError(
+                                            "Locked FFT crop invariant failed before epoching: "
+                                            f"empty span for {f_name} condition={lbl} rep={rep_key[1]}."
+                                        )
 
                                     data = raw_proc.get_data(start=start_samp, stop=stop_samp)
                                     rep_segments.append(data)
@@ -514,41 +496,34 @@ class ProcessingMixin:
                                     df_hz = sfreq / n_used if n_used > 0 else 0.0
                                     k = (1.2 * n_used / sfreq) if sfreq > 0 else 0.0
                                     k_is_int = abs(k - round(k)) < 1e-9
-                                    _, n_step_check, step_err = compute_onbin_step(fs=sfreq, f_oddball=ODDBALL_FREQ)
+                                    _, n_step_check, _step_err = compute_onbin_step(fs=sfreq, f_oddball=ODDBALL_FREQ)
                                     f_bin_hz = (sfreq / n_used) * round(k) if n_used > 0 and sfreq > 0 else 0.0
-                                    if not use_fallback:
-                                        if n_step_check is None or n_used % n_step_check != 0:
-                                            raise ValueError(
-                                                f"FFT crop enforcement failed for {f_name}/{lbl}: N={n_used}, N_step={n_step_check}"
-                                            )
-                                        fs_i = int(round(sfreq))
-                                        if (ODDBALL_FREQ.numerator * n_used) % (ODDBALL_FREQ.denominator * fs_i) != 0:
-                                            raise ValueError(
-                                                f"FFT bin-lock failed for {f_name}/{lbl}: N={n_used}, fs_i={fs_i}"
-                                            )
-                                        fft_crop_log(
-                                            "INFO",
-                                            f"FFT_CROP_ACTIVE file={f_name} condition={lbl} rep={rep_key[1]} fs={sfreq:.6f} "
-                                            f"N_step={n_step_check} N={n_used} N%N_step={n_used % n_step_check} "
-                                            f"k={k:.8f} f_bin={f_bin_hz:.12f}",
+                                    if n_step_check is None or n_used % n_step_check != 0:
+                                        raise _LockedFFTCropError(
+                                            f"FFT crop enforcement failed for {f_name}/{lbl}: N={n_used}, N_step={n_step_check}"
                                         )
-                                    else:
-                                        fft_crop_log(
-                                            "WARN",
-                                            f"FFT_CROP_FALLBACK file={f_name} condition={lbl} rep={rep_key[1]} reason={fallback_reason or step_err or 'unknown'} "
-                                            f"N={n_used} k={k:.8f} f_bin={f_bin_hz:.12f}",
+                                    fs_i = int(round(sfreq))
+                                    if (ODDBALL_FREQ.numerator * n_used) % (ODDBALL_FREQ.denominator * fs_i) != 0:
+                                        raise _LockedFFTCropError(
+                                            f"FFT bin-lock failed for {f_name}/{lbl}: N={n_used}, fs_i={fs_i}"
                                         )
                                     fft_crop_log(
-                                        "INFO" if not use_fallback else "WARN",
+                                        "INFO",
+                                        f"FFT_CROP_ACTIVE file={f_name} condition={lbl} rep={rep_key[1]} fs={sfreq:.6f} "
+                                        f"N_step={n_step_check} N={n_used} N%N_step={n_used % n_step_check} "
+                                        f"k={k:.8f} f_bin={f_bin_hz:.12f}",
+                                    )
+                                    fft_crop_log(
+                                        "INFO",
                                         f"file={f_name} condition={lbl} rep={rep_key[1]} block=({crop.block_start_sample},{crop.block_end_sample}) "
                                         f"n55_raw={crop.n55_raw} n55_dedup={crop.n55_dedup} cycles={crop.cycles} "
                                         f"first55={crop.first55_sample} last55={crop.last55_sample} available={crop.available_samples} "
                                         f"N={n_used} T={t_sec:.6f} df={df_hz:.6f} k={k:.8f} on_bin_pass={k_is_int} "
-                                        f"fallback={use_fallback} fallback_reason={fallback_reason} dedup_dropped={crop.dedup_dropped} missing_gap_warns={crop.missing_gap_count}",
+                                        f"fallback=False fallback_reason={fallback_reason} dedup_dropped={crop.dedup_dropped} missing_gap_warns={crop.missing_gap_count}",
                                     )
                                     rep_diagnostics.append(
                                         {
-                                            "crop_mode": "fixed_epoch_fallback" if use_fallback else "55_onbin",
+                                            "crop_mode": "55_onbin",
                                             "oddball_id": int(crop.oddball_id or 55),
                                             "n55": int(crop.n55_dedup),
                                             "first55_samp": int(crop.first55_sample) if crop.first55_sample is not None else np.nan,
@@ -575,11 +550,11 @@ class ProcessingMixin:
                                     gui_queue.put({'type': 'log',
                                                    'message': f"  -> Successfully created {len(epochs.events)} epochs for GUI label '{lbl}' in {f_name}."})
                                     file_epochs[lbl] = [epochs]
-                                    if rep_fallback_count:
-                                        fft_crop_log("WARN", f"file={f_name} condition={lbl} fallback_reps={rep_fallback_count}")
                                 else:
                                     gui_queue.put({'type': 'log',
                                                    'message': f"  -> No epochs generated for GUI label '{lbl}' in {f_name}."})
+                            except _LockedFFTCropError:
+                                raise
                             except Exception as e_epoch:
                                 gui_queue.put({'type': 'log',
                                                'message': f"!!! Epoching error for GUI label '{lbl}' in {f_name}: {e_epoch}\n{traceback.format_exc()}"})
@@ -597,6 +572,11 @@ class ProcessingMixin:
                         if len(unique_n) > 1:
                             fft_crop_log("WARN", f"file={f_name} n_common_mismatch={unique_n}")
 
+                except _LockedFFTCropError as crop_error:
+                    locked_fft_crop_failed = True
+                    error_message = f"Locked FFT crop failure for {f_name}: {crop_error}"
+                    locked_fft_crop_errors.append(error_message)
+                    gui_queue.put({'type': 'log', 'message': f"!!! {error_message}"})
                 except Exception as file_proc_err:
                     gui_queue.put({'type': 'log',
                                    'message': f"!!! Error during main processing for {f_name}: {file_proc_err}\n{traceback.format_exc()}"})
@@ -607,7 +587,7 @@ class ProcessingMixin:
                     has_valid_data = False
                     if file_epochs:
                         has_valid_data = any(
-                            elist and elist[0] and isinstance(elist[0], mne.Epochs) and hasattr(elist[0],
+                            elist and elist[0] and isinstance(elist[0], mne.BaseEpochs) and hasattr(elist[0],
                                 'events') and len(
                                 elist[0].events) > 0
                             for elist in file_epochs.values()
@@ -616,7 +596,7 @@ class ProcessingMixin:
                         gui_queue.put(
                             {'type': 'log', 'message': f"DEBUG [{f_name}]: Value of has_valid_data: {has_valid_data}"})
 
-                    if raw_proc is not None and has_valid_data:
+                    if raw_proc is not None and has_valid_data and not locked_fft_crop_failed:
                         gui_queue.put({'type': 'log', 'message': f"--- Calling Post‐process for {f_name} ---"})
                         temp_original_data_paths = self.data_paths
                         temp_original_preprocessed_data = self.preprocessed_data
@@ -669,6 +649,13 @@ class ProcessingMixin:
                 except Exception as e_qf:
                     gui_queue.put({'type': 'log', 'message': f"Error saving quality review file: {e_qf}"})
 
+            if locked_fft_crop_errors:
+                gui_queue.put(
+                    {
+                        'type': 'error',
+                        'message': "\n".join(locked_fft_crop_errors),
+                    }
+                )
             gui_queue.put({'type': 'done'})
 
         except Exception as e_thread:

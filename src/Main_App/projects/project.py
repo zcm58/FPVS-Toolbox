@@ -25,6 +25,13 @@ PROJECT_SCHEMA_VERSION = "2.1.0"
 _LEGACY_BANDPASS_WARNED: set[Path] = set()
 logger = logging.getLogger(__name__)
 
+_COMPATIBILITY_MANIFEST_KEY = "compatibility"
+_PROCESSING_FINGERPRINT_V9_KEY = "processing_fingerprint_v9"
+_PROCESSING_FINGERPRINT_V9_DEFAULTS = {
+    "epoch_start_s": -1.0,
+    "epoch_end_s": 125.0,
+}
+
 # Stable defaults used by GUI/processing
 DEFAULTS: Dict[str, Any] = {
     "input_folder": "Input",
@@ -140,6 +147,67 @@ def _preserve_disk_tools_metadata(manifest_path: Path, data: Dict[str, Any]) -> 
     return data
 
 
+def _processing_fingerprint_v9_compatibility(
+    manifest: Mapping[str, Any],
+) -> dict[str, float]:
+    """Extract retired epoch values solely for exact v9 fingerprint replay."""
+
+    preprocessing = manifest.get("preprocessing")
+    preprocessing_source = (
+        preprocessing if isinstance(preprocessing, Mapping) else {}
+    )
+    compatibility = manifest.get(_COMPATIBILITY_MANIFEST_KEY)
+    compatibility_source = (
+        compatibility if isinstance(compatibility, Mapping) else {}
+    )
+    fingerprint_v9 = compatibility_source.get(_PROCESSING_FINGERPRINT_V9_KEY)
+    fingerprint_source = (
+        fingerprint_v9 if isinstance(fingerprint_v9, Mapping) else {}
+    )
+
+    values: dict[str, float] = {}
+    for canonical_key, runtime_alias in (
+        ("epoch_start_s", "epoch_start"),
+        ("epoch_end_s", "epoch_end"),
+    ):
+        default = _PROCESSING_FINGERPRINT_V9_DEFAULTS[canonical_key]
+        raw_value = fingerprint_source.get(canonical_key)
+        if raw_value in (None, ""):
+            raw_value = preprocessing_source.get(canonical_key)
+        if raw_value in (None, ""):
+            raw_value = preprocessing_source.get(runtime_alias)
+        try:
+            values[canonical_key] = float(raw_value)
+        except (TypeError, ValueError):
+            values[canonical_key] = float(default)
+    return values
+
+
+def _store_processing_fingerprint_v9_compatibility(
+    manifest: Dict[str, Any],
+    values: Mapping[str, Any],
+) -> None:
+    """Persist non-default v9 replay values outside active preprocessing."""
+
+    normalized = {
+        key: float(values.get(key, default))
+        for key, default in _PROCESSING_FINGERPRINT_V9_DEFAULTS.items()
+    }
+    compatibility = manifest.get(_COMPATIBILITY_MANIFEST_KEY)
+    compatibility_out = (
+        dict(compatibility) if isinstance(compatibility, Mapping) else {}
+    )
+    if normalized != _PROCESSING_FINGERPRINT_V9_DEFAULTS:
+        compatibility_out[_PROCESSING_FINGERPRINT_V9_KEY] = normalized
+    else:
+        compatibility_out.pop(_PROCESSING_FINGERPRINT_V9_KEY, None)
+
+    if compatibility_out:
+        manifest[_COMPATIBILITY_MANIFEST_KEY] = compatibility_out
+    else:
+        manifest.pop(_COMPATIBILITY_MANIFEST_KEY, None)
+
+
 class Project:
     """
     Project model for PySide6 GUI.
@@ -156,6 +224,7 @@ class Project:
       - event_map: Dict[str, Any]
       - groups: Dict[str, Dict[str, Any]]
       - participants: Dict[str, Dict[str, Any]]
+      - processing_fingerprint_v9_compatibility: Dict[str, float]
       - manifest: Dict[str, Any]  (raw, for persistence)
     """
 
@@ -198,6 +267,12 @@ class Project:
         merged_opts["mode"] = mode
         self.options = merged_opts
 
+        # Preserve retired epoch values only for exact replay of existing v9
+        # processing fingerprints. They are not active preprocessing settings.
+        self.processing_fingerprint_v9_compatibility = (
+            _processing_fingerprint_v9_compatibility(manifest)
+        )
+
         # Preprocessing dict
         pp = manifest.get("preprocessing", {})
         legacy_inversion: dict[str, float] = {}
@@ -239,6 +314,10 @@ class Project:
         manifest["preprocessing"] = {
             key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
+        _store_processing_fingerprint_v9_compatibility(
+            manifest,
+            self.processing_fingerprint_v9_compatibility,
+        )
 
         # Event map dict
         ev = manifest.get("event_map", {})
@@ -359,6 +438,10 @@ class Project:
             raw_manifest["preprocessing"] = {
                 key: proj.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
             }
+            _store_processing_fingerprint_v9_compatibility(
+                raw_manifest,
+                proj.processing_fingerprint_v9_compatibility,
+            )
             _write_manifest_if_changed(resolved_manifest_path, raw_manifest)
         return proj
 
@@ -418,6 +501,10 @@ class Project:
         data["preprocessing"] = {
             key: normalized_pp[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
+        _store_processing_fingerprint_v9_compatibility(
+            data,
+            self.processing_fingerprint_v9_compatibility,
+        )
 
         # Persist the live event map from runtime state, normalized to {str: int}
         live_map: Dict[str, Any] = getattr(self, "event_map", {}) or {}
