@@ -4,6 +4,12 @@ Statistics and tool code is organized under one active Stats package. Old `PySid
 
 Primary paths:
 
+- `src/Tools/Free_Harmonic_Clustering/`: independent GUI-neutral analysis
+  package for the Hermann-style sensor x harmonic cluster-permutation method.
+  It reads original FullFFT condition workbooks, not Stats-ready Summed BCA,
+  and does not alter the locked Stats harmonic-selection/noise/summation rules.
+  The headless prototype supports one two-level paired-condition or
+  independent-group contrast per run on a complete BioSemi64 tensor.
 - `src/Tools/Stats/`: active single- and multi-group statistics GUI, controller,
   workers, analysis helpers, QC helpers, reporting, I/O, and shared helpers
   grouped by function. The root contains only package/docs files.

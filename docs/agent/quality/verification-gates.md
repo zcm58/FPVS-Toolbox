@@ -52,6 +52,9 @@ normal change loop; the precommit tier is the broad local handoff gate.
   and installer `/RELAUNCH=1`.
 - Project path or file I/O changes: run `python .agents/scripts/verify.py
   --scope project-io --tier focused`; tests must use isolated temporary paths.
+- Free Harmonic Clustering changes: run `python .agents/scripts/verify.py
+  --scope free-harmonic-clustering --tier focused`. Run the project-I/O scope
+  as well when canonical dataset discovery or containment behavior changes.
 - Publication Maps changes: run `python .agents/scripts/verify.py --scope
   publication-maps --tier focused`.
 - Publication figure generation changes: run `python

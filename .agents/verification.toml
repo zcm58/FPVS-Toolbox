@@ -166,6 +166,15 @@ tests = [
 include = ["src/Tools/Stats/**", "tests/stats/**"]
 manual_smoke = ["Open Standard FPVS Screening from the Main App and exercise the changed GUI/pipeline controls in a visible session when applicable."]
 
+[scopes.free-harmonic-clustering]
+audits = ["paths"]
+tests = ["tests/free_harmonic_clustering"]
+include = [
+  "src/Tools/Free_Harmonic_Clustering/**",
+  "tests/free_harmonic_clustering/**",
+]
+manual_smoke = []
+
 [scopes.loreta]
 audits = ["source-localization", "source-localization-refs", "gui", "paths"]
 tests = ["tests/loreta"]
