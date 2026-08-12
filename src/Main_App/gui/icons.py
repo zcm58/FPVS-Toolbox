@@ -105,10 +105,6 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         painter.drawLine(QPointF(size * 0.35, size * 0.34), QPointF(size * 0.65, size * 0.34))
         painter.drawLine(QPointF(size * 0.35, size * 0.48), QPointF(size * 0.65, size * 0.48))
         painter.drawLine(QPointF(size * 0.35, size * 0.62), QPointF(size * 0.56, size * 0.62))
-    elif kind == "epoch":
-        painter.drawArc(QRectF(size * 0.20, size * 0.20, size * 0.60, size * 0.60), 35 * 16, 285 * 16)
-        painter.drawLine(QPointF(size * 0.76, size * 0.24), QPointF(size * 0.80, size * 0.42))
-        painter.drawLine(QPointF(size * 0.76, size * 0.24), QPointF(size * 0.59, size * 0.27))
     elif kind == "settings":
         center = QPointF(size * 0.50, size * 0.50)
         painter.drawEllipse(center, size * 0.22, size * 0.22)

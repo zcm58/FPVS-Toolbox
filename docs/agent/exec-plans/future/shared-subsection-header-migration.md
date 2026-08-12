@@ -38,7 +38,6 @@ Primary GUI surfaces:
 - `src/Tools/Ratio_Calculator/`
 - `src/Tools/Publication_Maps/`
 - `src/Tools/Individual_Detectability/`
-- `src/Tools/Average_Preprocessing/New_PySide6/`
 - `src/Tools/Sequence_Figure/`
 - `src/Tools/LORETA_Visualizer/`
 
@@ -282,7 +281,6 @@ Use one surface group per small change set:
 5. Remaining embedded tools:
    - `src/Tools/Publication_Maps/`
    - `src/Tools/Individual_Detectability/`
-   - `src/Tools/Average_Preprocessing/New_PySide6/`
    - `src/Tools/Sequence_Figure/`
    - `src/Tools/LORETA_Visualizer/`
 

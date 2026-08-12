@@ -239,9 +239,6 @@ the manifest assignment.
    calculations.
 7. [ ] Migrate Ratio Calculator and Individual Detectability from flat-folder
    globbing to indexed records before offering per-group output controls.
-8. [ ] Give the beta Epoch Averaging tool an explicit group-aware input contract;
-   until then it hard-fails for grouped projects instead of substituting the
-   removed project-level input folder.
 
 Every migrated figure/summary tool must follow the same group behavior unless
 an existing, explicitly retained overlay contract says otherwise:

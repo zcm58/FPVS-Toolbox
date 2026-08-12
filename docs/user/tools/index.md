@@ -16,4 +16,3 @@ only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
 | [Sequence Figure](sequence-figure.md) | Default | Create a five-image FPVS stimulus-sequence diagram. |
 | [Ratio Calculator](ratio-calculator.md) | Beta | Explore paired condition A/B ratios for BCA, SNR, and z-score summaries. |
 | [Individual Detectability](individual-level-detectability.md) | Beta | Create participant-level summed-harmonic z-score and SNR panels. |
-| [Epoch Averaging](epoch-averaging.md) | Beta | Combine selected raw-BDF event epochs before frequency-domain post-processing. |

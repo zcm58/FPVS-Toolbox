@@ -9,7 +9,6 @@ Legend:
 
 ## Runtime-used (do not quarantine yet)
 
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`
 - `src/Tools/Stats/common/blas_limits.py`
 - `src/Tools/Stats/io/excel_io.py`
 - `src/Tools/Stats/analysis/full_snr.py`
@@ -100,8 +99,6 @@ Removed from active runtime after the Main App refactor slice:
 - `src/Main_App/Legacy_App/test_fft_onbin.py` -> moved to `src/quarantine/Main_App/Legacy_App/test_fft_onbin.py`
 - `src/Main_App/Legacy_App/ui_event_map_manager.py` -> moved to `src/quarantine/Main_App/Legacy_App/ui_event_map_manager.py`
 - `src/Main_App/Legacy_App/ui_setup_panels.py` -> moved to `src/quarantine/Main_App/Legacy_App/ui_setup_panels.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_demo.py` -> moved to `src/quarantine/Tools/Average_Preprocessing/Legacy/advanced_analysis_demo.py`
-
 ## Note
 
 - `Main_App.__init__` no longer defines lazy exports for missing/quarantined Legacy GUI modules.

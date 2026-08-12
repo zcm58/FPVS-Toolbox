@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from Main_App.gui import tool_workflows
 from Main_App.projects.grouping import (
     GroupConfigurationError,
     load_project_group_context,
@@ -84,37 +82,6 @@ def test_active_project_context_uses_same_canonical_group_identity(tmp_path) -> 
     assert context.group("control_group").label == "Control Group"
     assert context.participant("P01").group_id == "control_group"
     assert project.input_folder is None
-
-
-def test_epoch_averaging_does_not_use_grouped_input_fallback(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    raw_folder = tmp_path / "Raw" / "Control"
-    raw_folder.mkdir(parents=True)
-    project = Project.load(
-        tmp_path / "Project",
-        manifest={
-            "groups": {
-                "control": {
-                    "raw_input_folder": str(raw_folder),
-                }
-            }
-        },
-    )
-    messages: list[str] = []
-    monkeypatch.setattr(
-        tool_workflows.QMessageBox,
-        "critical",
-        lambda _parent, _title, message: messages.append(message),
-    )
-
-    result = tool_workflows.resolve_epoch_averaging_paths(
-        SimpleNamespace(currentProject=project)
-    )
-
-    assert result is None
-    assert messages and "will not substitute" in messages[0]
 
 
 def test_group_context_rejects_unknown_participant_group(tmp_path) -> None:

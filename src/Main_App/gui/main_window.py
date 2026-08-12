@@ -46,9 +46,6 @@ from Main_App.projects.project_manager import select_projects_root
 from Main_App.workers.mp_env import (
     compute_effective_max_workers,
 )
-from Tools.Average_Preprocessing.New_PySide6.main_window import (
-    AdvancedAveragingWindow,
-)
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
@@ -690,30 +687,6 @@ class MainWindow(QMainWindow):
         )
         self._loreta_beta_warning_acknowledged = True
 
-    def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
-        paths = tool_workflows.resolve_epoch_averaging_paths(self)
-        if paths is None:
-            return None
-
-        page = getattr(self, "_epoch_page", None)
-        if page is None:
-            data_dir, excel_dir = paths
-            page = AdvancedAveragingWindow(
-                parent=self,
-                input_dir=data_dir,
-                output_dir=excel_dir,
-            )
-            page.setObjectName("embedded_epoch_averaging_page")
-            try:
-                page.btn_close.clicked.disconnect(page.close)
-            except (RuntimeError, TypeError):
-                pass
-            page.btn_close.clicked.connect(self.show_home_page)
-            self.workspace_stack.addWidget(page)
-            self._epoch_page = page
-            self._epoch_win = page
-        return page
-
     def open_plot_generator(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("SNR Plots"):
             return
@@ -768,18 +741,6 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.debug("frequency_domain_resume_button_set_failed", exc_info=True)
         return False
-
-    def open_epoch_averaging(self) -> None:
-        page = self._ensure_epoch_averaging_page()
-        if page is None:
-            return
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-        self.workspace_stack.setCurrentWidget(page)
-        self._set_sidebar_selection("btn_epoch")
-
-    def open_advanced_analysis_window(self) -> None:
-        self.open_epoch_averaging()
 
     def show_about_dialog(self) -> None:
         tool_workflows.show_about_dialog(self, FPVS_TOOLBOX_VERSION)

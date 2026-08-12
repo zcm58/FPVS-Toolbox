@@ -32,9 +32,8 @@ for 256/512/1024/2048 Hz data.
 
 This behavior is owned by `Main_App.Shared.fft_crop_utils` and the active
 normal processing route through `Main_App.Performance.process_runner`. Do not
-try to repair normal processing FFT leakage by changing Average Preprocessing,
-advanced averaging, or unrelated workbook readers unless the user explicitly
-scopes that separate workflow.
+try to repair normal processing FFT leakage by changing unrelated workbook
+readers unless the user explicitly scopes that separate workflow.
 
 ## Inputs
 

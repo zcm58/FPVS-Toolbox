@@ -6,8 +6,6 @@ from typing import Any, Callable
 
 from PySide6.QtWidgets import QMessageBox
 
-from Main_App.projects.grouping import project_group_context
-
 
 def open_settings_window(host: Any, settings_dialog_cls: Callable[..., Any]) -> None:
     if host._settings_dialog and host._settings_dialog.isVisible():
@@ -26,49 +24,6 @@ def check_for_updates(host: Any, update_manager_module: Any) -> None:
     update_manager_module.check_for_updates_async(
         host, silent=False, notify_if_no_update=True, force=True
     )
-
-
-def resolve_epoch_averaging_paths(host: Any) -> tuple[str, str] | None:
-    if not host.currentProject:
-        QMessageBox.warning(host, "No Project", "Please load a project first.")
-        return None
-
-    data_dir = host.currentProject.subfolders.get("data")
-    if data_dir is None:
-        if project_group_context(host.currentProject).has_group_metadata:
-            QMessageBox.critical(
-                host,
-                "Grouped Project Not Supported",
-                "Epoch Averaging requires an explicit processed-data folder for a "
-                "grouped project. It will not substitute a project-level input "
-                "folder. Configure the data source before opening this beta tool.",
-            )
-            return None
-        data_dir = str(host.currentProject.input_folder)
-    else:
-        data_dir = str(host.currentProject.project_root / data_dir)
-    excel_dir = str(
-        host.currentProject.project_root
-        / host.currentProject.subfolders.get("excel", "")
-    )
-    return data_dir, excel_dir
-
-
-def open_epoch_averaging(
-    host: Any,
-    advanced_averaging_window_cls: Callable[..., Any],
-) -> None:
-    paths = resolve_epoch_averaging_paths(host)
-    if paths is None:
-        return
-    data_dir, excel_dir = paths
-    if not getattr(host, "_epoch_win", None):
-        host._epoch_win = advanced_averaging_window_cls(
-            parent=host, input_dir=data_dir, output_dir=excel_dir
-        )
-    host._epoch_win.show()
-    host._epoch_win.raise_()
-    host._epoch_win.activateWindow()
 
 
 def show_about_dialog(host: Any, version: str) -> None:

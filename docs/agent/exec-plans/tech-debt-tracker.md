@@ -69,21 +69,6 @@ remeasure an item before promoting it to an active plan.
 - **Done when:** each migrated responsibility has one documented owner and no
   active caller depends directly on the transitional path.
 
-### TD-005: Epoch Averaging beta lives under misleading active package names
-
-- **Evidence:** active imports still target
-  `Tools/Average_Preprocessing/New_PySide6` and
-  `Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`.
-- **Cost:** the names imply retired code even though the GUI and core are the
-  intentionally retained Epoch Averaging beta feature.
-- **Next slice:** when explicitly scheduled, rehome the active GUI and
-  UI-independent core under purpose-based names with compatibility adapters and
-  focused behavior tests. Do not remove or redesign the beta feature as part of
-  this debt item.
-- **Done when:** normal runtime imports use the new owner, the beta behavior and
-  outputs are unchanged, and legacy-named adapters can be removed or clearly
-  bounded.
-
 ### TD-006: LORETA source rebuilds do not reuse inverse-model work
 
 - **Evidence:** the retained one-click rebuild already generates both default

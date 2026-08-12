@@ -426,8 +426,6 @@ def reset_project_context_workspace(host: Any) -> None:
         "_plot_generator_page",
         "_publication_maps_page",
         "_loreta_visualizer_page",
-        "_epoch_page",
-        "_epoch_win",
     ):
         widget = getattr(host, attr_name, None)
         _retire_widget(widget, workspace=workspace, seen=seen)

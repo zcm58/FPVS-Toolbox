@@ -57,7 +57,7 @@ The **Workspace Tools** section of the app sidebar shows these default tools:
 Standard FPVS Screening, Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA
 Visualizer, and Sequence Figure.
 
-Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools.
+Ratio Calculator and Individual Detectability are beta tools.
 To show them, open **Settings > Advanced**, enable **Beta Tools**, then close
 and reopen FPVS Toolbox.
 
@@ -71,4 +71,3 @@ See the following sections for more information regarding each tool provided in 
 - [Sequence Figure](tools/sequence-figure.md)
 - [Ratio Calculator](tools/ratio-calculator.md)
 - [Individual Detectability](tools/individual-level-detectability.md)
-- [Epoch Averaging](tools/epoch-averaging.md)

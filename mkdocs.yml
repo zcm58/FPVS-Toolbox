@@ -58,7 +58,6 @@ nav:
       - Sequence Figure: tools/sequence-figure.md
       - Ratio Calculator: tools/ratio-calculator.md
       - Individual Detectability: tools/individual-level-detectability.md
-      - Epoch Averaging: tools/epoch-averaging.md
   - Reference:
       - Methods and References: reference/index.md
       - Source-PSD Reporting: reference/methods-reporting-checklist.md

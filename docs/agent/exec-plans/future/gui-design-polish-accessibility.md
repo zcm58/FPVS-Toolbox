@@ -47,7 +47,6 @@ Primary embedded and tool surfaces:
 - `src/Tools/Ratio_Calculator/`
 - `src/Tools/Publication_Maps/`
 - `src/Tools/Individual_Detectability/`
-- `src/Tools/Average_Preprocessing/New_PySide6/`
 - `src/Tools/Sequence_Figure/`
 - `src/Tools/LORETA_Visualizer/`
 

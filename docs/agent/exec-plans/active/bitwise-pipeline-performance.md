@@ -142,9 +142,9 @@ stored on a rotational, removable, or otherwise slow drive.
 - Worker-static dataset-index/cache lifecycle coverage: 6 passed. The
   PySide6 worker integration definition remains CI-only under the local
   no-Qt rule.
-- Cross-commit numerical fuzzing matched raw QC v1 on 1,011/1,011 arrays, raw
-  QC v2 on 1,011/1,011 arrays, and epoch averaging on 263/263 layouts. Result
-  bytes, exception identity, and warning category/message/order were exact.
+- Cross-commit numerical fuzzing matched raw QC v1 on 1,011/1,011 arrays and raw
+  QC v2 on 1,011/1,011 arrays. Result bytes, exception identity, and warning
+  category/message/order were exact.
   Layouts included C/F order, slices, zero-stride broadcasts, endian variants,
   unaligned arrays, and memmaps.
 - Post-processing worker behavior/static bundle: 17 passed.

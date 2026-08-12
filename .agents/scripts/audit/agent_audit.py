@@ -55,7 +55,6 @@ ACTIVE_SOURCE_LOCALIZATION_REF_RE = re.compile(
 )
 
 CURRENT_CODE_EXCLUDES = (
-    "src/Tools/Average_Preprocessing/Legacy/",
     "src/quarantine/",
     "src/Standalone_Scripts/",
 )

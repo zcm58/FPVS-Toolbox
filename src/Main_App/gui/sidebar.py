@@ -49,7 +49,6 @@ DEFAULT_TOOL_SPECS = (
 BETA_TOOL_SPECS = (
     ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
     ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
-    ("btn_epoch", "Epoch Averaging", "epoch", "open_epoch_averaging"),
 )
 
 
@@ -206,17 +205,14 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
     if host.settings.beta_tools_enabled():
         tool_specs.extend(BETA_TOOL_SPECS)
 
-    host.sidebar_epoch_button = None
     for role, text, icon_kind, slot_name in tool_specs:
-        button = make_button(
+        make_button(
             layout,
             role,
             text,
             sidebar_icon(icon_kind, ICON_PX),
             getattr(host, slot_name),
         )
-        if role == "btn_epoch":
-            host.sidebar_epoch_button = button
 
 
 def init_sidebar(self) -> None:
