@@ -200,6 +200,14 @@ def make_section_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
+def _make_divider(parent: QWidget, object_name: str = "sidebar_divider") -> QFrame:
+    divider = QFrame(parent)
+    divider.setObjectName(object_name)
+    divider.setFrameShape(QFrame.HLine)
+    divider.setFixedHeight(1)
+    return divider
+
+
 def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
     for role, text, icon_kind, slot_name in DEFAULT_TOOL_SPECS:
         make_button(
@@ -210,11 +218,16 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
             getattr(host, slot_name),
         )
 
+    host.sidebar_beta_tools_divider = None
     host.sidebar_beta_tools_label = None
     if not host.settings.beta_tools_enabled():
         return
 
     layout.addSpacing(8)
+    beta_divider = _make_divider(layout.parentWidget(), "sidebar_beta_tools_divider")
+    layout.addWidget(beta_divider)
+    host.sidebar_beta_tools_divider = beta_divider
+
     beta_label = make_section_label("Beta Tools", layout.parentWidget())
     beta_label.setProperty("sectionRole", "beta")
     layout.addWidget(beta_label)
@@ -260,13 +273,6 @@ def init_sidebar(self) -> None:
     lay.setContentsMargins(0, 6, 0, 6)
     lay.setSpacing(4)
 
-    def make_divider(parent: QWidget, object_name: str = "sidebar_divider") -> QFrame:
-        divider = QFrame(parent)
-        divider.setObjectName(object_name)
-        divider.setFrameShape(QFrame.HLine)
-        divider.setFixedHeight(1)
-        return divider
-
     primary_group = QWidget(sidebar)
     primary_group.setObjectName("sidebar_primary_group")
     primary_layout = QVBoxLayout(primary_group)
@@ -285,7 +291,7 @@ def init_sidebar(self) -> None:
     self.sidebar_home_button = home_btn
 
     primary_layout.addSpacing(8)
-    primary_layout.addWidget(make_divider(primary_group, "sidebar_home_divider"))
+    primary_layout.addWidget(_make_divider(primary_group, "sidebar_home_divider"))
     primary_layout.addSpacing(8)
 
     tools_label = make_section_label("Workspace Tools", primary_group)
@@ -316,7 +322,7 @@ def init_sidebar(self) -> None:
     utilities_layout = QVBoxLayout(utilities_group)
     utilities_layout.setContentsMargins(0, 0, 0, 0)
     utilities_layout.setSpacing(4)
-    utilities_layout.addWidget(make_divider(utilities_group))
+    utilities_layout.addWidget(_make_divider(utilities_group))
     utilities_layout.addSpacing(8)
 
     utility_label = make_section_label("Utilities", utilities_group)

@@ -497,6 +497,7 @@ def build_sidebar_stylesheet() -> str:
         }}
 
         #sidebar_home_divider,
+        #sidebar_beta_tools_divider,
         #sidebar_divider {{
             background: rgba(255, 255, 255, 0.12);
         }}
