@@ -3,8 +3,9 @@
 Each guide explains what the corresponding FPVS Toolbox tool does, its required
 inputs, the files it creates, and the main interpretation limits.
 
-The sidebar shows default tools first. Beta tools are appended to the sidebar
-only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
+The sidebar shows default tools first. A separate **Beta Tools** subsection is
+appended only after you enable Beta Tools in Settings > Advanced and reopen
+FPVS Toolbox.
 
 | Tool | Sidebar status | Purpose |
 | --- | --- | --- |

@@ -130,6 +130,7 @@ def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
 
     assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES
     assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS
+    assert win.sidebar_beta_tools_label is None
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -139,6 +140,9 @@ def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
 
     assert [button.property("role") for button in buttons] == DEFAULT_TOOL_ROLES + BETA_TOOL_ROLES
     assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS + BETA_TOOL_LABELS
+    assert win.sidebar_beta_tools_label.text() == "Beta Tools"
+    assert win.sidebar_beta_tools_label.property("sectionRole") == "beta"
+    assert win.sidebar_tools_group.layout().indexOf(win.sidebar_beta_tools_label) > len(DEFAULT_TOOL_ROLES) - 1
     _assert_utilities_anchored_at_bottom(win)
 
 

@@ -116,9 +116,9 @@ in the Preprocessing tab.
 The sidebar's default tool list is Standard FPVS Screening, Sensitivity Analysis,
 SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence Figure, in that order.
 Ratio Calculator and Individual Detectability are beta tools: they remain
-embedded workspace pages, but the sidebar appends them only when the global
-Settings option `tools.enable_beta_tools` is enabled and the app has been
-restarted.
+embedded workspace pages, but the sidebar appends them beneath a visible
+**Beta Tools** subsection only when the global Settings option
+`tools.enable_beta_tools` is enabled and the app has been restarted.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.

@@ -58,8 +58,9 @@ Standard FPVS Screening, Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA
 Visualizer, and Sequence Figure.
 
 Ratio Calculator and Individual Detectability are beta tools.
-To show them, open **Settings > Advanced**, enable **Beta Tools**, then close
-and reopen FPVS Toolbox.
+To show their separate **Beta Tools** sidebar subsection, open
+**Settings > Advanced**, enable **Beta Tools**, then close and reopen FPVS
+Toolbox.
 
 See the following sections for more information regarding each tool provided in FPVS Toolbox.
 

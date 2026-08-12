@@ -201,11 +201,26 @@ def make_section_label(text: str, parent: QWidget) -> QLabel:
 
 
 def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
-    tool_specs = list(DEFAULT_TOOL_SPECS)
-    if host.settings.beta_tools_enabled():
-        tool_specs.extend(BETA_TOOL_SPECS)
+    for role, text, icon_kind, slot_name in DEFAULT_TOOL_SPECS:
+        make_button(
+            layout,
+            role,
+            text,
+            sidebar_icon(icon_kind, ICON_PX),
+            getattr(host, slot_name),
+        )
 
-    for role, text, icon_kind, slot_name in tool_specs:
+    host.sidebar_beta_tools_label = None
+    if not host.settings.beta_tools_enabled():
+        return
+
+    layout.addSpacing(8)
+    beta_label = make_section_label("Beta Tools", layout.parentWidget())
+    beta_label.setProperty("sectionRole", "beta")
+    layout.addWidget(beta_label)
+    host.sidebar_beta_tools_label = beta_label
+
+    for role, text, icon_kind, slot_name in BETA_TOOL_SPECS:
         make_button(
             layout,
             role,
