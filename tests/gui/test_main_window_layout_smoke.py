@@ -309,7 +309,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         for label in win.sidebar.findChildren(QLabel)
         if label.objectName() == "SidebarSectionLabel"
     }
-    assert sidebar_section_titles == {"Workspace Tools", "Utilities"}
+    assert sidebar_section_titles == {"Quick Tools", "Utilities"}
     settings_buttons = [
         widget
         for widget in win.sidebar.findChildren(QWidget)

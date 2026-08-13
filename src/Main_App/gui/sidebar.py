@@ -294,7 +294,7 @@ def init_sidebar(self) -> None:
     primary_layout.addWidget(_make_divider(primary_group, "sidebar_home_divider"))
     primary_layout.addSpacing(8)
 
-    tools_label = make_section_label("Workspace Tools", primary_group)
+    tools_label = make_section_label("Quick Tools", primary_group)
     primary_layout.addWidget(tools_label)
     self.sidebar_tools_label = tools_label
 
