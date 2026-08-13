@@ -2,12 +2,43 @@
 # ruff: noqa: E402
 """Entry point for launching the FPVS Toolbox GUI application (PySide6 only)."""
 
+import os
+import sys
+from collections.abc import MutableMapping
+
+
+def _configure_linux_qpa_platform(
+    *,
+    platform_name: str | None = None,
+    environ: MutableMapping[str, str] | None = None,
+) -> None:
+    """Use XCB on Wayland sessions before Qt or VTK is imported.
+
+    PyVistaQt's VTK render window currently requires Qt's XCB platform on
+    Linux/Wayland.  A native Wayland Qt window gives VTK an incompatible X11
+    parent handle and can terminate during initial geometry setup with an
+    X_ConfigureWindow ``BadWindow`` error.
+    """
+    platform_name = sys.platform if platform_name is None else platform_name
+    environ = os.environ if environ is None else environ
+
+    if not platform_name.startswith("linux") or environ.get("QT_QPA_PLATFORM"):
+        return
+    if (
+        environ.get("XDG_SESSION_TYPE", "").strip().casefold() == "wayland"
+        and environ.get("WAYLAND_DISPLAY", "").strip()
+        and environ.get("DISPLAY", "").strip()
+    ):
+        environ["QT_QPA_PLATFORM"] = "xcb"
+
+
+_configure_linux_qpa_platform()
+
 from Main_App.workers.mp_env import set_blas_threads_single_process
 
 set_blas_threads_single_process()
 
 import multiprocessing as mp
-import sys
 
 from PySide6.QtCore import QCoreApplication
 
