@@ -18,6 +18,7 @@ def test_sidebar_section_headers_are_visually_distinct() -> None:
     stylesheet = build_sidebar_stylesheet()
 
     assert "#SidebarSectionLabel" in stylesheet
+    assert '#SidebarSectionLabel[centered="true"]' in stylesheet
     assert "#sidebar_beta_tools_divider" in stylesheet
     assert '#SidebarSelectionBar[active="true"]' in stylesheet
     assert "background-color: transparent;" in stylesheet

@@ -190,13 +190,20 @@ def make_button(
     return btn
 
 
-def make_section_label(text: str, parent: QWidget) -> QLabel:
+def make_section_label(
+    text: str,
+    parent: QWidget,
+    *,
+    centered: bool = False,
+) -> QLabel:
     label = QLabel(text, parent)
     label.setObjectName("SidebarSectionLabel")
+    label.setProperty("centered", centered)
     apply_font_role(label, "sidebar_section")
     label.setMinimumHeight(SECTION_LABEL_MIN_HEIGHT)
     label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+    horizontal_alignment = Qt.AlignHCenter if centered else Qt.AlignLeft
+    label.setAlignment(Qt.AlignVCenter | horizontal_alignment)
     return label
 
 
@@ -228,7 +235,11 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
     layout.addWidget(beta_divider)
     host.sidebar_beta_tools_divider = beta_divider
 
-    beta_label = make_section_label("Beta Tools", layout.parentWidget())
+    beta_label = make_section_label(
+        "Beta Tools",
+        layout.parentWidget(),
+        centered=True,
+    )
     beta_label.setProperty("sectionRole", "beta")
     layout.addWidget(beta_label)
     host.sidebar_beta_tools_label = beta_label
@@ -294,7 +305,7 @@ def init_sidebar(self) -> None:
     primary_layout.addWidget(_make_divider(primary_group, "sidebar_home_divider"))
     primary_layout.addSpacing(8)
 
-    tools_label = make_section_label("Quick Tools", primary_group)
+    tools_label = make_section_label("Quick Tools", primary_group, centered=True)
     primary_layout.addWidget(tools_label)
     self.sidebar_tools_label = tools_label
 

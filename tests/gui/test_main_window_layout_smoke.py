@@ -146,6 +146,8 @@ def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.sidebar_beta_tools_divider.frameShape() == QFrame.HLine
     assert win.sidebar_beta_tools_label.text() == "Beta Tools"
     assert win.sidebar_beta_tools_label.property("sectionRole") == "beta"
+    assert win.sidebar_beta_tools_label.property("centered") is True
+    assert win.sidebar_beta_tools_label.alignment() & Qt.AlignHCenter
     tools_layout = win.sidebar_tools_group.layout()
     divider_index = tools_layout.indexOf(win.sidebar_beta_tools_divider)
     label_index = tools_layout.indexOf(win.sidebar_beta_tools_label)
@@ -310,6 +312,10 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         if label.objectName() == "SidebarSectionLabel"
     }
     assert sidebar_section_titles == {"Quick Tools", "Utilities"}
+    assert win.sidebar_tools_label.property("centered") is True
+    assert win.sidebar_tools_label.alignment() & Qt.AlignHCenter
+    assert win.sidebar_utilities_label.property("centered") is False
+    assert win.sidebar_utilities_label.alignment() & Qt.AlignLeft
     settings_buttons = [
         widget
         for widget in win.sidebar.findChildren(QWidget)

@@ -435,6 +435,11 @@ def build_sidebar_stylesheet() -> str:
             font-weight: {css_font_weight("sidebar_section")};
         }}
 
+        #SidebarSectionLabel[centered="true"] {{
+            padding-left: 0;
+            padding-right: 0;
+        }}
+
         #sidebar_primary_group,
         #sidebar_tools_group,
         #sidebar_lower_region,
