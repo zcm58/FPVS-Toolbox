@@ -2,6 +2,7 @@ tests/audit/test_permission_safe_settings.py
 tests/audit/test_phase1_perf_hygiene.py
 tests/audit/test_stats_no_customtkinter_import.py
 tests/gui/test_busy_spinner.py
+tests/gui/test_free_harmonic_clustering_page.py
 tests/gui/test_gui_preproc_dialog.py
 tests/gui/test_individual_detectability_gui_smoke.py
 tests/gui/test_loreta_source_options_qt.py

@@ -9,6 +9,7 @@ from Main_App.gui.icons import _SIDEBAR_ICON_PATHS, sidebar_icon
 EXPECTED_SIDEBAR_ICONS = {
     "home",
     "stats",
+    "harmonic",
     "sensitivity",
     "chart",
     "scalp",

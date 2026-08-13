@@ -53,6 +53,18 @@ Primary areas:
   Visualizer. User-facing tool entry points are routed through the Main App GUI.
 - `src/Tools/Sequence_Figure/`: embedded publication-figure tool for drawing FPVS stimulus-sequence illustrations from manually selected stimulus images. Its renderer is widget-free and exports PNG/PDF/SVG figures; it is separate from the SNR Plot Generator.
 - `src/Tools/Sensitivity_Analysis/`: embedded, input-only idealized design-sensitivity calculator. Its widget-free backends estimate minimum detectable standardized effects for paired/one-sample t-tests, balanced one-way repeated-measures ANOVA, and the supported FPVS random-intercept linear mixed model. Mixed-model sensitivity uses cancellable Monte Carlo simulation in a Qt worker, mirrors the current `condition * ROI` fixed structure, and reports Monte Carlo uncertainty plus fit diagnostics under the simulated assumptions. It is not observed power or model-fit validation and does not read project data, persist settings, write files, or join the Stats pipeline.
+- `src/Tools/Free_Harmonic_Clustering/`: clean-room Free Harmonic Clustering
+  Analysis tool. Its numerical preparation, inference, and export modules stay
+  GUI-neutral; a thin project-bound PySide6 beta page owns setup, preparation
+  review, current-session results, and worker orchestration. It reads original managed
+  `FullFFT Amplitude (uV)` condition workbooks through the canonical project
+  dataset index, recomputes the paper-specific SNR/z preparation, preserves the
+  participant x sensor x harmonic tensor, and runs one paired or independent
+  two-level cluster-permutation contrast. New analyses use the fixed 197-edge
+  FieldTrip-style clean-room BioSemi64 graph and publish an additive polished
+  Excel/run-bundle export. It is separate from locked Standard FPVS Screening
+  and does not consume Stats-ready Summed BCA exports. See its
+  scoped `AGENTS.md` and `ARCHITECTURE.md`.
 - `src/Tools/LORETA_Visualizer/`: embedded 3D source-visualization tool. Its
   renderer displays anatomical meshes and prepared source payloads only; the
   current Hauk-informed L2-MNE source-PSD calculation and legacy/exploratory

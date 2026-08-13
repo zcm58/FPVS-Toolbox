@@ -62,10 +62,12 @@ DEFAULT_TOOL_LABELS = [
     "Sequence Figure",
 ]
 BETA_TOOL_ROLES = [
+    "btn_free_harmonic_clustering",
     "btn_ratio",
     "btn_individual_detectability",
 ]
 BETA_TOOL_LABELS = [
+    "Free Harmonic Clustering",
     "Ratio Calculator",
     "Individual Detectability",
 ]

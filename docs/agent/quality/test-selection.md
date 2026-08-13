@@ -39,6 +39,7 @@ environment.
 | `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |
 | `sensitivity-analysis` | Paired-test/RM-ANOVA power math plus mixed-model simulation, search, cancellation, uncertainty, and validation | Embedded page wiring, background worker, controls, results, reset, information tabs, and clipping smoke |
 | `stats` | Data/project context, pipeline, DV/harmonic rules, FullSNR, exports and reporting | Stats layout, focus, and window workflow smoke |
+| `free-harmonic-clustering` | FullFFT selected reads, spectral preparation, adjacency, paired/independent permutation inference, Excel/run-bundle exports, and static embedded-GUI contracts | Open the beta tool visibly, exercise prepare/run/cancel/results/folder actions, and complete the documented Neutral Happy release-gate reproduction; pytest-qt remains CI-only locally |
 | `loreta` | Payloads, source producers, project exports, rendering helpers and legacy boundaries | Embedded visualizer interaction and Qt worker smoke |
 | `figures` | Shared figure-style contract and focused output/rendering checks | Figure-export dialog interaction where applicable |
 | `legacy-boundary` | Retired package/source-localization audits and focused compatibility checks | None by default |

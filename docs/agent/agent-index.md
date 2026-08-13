@@ -18,6 +18,7 @@ shell-specific setup is needed.
 | Retired paths, legacy boundaries, removed features | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
 | Project paths, dialogs, exports, generated files | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
 | Stats package structure | `python .agents/scripts/audit/agent_audit.py --check stats-structure` |
+| Free Harmonic Clustering backend and embedded beta GUI | `python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused` |
 | Stats reporting size and legibility | `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` |
 | Cache/temp/debt-marker cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
 
@@ -34,6 +35,7 @@ shell-specific setup is needed.
 | Project manifests, project roots, file dialogs, exports, imports | `project-path-audit` | `docs/agent/architecture/project-io.md` |
 | Publication figure generation, `.png`/`.pdf` outputs, 600 dpi, figure typography | `project-path-audit` | `docs/agent/quality/figure-generation.md` |
 | Stats analysis, GUI/pipeline structure, reporting, exports | `pyside6-gui-cleanup` plus focused Stats tests | `docs/agent/architecture/statistics-tools.md` |
+| Free Harmonic Clustering, FullFFT tensor reads, cluster permutations | `project-path-audit` plus focused backend tests | `src/Tools/Free_Harmonic_Clustering/AGENTS.md`; `src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md` |
 | LORETA Visualizer, source visualization, or source-localization-adjacent rendering | `legacy-boundary-review` plus focused tool tests | `src/Tools/LORETA_Visualizer/AGENTS.md`; `src/Tools/LORETA_Visualizer/ARCHITECTURE.md` |
 | Publication scalp maps and source-data exports | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
 | FPVS sequence illustration figures, manual stimulus image slots, and high-DPI export | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Sequence_Figure/AGENTS.md` |

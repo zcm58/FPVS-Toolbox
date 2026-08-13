@@ -57,7 +57,8 @@ The **Workspace Tools** section of the app sidebar shows these default tools:
 Standard FPVS Screening, Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA
 Visualizer, and Sequence Figure.
 
-Ratio Calculator and Individual Detectability are beta tools.
+Free Harmonic Clustering Analysis, Ratio Calculator, and Individual
+Detectability are beta tools.
 To show their separate **Beta Tools** sidebar subsection, open
 **Settings > Advanced**, enable **Beta Tools**, then close and reopen FPVS
 Toolbox.

@@ -30,6 +30,12 @@ _SIDEBAR_ICON_PATHS = {
         <rect x="3" y="3.5" width="18" height="14" rx="2"/>
         <path d="m7 13 3-3 3 2 4-4"/><path d="M8 21h8M12 17.5V21"/>
     """,
+    "harmonic": """
+        <path d="M2.5 13 6 7l4 10 4-8 4 6 3.5-4"/>
+        <circle cx="2.5" cy="13" r=".8"/><circle cx="6" cy="7" r=".8"/>
+        <circle cx="10" cy="17" r=".8"/><circle cx="14" cy="9" r=".8"/>
+        <circle cx="18" cy="15" r=".8"/><circle cx="21.5" cy="11" r=".8"/>
+    """,
     "sensitivity": """
         <path d="M4 18a8 8 0 0 1 16 0"/><path d="M6.5 18h11"/>
         <path d="m12 15 4-4"/><circle cx="12" cy="15" r="1"/>

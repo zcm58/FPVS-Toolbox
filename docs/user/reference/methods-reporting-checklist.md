@@ -228,6 +228,78 @@ frequency-domain guidance for a priori ROIs, multiplicity correction, and
 maximum-statistic resampling. These sources support the method family; they do
 not make the Toolbox an exact reproduction of any one published pipeline.
 
+## Free Harmonic Clustering Analysis
+
+Use this checklist for the embedded Free Harmonic Clustering Analysis beta. It
+is a clean-room implementation of the sensor x harmonic method described by
+[Hermann et al.](https://doi.org/10.1111/psyp.70361) and informed by their
+[public implementation](https://github.com/oliver-hermann1/FPVS_Multiharmonic),
+not a claim of numerical identity with the authors' unpublished normalized
+tensors, spatial adjacency, dependency version, or expected outputs.
+
+### Design and inputs
+
+- State whether the run used a paired condition contrast or an independent
+  two-group contrast. For independent groups, report canonical `group_id`
+  values and N per group. For paired conditions, report complete paired N.
+- Report the one declared contrast and its direction (`arm A - arm B`). A set
+  of separate condition runs is not automatically corrected across conditions.
+- Report all ledger, participant-condition, whole-participant, and frequency-
+  domain QC exclusions. Missing nodes were not zero-filled or omitted with
+  varying degrees of freedom.
+- Report the BioSemi64 channel set/order, FFT duration/bin width, base and
+  oddball frequencies, ceiling, and complete +/-0.1-Hz window preflight.
+- State that project metadata, participant/group assignments, QC decisions,
+  and source workbooks were read without modification and that the completed
+  output was published as a new additive run.
+
+### Harmonics and normalization
+
+- State that raw amplitude came from original `FullFFT Amplitude (uV)`
+  workbooks. Saved Toolbox SNR, z-score, BCA, and Stats-ready Summed BCA were
+  not used as substitutes.
+- State whether Hermann automatic selection or a preregistered fixed highest
+  harmonic was used. For automatic selection, report the per-arm
+  grand-spectrum selector, sample-SD convention, exact `z > 3.29` detections,
+  and highest detection. In either mode, report the fill-through-highest
+  retained list and every dynamically derived base-rate-overlap exclusion.
+- Report the SNR rule: target amplitude divided by mean surrounding amplitude
+  within +/-0.1 Hz after excluding the target and immediately adjacent FFT
+  bins, without min/max trimming.
+- State that each participant/arm sensor x harmonic tensor was L2-normalized.
+  Inference concerns the relative spatial/harmonic distribution, not total
+  response magnitude.
+- State whether the analyzed sample selected the harmonic domain. The paper-
+  faithful default is adaptive/same-data selection, not an independently fixed
+  confirmatory domain.
+
+### Cluster inference
+
+- Report paired t or pooled independent t, degrees of freedom, two-sided entry
+  alpha `.01`, exact t threshold, and signed summed-t cluster mass.
+- Report the version and hash of the fixed 197-edge FieldTrip-style BioSemi64
+  spatial reconstruction, and state that it is an independent Toolbox graph,
+  not the authors' adjacency matrix. Every retained harmonic at one sensor was
+  adjacent to every other retained harmonic; spatial neighbors connected only
+  at the same harmonic; singleton clusters were allowed.
+- Report whole-participant sign flips/swaps or group-label permutations with
+  group sizes preserved, assignment count, RNG/seed, and assignment hash.
+- Report separate maximum-positive/minimum-negative nulls, strict Monte Carlo
+  comparison, `+1` p correction, and Monte Carlo confidence intervals.
+- State that raw cluster p-values were sign-specific and evaluated at `.025`
+  per direction for a two-tailed family alpha `.05`; report doubled p-values
+  when included in the export.
+- Report every observed cluster, membership, mass, cluster-level p/interval,
+  and descriptive cluster-average Cohen's d. Effect sizes are post-selection
+  and shape-dependent.
+- State the weak/global FWER limitation: significant clusters do not make
+  individual sensors, harmonics, cells, or boundaries pointwise significant.
+
+Retain `Free_Harmonic_Clustering_Results.xlsx`, the run manifest, compressed
+arrays, machine-readable result tables, source-workbook provenance, exact
+adjacency edges, null extrema or hash, Toolbox commit, and analysis
+plan/preregistration.
+
 ## Hauk-Informed Source-PSD Workflow
 
 This page describes the current source-localization workflow in FPVS

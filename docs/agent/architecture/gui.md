@@ -97,8 +97,8 @@ application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
 Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator,
-Individual Detectability, and Ratio Calculator are embedded in this workspace
-stack.
+Free Harmonic Clustering Analysis, Individual Detectability, and Ratio Calculator
+are embedded in this workspace stack.
 
 The Settings page groups project processing values under Preprocessing,
 analysis defaults under Stats, ROI definitions under ROIs, and app-level
@@ -114,7 +114,8 @@ in the Preprocessing tab.
 
 The sidebar's default tool list is Standard FPVS Screening, Sensitivity Analysis,
 SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence Figure, in that order.
-Ratio Calculator and Individual Detectability are beta tools: they remain
+Free Harmonic Clustering Analysis, Ratio Calculator, and Individual Detectability
+are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
 **Beta Tools** subsection only when the global Settings option
 `tools.enable_beta_tools` is enabled and the app has been restarted.
