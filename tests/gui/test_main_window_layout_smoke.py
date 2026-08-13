@@ -54,7 +54,7 @@ DEFAULT_TOOL_ROLES = [
     "btn_sequence_figure",
 ]
 DEFAULT_TOOL_LABELS = [
-    "Standard FPVS Screening",
+    "Data Screening",
     "Sensitivity Analysis",
     "SNR Plots",
     "Scalp Maps",
