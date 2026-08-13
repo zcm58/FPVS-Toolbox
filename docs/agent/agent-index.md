@@ -17,7 +17,7 @@ for initial routing before broad inspection.
 | Retired paths, legacy boundaries, removed features | `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` |
 | Project paths, dialogs, exports, generated files | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
 | Stats package structure | `python .agents/scripts/audit/agent_audit.py --check stats-structure` |
-| Free Harmonic Clustering backend | `python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused` |
+| Free Harmonic Clustering backend and embedded beta GUI | `python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused` |
 | Stats reporting size and legibility | `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` |
 | Cache/temp/debt-marker cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
 

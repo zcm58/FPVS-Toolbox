@@ -35,6 +35,7 @@ from .models import (
     FreeHarmonicMethodSpec,
     FreeHarmonicPreparationError,
     FrequencyWindowPlan,
+    ParticipantConditionExclusion,
     PreparationProvenance,
     PreparedContrast,
     ProjectContrastRequest,
@@ -128,6 +129,43 @@ def _manifest_manual_exclusions(index: ProjectDatasetIndex) -> tuple[str, ...]:
     return _sort_ids(preprocessing.get("manual_excluded_participants", ()))
 
 
+def _relevant_participant_condition_exclusions(
+    index: ProjectDatasetIndex,
+    request: ProjectContrastRequest,
+) -> tuple[ParticipantConditionExclusion, ...]:
+    conditions = {request.condition_a.casefold()}
+    if request.condition_b is not None:
+        conditions.add(request.condition_b.casefold())
+    group_keys = {group_id.casefold() for group_id in request.group_ids}
+    rows = {
+        (record.participant_id, record.condition)
+        for record in index.excluded_workbooks
+        if record.condition.casefold() in conditions
+        and (
+            not group_keys
+            or (
+                record.group_id is not None
+                and record.group_id.casefold() in group_keys
+            )
+        )
+    }
+    return tuple(
+        ParticipantConditionExclusion(
+            participant_id=participant_id,
+            condition=condition,
+        )
+        for participant_id, condition in sorted(
+            rows,
+            key=lambda row: (
+                row[1].casefold(),
+                row[0].casefold(),
+                row[1],
+                row[0],
+            ),
+        )
+    )
+
+
 def _completed_ledger_participants(
     project_root: Path,
 ) -> tuple[tuple[str, ...], bool]:
@@ -191,14 +229,21 @@ def _select_cohort(
         raise FreeHarmonicInputError(
             "Free Harmonic Clustering requires a managed project.json manifest."
         )
-    if not index.has_group_metadata:
+    if request.design is AnalysisDesign.INDEPENDENT_GROUPS:
+        if not index.has_group_metadata:
+            raise FreeHarmonicInputError(
+                "Independent-groups Free Harmonic Clustering requires "
+                "canonical project group metadata."
+            )
+        try:
+            index.require_group_assignments()
+        except Exception as exc:
+            raise FreeHarmonicInputError(str(exc)) from exc
+    elif request.group_ids and not index.has_group_metadata:
         raise FreeHarmonicInputError(
-            "Free Harmonic Clustering requires canonical project group metadata."
+            "A paired-condition group filter requires canonical project group "
+            "metadata."
         )
-    try:
-        index.require_group_assignments()
-    except Exception as exc:
-        raise FreeHarmonicInputError(str(exc)) from exc
 
     completed, ledger_filter_applied = _completed_ledger_participants(project_root)
     completed_keys = _casefold_ids(completed)
@@ -624,6 +669,9 @@ def prepare_project_contrast(
             cohort.frequency_qc_excluded_participants
         ),
         incomplete_pair_participants=cohort.incomplete_pair_participants,
+        participant_condition_exclusions=(
+            _relevant_participant_condition_exclusions(index, request)
+        ),
         dataset_diagnostics=diagnostics,
     )
     return PreparedContrast(

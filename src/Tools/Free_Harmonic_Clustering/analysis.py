@@ -5,11 +5,12 @@ exports, and Qt.  Public numerical tensors use participant x sensor x harmonic
 order.  A flattened node index is therefore ``sensor * harmonic_count +
 harmonic``.
 
-The fixed BioSemi64 edge table was derived independently from the standard MNE
-1.9.0 ``biosemi64`` montage with its EEG Delaunay-neighbour routine.  The table
-is embedded so scientific results do not change when MNE changes.  Its named
-edges and SHA-256 fingerprint are public audit data, not an unpublished author
-layout.
+The fixed BioSemi64 edge table is an independent clean-room reconstruction of
+the 197-edge FieldTrip-style compressed neighbourhood used by this tool.  It
+combines the previously embedded 169-edge MNE Delaunay graph with 28 explicitly
+audited FieldTrip-style neighbours.  The table is embedded so scientific
+results cannot drift with dependency upgrades.  It is not represented as the
+authors' unpublished adjacency matrix.
 """
 
 from __future__ import annotations
@@ -44,7 +45,9 @@ DEFAULT_CLUSTER_ALPHA_PER_TAIL = 0.025
 DEFAULT_PERMUTATION_COUNT = 10_000
 DEFAULT_BATCH_SIZE = 256
 
-BIOSEMI64_ADJACENCY_VERSION = "biosemi64-mne-delaunay-v1"
+BIOSEMI64_ADJACENCY_VERSION = (
+    "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
+)
 BIOSEMI64_CHANNELS: tuple[str, ...] = (
     "Fp1",
     "AF7",
@@ -114,7 +117,7 @@ BIOSEMI64_CHANNELS: tuple[str, ...] = (
 
 # Undirected edges in canonical-channel index order.  Keeping this literal is
 # intentional: adjacency must not silently drift with a dependency upgrade.
-_BIOSEMI64_EDGE_INDICES: tuple[tuple[int, int], ...] = (
+_BIOSEMI64_MNE_EDGE_INDICES: tuple[tuple[int, int], ...] = (
     (0, 1),
     (0, 2),
     (0, 32),
@@ -286,6 +289,51 @@ _BIOSEMI64_EDGE_INDICES: tuple[tuple[int, int], ...] = (
     (62, 63),
 )
 
+# Independently audited additions required to reconstruct the 197-edge
+# FieldTrip-style compressed BioSemi64 graph.  These additions are kept
+# separate from the historical 169-edge MNE subset so the derivation remains
+# reviewable and old run manifests remain interpretable by their own embedded
+# version, fingerprint, and edge table.
+_BIOSEMI64_FIELDTRIP_STYLE_ADDITIONS: tuple[tuple[int, int], ...] = (
+    (0, 3),  # Fp1--F1
+    (2, 5),  # AF3--F5
+    (4, 8),  # F3--FC5
+    (5, 7),  # F5--FT7
+    (8, 14),  # FC5--T7
+    (9, 13),  # FC3--C5
+    (10, 12),  # FC1--C3
+    (12, 18),  # C3--CP1
+    (13, 17),  # C5--CP3
+    (14, 16),  # T7--CP5
+    (15, 21),  # TP7--P5
+    (16, 20),  # CP5--P3
+    (19, 26),  # P1--O1
+    (21, 25),  # P5--PO3
+    (33, 38),  # Fp2--F2
+    (35, 40),  # AF4--F6
+    (39, 43),  # F4--FC6
+    (40, 42),  # F6--FT8
+    (43, 51),  # FC6--T8
+    (44, 50),  # FC4--C6
+    (45, 49),  # FC2--C4
+    (49, 55),  # C4--CP2
+    (50, 54),  # C6--CP4
+    (51, 53),  # T8--CP6
+    (52, 58),  # TP8--P6
+    (53, 57),  # CP6--P4
+    (56, 63),  # P2--O2
+    (58, 62),  # P6--PO4
+)
+
+_BIOSEMI64_EDGE_INDICES: tuple[tuple[int, int], ...] = tuple(
+    sorted(
+        {
+            *_BIOSEMI64_MNE_EDGE_INDICES,
+            *_BIOSEMI64_FIELDTRIP_STYLE_ADDITIONS,
+        }
+    )
+)
+
 
 def _named_biosemi64_edges() -> tuple[tuple[str, str], ...]:
     return tuple((BIOSEMI64_CHANNELS[left], BIOSEMI64_CHANNELS[right]) for left, right in _BIOSEMI64_EDGE_INDICES)
@@ -300,7 +348,9 @@ def _biosemi64_fingerprint() -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-BIOSEMI64_ADJACENCY_FINGERPRINT = "1f9c97bd057ea22d5bfdf9c36426e016eb27d94b8ced5959d241cc07fde613fa"
+BIOSEMI64_ADJACENCY_FINGERPRINT = (
+    "9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6"
+)
 if _biosemi64_fingerprint() != BIOSEMI64_ADJACENCY_FINGERPRINT:  # pragma: no cover - import-time integrity guard
     raise RuntimeError("The embedded BioSemi64 adjacency no longer matches its scientific fingerprint.")
 
@@ -382,7 +432,18 @@ def biosemi64_adjacency_manifest() -> dict[str, object]:
     return {
         "version": BIOSEMI64_ADJACENCY_VERSION,
         "fingerprint_sha256": BIOSEMI64_ADJACENCY_FINGERPRINT,
-        "derivation": "MNE 1.9.0 standard biosemi64 montage, EEG Delaunay triangulation",
+        "derivation": (
+            "Independent clean-room FieldTrip-style compressed BioSemi64 "
+            "reconstruction: fixed 169-edge MNE Delaunay subset plus 28 "
+            "audited neighbour additions; not the authors' unpublished matrix"
+        ),
+        "edge_count": len(BIOSEMI64_EDGES),
+        "base_edge_count": len(_BIOSEMI64_MNE_EDGE_INDICES),
+        "added_edge_count": len(_BIOSEMI64_FIELDTRIP_STYLE_ADDITIONS),
+        "added_edges": [
+            [BIOSEMI64_CHANNELS[left], BIOSEMI64_CHANNELS[right]]
+            for left, right in _BIOSEMI64_FIELDTRIP_STYLE_ADDITIONS
+        ],
         "channels": list(BIOSEMI64_CHANNELS),
         "edges": [list(edge) for edge in BIOSEMI64_EDGES],
     }

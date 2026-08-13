@@ -47,6 +47,15 @@ DEFAULT_TOOL_SPECS = (
 )
 
 BETA_TOOL_SPECS = (
+    # Navigation text is intentionally shortened to fit the fixed-width sidebar;
+    # the page, accessible name, tooltip, documentation, and exports use the
+    # full public title "Free Harmonic Clustering Analysis".
+    (
+        "btn_free_harmonic_clustering",
+        "Free Harmonic Clustering",
+        "harmonic",
+        "open_free_harmonic_clustering",
+    ),
     ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
     ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
     ("btn_epoch", "Epoch Averaging", "epoch", "open_epoch_averaging"),
@@ -215,6 +224,9 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
             sidebar_icon(icon_kind, ICON_PX),
             getattr(host, slot_name),
         )
+        if role == "btn_free_harmonic_clustering":
+            button.setToolTip("Free Harmonic Clustering Analysis (Beta)")
+            button.setAccessibleName("Free Harmonic Clustering Analysis")
         if role == "btn_epoch":
             host.sidebar_epoch_button = button
 

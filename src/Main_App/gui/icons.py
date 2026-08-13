@@ -48,6 +48,19 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         painter.drawRoundedRect(QRectF(size * 0.18, size * 0.22, size * 0.64, size * 0.46), 2, 2)
         painter.drawLine(QPointF(size * 0.50, size * 0.68), QPointF(size * 0.50, size * 0.82))
         painter.drawLine(QPointF(size * 0.35, size * 0.82), QPointF(size * 0.65, size * 0.82))
+    elif kind == "harmonic":
+        points = (
+            QPointF(size * 0.14, size * 0.54),
+            QPointF(size * 0.28, size * 0.30),
+            QPointF(size * 0.42, size * 0.70),
+            QPointF(size * 0.56, size * 0.38),
+            QPointF(size * 0.70, size * 0.62),
+            QPointF(size * 0.86, size * 0.46),
+        )
+        for left, right in zip(points, points[1:]):
+            painter.drawLine(left, right)
+        for point in points:
+            _draw_dot(painter, point, size * 0.035)
     elif kind == "sensitivity":
         center = QPointF(size * 0.50, size * 0.58)
         painter.drawArc(QRectF(size * 0.18, size * 0.26, size * 0.64, size * 0.64), 0, 180 * 16)

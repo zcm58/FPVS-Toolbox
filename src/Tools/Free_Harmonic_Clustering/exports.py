@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict
 from datetime import UTC, datetime
+from enum import Enum
 import hashlib
 from importlib.metadata import PackageNotFoundError, version as package_version
 import json
@@ -17,6 +18,11 @@ from typing import Iterable, Mapping, Sequence
 from uuid import uuid4
 
 import numpy as np
+from openpyxl import Workbook
+from openpyxl.cell.cell import Cell
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
 
 from config import FPVS_TOOLBOX_VERSION
 
@@ -28,16 +34,29 @@ from .models import (
     ExportReceipt,
     FreeHarmonicInputError,
     PreparedContrast,
+    SENSOR_ADJACENCY_VERSION,
 )
 
 
 TOOL_TITLE = "Free Harmonic Clustering Analysis"
-EXPORT_SCHEMA_VERSION = 1
+EXPORT_SCHEMA_VERSION = 2
 DEFAULT_RESULTS_SUBFOLDER = Path(
     "3 - Statistical Analysis Results",
     TOOL_TITLE,
 )
 MANIFEST_FILENAME = "manifest.json"
+HUMAN_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Results.xlsx"
+HUMAN_WORKBOOK_SHEETS: tuple[str, ...] = (
+    "Run Summary",
+    "Significant Clusters",
+    "All Clusters",
+    "Cluster Membership",
+    "Harmonic Selection",
+    "Participants and Exclusions",
+    "Methods and Provenance",
+    "Node Statistics",
+    "Null Distribution",
+)
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -126,6 +145,11 @@ def _validate_source_workbook(record: CohortWorkbook, project_root: Path) -> str
 def _validate_result(prepared: PreparedContrast, result: ClusterPermutationResult) -> None:
     if result.design is not prepared.request.design:
         raise ValueError("Prepared contrast and cluster result designs do not match.")
+    if result.sensor_adjacency_version != prepared.method.sensor_adjacency_version:
+        raise ValueError(
+            "Prepared method and cluster result spatial adjacency versions do "
+            "not match."
+        )
     expected_shape = (len(prepared.sensor_names), len(prepared.harmonics_hz))
     if result.observed_t.shape != expected_shape:
         raise ValueError(f"Cluster result shape must be {expected_shape}; got {result.observed_t.shape}.")
@@ -217,6 +241,22 @@ def _write_npz(path: Path, prepared: PreparedContrast, result: ClusterPermutatio
             candidate_harmonics_hz=np.asarray(plan.candidate_harmonics_hz),
             excluded_base_orders=np.asarray(plan.excluded_base_orders),
             excluded_base_harmonics_hz=np.asarray(plan.excluded_base_harmonics_hz),
+            harmonic_selection_mode=np.asarray(
+                prepared.selection.selection_mode.value,
+                dtype=np.str_,
+            ),
+            fixed_highest_harmonic_order=np.asarray(
+                -1
+                if prepared.selection.fixed_highest_harmonic_order is None
+                else prepared.selection.fixed_highest_harmonic_order,
+                dtype=np.int64,
+            ),
+            highest_detected_harmonic_order=np.asarray(
+                -1
+                if prepared.selection.highest_detected_order is None
+                else prepared.selection.highest_detected_order,
+                dtype=np.int64,
+            ),
             target_selected_indices=np.asarray(plan.target_selected_indices),
             noise_selected_indices=np.asarray(plan.noise_selected_indices),
             target_bin_frequencies_hz=np.asarray(target_bin_frequencies),
@@ -403,12 +443,18 @@ def _node_statistic_rows(
 def _harmonic_selection_rows(prepared: PreparedContrast) -> list[dict[str, object]]:
     selection = prepared.selection
     selected = {int(index) for index in selection.selected_candidate_indices}
+    selection_mode = selection.selection_mode.value
+    selection_ceiling = int(selection.selected_orders[-1])
+    automatic = selection_mode == "automatic"
     rows: list[dict[str, object]] = []
     for index, (order, harmonic_hz) in enumerate(
         zip(selection.candidate_orders, selection.candidate_harmonics_hz, strict=True)
     ):
         rows.append(
             {
+                "selection_mode": selection_mode,
+                "selection_ceiling_order": selection_ceiling,
+                "z_threshold_used_for_selection": automatic,
                 "harmonic_order": int(order),
                 "harmonic_hz": float(harmonic_hz),
                 "eligible_nonbase": True,
@@ -417,7 +463,15 @@ def _harmonic_selection_rows(prepared: PreparedContrast) -> list[dict[str, objec
                 "detected_arm_a": bool(selection.detected_arm_a[index]),
                 "detected_arm_b": bool(selection.detected_arm_b[index]),
                 "retained_fill_through": index in selected,
-                "exclusion_reason": "" if index in selected else "above_highest_detected",
+                "exclusion_reason": (
+                    ""
+                    if index in selected
+                    else (
+                        "above_highest_detected"
+                        if automatic
+                        else "above_fixed_ceiling"
+                    )
+                ),
             }
         )
     for order, harmonic_hz in zip(
@@ -427,6 +481,9 @@ def _harmonic_selection_rows(prepared: PreparedContrast) -> list[dict[str, objec
     ):
         rows.append(
             {
+                "selection_mode": selection_mode,
+                "selection_ceiling_order": selection_ceiling,
+                "z_threshold_used_for_selection": automatic,
                 "harmonic_order": int(order),
                 "harmonic_hz": float(harmonic_hz),
                 "eligible_nonbase": False,
@@ -443,16 +500,81 @@ def _harmonic_selection_rows(prepared: PreparedContrast) -> list[dict[str, objec
 
 def _participant_rows(prepared: PreparedContrast) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for arm, label, participant_ids in (
-        ("a", prepared.arm_a_label, prepared.participant_ids_a),
-        ("b", prepared.arm_b_label, prepared.participant_ids_b),
+    for arm, label, condition, participant_ids in (
+        (
+            "a",
+            prepared.arm_a_label,
+            prepared.request.condition_a,
+            prepared.participant_ids_a,
+        ),
+        (
+            "b",
+            prepared.arm_b_label,
+            prepared.request.condition_b or prepared.request.condition_a,
+            prepared.participant_ids_b,
+        ),
     ):
         for index, participant_id in enumerate(participant_ids):
             rows.append(
                 {
+                    "status": "Included",
+                    "exclusion_reason": "",
                     "arm": arm,
                     "arm_label": label,
+                    "condition": condition,
                     "participant_index": index,
+                    "participant_id": participant_id,
+                }
+            )
+    for exclusion in prepared.provenance.participant_condition_exclusions:
+        rows.append(
+            {
+                "status": "Excluded",
+                "exclusion_reason": exclusion.reason,
+                "arm": "",
+                "arm_label": "",
+                "condition": exclusion.condition,
+                "participant_index": "",
+                "participant_id": exclusion.participant_id,
+            }
+        )
+    return rows
+
+
+def _participant_and_exclusion_rows(
+    prepared: PreparedContrast,
+) -> list[dict[str, object]]:
+    """Return one human-readable cohort audit including excluded IDs."""
+
+    rows = [dict(row) for row in _participant_rows(prepared)]
+    exclusion_sets = (
+        (
+            "Processing ledger not completed",
+            prepared.provenance.ledger_excluded_participants,
+        ),
+        (
+            "Manual project exclusion",
+            prepared.provenance.manual_excluded_participants,
+        ),
+        (
+            "Frequency-domain QC exclusion",
+            prepared.provenance.frequency_qc_excluded_participants,
+        ),
+        (
+            "Incomplete paired-condition record",
+            prepared.provenance.incomplete_pair_participants,
+        ),
+    )
+    for reason, participant_ids in exclusion_sets:
+        for participant_id in participant_ids:
+            rows.append(
+                {
+                    "status": "Excluded",
+                    "exclusion_reason": reason,
+                    "arm": "",
+                    "arm_label": "",
+                    "condition": "",
+                    "participant_index": "",
                     "participant_id": participant_id,
                 }
             )
@@ -521,6 +643,763 @@ def _dependency_version(distribution: str) -> str | None:
         return None
 
 
+_TITLE_FILL = PatternFill("solid", fgColor="17365D")
+_SECTION_FILL = PatternFill("solid", fgColor="D9EAF7")
+_HEADER_FILL = PatternFill("solid", fgColor="2F75B5")
+_SIGNIFICANT_FILL = PatternFill("solid", fgColor="E2F0D9")
+_NOTE_FILL = PatternFill("solid", fgColor="F2F2F2")
+_WHITE_FONT = Font(name="Arial", color="FFFFFF", bold=True)
+_TITLE_FONT = Font(name="Arial", color="FFFFFF", bold=True, size=16)
+_BODY_FONT = Font(name="Arial", size=10)
+_HEADER_FONT = Font(name="Arial", color="FFFFFF", bold=True, size=10)
+_SECTION_FONT = Font(name="Arial", color="17365D", bold=True, size=11)
+_THIN_GRAY = Side(style="thin", color="D9E2F3")
+_BOTTOM_BORDER = Border(bottom=_THIN_GRAY)
+
+_HEADER_LABELS = {
+    "cluster_id": "Cluster ID",
+    "sign": "Sign",
+    "mass": "Cluster Mass",
+    "p_value": "Raw Tail p",
+    "conservative_p_value": "Conservative p",
+    "adjusted_two_sided_p_value": "Doubled Two-Sided p",
+    "p_ci_low": "Monte Carlo p CI Low",
+    "p_ci_high": "Monte Carlo p CI High",
+    "confidence_interval_straddles_alpha": "p CI Straddles Alpha",
+    "significant_cluster_level": "Significant",
+    "cluster_significant": "Cluster Significant",
+    "pointwise_significance_claimed": "Pointwise Claim",
+    "harmonic_hz": "Harmonic (Hz)",
+    "harmonics_hz": "Harmonics (Hz)",
+    "arm_a_z": "Arm A z",
+    "arm_b_z": "Arm B z",
+    "observed_t": "Observed t",
+    "n_a": "Arm A n",
+    "n_b": "Arm B n",
+    "arm_a_normalized_cluster_node_mean": "Arm A Normalized Mean",
+    "arm_b_normalized_cluster_node_mean": "Arm B Normalized Mean",
+    "arm_a_minus_b_raw_difference": "Arm A - B Difference",
+    "effect_denominator_sd": "Effect Denominator SD",
+    "effect_size": "Effect Size",
+    "effect_size_kind": "Effect Size Type",
+    "selection_mode": "Selection Mode",
+    "selection_ceiling_order": "Selection Ceiling Order",
+    "z_threshold_used_for_selection": "z Threshold Selected Domain",
+    "retained_fill_through": "Retained",
+    "eligible_nonbase": "Eligible Non-Base",
+    "exclusion_reason": "Exclusion Reason",
+    "participant_id": "Participant ID",
+    "participant_index": "Participant Index",
+    "arm_label": "Arm Label",
+    "permutation_index": "Permutation Index",
+    "positive_max_mass": "Positive Maximum Mass",
+    "negative_min_mass": "Negative Minimum Mass",
+}
+
+
+def _header_label(field_name: str) -> str:
+    return _HEADER_LABELS.get(
+        field_name,
+        field_name.replace("_", " ").title(),
+    )
+
+
+def _excel_scalar(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if value is None:
+        return ""
+    if isinstance(value, (tuple, list, set)):
+        return ", ".join(str(item) for item in value)
+    return value
+
+
+def _set_excel_value(cell: Cell, value: object) -> None:
+    """Write data without allowing untrusted text to become a formula."""
+
+    scalar = _excel_scalar(value)
+    if isinstance(scalar, str):
+        cell.value = scalar
+        cell.data_type = "s"
+        if scalar.startswith(("=", "+", "-", "@")):
+            cell.number_format = "@"
+    else:
+        cell.value = scalar
+
+
+def _number_format(field_name: str) -> str | None:
+    if field_name in {
+        "cluster_id",
+        "tie_count",
+        "node_count",
+        "n_a",
+        "n_b",
+        "sensor_count",
+        "harmonic_count",
+        "node_index",
+        "sensor_index",
+        "harmonic_index",
+        "harmonic_order",
+        "participant_index",
+        "permutation_index",
+        "selection_ceiling_order",
+    }:
+        return "0"
+    if field_name in {
+        "p_value",
+        "conservative_p_value",
+        "adjusted_two_sided_p_value",
+        "p_ci_low",
+        "p_ci_high",
+        "cluster_p_value",
+    }:
+        return "0.0000"
+    if "hz" in field_name:
+        return "0.0000"
+    if field_name.endswith("seconds"):
+        return "0.000"
+    if field_name in {
+        "mass",
+        "cluster_mass",
+        "observed_t",
+        "effect_size",
+        "effect_denominator_sd",
+        "arm_a_z",
+        "arm_b_z",
+        "arm_a_normalized_cluster_node_mean",
+        "arm_b_normalized_cluster_node_mean",
+        "arm_a_minus_b_raw_difference",
+        "positive_max_mass",
+        "negative_min_mass",
+    }:
+        return "0.0000"
+    return None
+
+
+def _set_sheet_title(
+    sheet: Worksheet,
+    *,
+    title: str,
+    description: str,
+    column_count: int,
+) -> None:
+    last_column = get_column_letter(max(1, column_count))
+    sheet.merge_cells(f"A1:{last_column}1")
+    sheet.merge_cells(f"A2:{last_column}2")
+    _set_excel_value(sheet["A1"], title)
+    _set_excel_value(sheet["A2"], description)
+    sheet["A1"].fill = _TITLE_FILL
+    sheet["A1"].font = _TITLE_FONT
+    sheet["A1"].alignment = Alignment(vertical="center")
+    sheet["A2"].fill = _NOTE_FILL
+    sheet["A2"].font = Font(name="Arial", color="404040", italic=True, size=10)
+    sheet["A2"].alignment = Alignment(wrap_text=True, vertical="center")
+    sheet.row_dimensions[1].height = 26
+    sheet.row_dimensions[2].height = 32
+    sheet.sheet_view.showGridLines = False
+
+
+def _set_reasonable_widths(
+    sheet: Worksheet,
+    *,
+    fields: Sequence[str],
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    for column_index, field_name in enumerate(fields, start=1):
+        longest = len(_header_label(field_name))
+        for row in rows[:500]:
+            value = str(_excel_scalar(row.get(field_name, "")))
+            longest = max(longest, min(len(value), 80))
+        if field_name in {
+            "sensors",
+            "harmonic_orders",
+            "harmonics_hz",
+            "exclusion_reason",
+            "effect_direction",
+            "effect_size_kind",
+            "item",
+            "value",
+            "notes",
+        }:
+            maximum = 48
+        else:
+            maximum = 28
+        sheet.column_dimensions[get_column_letter(column_index)].width = min(
+            max(longest + 2, 11),
+            maximum,
+        )
+
+
+def _write_table_sheet(
+    sheet: Worksheet,
+    *,
+    title: str,
+    description: str,
+    fields: Sequence[str],
+    rows: Sequence[Mapping[str, object]],
+    empty_message: str = "No rows were produced.",
+    significant_field: str | None = None,
+) -> None:
+    _set_sheet_title(
+        sheet,
+        title=title,
+        description=description,
+        column_count=len(fields),
+    )
+    header_row = 4
+    for column_index, field_name in enumerate(fields, start=1):
+        cell = sheet.cell(row=header_row, column=column_index)
+        _set_excel_value(cell, _header_label(field_name))
+        cell.fill = _HEADER_FILL
+        cell.font = _HEADER_FONT
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
+    sheet.row_dimensions[header_row].height = 32
+    if rows:
+        for row_index, row in enumerate(rows, start=header_row + 1):
+            significant = (
+                significant_field is not None
+                and bool(row.get(significant_field, False))
+            )
+            for column_index, field_name in enumerate(fields, start=1):
+                cell = sheet.cell(row=row_index, column=column_index)
+                _set_excel_value(cell, row.get(field_name, ""))
+                cell.font = _BODY_FONT
+                cell.alignment = Alignment(
+                    vertical="top",
+                    wrap_text=field_name
+                    in {
+                        "sensors",
+                        "harmonic_orders",
+                        "harmonics_hz",
+                        "exclusion_reason",
+                        "effect_direction",
+                        "effect_size_kind",
+                        "item",
+                        "value",
+                        "notes",
+                    },
+                )
+                cell.border = _BOTTOM_BORDER
+                number_format = _number_format(field_name)
+                if number_format is not None and not isinstance(cell.value, str):
+                    cell.number_format = number_format
+                if significant:
+                    cell.fill = _SIGNIFICANT_FILL
+        last_row = header_row + len(rows)
+    else:
+        last_row = header_row
+        last_column = get_column_letter(max(1, len(fields)))
+        sheet.merge_cells(
+            start_row=header_row + 1,
+            start_column=1,
+            end_row=header_row + 1,
+            end_column=len(fields),
+        )
+        _set_excel_value(sheet.cell(row=header_row + 1, column=1), empty_message)
+        sheet.cell(row=header_row + 1, column=1).font = Font(
+            name="Arial",
+            italic=True,
+            color="666666",
+        )
+        sheet.cell(row=header_row + 1, column=1).fill = _NOTE_FILL
+        sheet.cell(row=header_row + 1, column=1).alignment = Alignment(
+            wrap_text=True
+        )
+        sheet.column_dimensions[last_column].width = max(
+            sheet.column_dimensions[last_column].width or 0,
+            12,
+        )
+    sheet.auto_filter.ref = (
+        f"A{header_row}:{get_column_letter(len(fields))}{last_row}"
+    )
+    sheet.freeze_panes = f"A{header_row + 1}"
+    _set_reasonable_widths(sheet, fields=fields, rows=rows)
+
+
+def _cluster_sort_key(row: Mapping[str, object]) -> tuple[bool, float, int]:
+    p_value = float(row.get("p_value", 1.0))
+    cluster_id = int(row.get("cluster_id", 0))
+    return (not bool(row.get("significant_cluster_level", False)), p_value, cluster_id)
+
+
+def _methods_and_provenance_rows(
+    prepared: PreparedContrast,
+    result: ClusterPermutationResult,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+
+    def add(category: str, item: str, value: object, notes: str = "") -> None:
+        rows.append(
+            {
+                "category": category,
+                "item": item,
+                "value": value,
+                "notes": notes,
+            }
+        )
+
+    for field_name, value in asdict(prepared.method).items():
+        add("Method specification", _header_label(field_name), value)
+    add(
+        "Normalization",
+        "Participant normalization",
+        "Global L2 over each participant-arm sensor x retained-harmonic matrix",
+        "The estimand is the relative sensor/harmonic response distribution.",
+    )
+    add("Analysis", "Design", prepared.request.design.value)
+    add("Analysis", "Degrees of freedom", result.degrees_of_freedom)
+    add(
+        "Analysis",
+        "Cluster-forming t threshold",
+        result.cluster_forming_threshold,
+    )
+    add("Analysis", "Permutations evaluated", result.permutations_evaluated)
+    add("Analysis", "RNG algorithm", result.rng_algorithm)
+    add("Analysis", "Permutation seed", result.seed)
+    add(
+        "Analysis",
+        "Permutation assignment SHA-256",
+        result.permutation_assignment_hash,
+    )
+    add(
+        "Inference",
+        "Primary cluster p-value",
+        "Raw sign-specific Monte Carlo tail p",
+        f"Judged against alpha {result.cluster_alpha_per_tail:g} per direction.",
+    )
+    add(
+        "Inference",
+        "Secondary p-value",
+        "Doubled two-sided p",
+        "Reported as a secondary descriptive conversion, not an extra family correction.",
+    )
+    add(
+        "Inference",
+        "Inference scope",
+        "Cluster level only",
+        "Individual sensor-harmonic nodes are not pointwise significant claims.",
+    )
+    add("Adjacency", "Spatial version", result.sensor_adjacency_version)
+    add(
+        "Adjacency",
+        "Spatial fingerprint SHA-256",
+        result.sensor_adjacency_fingerprint,
+    )
+    add("Adjacency", "Spatial edge count", len(result.sensor_adjacency_edges))
+    add(
+        "Adjacency",
+        "Spatial derivation",
+        (
+            "Independent clean-room FieldTrip-style compressed BioSemi64 "
+            "reconstruction; fixed 169-edge MNE subset plus 28 audited additions"
+            if result.sensor_adjacency_version == SENSOR_ADJACENCY_VERSION
+            and len(result.sensor_adjacency_edges) == 197
+            else "Explicit versioned edge table recorded in manifest.json"
+        ),
+        "This is not represented as the authors' unpublished adjacency matrix.",
+    )
+    add("Adjacency", "Harmonic adjacency", "Complete within sensor")
+    add("Adjacency", "Flattening order", "Sensor-major")
+    provenance = prepared.provenance
+    add("Input provenance", "Source sheet", provenance.source_sheet)
+    add("Input provenance", "Source workbook count", provenance.workbook_count)
+    add(
+        "Input provenance",
+        "Participant-condition exclusion count",
+        len(provenance.participant_condition_exclusions),
+    )
+    add("Input provenance", "Grid fingerprint", provenance.grid_fingerprint)
+    add(
+        "Input provenance",
+        "Selected-column fingerprint",
+        provenance.selected_columns_fingerprint,
+    )
+    add(
+        "Input provenance",
+        "Frequency resolution (Hz)",
+        provenance.frequency_resolution_hz,
+    )
+    add("Timing", "Header reads (s)", provenance.header_read_seconds)
+    add("Timing", "Amplitude reads (s)", provenance.amplitude_read_seconds)
+    add(
+        "Timing",
+        "Numeric preparation (s)",
+        provenance.numeric_preparation_seconds,
+    )
+    add("Timing", "Preparation total (s)", provenance.total_seconds)
+    for warning in result.warnings:
+        add("Warnings", "Analysis warning", warning)
+    for diagnostic in provenance.dataset_diagnostics:
+        add("Warnings", "Dataset diagnostic", diagnostic)
+    add(
+        "Reference",
+        "Hermann et al. article",
+        "https://doi.org/10.1111/psyp.70361",
+    )
+    add(
+        "Reference",
+        "Public full text",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC13379596/",
+    )
+    add(
+        "Reference",
+        "Declared public code/data project",
+        "https://github.com/users/oliver-hermann1/projects/1",
+    )
+    add(
+        "Reference",
+        "Implementation status",
+        "Paper-faithful clean-room implementation; not author-validated",
+    )
+    return rows
+
+
+def _write_run_summary_sheet(
+    sheet: Worksheet,
+    *,
+    run_id: str,
+    created_at_utc: str,
+    prepared: PreparedContrast,
+    result: ClusterPermutationResult,
+    cluster_rows: Sequence[Mapping[str, object]],
+) -> None:
+    _set_sheet_title(
+        sheet,
+        title=TOOL_TITLE,
+        description=(
+            "Human-readable run summary. Raw tail p-values are the primary "
+            "Hermann-compatible cluster-level results."
+        ),
+        column_count=9,
+    )
+    sheet.freeze_panes = "A4"
+    sheet.merge_cells("A4:I4")
+    _set_excel_value(sheet["A4"], "Run Overview")
+    sheet["A4"].fill = _SECTION_FILL
+    sheet["A4"].font = _SECTION_FONT
+    sheet["A4"].alignment = Alignment(vertical="center")
+    contrast = f"{prepared.arm_a_label} - {prepared.arm_b_label}"
+    overview = (
+        ("Run ID", run_id),
+        ("Created (UTC)", created_at_utc),
+        ("Design", prepared.request.design.value),
+        ("Contrast", contrast),
+        ("Condition A", prepared.request.condition_a),
+        ("Condition B", prepared.request.condition_b or ""),
+        ("Arm A n", len(prepared.participant_ids_a)),
+        ("Arm B n", len(prepared.participant_ids_b)),
+        ("Selection Mode", prepared.selection.selection_mode.value),
+        (
+            "Retained Harmonics",
+            ", ".join(
+                f"H{int(order)} ({float(frequency):g} Hz)"
+                for order, frequency in zip(
+                    prepared.harmonic_orders,
+                    prepared.harmonics_hz,
+                    strict=True,
+                )
+            ),
+        ),
+        ("Permutations", result.permutations_evaluated),
+        ("Significant Clusters", sum(cluster.significant for cluster in result.clusters)),
+        ("Spatial Adjacency", result.sensor_adjacency_version),
+    )
+    for index, (label, value) in enumerate(overview, start=5):
+        _set_excel_value(sheet.cell(index, 1), label)
+        _set_excel_value(sheet.cell(index, 2), value)
+        sheet.cell(index, 1).font = Font(name="Arial", bold=True, color="404040")
+        sheet.cell(index, 2).font = _BODY_FONT
+        sheet.cell(index, 1).border = _BOTTOM_BORDER
+        sheet.cell(index, 2).border = _BOTTOM_BORDER
+    sheet.column_dimensions["A"].width = 24
+    sheet.column_dimensions["B"].width = 60
+
+    significant = sorted(
+        (
+            row
+            for row in cluster_rows
+            if bool(row.get("significant_cluster_level", False))
+        ),
+        key=_cluster_sort_key,
+    )
+    section_row = 5 + len(overview) + 1
+    sheet.merge_cells(
+        start_row=section_row,
+        start_column=1,
+        end_row=section_row,
+        end_column=9,
+    )
+    _set_excel_value(sheet.cell(section_row, 1), "Significant Results")
+    sheet.cell(section_row, 1).fill = _SECTION_FILL
+    sheet.cell(section_row, 1).font = _SECTION_FONT
+    summary_fields = (
+        "cluster_id",
+        "sign",
+        "sensors",
+        "harmonics_hz",
+        "mass",
+        "p_value",
+        "adjusted_two_sided_p_value",
+        "effect_size",
+        "effect_size_kind",
+    )
+    header_row = section_row + 1
+    for column_index, field_name in enumerate(summary_fields, start=1):
+        cell = sheet.cell(header_row, column_index)
+        _set_excel_value(cell, _header_label(field_name))
+        cell.fill = _HEADER_FILL
+        cell.font = _HEADER_FONT
+        cell.alignment = Alignment(wrap_text=True, horizontal="center")
+    if significant:
+        for row_index, row in enumerate(significant, start=header_row + 1):
+            for column_index, field_name in enumerate(summary_fields, start=1):
+                cell = sheet.cell(row_index, column_index)
+                _set_excel_value(cell, row.get(field_name, ""))
+                cell.font = _BODY_FONT
+                cell.fill = _SIGNIFICANT_FILL
+                cell.border = _BOTTOM_BORDER
+                number_format = _number_format(field_name)
+                if number_format and not isinstance(cell.value, str):
+                    cell.number_format = number_format
+    else:
+        sheet.merge_cells(
+            start_row=header_row + 1,
+            start_column=1,
+            end_row=header_row + 1,
+            end_column=9,
+        )
+        _set_excel_value(
+            sheet.cell(header_row + 1, 1),
+            "No clusters met the Hermann-compatible per-direction threshold.",
+        )
+        sheet.cell(header_row + 1, 1).fill = _NOTE_FILL
+        sheet.cell(header_row + 1, 1).font = Font(
+            name="Arial",
+            italic=True,
+            color="666666",
+        )
+    for column_index, width in enumerate(
+        (12, 12, 36, 20, 15, 14, 20, 14, 24),
+        start=1,
+    ):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+
+
+def _write_human_workbook(
+    path: Path,
+    *,
+    run_id: str,
+    created_at_utc: str,
+    prepared: PreparedContrast,
+    result: ClusterPermutationResult,
+    cluster_rows: Sequence[Mapping[str, object]],
+    membership_rows: Sequence[Mapping[str, object]],
+    harmonic_rows: Sequence[Mapping[str, object]],
+    participant_rows: Sequence[Mapping[str, object]],
+    node_rows: Sequence[Mapping[str, object]],
+    null_rows: Sequence[Mapping[str, object]],
+) -> None:
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = HUMAN_WORKBOOK_SHEETS[0]
+    for sheet_name in HUMAN_WORKBOOK_SHEETS[1:]:
+        workbook.create_sheet(sheet_name)
+    _write_run_summary_sheet(
+        summary,
+        run_id=run_id,
+        created_at_utc=created_at_utc,
+        prepared=prepared,
+        result=result,
+        cluster_rows=cluster_rows,
+    )
+
+    cluster_fields = (
+        "cluster_id",
+        "sign",
+        "effect_direction",
+        "mass",
+        "p_value",
+        "conservative_p_value",
+        "adjusted_two_sided_p_value",
+        "p_ci_low",
+        "p_ci_high",
+        "confidence_interval_straddles_alpha",
+        "significant_cluster_level",
+        "node_count",
+        "sensors",
+        "harmonic_orders",
+        "harmonics_hz",
+        "effect_size",
+        "effect_size_kind",
+        "arm_a_normalized_cluster_node_mean",
+        "arm_b_normalized_cluster_node_mean",
+        "arm_a_minus_b_raw_difference",
+        "n_a",
+        "n_b",
+    )
+    sorted_clusters = sorted(cluster_rows, key=_cluster_sort_key)
+    significant_clusters = [
+        row
+        for row in sorted_clusters
+        if bool(row.get("significant_cluster_level", False))
+    ]
+    _write_table_sheet(
+        workbook["Significant Clusters"],
+        title="Significant Clusters",
+        description=(
+            "Clusters meeting the raw sign-specific Monte Carlo p < .025 "
+            "threshold, sorted by ascending raw tail p."
+        ),
+        fields=cluster_fields,
+        rows=significant_clusters,
+        empty_message=(
+            "No clusters met the Hermann-compatible per-direction threshold."
+        ),
+        significant_field="significant_cluster_level",
+    )
+    _write_table_sheet(
+        workbook["All Clusters"],
+        title="All Observed Clusters",
+        description=(
+            "All sign-specific observed clusters; significant clusters are "
+            "listed first, followed by ascending raw tail p."
+        ),
+        fields=cluster_fields,
+        rows=sorted_clusters,
+        significant_field="significant_cluster_level",
+    )
+    membership_fields = (
+        "cluster_id",
+        "sign",
+        "node_index",
+        "sensor_index",
+        "sensor",
+        "harmonic_index",
+        "harmonic_order",
+        "harmonic_hz",
+        "observed_t",
+        "cluster_mass",
+        "cluster_p_value",
+        "cluster_significant",
+    )
+    _write_table_sheet(
+        workbook["Cluster Membership"],
+        title="Cluster Membership",
+        description=(
+            "Sensor-harmonic nodes belonging to each cluster. Inference is at "
+            "the cluster level, not the individual-node level."
+        ),
+        fields=membership_fields,
+        rows=membership_rows,
+        significant_field="cluster_significant",
+    )
+    harmonic_fields = (
+        "selection_mode",
+        "selection_ceiling_order",
+        "z_threshold_used_for_selection",
+        "harmonic_order",
+        "harmonic_hz",
+        "eligible_nonbase",
+        "arm_a_z",
+        "arm_b_z",
+        "detected_arm_a",
+        "detected_arm_b",
+        "retained_fill_through",
+        "exclusion_reason",
+    )
+    _write_table_sheet(
+        workbook["Harmonic Selection"],
+        title="Harmonic Selection Audit",
+        description=(
+            "Eligible oddball harmonics, base-rate overlaps, grand-spectrum z "
+            "audit, and the retained complete fill-through domain."
+        ),
+        fields=harmonic_fields,
+        rows=harmonic_rows,
+    )
+    participant_fields = (
+        "status",
+        "exclusion_reason",
+        "arm",
+        "arm_label",
+        "condition",
+        "participant_index",
+        "participant_id",
+    )
+    _write_table_sheet(
+        workbook["Participants and Exclusions"],
+        title="Participants and Exclusions",
+        description=(
+            "Included analysis-arm membership plus project/QC exclusions "
+            "recorded during preparation."
+        ),
+        fields=participant_fields,
+        rows=participant_rows,
+    )
+    _write_table_sheet(
+        workbook["Methods and Provenance"],
+        title="Methods and Provenance",
+        description=(
+            "Versioned scientific settings, inference scope, adjacency "
+            "identity, input fingerprints, timings, warnings, and references."
+        ),
+        fields=("category", "item", "value", "notes"),
+        rows=_methods_and_provenance_rows(prepared, result),
+    )
+    node_fields = (
+        "node_index",
+        "sensor_index",
+        "sensor",
+        "harmonic_index",
+        "harmonic_order",
+        "harmonic_hz",
+        "observed_t",
+        "cluster_id",
+        "cluster_sign",
+        "cluster_p_value",
+        "cluster_significant",
+        "pointwise_significance_claimed",
+    )
+    _write_table_sheet(
+        workbook["Node Statistics"],
+        title="Node Statistics",
+        description=(
+            "Observed sensor-harmonic t statistics and cluster assignments. "
+            "These rows do not make pointwise significance claims."
+        ),
+        fields=node_fields,
+        rows=node_rows,
+        significant_field="cluster_significant",
+    )
+    _write_table_sheet(
+        workbook["Null Distribution"],
+        title="Permutation Null Distribution",
+        description=(
+            "Separate positive maximum and negative minimum cluster-mass "
+            "extrema for every evaluated whole-participant permutation."
+        ),
+        fields=(
+            "permutation_index",
+            "positive_max_mass",
+            "negative_min_mass",
+        ),
+        rows=null_rows,
+    )
+    workbook.save(path)
+    with path.open("rb+") as stream:
+        os.fsync(stream.fileno())
+
+
 def _frequency_plan_manifest(prepared: PreparedContrast) -> dict[str, object]:
     plan = prepared.frequency_plan
     target_frequencies = plan.selected_frequencies_hz[plan.target_selected_indices]
@@ -556,6 +1435,7 @@ def _manifest_payload(
     result: ClusterPermutationResult,
     source_rows: Sequence[Mapping[str, object]],
     artifacts: Sequence[Mapping[str, object]],
+    created_at_utc: str,
 ) -> dict[str, object]:
     selection = prepared.selection
     provenance = prepared.provenance
@@ -563,7 +1443,7 @@ def _manifest_payload(
         "schema_version": EXPORT_SCHEMA_VERSION,
         "status": "complete",
         "run_id": run_id,
-        "created_at_utc": datetime.now(UTC).isoformat(),
+        "created_at_utc": created_at_utc,
         "tool": {
             "title": TOOL_TITLE,
             "method_version": prepared.method.method_version,
@@ -593,12 +1473,22 @@ def _manifest_payload(
             "cluster_level_inference_only": True,
             "pointwise_sensor_harmonic_significance": False,
             "cross_contrast_family_corrected": False,
-            "adaptive_harmonic_selection_uses_analysis_data": True,
+            "adaptive_harmonic_selection_uses_analysis_data": (
+                selection.selection_mode.value == "automatic"
+            ),
             "adaptive_selection_confirmatory_caveat": (
-                "The paper-faithful harmonic domain is selected from the "
-                "observed analysis arms before permutation and remains fixed; "
-                "confirmatory work should prefer a preregistered or independent "
-                "domain."
+                (
+                    "The paper-faithful harmonic domain is selected from the "
+                    "observed analysis arms before permutation and remains fixed; "
+                    "confirmatory work should prefer a preregistered or independent "
+                    "domain."
+                )
+                if selection.selection_mode.value == "automatic"
+                else (
+                    "The retained fill-through domain used the declared fixed "
+                    "highest eligible oddball harmonic and did not depend on "
+                    "crossing the observed-arm z threshold."
+                )
             ),
             "exchangeability_assumption": (
                 "Within-participant whole-tensor swaps are exchangeable under "
@@ -661,13 +1551,22 @@ def _manifest_payload(
                 "manual_excluded_participants": list(provenance.manual_excluded_participants),
                 "frequency_qc_excluded_participants": list(provenance.frequency_qc_excluded_participants),
                 "incomplete_pair_participants": list(provenance.incomplete_pair_participants),
+                "participant_condition_exclusions": [
+                    asdict(row)
+                    for row in provenance.participant_condition_exclusions
+                ],
                 "dataset_diagnostics": list(provenance.dataset_diagnostics),
             },
         },
         "harmonic_selection": {
+            "mode": selection.selection_mode.value,
+            "fixed_highest_harmonic_order": (
+                selection.fixed_highest_harmonic_order
+            ),
             "z_threshold": selection.z_threshold,
             "z_ddof": selection.z_ddof,
             "highest_detected_order": selection.highest_detected_order,
+            "selected_ceiling_order": int(selection.selected_orders[-1]),
             "selected_orders": [int(value) for value in selection.selected_orders],
             "selected_harmonics_hz": [float(value) for value in selection.selected_harmonics_hz],
             "candidate_count": int(selection.candidate_orders.size),
@@ -692,6 +1591,27 @@ def _manifest_payload(
         "adjacency": {
             "version": result.sensor_adjacency_version,
             "fingerprint_sha256": result.sensor_adjacency_fingerprint,
+            "edge_count": len(result.sensor_adjacency_edges),
+            "derivation": (
+                "Independent clean-room FieldTrip-style compressed BioSemi64 "
+                "reconstruction: fixed 169-edge MNE Delaunay subset plus 28 "
+                "audited neighbour additions; not the authors' unpublished matrix"
+                if result.sensor_adjacency_version == SENSOR_ADJACENCY_VERSION
+                and len(result.sensor_adjacency_edges) == 197
+                else "Explicit caller-provided versioned spatial edge table"
+            ),
+            "base_edge_count": (
+                169
+                if result.sensor_adjacency_version == SENSOR_ADJACENCY_VERSION
+                and len(result.sensor_adjacency_edges) == 197
+                else None
+            ),
+            "added_edge_count": (
+                28
+                if result.sensor_adjacency_version == SENSOR_ADJACENCY_VERSION
+                and len(result.sensor_adjacency_edges) == 197
+                else None
+            ),
             "sensor_edges": [list(edge) for edge in result.sensor_adjacency_edges],
             "harmonic_adjacency": "complete-within-sensor",
             "flattening_order": "sensor-major",
@@ -739,6 +1659,14 @@ def export_free_harmonic_run(
     )
     _validate_result(prepared, result)
     source_rows = _source_workbook_rows(prepared, project_root)
+    cluster_rows = _cluster_summary_rows(prepared, result)
+    membership_rows = _cluster_membership_rows(prepared, result)
+    node_rows = _node_statistic_rows(prepared, result)
+    harmonic_rows = _harmonic_selection_rows(prepared)
+    machine_participant_rows = _participant_rows(prepared)
+    human_participant_rows = _participant_and_exclusion_rows(prepared)
+    null_rows = _null_extrema_rows(result)
+    created_at_utc = datetime.now(UTC).isoformat()
     if final_directory.exists():
         raise FileExistsError(f"Free-harmonic run already exists: {final_directory}")
 
@@ -786,7 +1714,7 @@ def export_free_harmonic_run(
                 "effect_size",
                 "effect_size_kind",
             ),
-            _cluster_summary_rows(prepared, result),
+            cluster_rows,
         ),
         (
             "cluster_membership",
@@ -805,7 +1733,7 @@ def export_free_harmonic_run(
                 "cluster_p_value",
                 "cluster_significant",
             ),
-            _cluster_membership_rows(prepared, result),
+            membership_rows,
         ),
         (
             "node_statistics",
@@ -824,12 +1752,15 @@ def export_free_harmonic_run(
                 "cluster_significant",
                 "pointwise_significance_claimed",
             ),
-            _node_statistic_rows(prepared, result),
+            node_rows,
         ),
         (
             "harmonic_selection",
             "harmonic_selection.csv",
             (
+                "selection_mode",
+                "selection_ceiling_order",
+                "z_threshold_used_for_selection",
                 "harmonic_order",
                 "harmonic_hz",
                 "eligible_nonbase",
@@ -840,13 +1771,21 @@ def export_free_harmonic_run(
                 "retained_fill_through",
                 "exclusion_reason",
             ),
-            _harmonic_selection_rows(prepared),
+            harmonic_rows,
         ),
         (
             "participants",
             "participants.csv",
-            ("arm", "arm_label", "participant_index", "participant_id"),
-            _participant_rows(prepared),
+            (
+                "status",
+                "exclusion_reason",
+                "arm",
+                "arm_label",
+                "condition",
+                "participant_index",
+                "participant_id",
+            ),
+            machine_participant_rows,
         ),
         (
             "source_workbooks",
@@ -870,7 +1809,7 @@ def export_free_harmonic_run(
             "null_extrema",
             "null_extrema.csv",
             ("permutation_index", "positive_max_mass", "negative_min_mass"),
-            _null_extrema_rows(result),
+            null_rows,
         ),
     )
 
@@ -899,6 +1838,29 @@ def export_free_harmonic_run(
             )
         )
 
+        workbook_path = staging / HUMAN_WORKBOOK_FILENAME
+        _write_human_workbook(
+            workbook_path,
+            run_id=resolved_run_id,
+            created_at_utc=created_at_utc,
+            prepared=prepared,
+            result=result,
+            cluster_rows=cluster_rows,
+            membership_rows=membership_rows,
+            harmonic_rows=harmonic_rows,
+            participant_rows=human_participant_rows,
+            node_rows=node_rows,
+            null_rows=null_rows,
+        )
+        artifact_rows.append(
+            _artifact_manifest_row(
+                role="human_readable_workbook",
+                staging_path=workbook_path,
+                destination=final_directory,
+                project_root=project_root,
+            )
+        )
+
         manifest_payload = _manifest_payload(
             run_id=resolved_run_id,
             project_root=project_root,
@@ -907,6 +1869,7 @@ def export_free_harmonic_run(
             result=result,
             source_rows=source_rows,
             artifacts=artifact_rows,
+            created_at_utc=created_at_utc,
         )
         manifest_staging_path = staging / MANIFEST_FILENAME
         _write_manifest(manifest_staging_path, manifest_payload)
@@ -949,6 +1912,8 @@ def export_free_harmonic_run(
 __all__ = [
     "DEFAULT_RESULTS_SUBFOLDER",
     "EXPORT_SCHEMA_VERSION",
+    "HUMAN_WORKBOOK_FILENAME",
+    "HUMAN_WORKBOOK_SHEETS",
     "MANIFEST_FILENAME",
     "TOOL_TITLE",
     "export_free_harmonic_run",

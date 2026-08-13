@@ -10,8 +10,10 @@ from typing import Iterable
 import numpy as np
 
 
-METHOD_VERSION = "hermann_free_harmonic_clustering_cleanroom_v1"
-SENSOR_ADJACENCY_VERSION = "biosemi64-mne-delaunay-v1"
+METHOD_VERSION = "hermann_free_harmonic_clustering_cleanroom_v2"
+SENSOR_ADJACENCY_VERSION = (
+    "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
+)
 
 
 class FreeHarmonicError(RuntimeError):
@@ -84,6 +86,13 @@ class AnalysisDesign(str, Enum):
     PAIRED_CONDITIONS = "paired_conditions"
 
 
+class HarmonicSelectionMode(str, Enum):
+    """Supported harmonic-domain selection policies."""
+
+    AUTOMATIC = "automatic"
+    FIXED_HIGHEST = "fixed_highest"
+
+
 def _nonempty_text(value: object, *, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -117,6 +126,10 @@ class FreeHarmonicMethodSpec:
     oddball_frequency_hz: float = 1.2
     base_frequency_hz: float = 6.0
     max_harmonic_hz: float = 48.0
+    harmonic_selection_mode: HarmonicSelectionMode = (
+        HarmonicSelectionMode.AUTOMATIC
+    )
+    fixed_highest_harmonic_order: int | None = None
     noise_half_width_hz: float = 0.1
     harmonic_z_threshold: float = 3.29
     harmonic_z_ddof: int = 1
@@ -140,6 +153,47 @@ class FreeHarmonicMethodSpec:
                 field_name="sensor_adjacency_version",
             ),
         )
+        try:
+            selection_mode = (
+                self.harmonic_selection_mode
+                if isinstance(
+                    self.harmonic_selection_mode,
+                    HarmonicSelectionMode,
+                )
+                else HarmonicSelectionMode(str(self.harmonic_selection_mode))
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "harmonic_selection_mode must be 'automatic' or "
+                "'fixed_highest'."
+            ) from exc
+        object.__setattr__(
+            self,
+            "harmonic_selection_mode",
+            selection_mode,
+        )
+        fixed_order = self.fixed_highest_harmonic_order
+        if selection_mode is HarmonicSelectionMode.AUTOMATIC:
+            if fixed_order is not None:
+                raise ValueError(
+                    "fixed_highest_harmonic_order must be omitted in automatic "
+                    "harmonic-selection mode."
+                )
+        else:
+            if (
+                fixed_order is None
+                or isinstance(fixed_order, bool)
+                or int(fixed_order) < 1
+            ):
+                raise ValueError(
+                    "fixed_highest mode requires a positive integer "
+                    "fixed_highest_harmonic_order."
+                )
+            object.__setattr__(
+                self,
+                "fixed_highest_harmonic_order",
+                int(fixed_order),
+            )
         for field_name in (
             "oddball_frequency_hz",
             "base_frequency_hz",
@@ -220,6 +274,118 @@ class ProjectContrastRequest:
         object.__setattr__(self, "condition_a", condition_a)
         object.__setattr__(self, "condition_b", condition_b)
         object.__setattr__(self, "group_ids", groups)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectGroupOption:
+    """One canonical managed-project group exposed for GUI selection."""
+
+    group_id: str
+    label: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "group_id",
+            _nonempty_text(self.group_id, field_name="group_id"),
+        )
+        object.__setattr__(
+            self,
+            "label",
+            _nonempty_text(self.label, field_name="label"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectAnalysisOptions:
+    """Read-only project/header inspection for analysis setup.
+
+    This model contains only canonical metadata and header-derived frequency
+    availability.  Building it never reads amplitude cells or writes output.
+    """
+
+    project_root: Path
+    conditions: tuple[str, ...]
+    groups: tuple[ProjectGroupOption, ...]
+    workbook_count: int
+    representative_workbook_relative_path: str
+    grid_compatible: bool
+    grid_compatibility_verified: bool
+    compatibility_message: str
+    grid_fingerprint: str
+    frequency_resolution_hz: float
+    fft_upper_frequency_hz: float
+    effective_harmonic_upper_frequency_hz: float
+    eligible_orders: tuple[int, ...]
+    eligible_harmonics_hz: tuple[float, ...]
+    excluded_base_orders: tuple[int, ...]
+    excluded_base_harmonics_hz: tuple[float, ...]
+    incompatible_workbooks: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "project_root", Path(self.project_root))
+        conditions = _tuple_text(self.conditions)
+        groups = tuple(self.groups)
+        if not conditions:
+            raise ValueError("ProjectAnalysisOptions requires conditions.")
+        if any(not isinstance(group, ProjectGroupOption) for group in groups):
+            raise TypeError("groups must contain ProjectGroupOption values.")
+        if len({group.group_id.casefold() for group in groups}) != len(groups):
+            raise ValueError("Project group IDs must be distinct.")
+        count = int(self.workbook_count)
+        if count < 1:
+            raise ValueError("workbook_count must be positive.")
+        for field_name in (
+            "representative_workbook_relative_path",
+            "compatibility_message",
+            "grid_fingerprint",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+        for field_name in (
+            "frequency_resolution_hz",
+            "fft_upper_frequency_hz",
+            "effective_harmonic_upper_frequency_hz",
+        ):
+            value = float(getattr(self, field_name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{field_name} must be finite and positive.")
+            object.__setattr__(self, field_name, value)
+        eligible_orders = tuple(int(value) for value in self.eligible_orders)
+        eligible_hz = tuple(float(value) for value in self.eligible_harmonics_hz)
+        excluded_orders = tuple(int(value) for value in self.excluded_base_orders)
+        excluded_hz = tuple(float(value) for value in self.excluded_base_harmonics_hz)
+        if not eligible_orders or len(eligible_orders) != len(eligible_hz):
+            raise ValueError("Eligible harmonic orders/frequencies must align.")
+        if len(excluded_orders) != len(excluded_hz):
+            raise ValueError("Excluded base-overlap orders/frequencies must align.")
+        if any(value < 1 for value in (*eligible_orders, *excluded_orders)):
+            raise ValueError("Harmonic orders must be positive.")
+        if any(not np.isfinite(value) or value <= 0.0 for value in (*eligible_hz, *excluded_hz)):
+            raise ValueError("Harmonic frequencies must be finite and positive.")
+        object.__setattr__(self, "conditions", conditions)
+        object.__setattr__(self, "groups", groups)
+        object.__setattr__(self, "workbook_count", count)
+        object.__setattr__(self, "grid_compatible", bool(self.grid_compatible))
+        object.__setattr__(
+            self,
+            "grid_compatibility_verified",
+            bool(self.grid_compatibility_verified),
+        )
+        object.__setattr__(self, "eligible_orders", eligible_orders)
+        object.__setattr__(self, "eligible_harmonics_hz", eligible_hz)
+        object.__setattr__(self, "excluded_base_orders", excluded_orders)
+        object.__setattr__(self, "excluded_base_harmonics_hz", excluded_hz)
+        object.__setattr__(
+            self,
+            "incompatible_workbooks",
+            _tuple_text(self.incompatible_workbooks),
+        )
+        object.__setattr__(self, "diagnostics", _tuple_text(self.diagnostics))
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,7 +538,9 @@ class HarmonicSelection:
     excluded_base_harmonics_hz: np.ndarray
     z_threshold: float
     z_ddof: int
-    highest_detected_order: int
+    highest_detected_order: int | None
+    selection_mode: HarmonicSelectionMode = HarmonicSelectionMode.AUTOMATIC
+    fixed_highest_harmonic_order: int | None = None
 
     def __post_init__(self) -> None:
         one_dimensional = {
@@ -425,7 +593,38 @@ class HarmonicSelection:
             object.__setattr__(self, field_name, value)
         object.__setattr__(self, "z_threshold", float(self.z_threshold))
         object.__setattr__(self, "z_ddof", int(self.z_ddof))
-        object.__setattr__(self, "highest_detected_order", int(self.highest_detected_order))
+        try:
+            selection_mode = (
+                self.selection_mode
+                if isinstance(self.selection_mode, HarmonicSelectionMode)
+                else HarmonicSelectionMode(str(self.selection_mode))
+            )
+        except ValueError as exc:
+            raise ValueError("Unsupported harmonic selection mode.") from exc
+        highest_detected = self.highest_detected_order
+        if highest_detected is not None:
+            highest_detected = int(highest_detected)
+            if highest_detected < 1:
+                raise ValueError("highest_detected_order must be positive when set.")
+        fixed_order = self.fixed_highest_harmonic_order
+        if selection_mode is HarmonicSelectionMode.AUTOMATIC:
+            if fixed_order is not None:
+                raise ValueError(
+                    "Automatic selection cannot record a fixed harmonic ceiling."
+                )
+        else:
+            if fixed_order is None or int(fixed_order) < 1:
+                raise ValueError(
+                    "Fixed selection requires fixed_highest_harmonic_order."
+                )
+            fixed_order = int(fixed_order)
+            if fixed_order != int(normalized["selected_orders"][-1]):
+                raise ValueError(
+                    "Fixed harmonic ceiling must equal the highest retained order."
+                )
+        object.__setattr__(self, "highest_detected_order", highest_detected)
+        object.__setattr__(self, "selection_mode", selection_mode)
+        object.__setattr__(self, "fixed_highest_harmonic_order", fixed_order)
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,6 +667,23 @@ class CohortWorkbook:
 
 
 @dataclass(frozen=True, slots=True)
+class ParticipantConditionExclusion:
+    """One canonical project-level participant-condition exclusion."""
+
+    participant_id: str
+    condition: str
+    reason: str = "Project participant-condition exclusion"
+
+    def __post_init__(self) -> None:
+        for field_name in ("participant_id", "condition", "reason"):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class PreparationProvenance:
     """Run-level cohort, I/O, and preparation audit."""
 
@@ -489,6 +705,10 @@ class PreparationProvenance:
     manual_excluded_participants: tuple[str, ...] = ()
     frequency_qc_excluded_participants: tuple[str, ...] = ()
     incomplete_pair_participants: tuple[str, ...] = ()
+    participant_condition_exclusions: tuple[
+        ParticipantConditionExclusion,
+        ...,
+    ] = ()
     dataset_diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -533,6 +753,29 @@ class PreparationProvenance:
             "dataset_diagnostics",
         ):
             object.__setattr__(self, field_name, _tuple_text(getattr(self, field_name)))
+        condition_exclusions = tuple(self.participant_condition_exclusions)
+        if any(
+            not isinstance(row, ParticipantConditionExclusion)
+            for row in condition_exclusions
+        ):
+            raise TypeError(
+                "participant_condition_exclusions must contain "
+                "ParticipantConditionExclusion values."
+            )
+        identities = {
+            (row.participant_id.casefold(), row.condition.casefold())
+            for row in condition_exclusions
+        }
+        if len(identities) != len(condition_exclusions):
+            raise ValueError(
+                "participant_condition_exclusions must be unique by "
+                "participant and condition."
+            )
+        object.__setattr__(
+            self,
+            "participant_condition_exclusions",
+            condition_exclusions,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,6 +810,23 @@ class PreparedContrast:
             raise TypeError("request must be a ProjectContrastRequest.")
         if not isinstance(self.method, FreeHarmonicMethodSpec):
             raise TypeError("method must be a FreeHarmonicMethodSpec.")
+        if not isinstance(self.selection, HarmonicSelection):
+            raise TypeError("selection must be a HarmonicSelection.")
+        if not isinstance(self.frequency_plan, FrequencyWindowPlan):
+            raise TypeError("frequency_plan must be a FrequencyWindowPlan.")
+        if not isinstance(self.provenance, PreparationProvenance):
+            raise TypeError("provenance must be PreparationProvenance.")
+        if self.selection.selection_mode is not self.method.harmonic_selection_mode:
+            raise ValueError(
+                "Prepared method and resolved harmonic selection modes must match."
+            )
+        if (
+            self.selection.fixed_highest_harmonic_order
+            != self.method.fixed_highest_harmonic_order
+        ):
+            raise ValueError(
+                "Prepared method and resolved fixed harmonic ceilings must match."
+            )
         object.__setattr__(self, "project_root", Path(self.project_root))
         object.__setattr__(
             self,
@@ -627,6 +887,13 @@ class PreparedContrast:
         )
         if orders.size != harmonics.size or not harmonics.size:
             raise ValueError("Harmonic order/frequency arrays must match and be non-empty.")
+        if not np.array_equal(orders, self.selection.selected_orders) or not np.array_equal(
+            harmonics,
+            self.selection.selected_harmonics_hz,
+        ):
+            raise ValueError(
+                "Prepared harmonic arrays must match the resolved harmonic selection."
+            )
         expected_a = (len(participants_a), len(sensors), harmonics.size)
         expected_b = (len(participants_b), len(sensors), harmonics.size)
         if values_a.shape != expected_a:
@@ -906,11 +1173,15 @@ __all__ = [
     "FreeHarmonicMethodSpec",
     "FreeHarmonicPreparationError",
     "FrequencyWindowPlan",
+    "HarmonicSelectionMode",
     "HarmonicSelection",
     "METHOD_VERSION",
     "NoHarmonicsSelectedError",
+    "ParticipantConditionExclusion",
     "PreparationProvenance",
     "PreparedContrast",
+    "ProjectAnalysisOptions",
     "ProjectContrastRequest",
+    "ProjectGroupOption",
     "SENSOR_ADJACENCY_VERSION",
 ]

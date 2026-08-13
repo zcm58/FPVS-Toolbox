@@ -47,12 +47,13 @@ Current `Legacy_App` runtime couplings:
 
 ## Tools
 
-- `src/Tools/Free_Harmonic_Clustering/`: headless clean-room Free Harmonic
-  Clustering Analysis backend. It uses canonical managed-project identities,
+- `src/Tools/Free_Harmonic_Clustering/`: clean-room Free Harmonic Clustering
+  Analysis backend plus a thin embedded beta GUI. It uses canonical
+  managed-project identities,
   selected-column FullFFT ingestion, paper-specific SNR/z and participant L2
   normalization, complete same-sensor harmonic adjacency, and paired or
-  independent whole-tensor permutation inference. It owns no GUI and remains
-  separate from Standard FPVS Screening.
+  independent whole-tensor permutation inference. Its scientific modules remain
+  widget-free and separate from Standard FPVS Screening.
 - `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines,
   reporting, I/O, and shared helpers grouped by function. Removed
   `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.

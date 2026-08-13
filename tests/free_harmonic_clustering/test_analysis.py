@@ -53,12 +53,47 @@ def test_biosemi64_adjacency_has_fixed_auditable_identity() -> None:
     assert adjacency.dtype == np.bool_
     assert np.array_equal(adjacency, adjacency.T)
     assert not np.any(np.diag(adjacency))
-    assert int(np.count_nonzero(adjacency) // 2) == 169
-    assert len(edges) == 169
+    assert int(np.count_nonzero(adjacency) // 2) == 197
+    assert len(edges) == 197
     assert len(set(edges)) == len(edges)
-    assert BIOSEMI64_ADJACENCY_FINGERPRINT == "1f9c97bd057ea22d5bfdf9c36426e016eb27d94b8ced5959d241cc07fde613fa"
+    assert BIOSEMI64_ADJACENCY_FINGERPRINT == (
+        "9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6"
+    )
     assert manifest["fingerprint_sha256"] == BIOSEMI64_ADJACENCY_FINGERPRINT
+    assert manifest["edge_count"] == 197
+    assert manifest["base_edge_count"] == 169
+    assert manifest["added_edge_count"] == 28
     assert manifest["edges"] == [list(edge) for edge in edges]
+    assert {tuple(edge) for edge in manifest["added_edges"]} == {
+        ("Fp1", "F1"),
+        ("AF3", "F5"),
+        ("F3", "FC5"),
+        ("F5", "FT7"),
+        ("FC5", "T7"),
+        ("FC3", "C5"),
+        ("FC1", "C3"),
+        ("C3", "CP1"),
+        ("C5", "CP3"),
+        ("T7", "CP5"),
+        ("TP7", "P5"),
+        ("CP5", "P3"),
+        ("P1", "O1"),
+        ("P5", "PO3"),
+        ("Fp2", "F2"),
+        ("AF4", "F6"),
+        ("F4", "FC6"),
+        ("F6", "FT8"),
+        ("FC6", "T8"),
+        ("FC4", "C6"),
+        ("FC2", "C4"),
+        ("C4", "CP2"),
+        ("C6", "CP4"),
+        ("T8", "CP6"),
+        ("TP8", "P6"),
+        ("CP6", "P4"),
+        ("P2", "O2"),
+        ("P6", "PO4"),
+    }
 
     # A breadth-first check guards accidental graph fragmentation.
     seen = {0}

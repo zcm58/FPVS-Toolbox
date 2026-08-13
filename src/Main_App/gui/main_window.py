@@ -557,6 +557,80 @@ class MainWindow(QMainWindow):
             self._sensitivity_analysis_page = page
         return page
 
+    def _free_harmonic_frequency_snapshot(self):
+        """Return the active read-only analysis-frequency snapshot, if valid."""
+
+        from Tools.Free_Harmonic_Clustering.gui import ProjectFrequencySnapshot
+
+        try:
+            oddball_hz = float(self.settings.get("analysis", "oddball_freq", ""))
+            base_hz = float(self.settings.get("analysis", "base_freq", ""))
+            return ProjectFrequencySnapshot(
+                oddball_frequency_hz=oddball_hz,
+                base_frequency_hz=base_hz,
+            )
+        except (TypeError, ValueError):
+            logger.warning(
+                "free_harmonic_clustering_frequency_metadata_invalid",
+                exc_info=True,
+            )
+            return None
+
+    def _ensure_free_harmonic_clustering_page(self) -> QWidget:
+        from Tools.Free_Harmonic_Clustering.gui import FreeHarmonicClusteringPage
+
+        project = getattr(self, "currentProject", None)
+        project_root = (
+            Path(project.project_root).resolve()
+            if project is not None and hasattr(project, "project_root")
+            else None
+        )
+        page = getattr(self, "_free_harmonic_clustering_page", None)
+        page_root = (
+            Path(getattr(page, "project_root", "")).resolve()
+            if page is not None and getattr(page, "project_root", None)
+            else None
+        )
+        if page is None or page_root != project_root:
+            if page is not None:
+                page.shutdown()
+                self.workspace_stack.removeWidget(page)
+                page.deleteLater()
+            page = FreeHarmonicClusteringPage(
+                project_root=project_root,
+                frequency_snapshot=self._free_harmonic_frequency_snapshot(),
+                parent=self.workspace_stack,
+            )
+            page.setObjectName("embedded_free_harmonic_clustering_page")
+            self.workspace_stack.addWidget(page)
+            self._free_harmonic_clustering_page = page
+        else:
+            page.refresh_project_context(
+                project_root=project_root,
+                frequency_snapshot=self._free_harmonic_frequency_snapshot(),
+            )
+        return page
+
+    def open_free_harmonic_clustering(self) -> None:
+        project = getattr(self, "currentProject", None)
+        if project is None or not hasattr(project, "project_root"):
+            QMessageBox.warning(
+                self,
+                "Open a Project",
+                "Open a managed FPVS project before using Free Harmonic Clustering Analysis.",
+            )
+            return
+        if not self._frequency_domain_outputs_ready_for_tool(
+            "Free Harmonic Clustering Analysis"
+        ):
+            return
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(
+            self._ensure_free_harmonic_clustering_page()
+        )
+        self._set_sidebar_selection("btn_free_harmonic_clustering")
+
     def open_sensitivity_analysis(self) -> None:
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
@@ -904,6 +978,28 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        from Tools.Free_Harmonic_Clustering.gui import (
+            cancel_all_active_operations,
+            has_active_operations,
+        )
+
+        if has_active_operations():
+            cancel_all_active_operations()
+            QMessageBox.information(
+                self,
+                "Free Harmonic Clustering Is Stopping",
+                "Cancellation was requested. Wait for all active analysis "
+                "steps to stop before closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
+        free_harmonic_page = getattr(
+            self,
+            "_free_harmonic_clustering_page",
+            None,
+        )
+        if free_harmonic_page is not None:
+            free_harmonic_page.shutdown()
         sensitivity_page = getattr(self, "_sensitivity_analysis_page", None)
         if sensitivity_page is not None:
             sensitivity_page.shutdown()

@@ -5,6 +5,7 @@ from __future__ import annotations
 from .api import (
     FreeHarmonicRun,
     analyze_prepared_contrast,
+    inspect_project_analysis_options,
     prepare_project_contrast,
     run_free_harmonic_clustering,
 )
@@ -18,10 +19,14 @@ from .models import (
     FreeHarmonicInputError,
     FreeHarmonicMethodSpec,
     FreeHarmonicPreparationError,
+    HarmonicSelectionMode,
     METHOD_VERSION,
     NoHarmonicsSelectedError,
+    ParticipantConditionExclusion,
     PreparedContrast,
+    ProjectAnalysisOptions,
     ProjectContrastRequest,
+    ProjectGroupOption,
 )
 
 __all__ = [
@@ -34,12 +39,17 @@ __all__ = [
     "FreeHarmonicMethodSpec",
     "FreeHarmonicPreparationError",
     "FreeHarmonicRun",
+    "HarmonicSelectionMode",
     "METHOD_VERSION",
     "NoHarmonicsSelectedError",
+    "ParticipantConditionExclusion",
     "PreparedContrast",
+    "ProjectAnalysisOptions",
     "ProjectContrastRequest",
+    "ProjectGroupOption",
     "analyze_prepared_contrast",
     "export_free_harmonic_run",
+    "inspect_project_analysis_options",
     "prepare_project_contrast",
     "run_free_harmonic_clustering",
 ]

@@ -18,6 +18,7 @@ from .models import (
     FreeHarmonicPreparationError,
     FrequencyWindowPlan,
     HarmonicSelection,
+    HarmonicSelectionMode,
     NoHarmonicsSelectedError,
 )
 
@@ -244,6 +245,55 @@ def build_frequency_window_plan(
     )
 
 
+def build_available_frequency_window_plan(
+    header: Sequence[object],
+    *,
+    oddball_frequency_hz: float,
+    base_frequency_hz: float,
+    noise_half_width_hz: float = 0.1,
+    electrode_column: str = "Electrode",
+) -> FrequencyWindowPlan:
+    """Build the largest valid header-derived non-base harmonic plan.
+
+    This is the read-only setup counterpart to :func:`build_frequency_window_plan`.
+    Its ceiling comes from the actual FullFFT upper frequency after reserving a
+    complete physical noise window; it never assumes the historical 48-Hz
+    default.
+    """
+
+    _, frequencies = _frequency_columns(header)
+    oddball_hz = float(oddball_frequency_hz)
+    base_hz = float(base_frequency_hz)
+    half_width_hz = float(noise_half_width_hz)
+    for field_name, value in (
+        ("oddball_frequency_hz", oddball_hz),
+        ("base_frequency_hz", base_hz),
+        ("noise_half_width_hz", half_width_hz),
+    ):
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{field_name} must be finite and positive.")
+    usable_upper_hz = float(frequencies[-1]) - half_width_hz
+    highest_order = int(
+        np.floor((usable_upper_hz + _GRID_TOLERANCE_HZ) / oddball_hz)
+    )
+    if highest_order < 1:
+        raise FreeHarmonicPreparationError(
+            "FullFFT does not contain one oddball harmonic with a complete "
+            "physical noise window."
+        )
+    specification = FreeHarmonicMethodSpec(
+        oddball_frequency_hz=oddball_hz,
+        base_frequency_hz=base_hz,
+        max_harmonic_hz=highest_order * oddball_hz,
+        noise_half_width_hz=half_width_hz,
+    )
+    return build_frequency_window_plan(
+        header,
+        specification,
+        electrode_column=electrode_column,
+    )
+
+
 def compute_participant_snr(
     selected_amplitudes: np.ndarray,
     plan: FrequencyWindowPlan,
@@ -316,7 +366,13 @@ def select_harmonics(
     plan: FrequencyWindowPlan,
     spec: FreeHarmonicMethodSpec,
 ) -> HarmonicSelection:
-    """Detect in either arm and retain all eligible harmonics through the highest."""
+    """Resolve the declared harmonic domain and retain a complete fill-through.
+
+    Automatic mode mirrors the Hermann-compatible observed-arm z rule.  Fixed
+    mode still calculates the same z/detection audit, but its retained ceiling
+    is the explicitly declared eligible non-base oddball order and is not
+    conditional on crossing the z threshold.
+    """
 
     z_a = compute_harmonic_z(
         grand_selected_amplitude_a,
@@ -331,16 +387,40 @@ def select_harmonics(
     detected_a = z_a > float(spec.harmonic_z_threshold)
     detected_b = z_b > float(spec.harmonic_z_threshold)
     detected_either = detected_a | detected_b
-    if not np.any(detected_either):
-        raise NoHarmonicsSelectedError(
-            candidate_orders=plan.candidate_orders,
-            candidate_harmonics_hz=plan.candidate_harmonics_hz,
-            arm_a_z=z_a,
-            arm_b_z=z_b,
-            z_threshold=spec.harmonic_z_threshold,
-        )
-    highest_order = int(np.max(plan.candidate_orders[detected_either]))
-    selected_indices = np.flatnonzero(plan.candidate_orders <= highest_order)
+    highest_detected_order = (
+        int(np.max(plan.candidate_orders[detected_either]))
+        if np.any(detected_either)
+        else None
+    )
+    fixed_order: int | None = None
+    if spec.harmonic_selection_mode is HarmonicSelectionMode.AUTOMATIC:
+        if highest_detected_order is None:
+            raise NoHarmonicsSelectedError(
+                candidate_orders=plan.candidate_orders,
+                candidate_harmonics_hz=plan.candidate_harmonics_hz,
+                arm_a_z=z_a,
+                arm_b_z=z_b,
+                z_threshold=spec.harmonic_z_threshold,
+            )
+        selected_ceiling = highest_detected_order
+    else:
+        fixed_order = int(spec.fixed_highest_harmonic_order or 0)
+        if not np.any(plan.candidate_orders == fixed_order):
+            harmonic_hz = fixed_order * float(spec.oddball_frequency_hz)
+            if np.any(plan.excluded_base_orders == fixed_order):
+                detail = "it overlaps the base stimulation frequency"
+            elif fixed_order > int(plan.candidate_orders[-1]):
+                detail = "it exceeds the available planned FullFFT domain"
+            else:
+                detail = "it is not an eligible non-base oddball harmonic"
+            raise FreeHarmonicPreparationError(
+                "fixed_highest_harmonic_order "
+                f"{fixed_order} ({harmonic_hz:g} Hz) is invalid because {detail}."
+            )
+        selected_ceiling = fixed_order
+    selected_indices = np.flatnonzero(
+        plan.candidate_orders <= selected_ceiling
+    )
     return HarmonicSelection(
         candidate_orders=plan.candidate_orders,
         candidate_harmonics_hz=plan.candidate_harmonics_hz,
@@ -355,7 +435,9 @@ def select_harmonics(
         excluded_base_harmonics_hz=plan.excluded_base_harmonics_hz,
         z_threshold=spec.harmonic_z_threshold,
         z_ddof=spec.harmonic_z_ddof,
-        highest_detected_order=highest_order,
+        highest_detected_order=highest_detected_order,
+        selection_mode=spec.harmonic_selection_mode,
+        fixed_highest_harmonic_order=fixed_order,
     )
 
 
@@ -396,6 +478,7 @@ def l2_normalize_snr(selected_snr: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
+    "build_available_frequency_window_plan",
     "build_frequency_window_plan",
     "compute_harmonic_z",
     "compute_participant_snr",

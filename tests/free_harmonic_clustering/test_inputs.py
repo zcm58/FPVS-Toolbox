@@ -34,6 +34,7 @@ def _write_project(
     participant_conditions: dict[str, tuple[str, ...]],
     ledger_statuses: dict[str, str] | None = None,
     manual_excluded_participants: tuple[str, ...] = (),
+    participant_condition_exclusions: dict[str, tuple[str, ...]] | None = None,
     frequency_excluded_participants: tuple[str, ...] = (),
     electrode_exclusions: tuple[tuple[str, str], ...] = (),
     frequency_outputs_stale: bool = False,
@@ -59,6 +60,12 @@ def _write_project(
         },
         "preprocessing": {
             "manual_excluded_participants": list(manual_excluded_participants),
+            "manual_excluded_participant_conditions": {
+                participant: list(conditions)
+                for participant, conditions in (
+                    participant_condition_exclusions or {}
+                ).items()
+            },
         },
         "tools": {
             "frequency_domain_qc": {
@@ -281,6 +288,85 @@ def test_paired_conditions_use_complete_intersection_in_identical_order(
     assert prepared.arm_b_label == "Happy"
     assert prepared.provenance.incomplete_pair_participants == ("P3",)
     assert len(amplitude_calls) == 4
+
+
+def test_paired_conditions_allow_managed_project_without_group_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "Project"
+    root.mkdir()
+    manifest = {
+        "results_folder": ".",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "groups": {},
+        "participants": {"P1": {}, "P2": {}},
+        "preprocessing": {},
+    }
+    (root / "project.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    for condition in ("Angry", "Happy"):
+        condition_root = root / "1 - Excel Data Files" / condition
+        condition_root.mkdir(parents=True)
+        for participant in ("P1", "P2"):
+            (condition_root / f"{participant}_{condition}_Results.xlsx").write_bytes(
+                b"selected-reader-test-double"
+            )
+    _headers, amplitude_calls = _install_reader_doubles(monkeypatch)
+
+    prepared = inputs.prepare_project_contrast(
+        ProjectContrastRequest(
+            project_root=root,
+            design=AnalysisDesign.PAIRED_CONDITIONS,
+            condition_a="Angry",
+            condition_b="Happy",
+        ),
+        FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+    )
+
+    assert prepared.participant_ids_a == prepared.participant_ids_b == ("P1", "P2")
+    assert len(amplitude_calls) == 4
+
+
+def test_relevant_participant_condition_exclusions_are_preserved_in_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _paths = _write_project(
+        tmp_path / "Project",
+        groups={"all": ("All Participants", "All")},
+        participant_groups={"P1": "all", "P2": "all", "P3": "all"},
+        participant_conditions={
+            "P1": ("Angry", "Happy", "Unselected"),
+            "P2": ("Angry", "Happy", "Unselected"),
+            "P3": ("Angry", "Happy", "Unselected"),
+        },
+        participant_condition_exclusions={
+            "P3": ("Happy", "Unselected"),
+        },
+    )
+    _install_reader_doubles(monkeypatch)
+
+    prepared = inputs.prepare_project_contrast(
+        ProjectContrastRequest(
+            project_root=root,
+            design=AnalysisDesign.PAIRED_CONDITIONS,
+            condition_a="Angry",
+            condition_b="Happy",
+        ),
+        FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+    )
+
+    exclusions = prepared.provenance.participant_condition_exclusions
+    assert [
+        (row.participant_id, row.condition, row.reason)
+        for row in exclusions
+    ] == [
+        ("P3", "Happy", "Project participant-condition exclusion"),
+    ]
+    assert prepared.provenance.incomplete_pair_participants == ("P3",)
 
 
 def test_included_frequency_qc_electrode_exclusion_fails_before_workbook_reads(

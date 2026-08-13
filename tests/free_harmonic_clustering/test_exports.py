@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from openpyxl import load_workbook
 import pytest
 
 from Tools.Free_Harmonic_Clustering import exports
@@ -19,6 +20,7 @@ from Tools.Free_Harmonic_Clustering.models import (
     FreeHarmonicMethodSpec,
     FrequencyWindowPlan,
     HarmonicSelection,
+    ParticipantConditionExclusion,
     PreparationProvenance,
     PreparedContrast,
     ProjectContrastRequest,
@@ -65,7 +67,11 @@ def _prepared_and_result(tmp_path: Path) -> tuple[PreparedContrast, ClusterPermu
                 )
             )
 
-    method = FreeHarmonicMethodSpec(n_permutations=3, seed=7)
+    method = FreeHarmonicMethodSpec(
+        n_permutations=3,
+        seed=7,
+        sensor_adjacency_version="test-adjacency-v1",
+    )
     request = ProjectContrastRequest(
         project_root=project_root,
         design=AnalysisDesign.INDEPENDENT_GROUPS,
@@ -152,6 +158,12 @@ def _prepared_and_result(tmp_path: Path) -> tuple[PreparedContrast, ClusterPermu
             reader_phase_seconds=(("worksheet_xml", 0.08),),
             ledger_filter_applied=True,
             completed_participants=("A1", "A2", "B1", "B2"),
+            participant_condition_exclusions=(
+                ParticipantConditionExclusion(
+                    participant_id="P4",
+                    condition="Neutral Angry",
+                ),
+            ),
         ),
     )
     clusters = (
@@ -226,6 +238,7 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
         "cluster_membership.csv",
         "cluster_summary.csv",
         "harmonic_selection.csv",
+        "Free_Harmonic_Clustering_Results.xlsx",
         "manifest.json",
         "node_statistics.csv",
         "null_extrema.csv",
@@ -249,7 +262,18 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
     assert manifest["frequency_plan"]["target_selected_indices"] == [1, 2]
     assert manifest["frequency_plan"]["noise_selected_indices"] == [[0, 3], [0, 4]]
     assert manifest["frequency_plan"]["target_frequency_errors_hz"] == [0.0, 0.0]
-    assert len(manifest["artifacts"]) == 8
+    assert manifest["schema_version"] == 2
+    assert len(manifest["artifacts"]) == 9
+    assert manifest["harmonic_selection"]["mode"] == "automatic"
+    assert manifest["preparation"]["cohort_filters"][
+        "participant_condition_exclusions"
+    ] == [
+        {
+            "participant_id": "P4",
+            "condition": "Neutral Angry",
+            "reason": "Project participant-condition exclusion",
+        }
+    ]
     for artifact in manifest["artifacts"]:
         path = prepared.project_root / artifact["path"]
         assert artifact["sha256"] == _sha256(path)
@@ -276,6 +300,19 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
     assert cluster_rows[0]["effect_value_scale"].startswith("participant-arm L2")
     assert cluster_rows[0]["n_a"] == "2"
     assert cluster_rows[0]["n_b"] == "2"
+    with (receipt.output_directory / "participants.csv").open(
+        encoding="utf-8",
+        newline="",
+    ) as stream:
+        participant_rows = list(csv.DictReader(stream))
+    assert any(
+        row["status"] == "Excluded"
+        and row["participant_id"] == "P4"
+        and row["condition"] == "Neutral Angry"
+        and row["exclusion_reason"]
+        == "Project participant-condition exclusion"
+        for row in participant_rows
+    )
     with np.load(receipt.output_directory / "arrays.npz", allow_pickle=False) as arrays:
         assert arrays["observed_t"].shape == (2, 2)
         assert arrays["normalized_values_a"].shape == (2, 2, 2)
@@ -290,6 +327,36 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
         assert arrays["target_selected_indices"].tolist() == [1, 2]
         assert arrays["noise_selected_indices"].tolist() == [[0, 3], [0, 4]]
         assert arrays["target_frequency_errors_hz"].tolist() == [0.0, 0.0]
+        assert arrays["harmonic_selection_mode"].item() == "automatic"
+
+    workbook_path = receipt.output_directory / exports.HUMAN_WORKBOOK_FILENAME
+    workbook = load_workbook(workbook_path, data_only=False)
+    assert tuple(workbook.sheetnames) == exports.HUMAN_WORKBOOK_SHEETS
+    for sheet_name in exports.HUMAN_WORKBOOK_SHEETS[1:]:
+        sheet = workbook[sheet_name]
+        assert sheet.freeze_panes == "A5"
+        assert sheet.auto_filter.ref is not None
+        assert sheet.sheet_view.showGridLines is False
+    significant_sheet = workbook["Significant Clusters"]
+    all_sheet = workbook["All Clusters"]
+    assert significant_sheet["A5"].value == 1
+    assert all_sheet["A5"].value == 1
+    assert all_sheet["A6"].value == -1
+    assert significant_sheet["E5"].number_format == "0.0000"
+    assert significant_sheet["A5"].fill.fgColor.rgb.endswith("E2F0D9")
+    assert all(
+        cell.data_type != "f"
+        for sheet in workbook.worksheets
+        for row in sheet.iter_rows()
+        for cell in row
+    )
+    participants_sheet = workbook["Participants and Exclusions"]
+    assert any(
+        participants_sheet.cell(row=row, column=1).value == "Excluded"
+        and participants_sheet.cell(row=row, column=5).value == "Neutral Angry"
+        and participants_sheet.cell(row=row, column=7).value == "P4"
+        for row in range(5, participants_sheet.max_row + 1)
+    )
 
 
 def test_export_rejects_destination_outside_project(tmp_path: Path) -> None:
@@ -392,3 +459,35 @@ def test_export_rejects_cluster_membership_that_disagrees_with_labels(
 
     with pytest.raises(ValueError, match="different IDs"):
         exports.export_free_harmonic_run(prepared, result, run_id="bad-labels")
+
+
+def test_human_workbook_forces_project_controlled_formula_like_text_to_string(
+    tmp_path: Path,
+) -> None:
+    prepared, result = _prepared_and_result(tmp_path)
+    prepared = replace(
+        prepared,
+        arm_a_label="=2+3",
+        arm_b_label="@SUM(A1:A2)",
+    )
+
+    receipt = exports.export_free_harmonic_run(
+        prepared,
+        result,
+        run_id="safe-text",
+    )
+
+    workbook = load_workbook(
+        receipt.output_directory / exports.HUMAN_WORKBOOK_FILENAME,
+        data_only=False,
+    )
+    dangerous = [
+        cell
+        for sheet in workbook.worksheets
+        for row in sheet.iter_rows()
+        for cell in row
+        if isinstance(cell.value, str)
+        and cell.value.startswith(("=", "+", "-", "@"))
+    ]
+    assert dangerous
+    assert all(cell.data_type == "s" for cell in dangerous)

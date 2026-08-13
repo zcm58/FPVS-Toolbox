@@ -421,6 +421,7 @@ def reset_project_context_workspace(host: Any) -> None:
     for attr_name in (
         "_settings_page",
         "_stats_page",
+        "_free_harmonic_clustering_page",
         "_ratio_calculator_page",
         "_individual_detectability_page",
         "_plot_generator_page",
@@ -430,6 +431,13 @@ def reset_project_context_workspace(host: Any) -> None:
         "_epoch_win",
     ):
         widget = getattr(host, attr_name, None)
+        if attr_name == "_free_harmonic_clustering_page" and widget is not None:
+            shutdown = getattr(widget, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown()
+                except RuntimeError:
+                    pass
         _retire_widget(widget, workspace=workspace, seen=seen)
         setattr(host, attr_name, None)
 

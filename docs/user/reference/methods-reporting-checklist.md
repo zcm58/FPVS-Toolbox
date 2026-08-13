@@ -230,11 +230,12 @@ not make the Toolbox an exact reproduction of any one published pipeline.
 
 ## Free Harmonic Clustering Analysis
 
-Use this checklist for the headless Free Harmonic Clustering Analysis beta. It
+Use this checklist for the embedded Free Harmonic Clustering Analysis beta. It
 is a clean-room implementation of the sensor x harmonic method described by
-[Hermann et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC13379596/), not a
-claim of numerical identity with the authors' unpublished normalized tensors,
-spatial adjacency, dependency version, or expected outputs.
+[Hermann et al.](https://doi.org/10.1111/psyp.70361) and informed by their
+[public implementation](https://github.com/oliver-hermann1/FPVS_Multiharmonic),
+not a claim of numerical identity with the authors' unpublished normalized
+tensors, spatial adjacency, dependency version, or expected outputs.
 
 ### Design and inputs
 
@@ -248,15 +249,20 @@ spatial adjacency, dependency version, or expected outputs.
   varying degrees of freedom.
 - Report the BioSemi64 channel set/order, FFT duration/bin width, base and
   oddball frequencies, ceiling, and complete +/-0.1-Hz window preflight.
+- State that project metadata, participant/group assignments, QC decisions,
+  and source workbooks were read without modification and that the completed
+  output was published as a new additive run.
 
 ### Harmonics and normalization
 
 - State that raw amplitude came from original `FullFFT Amplitude (uV)`
   workbooks. Saved Toolbox SNR, z-score, BCA, and Stats-ready Summed BCA were
   not used as substitutes.
-- Report the per-arm grand-spectrum selector, sample-SD convention, exact
-  `z > 3.29` detections, highest detection, fill-through-highest retained list,
-  and every base-rate-overlap exclusion.
+- State whether Hermann automatic selection or a preregistered fixed highest
+  harmonic was used. For automatic selection, report the per-arm
+  grand-spectrum selector, sample-SD convention, exact `z > 3.29` detections,
+  and highest detection. In either mode, report the fill-through-highest
+  retained list and every dynamically derived base-rate-overlap exclusion.
 - Report the SNR rule: target amplitude divided by mean surrounding amplitude
   within +/-0.1 Hz after excluding the target and immediately adjacent FFT
   bins, without min/max trimming.
@@ -271,9 +277,11 @@ spatial adjacency, dependency version, or expected outputs.
 
 - Report paired t or pooled independent t, degrees of freedom, two-sided entry
   alpha `.01`, exact t threshold, and signed summed-t cluster mass.
-- Report the spatial edge source/hash. Every retained harmonic at one sensor
-  was adjacent to every other retained harmonic; spatial neighbors connected
-  only at the same harmonic; singleton clusters were allowed.
+- Report the version and hash of the fixed 197-edge FieldTrip-style BioSemi64
+  spatial reconstruction, and state that it is an independent Toolbox graph,
+  not the authors' adjacency matrix. Every retained harmonic at one sensor was
+  adjacent to every other retained harmonic; spatial neighbors connected only
+  at the same harmonic; singleton clusters were allowed.
 - Report whole-participant sign flips/swaps or group-label permutations with
   group sizes preserved, assignment count, RNG/seed, and assignment hash.
 - Report separate maximum-positive/minimum-negative nulls, strict Monte Carlo
@@ -287,9 +295,10 @@ spatial adjacency, dependency version, or expected outputs.
 - State the weak/global FWER limitation: significant clusters do not make
   individual sensors, harmonics, cells, or boundaries pointwise significant.
 
-Retain the run manifest, compressed arrays, result tables, source-workbook
-provenance, exact adjacency edges, null extrema or hash, Toolbox commit, and
-analysis plan/preregistration.
+Retain `Free_Harmonic_Clustering_Results.xlsx`, the run manifest, compressed
+arrays, machine-readable result tables, source-workbook provenance, exact
+adjacency edges, null extrema or hash, Toolbox commit, and analysis
+plan/preregistration.
 
 ## Hauk-Informed Source-PSD Workflow
 

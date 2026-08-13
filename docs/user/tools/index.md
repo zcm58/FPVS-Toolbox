@@ -14,6 +14,7 @@ only after you enable Beta Tools in Settings > Advanced and reopen FPVS Toolbox.
 | [Scalp Maps](publication-maps.md) | Default | Export sensor-space BCA, SNR, and z-score topographies. |
 | [LORETA Visualizer](loreta-visualizer.md) | Default | Inspect beta template-space estimates of FPVS response patterns. |
 | [Sequence Figure](sequence-figure.md) | Default | Create a five-image FPVS stimulus-sequence diagram. |
+| [Free Harmonic Clustering Analysis](free-harmonic-clustering.md) | Beta | Compare the relative electrode x harmonic response distribution for one paired-condition or independent-group contrast. |
 | [Ratio Calculator](ratio-calculator.md) | Beta | Explore paired condition A/B ratios for BCA, SNR, and z-score summaries. |
 | [Individual Detectability](individual-level-detectability.md) | Beta | Create participant-level summed-harmonic z-score and SNR panels. |
 | [Epoch Averaging](epoch-averaging.md) | Beta | Combine selected raw-BDF event epochs before frequency-domain post-processing. |

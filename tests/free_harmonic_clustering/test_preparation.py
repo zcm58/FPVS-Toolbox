@@ -8,6 +8,7 @@ import pytest
 from Tools.Free_Harmonic_Clustering.models import (
     FreeHarmonicMethodSpec,
     FreeHarmonicPreparationError,
+    HarmonicSelectionMode,
     NoHarmonicsSelectedError,
 )
 from Tools.Free_Harmonic_Clustering.preparation import (
@@ -140,3 +141,48 @@ def test_participant_snr_rejects_negative_fullfft_amplitude() -> None:
 
     with pytest.raises(FreeHarmonicPreparationError, match="non-negative"):
         compute_participant_snr(amplitudes, plan)
+
+
+def test_fixed_highest_mode_uses_declared_fill_through_without_z_detection() -> None:
+    spec = FreeHarmonicMethodSpec(
+        base_frequency_hz=2.4,
+        max_harmonic_hz=4.8,
+        harmonic_selection_mode=HarmonicSelectionMode.FIXED_HIGHEST,
+        fixed_highest_harmonic_order=3,
+        harmonic_z_threshold=1_000.0,
+    )
+    plan = build_frequency_window_plan(_header(), spec)
+    grand = _selected_spectrum(plan, target_value=1.0)
+
+    selection = select_harmonics(grand, grand, plan, spec)
+
+    assert selection.selection_mode is HarmonicSelectionMode.FIXED_HIGHEST
+    assert selection.fixed_highest_harmonic_order == 3
+    assert selection.selected_orders.tolist() == [1, 3]
+    assert selection.highest_detected_order is None
+    assert not np.any(selection.detected_arm_a)
+    assert np.all(np.isfinite(selection.arm_a_z))
+
+
+def test_fixed_highest_mode_rejects_base_overlap_or_unavailable_order() -> None:
+    base_overlap = FreeHarmonicMethodSpec(
+        base_frequency_hz=2.4,
+        max_harmonic_hz=4.8,
+        harmonic_selection_mode="fixed_highest",
+        fixed_highest_harmonic_order=2,
+    )
+    plan = build_frequency_window_plan(_header(), base_overlap)
+    grand = _selected_spectrum(plan)
+    with pytest.raises(FreeHarmonicPreparationError, match="overlaps the base"):
+        select_harmonics(grand, grand, plan, base_overlap)
+
+    unavailable = replace(base_overlap, fixed_highest_harmonic_order=5)
+    with pytest.raises(FreeHarmonicPreparationError, match="exceeds the available"):
+        select_harmonics(grand, grand, plan, unavailable)
+
+
+def test_method_spec_rejects_ambiguous_harmonic_selection_configuration() -> None:
+    with pytest.raises(ValueError, match="must be omitted"):
+        FreeHarmonicMethodSpec(fixed_highest_harmonic_order=2)
+    with pytest.raises(ValueError, match="requires a positive integer"):
+        FreeHarmonicMethodSpec(harmonic_selection_mode="fixed_highest")

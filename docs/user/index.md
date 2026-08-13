@@ -57,13 +57,14 @@ The **Workspace Tools** section of the app sidebar shows these default tools:
 Standard FPVS Screening, Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA
 Visualizer, and Sequence Figure.
 
-Ratio Calculator, Individual Detectability, and Epoch Averaging are beta tools.
-To show them, open **Settings > Advanced**, enable **Beta Tools**, then close
-and reopen FPVS Toolbox.
+Free Harmonic Clustering Analysis, Ratio Calculator, Individual Detectability,
+and Epoch Averaging are beta tools. To show them, open **Settings > Advanced**,
+enable **Beta Tools**, then close and reopen FPVS Toolbox.
 
 See the following sections for more information regarding each tool provided in FPVS Toolbox.
 
 - [Standard FPVS Screening](tools/statistics.md)
+- [Free Harmonic Clustering Analysis](tools/free-harmonic-clustering.md)
 - [Sensitivity Analysis](tools/sensitivity-analysis.md)
 - [SNR Plots](tools/snr-plot-generator.md)
 - [Scalp Maps](tools/publication-maps.md)

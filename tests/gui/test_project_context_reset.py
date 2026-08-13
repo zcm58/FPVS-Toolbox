@@ -18,6 +18,7 @@ class _FakeWidget:
         self.closed = 0
         self.rejected = 0
         self.deleted = 0
+        self.shutdown_calls = 0
 
     def close(self) -> None:
         self.closed += 1
@@ -28,11 +29,15 @@ class _FakeWidget:
     def deleteLater(self) -> None:  # noqa: N802 - Qt-compatible test double
         self.deleted += 1
 
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+
 
 def test_project_context_reset_discards_embedded_pages_and_returns_home() -> None:
     workspace = _FakeWorkspace()
     settings_page = _FakeWidget()
     stats_page = _FakeWidget()
+    free_harmonic_page = _FakeWidget()
     ratio_page = _FakeWidget()
     epoch_page = _FakeWidget()
     settings_dialog = _FakeWidget()
@@ -42,6 +47,7 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
         _settings_dialog=settings_dialog,
         _settings_page=settings_page,
         _stats_page=stats_page,
+        _free_harmonic_clustering_page=free_harmonic_page,
         _ratio_calculator_page=ratio_page,
         _individual_detectability_page=_FakeWidget(),
         _plot_generator_page=_FakeWidget(),
@@ -56,6 +62,7 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     assert host._settings_dialog is None
     assert host._settings_page is None
     assert host._stats_page is None
+    assert host._free_harmonic_clustering_page is None
     assert host._ratio_calculator_page is None
     assert host._individual_detectability_page is None
     assert host._plot_generator_page is None
@@ -65,6 +72,8 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     assert settings_dialog.deleted == 1
     assert settings_page in workspace.removed
     assert stats_page in workspace.removed
+    assert free_harmonic_page in workspace.removed
+    assert free_harmonic_page.shutdown_calls == 1
     assert ratio_page in workspace.removed
     assert epoch_page in workspace.removed
     assert epoch_page.closed == 1
