@@ -1,27 +1,18 @@
 from __future__ import annotations
 
 from functools import lru_cache
-import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap, QPen
+from PySide6.QtCore import QByteArray, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPalette, QPixmap, QPen
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
 from Main_App.gui.style_tokens import ACCENT_COLOR
-from Main_App.gui.typography import font_for_role
 
 
 def _icon_color() -> QColor:
     app = QApplication.instance()
     return app.palette().color(QPalette.ButtonText) if app else QColor("white")
-
-
-def _stroke(size: int) -> QPen:
-    pen = QPen(_icon_color())
-    pen.setWidth(max(2, round(size * 0.1)))
-    pen.setCapStyle(Qt.RoundCap)
-    pen.setJoinStyle(Qt.RoundJoin)
-    return pen
 
 
 def _draw_dot(painter: QPainter, center: QPointF, radius: float) -> None:
@@ -30,110 +21,148 @@ def _draw_dot(painter: QPainter, center: QPointF, radius: float) -> None:
     painter.setBrush(Qt.NoBrush)
 
 
+_SIDEBAR_ICON_PATHS = {
+    "home": """
+        <path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/>
+        <path d="M9.5 21v-7h5v7"/>
+    """,
+    "stats": """
+        <rect x="3" y="3.5" width="18" height="14" rx="2"/>
+        <path d="m7 13 3-3 3 2 4-4"/><path d="M8 21h8M12 17.5V21"/>
+    """,
+    "sensitivity": """
+        <path d="M4 18a8 8 0 0 1 16 0"/><path d="M6.5 18h11"/>
+        <path d="m12 15 4-4"/><circle cx="12" cy="15" r="1"/>
+    """,
+    "chart": """
+        <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+    """,
+    "ratio": """
+        <circle cx="12" cy="6" r="1.5"/><path d="M6 12h12"/>
+        <circle cx="12" cy="18" r="1.5"/>
+    """,
+    "detectability": """
+        <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+    """,
+    "scalp": """
+        <circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v4M7 6.5l2.5 3M17 6.5l-2.5 3"/>
+        <path d="M6 14.5h12M8.5 18l2-3.5M15.5 18l-2-3.5"/>
+        <circle cx="12" cy="11" r="1"/>
+    """,
+    "loreta": """
+        <path d="M12 5.5c-1-3.5-6-3-6 1-3 .5-3 5-.5 6.5-1 3.5 3 6.5 6.5 4.5"/>
+        <path d="M12 5.5c1-3.5 6-3 6 1 3 .5 3 5 .5 6.5 1 3.5-3 6.5-6.5 4.5V5.5Z"/>
+        <path d="M8 8.5c2 0 2 2 4 2M16 8.5c-2 0-2 2-4 2M8 14c2 0 2-2 4-2M16 14c-2 0-2-2-4-2"/>
+    """,
+    "image": """
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <circle cx="8.5" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 3-3 5 5"/>
+    """,
+    "sequence": """
+        <rect x="2.5" y="4" width="5" height="5" rx="1"/>
+        <rect x="9.5" y="4" width="5" height="5" rx="1"/>
+        <rect x="16.5" y="4" width="5" height="5" rx="1"/>
+        <path d="M5 14v5M19 14v5M5 16.5h14"/>
+    """,
+    "report": """
+        <path d="M6 2.5h9l4 4V21.5H6Z"/><path d="M15 2.5v4h4M9 11h6M9 15h6M9 19h4"/>
+    """,
+    "settings": """
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/>
+        <circle cx="12" cy="12" r="7"/>
+    """,
+    "info": """
+        <circle cx="12" cy="12" r="9"/><path d="M12 11v6"/>
+        <path d="M12 7h.01" stroke-width="3"/>
+    """,
+    "help": """
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M9.6 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1.1.9-1.1 1.7v.5M12 17h.01"/>
+    """,
+}
+
+
+def _sidebar_svg(kind: str, *, disabled: bool) -> QByteArray:
+    paths = _SIDEBAR_ICON_PATHS.get(kind, '<circle cx="12" cy="12" r="8"/>')
+    opacity = "0.38" if disabled else "1"
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+        fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"
+        stroke-linejoin="round" stroke-opacity="{opacity}">{paths}</svg>"""
+    return QByteArray(svg.encode("utf-8"))
+
+
+class _SidebarSvgIconEngine(QIconEngine):
+    """Render a consistent sidebar SVG at the display's native pixel density."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__()
+        self._kind = kind
+
+    def clone(self) -> QIconEngine:
+        return _SidebarSvgIconEngine(self._kind)
+
+    def key(self) -> str:
+        return "FPVSSidebarSvgIcon"
+
+    def isNull(self) -> bool:
+        return False
+
+    def paint(
+        self,
+        painter: QPainter,
+        rect: QRect,
+        mode: QIcon.Mode,
+        _state: QIcon.State,
+    ) -> None:
+        renderer = QSvgRenderer(
+            _sidebar_svg(self._kind, disabled=mode == QIcon.Disabled)
+        )
+        renderer.render(painter, QRectF(rect))
+
+    def pixmap(
+        self,
+        size: QSize,
+        mode: QIcon.Mode,
+        state: QIcon.State,
+    ) -> QPixmap:
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        self.paint(painter, QRect(0, 0, size.width(), size.height()), mode, state)
+        painter.end()
+        return pixmap
+
+    def scaledPixmap(
+        self,
+        size: QSize,
+        mode: QIcon.Mode,
+        state: QIcon.State,
+        scale: float,
+    ) -> QPixmap:
+        pixel_size = QSize(
+            max(1, round(size.width() * scale)),
+            max(1, round(size.height() * scale)),
+        )
+        pixmap = QPixmap(pixel_size)
+        pixmap.setDevicePixelRatio(scale)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        self.paint(painter, QRect(0, 0, size.width(), size.height()), mode, state)
+        painter.end()
+        return pixmap
+
+
 @lru_cache(maxsize=32)
 def sidebar_icon(kind: str, size: int = 20) -> QIcon:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
+    """Return a resolution-independent sidebar icon.
 
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.setPen(_stroke(size))
-    painter.setBrush(Qt.NoBrush)
-
-    if kind == "home":
-        painter.drawLine(QPointF(size * 0.18, size * 0.48), QPointF(size * 0.50, size * 0.20))
-        painter.drawLine(QPointF(size * 0.50, size * 0.20), QPointF(size * 0.82, size * 0.48))
-        painter.drawRoundedRect(QRectF(size * 0.27, size * 0.45, size * 0.46, size * 0.38), 2, 2)
-    elif kind == "stats":
-        painter.drawRoundedRect(QRectF(size * 0.18, size * 0.22, size * 0.64, size * 0.46), 2, 2)
-        painter.drawLine(QPointF(size * 0.50, size * 0.68), QPointF(size * 0.50, size * 0.82))
-        painter.drawLine(QPointF(size * 0.35, size * 0.82), QPointF(size * 0.65, size * 0.82))
-    elif kind == "sensitivity":
-        center = QPointF(size * 0.50, size * 0.58)
-        painter.drawArc(QRectF(size * 0.18, size * 0.26, size * 0.64, size * 0.64), 0, 180 * 16)
-        painter.drawLine(center, QPointF(size * 0.68, size * 0.38))
-        _draw_dot(painter, center, size * 0.055)
-        painter.drawLine(QPointF(size * 0.23, size * 0.67), QPointF(size * 0.77, size * 0.67))
-    elif kind == "chart":
-        for index, height in enumerate((0.30, 0.52, 0.72)):
-            x = size * (0.26 + index * 0.22)
-            painter.drawLine(QPointF(x, size * 0.78), QPointF(x, size * (0.78 - height)))
-    elif kind == "ratio":
-        painter.drawLine(QPointF(size * 0.28, size * 0.50), QPointF(size * 0.72, size * 0.50))
-        _draw_dot(painter, QPointF(size * 0.50, size * 0.30), size * 0.055)
-        _draw_dot(painter, QPointF(size * 0.50, size * 0.70), size * 0.055)
-    elif kind == "detectability":
-        center = QPointF(size * 0.50, size * 0.50)
-        painter.drawEllipse(center, size * 0.34, size * 0.34)
-        painter.drawEllipse(center, size * 0.16, size * 0.16)
-        painter.drawLine(QPointF(size * 0.50, size * 0.14), QPointF(size * 0.50, size * 0.28))
-        painter.drawLine(QPointF(size * 0.50, size * 0.72), QPointF(size * 0.50, size * 0.86))
-        painter.drawLine(QPointF(size * 0.14, size * 0.50), QPointF(size * 0.28, size * 0.50))
-        painter.drawLine(QPointF(size * 0.72, size * 0.50), QPointF(size * 0.86, size * 0.50))
-    elif kind == "scalp":
-        center = QPointF(size * 0.50, size * 0.50)
-        painter.drawEllipse(center, size * 0.34, size * 0.34)
-        painter.drawArc(QRectF(size * 0.28, size * 0.28, size * 0.44, size * 0.44), 25 * 16, 300 * 16)
-        painter.drawArc(QRectF(size * 0.38, size * 0.36, size * 0.24, size * 0.28), 25 * 16, 300 * 16)
-        _draw_dot(painter, QPointF(size * 0.36, size * 0.38), size * 0.035)
-        _draw_dot(painter, QPointF(size * 0.64, size * 0.38), size * 0.035)
-        _draw_dot(painter, QPointF(size * 0.50, size * 0.62), size * 0.035)
-    elif kind == "loreta":
-        center = QPointF(size * 0.50, size * 0.50)
-        painter.drawEllipse(center, size * 0.32, size * 0.36)
-        painter.drawLine(QPointF(size * 0.50, size * 0.20), QPointF(size * 0.50, size * 0.80))
-        painter.drawArc(QRectF(size * 0.26, size * 0.26, size * 0.25, size * 0.22), 20 * 16, 210 * 16)
-        painter.drawArc(QRectF(size * 0.49, size * 0.26, size * 0.25, size * 0.22), -50 * 16, 210 * 16)
-        painter.drawArc(QRectF(size * 0.28, size * 0.51, size * 0.22, size * 0.20), 30 * 16, 210 * 16)
-        painter.drawArc(QRectF(size * 0.50, size * 0.51, size * 0.22, size * 0.20), -60 * 16, 210 * 16)
-        _draw_dot(painter, QPointF(size * 0.61, size * 0.58), size * 0.045)
-    elif kind == "image":
-        painter.drawRoundedRect(QRectF(size * 0.18, size * 0.24, size * 0.64, size * 0.52), 2, 2)
-        painter.drawEllipse(QPointF(size * 0.38, size * 0.40), size * 0.055, size * 0.055)
-        painter.drawLine(QPointF(size * 0.28, size * 0.68), QPointF(size * 0.43, size * 0.55))
-        painter.drawLine(QPointF(size * 0.43, size * 0.55), QPointF(size * 0.55, size * 0.64))
-        painter.drawLine(QPointF(size * 0.55, size * 0.64), QPointF(size * 0.68, size * 0.48))
-    elif kind == "sequence":
-        for index in range(3):
-            x = size * (0.16 + index * 0.25)
-            painter.drawRoundedRect(QRectF(x, size * 0.22, size * 0.17, size * 0.17), 1.5, 1.5)
-        painter.drawLine(QPointF(size * 0.18, size * 0.64), QPointF(size * 0.82, size * 0.64))
-        painter.drawLine(QPointF(size * 0.18, size * 0.64), QPointF(size * 0.18, size * 0.78))
-        painter.drawLine(QPointF(size * 0.82, size * 0.64), QPointF(size * 0.82, size * 0.78))
-    elif kind == "report":
-        painter.drawRoundedRect(QRectF(size * 0.24, size * 0.16, size * 0.52, size * 0.68), 2, 2)
-        painter.drawLine(QPointF(size * 0.35, size * 0.34), QPointF(size * 0.65, size * 0.34))
-        painter.drawLine(QPointF(size * 0.35, size * 0.48), QPointF(size * 0.65, size * 0.48))
-        painter.drawLine(QPointF(size * 0.35, size * 0.62), QPointF(size * 0.56, size * 0.62))
-    elif kind == "settings":
-        center = QPointF(size * 0.50, size * 0.50)
-        painter.drawEllipse(center, size * 0.22, size * 0.22)
-        painter.drawEllipse(center, size * 0.075, size * 0.075)
-        for index in range(8):
-            angle = index * math.pi / 4
-            inner = size * 0.31
-            outer = size * 0.42
-            painter.drawLine(
-                QPointF(center.x() + math.cos(angle) * inner, center.y() + math.sin(angle) * inner),
-                QPointF(center.x() + math.cos(angle) * outer, center.y() + math.sin(angle) * outer),
-            )
-    elif kind == "info":
-        center = QPointF(size * 0.50, size * 0.50)
-        painter.drawEllipse(center, size * 0.34, size * 0.34)
-        _draw_dot(painter, QPointF(size * 0.50, size * 0.34), size * 0.045)
-        painter.drawLine(QPointF(size * 0.50, size * 0.46), QPointF(size * 0.50, size * 0.66))
-    elif kind == "help":
-        center = QPointF(size * 0.50, size * 0.50)
-        painter.drawEllipse(center, size * 0.34, size * 0.34)
-        font = font_for_role("icon_glyph", QApplication.font() if QApplication.instance() else None)
-        font.setPixelSize(max(1, int(size * 0.58)))
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "?")
-    else:
-        painter.drawEllipse(QPointF(size * 0.50, size * 0.50), size * 0.32, size * 0.32)
-
-    painter.end()
-    return QIcon(pixmap)
+    ``size`` remains part of the compatibility API and cache key; the SVG
+    engine renders at the actual size and device-pixel ratio requested by Qt.
+    """
+    del size
+    return QIcon(_SidebarSvgIconEngine(kind))
 
 
 @lru_cache(maxsize=4)

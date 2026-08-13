@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QDesktopServices
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -52,31 +52,12 @@ BETA_TOOL_SPECS = (
 )
 
 
-def tinted_icon(source: QIcon | str | Path, color: QColor) -> QIcon:
-    """Return a tinted icon from a file path, theme name, or QIcon."""
+def _resolve_icon(source: QIcon | str | Path) -> QIcon:
+    """Return an icon from a file path, theme name, or existing QIcon."""
     if isinstance(source, QIcon):
-        icon = source
-    else:
-        p = Path(str(source))
-        icon = QIcon(str(p)) if p.exists() else QIcon.fromTheme(str(source))
-
-    if icon.isNull():
-        return icon
-
-    pm = icon.pixmap(ICON_PX, ICON_PX)
-    tinted = QPixmap(pm.size())
-    tinted.fill(Qt.transparent)
-    painter = QPainter(tinted)
-    painter.drawPixmap(0, 0, pm)
-    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-    painter.fillRect(tinted.rect(), color)
-    painter.end()
-    return QIcon(tinted)
-
-
-def white_icon(source: QIcon | str | Path) -> QIcon:
-    """Return a white-tinted icon from a file path, theme name, or QIcon."""
-    return tinted_icon(source, QColor("white"))
+        return source
+    path = Path(str(source))
+    return QIcon(str(path)) if path.exists() else QIcon.fromTheme(str(source))
 
 
 class SidebarButton(QWidget):
@@ -123,10 +104,20 @@ class SidebarButton(QWidget):
         self._normal_icon_pixmap: QPixmap | None = None
         self._locked_icon_pixmap: QPixmap | None = None
         if icon:
-            self._normal_icon_pixmap = white_icon(icon).pixmap(ICON_PX, ICON_PX)
-            self._locked_icon_pixmap = tinted_icon(icon, QColor(255, 255, 255, 97)).pixmap(
-                ICON_PX,
-                ICON_PX,
+            resolved_icon = _resolve_icon(icon)
+            icon_size = QSize(ICON_PX, ICON_PX)
+            pixel_ratio = max(1.0, self.devicePixelRatioF())
+            self._normal_icon_pixmap = resolved_icon.pixmap(
+                icon_size,
+                pixel_ratio,
+                QIcon.Normal,
+                QIcon.Off,
+            )
+            self._locked_icon_pixmap = resolved_icon.pixmap(
+                icon_size,
+                pixel_ratio,
+                QIcon.Disabled,
+                QIcon.Off,
             )
             self.icon_lbl.setPixmap(self._normal_icon_pixmap)
         lay.addWidget(self.icon_lbl, 0, Qt.AlignVCenter)
