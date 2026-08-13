@@ -84,7 +84,7 @@ queued by the locked available-observation workflow.
 
 Structural checks:
 
-```powershell
+```console
 python .agents/scripts/audit/agent_audit.py --check stats-structure
 python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility
 ```

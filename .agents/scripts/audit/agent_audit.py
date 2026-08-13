@@ -48,8 +48,11 @@ CUSTOMTK_IMPORT_RE = re.compile(
 )
 PRINT_RE = re.compile(r"^\s*print\s*\(")
 WINDOWS_USER_PATH_RE = r"[A-Za-z]:\\" + r"Users\\" + r"[^\\\s]+"
-POSIX_USER_PATH_RE = "/" + "Users/" + r"[^/\s]+"
-LOCAL_PATH_RE = re.compile(f"(?:{WINDOWS_USER_PATH_RE}|{POSIX_USER_PATH_RE})")
+MACOS_USER_PATH_RE = "/" + "Users/" + r"[^/\s]+"
+LINUX_USER_PATH_RE = "/" + "home/" + r"[^/\s]+"
+LOCAL_PATH_RE = re.compile(
+    f"(?:{WINDOWS_USER_PATH_RE}|{MACOS_USER_PATH_RE}|{LINUX_USER_PATH_RE})"
+)
 ACTIVE_SOURCE_LOCALIZATION_REF_RE = re.compile(
     r"(?:Tools\.SourceLocalization|src[/\\]Tools[/\\]SourceLocalization)"
 )

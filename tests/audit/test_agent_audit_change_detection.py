@@ -117,6 +117,18 @@ def test_parse_args_accepts_explicit_base_ref():
 
 
 @pytest.mark.parametrize(
+    "path",
+    (
+        "C:" + r"\Users\developer\project\file.py",
+        "/" + "Users/developer/project/file.py",
+        "/" + "home/developer/project/file.py",
+    ),
+)
+def test_local_path_pattern_covers_supported_development_hosts(path):
+    assert agent_audit.LOCAL_PATH_RE.search(path)
+
+
+@pytest.mark.parametrize(
     ("attribute", "message"),
     (
         ("VERIFICATION_DRIVER", "missing executable verification driver"),

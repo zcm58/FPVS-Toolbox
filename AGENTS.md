@@ -2,7 +2,9 @@
 
 ## Repo Purpose
 
-FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing, cleaning, visualizing, and statistically analyzing EEG data from Fast Periodic Visual Stimulation experiments.
+FPVS Toolbox is a PySide6 desktop application for preprocessing, cleaning,
+visualizing, and statistically analyzing EEG data from Fast Periodic Visual
+Stimulation experiments. Releases currently ship through a Windows installer.
 
 ## Working Rules
 
@@ -10,7 +12,15 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Prefer the smallest behavior-preserving change that solves the task.
 - Touch only files required by the task; do not refactor adjacent code opportunistically.
 - Preserve existing processing order, data formats, exports, and user workflows unless the task explicitly changes them.
-- Prefer executable checks over broad reading. Activate the repo environment first (`.\.venv1` when present, otherwise `.\.venv`), then run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` before reading only the focused docs needed for failures or context.
+- Development and source execution may occur on Windows 11 or CachyOS (Arch
+  Linux). Keep paths, subprocesses, GUI behavior, and tests compatible with
+  both; prefer `pathlib`, Python/PySide6 platform abstractions, and one simple
+  shared implementation. Isolate OS-specific behavior only when packaging or
+  system integration requires it.
+- Prefer executable checks over broad reading. Use the available `.venv1` or
+  `.venv` environment, then run the relevant skill audit or
+  `python .agents/scripts/audit/agent_audit.py`. Shell-specific setup lives in
+  [docs/agent/guides/development.md](docs/agent/guides/development.md).
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
 - Start with [docs/agent/agent-index.md](docs/agent/agent-index.md) when choosing skills, scripts, and focused tests.
 - Treat `src/Standalone_Scripts/**` as an opt-in boundary. Do not list, search,
@@ -55,91 +65,26 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Do not run offscreen Qt workflows in this repo. Do not set
   `QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and
   do not launch ad-hoc offscreen Qt scripts; they can freeze or hang
-  indefinitely in this Windows environment.
+  indefinitely in supported local development environments.
 - GUI changes need non-GUI checks plus a documented visible/manual smoke path.
   PySide6/pytest-qt execution is CI-only by default; run it locally only in an
   explicitly user-approved safe visible environment.
 
-## Skills
+## Routing And Verification
 
-Repo-local skills live in `.agents/skills/`.
-
-- `pyside6-gui-cleanup`: PySide6 widgets, layouts, dialogs, actions, status UX, workers, and theme cleanup.
-- `legacy-boundary-review`: refactors near retired legacy paths, removed-feature boundaries, or historical API boundaries.
-- `project-path-audit`: file dialogs, manifests, exports, imports, generated files, and project-root path discipline.
-- `pytest-qt-smoke`: maintain registered pytest-qt smoke coverage definitions
-  for CI; do not run them locally unless the user explicitly approves a safe
-  visible GUI environment.
-- `cleanup-generated-files`: generated build, cache, temp, and stale local data cleanup.
-- `publication-table-export`: publication-ready table assets using shared toolbox typography, SVG plus 600-DPI PNG, saved under a project root in `9 - Tables`.
-
-Run skill-local scripts before manual inspection when they apply:
-
-Command examples use the preferred `.venv1` path. If that environment is not
-present in the checkout, substitute `.venv` in the same path.
-
-```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-```
-
-Use the script output to decide what to read next. If a script passes, do not scan broad folders just to confirm the same invariant manually.
-
-Globally installed Codex skills are secondary to these repo-local rules. Use
-`docs/agent/agent-index.md` for the narrow list that applies here; do not route
-normal FPVS Toolbox work through React, Vercel, React Native, or web-app skills
-unless the repo gains that scoped surface in the task being performed. Global
-skills never replace the repo environment (`.venv1` preferred; `.venv`
-fallback), repo-local audits, no-offscreen Qt limits, or
-the focused verification gates below.
-
-## Useful Docs
-
-- Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Docs knowledge-base map: [docs/agent/README.md](docs/agent/README.md)
-- Agent command index: [docs/agent/agent-index.md](docs/agent/agent-index.md)
-- Active execution plans: [docs/agent/exec-plans/active/](docs/agent/exec-plans/active/)
-- Technical debt tracker: [docs/agent/exec-plans/tech-debt-tracker.md](docs/agent/exec-plans/tech-debt-tracker.md)
-- Main App target layout: [docs/agent/architecture/main-app-target-layout.md](docs/agent/architecture/main-app-target-layout.md)
-- Module map: [docs/agent/architecture/module-map.md](docs/agent/architecture/module-map.md)
-- Protected paths: [docs/agent/architecture/protected-paths.txt](docs/agent/architecture/protected-paths.txt)
-- Test selection: [docs/agent/quality/test-selection.md](docs/agent/quality/test-selection.md)
-- Verification gates: [docs/agent/quality/verification-gates.md](docs/agent/quality/verification-gates.md)
-- Garbage collection: [docs/agent/quality/garbage-collection.md](docs/agent/quality/garbage-collection.md)
-- GUI architecture: [docs/agent/architecture/gui.md](docs/agent/architecture/gui.md); canonical active import surface lives in `src/Main_App/gui/`.
-- Diagnostics: [docs/agent/architecture/diagnostics.md](docs/agent/architecture/diagnostics.md); canonical runtime import surface lives in `src/Main_App/diagnostics/`.
-- BDF loading contract: [docs/agent/architecture/eeg-loading-contract.md](docs/agent/architecture/eeg-loading-contract.md); canonical active import surface lives in `src/Main_App/io/load_utils.py`.
-- Workers and threading: [docs/agent/architecture/workers-threading.md](docs/agent/architecture/workers-threading.md); canonical active import surface lives in `src/Main_App/workers/`.
-- Project I/O: [docs/agent/architecture/project-io.md](docs/agent/architecture/project-io.md); canonical active import surface lives in `src/Main_App/projects/`.
-- Preprocessing contract: [docs/agent/architecture/preprocessing-contract.md](docs/agent/architecture/preprocessing-contract.md); canonical active import surface lives in `src/Main_App/processing/preprocess.py`.
-- Pre-ship checklist: [docs/agent/reviews/pre_ship_checklist.md](docs/agent/reviews/pre_ship_checklist.md)
-- Legacy quarantine audit: [docs/agent/architecture/legacy-quarantine-audit.md](docs/agent/architecture/legacy-quarantine-audit.md)
-- LORETA Visualizer tool docs: [src/Tools/LORETA_Visualizer/AGENTS.md](src/Tools/LORETA_Visualizer/AGENTS.md) and [src/Tools/LORETA_Visualizer/ARCHITECTURE.md](src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
-
-## Standard Verification
-
-Run the narrowest relevant scope first, then broaden when the change affects
-shared behavior. The driver selects `.venv1` when present and otherwise `.venv`.
-
-```powershell
-python .agents/scripts/verify.py --scope <scope> --tier focused
-python .agents/scripts/verify.py --scope repo --tier precommit
-```
-
-Choose the scope in `docs/agent/agent-index.md`. For GUI changes, leave Qt
-execution to CI and report the manual/visible smoke path. If another gate cannot
-run locally, report the command, failure reason, and residual risk.
-
-## Done Means
-
-- Retired `Legacy_App` and `PySide6_App` paths are not recreated.
-- Source Localization/eLORETA remains removed from active runtime unless explicitly restored as a new feature.
-- New LORETA Visualizer work preserves rendering/calculation separation and does not use retired Source Localization code as precedent.
-- PySide6-only GUI imports are preserved.
-- UI work remains non-blocking.
-- Project-path discipline is preserved.
-- Errors are logged and surfaced without freezing the app.
-- Non-GUI checks or documented visible/manual smoke checks cover changed behavior.
-- Architecture or agent docs reflect any changed structure, or the handoff explains why no doc update was needed.
+- [docs/agent/agent-index.md](docs/agent/agent-index.md) is the compact source
+  for skill selection, first commands, focused docs, and verification scopes.
+  Run applicable skill-local audits before manual inspection, and do not scan
+  broad folders to reconfirm a passing invariant.
+- Repo-local skills and rules take precedence over generic installed skills for
+  FPVS Toolbox work. Web/frontend skills do not apply to the PySide6 desktop UI
+  unless a task explicitly introduces a web surface.
+- Use `python .agents/scripts/verify.py --scope <scope> --tier focused` first;
+  use `python .agents/scripts/verify.py --scope repo --tier precommit` for the
+  broad local handoff gate. The driver selects `.venv1` or `.venv`.
+- For GUI changes, leave Qt execution to CI and document the visible/manual
+  smoke path. If a gate cannot run, report the command, failure reason, and
+  residual risk.
+- Use [docs/agent/README.md](docs/agent/README.md) for the knowledge-base map and
+  [docs/agent/reviews/pre_ship_checklist.md](docs/agent/reviews/pre_ship_checklist.md)
+  for final review criteria.

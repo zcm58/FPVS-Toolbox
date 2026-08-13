@@ -1,15 +1,8 @@
 # Module Map
 
-Use this as a quick orientation map before opening files. Run the relevant audit script first when the task matches a skill; use this file to choose the next narrow file or doc to open.
-
-Common first commands:
-
-```powershell
-python .agents/scripts/audit/agent_audit.py
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-```
+Use this as a quick orientation map before opening files. Run the relevant
+audit from `docs/agent/agent-index.md` first, then use this page to choose the
+next narrow file or focused document.
 
 ## Main App
 

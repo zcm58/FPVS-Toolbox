@@ -5,7 +5,7 @@
 This directory owns the embedded LORETA 3D visualizer, its prepared-payload
 contract, and its source producers. Run the focused gate before broad reading:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope loreta --tier focused
 ```
 
@@ -216,7 +216,8 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   smoothing, and surface visible errors when anatomy, template generation, or
   the all-condition reference is unavailable.
 - Transparent mesh modes use plain alpha blending. Do not re-enable VTK depth
-  peeling without visible validation on supported Windows/VTK driver stacks;
+  peeling without visible validation on supported Windows 11 and CachyOS
+  (Arch Linux) VTK/graphics stacks;
   depth peeling has made translucent meshes disappear on a supported machine.
 - Missing PyVista/VTK/MNE/fsaverage must produce inline status and the retained
   synthetic fallback instead of crashing the Main App. Synthetic conditions,
@@ -259,8 +260,8 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 
 - Preserve the untracked repository-root `.fpvs_cache/`. Automatic fsaverage
   installs and transient archives belong under
-  `.fpvs_cache/mne/MNE-fsaverage-data/`, never `%TEMP%`, AppData, `src/`,
-  `docs/`, package data, or an optional quarantine tree.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`, never an OS temp/user-cache location,
+  `src/`, `docs/`, package data, or an optional quarantine tree.
 - Reject configured fsaverage candidates under source, docs, temp, or common
   admin-protected system folders; ignore stale generic MNE settings there so the
   root-local cache can be used.

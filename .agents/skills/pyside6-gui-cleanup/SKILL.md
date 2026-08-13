@@ -1,6 +1,6 @@
 ---
 name: pyside6-gui-cleanup
-description: Use for Windows-oriented PySide6 GUI cleanup, widget refactors, layout polish, QAction fixes, theme-token usage, worker wiring, and non-blocking status or error UX in FPVS Toolbox.
+description: Use for cross-platform PySide6 GUI cleanup, widget refactors, layout polish, QAction fixes, theme-token usage, worker wiring, and non-blocking status or error UX in FPVS Toolbox.
 ---
 
 # PySide6 GUI Cleanup
@@ -11,7 +11,7 @@ Use this workflow when changing PySide6 widgets, dialogs, menus, toolbar actions
 
 ## Workflow
 
-1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` when that environment exists; otherwise use the `.venv` equivalents.
+1. Use the active `.venv1` or `.venv` described in `docs/agent/guides/development.md`.
 2. Run `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` before broad manual inspection.
 3. Read only the focused docs or files needed by the task or by script failures.
 4. Identify the smallest GUI cleanup that satisfies the task.
@@ -27,7 +27,7 @@ Use this workflow when changing PySide6 widgets, dialogs, menus, toolbar actions
 14. Use structured logging for production diagnostics.
 15. PySide6/pytest-qt execution is CI-only by default. Do not set
     `QT_QPA_PLATFORM=offscreen` or launch ad-hoc offscreen Qt scripts locally;
-    they can freeze in this Windows environment.
+    they can freeze in supported local development environments.
 16. Add or update registered pytest-qt smoke coverage when useful. Run it
     locally only when the user explicitly approves a safe visible environment.
 17. Document the visible/manual smoke path and why automated GUI execution was

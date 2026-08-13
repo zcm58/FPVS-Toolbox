@@ -14,7 +14,10 @@ Primary paths:
 
 FPVS Toolbox uses a strict hybrid settings model:
 
-- App-level settings use `FPVS_CONFIG_HOME` when set, otherwise the user-writable app config root under `%LOCALAPPDATA%\FPVS Toolbox\settings\` on Windows.
+- App-level settings use `FPVS_CONFIG_HOME` when set. Otherwise they use
+  `%LOCALAPPDATA%/FPVS Toolbox/settings/` on Windows and
+  `$XDG_CONFIG_HOME/FPVS Toolbox/settings/` on CachyOS, falling back to
+  `~/.config/FPVS Toolbox/settings/` when `XDG_CONFIG_HOME` is unset.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
 - `preprocessing.manual_excluded_participant_conditions` stores a normalized,
@@ -224,7 +227,7 @@ Rules:
 
 Focused local verification:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope project-io --tier focused
 ```
 

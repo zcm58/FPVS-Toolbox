@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from Main_App.Shared.settings_paths import app_logs_dir
@@ -174,7 +174,10 @@ def replay_worker_timing_records(
     if not isinstance(records, list):
         return
 
-    file_name = Path(str(result.get("file", "unknown"))).name
+    file_path = str(result.get("file", "unknown"))
+    file_name = (
+        PureWindowsPath(file_path).name if "\\" in file_path else Path(file_path).name
+    )
     for record in records:
         if isinstance(record, dict):
             log_worker_timing_record(log, file_name=file_name, record=record)

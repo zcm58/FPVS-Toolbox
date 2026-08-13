@@ -85,23 +85,12 @@ Keep `_Worker` importable from `Tools.Plot_Generator.worker`. New worker helper
 logic should go in the focused helper modules above and remain PySide6-free
 unless it belongs in the QObject shell.
 
-Use `.venv1` when it exists. On a development machine that only has `.venv`,
-substitute `.venv` in the commands below.
-
-Before broad manual inspection, run:
-
-```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/scripts/audit/agent_audit.py
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-```
-
-Use script output to decide what to read next.
+Use the root `AGENTS.md` platform/environment policy and the initial audits in
+`docs/agent/agent-index.md`. Use their output to decide what to read next.
 
 For Plot Generator worker or rendering changes, start with:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope plot-generator --tier focused
 ```
 
@@ -133,4 +122,3 @@ The app should read all of these Excel files for each condition and generate an 
 across all the participants, then plot that data. To further clarify, if you have 30 participants and 5 conditions,
 You should generate one plot per condition per ROI. If the user defines 4 ROIs like "frontal, central, parietal,
 occipital", then you have 4 ROIs * 5 conditions = 20 plots.
-

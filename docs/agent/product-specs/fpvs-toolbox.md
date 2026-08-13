@@ -1,7 +1,9 @@
 # FPVS Toolbox Product Scope
 
-FPVS Toolbox is a Windows-oriented PySide6 desktop application for FPVS EEG
-workflows.
+FPVS Toolbox is a PySide6 desktop application for FPVS EEG workflows. The
+current release artifact is a Windows installer, while development and source
+execution may take place on Windows 11 or CachyOS (Arch Linux). Shared runtime
+decisions should remain portable across both without parallel implementations.
 
 Primary user workflows:
 

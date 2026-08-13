@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 from tests import repo_root
 
@@ -18,12 +21,24 @@ def test_resolve_repo_python_prefers_venv1_then_venv(tmp_path: Path) -> None:
     venv_python = tmp_path / ".venv" / "Scripts" / "python.exe"
     venv_python.parent.mkdir(parents=True)
     venv_python.touch()
-    assert verify.resolve_repo_python(tmp_path) == venv_python.resolve()
+    assert verify.resolve_repo_python(tmp_path) == venv_python
 
     venv1_python = tmp_path / ".venv1" / "Scripts" / "python.exe"
     venv1_python.parent.mkdir(parents=True)
     venv1_python.touch()
-    assert verify.resolve_repo_python(tmp_path) == venv1_python.resolve()
+    assert verify.resolve_repo_python(tmp_path) == venv1_python
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX venv launchers are symlinks")
+def test_resolve_repo_python_preserves_posix_venv_launcher(tmp_path: Path) -> None:
+    interpreter = tmp_path / ".venv" / "bin" / "python3.13"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+    launcher = interpreter.with_name("python")
+    launcher.symlink_to(interpreter.name)
+
+    assert verify.resolve_repo_python(tmp_path) == launcher
+    assert verify.resolve_repo_python(tmp_path) != launcher.resolve()
 
 
 def test_validate_config_rejects_qt_test_in_local_bundle(tmp_path: Path) -> None:

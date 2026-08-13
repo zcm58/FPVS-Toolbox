@@ -7,7 +7,7 @@ Goal: change only the requested PySide6 GUI behavior.
 
 Checks:
 
-```powershell
+```console
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/scripts/audit/agent_audit.py --check gui
 python -m py_compile <changed Python files>

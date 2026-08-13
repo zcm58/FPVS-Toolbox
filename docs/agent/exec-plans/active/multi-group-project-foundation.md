@@ -296,7 +296,7 @@ selection, and diagnostics only.
 
 Use the repository-selected `.venv1`/`.venv` interpreter:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope project-io --tier focused
 python .agents/scripts/verify.py --scope processing --tier focused
 python .agents/scripts/verify.py --scope plot-generator --tier focused

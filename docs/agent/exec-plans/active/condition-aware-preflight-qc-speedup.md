@@ -80,4 +80,4 @@ its filter order, or any generated scientific output.
 
 Do not run Qt or offscreen GUI tests locally. Register any needed pytest-qt
 coverage for CI, run the safe GUI-static gate locally, and document a visible
-Windows smoke path.
+smoke path on Windows 11 or CachyOS.

@@ -80,7 +80,7 @@ Use two inventories.
 
 Find shared section cards:
 
-```powershell
+```console
 rg -n "SectionCard\(" src/Main_App src/Tools -g "*.py"
 ```
 
@@ -93,7 +93,7 @@ Expected classification:
 
 Find local label headings and manual styling:
 
-```powershell
+```console
 rg -n --fixed-strings "QLabel(" src/Main_App src/Tools -g "*.py"
 rg -n --fixed-strings "setBold(True)" src/Main_App src/Tools -g "*.py"
 rg -n --fixed-strings "setProperty(\"caption\"" src/Main_App src/Tools -g "*.py"
@@ -308,14 +308,13 @@ document a visible smoke path.
 
 Run focused checks after each surface group:
 
-The commands use the preferred `.venv1` interpreter. Substitute
-`.venv\Scripts\python.exe` when `.venv1` is absent.
+Use the active environment selected by the repository policy.
 
-```powershell
-.\.venv1\Scripts\python.exe -m py_compile <touched Python files>
-.\.venv1\Scripts\python.exe -m ruff check <touched Python files> --ignore F401,F405
-.\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check gui
+```console
+python -m py_compile <touched Python files>
+python -m ruff check <touched Python files> --ignore F401,F405
+python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
+python .agents/scripts/audit/agent_audit.py --check gui
 git diff --check
 ```
 

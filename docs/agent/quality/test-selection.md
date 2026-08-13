@@ -5,7 +5,7 @@ selects `.venv1` or `.venv`, keeps output compact, applies the explicit Qt-test
 registry, and composes the tests, audits, compilation, and lint checks required
 for each scope.
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope <scope> --tier focused
 ```
 
@@ -15,9 +15,9 @@ update the driver when executable coverage changes.
 
 ## Qt Execution Boundary
 
-PySide6/pytest-qt tests are CI-only by default. Do not run them on local Windows
-machines, do not set `QT_QPA_PLATFORM=offscreen`, and do not launch ad-hoc
-offscreen Qt scripts. They can freeze indefinitely even when a filename or
+PySide6/pytest-qt tests are CI-only by default. Do not run them on local
+development machines, do not set `QT_QPA_PLATFORM=offscreen`, and do not
+launch ad-hoc offscreen Qt scripts. They can freeze indefinitely even when a filename or
 marker does not obviously identify it as a Qt test.
 
 For GUI changes, keep the CI Qt coverage definition current, run the local

@@ -1,19 +1,9 @@
-Instructions for Codex: 
+Instructions for Codex:
 
-Before broad manual inspection, run the relevant executable check:
-
-Prefer `.venv1` when present; if it is absent, substitute `.venv` in the
-activation path below.
-
-```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/scripts/audit/agent_audit.py
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-```
-
-Use those results to decide what to read next. Do not scan unrelated source folders when a skill script already proves the invariant.
+Inherit the repository environment, cross-platform, and audit policy from the
+root `AGENTS.md`. Use `docs/agent/agent-index.md` to select the first executable
+check, and do not scan unrelated source folders when that check already proves
+the invariant.
 
 If you are instructed to make edits in a specific directory that will not affect other directories, please review 
 the AGENTS.md file in that directory for specific instructions. To save time, you do not have to review the AGENTS.md

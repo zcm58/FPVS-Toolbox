@@ -58,7 +58,7 @@ Figure typography is separate from GUI typography.
 For figure-output changes, run the shared figure contract and then the affected
 tool scope:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope figures --tier focused
 python .agents/scripts/verify.py --scope <affected-tool> --tier focused
 ```

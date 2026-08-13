@@ -38,7 +38,7 @@ Rules:
 
 Useful checks:
 
-```powershell
+```console
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/scripts/audit/agent_audit.py --check protected
 python .agents/scripts/audit/agent_audit.py --check source-localization

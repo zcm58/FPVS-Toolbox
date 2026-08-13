@@ -6,7 +6,7 @@ Goal: keep retired or historical legacy behavior from re-entering active runtime
 
 Checks:
 
-```powershell
+```console
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/scripts/audit/agent_audit.py --check protected
 python .agents/scripts/audit/agent_audit.py --check source-localization

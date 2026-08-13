@@ -102,10 +102,9 @@ and source tables remain in the workbook.
 
 ## Checks
 
-Prefer `.venv1` when present; otherwise substitute `.venv`.
+Use the active environment selected by the root agent policy.
 
-```powershell
-.\.venv1\Scripts\Activate.ps1
+```console
 python .agents/scripts/audit/agent_audit.py --check stats-structure
 python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py

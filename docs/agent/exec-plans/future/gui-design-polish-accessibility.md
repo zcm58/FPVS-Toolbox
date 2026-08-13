@@ -280,7 +280,7 @@ inspection without adding visual noise:
 
 1. Inventory modal validation calls with:
 
-   ```powershell
+   ```console
    rg -n "QMessageBox\.(warning|critical|information)|show_error\(|show_warning\(|show_info\(" src/Main_App src/Tools -g "*.py"
    ```
 
@@ -299,7 +299,7 @@ inspection without adding visual noise:
 
 1. Build a copy inventory for common verbs and ambiguous labels:
 
-   ```powershell
+   ```console
    rg -n "\"OK\"|\"Browse\.\.\.\"|\"Open\.\.\.\"|\"Generate\"|\"Reset to Default settings\"|\"Error\"" src/Main_App src/Tools -g "*.py"
    ```
 
@@ -332,7 +332,7 @@ inspection without adding visual noise:
 
 1. Inventory active GUI animations:
 
-   ```powershell
+   ```console
    rg -n "QPropertyAnimation|BusySpinner|BrainPulseWidget|setDuration\(" src/Main_App src/Tools -g "*.py"
    ```
 
@@ -355,17 +355,17 @@ inspection without adding visual noise:
 
 ## Verification Plan
 
-Run focused non-GUI checks first. Prefer `.venv1` in the active checkout; if it
-is absent, use `.venv\Scripts\python.exe` and report that substitution.
+Run focused non-GUI checks first in the active environment selected by the
+repository policy.
 
 Recommended commands after implementation slices:
 
-```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Main_App\gui\theme.py src\Main_App\gui\style_tokens.py src\Main_App\gui\typography.py
-.\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
-.\.venv1\Scripts\python.exe .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check gui
-.\.venv1\Scripts\python.exe -m pytest tests\gui\test_ui_components_smoke.py -q
+```console
+python -m py_compile src/Main_App/gui/theme.py src/Main_App/gui/style_tokens.py src/Main_App/gui/typography.py
+python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
+python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
+python .agents/scripts/audit/agent_audit.py --check gui
+python -m pytest tests/gui/test_ui_components_smoke.py -q
 ```
 
 For touched tool surfaces, add the nearest focused non-GUI checks from
@@ -374,7 +374,7 @@ For touched tool surfaces, add the nearest focused non-GUI checks from
 Do not run pytest-qt/offscreen GUI workflows locally. Provide a visible/manual
 smoke path instead, such as:
 
-1. Launch the app normally in a visible Windows session.
+1. Launch the app normally in a visible Windows 11 or CachyOS session.
 2. Create or open a project.
 3. Use keyboard traversal through landing actions, sidebar, preprocessing
    inputs, settings, Stats, Plot Generator, Ratio Calculator, and any touched

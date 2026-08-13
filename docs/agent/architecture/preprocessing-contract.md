@@ -624,7 +624,7 @@ Use the processing scope for preprocessing ownership, routing, or behavior
 changes. The driver selects `.venv1` or `.venv` and excludes Qt execution
 locally:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope processing --tier focused
 ```
 

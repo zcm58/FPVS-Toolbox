@@ -5,35 +5,35 @@ not part of the end-user documentation.
 
 ## Local Environment
 
-Prefer `.\.venv1` as the repository virtual-environment name on development
-machines. An existing `.\.venv` is also supported and should be used as the
-fallback instead of creating a duplicate environment only to match examples.
-Recreate either environment locally from that machine's Python interpreter
-rather than reusing a copied virtual environment from another computer:
+Development and source execution may occur on Windows 11 or CachyOS (Arch
+Linux). Keep virtual environments machine-local; never copy one between
+operating systems. Prefer an existing `.venv1`, fall back to an existing
+`.venv`, and do not create a duplicate merely to match an example.
+
+Windows PowerShell setup:
 
 ```powershell
 python -m venv .venv1
-```
-
-The command examples below use `.venv1`; substitute `.venv` in the same path
-when that is the environment available in the checkout.
-
-Install dependencies with:
-
-```powershell
-.\.venv1\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-Before running repo commands in a shell, activate the environment:
-
-```powershell
 .\.venv1\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-After activation, use `python` in command examples. If PyCharm or another IDE
-reports that it did not find the executable, repoint the project interpreter to
-the selected `.\.venv1\Scripts\python.exe` or `.\.venv\Scripts\python.exe`
-and remove stale references to virtual environments that no longer exist.
+CachyOS/Bash setup:
+
+```bash
+python -m venv .venv1
+source .venv1/bin/activate
+python -m pip install -r requirements.txt
+```
+
+After activation, shared cross-platform commands use `python` and
+repository-relative forward-slash paths. If an IDE loses its interpreter, select
+`.venv1/Scripts/python.exe` or `.venv/Scripts/python.exe` on Windows and
+`.venv1/bin/python` or `.venv/bin/python` on CachyOS.
+
+Shared development decisions must work on both platforms. Prefer `pathlib`,
+Python/PySide6 APIs, and one portable code path; add a platform branch only
+when an OS-specific installer or system integration makes it unavoidable.
 
 For validation commands, set `PYTHONNOUSERSITE=1` when you need to ensure tests
 and import checks do not fall back to user-site packages from the global Python
@@ -55,7 +55,9 @@ Updating `FPVS_TOOLBOX_VERSION` is the release version bump.
 
 ## Packaging
 
-Releases provide an Inno Setup installer. Running the installer creates a
+Windows releases provide an Inno Setup installer. Build and installer smoke
+work therefore runs on Windows 11; CachyOS development does not need to
+duplicate Windows-only packaging tooling. Running the installer creates a
 folder containing `FPVS_Toolbox.exe`, required DLLs, and configuration files.
 Release packaging definitions live in `scripts/packaging/`.
 
@@ -144,7 +146,7 @@ Use the narrowest relevant scope first. See
 
 Common gates:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope <scope> --tier focused
 python .agents/scripts/verify.py --scope repo --tier precommit
 ```

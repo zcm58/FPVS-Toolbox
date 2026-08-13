@@ -235,46 +235,27 @@ explicitly approves a safe visible Qt test environment.
 
 Use focused checks first:
 
-The commands use the preferred `.venv1` interpreter. Substitute
-`.venv\Scripts\python.exe` when `.venv1` is absent. The baseline below records
-the environment used when that historical verification was run.
+Let the verification driver select `.venv1` or `.venv` on either supported
+development platform:
 
-```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\selection_state.py src\Tools\Plot_Generator\generation_workflow.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\manifest_utils.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\data_collection.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\rendering.py
-.\.venv1\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_worker_config.py tests\plot_generator\test_plot_generator_group_overlay_worker.py tests\plot_generator\test_plot_generator_manifest_utils.py tests\plot_generator\test_plot_generator_excel_inputs.py tests\plot_generator\test_plot_generator_project_input_policy.py -q
-.\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
-.\.venv1\Scripts\python.exe .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check gui
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check paths
+```console
+python .agents/scripts/verify.py --scope plot-generator --tier focused
 ```
 
 Use pytest-qt coverage as a definition of expected GUI behavior, but do not run
 it locally/offscreen:
 
-```powershell
-.\.venv1\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_multigroup_smoke.py -q
+```console
+python -m pytest tests/plot_generator/test_plot_generator_multigroup_smoke.py -q
 ```
 
 Run that command only in an explicitly approved safe visible Qt environment.
 
 ## Baseline Verification From Plan Refresh
 
-Passed on 2026-05-31:
-
-```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\selection_state.py src\Tools\Plot_Generator\generation_workflow.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\rendering.py src\Tools\Plot_Generator\manifest_utils.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\data_collection.py
-.\.venv1\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_worker_config.py tests\plot_generator\test_plot_generator_group_overlay_worker.py tests\plot_generator\test_plot_generator_manifest_utils.py tests\plot_generator\test_plot_generator_excel_inputs.py tests\plot_generator\test_plot_generator_project_input_policy.py -q
-.\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
-.\.venv1\Scripts\python.exe .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check gui
-.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check paths
-```
-
-Notes:
-
-- The focused pytest command collected 17 tests and all passed.
-- Pytest-qt GUI smoke was not run locally because this repo forbids offscreen
-  Qt workflows.
+On 2026-05-31, the equivalent focused compilation, five Plot Generator test
+files (17 tests), GUI/path audits, and agent audits passed. Pytest-qt GUI smoke
+was not run locally because this repo forbids offscreen Qt workflows.
 
 ## Reporting Requirements
 

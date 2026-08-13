@@ -314,8 +314,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
   disables VTK depth peeling and relies on normal alpha blending so
-  transparent brain meshes remain visible across supported Windows graphics
-  stacks. It must not calculate source estimates.
+  transparent brain meshes remain visible across supported Windows 11 and
+  CachyOS (Arch Linux) graphics stacks. It must not calculate source estimates.
 - `fsaverage_cache.py`: shared fsaverage cache path policy. Automatic fetches
   install fsaverage and keep transient ZIP archives under
   `.fpvs_cache/mne/MNE-fsaverage-data/` in the FPVS Toolbox root. `src/`,
@@ -659,7 +659,7 @@ adds cross-field checks that the schema intentionally does not own.
 Use the focused tool gate; it selects `.venv1` or `.venv`, applies the Qt guard,
 and runs the tool tests, static checks, and legacy/source-localization audits:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope loreta --tier focused
 ```
 

@@ -8,7 +8,7 @@ packages under `src/Main_App/`.
 
 ```text
 src/Main_App/
-  gui/            # Windows/PySide6 user interface, widgets, menus, dialogs
+  gui/            # Cross-platform PySide6 interface, widgets, menus, dialogs
   processing/     # EEG preprocessing and pipeline orchestration import surface
   io/             # BDF loading, project paths, manifests, export path helpers
   projects/       # Project model/settings, manifests, dataset identity/indexing

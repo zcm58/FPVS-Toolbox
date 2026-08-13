@@ -81,7 +81,7 @@ Rules:
 
 Focused local verification:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope processing --tier focused
 ```
 

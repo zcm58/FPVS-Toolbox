@@ -22,7 +22,7 @@ work from compounding into technical debt.
 
 Run:
 
-```powershell
+```console
 python .agents/scripts/audit/agent_audit.py --check garbage-collection
 ```
 

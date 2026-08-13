@@ -9,16 +9,17 @@ description: Clean generated build artifacts, Python/tool caches, test scratch f
 
 1. State the cleanup scope before deleting anything.
 2. Preserve `.venv1/`, `.venv/`, `.idea/`, root `.fpvs_cache/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. Preserve `src/quarantine/` if it exists; its absence is valid. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
-3. Run a dry run first:
+3. Run a dry run first. Use Windows PowerShell or `pwsh` on Windows 11, and
+   PowerShell 7 (`pwsh`) on CachyOS:
 
 ```powershell
-.\.agents\skills\cleanup-generated-files\scripts\cleanup_generated_files.ps1 -DryRun
+& ./.agents/skills/cleanup-generated-files/scripts/cleanup_generated_files.ps1 -DryRun
 ```
 
 4. If the user asked for deletion and the dry-run targets match the request, run:
 
 ```powershell
-.\.agents\skills\cleanup-generated-files\scripts\cleanup_generated_files.ps1
+& ./.agents/skills/cleanup-generated-files/scripts/cleanup_generated_files.ps1
 ```
 
 5. Verify with:

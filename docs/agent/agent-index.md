@@ -6,9 +6,10 @@ the result.
 
 ## First Commands
 
-The verification driver selects `.venv1` when present and otherwise `.venv`.
-Use it for test/lint/compile verification; use the narrow audit commands below
-for initial routing before broad inspection.
+The verification driver selects `.venv1` when present and otherwise `.venv`
+on Windows 11 or CachyOS. Use it for test/lint/compile verification; use the
+narrow audits below for initial routing. See `guides/development.md` only when
+shell-specific setup is needed.
 
 | Task | First command |
 | --- | --- |
@@ -74,7 +75,7 @@ fallback), or the no-offscreen-Qt rule.
 
 Route local verification through one command:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope <scope> --tier focused
 ```
 
@@ -86,7 +87,8 @@ test registry and excludes Qt execution locally.
 
 PySide6/pytest-qt targets remain useful coverage definitions, but execute them
 only in the configured CI Qt job or an explicitly user-approved safe visible
-environment. Never set `QT_QPA_PLATFORM=offscreen` on local Windows machines.
+environment. Never set `QT_QPA_PLATFORM=offscreen` on local development
+machines.
 See `docs/agent/quality/test-selection.md` for what each scope covers.
 
 ## Reading Rule

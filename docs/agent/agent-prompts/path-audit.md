@@ -6,7 +6,7 @@ Goal: review or change project-root file I/O without changing data formats.
 
 Checks:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope project-io --tier focused
 ```
 

@@ -71,10 +71,9 @@ Primary paths:
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.
-- `src/Main_App/gui/tool_workflows.py`: update-check, help/about, and Epoch
-  Averaging path/window helpers used by `MainWindow`. Settings editing lives in
-  `settings_panel.py` and is routed through the main workspace stack by
-  `MainWindow`.
+- `src/Main_App/gui/tool_workflows.py`: settings-dialog, update-check, and
+  about-dialog helpers used by `MainWindow`. Settings editing lives in
+  `settings_panel.py` and is routed through the main workspace stack.
 - `src/Main_App/gui/update_dialog.py`: user-facing update check, release-note
   preview, installer download progress, final install confirmation, and
   install busy guard.
@@ -343,7 +342,7 @@ Rules:
 
 Focused local verification:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope gui --tier focused
 ```
 

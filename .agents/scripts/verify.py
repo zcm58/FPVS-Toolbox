@@ -38,8 +38,10 @@ def resolve_repo_python(repo_root: Path = REPO_ROOT) -> Path:
         for suffix in suffixes:
             candidate = repo_root / environment / suffix
             if candidate.is_file():
-                return candidate.resolve()
-    return Path(sys.executable).resolve()
+                # Resolving a POSIX venv launcher follows its symlink to the
+                # base interpreter and drops the venv's site-packages.
+                return candidate.absolute()
+    return Path(sys.executable).absolute()
 
 
 def load_scopes(config_path: Path = CONFIG_PATH) -> tuple[dict[str, VerificationScope], Path]:

@@ -4,20 +4,12 @@
 
 This file is the top-level map for agents working in FPVS Toolbox. Keep durable architecture details here or in linked docs, not in long prompts.
 
-Use executable checks before broad reading:
-
-Prefer `.venv1` when it exists in the checkout. If it is absent, use `.venv`
-in the same command paths.
-
-```powershell
-.\.venv1\Scripts\Activate.ps1
-python .agents/scripts/audit/agent_audit.py
-python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-```
-
-Read [docs/agent/agent-index.md](docs/agent/agent-index.md) for the compact skill/script/test map. Read the focused architecture pages below only when the task touches that area or a check reports a relevant issue.
+Use executable checks before broad reading. The compact skill, audit, document,
+and test map lives in [docs/agent/agent-index.md](docs/agent/agent-index.md);
+shell-specific environment setup lives in
+[docs/agent/guides/development.md](docs/agent/guides/development.md). Read a
+focused architecture page only when the task touches that area or an audit
+reports a relevant issue.
 
 ## Execution Plans
 
@@ -31,7 +23,10 @@ The docs tree is split into [docs/agent](docs/agent/) for agent-facing guidance 
 
 ## Application Shape
 
-FPVS Toolbox is a Windows-oriented desktop application built around PySide6 GUI entry points, processing backends, and analysis tools under `src/`.
+FPVS Toolbox is a PySide6 desktop application built around GUI entry points,
+processing backends, and analysis tools under `src/`. Windows 11 is the current
+release platform; source development and execution may also occur on CachyOS
+(Arch Linux), so shared runtime code must remain portable between both.
 
 Primary areas:
 
@@ -100,6 +95,9 @@ Focused architecture pages:
 
 ## Boundaries
 
+- Prefer one portable implementation for Windows 11 and CachyOS. Use
+  `pathlib`, Qt, and standard-library platform abstractions; confine unavoidable
+  OS-specific behavior to packaging or focused system-integration adapters.
 - GUI code should orchestrate widgets, signals, and user feedback; processing logic belongs in backend, worker, or tool modules.
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
 - Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` or `PySide6_App` modules.

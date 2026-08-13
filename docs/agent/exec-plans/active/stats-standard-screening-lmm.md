@@ -328,8 +328,8 @@ The current workflow still needs these behavioral changes:
 - Add explicit first-round/custom-model, same-sample harmonics, missingness,
   association-not-causation, and non-equivalence boundaries.
 - Preserve detailed workbook auditability and the concise Run log.
-- Update CI-only GUI smoke definitions and document a visible Windows smoke
-  path.
+- Update CI-only GUI smoke definitions and document a visible smoke path on a
+  supported development platform.
 
 ### Definition of Done
 
@@ -384,7 +384,7 @@ The current workflow still needs these behavioral changes:
 
 ### Final Visible Smoke Path
 
-Run in a normal visible Windows session, never offscreen:
+Run in a normal visible Windows 11 or CachyOS session, never offscreen:
 
 1. Open a balanced single-group project and confirm LMM-first results plus an
    ANOVA compatibility line.
@@ -410,8 +410,9 @@ Run in a normal visible Windows session, never offscreen:
 ### Residual Risk
 
 - Registered Qt smoke tests were not run locally because repository policy
-  reserves Qt execution for CI or an explicitly approved visible Windows
-  session. The manual visible path above remains the release smoke procedure.
+  reserves Qt execution for CI or an explicitly approved visible development
+  session. The manual visible path above remains the feature smoke procedure;
+  Windows installer smoke remains separate.
 - Fixed-effect likelihood-ratio tests and model-estimated contrasts use
   asymptotic inference. Small samples, sparse cells, convergence warnings, or
   boundary fits still require expert review of the workbook diagnostics.

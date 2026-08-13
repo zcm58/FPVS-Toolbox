@@ -22,9 +22,10 @@ For a compact command map, use `docs/agent/agent-index.md`.
   surface or one small module group at a time so failures are attributable and
   interruptible.
 - Do not run Qt tests locally. Never set `QT_QPA_PLATFORM=offscreen` or launch
-  ad-hoc offscreen Qt scripts; they can freeze or hang indefinitely in this
-  Windows environment. PySide6/pytest-qt targets execute only in the configured
-  CI Qt job unless the user explicitly approves a safe visible GUI environment.
+  ad-hoc offscreen Qt scripts; they can freeze or hang indefinitely in
+  supported local development environments. PySide6/pytest-qt targets execute
+  only in the configured CI Qt job unless the user explicitly approves a safe
+  visible GUI environment.
   Local GUI verification uses non-GUI checks plus a documented visible/manual
   smoke path.
 
@@ -34,7 +35,7 @@ Use the verification driver instead of composing pytest, Ruff, compile, and
 audit commands by hand. It selects `.venv1` when present and otherwise `.venv`,
 applies the local Qt guard, and keeps output compact.
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope <scope> --tier focused
 python .agents/scripts/verify.py --scope repo --tier precommit
 ```

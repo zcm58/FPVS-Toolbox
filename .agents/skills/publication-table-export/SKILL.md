@@ -11,14 +11,11 @@ Create table-only publication assets that match the FPVS Toolbox publication-tab
 
 Use the bundled script for final assets:
 
-Command examples use the preferred `.venv1` interpreter. Substitute
-`.venv\Scripts\python.exe` when `.venv1` is absent.
+Use the active `.venv1` or `.venv` described in
+`docs/agent/guides/development.md`:
 
-```powershell
-.\.venv1\Scripts\python.exe .agents\skills\publication-table-export\scripts\export_publication_table.py `
-  --project-root "C:\Path\To\FPVS Project" `
-  --input ".codex-tmp\table.csv" `
-  --output-name "semantic_categories_harmonics"
+```console
+python .agents/skills/publication-table-export/scripts/export_publication_table.py --project-root "<project-root>" --input ".codex-tmp/table.csv" --output-name "semantic_categories_harmonics"
 ```
 
 ## Workflow
@@ -26,7 +23,7 @@ Command examples use the preferred `.venv1` interpreter. Substitute
 1. Identify the project root.
    - Use the active FPVS project root when available.
    - If the user only gives manuscript values, ask only if the project root is genuinely unknown.
-   - The script creates `<project root>\9 - Tables` and never writes final assets elsewhere.
+   - The script creates `<project root>/9 - Tables` and never writes final assets elsewhere.
 
 2. Build a small source table.
    - Prefer source workbook values over prose.
@@ -41,13 +38,13 @@ Command examples use the preferred `.venv1` interpreter. Substitute
    - Use preview HTML only for inspection; the final publication assets are the PNG/SVG.
 
 4. Verify outputs.
-   - Confirm files exist under `<project root>\9 - Tables`.
+   - Confirm files exist under `<project root>/9 - Tables`.
    - Confirm PNG dimensions and DPI metadata.
    - Confirm SVG does not contain embedded caption/title text.
    - Run the path audit when adding or changing path behavior:
 
-```powershell
-.\.venv1\Scripts\python.exe .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py
+```console
+python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
 
 ## Styling Contract

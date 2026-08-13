@@ -55,7 +55,7 @@ Rules:
 
 Focused local verification:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope publication-maps --tier focused
 python .agents/scripts/verify.py --scope stats --tier focused
 ```

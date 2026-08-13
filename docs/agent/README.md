@@ -6,9 +6,9 @@ this map to choose the narrowest deeper source of truth.
 
 User-facing MkDocs pages live under `docs/user/`.
 
-Activate `.\.venv1` before running Python-based repo commands when it is
-present; otherwise activate `.\.venv`. Command examples that use `python`
-assume the available repo environment is active.
+Command examples assume the available `.venv1` or `.venv` environment is
+active. Windows 11 and CachyOS setup commands live only in
+`guides/development.md`.
 
 ## Directory Map
 

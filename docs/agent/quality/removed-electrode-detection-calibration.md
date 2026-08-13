@@ -140,7 +140,7 @@ When tuning:
 
 Use the processing scope; the driver selects `.venv1` or `.venv`:
 
-```powershell
+```console
 python .agents/scripts/verify.py --scope processing --tier focused
 ```
 
