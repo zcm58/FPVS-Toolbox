@@ -101,8 +101,9 @@ Free Harmonic Clustering Analysis, Individual Detectability, and Ratio Calculato
 are embedded in this workspace stack.
 
 The Settings page groups project processing values under Preprocessing,
-analysis defaults under Stats, ROI definitions under ROIs, and app-level
-toggles such as Debug Mode and Beta Tools under Advanced. Advanced also hosts
+project-specific harmonic selection and summation under Harmonics, analysis
+defaults under Stats, ROI definitions under ROIs, and app-level toggles such as
+Debug Mode and Beta Tools under Advanced. Advanced also hosts
 the project preprocessing QC toggle for auto-detecting removed electrodes,
 manual removed-electrode metadata, and manual participant-level processing
 exclusions because those controls are intentionally more specialized than the
@@ -112,7 +113,8 @@ frequency-domain exclusions marks downstream frequency-domain outputs stale and
 requires regeneration. Do not put app-level visibility or diagnostics toggles
 in the Preprocessing tab.
 
-The project-specific **Advanced Harmonic Selection and Summation** card edits
+The project-specific **Harmonic Selection and Summation** card on the dedicated
+Harmonics tab edits
 the processing-owned method profile rather than creating a Stats-local policy.
 Its profile choices and stable backend IDs are:
 

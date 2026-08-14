@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -437,6 +439,13 @@ def test_stats_harmonic_action_opens_settings_without_clearing_cache(
     qtbot.addWidget(host)
     opened: list[bool] = []
     host.open_settings_window = lambda: opened.append(True)
+    settings_tabs = QTabWidget(host)
+    for label in ("Preprocessing", "Harmonics", "Stats"):
+        settings_tabs.addTab(QWidget(settings_tabs), label)
+    host._settings_page = SimpleNamespace(
+        tabs=settings_tabs,
+        _harmonic_tab_index=1,
+    )
     workspace = QStackedWidget(host)
 
     window = StatsWindow(parent=host, project_dir=str(tmp_path))
@@ -450,8 +459,9 @@ def test_stats_harmonic_action_opens_settings_without_clearing_cache(
     qtbot.mouseClick(window.recalculate_harmonics_btn, Qt.LeftButton)
 
     assert opened == [True]
+    assert settings_tabs.currentIndex() == 1
     assert manifest_path.read_text(encoding="utf-8") == manifest_text
-    assert "Opened Settings > Preprocessing" in window.lbl_status.text()
+    assert "Opened Settings > Harmonics" in window.lbl_status.text()
 
 
 def test_stats_tool_info_uses_expected_nonexpert_tabs():

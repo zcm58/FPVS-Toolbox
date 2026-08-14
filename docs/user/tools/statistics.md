@@ -151,8 +151,7 @@ The processing workflow records the selection in
 `Quality Check/Harmonic_Selection_Summary.xlsx` and in project metadata. A
 missing or stale selection must be recalculated before screening proceeds; the
 Stats tool does not silently invent another list. Use
-**Settings > Preprocessing > Advanced Harmonic Selection and Summation >
-Recalculate Harmonics**.
+**Settings > Harmonics > Recalculate Harmonics**.
 The screening page links to that Settings workflow but does not delete or
 recalculate the processing-time selection itself. Before recalculation starts,
 Settings snapshots the saved project method plus the relevant app analysis and

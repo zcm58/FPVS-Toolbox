@@ -7,11 +7,12 @@ Implementation and automated verification are complete on feature branch
 contains the four profile engines, balanced pooling, explicit new-project/
 legacy migration, neutral FullFFT provenance, Free Harmonic Clustering
 decoupling, per-artifact freshness, post-selection rebuild, and the Advanced
-Settings integration. Architecture and user-method documentation now reflects
-those boundaries. The plan remains active for the visible supported-platform
-GUI smoke and a separately powered FHC automatic-domain null-calibration study;
-the latter is validation of a conditional inferential claim, not unfinished
-standard Summed-BCA implementation.
+Settings integration on a dedicated Harmonics tab. Architecture and user-method
+documentation now reflects those boundaries. The plan remains active for the
+visible supported-platform GUI smoke and a separately powered FHC
+automatic-domain null-calibration study; the latter is validation of a
+conditional inferential claim, not unfinished standard Summed-BCA
+implementation.
 
 Created 2026-08-14. This plan overlaps the active
 `stats-standard-screening-lmm.md`, `multi-group-project-foundation.md`, and
@@ -21,7 +22,7 @@ contracts unless this plan explicitly supersedes a harmonic-selection rule.
 
 ## Executive Outcome
 
-Harden and extend the existing Advanced Harmonic Selection setting so a
+Harden and extend the Harmonic Selection setting so a
 researcher chooses a named, versioned method for selecting the common harmonic
 domain and determining which baseline-corrected amplitude (BCA) harmonics are
 summed. The accepted method must define one canonical Summed BCA outcome that
@@ -378,9 +379,9 @@ claim unconditional error control for that adaptive workflow.
 
 #### Work
 
-- Refactor the existing flat Advanced harmonic section into
-  `Harmonic Selection and Summation` using shared PySide6 components; do not
-  add a duplicate settings surface.
+- Refactor the existing flat harmonic section into a dedicated Harmonics tab
+  containing `Harmonic Selection and Summation` using shared PySide6
+  components; do not add a duplicate settings surface.
 - Show method summary, citations/rationale, current electrode scope, pooling
   policy, same-sample warning, current fingerprint, and derivative freshness.
 - Add non-blocking recalculate/rebuild progress, confirmation, cancellable
@@ -559,3 +560,10 @@ Run in a normal visible supported Windows 11 or CachyOS session:
   The repository precommit gate then passed with 1,579 tests and 3 skips, along
   with Ruff, compilation, strict MkDocs, and the complete agent audit. No
   supported-platform visible/manual GUI smoke was performed in this session.
+- 2026-08-14: Moved the Harmonic Selection and Summation card from the crowded
+  Preprocessing page to a dedicated Harmonics tab with its own standard
+  Settings footer. The Stats shortcut now opens that tab directly, and the
+  registered CI Qt layout coverage verifies the new ownership so the clipping
+  regression cannot silently return. The GUI and Stats focused gates plus the
+  repository precommit gate passed (1,579 tests, 3 skipped); Qt execution and
+  the visible smoke remain assigned to CI/a supported visible session.

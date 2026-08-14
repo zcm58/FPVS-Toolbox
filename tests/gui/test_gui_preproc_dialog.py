@@ -317,7 +317,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
-    assert "Advanced Harmonic Selection and Summation" in cards
+    assert "Harmonic Selection and Summation" in cards
     assert "Application Options" in cards
     assert "Processing QC" in cards
     assert "Diagnostics" not in cards
@@ -327,6 +327,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "Regions of Interest" in cards
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
         "Preprocessing",
+        "Harmonics",
         "Stats",
         "ROIs",
         "Advanced",
@@ -356,7 +357,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg.line_noise_filter_enabled_check.setChecked(True)
     assert dlg.line_noise_frequency_combo.isEnabled() is True
     assert dlg.line_noise_frequency_combo.currentData() == 50
-    harmonic_card = cards["Advanced Harmonic Selection and Summation"]
+    harmonic_card = cards["Harmonic Selection and Summation"]
     assert harmonic_card.isAncestorOf(dlg.harmonic_summation_method_combo)
     assert harmonic_card.isAncestorOf(dlg.harmonic_electrode_scope_combo)
     assert harmonic_card.isAncestorOf(dlg.fixed_harmonic_freqs_edit)
@@ -443,6 +444,9 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert all(button.height() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
     assert dlg.btn_changeRoot.property("secondary") is True
     preproc_tab = dlg.tabs.widget(dlg._preproc_tab_index)
+    harmonics_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Harmonics"
+    )
     stats_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Stats"
     )
@@ -452,11 +456,14 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     advanced_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Advanced"
     )
+    harmonics_tab = dlg.tabs.widget(harmonics_tab_index)
     stats_tab = dlg.tabs.widget(stats_tab_index)
     rois_tab = dlg.tabs.widget(rois_tab_index)
     advanced_tab = dlg.tabs.widget(advanced_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
-    assert preproc_tab.isAncestorOf(cards["Advanced Harmonic Selection and Summation"])
+    assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
+    assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
+    assert harmonics_tab.objectName() == "settings_harmonics_tab"
     assert advanced_tab.isAncestorOf(cards["Application Options"])
     assert advanced_tab.isAncestorOf(cards["Processing QC"])
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])
@@ -465,10 +472,12 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     rois_layout = rois_tab.layout()
     assert rois_layout.indexOf(cards["Regions of Interest"]) < rois_layout.indexOf(cards["Quick Add"])
     assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
+    assert harmonics_tab.findChild(ActionRow, "settings_harmonic_footer_actions") is not None
     assert stats_tab.findChild(ActionRow, "settings_stats_footer_actions") is not None
     assert rois_tab.findChild(ActionRow, "settings_rois_footer_actions") is not None
     assert advanced_tab.findChild(ActionRow, "settings_advanced_footer_actions") is not None
     assert preproc_tab.findChild(QWidget, "settings_preproc_footer") is not None
+    assert harmonics_tab.findChild(QWidget, "settings_harmonic_footer") is not None
     assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
     assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
     assert advanced_tab.findChild(QWidget, "settings_advanced_footer") is not None

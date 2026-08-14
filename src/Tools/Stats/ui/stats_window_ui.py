@@ -111,7 +111,7 @@ class StatsWindowUiMixin:
 
         self.harmonic_selection_note = QLabel(
             "This definition is read-only here. Change or recalculate the project "
-            "method in Advanced Harmonic Selection and Summation."
+            "method in Settings > Harmonics."
         )
         self.harmonic_selection_note.setObjectName("stats_harmonic_selection_note")
         self.harmonic_selection_note.setWordWrap(True)
@@ -121,7 +121,7 @@ class StatsWindowUiMixin:
         )
         self.recalculate_harmonics_btn.setObjectName("stats_recalculate_harmonics_button")
         self.recalculate_harmonics_btn.setToolTip(
-            "Open Settings > Preprocessing, where the project harmonic selection "
+            "Open Settings > Harmonics, where the project harmonic selection "
             "can be reviewed and recalculated safely."
         )
         self.recalculate_harmonics_btn.clicked.connect(self.on_recalculate_harmonics_clicked)

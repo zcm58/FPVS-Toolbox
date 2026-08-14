@@ -159,7 +159,7 @@ Rules:
   post-process/recalculate error; it does not imply that raw EEG preprocessing
   must be repeated.
 - The Stats page may link users to
-  `Settings > Preprocessing > Advanced Harmonic Selection and Summation`, but
+  `Settings > Harmonics`, but
   it must not clear the
   saved selection, claim that the next Stats run will recalculate it, or start
   a second recalculation workflow. FFT-grid review, background calculation,

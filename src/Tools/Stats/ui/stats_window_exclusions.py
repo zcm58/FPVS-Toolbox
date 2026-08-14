@@ -97,7 +97,7 @@ class StatsWindowExclusionsMixin:
             )
             note.setText(
                 "Read-only accepted processing selection. Change or recalculate "
-                "it in Advanced Harmonic Selection and Summation."
+                "it in Settings > Harmonics."
                 + fingerprint_text
             )
             note.setToolTip(str(metadata.get("methods_summary") or ""))
@@ -343,7 +343,7 @@ class StatsWindowExclusionsMixin:
                 "Recalculate Harmonics in Settings",
                 (
                     "Open the main FPVS Toolbox Settings page, choose "
-                    "Preprocessing, then use Recalculate Harmonics. Standard "
+                    "Harmonics, then use Recalculate Harmonics. Standard "
                     "FPVS Screening does not recalculate or clear processing-"
                     "time harmonic metadata."
                 ),
@@ -351,9 +351,8 @@ class StatsWindowExclusionsMixin:
             return
 
         message = (
-            "Opened Settings > Preprocessing. Use Recalculate Harmonics in the "
-            "Harmonic Selection section, then return to Standard FPVS "
-            "Screening."
+            "Opened Settings > Harmonics. Use Recalculate Harmonics, then return "
+            "to Standard FPVS Screening."
         )
         self.append_log("General", message)
         self._set_status(message)
@@ -364,7 +363,7 @@ class StatsWindowExclusionsMixin:
         set_current_index = getattr(settings_tabs, "setCurrentIndex", None)
         if callable(set_current_index):
             set_current_index(
-                int(getattr(settings_page, "_preproc_tab_index", 0))
+                int(getattr(settings_page, "_harmonic_tab_index", 0))
             )
         recalculate_button = getattr(
             settings_page,

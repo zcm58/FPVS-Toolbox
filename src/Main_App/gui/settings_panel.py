@@ -218,6 +218,8 @@ class SettingsDialog(QDialog):
 
         preproc_tab = self._init_preproc_tab(self.tabs)
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
+        harmonic_tab = self._init_harmonic_tab(self.tabs)
+        self._harmonic_tab_index = self.tabs.indexOf(harmonic_tab)
         self._init_stats_tab(self.tabs)
         self._init_rois_tab(self.tabs)
         self._init_advanced_tab(self.tabs)
@@ -385,7 +387,6 @@ class SettingsDialog(QDialog):
         grid.addWidget(self.line_noise_frequency_combo, line_noise_row, 3)
 
         layout.addWidget(self.group_preproc)
-        self._add_harmonic_selection_section(tab, layout, project_pp)
 
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_preproc_footer")
@@ -406,6 +407,21 @@ class SettingsDialog(QDialog):
                 lambda canon=canonical, field=edit: self._on_preproc_edit_finished(canon, field)
             )
 
+        return tab
+
+    def _init_harmonic_tab(self, tabs: QTabWidget) -> QWidget:
+        tab = QWidget()
+        tab.setObjectName("settings_harmonics_tab")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        project_pp = self._project_preprocessing() if self.project else None
+        self._add_harmonic_selection_section(tab, layout, project_pp)
+
+        layout.addStretch(1)
+        self._add_settings_footer(tab, layout, "settings_harmonic_footer")
+        tabs.addTab(tab, "Harmonics")
         return tab
 
     def _harmonic_policy_payload_from_preprocessing(
@@ -512,7 +528,7 @@ class SettingsDialog(QDialog):
     ) -> None:
         settings = normalize_dv_policy(self._harmonic_policy_payload_from_preprocessing(project_pp))
         harmonic_group = SectionCard(
-            "Advanced Harmonic Selection and Summation",
+            "Harmonic Selection and Summation",
             tab,
             object_name="settings_harmonic_selection_card",
         )
