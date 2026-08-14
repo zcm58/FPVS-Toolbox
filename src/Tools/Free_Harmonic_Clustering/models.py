@@ -710,6 +710,11 @@ class PreparationProvenance:
         ...,
     ] = ()
     dataset_diagnostics: tuple[str, ...] = ()
+    full_fft_provenance_method_version: str = ""
+    full_fft_source_fingerprint: str = ""
+    full_fft_cohort_fingerprint: str = ""
+    full_fft_frequency_qc_fingerprint: str = ""
+    full_fft_processing_export_fingerprint: str = ""
 
     def __post_init__(self) -> None:
         for field_name in ("source_sheet", "grid_fingerprint", "selected_columns_fingerprint"):
@@ -776,6 +781,27 @@ class PreparationProvenance:
             "participant_condition_exclusions",
             condition_exclusions,
         )
+        neutral_fields = (
+            "full_fft_provenance_method_version",
+            "full_fft_source_fingerprint",
+            "full_fft_cohort_fingerprint",
+            "full_fft_frequency_qc_fingerprint",
+            "full_fft_processing_export_fingerprint",
+        )
+        neutral_values = tuple(
+            str(getattr(self, field_name) or "").strip()
+            for field_name in neutral_fields
+        )
+        if any(neutral_values) and not all(neutral_values):
+            raise ValueError(
+                "Neutral FullFFT provenance fields must be supplied together."
+            )
+        for field_name, value in zip(
+            neutral_fields,
+            neutral_values,
+            strict=True,
+        ):
+            object.__setattr__(self, field_name, value)
 
 
 @dataclass(frozen=True, slots=True)

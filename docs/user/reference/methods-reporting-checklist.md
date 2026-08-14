@@ -36,18 +36,50 @@ testing, or another specialized estimand.
 
 ### Summed BCA and selection provenance
 
-- Report the exact detected and included oddball harmonics, base-rate-overlap
-  exclusions, upper limit, `z > 1.64` rule, ROI-electrode union, neighboring-bin
-  rule, and whether the isolated-highest gap guard changed the included list.
-  The neighboring window is +/-10 FFT bins; target - 1, target, and target + 1
-  are excluded, followed by the single minimum and maximum finite noise
-  values. Summation fills eligible non-base harmonics through the highest
-  detection unless more than 10 eligible harmonics lie strictly between the
-  two highest detections; exactly 10 remains allowed.
+- Report the named harmonic-selection profile, stable method ID/version,
+  canonical selection fingerprint, configured search ceiling, and whether the
+  project inherited Legacy behavior or explicitly saved a new-project profile.
+- Report evaluated, detected, and included oddball harmonics as separate lists,
+  plus exact BCA columns, base-rate-overlap exclusions, stopping/cutoff reason,
+  and any candidates that were not evaluated after stopping. Do not call every
+  included fill-through harmonic significant.
+- For either adaptive non-legacy profile, report the all-scalp or frozen
+  a-priori selection mask; participant Ns within every declared group x
+  condition cell; equal group weights within condition; condition-specific Z
+  calculation; and equal condition weights. State that entirely missing
+  declared cells block adaptive selection rather than being silently
+  renormalized. Explain that equal group weighting defines the common-selector
+  estimand and gives members of a smaller group more influence.
+- For adaptive profiles, report strict `z > 1.64` and the neighboring-bin rule:
+  +/-10 FFT bins, excluding target - 1, target, and target + 1, then removing
+  one finite minimum and maximum before the mean and population SD. For the
+  Dzhelyova/Poncet profile, report the two consecutive eligible failures and
+  preceding cutoff; state whether the search ceiling was sufficient to observe
+  the stop. For Significant-only, state that only local threshold detections
+  were included and that this is not across-harmonic error correction.
+- For Fixed/preregistered, report whether the input was an exact Hz list, upper
+  oddball-harmonic index, or upper frequency, plus every dynamic base-overlap
+  exclusion and the independent source/preregistration for that domain. State
+  that dynamic base-overlap exclusion was mandatory, not user-selectable.
+- For Legacy, report its saved electrode scope, equal-available-workbook
+  pooling, fill-through-highest rule, and whether the one-pass isolated-highest
+  guard changed the sum. The guard drops the isolated highest detected peak
+  only when more than 10 eligible non-base harmonics lie strictly between the
+  two highest detections; exactly 10 remains allowed and the upper peak stays
+  recorded as detected.
 - State whether the harmonic list was selected independently, was a fixed but
   unverified list, or was selected adaptively from the same sample.
 - If the list was selected from the analyzed sample, label
   response-versus-zero p-values **exploratory post-selection**.
+- State that one common included list was applied uniformly across
+  participants, groups, conditions, electrodes, and ROIs. If the profile was
+  changed, report whether the Stats-ready and full-audit workbooks and the
+  canonical L2-MNE/eLORETA Hauk source-PSD map directories were current for the
+  same fingerprint; retain older reports with their original fingerprint
+  rather than silently relabeling them.
+- For exported multi-group data, retain and report the stable canonical
+  `group_id` used for pooling/inference separately from the human-readable
+  `group_label`. Display labels are not identifiers and need not be unique.
 - State that the standard response question is prespecified as one-sided:
   `H1: mean Summed BCA > 0`. A negative response cannot satisfy that
   directional hypothesis.
@@ -63,8 +95,14 @@ testing, or another specialized estimand.
   the inferential sample size if the external model used a subset.
 - State that raw ROI Summed BCA is the mean, across available ROI electrodes,
   of each electrode's BCA summed over the accepted processing-time harmonics.
-  RMS normalization divides by the whole-scalp RMS of those electrode sums;
-  signed-mean normalization divides by their whole-scalp signed mean.
+  RMS normalization is harmonic-specific: at each accepted harmonic, divide
+  every electrode BCA by the scalp vector length
+  `sqrt(sum(electrode_bca**2))`, then sum the normalized electrode values over
+  harmonics and average them within ROI (Dzhelyova et al., 2017; McCarthy &
+  Wood, 1985). Note that this published "RMS" formula is root-sum-square, not
+  conventional root mean square. Signed-mean normalization instead divides
+  each electrode's raw post-harmonic sum by the whole-scalp signed mean before
+  ROI averaging.
 - Retain the workbook's ROI definitions and harmonic-selection sheets with the
   analysis record. Missing conditions are blank and must not be recoded as
   zero.
@@ -252,6 +290,11 @@ tensors, spatial adjacency, dependency version, or expected outputs.
 - State that project metadata, participant/group assignments, QC decisions,
   and source workbooks were read without modification and that the completed
   output was published as a new additive run.
+- Retain the neutral FullFFT provenance method version plus source, cohort,
+  frequency-QC, processing/export, and grid fingerprints. State that this
+  processing-owned record, not the standard Stats harmonic cache, validated
+  the inputs. A standard Summed-BCA profile/list change does not define or
+  invalidate the clustering domain; a FullFFT/cohort/QC/rate/grid change does.
 
 ### Harmonics and normalization
 
@@ -294,6 +337,16 @@ tensors, spatial adjacency, dependency version, or expected outputs.
   and shape-dependent.
 - State the weak/global FWER limitation: significant clusters do not make
   individual sensors, harmonics, cells, or boundaries pointwise significant.
+- State that cluster-level control is conditional on the declared candidate
+  domain, adjacency, cluster-entry threshold, contrast family, and valid whole-
+  participant exchangeability. It favors spatially or harmonically extended
+  effects and does not correct a collection of separately run contrasts.
+- For Hermann automatic selection, state that the domain was selected from the
+  observed arms and then held fixed during permutation. Conditional cluster
+  correction alone is not proof of unconditional error control for this
+  selection-plus-permutation workflow. The Toolbox's deterministic end-to-end
+  null harness is a regression smoke envelope, not a calibrated validation
+  study or a replacement for design-specific simulation.
 
 Retain `Free_Harmonic_Clustering_Results.xlsx`, the run manifest, compressed
 arrays, machine-readable result tables, source-workbook provenance, exact
@@ -404,12 +457,9 @@ recorded resting covariance, and must be reported with the inverse settings.
 
 For each participant and condition, the producer:
 
-1. loads the significant oddball harmonics already selected and saved for the
-   project during post-processing. Under the default through-highest rule, an
-   isolated highest detection is excluded from the selected list when more than
-   10 eligible non-base harmonics lie strictly between it and the next-highest
-   significant detection; base-rate overlaps do not count and exactly 10 is
-   allowed;
+1. loads the exact canonical included oddball harmonics already selected and
+   saved for the project during post-processing. It does not reconstruct the
+   profile's stopping or fill rule from the detected list;
 2. requires every selected harmonic and every required neighboring position to
    fall on an exact FFT bin for the derivative's `N` and sampling frequency;
 3. for default L2-MNE, calls `mne.minimum_norm.compute_source_psd` on the
@@ -504,9 +554,10 @@ Report at least:
   volts, and the number of repetitions contributing to each derivative;
 - preprocessing, reference, montage/channel, epoch crop, `N`, sampling
   frequency, and resulting frequency resolution;
-- that the saved project significant-harmonic selection was reused, with the
-  exact detected and selected harmonic frequencies, whether the isolated-highest
-  gap guard was applied, its eligible-gap count, and any excluded upper peak;
+- that the saved project harmonic-selection profile and fingerprint were
+  reused, with exact detected and included frequencies, stopping reason,
+  selection electrode mask, and any profile-specific exclusions or Legacy gap-
+  guard decision;
 - the EEG-only `fsaverage` BioSemi64 template limitation and the absence of
   individual MRI/coregistration, MEG, and modality fusion;
 - the MNE version, cortical spacing, volume-grid spacing, each method's

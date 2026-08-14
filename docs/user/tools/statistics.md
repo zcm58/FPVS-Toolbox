@@ -85,35 +85,107 @@ tables rather than treating MAR as guaranteed.
 
 ## Summed BCA and Harmonic Selection
 
-The default policy determines one common list of oddball harmonics from the
-grand-averaged `FullFFT Amplitude (uV)` spectra. Detection uses the union of the
-electrodes in the project's predefined ROIs and a strict `z > 1.64` threshold.
-Base-rate overlaps are excluded.
+The Toolbox saves one project-wide harmonic-selection profile and one exact
+list of harmonics to include in Summed BCA. The same included list is applied
+to every participant, group, condition, electrode, and ROI. Standard FPVS
+Screening and the standard analysis workbooks read that saved result; they do
+not silently select another list.
+
+New projects use **Dzhelyova/Poncet — stop after two consecutive failures
+(recommended)**. Existing projects that predate named profiles retain
+**Legacy FPVS Toolbox — through highest with isolated-peak guard** until you
+explicitly change them, so upgrading the Toolbox does not silently change old
+results.
+
+The Advanced Settings card offers four profiles:
+
+| Profile | What defines the Summed-BCA harmonics? | Interpretation |
+| --- | --- | --- |
+| **Dzhelyova/Poncet — stop after two consecutive failures (recommended)** | Tests eligible oddball harmonics in order. It stops after two consecutive non-base candidates fail strict `z > 1.64` and includes every eligible harmonic through the one before that pair. | Literature-style, but still adaptive and selected from this sample. |
+| **Fixed / preregistered harmonic domain** | Uses an exact Hz list, all oddball harmonics through an upper harmonic index, or all through an upper frequency; the Toolbox always removes dynamically identified base-rate overlaps. | Preferred for confirmatory work when the domain was genuinely specified independently. |
+| **Significant-only (exploratory)** | Searches the bounded domain and includes only candidates with strict `z > 1.64`. | Same-sample exploratory selection; it is not across-harmonic multiplicity correction. |
+| **Legacy FPVS Toolbox — through highest with isolated-peak guard** | Preserves the earlier equal-workbook grand average, fills eligible harmonics through the highest detection, and applies the one-pass isolated-highest guard described below. | Reproducibility profile for existing analyses, not a claim of exact alignment with every publication. |
+
+For the two adaptive non-legacy profiles, the common selector is balanced in a
+specific order. Participants are first averaged within every declared group x
+condition cell. Groups then receive equal weight within each condition. A
+local-Z spectrum is calculated separately for each condition, and the
+condition Z-scores receive equal weight. This keeps a larger group or a
+condition with more available workbooks from defining the common outcome just
+because it has more files. It also gives each member of a smaller group more
+influence, so it is an explicit estimand choice rather than a universally best
+weighting rule. If an entire declared group x condition cell is missing,
+adaptive selection stops with a message to complete the dataset or use a fixed
+domain; it does not quietly redistribute that cell's weight.
+
+Non-legacy adaptive profiles use all retained scalp electrodes by default. A
+focal paradigm can instead save a frozen a-priori electrode mask. Later edits
+to Stats ROIs cannot change either selection. The mutable union of Stats ROI
+electrodes remains available only in the Legacy profile.
 
 For each candidate harmonic, the noise window spans +/-10 FFT bins around the
 target. The target bin and its immediately adjacent bins are excluded, then the
 single lowest and single highest finite noise values are removed before the
-mean and population standard deviation are calculated.
+mean and population standard deviation are calculated. Adaptive detection is
+strictly greater than `1.64`; equality does not pass. Base-rate overlaps are
+excluded from selection and summation.
 
-Summed BCA includes every eligible non-base oddball harmonic through the
-highest detected significant harmonic, even if an intervening harmonic was not
-itself significant. A one-pass gap guard prevents a lone high-frequency peak
-from filling a very long empty interval: if more than 10 eligible non-base
-harmonics lie strictly between the two highest detected peaks, the highest peak
-and all harmonics above the next-highest peak are excluded from the sum.
-Base-rate overlaps do not count toward the gap, and exactly 10 intervening
-eligible harmonics remains allowed. The same included list is applied to every
-participant, condition, and ROI.
+For the recommended two-failure profile, a base-rate overlap is skipped and
+does not count as one of the two failures. If the configured harmonic ceiling
+is reached before two consecutive eligible failures occur, the Toolbox stops
+instead of pretending that the stopping rule succeeded. Increase the BCA
+upper limit and recalculate, or use a justified fixed domain.
+
+Legacy alone uses the earlier fill-through rule. Its one-pass guard activates
+when more than 10 eligible non-base harmonics lie strictly between the two
+highest detected peaks: the isolated upper peak stays recorded as detected,
+but it and all intervening harmonics above the next-highest peak are omitted
+from the sum. Base overlaps do not count and exactly 10 intervening harmonics
+remains allowed.
+
+The fixed-profile overlap rule is mandatory, not an optional checkbox: a
+requested frequency that coincides with the base rate or one of its harmonics
+is recorded as excluded and never enters Summed BCA.
 
 The processing workflow records the selection in
 `Quality Check/Harmonic_Selection_Summary.xlsx` and in project metadata. A
 missing or stale selection must be recalculated before screening proceeds; the
 Stats tool does not silently invent another list. Use
-**Settings > Preprocessing > Harmonic Selection > Recalculate Harmonics**.
+**Settings > Preprocessing > Advanced Harmonic Selection and Summation >
+Recalculate Harmonics**.
 The screening page links to that Settings workflow but does not delete or
-recalculate the processing-time selection itself. Settings keeps the prior
-saved entry while a fresh calculation runs, so a failed or cancelled retry
-cannot erase the last completed selection.
+recalculate the processing-time selection itself. Before recalculation starts,
+Settings snapshots the saved project method plus the relevant app analysis and
+ROI settings. Cancelling the FFT-grid/exclusion review, or failing validation
+before a replacement selection is saved, restores that snapshot and leaves
+current artifacts unchanged. Starting the worker alone does not stale the old
+outputs. Settings stays open and project navigation remains locked until the
+worker finishes. Once a replacement selection is saved, that method becomes
+the project definition; a later export failure preserves the last reproducible
+files but records them as stale or failed for the newly required selection
+rather than presenting them as current.
+
+Changing participant-condition FFT-crop exclusions changes the active FullFFT
+cohort. After that review is accepted, the Toolbox resumes frequency-domain QC
+and neutral FullFFT provenance before recalculating selection. This remains a
+post-processing-only run: raw EEG preprocessing and participant FFT export are
+not repeated.
+
+After an accepted selection changes, the Toolbox marks the Stats-ready and
+full-audit workbooks plus the current L2-MNE and eLORETA Hauk source-PSD map
+directories stale. It rebuilds the workbooks from the existing processed FullFFT
+and BCA sheets and rebuilds the maps from durable source-ready time-domain
+derivatives. It does not reload BDF files, filter or epoch EEG, or recompute
+participant FFT workbooks. If the scientific selection fingerprint is
+unchanged and every recorded derivative still exists and is current, no
+rebuild is needed. A failed replacement keeps the preceding reproducible
+artifact and records that it is not current for the new selection.
+
+Free Harmonic Clustering is a separate analysis. It reads the original
+`FullFFT Amplitude (uV)` sheets, validates neutral FullFFT provenance, and owns
+its own harmonic domain. Changing a standard Summed-BCA profile does not change
+or stale the clustering domain merely because the standard included list
+changed.
 
 ### Why provenance changes response interpretation
 
@@ -354,7 +426,10 @@ report failure explicitly.
 
 **Export Stats-Ready Workbook** writes `Stats_Ready_Summed_BCA.xlsx` for JASP,
 R/RStudio, SAS, or another package. It contains long and wide Summed BCA data,
-participant and canonical group identifiers, and harmonic-selection evidence.
+participant identifiers, stable canonical `group_id` values, separate display
+`group_label` values, and harmonic-selection evidence. The ID drives pooling
+and inference; the label is descriptive, so two groups with the same display
+label remain distinct.
 Use it for covariates, other random-effects structures, more than two groups,
 Kenward-Roger/Satterthwaite inference, equivalence tests, or another final
 model not offered by Standard FPVS Screening.
@@ -367,8 +442,19 @@ conditions, including observations currently excluded by Toolbox QC. Those
 decisions appear as `Current Toolbox Exclusion`, `QC Flag`, and `QC Notes`
 fields; they do not remove values. Separate sheets provide raw, RMS-normalized,
 and signed-mean-normalized wide data, electrode-level values, whole-scalp
-normalizers, ROI definitions, and the harmonic-selection record. Missing
-conditions stay missing rather than being filled with zero.
+values, harmonic-specific RMS scales, ROI definitions, and the harmonic-
+selection record. Missing conditions stay missing rather than being filled
+with zero.
+
+For RMS-normalized BCA, the Toolbox follows the topographic sequence used by
+Dzhelyova et al. (2017). At each selected harmonic, electrode BCA values are
+divided by the whole-scalp vector length, calculated as the square root of the
+sum of squared BCA values across electrodes. The normalized electrode values
+are then summed across harmonics and averaged within each ROI. Although this is
+called RMS normalization in that publication, the stated calculation is a
+root-sum-square and does not divide by the number of electrodes. Signed-mean
+normalization is separate: raw electrode BCA is first summed across harmonics,
+then divided by the whole-scalp signed mean and averaged within ROI.
 
 The full-audit workbook uses the harmonic list already accepted at processing
 time. Including flagged observations does not cause the Toolbox to select a
@@ -377,13 +463,24 @@ the wide sheets are convenient for software that expects one participant per
 row. Any exclusions or alternate models remain the external analyst's explicit
 decision.
 
-Retain `Quality Check/Harmonic_Selection_Summary.xlsx` and the corresponding
-project metadata with the analysis record.
+Retain `Quality Check/Harmonic_Selection_Summary.xlsx`, the corresponding
+project metadata, method ID/version, selection fingerprint, detected and
+included lists, stopping reason, electrode mask, pooling-cell Ns/weights, and
+artifact-freshness record with the analysis.
 
 ## Published-Method Context
 
 The core approach has direct FPVS precedent:
 
+- [Dzhelyova et al. (2017)](https://academic.oup.com/cercor/article/27/8/4106/3056435)
+  used condition-wise grand spectra and a two-consecutive-nonsignificant-
+  harmonic stopping convention. The named Dzhelyova/Poncet profile reproduces
+  that stopping concept; its balanced multi-group pooling is an explicit
+  Toolbox extension.
+- A fixed harmonic range is the clearest confirmatory choice when prior work or
+  a preregistration justifies it independently. The Legacy isolated-highest
+  greater-than-10 gap guard has no direct publication counterpart and is kept
+  as a versioned reproducibility method.
 - [Vandenheever et al. (2025)](https://doi.org/10.1016/j.ijpsycho.2025.113212)
   analyzed summed BCA with ROI and anxiety-group models, a participant random
   intercept, and multiplicity-adjusted planned contrasts.

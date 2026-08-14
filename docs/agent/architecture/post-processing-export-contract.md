@@ -16,6 +16,70 @@ Active post-export adapter imports should use `Main_App.exports.post_export_adap
 
 The function logs start/end status, skips conditions without data, and logs a warning if no Excel files are saved.
 
+## Canonical Harmonic Selection And Freshness
+
+Processing-end harmonic selection produces one immutable scientific result for
+the project. Its metadata distinguishes the evaluated domain, strict local-Z
+detections, the exact harmonics included in Summed BCA, base-rate-overlap
+exclusions, stopping reason, electrode mask, participant/group/condition
+coverage, pooling-cell Ns and weights, method ID/version, and source-workbook
+fingerprints. A deterministic `selection_fingerprint` hashes those scientific
+inputs while excluding transient cache timestamps and workflow state.
+
+Every standard Summed-BCA consumer must use the exact canonical included BCA
+columns. A report, map, Stats-ready export, or full-audit export must not infer
+significance again, fill through a different cutoff, or choose a condition-,
+group-, ROI-, or participant-specific list. The compact
+`Quality Check/Harmonic_Selection_Summary.xlsx` workbook and the durable
+selection metadata under `tools.processing.harmonic_selection` in
+`project.json` remain the audit source for detected versus included harmonics.
+
+Managed multi-group selection and Stats-ready export carry the stable
+manifest `group_id` separately from the human-readable `group_label`.
+Participant-to-group assignment, balanced pooling, cache identity, and
+inference use the ID; labels are presentation metadata and duplicate labels do
+not collapse two canonical groups.
+
+Managed projects track selection-derived canonical artifacts under
+`tools.post_processing.artifact_freshness` in `project.json`. Each record has a
+project-relative path, `current`, `stale`, or `failed` status, the fingerprint
+from which it was built, and the currently required fingerprint. The tracked
+derivatives are:
+
+- `3 - Statistical Analysis Results/Stats_Ready_Summed_BCA.xlsx`;
+- `3 - Statistical Analysis Results/Analysis_Ready_Summed_BCA_Full_Audit.xlsx`;
+- `6 - Source Localization/L2-MNE Hauk Source PSD Beta/`; and
+- `6 - Source Localization/eLORETA Hauk Source PSD Beta/`.
+
+Accepting the same fingerprint leaves current outputs intact. Accepting a
+different fingerprint first marks all four derivatives stale, then resumes the
+normal post-processing pipeline after harmonic selection. That resume reads
+the immutable processed workbooks and their existing BCA columns; it never
+loads raw EEG, filters, epochs, recomputes FFTs, or rewrites participant-
+condition workbooks. The source-map rebuild reuses durable source-ready time-
+domain derivatives rather than raw EEG or participant FFT generation. Before
+replacement, an existing canonical file or directory is
+moved beneath project-local `.fpvs_processing/stale_artifacts/`. Successful
+publication marks the replacement current. A failed publication removes a
+partial replacement, restores the preceding artifact, and leaves its registry
+record failed/stale for the new fingerprint instead of presenting the old file
+as current.
+
+Original FullFFT sheets are upstream source artifacts, not Summed-BCA
+derivatives. `Main_App.processing.full_fft_provenance` records their separate
+neutral identity under `tools.processing.full_fft_provenance`: project-relative
+source workbooks, base/oddball rates, exact grid and resolution, active cohort
+and frequency-QC state, processing-ledger/export identity, and independent
+fingerprints. The full post-processing run writes this record only after
+frequency-domain QC is accepted and marked current, before harmonic selection
+and all of its standard derivatives. This ordering keeps valid FullFFT inputs
+available to Free Harmonic Clustering even if selection or a sibling export
+later fails. A harmonic-only rebuild
+does not rewrite it because neither the FullFFT sources nor their cohort
+changed. Stale standard Summed-BCA derivatives therefore do not block Free
+Harmonic Clustering; stale FullFFT, cohort/QC, rate, grid, or processing-export
+provenance does.
+
 ## Source-Ready Time-Domain Sibling Export
 
 The Hauk source-PSD features do not change this Excel adapter or any workbook
@@ -72,12 +136,29 @@ only selection source.
 The primary `ROI Long` sheet provides one observed participant x condition x
 configured-ROI row with raw Summed BCA, RMS-normalized BCA, signed-mean-
 normalized BCA, canonical group label, and concise QC fields. Supporting wide,
-electrode-level, whole-scalp normalizer, QC, ROI-definition, and harmonic
+electrode-level, whole-scalp, harmonic-scale, QC, ROI-definition, and harmonic
 selection sheets make the aggregation auditable without adding source paths or
-file hashes to the statistical table. Missing values remain blank and are not
-imputed or replaced by zero. The writer publishes through a same-directory
-temporary workbook and atomic replacement so a failed rebuild cannot leave a
-partially written XLSX file.
+file hashes to the statistical table.
+
+RMS-normalized BCA follows the topographic normalization order described by
+Dzhelyova et al. (2017) and McCarthy and Wood (1985). For every participant x
+condition x selected harmonic, each electrode BCA is divided by the scalp
+vector length `sqrt(sum(electrode_bca**2))`; the normalized electrode values
+are then summed across harmonics and finally averaged within ROI. The published
+FPVS paper calls this quantity RMS, but the stated formula is root-sum-square,
+not conventional `sqrt(mean(square))`; electrode count is therefore not part
+of the denominator. `RMS Harmonic Scales` records every harmonic-specific
+denominator. `Whole Scalp Values` retains a clearly labeled post-sum RMS for
+description only; it is not used for normalization. Signed-mean normalization
+remains post-summation: each raw electrode harmonic sum is divided by the
+whole-scalp signed mean before ROI averaging.
+
+Missing values remain blank and are not imputed or replaced by zero. A
+harmonic with incomplete electrode coverage, a zero vector length, or a
+non-finite vector length invalidates publication-style RMS values for that
+participant-condition and is recorded in the harmonic-scale and QC sheets. The
+writer publishes through a same-directory temporary workbook and atomic
+replacement so a failed rebuild cannot leave a partially written XLSX file.
 
 ## Analysis Settings
 

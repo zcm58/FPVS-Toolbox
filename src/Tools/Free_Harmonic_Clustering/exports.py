@@ -1019,6 +1019,32 @@ def _methods_and_provenance_rows(
         len(provenance.participant_condition_exclusions),
     )
     add("Input provenance", "Grid fingerprint", provenance.grid_fingerprint)
+    if provenance.full_fft_provenance_method_version:
+        add(
+            "Input provenance",
+            "Neutral FullFFT provenance method",
+            provenance.full_fft_provenance_method_version,
+        )
+        add(
+            "Input provenance",
+            "Neutral FullFFT source fingerprint",
+            provenance.full_fft_source_fingerprint,
+        )
+        add(
+            "Input provenance",
+            "Neutral FullFFT cohort fingerprint",
+            provenance.full_fft_cohort_fingerprint,
+        )
+        add(
+            "Input provenance",
+            "Neutral FullFFT QC fingerprint",
+            provenance.full_fft_frequency_qc_fingerprint,
+        )
+        add(
+            "Input provenance",
+            "Neutral FullFFT processing/export fingerprint",
+            provenance.full_fft_processing_export_fingerprint,
+        )
     add(
         "Input provenance",
         "Selected-column fingerprint",
@@ -1537,6 +1563,19 @@ def _manifest_payload(
             "full_frequency_column_count": provenance.full_frequency_column_count,
             "selected_frequency_column_count": (provenance.selected_frequency_column_count),
             "workbook_count": provenance.workbook_count,
+            "neutral_full_fft_provenance": {
+                "method_version": (
+                    provenance.full_fft_provenance_method_version
+                ),
+                "source_fingerprint": provenance.full_fft_source_fingerprint,
+                "cohort_fingerprint": provenance.full_fft_cohort_fingerprint,
+                "frequency_qc_fingerprint": (
+                    provenance.full_fft_frequency_qc_fingerprint
+                ),
+                "processing_export_fingerprint": (
+                    provenance.full_fft_processing_export_fingerprint
+                ),
+            },
             "timing_seconds": {
                 "header_read": provenance.header_read_seconds,
                 "amplitude_read": provenance.amplitude_read_seconds,

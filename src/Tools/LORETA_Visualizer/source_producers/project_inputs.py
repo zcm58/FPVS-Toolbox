@@ -19,6 +19,10 @@ import openpyxl
 import pandas as pd
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.processing.artifact_freshness import (
+    STATS_READY_SUMMED_BCA_ARTIFACT,
+    require_current_artifact,
+)
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Main_App.projects import (
     GroupInfo,
@@ -121,6 +125,7 @@ def build_l2_mne_conditions_from_project(
     dataset_index = load_project_dataset_index(root)
     sheet_name = _sheet_for_metric(metric)
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
+    _require_current_stats_ready_workbook(root, stats_ready)
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
     participant_selection = project_source_participant_selection(
@@ -294,6 +299,21 @@ def _truthy_cell(value: object) -> bool:
         return float(value) != 0.0
     text = str(value).strip().casefold()
     return text in {"1", "true", "yes", "y", "include", "included", "selected"}
+
+
+def _require_current_stats_ready_workbook(
+    project_root: Path,
+    stats_ready_path: Path,
+) -> None:
+    """Reject a stale selected-harmonic source in managed projects."""
+
+    if not (project_root / "project.json").is_file():
+        return
+    require_current_artifact(
+        project_root,
+        STATS_READY_SUMMED_BCA_ARTIFACT,
+        stats_ready_path,
+    )
 
 
 def _read_selected_harmonics(stats_ready_path: Path) -> tuple[float, ...]:

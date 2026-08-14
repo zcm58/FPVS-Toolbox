@@ -153,6 +153,12 @@ class StatsWindow(
         # controller
         self._controller = StatsController(view=self)
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Refresh processing-owned harmonic state when the tool is revisited."""
+
+        super().showEvent(event)
+        self._refresh_canonical_harmonic_summary()
+
     def _load_project_context_from_root(self, project_root: Path) -> None:
         """Refresh Stats output-path metadata from a project root."""
         self._project_path = Path(project_root).resolve()
@@ -184,6 +190,8 @@ class StatsWindow(
         self._invalidate_controller_context()
         self._load_project_context_from_root(new_root)
         self._clear_project_bound_stats_state(invalidate_controller=False)
+        if hasattr(self, "harmonic_profile_value"):
+            self._refresh_canonical_harmonic_summary()
         if clear_last_export:
             self._set_last_export_path(None)
         if reload_default_folder:

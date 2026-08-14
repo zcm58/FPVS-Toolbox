@@ -53,7 +53,36 @@ Stimulation experiments. Releases currently ship through a Windows installer.
 - The new LORETA Visualizer work is a separate source-localization visualization branch under `src/Tools/LORETA_Visualizer/`, not a revival of `src/Tools/SourceLocalization/**`. Keep visualizer rendering, mesh helpers, payload adapters, demo data, and tool-local docs in that directory; preserve the boundary where future source-localization calculations produce prepared values and visualizer helpers bridge them into renderer payloads.
 - Preserve the ignored root `.fpvs_cache/` when it contains MNE/fsaverage template data for the LORETA Visualizer. It is a local dependency cache, not a deletion target for routine cleanup.
 - The active preprocessing order is locked to match the Volfart et al. (2021) FPVS implementation decision: initial reference, drop reference channels, optional channel limit preserving stim, FIR filter, downsample, kurtosis/interpolation, final average reference. Do not reorder filtering and downsampling, change FIR duration scaling, or remove the order/version fingerprint guards unless the user explicitly requests a statistical-method change and updates `docs/agent/architecture/preprocessing-contract.md`, `docs/user/reference/methods-reporting-checklist.md`, and the focused processing-order tests.
-- The Stats default group-level significant-harmonics method is locked behavior. It detects significant non-base oddball harmonics from grand-averaged `FullFFT Amplitude (uV)` spectra over the union of predefined ROI electrodes, using strict z > 1.64 against neighboring-bin noise, then includes eligible non-base oddball harmonics through the highest detected significant harmonic in Summed BCA. One isolated-highest guard modifies that fill rule: when more than 10 eligible non-base harmonics lie strictly between the two highest detected significant harmonics, base-rate overlaps excluded from the count, the highest detection and every intervening harmonic above the next-highest detection are omitted from summation. Exactly 10 remains allowed, the highest peak remains recorded as detected, and the guard is applied only once. Neighboring noise is +/-10 FFT bins around the target after excluding target-1, target, target+1, then dropping the single minimum and single maximum finite amplitude values before computing mean and population SD. Do not change this threshold, default electrode scope, summation or gap-guard rule, noise-window, min/max exclusion, exact-column requirement, or uniform application across participants, conditions, and ROIs unless the user explicitly requests a statistical-method change.
+- The versioned Stats harmonic-selection profiles are locked statistical
+  behavior. New projects explicitly default to
+  `dzhelyova_poncet_two_consecutive_failures` v1 with all retained scalp
+  electrodes; a missing or unversioned profile in an existing project resolves
+  to `legacy_fpvs_toolbox` v1 so prior values do not change silently. The four
+  supported profiles are Legacy FPVS Toolbox, Fixed/preregistered domain,
+  Significant-only exploratory, and Dzhelyova/Poncet two consecutive failures.
+  Adaptive non-legacy profiles average participants within every declared
+  group x condition cell, weight groups equally within condition, calculate
+  local Z separately by condition, and weight conditions equally; an entirely
+  missing declared cell is a hard failure. They use all retained scalp
+  electrodes or one frozen a-priori selection mask, never mutable Stats ROIs.
+  The literature profile stops only after two consecutive eligible non-base
+  harmonics have `z <= 1.64`, includes eligible harmonics through the preceding
+  cutoff, and fails if the configured search ceiling is reached first. The
+  significant-only profile includes only strict local `z > 1.64` detections in
+  its bounded domain. The fixed profile accepts an exact frequency list, upper
+  harmonic index, or upper frequency and requires exact BCA columns after
+  mandatory dynamic base-overlap exclusion. Legacy alone preserves equal-available-
+  workbook pooling, mutable ROI-union scope, fill-through-highest summation,
+  and the one-pass greater-than-10 isolated-highest gap guard. Every adaptive
+  profile retains the locked neighboring-noise calculation: +/-10 FFT bins,
+  excluding target-1, target, and target+1, then dropping one finite minimum
+  and maximum before the mean and population SD. Downstream standard consumers
+  must use the exact canonical included list and selection fingerprint; they
+  must not reselect, refill, or truncate it. Free Harmonic Clustering remains
+  independent and consumes original FullFFT plus neutral processing-owned
+  provenance, never this standard selected list. Do not alter these contracts
+  without an explicitly scoped statistical-method change and corresponding
+  architecture, user-method, and focused-test updates.
 - Sensitivity Analysis is locked as an input-only idealized design-sensitivity calculator. Its mixed-model mode estimates a minimum standardized detectable contrast conditional on manually entered design assumptions. Do not describe it as observed/post-hoc power or model-fit validation, and do not add project-data reads, observed residuals, fitted variance components, persistence, or Stats-pipeline coupling unless the user explicitly scopes a separate data-informed feature.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
 - Use PySide6 for GUI work. Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports anywhere in repo code.

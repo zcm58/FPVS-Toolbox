@@ -1,4 +1,5 @@
 """Export helpers for StatsWindow."""
+# ruff: noqa: F405 - mixin compatibility surface intentionally re-exports support names
 from __future__ import annotations
 
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
@@ -262,7 +263,8 @@ class StatsWindowExportsMixin:
             base_freq=self._current_base_freq,
             rois=self.rois,
             dv_policy=self._get_dv_policy_payload(),
-            group_map=getattr(self, "_subject_group_map", {}),
+            group_map=getattr(self, "_participant_group_id_map", {}),
+            group_label_map=getattr(self, "_subject_group_map", {}),
             output_path=str(output_path),
             manual_excluded_pids=sorted(self.manual_excluded_pids),
             max_freq=max_freq,

@@ -93,6 +93,12 @@ def test_create_project_from_fpvs_config_saves_toolbox_project(tmp_path) -> None
     loaded = Project.load(project.project_root)
     assert loaded.name == "Semantic Categories Test"
     assert loaded.event_map == {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2}
+    assert loaded.preprocessing["harmonic_selection_profile"] == (
+        "dzhelyova_poncet_two_consecutive_failures"
+    )
+    assert loaded.preprocessing["group_significant_electrode_scope"] == (
+        "all_scalp_electrodes"
+    )
 
 
 def test_create_project_from_fpvs_config_seeds_manual_removed_electrodes(tmp_path) -> None:

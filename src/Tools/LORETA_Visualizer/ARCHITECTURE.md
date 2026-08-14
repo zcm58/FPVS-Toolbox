@@ -43,7 +43,10 @@ folders and condition/group workbook subfolders. Canonical participant and
 group identity comes only from project metadata through that index. Those
 legacy/exploratory routes require the Stats-ready workbook and, for z-scores,
 `FullFFT Amplitude (uV)` target and neighboring-bin columns; true multi-group
-projects are partitioned before source-input aggregation.
+projects are partitioned before source-input aggregation. In a managed project,
+both amplitude-workbook adapters validate the processing-owned Stats-ready
+artifact-freshness record before reading its selected harmonic list. A stale,
+missing, or fingerprint-mismatched workbook is not a usable GUI prerequisite.
 
 The normal Hauk-informed source-PSD routes instead read the processing-time
 harmonic selection and durable, signed time-domain derivatives written while
@@ -53,7 +56,10 @@ are sibling downstream consumers: a Stats workbook failure does not by itself
 invalidate otherwise complete source-PSD inputs. Existing valid signed
 FIF/JSON derivatives can therefore be reused to rebuild source maps after an
 orientation-method update; sensor preprocessing need not be repeated solely to
-regenerate the maps.
+regenerate the maps. The canonical L2-MNE and eLORETA Hauk source-PSD output
+directories are selection-dependent artifacts: a changed accepted list marks
+both stale, archives any preceding directory during replacement, and rebuilds
+them from the durable time-domain derivatives in the selection-only resume.
 
 The default L2 method, `l2_mne_hauk_source_psd_cortical_normal_v1`, selects the
 cortical surface-normal component with MNE source PSD `pick_ori="normal"`. The

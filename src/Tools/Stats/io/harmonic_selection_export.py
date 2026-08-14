@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_ID
 from Tools.Stats.io.stats_ready_export import (
     HARMONIC_SELECTION_SHEET,
     SELECTION_SUMMARY_SHEET,
     _build_harmonic_selection_frame,
     _build_selection_summary_frame,
+    _selection_metadata_uses_fixed_schema,
     write_stats_ready_workbook,
 )
 
@@ -25,7 +25,7 @@ def build_harmonic_selection_frames(
     """Build user-facing harmonic-selection summary frames."""
     if "group_significant_harmonics" in selection_metadata or "fixed_predefined_harmonics" in selection_metadata:
         dv_metadata = dict(selection_metadata)
-    elif selection_metadata.get("harmonic_policy") == FIXED_PREDEFINED_POLICY_ID:
+    elif _selection_metadata_uses_fixed_schema(selection_metadata):
         dv_metadata = {"fixed_predefined_harmonics": dict(selection_metadata)}
     else:
         dv_metadata = {"group_significant_harmonics": dict(selection_metadata)}

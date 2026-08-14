@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import threading
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from Tools.Stats.analysis.dv_policy_fixed_predefined import _prepare_fixed_predefined_bca_data
@@ -12,8 +13,12 @@ from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
     FIXED_PREDEFINED_POLICY_NAME,
     GROUP_SIGNIFICANT_POLICY_NAME,
+    HARMONIC_SELECTION_PROFILES,
+    NEW_PROJECT_HARMONIC_PROFILE_ID,
     LOCKED_ODDBALL_FREQUENCY_HZ,
     _resolve_max_freq,
+    dv_policy_payload_from_selection_metadata,
+    new_project_dv_policy_settings,
     normalize_dv_policy,
 )
 from Tools.Stats.data.group_harmonic_cache import project_processing_signature_hash
@@ -30,10 +35,14 @@ __all__ = [
     "FIXED_PREDEFINED_DEFAULT_FREQUENCIES",
     "GROUP_SIGNIFICANT_POLICY_NAME",
     "LOCKED_ODDBALL_FREQUENCY_HZ",
+    "HARMONIC_SELECTION_PROFILES",
+    "NEW_PROJECT_HARMONIC_PROFILE_ID",
     "CANONICAL_HARMONIC_SOURCE",
     "CUSTOM_HARMONIC_SOURCE",
     "SharedHarmonicSelection",
     "normalize_dv_policy",
+    "dv_policy_payload_from_selection_metadata",
+    "new_project_dv_policy_settings",
     "prepare_summed_bca_data",
     "load_project_processing_harmonics",
 ]
@@ -73,6 +82,8 @@ def _build_cache_key(
     max_freq: float | None,
     selection_conditions: Optional[List[str]],
     project_processing_hash: str | None,
+    canonical_selection_fingerprint: str | None,
+    source_workbook_identities: tuple,
 ) -> tuple:
     """Handle the build cache key step for the Stats workflow."""
     return (
@@ -84,16 +95,60 @@ def _build_cache_key(
         _freeze_rois(rois),
         float(max_freq) if max_freq is not None else None,
         settings.name,
+        settings.harmonic_selection_profile,
+        settings.harmonic_selection_profile_version,
         settings.fixed_harmonic_frequencies_hz,
+        settings.fixed_harmonic_input_mode,
+        settings.fixed_harmonic_upper_harmonic_index,
+        settings.fixed_harmonic_upper_frequency_hz,
         settings.fixed_harmonic_auto_exclude_base,
         float(settings.fixed_harmonic_base_tolerance_hz),
         float(settings.fixed_harmonic_matching_tolerance_hz),
         float(settings.group_significant_z_threshold),
         settings.group_significant_electrode_scope,
+        tuple(settings.group_significant_selection_electrodes),
         settings.group_significant_summation_method,
         float(settings.group_significant_oddball_frequency_hz),
         project_processing_hash,
+        canonical_selection_fingerprint,
+        source_workbook_identities,
     )
+
+
+def _source_workbook_identities(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+) -> tuple:
+    """Freeze current source identity so in-process DV cache cannot outlive files."""
+
+    identities: list[tuple[object, ...]] = []
+    for subject in subjects:
+        for condition in conditions:
+            raw_path = (subject_data.get(subject, {}) or {}).get(condition)
+            if not raw_path:
+                identities.append((str(subject), str(condition), "", None, None))
+                continue
+            path = Path(raw_path).resolve(strict=False)
+            try:
+                stat = path.stat()
+            except OSError:
+                size_bytes = None
+                mtime_ns = None
+            else:
+                size_bytes = int(stat.st_size)
+                mtime_ns = int(stat.st_mtime_ns)
+            identities.append(
+                (
+                    str(subject),
+                    str(condition),
+                    str(path),
+                    size_bytes,
+                    mtime_ns,
+                )
+            )
+    return tuple(sorted(identities))
 
 
 def prepare_summed_bca_data(
@@ -129,10 +184,32 @@ def prepare_summed_bca_data(
                 "Frequency-domain participant exclusions applied: "
                 + ", ".join(excluded)
             )
+    canonical_selection_fingerprint: str | None = None
+    if project_root not in (None, ""):
+        canonical = load_project_processing_harmonics(
+            project_root=project_root,
+            log_func=log_func,
+        )
+        settings = normalize_dv_policy(
+            dv_policy_payload_from_selection_metadata(canonical.metadata)
+        )
+        canonical_selection_fingerprint = str(
+            canonical.metadata.get("selection_fingerprint") or ""
+        )
+        if not canonical_selection_fingerprint:
+            raise RuntimeError(
+                "The accepted processing-time harmonic selection has no canonical "
+                "selection fingerprint. Use Settings > Recalculate Harmonics."
+            )
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
     if meta_target is not None and resolved_max_freq is not None:
         meta_target["max_frequency_hz"] = float(resolved_max_freq)
     processing_hash = project_processing_signature_hash(project_root)
+    workbook_identities = _source_workbook_identities(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+    )
     cache_key = None
     if provenance_map is None:
         cache_key = _build_cache_key(
@@ -145,6 +222,8 @@ def prepare_summed_bca_data(
             max_freq=resolved_max_freq,
             selection_conditions=selection_conditions,
             project_processing_hash=processing_hash,
+            canonical_selection_fingerprint=canonical_selection_fingerprint,
+            source_workbook_identities=workbook_identities,
         )
         with _DV_DATA_CACHE_LOCK:
             cached = _DV_DATA_CACHE.get(cache_key)
@@ -179,6 +258,7 @@ def prepare_summed_bca_data(
             settings=settings,
             dv_metadata=meta_target,
             project_root=project_root,
+            use_accepted_processing_selection=project_root not in (None, ""),
         )
     if cache_key is not None and data is not None:
         if meta_target is None:

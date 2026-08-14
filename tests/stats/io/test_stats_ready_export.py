@@ -13,6 +13,10 @@ from Tools.Stats.io.stats_ready_export import (
     WIDE_FORMAT_SHEET,
     build_stats_ready_frames,
     prepare_stats_ready_export,
+    write_stats_ready_workbook,
+)
+from Tools.LORETA_Visualizer.source_producers.project_inputs import (
+    _read_selected_harmonics,
 )
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_ID,
@@ -146,6 +150,31 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
     assert summary["Highest selected harmonic (Hz)"] == pytest.approx(12.0)
 
 
+def test_stats_ready_keeps_canonical_group_ids_when_display_labels_duplicate():
+    subjects, conditions, rois, subject_data, summed_bca, provenance, dv_metadata = (
+        _fixture_inputs()
+    )
+    frames = build_stats_ready_frames(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        rois=rois,
+        summed_bca=summed_bca,
+        provenance_map=provenance,
+        dv_metadata=dv_metadata,
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
+        group_map={"S1": "group_a", "S2": "group_b"},
+        group_label_map={"S1": "Shared label", "S2": "Shared label"},
+    )
+
+    long_df = frames[LONG_FORMAT_SHEET]
+    assert set(long_df["group_id"]) == {"group_a", "group_b"}
+    assert set(long_df["group_label"]) == {"Shared label"}
+    wide_df = frames[WIDE_FORMAT_SHEET]
+    assert set(wide_df["group_id"]) == {"group_a", "group_b"}
+    assert set(wide_df["group_label"]) == {"Shared label"}
+
+
 def test_build_stats_ready_frames_requires_complete_group_labels_when_groups_exist():
     subjects, conditions, rois, subject_data, summed_bca, provenance, dv_metadata = _fixture_inputs()
 
@@ -163,11 +192,14 @@ def test_build_stats_ready_frames_requires_complete_group_labels_when_groups_exi
         )
 
 
-def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
+def test_build_stats_ready_frames_exports_fixed_predefined_metadata(tmp_path):
     subjects, conditions, rois, subject_data, summed_bca, provenance, _dv_metadata = _fixture_inputs()
     fixed_meta = {
         "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
         "harmonic_policy_label": "Fixed predefined harmonic list applied uniformly across participants, conditions, and ROIs",
+        "harmonic_selection_profile": "fixed_preregistered_domain",
+        "harmonic_selection_profile_version": "1.0",
+        "selection_fingerprint": "a" * 64,
         "fixed_harmonic_included_frequencies_hz": [1.2, 2.4, 3.6, 4.8, 7.2],
         "excluded_base_overlap_frequencies_hz": [6.0],
         "base_frequency_hz": 6.0,
@@ -182,16 +214,33 @@ def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
         "snr_used_for_statistics": False,
         "bca_negative_values_retained": True,
         "bca_near_zero_values_retained": True,
-        "selection_rows": [
+        "detected_significant_harmonics_hz": [],
+        "included_harmonics_hz": [1.2, 2.4, 3.6, 4.8, 7.2],
+        "source_workbook_fingerprints": [
             {
-                "requested_frequency_hz": 1.2,
-                "matched_frequency_hz": 1.2,
-                "matched_column": "1.2000_Hz",
-                "matched_bin_index": 1,
-                "included": True,
-                "exclusion_reason": "",
-                "warning": "",
-            },
+                "subject": "S1",
+                "condition": "Face",
+                "path": "1 - Excel Data Files/Face/S1_Face.xlsx",
+                "size_bytes": 123,
+                "mtime_ns": 456,
+            }
+        ],
+        "selection_rows": [
+            *[
+                {
+                    "requested_frequency_hz": frequency,
+                    "matched_frequency_hz": frequency,
+                    "matched_column": f"{frequency:.4f}_Hz",
+                    "matched_bin_index": index,
+                    "included": True,
+                    "exclusion_reason": "",
+                    "warning": "",
+                }
+                for index, frequency in enumerate(
+                    [1.2, 2.4, 3.6, 4.8, 7.2],
+                    start=1,
+                )
+            ],
             {
                 "requested_frequency_hz": 6.0,
                 "matched_frequency_hz": None,
@@ -212,7 +261,9 @@ def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
         provenance_map=provenance,
         dv_metadata={
             "policy_name": FIXED_PREDEFINED_POLICY_NAME,
-            "fixed_predefined_harmonics": fixed_meta,
+            # Regression: even a stale/wrong wrapper cannot make canonical fixed
+            # metadata use the group-significant row converter.
+            "group_significant_harmonics": fixed_meta,
         },
         dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
         group_map={},
@@ -232,6 +283,24 @@ def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
     assert bool(selected_row["included_in_summation"]) is True
     assert bool(excluded_row["excluded_base_rate"]) is True
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
+    assert selection_df.loc[
+        selection_df["included_in_summation"],
+        "requested_harmonic_hz",
+    ].tolist() == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
+
+    summary = _summary_map(frames[SELECTION_SUMMARY_SHEET])
+    assert summary["Harmonic selection profile ID"] == "fixed_preregistered_domain"
+    assert summary["Harmonic selection profile version"] == "1.0"
+    assert summary["Selection fingerprint"] == "a" * 64
+    assert summary["Canonical detected harmonic frequencies (Hz)"] == ""
+    assert summary["Canonical included harmonic frequencies (Hz)"] == (
+        "1.2; 2.4; 3.6; 4.8; 7.2"
+    )
+    assert "S1::Face" in summary["Selection source workbook identities"]
+
+    target = tmp_path / "Stats_Ready_Summed_BCA.xlsx"
+    write_stats_ready_workbook(target, frames)
+    assert _read_selected_harmonics(target) == (1.2, 2.4, 3.6, 4.8, 7.2)
 
 
 def test_build_stats_ready_frames_exports_group_significant_metadata():
@@ -239,6 +308,31 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     group_meta = {
         "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
         "harmonic_policy_label": "Group-level significant oddball harmonics from a grand-averaged amplitude spectrum",
+        "harmonic_selection_profile": "significant_only_exploratory",
+        "harmonic_selection_profile_version": "1.0",
+        "selection_fingerprint": "b" * 64,
+        "selection_electrode_mask": ["O1", "O2"],
+        "pooling_method": "balanced_group_condition_then_equal_condition_z",
+        "pooling_cells": [
+            {
+                "group_id": "all_participants",
+                "condition": "Face",
+                "participant_count": 2,
+                "participant_weight_within_cell": 0.5,
+                "group_weight_within_condition": 1.0,
+                "condition_weight": 0.5,
+                "effective_participant_weight": 0.25,
+            }
+        ],
+        "source_workbook_fingerprints": [
+            {
+                "subject": "S1",
+                "condition": "Face",
+                "path": "1 - Excel Data Files/Face/S1_Face.xlsx",
+                "size_bytes": 123,
+                "mtime_ns": 456,
+            }
+        ],
         "selected_harmonics_hz": [1.2, 3.6, 7.2],
         "highest_significant_harmonic_hz": 7.2,
         "highest_significant_harmonic_index": 6,
@@ -349,6 +443,17 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     assert summary["All harmonics 1 through highest index significant?"] == "No"
     assert summary["Non-significant harmonic indices within 1..highest"] == "2; 4; 5"
     assert summary["Significant harmonic indices"] == "1; 3; 6"
+    assert summary["Harmonic selection profile ID"] == (
+        "significant_only_exploratory"
+    )
+    assert summary["Harmonic selection profile version"] == "1.0"
+    assert summary["Selection fingerprint"] == "b" * 64
+    assert summary["Frozen/effective selection electrode mask"] == "O1; O2"
+    assert summary["Pooling cell participant counts"] == (
+        "all_participants::Face=2"
+    )
+    assert "effective=0.25" in summary["Pooling cell weights"]
+    assert "S1::Face" in summary["Selection source workbook identities"]
 
     selection_df = frames[HARMONIC_SELECTION_SHEET]
     _assert_slim_harmonic_selection_columns(selection_df)

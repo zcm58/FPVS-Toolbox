@@ -9,6 +9,13 @@ import pandas as pd
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.processing.artifact_freshness import (
+    STATS_READY_SUMMED_BCA_ARTIFACT,
+    StalePostProcessingArtifactError,
+    activate_selection_freshness,
+    mark_artifact_current,
+    mark_selection_derivatives_stale,
+)
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     SOURCE_TOPOGRAPHY_METRIC_BCA,
     SOURCE_TOPOGRAPHY_METRIC_FFT_AMPLITUDE,
@@ -170,6 +177,20 @@ def test_project_input_assembler_rejects_missing_selected_column(tmp_path) -> No
         build_l2_mne_conditions_from_project(project_root)
 
 
+def test_project_input_assembler_rejects_stale_stats_ready_in_managed_project(
+    tmp_path: Path,
+) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    _write_single_group_manifest(project_root)
+    mark_selection_derivatives_stale(
+        project_root,
+        reason="The accepted harmonic selection changed.",
+    )
+
+    with pytest.raises(StalePostProcessingArtifactError, match="is stale"):
+        build_l2_mne_conditions_from_project(project_root)
+
+
 def test_selected_harmonic_reader_accepts_current_stats_ready_schema(tmp_path) -> None:
     stats_ready = tmp_path / "Stats_Ready_Summed_BCA.xlsx"
     with pd.ExcelWriter(stats_ready) as writer:
@@ -324,6 +345,7 @@ def _convert_fixture_to_multi_group(
         ),
         encoding="utf-8",
     )
+    _mark_stats_ready_current(project_root)
 
 
 def _write_single_group_manifest(project_root: Path) -> None:
@@ -347,4 +369,24 @@ def _write_single_group_manifest(project_root: Path) -> None:
             }
         ),
         encoding="utf-8",
+    )
+    _mark_stats_ready_current(project_root)
+
+
+def _mark_stats_ready_current(project_root: Path) -> None:
+    summary = project_root / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text("fixture selection", encoding="utf-8")
+    activate_selection_freshness(
+        project_root,
+        {"selection_fingerprint": "fixture-selection"},
+        selection_summary_path=summary,
+    )
+    mark_artifact_current(
+        project_root,
+        STATS_READY_SUMMED_BCA_ARTIFACT,
+        project_root
+        / "3 - Statistical Analysis Results"
+        / "Stats_Ready_Summed_BCA.xlsx",
+        "fixture-selection",
     )

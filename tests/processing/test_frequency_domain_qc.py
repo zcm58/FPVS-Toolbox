@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from Main_App.processing import harmonic_selection_qc
 from Main_App.processing.frequency_domain_qc import (
     WARNING_REASON_UNUSUAL_VALUES,
     active_frequency_domain_exclusions,
@@ -94,10 +95,24 @@ def test_frequency_domain_qc_sync_clears_stale_automatic_exclusions(tmp_path):
     assert exclusions.downstream_outputs_stale is True
 
 
-def test_summed_bca_drops_frequency_domain_excluded_electrode(tmp_path):
+def test_summed_bca_drops_frequency_domain_excluded_electrode(
+    tmp_path,
+    monkeypatch,
+):
     project = _make_project(tmp_path)
     report = run_frequency_domain_qc_review(project)
     apply_frequency_domain_qc_decision(project.project_root, report)
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Right OT": ["O2", "PZ"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_base_frequency_hz",
+        lambda: 6.0,
+    )
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
 
     subject_data = {
         "P1": {

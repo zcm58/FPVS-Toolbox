@@ -7,7 +7,6 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QCheckBox,
     QComboBox,
-    QHeaderView,
     QLabel,
     QListWidget,
     QProgressBar,
@@ -182,22 +181,31 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         window.manual_exclusion_candidates_list
     )
     assert cards["Summed BCA definition"].isAncestorOf(
-        window.fixed_predefined_preview_table
+        window.harmonic_profile_value
     )
-    assert window.recalculate_harmonics_btn.text() == "Open Recalculation Settings"
+    assert cards["Summed BCA definition"].isAncestorOf(
+        window.harmonic_included_value
+    )
+    assert window.harmonic_profile_value.objectName() == (
+        "stats_harmonic_profile_value"
+    )
+    assert window.harmonic_included_value.objectName() == (
+        "stats_harmonic_included_value"
+    )
+    assert window.harmonic_selection_note.objectName() == (
+        "stats_harmonic_selection_note"
+    )
+    assert window.harmonic_profile_value.textInteractionFlags() & (
+        Qt.TextSelectableByMouse
+    )
+    assert window.harmonic_included_value.textInteractionFlags() & (
+        Qt.TextSelectableByMouse
+    )
+    assert not hasattr(window, "dv_policy_combo")
+    assert not hasattr(window, "fixed_predefined_controls")
+    assert not hasattr(window, "fixed_predefined_exclude_base")
+    assert window.recalculate_harmonics_btn.text() == "Open Harmonic Settings"
     assert "Settings > Preprocessing" in window.recalculate_harmonics_btn.toolTip()
-    assert (
-        window.fixed_predefined_preview_table.sizePolicy().verticalPolicy()
-        == QSizePolicy.Fixed
-    )
-    assert (
-        window.fixed_predefined_preview_table.sizePolicy().horizontalPolicy()
-        == QSizePolicy.Expanding
-    )
-    assert window.fixed_predefined_preview_table.maximumHeight() <= 150
-    header = window.fixed_predefined_preview_table.horizontalHeader()
-    assert header.sectionResizeMode(0) == QHeaderView.Stretch
-    assert header.sectionResizeMode(5) == QHeaderView.Stretch
 
     assert window.analysis_design_group.objectName() == "stats_analysis_design_group"
     assert window.analysis_mode_value.objectName() == "stats_analysis_mode_value"

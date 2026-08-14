@@ -112,6 +112,44 @@ frequency-domain exclusions marks downstream frequency-domain outputs stale and
 requires regeneration. Do not put app-level visibility or diagnostics toggles
 in the Preprocessing tab.
 
+The project-specific **Advanced Harmonic Selection and Summation** card edits
+the processing-owned method profile rather than creating a Stats-local policy.
+Its profile choices and stable backend IDs are:
+
+- **Dzhelyova/Poncet — stop after two consecutive failures (recommended)**,
+  `dzhelyova_poncet_two_consecutive_failures`;
+- **Fixed / preregistered harmonic domain**,
+  `fixed_preregistered_domain`;
+- **Significant-only (exploratory)**,
+  `significant_only_exploratory`; and
+- **Legacy FPVS Toolbox — through highest with isolated-peak guard**,
+  `legacy_fpvs_toolbox`.
+
+The card must expose only scientifically valid controls for the selected
+profile. Fixed mode chooses an exact Hz list, upper oddball-harmonic index, or
+upper frequency in Hz and always excludes dynamically identified base-rate
+overlaps; this exclusion is displayed as a locked rule, not an optional
+setting. Non-legacy adaptive modes use all retained scalp
+electrodes or a nonempty frozen selection mask; mutable ROI-union scope is
+available only for Legacy. The visible explanation must distinguish locally
+detected harmonics from the exact included Summed-BCA list and identify
+same-sample adaptive profiles as exploratory.
+
+Applying a project method change requires confirmation and starts background
+recalculation plus selection-dependent post-processing. The UI must report that
+this uses existing FullFFT/BCA workbooks and does not rerun EEG preprocessing.
+It remains disabled/busy until the worker's result and thread-finished signals
+arrive, then reports the saved method/fingerprint and derivative rebuild or an
+actionable failure. Before the worker starts, the dialog snapshots project
+preprocessing, app analysis/ROI settings, and its project cache. A validation
+or save failure, failed/incompatible grid review, or user cancellation of the
+exclusion-review dialog restores that snapshot; derivative freshness is not
+changed merely because the worker starts. A pre-persistence selection failure
+also restores the snapshot. Once a replacement selection is persisted,
+Settings cannot be closed or rejected and shell navigation remains locked until
+publication finishes; the running worker has no cooperative cancel action.
+Project switching must not retain another project's method or worker state.
+
 The sidebar's default tool list is Standard FPVS Screening, Sensitivity Analysis,
 SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence Figure, in that order.
 Free Harmonic Clustering Analysis, Ratio Calculator, and Individual Detectability

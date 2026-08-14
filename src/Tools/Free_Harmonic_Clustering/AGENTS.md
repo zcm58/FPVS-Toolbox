@@ -18,6 +18,15 @@ one contrast, then delegates long work to signal-driven workers.
 - Read scientific inputs only from original `FullFFT Amplitude (uV)` condition
   workbooks discovered through `Main_App.projects.load_project_dataset_index`.
   Do not read Stats-ready Summed BCA workbooks.
+- Both GUI inspection and direct preparation must validate
+  `Main_App.processing.full_fft_provenance`. That neutral project-local record
+  owns source paths, rates, grid, cohort/QC, and processing/export identity. Do
+  not require or fall back to `tools.stats.group_significant_harmonics_cache`.
+- Standard harmonic-profile settings, detected/included lists, selection
+  fingerprints, and Summed-BCA artifact freshness are outside this tool's
+  numerical preparation. A stale standard derivative alone must not block
+  preparation; stale/missing FullFFT, cohort/QC, rate, grid, or processing-
+  export provenance must block with a post-processing remedy.
 - Canonical groups and participant identities come only from `project.json`
   through the shared dataset index. Never infer group membership from folders.
 - Keep the paper-faithful SNR/z/noise-window/L2 rules isolated from the locked
@@ -33,6 +42,15 @@ one contrast, then delegates long work to signal-driven workers.
 - Positive and negative clusters use separate extreme-cluster nulls. Report
   cluster-level inference only; never label individual nodes pointwise
   significant.
+- Describe cluster correction as conditional on the candidate domain,
+  adjacency, node-entry threshold, declared contrast family, and valid whole-
+  participant exchangeability. It favors extended effects, does not provide
+  pointwise node significance, and does not correct separately run contrasts.
+- Automatic observed-arm ceiling selection is held fixed during each
+  permutation run. Maintain the deterministic end-to-end null regression that
+  repeats selection and permutation per replicate, but label its prespecified
+  small envelope as a smoke regression, not calibrated unconditional FWER
+  validation.
 - Require complete finite maps on one shared frequency grid and one shared
   BioSemi64 sensor set. Do not zero-fill or perform node-wise omission.
 - Resolve all writes beneath the explicit managed project root. Do not mutate

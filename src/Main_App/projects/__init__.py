@@ -45,12 +45,18 @@ _DATASET_PATH_NAMES = {
     "resolve_project_excel_root",
 }
 _PREPROCESSING_NAMES = {
+    "HARMONIC_SELECTION_PROFILE_VERSION",
+    "FIXED_HARMONIC_SELECTION_PROFILE",
+    "LEGACY_HARMONIC_SELECTION_PROFILE",
+    "NEW_PROJECT_HARMONIC_SELECTION_PROFILE",
+    "SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE",
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
     "is_participant_condition_excluded",
     "normalize_manual_excluded_participant_conditions",
     "normalize_manual_excluded_participants",
     "normalize_preprocessing_settings",
+    "new_project_preprocessing_settings",
 }
 
 __all__ = sorted(

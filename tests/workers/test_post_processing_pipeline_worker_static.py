@@ -70,38 +70,21 @@ def test_stats_and_source_exports_are_unconditional_sibling_steps() -> None:
     run_method = _class_method(tree, "run")
     try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
 
-    stats_index = next(
-        index
-        for index, statement in enumerate(try_node.body)
-        if isinstance(statement, ast.Assign)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Attribute)
-        and statement.value.func.attr == "_run_stats_ready_export"
-    )
-    audit_index = next(
-        index
-        for index, statement in enumerate(try_node.body)
-        if isinstance(statement, ast.Expr)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Attribute)
-        and statement.value.func.attr == "append"
-        and statement.value.args
-        and isinstance(statement.value.args[0], ast.Call)
-        and isinstance(statement.value.args[0].func, ast.Attribute)
-        and statement.value.args[0].func.attr == "_run_analysis_ready_export"
-    )
-    source_index = next(
-        index
-        for index, statement in enumerate(try_node.body)
-        if isinstance(statement, ast.Expr)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Attribute)
-        and statement.value.func.attr == "extend"
-        and statement.value.args
-        and isinstance(statement.value.args[0], ast.Call)
-        and isinstance(statement.value.args[0].func, ast.Attribute)
-        and statement.value.args[0].func.attr == "_run_source_maps"
-    )
+    def statement_call_index(method_name: str) -> int:
+        return next(
+            index
+            for index, statement in enumerate(try_node.body)
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == method_name
+                for node in ast.walk(statement)
+            )
+        )
+
+    stats_index = statement_call_index("_run_stats_ready_export")
+    audit_index = statement_call_index("_run_analysis_ready_export")
+    source_index = statement_call_index("_run_source_maps")
 
     assert stats_index < audit_index < source_index
 

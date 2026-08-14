@@ -113,11 +113,6 @@ class StatsWindowActionsMixin:
 
         for name, signal_name, callback in (
             (
-                "dv_policy_combo",
-                "currentTextChanged",
-                self._sync_provenance_warning,
-            ),
-            (
                 "group_pair_combo",
                 "currentIndexChanged",
                 self._refresh_analysis_design_summary,

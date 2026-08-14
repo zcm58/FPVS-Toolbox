@@ -25,22 +25,31 @@ Common long-running work:
   receive a per-file output group-folder map so post-export writes into the
   condition-first/group-second Excel tree.
 - After a successful Main App processing run, `PostProcessingPipelineWorker`
-  orchestrates downstream analysis prep in a background `QThread`: frequency
-  QC/harmonic selection, the standard Stats-ready Summed BCA export, the
-  additive full-audit analysis-ready export, and time-domain L2-MNE source-PSD
-  generation. Both spreadsheet exports and source generation are sibling
-  consumers after harmonic selection; one failure must be reported without
-  making the other scientifically invalid. This worker is orchestration only;
+  orchestrates downstream analysis prep in a background `QThread`. The full
+  order is frequency-domain QC acceptance, neutral FullFFT provenance,
+  harmonic selection, the standard Stats-ready Summed BCA export, the additive
+  full-audit analysis-ready export, and both canonical Hauk source-PSD map
+  producers. The spreadsheet exports and maps are
+  sibling consumers of one accepted canonical included-harmonic list; one
+  failure must be reported without relabeling an old artifact as current. This
+  worker is orchestration only;
   harmonic selection, standard Summed BCA export, full-audit workbook
   generation, and source-estimation logic remain owned by their processing,
   Stats, `Main_App.exports`, and LORETA source-producer modules.
-- The GUI marks frequency-domain outputs current when frequency-domain QC,
-  harmonic selection, and the standard Stats-ready Summed BCA export all
-  succeed. The additive full-audit workbook reports its own failure without
-  making those standard outputs stale. Optional L2-MNE/eLORETA source-map
-  failures remain logged warnings and keep those source outputs unavailable,
-  but they must not leave SNR or Stats locked behind a stale-frequency-domain
-  gate.
+- After accepted frequency-domain QC is marked current, the full pipeline
+  writes or revalidates processing-owned neutral FullFFT provenance before it
+  attempts harmonic selection or any selection-derived export. That
+  header-only record is independent of the standard Summed-BCA selection and
+  is the common provenance gate for Free Harmonic Clustering GUI inspection
+  and direct preparation.
+- Once harmonic selection succeeds, the worker activates the canonical
+  selection fingerprint. A changed fingerprint marks the Stats-ready,
+  full-audit, L2-MNE Hauk source-PSD map, and eLORETA Hauk source-PSD map
+  derivatives stale before export; an identical fingerprint leaves current
+  derivatives current.
+  Each successful atomic file or directory publication is marked current
+  independently, while a failed rebuild restores the preceding artifact and
+  records `failed` for the newly required fingerprint.
 - Downstream post-processing starts only after the processing ledger update
   succeeds. A ledger-write failure skips source generation so the exporter
   cannot infer a participant cohort from stale or partial state.
@@ -48,9 +57,8 @@ Common long-running work:
   and also emits structured phase progress as `(phase_id, completed_units,
   total_units, user_message)`. The main-thread GUI bridge uses that contract to
   replace completed per-file rows with downstream progress across frequency-
-  domain QC, harmonic selection, Stats-ready export, and time-domain L2-MNE
-  source maps; numeric progress must not be inferred from free-form log
-  messages.
+  domain QC, harmonic selection, Stats-ready export, and Hauk source-PSD map
+  generation; numeric progress must not be inferred from free-form log messages.
 - `ProjectProcessingCacheResetWorker` performs recursive cache inspection and
   deletion in a background `QThread`. The GUI confirms the exact scope first,
   then locks project navigation, the active workspace, the Start button, and
@@ -60,7 +68,34 @@ Common long-running work:
   selection in separate background `QThread` workers. Result, failure, and
   thread-finished signals must pass through the main-thread
   `_SettingsWorkerUiBridge` before updating Settings widgets, opening review or
-  result dialogs, or releasing GUI controls.
+  result dialogs, or releasing GUI controls. After selection is accepted, the
+  harmonic worker calls the post-processing resume entry point with the exact
+  selection metadata. This resume begins after harmonic selection, rebuilds
+  the Stats-ready and full-audit workbooks plus both Hauk source-PSD map
+  directories, and never loads BDFs, preprocesses EEG, or regenerates FFT
+  workbooks. Source-map calculation reuses the durable source-ready FIF
+  derivatives. If the fingerprint is unchanged and every dependent target
+  still exists with a current matching record, it may finish as a no-op. A
+  standard selection-only rebuild leaves neutral FullFFT provenance unchanged
+  because its source/cohort inputs did not change.
+- Settings snapshots project preprocessing, app analysis/ROI configuration,
+  and its project cache before it persists inputs for recalculation. A failed
+  save, failed grid audit, incompatible grid, or cancelled exclusion-review
+  dialog restores that snapshot. Starting the worker does not itself mark
+  derivatives stale: the old selection and artifacts remain current until a
+  replacement selection is successfully persisted. If selection fails before
+  that point, Settings restores the snapshot; after a replacement selection is
+  persisted, the new method is committed and a later export failure restores
+  the preceding file/directory but leaves it stale or failed for the required
+  fingerprint. Settings close/reject and application navigation remain locked
+  throughout the grid-review-to-harmonic-worker handoff, and the current
+  implementation does not cooperatively cancel an in-flight
+  selection-plus-publication run.
+- An accepted participant-condition exclusion changes the FullFFT cohort, not
+  only the selected harmonic list. After the grid worker releases its thread,
+  Settings therefore resumes the full frequency-domain post-processing path so
+  frequency QC and neutral FullFFT provenance are refreshed before selection;
+  it still does not reload or preprocess raw EEG.
 
 Rules:
 

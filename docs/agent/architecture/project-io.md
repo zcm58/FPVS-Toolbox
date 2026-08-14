@@ -20,6 +20,14 @@ FPVS Toolbox uses a strict hybrid settings model:
   `~/.config/FPVS Toolbox/settings/` when `XDG_CONFIG_HOME` is unset.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
+- Harmonic Selection and Summation is project-specific scientific state in the
+  `preprocessing` namespace. New projects persist the
+  `dzhelyova_poncet_two_consecutive_failures` v1 profile with all retained
+  scalp electrodes. Loading an older project with no profile/version must
+  preserve the exact `legacy_fpvs_toolbox` v1 behavior; normalization must not
+  silently migrate that project to the new-project default. Fixed-profile
+  exact-list/upper-harmonic/upper-frequency inputs and any frozen electrode
+  mask travel with the project rather than app-global settings.
 - `preprocessing.manual_excluded_participant_conditions` stores a normalized,
   deterministic participant-ID-to-condition-list mapping. Participant and
   condition matching is case-insensitive. These are downstream cohort
@@ -28,16 +36,38 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Stats may store reusable analysis metadata in `project.json` under
   `tools.stats`. The group-significant harmonics cache lives at
   `tools.stats.group_significant_harmonics_cache`, is keyed by selected
-  participants/conditions, source workbook fingerprints, Stats harmonic
-  settings, predefined ROI definitions, and the current project
-  preprocessing/event-map signature, and must be invalidated when any of those
-  inputs change. Project saves must preserve this namespace when Stats or
-  processing-end harmonic QC updates it directly from a worker.
+  participants/conditions, canonical group assignments, source-workbook
+  fingerprints, named harmonic profile/version and parameters, selection
+  electrode mask, applicable ROI definitions for Legacy, and the current
+  project preprocessing/event-map signature. Cache entries retain evaluated,
+  detected, and included harmonics, pooling-cell sample sizes/weights, stopping
+  provenance, and the canonical selection fingerprint. Project saves must
+  preserve this namespace when Stats or processing-end harmonic QC updates it
+  directly from a worker.
+- Neutral FullFFT provenance lives at
+  `tools.processing.full_fft_provenance`. It stores only project-relative
+  source identity, rates, grid/resolution, cohort/QC, processing/export
+  identity, and their fingerprints. It contains no Stats profile, selected
+  harmonic list, or Summed-BCA freshness state. Copied projects therefore
+  resolve every recorded source beneath the copied active project root.
+- Per-artifact selection freshness lives at
+  `tools.post_processing.artifact_freshness`. Its active selection fingerprint
+  and project-relative records use `current`, `stale`, or `failed` status. The
+  tracked selection-dependent derivatives are the Stats-ready workbook, the
+  full-audit workbook, the L2-MNE Hauk source-PSD map directory, and the
+  eLORETA Hauk source-PSD map directory; the harmonic-selection summary is
+  tracked as the current accepted-selection audit. A changed fingerprint
+  invalidates all four derivatives; an identical fingerprint does not. Legacy
+  cache keys or deterministic legacy metadata hashes are accepted only to
+  migrate an older project into the registry.
 - v2.1 multi-group projects store canonical group definitions in
   `project.json` under `groups`. Keys are stable readable `group_id` slugs;
   entries carry `label`, `folder_name`, and `raw_input_folder`. Participant
   entries use `group_id` plus `raw_file`; legacy `group` values may be read only
-  as migration/input compatibility.
+  as migration/input compatibility. Harmonic pooling, cache identity, and
+  Stats-ready inference columns use the canonical `group_id`. The optional
+  `group_label` is a separate display field and may duplicate another group's
+  label without merging those groups.
 - Every declared group requires a nonblank `raw_input_folder`. Its
   `folder_name` must be a safe single Windows path component; absolute paths,
   separators/traversal, reserved device names, and trailing dots/spaces are
@@ -72,9 +102,15 @@ FPVS Toolbox uses a strict hybrid settings model:
   index remains absent until a later run rebuilds it.
 - Processing-end harmonic selection writes
   `Quality Check/Harmonic_Selection_Summary.xlsx` under the active project root
-  and saves the matching harmonic-selection metadata into
-  `tools.stats.group_significant_harmonics_cache`. The raw data and generated
-  condition workbooks are not altered by this QC export.
+  and saves the authoritative active/history record under
+  `tools.processing.harmonic_selection`. A matching
+  `tools.stats.group_significant_harmonics_cache` entry is reusable calculation
+  state, not the downstream source of truth. The summary is registered as
+  current for the accepted selection, while a changed canonical fingerprint
+  marks the Stats-ready and full-audit workbooks plus the L2-MNE and eLORETA
+  Hauk source-PSD map directories stale before their rebuild. The raw data,
+  FullFFT sheets, generated condition workbooks, and neutral FullFFT provenance
+  are not altered by a selection-only recalculation.
 - After accepted processing-end harmonic selection, the background
   post-processing pipeline also writes
   `3 - Statistical Analysis Results/Analysis_Ready_Summed_BCA_Full_Audit.xlsx`.
@@ -84,6 +120,10 @@ FPVS Toolbox uses a strict hybrid settings model:
   QC decisions are recorded as flags rather than applied as filters. Group
   labels still come only from `project.json`, and the already accepted
   processing-time harmonic list is not recalculated on the audit cohort.
+  Canonical replacements are published atomically. The worker archives an old
+  file below `.fpvs_processing/stale_artifacts/` before replacement, restores
+  it if publication fails, and keeps the new fingerprint's freshness record
+  failed rather than destroying or relabeling the preceding reproducible file.
 - Processing-end frequency-domain QC writes reviewed summed-BCA plausibility
   decisions into `project.json` under `tools.frequency_domain_qc` and writes
   `Quality Check/Frequency_Domain_QC_Review.txt` after user acceptance. This

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import json
+import logging
 from typing import Any, Callable, Dict
 from pathlib import Path
 
@@ -75,17 +77,30 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_removed_electrode_detection_mode,
 )
 from Tools.Stats.analysis.dv_policy_settings import (
+    FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
+    FIXED_HARMONIC_INPUT_UPPER_FREQUENCY,
+    FIXED_HARMONIC_INPUT_UPPER_HARMONIC,
     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
     FIXED_PREDEFINED_POLICY_NAME,
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
     GROUP_SIGNIFICANT_POLICY_NAME,
     GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
     GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+    GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES,
+    HARMONIC_PROFILE_FIXED_ID,
+    HARMONIC_PROFILE_LEGACY_ID,
+    HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
+    HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
+    HARMONIC_PROFILE_VERSION_1,
     normalize_dv_policy,
 )
 from Tools.Stats.analysis.dv_policy_group_significant import clear_group_significant_selection_cache
 from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_selections
+
+
+logger = logging.getLogger(__name__)
 
 
 class _SettingsWorkerUiBridge(QObject):
@@ -206,6 +221,14 @@ class SettingsDialog(QDialog):
         self._init_stats_tab(self.tabs)
         self._init_rois_tab(self.tabs)
         self._init_advanced_tab(self.tabs)
+        self._initial_harmonic_settings_signature = (
+            self._harmonic_settings_signature_from_preprocessing(
+                self._project_preprocessing()
+            )
+        )
+        self._initial_frequency_analysis_signature = (
+            self._frequency_analysis_settings_signature()
+        )
         self._last_tab_index = self.tabs.currentIndex()
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -399,6 +422,22 @@ class SettingsDialog(QDialog):
                     GROUP_SIGNIFICANT_POLICY_NAME,
                 ),
             ),
+            "harmonic_selection_profile": preprocessing.get(
+                "harmonic_selection_profile",
+                self.manager.get(
+                    "preprocessing",
+                    "harmonic_selection_profile",
+                    HARMONIC_PROFILE_LEGACY_ID,
+                ),
+            ),
+            "harmonic_selection_profile_version": preprocessing.get(
+                "harmonic_selection_profile_version",
+                self.manager.get(
+                    "preprocessing",
+                    "harmonic_selection_profile_version",
+                    HARMONIC_PROFILE_VERSION_1,
+                ),
+            ),
             "group_significant_electrode_scope": preprocessing.get(
                 "group_significant_electrode_scope",
                 self.manager.get(
@@ -412,7 +451,15 @@ class SettingsDialog(QDialog):
                 self.manager.get(
                     "preprocessing",
                     "group_significant_summation_method",
-                    GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+                    "through_highest_significant",
+                ),
+            ),
+            "group_significant_selection_electrodes": preprocessing.get(
+                "group_significant_selection_electrodes",
+                self.manager.get(
+                    "preprocessing",
+                    "group_significant_selection_electrodes",
+                    "",
                 ),
             ),
             "fixed_harmonic_frequencies_hz": preprocessing.get(
@@ -421,6 +468,30 @@ class SettingsDialog(QDialog):
                     "preprocessing",
                     "fixed_harmonic_frequencies_hz",
                     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
+                ),
+            ),
+            "fixed_harmonic_input_mode": preprocessing.get(
+                "fixed_harmonic_input_mode",
+                self.manager.get(
+                    "preprocessing",
+                    "fixed_harmonic_input_mode",
+                    FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
+                ),
+            ),
+            "fixed_harmonic_upper_harmonic_index": preprocessing.get(
+                "fixed_harmonic_upper_harmonic_index",
+                self.manager.get(
+                    "preprocessing",
+                    "fixed_harmonic_upper_harmonic_index",
+                    "0",
+                ),
+            ),
+            "fixed_harmonic_upper_frequency_hz": preprocessing.get(
+                "fixed_harmonic_upper_frequency_hz",
+                self.manager.get(
+                    "preprocessing",
+                    "fixed_harmonic_upper_frequency_hz",
+                    "0.0",
                 ),
             ),
             "fixed_harmonic_auto_exclude_base": preprocessing.get(
@@ -440,11 +511,8 @@ class SettingsDialog(QDialog):
         project_pp: Dict[str, Any] | None,
     ) -> None:
         settings = normalize_dv_policy(self._harmonic_policy_payload_from_preprocessing(project_pp))
-        self._initial_harmonic_settings_signature = (
-            self._harmonic_settings_signature_from_settings(settings)
-        )
         harmonic_group = SectionCard(
-            "Harmonic Selection",
+            "Advanced Harmonic Selection and Summation",
             tab,
             object_name="settings_harmonic_selection_card",
         )
@@ -455,32 +523,31 @@ class SettingsDialog(QDialog):
             "settings_harmonic_summation_method"
         )
         self.harmonic_summation_method_combo.addItem(
-            "Up to highest significant (trim gaps >10)",
-            GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+            "Dzhelyova/Poncet — stop after two consecutive failures (recommended)",
+            HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
         )
         self.harmonic_summation_method_combo.addItem(
-            "Significant harmonics only",
-            GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
+            "Fixed / preregistered harmonic domain",
+            HARMONIC_PROFILE_FIXED_ID,
         )
         self.harmonic_summation_method_combo.addItem(
-            "Fixed harmonic list",
-            "fixed_predefined",
+            "Significant-only (exploratory)",
+            HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
         )
-        selected_method = (
-            "fixed_predefined"
-            if settings.name == FIXED_PREDEFINED_POLICY_NAME
-            else settings.group_significant_summation_method
+        self.harmonic_summation_method_combo.addItem(
+            "Legacy FPVS Toolbox — through highest with isolated-peak guard",
+            HARMONIC_PROFILE_LEGACY_ID,
         )
-        method_index = self.harmonic_summation_method_combo.findData(selected_method)
+        method_index = self.harmonic_summation_method_combo.findData(
+            settings.harmonic_selection_profile
+        )
         self.harmonic_summation_method_combo.setCurrentIndex(max(0, method_index))
         self.harmonic_summation_method_combo.setToolTip(
-            "Choose which oddball harmonics are included in Summed BCA after processing. "
-            "The default fills through the highest significant harmonic, but excludes an "
-            "isolated highest peak when more than 10 eligible non-base harmonics lie "
-            "between the two highest significant peaks."
+            "Choose the versioned rule that defines the common oddball harmonics "
+            "summed into BCA for every downstream analysis."
         )
         harmonic_form.addRow(
-            QLabel("Summation method:", harmonic_group),
+            QLabel("Method profile:", harmonic_group),
             self.harmonic_summation_method_combo,
         )
 
@@ -489,23 +556,73 @@ class SettingsDialog(QDialog):
             "settings_harmonic_electrode_scope"
         )
         self.harmonic_electrode_scope_combo.addItem(
-            "Average within selected ROIs only",
-            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+            "All retained scalp electrodes",
+            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
         )
         self.harmonic_electrode_scope_combo.addItem(
-            "Grand average across all scalp electrodes",
-            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+            "Frozen custom electrode mask",
+            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
+        )
+        self.harmonic_electrode_scope_combo.addItem(
+            "Legacy only: current Stats ROI union",
+            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
         )
         scope_index = self.harmonic_electrode_scope_combo.findData(
             settings.group_significant_electrode_scope
         )
         self.harmonic_electrode_scope_combo.setCurrentIndex(max(0, scope_index))
         self.harmonic_electrode_scope_combo.setToolTip(
-            "Choose the electrode set used to build the group-level FFT spectrum for harmonic selection."
+            "Adaptive profiles use this fixed electrode set to build the selection "
+            "spectrum. A frozen mask prevents later ROI edits from changing the method."
         )
         harmonic_form.addRow(
-            QLabel("Averaging method:", harmonic_group),
+            QLabel("Selection electrodes:", harmonic_group),
             self.harmonic_electrode_scope_combo,
+        )
+
+        self.harmonic_selection_electrodes_edit = QLineEdit(
+            ", ".join(settings.group_significant_selection_electrodes),
+            harmonic_group,
+        )
+        self.harmonic_selection_electrodes_edit.setObjectName(
+            "settings_harmonic_selection_electrodes"
+        )
+        self.harmonic_selection_electrodes_edit.setPlaceholderText(
+            "O1, Oz, O2, PO7, PO8"
+        )
+        self.harmonic_selection_electrodes_edit.setToolTip(
+            "Comma-separated electrode names stored with the method and fingerprint."
+        )
+        harmonic_form.addRow(
+            QLabel("Frozen electrode mask:", harmonic_group),
+            self.harmonic_selection_electrodes_edit,
+        )
+
+        self.fixed_harmonic_input_mode_combo = QComboBox(harmonic_group)
+        self.fixed_harmonic_input_mode_combo.setObjectName(
+            "settings_fixed_harmonic_input_mode"
+        )
+        self.fixed_harmonic_input_mode_combo.addItem(
+            "Exact frequency list",
+            FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
+        )
+        self.fixed_harmonic_input_mode_combo.addItem(
+            "All eligible harmonics through harmonic index",
+            FIXED_HARMONIC_INPUT_UPPER_HARMONIC,
+        )
+        self.fixed_harmonic_input_mode_combo.addItem(
+            "All eligible harmonics through frequency",
+            FIXED_HARMONIC_INPUT_UPPER_FREQUENCY,
+        )
+        fixed_mode_index = self.fixed_harmonic_input_mode_combo.findData(
+            settings.fixed_harmonic_input_mode
+        )
+        self.fixed_harmonic_input_mode_combo.setCurrentIndex(
+            max(0, fixed_mode_index)
+        )
+        harmonic_form.addRow(
+            QLabel("Fixed-domain input:", harmonic_group),
+            self.fixed_harmonic_input_mode_combo,
         )
 
         self.fixed_harmonic_freqs_edit = QLineEdit(
@@ -518,32 +635,69 @@ class SettingsDialog(QDialog):
             "Comma-separated harmonic frequencies in Hz. Used only when Fixed harmonic list is selected."
         )
         harmonic_form.addRow(
-            QLabel("Fixed harmonics (Hz):", harmonic_group),
+            QLabel("Exact frequencies (Hz):", harmonic_group),
             self.fixed_harmonic_freqs_edit,
         )
 
+        self.fixed_harmonic_upper_index_edit = QLineEdit(
+            ""
+            if settings.fixed_harmonic_upper_harmonic_index is None
+            else str(settings.fixed_harmonic_upper_harmonic_index),
+            harmonic_group,
+        )
+        self.fixed_harmonic_upper_index_edit.setObjectName(
+            "settings_fixed_harmonic_upper_index"
+        )
+        self.fixed_harmonic_upper_index_edit.setPlaceholderText("14")
+        self.fixed_harmonic_upper_index_edit.setToolTip(
+            "Include eligible oddball harmonic orders from 1 through this index."
+        )
+        harmonic_form.addRow(
+            QLabel("Upper harmonic index:", harmonic_group),
+            self.fixed_harmonic_upper_index_edit,
+        )
+
+        self.fixed_harmonic_upper_frequency_edit = QLineEdit(
+            ""
+            if settings.fixed_harmonic_upper_frequency_hz is None
+            else f"{settings.fixed_harmonic_upper_frequency_hz:g}",
+            harmonic_group,
+        )
+        self.fixed_harmonic_upper_frequency_edit.setObjectName(
+            "settings_fixed_harmonic_upper_frequency"
+        )
+        self.fixed_harmonic_upper_frequency_edit.setPlaceholderText("16.8")
+        self.fixed_harmonic_upper_frequency_edit.setToolTip(
+            "Include eligible oddball harmonics at or below this prespecified frequency."
+        )
+        harmonic_form.addRow(
+            QLabel("Upper frequency (Hz):", harmonic_group),
+            self.fixed_harmonic_upper_frequency_edit,
+        )
+
         self.fixed_harmonic_exclude_base_check = QCheckBox(
-            "Automatically exclude base-rate overlaps",
+            "Base-rate overlaps are always excluded",
             harmonic_group,
         )
         self.fixed_harmonic_exclude_base_check.setObjectName(
             "settings_fixed_harmonics_exclude_base"
         )
-        self.fixed_harmonic_exclude_base_check.setChecked(
-            bool(settings.fixed_harmonic_auto_exclude_base)
+        self.fixed_harmonic_exclude_base_check.setChecked(True)
+        self.fixed_harmonic_exclude_base_check.setEnabled(False)
+        self.fixed_harmonic_exclude_base_check.setToolTip(
+            "Oddball harmonics that overlap the base stimulation frequency or "
+            "its harmonics cannot enter the fixed oddball composite."
         )
         harmonic_form.addRow("", self.fixed_harmonic_exclude_base_check)
 
         harmonic_group.content_layout.addLayout(harmonic_form)
         self.fixed_harmonic_warning = StatusBanner(
-            "Fixed harmonics may not match the statistically significant harmonic "
-            "list selected by FPVS Toolbox. Use this for exploratory or comparison "
-            "checks; primary summaries use the shared significant-harmonic policy.",
+            "",
             harmonic_group,
-            variant="warning",
+            variant="info",
         )
         self.fixed_harmonic_warning.setObjectName("settings_fixed_harmonic_warning")
-        self.fixed_harmonic_warning.setVisible(False)
+        self.fixed_harmonic_warning.setVisible(True)
         harmonic_group.content_layout.addWidget(self.fixed_harmonic_warning)
         harmonic_actions = ActionRow(harmonic_group, alignment=Qt.AlignLeft)
         harmonic_actions.setObjectName("settings_harmonic_selection_actions")
@@ -556,7 +710,9 @@ class SettingsDialog(QDialog):
             "settings_recalculate_harmonics_button"
         )
         self.recalculate_harmonics_button.setToolTip(
-            "Rebuild the project's statistically significant harmonic list from the processed Excel outputs."
+            "Recalculate the project's harmonic domain from existing processed "
+            "workbooks, then rebuild every Summed-BCA derivative. Raw EEG "
+            "preprocessing and FFT export are not rerun."
         )
         self.recalculate_harmonics_button.setEnabled(self.project is not None)
         self.recalculate_harmonics_button.clicked.connect(
@@ -591,6 +747,12 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(harmonic_group)
         self.harmonic_summation_method_combo.currentIndexChanged.connect(
+            self._update_harmonic_selection_controls
+        )
+        self.harmonic_electrode_scope_combo.currentIndexChanged.connect(
+            self._update_harmonic_selection_controls
+        )
+        self.fixed_harmonic_input_mode_combo.currentIndexChanged.connect(
             self._update_harmonic_selection_controls
         )
         self._update_harmonic_selection_controls()
@@ -1052,16 +1214,18 @@ class SettingsDialog(QDialog):
         )
 
     def _harmonic_settings_signature_from_settings(self, settings: Any) -> tuple[object, ...]:
-        if settings.name == FIXED_PREDEFINED_POLICY_NAME:
-            return (
-                settings.name,
-                str(settings.fixed_harmonic_frequencies_hz).strip(),
-                bool(settings.fixed_harmonic_auto_exclude_base),
-            )
         return (
             settings.name,
+            str(settings.harmonic_selection_profile),
+            str(settings.harmonic_selection_profile_version),
             str(settings.group_significant_electrode_scope),
+            tuple(settings.group_significant_selection_electrodes),
             str(settings.group_significant_summation_method),
+            str(settings.fixed_harmonic_input_mode),
+            str(settings.fixed_harmonic_frequencies_hz).strip(),
+            settings.fixed_harmonic_upper_harmonic_index,
+            settings.fixed_harmonic_upper_frequency_hz,
+            bool(settings.fixed_harmonic_auto_exclude_base),
         )
 
     def _harmonic_settings_signature_from_preprocessing(
@@ -1071,7 +1235,41 @@ class SettingsDialog(QDialog):
         settings = normalize_dv_policy(
             self._harmonic_policy_payload_from_preprocessing(preprocessing)
         )
-        return self._harmonic_settings_signature_from_settings(settings)
+        base_frequency = (
+            self.base_freq_edit.text()
+            if hasattr(self, "base_freq_edit")
+            else self.manager.get("analysis", "base_freq", "6.0")
+        )
+        bca_upper_limit = (
+            self.bca_limit_edit.text()
+            if hasattr(self, "bca_limit_edit")
+            else self.manager.get("analysis", "bca_upper_limit", "16.8")
+        )
+        roi_pairs = (
+            self.roi_editor.get_pairs()
+            if hasattr(self, "roi_editor")
+            else self.manager.get_roi_pairs()
+        )
+        normalized_rois = tuple(
+            (
+                str(name).strip(),
+                tuple(str(electrode).strip().upper() for electrode in electrodes),
+            )
+            for name, electrodes in roi_pairs
+        )
+        return (
+            *self._harmonic_settings_signature_from_settings(settings),
+            self._normalized_signature_number(base_frequency),
+            self._normalized_signature_number(bca_upper_limit),
+            normalized_rois,
+        )
+
+    @staticmethod
+    def _normalized_signature_number(value: object) -> object:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return str(value).strip()
 
     def _project_has_processed_outputs(self) -> bool:
         if self.project is None:
@@ -1107,14 +1305,30 @@ class SettingsDialog(QDialog):
         current = self._harmonic_settings_signature_from_preprocessing(validated_preproc)
         return initial is not None and current != initial
 
+    def _frequency_analysis_settings_signature(self) -> tuple[object, object]:
+        return (
+            self._normalized_signature_number(self.base_freq_edit.text()),
+            self._normalized_signature_number(self.bca_limit_edit.text()),
+        )
+
+    def _frequency_analysis_settings_changed_after_processing(self) -> bool:
+        if self.project is None or not self._project_has_processed_outputs():
+            return False
+        initial = getattr(self, "_initial_frequency_analysis_signature", None)
+        return (
+            initial is not None
+            and self._frequency_analysis_settings_signature() != initial
+        )
+
     def _ask_recalculate_harmonics_after_settings_change(self) -> bool:
         choice = QMessageBox.question(
             self,
             "Recalculate Harmonics?",
             (
-                "This project already has processed data, and the harmonic selection "
-                "settings were changed. Recalculate the statistically significant "
-                "harmonic list now so downstream tools use the updated method?"
+                "This project already has processed data, and settings that define "
+                "harmonic selection or Summed BCA were changed. Rebuild the affected "
+                "post-processing outputs now? Raw EEG preprocessing and FFT export "
+                "will not be rerun."
             ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
@@ -1130,14 +1344,76 @@ class SettingsDialog(QDialog):
         banner.setVisible(bool(text))
 
     def _fixed_harmonic_list_selected(self) -> bool:
-        return self.harmonic_summation_method_combo.currentData() == "fixed_predefined"
+        return (
+            self.harmonic_summation_method_combo.currentData()
+            == HARMONIC_PROFILE_FIXED_ID
+        )
 
     def _update_harmonic_selection_controls(self) -> None:
         fixed_selected = self._fixed_harmonic_list_selected()
+        profile_id = self.harmonic_summation_method_combo.currentData()
+        legacy_selected = profile_id == HARMONIC_PROFILE_LEGACY_ID
         self.harmonic_electrode_scope_combo.setEnabled(not fixed_selected)
-        self.fixed_harmonic_freqs_edit.setEnabled(fixed_selected)
-        self.fixed_harmonic_exclude_base_check.setEnabled(fixed_selected)
-        self.fixed_harmonic_warning.setVisible(fixed_selected)
+        if (
+            not fixed_selected
+            and not legacy_selected
+            and self.harmonic_electrode_scope_combo.currentData()
+            == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+        ):
+            all_index = self.harmonic_electrode_scope_combo.findData(
+                GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL
+            )
+            self.harmonic_electrode_scope_combo.setCurrentIndex(all_index)
+        frozen_selected = (
+            not fixed_selected
+            and self.harmonic_electrode_scope_combo.currentData()
+            == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN
+        )
+        self.harmonic_selection_electrodes_edit.setEnabled(frozen_selected)
+
+        self.fixed_harmonic_input_mode_combo.setEnabled(fixed_selected)
+        fixed_mode = self.fixed_harmonic_input_mode_combo.currentData()
+        self.fixed_harmonic_freqs_edit.setEnabled(
+            fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_FREQUENCY_LIST
+        )
+        self.fixed_harmonic_upper_index_edit.setEnabled(
+            fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_UPPER_HARMONIC
+        )
+        self.fixed_harmonic_upper_frequency_edit.setEnabled(
+            fixed_selected and fixed_mode == FIXED_HARMONIC_INPUT_UPPER_FREQUENCY
+        )
+        self.fixed_harmonic_exclude_base_check.setEnabled(False)
+        if profile_id == HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID:
+            note = (
+                "Publication-aligned profile: participants are averaged within each "
+                "group × condition cell, groups receive equal weight within condition, "
+                "and conditions receive equal weight. The search stops only after two "
+                "consecutive eligible nonsignificant harmonics."
+            )
+            variant = "success"
+        elif profile_id == HARMONIC_PROFILE_FIXED_ID:
+            note = (
+                "Confirmatory option: choose the harmonic domain independently of this "
+                "dataset and report that choice. Base-rate overlaps are always "
+                "removed from the oddball composite."
+            )
+            variant = "info"
+        elif profile_id == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID:
+            note = (
+                "Exploratory option: only individually detected z > 1.64 harmonics are "
+                "summed. Selection and inference use the same sample."
+            )
+            variant = "warning"
+        else:
+            note = (
+                "Reproducibility option for existing projects: available workbooks are "
+                "pooled equally, eligible harmonics are filled through the highest "
+                "detection, and the isolated-peak gap guard is retained."
+            )
+            variant = "warning"
+        self.fixed_harmonic_warning.set_variant(variant)
+        self.fixed_harmonic_warning.set_text(note)
+        self.fixed_harmonic_warning.setVisible(True)
 
     def _save_project_preprocessing_for_harmonic_recalculation(
         self,
@@ -1162,20 +1438,190 @@ class SettingsDialog(QDialog):
             return False
         return True
 
+    def _save_analysis_inputs_for_harmonic_recalculation(self) -> bool:
+        """Persist every non-project input consumed by harmonic selection."""
+
+        try:
+            base_frequency = float(self.base_freq_edit.text())
+            bca_upper_limit = float(self.bca_limit_edit.text())
+        except (TypeError, ValueError):
+            QMessageBox.warning(
+                self,
+                "Invalid Analysis Settings",
+                "Base frequency and BCA harmonic upper limit must be numbers.",
+            )
+            return False
+        if base_frequency <= 0.0 or bca_upper_limit <= 0.0:
+            QMessageBox.warning(
+                self,
+                "Invalid Analysis Settings",
+                "Base frequency and BCA harmonic upper limit must be positive.",
+            )
+            return False
+        try:
+            self.manager.set("analysis", "base_freq", f"{base_frequency:g}")
+            self.manager.set("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
+            self.manager.set("analysis", "bca_upper_limit", f"{bca_upper_limit:g}")
+            self.manager.set_roi_montage(self._current_roi_montage())
+            self.manager.set_roi_pairs(self.roi_editor.get_pairs())
+            for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
+                self.manager.set_custom_roi_presets(montage_key, custom_presets)
+            self.manager.save()
+        except Exception as exc:  # pragma: no cover - settings I/O failure
+            QMessageBox.critical(self, "Save Error", str(exc))
+            return False
+        return True
+
+    def _capture_harmonic_settings_rollback(self) -> None:
+        """Snapshot settings that must survive a cancelled FFT-grid review."""
+
+        if self.project is None or hasattr(self, "_harmonic_settings_rollback"):
+            return
+        self._harmonic_settings_rollback = {
+            "preprocessing": copy.deepcopy(self.project.preprocessing),
+            "manager_config": copy.deepcopy(self.manager.config),
+            "project_cache": copy.deepcopy(self._project_cache),
+            "manual_excluded_participant_conditions": copy.deepcopy(
+                self._manual_excluded_participant_conditions
+            ),
+        }
+
+    def _clear_harmonic_settings_rollback(self) -> None:
+        if hasattr(self, "_harmonic_settings_rollback"):
+            del self._harmonic_settings_rollback
+
+    def _restore_harmonic_settings_after_cancel(self) -> None:
+        snapshot = getattr(self, "_harmonic_settings_rollback", None)
+        if not isinstance(snapshot, dict):
+            return
+        restore_errors: list[str] = []
+        try:
+            if self.project is not None:
+                try:
+                    preprocessing = copy.deepcopy(snapshot["preprocessing"])
+                    self.project.update_preprocessing(preprocessing)
+                    self.project.save()
+                    self._project_cache = copy.deepcopy(snapshot["project_cache"])
+                    self._manual_excluded_participant_conditions = copy.deepcopy(
+                        snapshot["manual_excluded_participant_conditions"]
+                    )
+                except Exception as exc:  # pragma: no cover - disk I/O failure
+                    restore_errors.append(f"project settings ({exc})")
+            try:
+                self.manager.config = copy.deepcopy(snapshot["manager_config"])
+                self.manager.save()
+            except Exception as exc:  # pragma: no cover - settings I/O failure
+                restore_errors.append(f"application analysis settings ({exc})")
+            try:
+                from Tools.Stats.data.shared_rois import (
+                    apply_rois_to_modules,
+                    load_rois_from_settings,
+                )
+
+                apply_rois_to_modules(load_rois_from_settings(self.manager))
+            except Exception:  # Rollback cache-refresh boundary: saved settings remain authoritative.
+                pass
+            try:
+                from config import update_target_frequencies
+
+                update_target_frequencies(
+                    config.DEFAULT_ODDBALL_FREQ,
+                    float(self.manager.get("analysis", "bca_upper_limit", "16.8")),
+                )
+            except Exception:  # Rollback cache-refresh boundary: saved settings remain authoritative.
+                pass
+        finally:
+            self._clear_harmonic_settings_rollback()
+        if restore_errors:
+            logger.error(
+                "harmonic_settings_rollback_failed project_root=%r errors=%r",
+                str(getattr(self.project, "project_root", "") or ""),
+                restore_errors,
+            )
+            QMessageBox.critical(
+                self,
+                "Settings Restore Failed",
+                "The previous settings could not be restored completely: "
+                + "; ".join(restore_errors),
+            )
+
+    def _mark_harmonic_derivatives_stale(self) -> None:
+        if self.project is None:
+            return
+        from Main_App.processing.artifact_freshness import (
+            mark_selection_derivatives_stale,
+        )
+
+        mark_selection_derivatives_stale(
+            self.project.project_root,
+            reason=(
+                "Harmonic-selection or Summed-BCA analysis settings changed; "
+                "recalculate harmonics before using dependent outputs."
+            ),
+        )
+
+    def _mark_frequency_analysis_outputs_stale(self) -> None:
+        if self.project is None:
+            return
+        from Main_App.processing.frequency_domain_qc import (
+            mark_frequency_domain_outputs_stale,
+        )
+
+        mark_frequency_domain_outputs_stale(
+            self.project.project_root,
+            reason=(
+                "Base frequency or BCA harmonic upper limit changed; rerun "
+                "frequency-domain post-processing and QC."
+            ),
+        )
+
+    def _resume_frequency_domain_post_processing(self) -> None:
+        host = getattr(self, "host", None) or self.parent()
+        if host is None:
+            return
+        from Main_App.gui.processing_workflows import resume_post_processing
+
+        self.accept()
+        resume_post_processing(host)
+
     def _on_recalculate_harmonics_clicked(self) -> None:
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
             return
+        frequency_analysis_changed = (
+            self._frequency_analysis_settings_changed_after_processing()
+        )
+        self._capture_harmonic_settings_rollback()
         if not self._save_project_preprocessing_for_harmonic_recalculation(validated_preproc):
+            self._restore_harmonic_settings_after_cancel()
+            return
+        if not self._save_analysis_inputs_for_harmonic_recalculation():
+            self._restore_harmonic_settings_after_cancel()
             return
         if not self._project_has_processed_outputs():
+            self._restore_harmonic_settings_after_cancel()
             QMessageBox.information(
                 self,
                 "No Processed Data",
                 "Process this project before recalculating harmonic selection.",
             )
             return
-        self._start_full_fft_grid_review(recalculate_after=True)
+        if frequency_analysis_changed:
+            try:
+                self._mark_frequency_analysis_outputs_stale()
+            except (OSError, RuntimeError, ValueError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Freshness Status Warning",
+                    f"Frequency-domain outputs could not be marked stale: {exc}",
+                )
+                self._restore_harmonic_settings_after_cancel()
+                return
+            self._clear_harmonic_settings_rollback()
+            self._resume_frequency_domain_post_processing()
+            return
+        if not self._start_full_fft_grid_review(recalculate_after=True):
+            self._restore_harmonic_settings_after_cancel()
 
     def _on_review_condition_exclusions_clicked(self) -> None:
         if self.project is None:
@@ -1192,6 +1638,8 @@ class SettingsDialog(QDialog):
     def _save_participant_condition_exclusions(
         self,
         exclusions: Dict[str, Any],
+        *,
+        invalidate_outputs: bool = True,
     ) -> bool:
         if self.project is None:
             return False
@@ -1226,6 +1674,8 @@ class SettingsDialog(QDialog):
         self._manual_excluded_participant_conditions = dict(
             normalized.get("manual_excluded_participant_conditions") or {}
         )
+        if not invalidate_outputs:
+            return True
         invalidation_warnings: list[str] = []
         try:
             mark_frequency_domain_outputs_stale(
@@ -1270,6 +1720,32 @@ class SettingsDialog(QDialog):
         self.review_condition_exclusions_button.setEnabled(
             enabled and self.project is not None
         )
+
+    def _lock_settings_navigation(self) -> None:
+        owner = getattr(self, "host", None)
+        if owner is None or owner is self:
+            return
+        if getattr(owner, "_settings_worker_navigation_locked", False):
+            return
+        from Main_App.gui import shell_status
+
+        shell_status._set_processing_navigation_locked(owner, True)
+        owner._settings_worker_navigation_locked = True
+
+    def _unlock_settings_navigation_if_idle(self) -> None:
+        owner = getattr(self, "host", None)
+        if owner is None or owner is self:
+            return
+        if getattr(owner, "_settings_full_fft_grid_qc_thread", None) is not None:
+            return
+        if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
+            return
+        if not getattr(owner, "_settings_worker_navigation_locked", False):
+            return
+        from Main_App.gui import shell_status
+
+        shell_status._set_processing_navigation_locked(owner, False)
+        owner._settings_worker_navigation_locked = False
 
     def _start_full_fft_grid_review(
         self,
@@ -1320,27 +1796,40 @@ class SettingsDialog(QDialog):
             )
             return False
 
+        try:
+            thread = QThread(owner)
+            worker = FullFftGridQcWorker(self.project.project_root)
+            worker.moveToThread(thread)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "FFT Grid Check Unavailable",
+                f"The FFT grid check could not start: {exc}",
+            )
+            return False
+
         self._set_harmonic_recalculation_status(
             "Checking processed FullFFT grids for incompatible crop lengths...",
             "info",
         )
         self._set_full_fft_grid_review_controls_enabled(False)
-        thread = QThread(owner)
-        worker = FullFftGridQcWorker(self.project.project_root)
-        worker.moveToThread(thread)
         owner._settings_full_fft_grid_qc_thread = thread
         owner._settings_full_fft_grid_qc_worker = worker
+        self._lock_settings_navigation()
+        resume_frequency_postprocessing_after_release = False
 
         def _release_worker() -> None:
             owner._settings_full_fft_grid_qc_thread = None
             owner._settings_full_fft_grid_qc_worker = None
             owner._settings_full_fft_grid_qc_bridge = None
-            self._set_full_fft_grid_review_controls_enabled(True)
-            if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
-                self.recalculate_harmonics_button.setEnabled(False)
-                self.review_condition_exclusions_button.setEnabled(False)
+            if getattr(owner, "_settings_harmonic_recalc_thread", None) is None:
+                self._set_full_fft_grid_review_controls_enabled(True)
+            self._unlock_settings_navigation_if_idle()
+            if resume_frequency_postprocessing_after_release:
+                self._resume_frequency_domain_post_processing()
 
         def _handle_finished(audit: object) -> None:
+            nonlocal resume_frequency_postprocessing_after_release
             candidates = tuple(getattr(audit, "review_candidates", ()) or ())
             should_open = (
                 bool(candidates)
@@ -1350,7 +1839,10 @@ class SettingsDialog(QDialog):
                 or not recalculate_after
             )
             accepted = True
-            proposed_exclusions = self._manual_excluded_participant_conditions
+            current_exclusions = normalize_manual_excluded_participant_conditions(
+                self._manual_excluded_participant_conditions
+            )
+            proposed_exclusions = current_exclusions
             if should_open:
                 dialog = ParticipantConditionExclusionsDialog(
                     audit,
@@ -1362,10 +1854,8 @@ class SettingsDialog(QDialog):
                     proposed_exclusions = (
                         dialog.excluded_participant_conditions()
                     )
-                    accepted = self._save_participant_condition_exclusions(
-                        proposed_exclusions
-                    )
             if not accepted:
+                self._restore_harmonic_settings_after_cancel()
                 self._set_harmonic_recalculation_status(
                     "FFT crop exclusion review was cancelled.",
                     "warning",
@@ -1375,6 +1865,7 @@ class SettingsDialog(QDialog):
                 if not audit.is_compatible_with_exclusions(
                     proposed_exclusions
                 ):
+                    self._restore_harmonic_settings_after_cancel()
                     self._set_harmonic_recalculation_status(
                         "Harmonic recalculation is waiting for one compatible "
                         "included FFT grid.",
@@ -1389,9 +1880,27 @@ class SettingsDialog(QDialog):
                         "before recalculating harmonics.",
                     )
                     return
-                self._start_harmonic_recalculation(
+            normalized_proposed = normalize_manual_excluded_participant_conditions(
+                proposed_exclusions
+            )
+            exclusions_changed = normalized_proposed != current_exclusions
+            if exclusions_changed and not self._save_participant_condition_exclusions(
+                normalized_proposed,
+                invalidate_outputs=True,
+            ):
+                self._restore_harmonic_settings_after_cancel()
+                return
+            if recalculate_after:
+                if exclusions_changed:
+                    # The active FullFFT cohort changed, so neutral FullFFT
+                    # provenance and frequency-domain QC must be rebuilt too.
+                    self._clear_harmonic_settings_rollback()
+                    resume_frequency_postprocessing_after_release = True
+                    return
+                if not self._start_harmonic_recalculation(
                     accept_on_success=accept_on_success
-                )
+                ):
+                    self._restore_harmonic_settings_after_cancel()
             else:
                 self._set_harmonic_recalculation_status(
                     "Participant-condition exclusions saved. Recalculate harmonics "
@@ -1400,6 +1909,7 @@ class SettingsDialog(QDialog):
                 )
 
         def _handle_failed(message: str) -> None:
+            self._restore_harmonic_settings_after_cancel()
             self._set_harmonic_recalculation_status(
                 f"FFT grid check failed: {message}",
                 "warning",
@@ -1413,17 +1923,35 @@ class SettingsDialog(QDialog):
             parent=owner,
         )
         owner._settings_full_fft_grid_qc_bridge = bridge
-        thread.started.connect(worker.run)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(bridge.handle_result)
-        worker.failed.connect(thread.quit)
-        worker.failed.connect(worker.deleteLater)
-        worker.failed.connect(bridge.handle_failed)
-        thread.finished.connect(bridge.handle_thread_finished)
-        thread.finished.connect(bridge.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
+        try:
+            thread.started.connect(worker.run)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            worker.finished.connect(bridge.handle_result)
+            worker.failed.connect(thread.quit)
+            worker.failed.connect(worker.deleteLater)
+            worker.failed.connect(bridge.handle_failed)
+            thread.finished.connect(bridge.handle_thread_finished)
+            thread.finished.connect(bridge.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.start()
+        except Exception as exc:  # noqa: BLE001
+            owner._settings_full_fft_grid_qc_thread = None
+            owner._settings_full_fft_grid_qc_worker = None
+            owner._settings_full_fft_grid_qc_bridge = None
+            self._set_full_fft_grid_review_controls_enabled(True)
+            self._unlock_settings_navigation_if_idle()
+            for obj in (worker, bridge, thread):
+                try:
+                    obj.deleteLater()
+                except RuntimeError:
+                    pass
+            QMessageBox.warning(
+                self,
+                "FFT Grid Check Unavailable",
+                f"The FFT grid check could not start: {exc}",
+            )
+            return False
         return True
 
     def _start_harmonic_recalculation(self, *, accept_on_success: bool = False) -> bool:
@@ -1465,21 +1993,31 @@ class SettingsDialog(QDialog):
             )
             return False
 
+        try:
+            thread = QThread(owner)
+            worker = ProcessingHarmonicSelectionWorker(self.project)
+            worker.moveToThread(thread)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "Recalculation Unavailable",
+                f"Harmonic recalculation could not start: {exc}",
+            )
+            return False
+
         self._set_harmonic_recalculation_status(
-            "Recalculating harmonic selection from processed Excel outputs...",
+            "Recalculating harmonics and rebuilding Summed-BCA outputs from existing processed workbooks...",
             "info",
         )
-        self.recalculate_harmonics_button.setEnabled(False)
-        self.review_condition_exclusions_button.setEnabled(False)
-        thread = QThread(owner)
-        worker = ProcessingHarmonicSelectionWorker(self.project)
-        worker.moveToThread(thread)
+        self._set_full_fft_grid_review_controls_enabled(False)
         owner._settings_harmonic_recalc_thread = thread
         owner._settings_harmonic_recalc_worker = worker
+        self._lock_settings_navigation()
 
         def _handle_finished(result: object) -> None:
             payload = result if isinstance(result, dict) else {}
             if payload.get("ok"):
+                self._clear_harmonic_settings_rollback()
                 workbook_path = payload.get("workbook_path", "")
                 self._initial_harmonic_settings_signature = (
                     self._harmonic_settings_signature_from_preprocessing(
@@ -1487,17 +2025,27 @@ class SettingsDialog(QDialog):
                     )
                 )
                 self._set_harmonic_recalculation_status(
-                    f"Harmonic selection recalculated: {workbook_path}",
+                    f"Harmonics and downstream Summed-BCA outputs rebuilt: {workbook_path}",
                     "success",
                 )
                 QMessageBox.information(
                     self,
-                    "Harmonics Recalculated",
-                    f"Harmonic selection was recalculated and saved to:\n{workbook_path}",
+                    "Harmonics and Outputs Rebuilt",
+                    (
+                        "Harmonic selection and downstream Summed-BCA outputs were "
+                        "rebuilt from the existing processed workbooks. Raw EEG "
+                        f"preprocessing was not rerun.\n\nSelection audit:\n{workbook_path}"
+                    ),
                 )
                 if accept_on_success:
                     self.accept()
             else:
+                if payload.get("selection_recalculated"):
+                    # A new canonical selection was already accepted. Keep its
+                    # matching settings and the downstream failed/stale state.
+                    self._clear_harmonic_settings_rollback()
+                else:
+                    self._restore_harmonic_settings_after_cancel()
                 message = str(payload.get("error") or "Unknown error")
                 self._set_harmonic_recalculation_status(
                     f"Harmonic recalculation failed: {message}",
@@ -1513,9 +2061,8 @@ class SettingsDialog(QDialog):
             owner._settings_harmonic_recalc_thread = None
             owner._settings_harmonic_recalc_worker = None
             owner._settings_harmonic_recalc_bridge = None
-            enabled = self.project is not None
-            self.recalculate_harmonics_button.setEnabled(enabled)
-            self.review_condition_exclusions_button.setEnabled(enabled)
+            self._set_full_fft_grid_review_controls_enabled(True)
+            self._unlock_settings_navigation_if_idle()
 
         bridge = _SettingsWorkerUiBridge(
             result_callback=_handle_finished,
@@ -1523,14 +2070,32 @@ class SettingsDialog(QDialog):
             parent=owner,
         )
         owner._settings_harmonic_recalc_bridge = bridge
-        thread.started.connect(worker.run)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(bridge.handle_result)
-        thread.finished.connect(bridge.handle_thread_finished)
-        thread.finished.connect(bridge.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
+        try:
+            thread.started.connect(worker.run)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            worker.finished.connect(bridge.handle_result)
+            thread.finished.connect(bridge.handle_thread_finished)
+            thread.finished.connect(bridge.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.start()
+        except Exception as exc:  # noqa: BLE001
+            owner._settings_harmonic_recalc_thread = None
+            owner._settings_harmonic_recalc_worker = None
+            owner._settings_harmonic_recalc_bridge = None
+            self._set_full_fft_grid_review_controls_enabled(True)
+            self._unlock_settings_navigation_if_idle()
+            for obj in (worker, bridge, thread):
+                try:
+                    obj.deleteLater()
+                except RuntimeError:
+                    pass
+            QMessageBox.warning(
+                self,
+                "Recalculation Unavailable",
+                f"Harmonic recalculation could not start: {exc}",
+            )
+            return False
         return True
 
     def _removed_electrode_detection_mode(self) -> str:
@@ -1746,7 +2311,39 @@ class SettingsDialog(QDialog):
 
     def _validated_preproc_payload(self) -> Dict[str, Any] | None:
         try:
-            return normalize_preprocessing_settings(self._collect_project_preprocessing_inputs())
+            normalized = normalize_preprocessing_settings(
+                self._collect_project_preprocessing_inputs()
+            )
+            harmonic_settings = normalize_dv_policy(
+                self._harmonic_policy_payload_from_preprocessing(normalized)
+            )
+            if harmonic_settings.harmonic_selection_profile == HARMONIC_PROFILE_FIXED_ID:
+                if (
+                    harmonic_settings.fixed_harmonic_input_mode
+                    == FIXED_HARMONIC_INPUT_FREQUENCY_LIST
+                ):
+                    from Tools.Stats.analysis.dv_policy_fixed_predefined import (
+                        parse_fixed_harmonic_frequency_list,
+                    )
+
+                    parse_fixed_harmonic_frequency_list(
+                        harmonic_settings.fixed_harmonic_frequencies_hz
+                    )
+                elif (
+                    harmonic_settings.fixed_harmonic_input_mode
+                    == FIXED_HARMONIC_INPUT_UPPER_HARMONIC
+                    and harmonic_settings.fixed_harmonic_upper_harmonic_index is None
+                ):
+                    raise ValueError(
+                        "Enter a positive whole-number upper harmonic index."
+                    )
+                elif (
+                    harmonic_settings.fixed_harmonic_input_mode
+                    == FIXED_HARMONIC_INPUT_UPPER_FREQUENCY
+                    and harmonic_settings.fixed_harmonic_upper_frequency_hz is None
+                ):
+                    raise ValueError("Enter a positive upper harmonic frequency in Hz.")
+            return normalized
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid Settings", str(exc))
             self._focus_invalid_preproc_field(str(exc))
@@ -1807,7 +2404,20 @@ class SettingsDialog(QDialog):
         except RuntimeError:
             return False
 
-    def reject(self) -> None:
+    def _harmonic_recalculation_is_running(self) -> bool:
+        owner = getattr(self, "host", None) or self
+        thread = getattr(owner, "_settings_harmonic_recalc_thread", None)
+        if thread is None:
+            return False
+        is_running = getattr(thread, "isRunning", None)
+        if not callable(is_running):
+            return True
+        try:
+            return bool(is_running())
+        except RuntimeError:
+            return False
+
+    def _can_leave_settings(self) -> bool:
         if self._full_fft_grid_review_is_running():
             QMessageBox.information(
                 self,
@@ -1815,6 +2425,19 @@ class SettingsDialog(QDialog):
                 "Wait for the processed FFT grid check to finish before closing "
                 "Settings.",
             )
+            return False
+        if self._harmonic_recalculation_is_running():
+            QMessageBox.information(
+                self,
+                "Harmonic Recalculation In Progress",
+                "Wait for harmonic recalculation and downstream publication to "
+                "finish before closing Settings.",
+            )
+            return False
+        return True
+
+    def reject(self) -> None:
+        if not self._can_leave_settings():
             return
         super().reject()
 
@@ -1828,6 +2451,14 @@ class SettingsDialog(QDialog):
                 "Settings.",
             )
             return
+        if self._harmonic_recalculation_is_running():
+            QMessageBox.information(
+                self,
+                "Harmonic Recalculation In Progress",
+                "Wait for harmonic recalculation and downstream publication to "
+                "finish before saving Settings.",
+            )
+            return
         using_project = self.project is not None
 
         validated_preproc = self._validated_preproc_payload()
@@ -1835,11 +2466,19 @@ class SettingsDialog(QDialog):
             return
         if not self._confirm_parallel_worker_override(validated_preproc):
             return
+        harmonic_settings_changed = self._harmonic_settings_changed_after_processing(
+            validated_preproc
+        )
+        frequency_analysis_changed = (
+            self._frequency_analysis_settings_changed_after_processing()
+        )
         recalculate_harmonics_after_save = False
-        if self._harmonic_settings_changed_after_processing(validated_preproc):
+        if harmonic_settings_changed:
             recalculate_harmonics_after_save = (
                 self._ask_recalculate_harmonics_after_settings_change()
             )
+        if recalculate_harmonics_after_save:
+            self._capture_harmonic_settings_rollback()
 
         if not using_project:
             self.manager.set("stim", "channel", config.DEFAULT_STIM_CHANNEL)
@@ -1898,9 +2537,15 @@ class SettingsDialog(QDialog):
             )
             for option in (
                 "harmonic_selection_policy",
+                "harmonic_selection_profile",
+                "harmonic_selection_profile_version",
                 "group_significant_electrode_scope",
+                "group_significant_selection_electrodes",
                 "group_significant_summation_method",
                 "fixed_harmonic_frequencies_hz",
+                "fixed_harmonic_input_mode",
+                "fixed_harmonic_upper_harmonic_index",
+                "fixed_harmonic_upper_frequency_hz",
                 "fixed_harmonic_auto_exclude_base",
             ):
                 self.manager.set(
@@ -1914,16 +2559,44 @@ class SettingsDialog(QDialog):
                 self._project_cache = normalized
                 self.project.save()
             except ValueError as exc:
+                self._restore_harmonic_settings_after_cancel()
                 QMessageBox.warning(self, "Invalid Settings", str(exc))
                 return
             except Exception as exc:  # pragma: no cover - disk I/O error path
+                self._restore_harmonic_settings_after_cancel()
                 QMessageBox.critical(self, "Save Error", str(exc))
                 return
+            if harmonic_settings_changed and not recalculate_harmonics_after_save:
+                try:
+                    self._mark_harmonic_derivatives_stale()
+                except (OSError, RuntimeError, ValueError) as exc:
+                    QMessageBox.warning(
+                        self,
+                        "Freshness Status Warning",
+                        (
+                            "The settings were saved, but the Summed-BCA freshness "
+                            f"record could not be updated: {exc}. Downstream loaders "
+                            "will still reject the mismatched saved selection."
+                        ),
+                    )
         prev_debug = self.manager.debug_enabled()
         prev_beta_tools = self.manager.beta_tools_enabled()
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.set_beta_tools_enabled(self.beta_tools_check.isChecked())
         self.manager.save()
+
+        if using_project and frequency_analysis_changed:
+            try:
+                self._mark_frequency_analysis_outputs_stale()
+            except (OSError, RuntimeError, ValueError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Freshness Status Warning",
+                    f"Frequency-domain outputs could not be marked stale: {exc}",
+                )
+                if recalculate_harmonics_after_save:
+                    self._restore_harmonic_settings_after_cancel()
+                    return
 
         if not prev_debug and self.manager.debug_enabled():
             QMessageBox.information(
@@ -1967,11 +2640,38 @@ class SettingsDialog(QDialog):
             pass
 
         if recalculate_harmonics_after_save:
+            if frequency_analysis_changed:
+                self._clear_harmonic_settings_rollback()
+                self._resume_frequency_domain_post_processing()
+                return
             if self._start_full_fft_grid_review(
                 recalculate_after=True,
                 accept_on_success=True,
             ):
                 return
+            self._restore_harmonic_settings_after_cancel()
+            return
+        if harmonic_settings_changed:
+            remedy = (
+                "Use Resume Post-processing before running downstream analyses. "
+                "Free Harmonic Clustering will remain blocked until neutral "
+                "FullFFT provenance is refreshed."
+                if frequency_analysis_changed
+                else (
+                    "Use Recalculate Harmonics before running downstream analyses. "
+                    "The original FullFFT workbooks and Free Harmonic Clustering "
+                    "inputs remain valid."
+                )
+            )
+            QMessageBox.warning(
+                self,
+                "Summed-BCA Outputs Are Stale",
+                (
+                    "The harmonic method settings were saved, but the replacement "
+                    "harmonic selection and Summed-BCA outputs have not been built. "
+                    + remedy
+                ),
+            )
 
         self.accept()
 
@@ -2020,29 +2720,44 @@ class SettingsDialog(QDialog):
         values["manual_excluded_participant_conditions"] = dict(
             self._manual_excluded_participant_conditions
         )
+        selected_profile = (
+            self.harmonic_summation_method_combo.currentData()
+            or HARMONIC_PROFILE_LEGACY_ID
+        )
         fixed_selected = self._fixed_harmonic_list_selected()
         values["harmonic_selection_policy"] = (
             FIXED_PREDEFINED_POLICY_NAME
             if fixed_selected
             else GROUP_SIGNIFICANT_POLICY_NAME
         )
+        values["harmonic_selection_profile"] = selected_profile
+        values["harmonic_selection_profile_version"] = HARMONIC_PROFILE_VERSION_1
         values["group_significant_electrode_scope"] = (
             self.harmonic_electrode_scope_combo.currentData()
-            or GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
+            or GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL
         )
-        selected_summation_method = self.harmonic_summation_method_combo.currentData()
-        values["group_significant_summation_method"] = (
-            GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
-            if fixed_selected
-            else (
-                selected_summation_method
-                or GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
-            )
+        values["group_significant_selection_electrodes"] = (
+            self.harmonic_selection_electrodes_edit.text()
         )
+        if selected_profile == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID:
+            summation_method = GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY
+        elif selected_profile == HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID:
+            summation_method = GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+        else:
+            summation_method = GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST
+        values["group_significant_summation_method"] = summation_method
         values["fixed_harmonic_frequencies_hz"] = self.fixed_harmonic_freqs_edit.text()
-        values["fixed_harmonic_auto_exclude_base"] = (
-            self.fixed_harmonic_exclude_base_check.isChecked()
+        values["fixed_harmonic_input_mode"] = (
+            self.fixed_harmonic_input_mode_combo.currentData()
+            or FIXED_HARMONIC_INPUT_FREQUENCY_LIST
         )
+        values["fixed_harmonic_upper_harmonic_index"] = (
+            self.fixed_harmonic_upper_index_edit.text().strip() or 0
+        )
+        values["fixed_harmonic_upper_frequency_hz"] = (
+            self.fixed_harmonic_upper_frequency_edit.text().strip() or 0.0
+        )
+        values["fixed_harmonic_auto_exclude_base"] = True
         values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values
 
@@ -2066,6 +2781,8 @@ class EmbeddedSettingsPage(SettingsDialog):
         self._return_to_home()
 
     def reject(self) -> None:
+        if not self._can_leave_settings():
+            return
         self._return_to_home()
 
     def _return_to_home(self) -> None:

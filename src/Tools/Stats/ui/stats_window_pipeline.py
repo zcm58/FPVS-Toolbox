@@ -560,7 +560,6 @@ class StatsWindowPipelineMixin:
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
-        self._update_fixed_predefined_base_freq_label()
         qc_cfg = self._get_qc_settings()
         if not qc_cfg:
             return False
@@ -1073,7 +1072,6 @@ class StatsWindowPipelineMixin:
         if not got:
             raise RuntimeError("Unable to load analysis settings.")
         self._current_base_freq, self._current_alpha = got
-        self._update_fixed_predefined_base_freq_label()
         return self._current_base_freq, self._current_alpha, self.rois, self._get_selected_conditions()
 
     def ensure_pipeline_ready(
@@ -1096,6 +1094,23 @@ class StatsWindowPipelineMixin:
                 pipeline=pipeline_id,
                 event="end",
                 extra={"reason": "analysis_mode_project_mismatch"},
+            )
+            return False
+        try:
+            self._get_dv_policy_payload()
+        except (RuntimeError, ValueError) as exc:
+            message = (
+                f"The accepted project harmonic selection is unavailable: {exc} "
+                "Open Harmonic Settings and recalculate it before running "
+                "Standard FPVS Screening."
+            )
+            self._refresh_canonical_harmonic_summary()
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
+            self._log_pipeline_event(
+                pipeline=pipeline_id,
+                event="end",
+                extra={"reason": "canonical_harmonic_selection_unavailable"},
             )
             return False
         if not self._precheck(require_anova=require_anova, start_guard=False):

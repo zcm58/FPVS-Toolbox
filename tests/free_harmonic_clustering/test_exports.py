@@ -164,6 +164,11 @@ def _prepared_and_result(tmp_path: Path) -> tuple[PreparedContrast, ClusterPermu
                     condition="Neutral Angry",
                 ),
             ),
+            full_fft_provenance_method_version="neutral-full-fft-v1",
+            full_fft_source_fingerprint="full-fft-source-sha",
+            full_fft_cohort_fingerprint="full-fft-cohort-sha",
+            full_fft_frequency_qc_fingerprint="full-fft-qc-sha",
+            full_fft_processing_export_fingerprint="processing-export-sha",
         ),
     )
     clusters = (
@@ -265,6 +270,13 @@ def test_export_publishes_complete_hashed_project_relative_bundle(tmp_path: Path
     assert manifest["schema_version"] == 2
     assert len(manifest["artifacts"]) == 9
     assert manifest["harmonic_selection"]["mode"] == "automatic"
+    assert manifest["preparation"]["neutral_full_fft_provenance"] == {
+        "method_version": "neutral-full-fft-v1",
+        "source_fingerprint": "full-fft-source-sha",
+        "cohort_fingerprint": "full-fft-cohort-sha",
+        "frequency_qc_fingerprint": "full-fft-qc-sha",
+        "processing_export_fingerprint": "processing-export-sha",
+    }
     assert manifest["preparation"]["cohort_filters"][
         "participant_condition_exclusions"
     ] == [

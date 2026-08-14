@@ -8,6 +8,13 @@ import pandas as pd
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.processing.artifact_freshness import (
+    STATS_READY_SUMMED_BCA_ARTIFACT,
+    StalePostProcessingArtifactError,
+    activate_selection_freshness,
+    mark_artifact_current,
+    mark_selection_derivatives_stale,
+)
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers import project_fullfft_inputs
@@ -299,6 +306,24 @@ def test_project_fullfft_assemblers_split_canonical_groups_before_aggregation(
     )
 
 
+def test_project_fullfft_assembler_rejects_stale_stats_ready_in_managed_project(
+    tmp_path: Path,
+) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    _convert_fixture_to_multi_group(project_root)
+    mark_selection_derivatives_stale(
+        project_root,
+        reason="The accepted harmonic selection changed.",
+    )
+
+    with pytest.raises(StalePostProcessingArtifactError, match="is stale"):
+        build_l2_mne_hauk_zscore_conditions_from_project(
+            project_root,
+            noise_window_bins=3,
+            min_noise_bins=4,
+        )
+
+
 def test_project_hauk_zscore_rejects_outputs_outside_project_root(tmp_path) -> None:
     project_root = _build_project_fixture(tmp_path)
 
@@ -465,6 +490,22 @@ def _convert_fixture_to_multi_group(project_root: Path) -> None:
             }
         ),
         encoding="utf-8",
+    )
+    summary = project_root / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text("fixture selection", encoding="utf-8")
+    activate_selection_freshness(
+        project_root,
+        {"selection_fingerprint": "fixture-selection"},
+        selection_summary_path=summary,
+    )
+    mark_artifact_current(
+        project_root,
+        STATS_READY_SUMMED_BCA_ARTIFACT,
+        project_root
+        / "3 - Statistical Analysis Results"
+        / "Stats_Ready_Summed_BCA.xlsx",
+        "fixture-selection",
     )
 
 

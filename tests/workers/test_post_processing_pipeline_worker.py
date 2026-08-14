@@ -7,6 +7,17 @@ from types import SimpleNamespace
 import pytest
 
 import Main_App.workers.post_processing_pipeline_worker as worker_module
+from Main_App.processing.artifact_freshness import (
+    ARTIFACT_STATUS_CURRENT,
+    ARTIFACT_STATUS_FAILED,
+    ARTIFACT_STATUS_STALE,
+    SELECTION_DEPENDENT_ARTIFACTS,
+    STATS_READY_SUMMED_BCA_ARTIFACT,
+    activate_selection_freshness,
+    canonical_artifact_path,
+    load_artifact_freshness_registry,
+    mark_artifact_current,
+)
 from Main_App.workers.post_processing_pipeline_worker import (
     PostProcessingPipelineWorker,
     PostProcessingStepResult,
@@ -54,6 +65,20 @@ class _RecordingWorker(PostProcessingPipelineWorker):
             True,
             "full audit ok",
             "analysis_ready.xlsx",
+        )
+
+    def _run_full_fft_provenance(
+        self,
+        project_root: Path,
+        completed_steps: list[PostProcessingStepResult],
+    ) -> PostProcessingStepResult:
+        self.calls.append(f"full_fft:{project_root.name}")
+        successful = {step.name for step in completed_steps if step.ok}
+        ok = "frequency_domain_qc" in successful
+        return PostProcessingStepResult(
+            "full_fft_provenance",
+            ok,
+            "FullFFT provenance ok" if ok else "FullFFT provenance blocked",
         )
 
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
@@ -257,6 +282,126 @@ def test_source_map_modes_run_independently_after_a_partial_failure(
     assert failing_mode in next(result.message for result in results if not result.ok)
 
 
+def test_failed_source_map_rebuild_restores_preceding_directory_and_marks_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_resume_project(tmp_path)
+    summary = tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+    activate_selection_freshness(
+        tmp_path,
+        {"selection_fingerprint": "old-selection"},
+        selection_summary_path=summary,
+    )
+    artifact_id = "l2_mne_source_psd"
+    output_dir = canonical_artifact_path(tmp_path, artifact_id)
+    output_dir.mkdir(parents=True)
+    (output_dir / "old.json").write_text("old", encoding="utf-8")
+    mark_artifact_current(
+        tmp_path,
+        artifact_id,
+        output_dir,
+        "old-selection",
+    )
+
+    worker = PostProcessingPipelineWorker(_Project(tmp_path))
+    worker._harmonic_selection_metadata = {  # noqa: SLF001
+        "selection_fingerprint": "new-selection"
+    }
+    worker._previous_selection_fingerprint = "old-selection"  # noqa: SLF001
+    worker._activate_artifact_freshness(  # noqa: SLF001
+        tmp_path,
+        selection_summary_path=summary,
+    )
+
+    def _fail_after_partial_write(**_kwargs):
+        output_dir.mkdir(parents=True)
+        (output_dir / "partial.json").write_text("partial", encoding="utf-8")
+        raise RuntimeError("source rebuild failed intentionally")
+
+    monkeypatch.setattr(
+        worker_module,
+        "_load_source_psd_export_api",
+        lambda: (lambda _root: output_dir, _fail_after_partial_write),
+    )
+
+    step = worker._record_artifact_freshness(  # noqa: SLF001
+        worker._run_source_map_mode(tmp_path, artifact_id)  # noqa: SLF001
+    )
+
+    assert step.ok is False
+    assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
+    assert not (output_dir / "partial.json").exists()
+    record = load_artifact_freshness_registry(tmp_path).artifacts[artifact_id]
+    assert record.status == ARTIFACT_STATUS_FAILED
+    assert record.built_from_selection_fingerprint == "old-selection"
+
+
+def test_source_map_freshness_save_failure_restores_preceding_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Main_App.processing import artifact_freshness as freshness_module
+
+    _write_resume_project(tmp_path)
+    summary = tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+    activate_selection_freshness(
+        tmp_path,
+        {"selection_fingerprint": "old-selection"},
+        selection_summary_path=summary,
+    )
+    artifact_id = "l2_mne_source_psd"
+    output_dir = canonical_artifact_path(tmp_path, artifact_id)
+    output_dir.mkdir(parents=True)
+    (output_dir / "old.json").write_text("old", encoding="utf-8")
+    mark_artifact_current(tmp_path, artifact_id, output_dir, "old-selection")
+
+    worker = PostProcessingPipelineWorker(_Project(tmp_path))
+    worker._harmonic_selection_metadata = {  # noqa: SLF001
+        "selection_fingerprint": "new-selection"
+    }
+    worker._previous_selection_fingerprint = "old-selection"  # noqa: SLF001
+    worker._activate_artifact_freshness(  # noqa: SLF001
+        tmp_path,
+        selection_summary_path=summary,
+    )
+
+    def _write_replacement(**_kwargs):
+        output_dir.mkdir(parents=True)
+        manifest = output_dir / "manifest.json"
+        manifest.write_text("new", encoding="utf-8")
+        return SimpleNamespace(
+            manifest_path=manifest,
+            included_participants=("P01",),
+            source_ineligible_participants=(),
+            source_condition_omissions=(),
+        )
+
+    monkeypatch.setattr(
+        worker_module,
+        "_load_source_psd_export_api",
+        lambda: (lambda _root: output_dir, _write_replacement),
+    )
+    source_step = worker._run_source_map_mode(  # noqa: SLF001
+        tmp_path,
+        artifact_id,
+    )
+    monkeypatch.setattr(
+        freshness_module,
+        "mark_artifact_current",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            PermissionError("project.json is locked")
+        ),
+    )
+
+    recorded = worker._record_artifact_freshness(source_step)  # noqa: SLF001
+
+    assert recorded.ok is False
+    assert "freshness could not be saved" in recorded.message
+    assert (output_dir / "old.json").read_text(encoding="utf-8") == "old"
+    assert not (output_dir / "manifest.json").exists()
+
+
 def test_pipeline_reports_success_with_source_cohort_warnings(tmp_path) -> None:
     worker = _CohortWarningWorker(_Project(tmp_path))
     phase_progress: list[tuple[str, int, int, str]] = []
@@ -303,6 +448,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
     assert worker.calls == [
         "qc",
         f"sync:{tmp_path.name}",
+        f"full_fft:{tmp_path.name}",
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
@@ -336,6 +482,7 @@ def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:
     assert finished[0]["has_warnings"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
         "frequency_domain_qc",
+        "full_fft_provenance",
         "harmonic_selection",
         "stats_ready_summed_bca",
         "analysis_ready_full_audit",
@@ -450,6 +597,7 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
     assert worker.calls == [
         "qc",
         f"sync:{tmp_path.name}",
+        f"full_fft:{tmp_path.name}",
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
@@ -460,6 +608,7 @@ def test_post_processing_pipeline_runs_source_psd_when_stats_ready_fails(tmp_pat
     assert finished and finished[0]["ok"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
         "frequency_domain_qc",
+        "full_fft_provenance",
         "harmonic_selection",
         "stats_ready_summed_bca",
         "analysis_ready_full_audit",
@@ -488,6 +637,7 @@ def test_post_processing_pipeline_runs_source_psd_when_full_audit_export_fails(
     assert worker.calls == [
         "qc",
         f"sync:{tmp_path.name}",
+        f"full_fft:{tmp_path.name}",
         "harmonics",
         f"stats:{tmp_path.name}",
         f"audit:{tmp_path.name}",
@@ -498,6 +648,7 @@ def test_post_processing_pipeline_runs_source_psd_when_full_audit_export_fails(
     assert finished and finished[0]["ok"] is False
     assert [step["name"] for step in finished[0]["steps"]] == [
         "frequency_domain_qc",
+        "full_fft_provenance",
         "harmonic_selection",
         "stats_ready_summed_bca",
         "analysis_ready_full_audit",
@@ -568,3 +719,212 @@ def test_post_processing_pipeline_refuses_to_touch_outputs_outside_project(tmp_p
     else:
         raise AssertionError("Expected external output invalidation to fail")
     assert outside.exists()
+
+
+class _SelectionResumeWorker(PostProcessingPipelineWorker):
+    def __init__(self, project: _Project, **kwargs) -> None:
+        super().__init__(project, **kwargs)
+        self.calls: list[str] = []
+
+    def _run_frequency_domain_qc_review(self) -> dict[str, object]:
+        raise AssertionError("Selection-only resume must not rerun frequency-domain QC.")
+
+    def _run_harmonic_selection(self) -> PostProcessingStepResult:
+        raise AssertionError("Selection-only resume must not rerun harmonic selection.")
+
+    def _publish(self, artifact_id: str) -> PostProcessingStepResult:
+        self.calls.append(artifact_id)
+        target = canonical_artifact_path(self._project.project_root, artifact_id)
+        self._artifact_targets[artifact_id] = target
+        if target.suffix:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(artifact_id, encoding="utf-8")
+            result_path = target
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+            result_path = target / "manifest.json"
+            result_path.write_text(artifact_id, encoding="utf-8")
+        return PostProcessingStepResult(
+            artifact_id,
+            True,
+            f"{artifact_id} rebuilt",
+            str(result_path),
+        )
+
+    def _run_stats_ready_export(self, _project_root: Path) -> PostProcessingStepResult:
+        return self._publish("stats_ready_summed_bca")
+
+    def _run_analysis_ready_export(self, _project_root: Path) -> PostProcessingStepResult:
+        return self._publish("analysis_ready_full_audit")
+
+    def _run_source_map_mode(
+        self,
+        _project_root: Path,
+        mode: str,
+    ) -> PostProcessingStepResult:
+        return self._publish(mode)
+
+
+def _write_resume_project(root: Path) -> None:
+    (root / "project.json").write_text(
+        '{"schema_version": "2.1.0"}',
+        encoding="utf-8",
+    )
+    summary = root / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+    summary.parent.mkdir(parents=True)
+    summary.write_text("accepted selection", encoding="utf-8")
+
+
+def test_selection_resume_rebuilds_only_selection_dependent_artifacts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_resume_project(tmp_path)
+    raw_source = tmp_path / "Input" / "P01.bdf"
+    full_fft_source = tmp_path / "1 - Excel Data Files" / "P01.xlsx"
+    raw_source.parent.mkdir()
+    full_fft_source.parent.mkdir()
+    raw_source.write_text("raw EEG remains untouched", encoding="utf-8")
+    full_fft_source.write_text("FullFFT remains untouched", encoding="utf-8")
+    from Main_App import projects as projects_module
+
+    monkeypatch.setattr(
+        projects_module,
+        "load_project_dataset_index",
+        lambda root: SimpleNamespace(project_root=Path(root)),
+    )
+    worker = _SelectionResumeWorker(
+        _Project(tmp_path),
+        resume_from_selection=True,
+        selection_metadata={
+            "selection_fingerprint": "new-selection",
+            "included_harmonics_hz": [1.2, 2.4],
+        },
+        previous_selection_fingerprint="old-selection",
+    )
+    finished: list[dict] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert worker.calls == list(SELECTION_DEPENDENT_ARTIFACTS)
+    assert finished[-1]["ok"] is True
+    assert finished[-1]["selection_changed"] is True
+    registry = load_artifact_freshness_registry(tmp_path)
+    assert registry.selection_fingerprint == "new-selection"
+    assert all(
+        registry.artifacts[artifact_id].status == ARTIFACT_STATUS_CURRENT
+        for artifact_id in SELECTION_DEPENDENT_ARTIFACTS
+    )
+    assert raw_source.read_text(encoding="utf-8") == "raw EEG remains untouched"
+    assert full_fft_source.read_text(encoding="utf-8") == "FullFFT remains untouched"
+
+
+def test_selection_resume_skips_rebuild_when_fingerprint_and_artifacts_are_current(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_resume_project(tmp_path)
+    metadata = {
+        "selection_fingerprint": "same-selection",
+        "included_harmonics_hz": [1.2, 2.4],
+    }
+    activate_selection_freshness(
+        tmp_path,
+        metadata,
+        selection_summary_path=(
+            tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+        ),
+    )
+    for artifact_id in SELECTION_DEPENDENT_ARTIFACTS:
+        target = canonical_artifact_path(tmp_path, artifact_id)
+        if target.suffix:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("current", encoding="utf-8")
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+        mark_artifact_current(
+            tmp_path,
+            artifact_id,
+            target,
+            "same-selection",
+        )
+    from Main_App import projects as projects_module
+
+    monkeypatch.setattr(
+        projects_module,
+        "load_project_dataset_index",
+        lambda root: SimpleNamespace(project_root=Path(root)),
+    )
+    worker = _SelectionResumeWorker(
+        _Project(tmp_path),
+        resume_from_selection=True,
+        selection_metadata=metadata,
+        previous_selection_fingerprint="same-selection",
+    )
+    finished: list[dict] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert worker.calls == []
+    assert finished[-1]["ok"] is True
+    assert finished[-1]["rebuild_skipped"] is True
+
+
+def test_selection_resume_marks_outputs_stale_before_dataset_reload(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_resume_project(tmp_path)
+    old_metadata = {
+        "selection_fingerprint": "old-selection",
+        "included_harmonics_hz": [1.2],
+    }
+    activate_selection_freshness(
+        tmp_path,
+        old_metadata,
+        selection_summary_path=(
+            tmp_path / "Quality Check" / "Harmonic_Selection_Summary.xlsx"
+        ),
+    )
+    for artifact_id in SELECTION_DEPENDENT_ARTIFACTS:
+        target = canonical_artifact_path(tmp_path, artifact_id)
+        if target.suffix:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("old", encoding="utf-8")
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+        mark_artifact_current(tmp_path, artifact_id, target, "old-selection")
+    from Main_App import projects as projects_module
+
+    monkeypatch.setattr(
+        projects_module,
+        "load_project_dataset_index",
+        lambda _root: (_ for _ in ()).throw(RuntimeError("index failed")),
+    )
+    worker = PostProcessingPipelineWorker(
+        _Project(tmp_path),
+        resume_from_selection=True,
+        selection_metadata={
+            "selection_fingerprint": "new-selection",
+            "included_harmonics_hz": [1.2, 2.4],
+        },
+        previous_selection_fingerprint="old-selection",
+    )
+    finished: list[dict] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert finished[-1]["ok"] is False
+    assert "index failed" in finished[-1]["steps"][-1]["message"]
+    registry = load_artifact_freshness_registry(tmp_path)
+    assert all(
+        registry.artifacts[artifact_id].status == ARTIFACT_STATUS_STALE
+        for artifact_id in SELECTION_DEPENDENT_ARTIFACTS
+    )
+    assert canonical_artifact_path(
+        tmp_path,
+        STATS_READY_SUMMED_BCA_ARTIFACT,
+    ).read_text(encoding="utf-8") == "old"

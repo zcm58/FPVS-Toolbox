@@ -86,6 +86,15 @@ created during processing plus the saved project harmonic selection. When
 source maps are available, the visualizer loads the prepared source-map files
 for the selected conditions.
 
+The canonical L2-MNE and eLORETA Hauk source-PSD map directories are tracked
+against the accepted harmonic-selection fingerprint. Changing the standard
+included list marks both map directories stale along with the Stats-ready and
+full-audit workbooks. Recalculate Harmonics or Resume Post-processing rebuilds
+the maps from the existing source-ready FIF derivatives; it does not reload or
+reprocess the participant EEG. A restored older directory remains reproducible
+after a failed replacement, but it is not treated as current for the new
+selection.
+
 If source maps are absent or use a historical orientation method, Source Map
 Options can rebuild them from valid existing FIF derivatives. Reprocessing is
 needed only when those derivatives are missing, stale, or invalid.

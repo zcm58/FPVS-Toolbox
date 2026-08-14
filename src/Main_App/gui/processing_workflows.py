@@ -71,6 +71,7 @@ _POST_PROCESSING_FREQUENCY_DOMAIN_STEP_NAMES = frozenset(
         "frequency_domain_qc",
         "harmonic_selection",
         "stats_ready_summed_bca",
+        "full_fft_provenance",
     }
 )
 _POST_PROCESSING_PHASE_STATES = {

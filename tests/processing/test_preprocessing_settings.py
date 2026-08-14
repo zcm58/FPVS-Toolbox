@@ -3,8 +3,12 @@ import pytest
 pytest.importorskip("PySide6")
 
 from Main_App.projects.preprocessing_settings import (
+    HARMONIC_SELECTION_PROFILE_VERSION,
+    LEGACY_HARMONIC_SELECTION_PROFILE,
+    NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
     PREPROCESSING_CANONICAL_KEYS,
     is_participant_condition_excluded,
+    new_project_preprocessing_settings,
     normalize_manual_excluded_participant_conditions,
     normalize_preprocessing_settings,
 )
@@ -29,8 +33,57 @@ def test_defaults_use_expected_bandpass():
     assert normalized["manual_removed_electrodes"] == {}
     assert normalized["manual_excluded_participants"] == []
     assert normalized["manual_excluded_participant_conditions"] == {}
+    assert normalized["harmonic_selection_profile"] == LEGACY_HARMONIC_SELECTION_PROFILE
+    assert normalized["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
     assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
     assert _RETIRED_EPOCH_KEYS.isdisjoint(PREPROCESSING_CANONICAL_KEYS)
+
+
+def test_new_projects_explicitly_use_publication_aligned_harmonic_profile():
+    settings = new_project_preprocessing_settings()
+
+    assert settings["harmonic_selection_profile"] == NEW_PROJECT_HARMONIC_SELECTION_PROFILE
+    assert settings["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
+    assert settings["group_significant_electrode_scope"] == "all_scalp_electrodes"
+    assert settings["group_significant_summation_method"] == "two_consecutive_failures"
+    assert settings["fixed_harmonic_input_mode"] == "frequency_list"
+
+
+def test_harmonic_profile_inputs_normalize_to_manifest_safe_values():
+    settings = normalize_preprocessing_settings(
+        {
+            "harmonic_selection_profile": "fixed_preregistered_domain",
+            "harmonic_selection_profile_version": "1.0",
+            "fixed_harmonic_input_mode": "upper_harmonic_index",
+            "fixed_harmonic_upper_harmonic_index": "14",
+            "fixed_harmonic_upper_frequency_hz": "16.8",
+            "group_significant_selection_electrodes": "O1, Oz, O2",
+        }
+    )
+
+    assert settings["harmonic_selection_profile"] == "fixed_preregistered_domain"
+    assert settings["fixed_harmonic_upper_harmonic_index"] == 14
+    assert settings["fixed_harmonic_upper_frequency_hz"] == 16.8
+    assert settings["group_significant_selection_electrodes"] == "O1, Oz, O2"
+
+
+def test_legacy_fixed_policy_name_migrates_to_fixed_profile():
+    settings = normalize_preprocessing_settings(
+        {"harmonic_selection_policy": "Fixed / predefined harmonic list"}
+    )
+
+    assert settings["harmonic_selection_profile"] == "fixed_preregistered_domain"
+    assert settings["harmonic_selection_policy"] == (
+        "Fixed / predefined harmonic list"
+    )
+
+
+def test_partial_nonlegacy_profile_defaults_to_all_scalp_scope():
+    settings = normalize_preprocessing_settings(
+        {"harmonic_selection_profile": "significant_only_exploratory"}
+    )
+
+    assert settings["group_significant_electrode_scope"] == "all_scalp_electrodes"
 
 
 def test_retired_epoch_window_inputs_are_not_preprocessing_settings():

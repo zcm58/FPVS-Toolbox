@@ -232,7 +232,7 @@ def test_bca_maps_require_processing_time_harmonic_selection(tmp_path: Path) -> 
 
     with pytest.raises(
         CanonicalHarmonicSelectionError,
-        match="No current processing-time significant-harmonic selection",
+        match="No current processing-time harmonic selection",
     ):
         build_publication_map_result(request)
 

@@ -15,6 +15,10 @@ from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
 )
+from Main_App.processing.full_fft_provenance import (
+    FullFftProvenanceError,
+    validate_project_full_fft_provenance,
+)
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import (
     ProjectDatasetIndex,
@@ -512,6 +516,15 @@ def prepare_project_contrast(
         raise FreeHarmonicInputError(
             "The dataset index resolved to a different active project root."
         )
+    try:
+        full_fft_provenance = validate_project_full_fft_provenance(
+            project_root,
+            base_frequency_hz=spec.base_frequency_hz,
+            oddball_frequency_hz=spec.oddball_frequency_hz,
+            dataset_index=index,
+        )
+    except FullFftProvenanceError as exc:
+        raise FreeHarmonicInputError(str(exc)) from exc
     cohort = _select_cohort(index, request, project_root)
     arm_rows = (
         *(('a', cohort.arm_a_label, record) for record in cohort.arm_a_records),
@@ -560,6 +573,12 @@ def prepare_project_contrast(
         )
     if plan is None:  # pragma: no cover - guarded by non-empty cohort
         raise FreeHarmonicInputError("No workbooks were available for preparation.")
+    if plan.grid_fingerprint != full_fft_provenance.grid_fingerprint:
+        raise FreeHarmonicInputError(
+            "The selected-cohort FullFFT grid does not match saved neutral "
+            "FullFFT provenance. Rerun post-processing; EEG preprocessing is "
+            "not required."
+        )
 
     snr_by_arm: dict[str, list[np.ndarray]] = {"a": [], "b": []}
     raw_sum_by_arm = {
@@ -673,6 +692,17 @@ def prepare_project_contrast(
             _relevant_participant_condition_exclusions(index, request)
         ),
         dataset_diagnostics=diagnostics,
+        full_fft_provenance_method_version=(
+            full_fft_provenance.method_version
+        ),
+        full_fft_source_fingerprint=full_fft_provenance.source_fingerprint,
+        full_fft_cohort_fingerprint=full_fft_provenance.cohort_fingerprint,
+        full_fft_frequency_qc_fingerprint=(
+            full_fft_provenance.frequency_qc_fingerprint
+        ),
+        full_fft_processing_export_fingerprint=(
+            full_fft_provenance.processing_export_fingerprint
+        ),
     )
     return PreparedContrast(
         request=request,

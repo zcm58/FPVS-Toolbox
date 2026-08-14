@@ -20,6 +20,8 @@ from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_ID,
     GROUP_SIGNIFICANT_POLICY_ID,
+    HARMONIC_PROFILE_FIXED_ID,
+    dv_policy_payload_from_selection_metadata,
 )
 
 logger = logging.getLogger("Tools.Stats")
@@ -129,12 +131,34 @@ def _common_rossion_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, obje
 
 def _common_fixed_predefined_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
     fixed_meta = dv_metadata.get("fixed_predefined_harmonics")
-    return fixed_meta if isinstance(fixed_meta, Mapping) else {}
+    if isinstance(fixed_meta, Mapping):
+        return fixed_meta
+    group_meta = dv_metadata.get("group_significant_harmonics")
+    if isinstance(group_meta, Mapping) and _selection_metadata_uses_fixed_schema(
+        group_meta
+    ):
+        return group_meta
+    if _selection_metadata_uses_fixed_schema(dv_metadata):
+        return dv_metadata
+    return {}
 
 
 def _common_group_significant_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
     group_meta = dv_metadata.get("group_significant_harmonics")
-    return group_meta if isinstance(group_meta, Mapping) else {}
+    if not isinstance(group_meta, Mapping):
+        return {}
+    return {} if _selection_metadata_uses_fixed_schema(group_meta) else group_meta
+
+
+def _selection_metadata_uses_fixed_schema(
+    metadata: Mapping[str, object],
+) -> bool:
+    """Classify canonical metadata by versioned profile, with legacy policy fallback."""
+
+    profile_id = str(metadata.get("harmonic_selection_profile") or "").strip()
+    if profile_id:
+        return profile_id == HARMONIC_PROFILE_FIXED_ID
+    return str(metadata.get("harmonic_policy") or "") == FIXED_PREDEFINED_POLICY_ID
 
 
 def _resolve_group_labels(
@@ -205,28 +229,36 @@ def _build_long_frame(
     dv_metadata: Mapping[str, object],
     dv_policy: Mapping[str, object] | None,
     group_map: Mapping[str, object] | None,
+    group_label_map: Mapping[str, object] | None,
 ) -> pd.DataFrame:
     _ = dv_metadata, dv_policy, provenance_map
     group_labels = _resolve_group_labels(subjects, group_map)
+    display_labels = (
+        _resolve_group_labels(subjects, group_label_map)
+        if group_label_map is not None
+        else None
+    )
 
     rows: list[dict[str, object]] = []
     for subject in subjects:
         for condition in conditions:
             condition_data = summed_bca.get(subject, {}).get(condition, {})
             for roi in rois:
-                rows.append(
-                    {
-                        "subject_id": subject,
-                        "group_id": group_labels[subject],
-                        "condition": condition,
-                        "roi": roi,
-                        "summed_bca_uv": _numeric_or_nan(condition_data.get(roi)),
-                    }
-                )
+                row = {
+                    "subject_id": subject,
+                    "group_id": group_labels[subject],
+                    "condition": condition,
+                    "roi": roi,
+                    "summed_bca_uv": _numeric_or_nan(condition_data.get(roi)),
+                }
+                if display_labels is not None:
+                    row["group_label"] = display_labels[subject]
+                rows.append(row)
 
     columns = [
         "subject_id",
         "group_id",
+        *(["group_label"] if display_labels is not None else []),
         "condition",
         "roi",
         "summed_bca_uv",
@@ -250,6 +282,8 @@ def _build_jasp_wide_frame(
 ) -> pd.DataFrame:
     column_map = _wide_column_names(conditions, rois)
     id_columns = ["subject_id", "group_id"]
+    if "group_label" in long_df.columns:
+        id_columns.append("group_label")
     subjects_df = long_df.loc[:, id_columns].drop_duplicates().reset_index(drop=True)
     ordered_pairs = [
         (condition, roi)
@@ -262,6 +296,7 @@ def _build_jasp_wide_frame(
     if (
         pair_count > 0
         and len(long_df) == len(subjects_df) * pair_count
+        and "group_label" not in long_df.columns
         and long_df["summed_bca_uv"].dtype == np.dtype(np.float64)
         and all(
             long_df[column].dtype == np.dtype(object)
@@ -337,6 +372,7 @@ def build_stats_ready_frames(
     dv_metadata: Mapping[str, object],
     dv_policy: Mapping[str, object] | None = None,
     group_map: Mapping[str, object] | None = None,
+    group_label_map: Mapping[str, object] | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Build all stats-ready workbook sheets from canonical Summed BCA data."""
 
@@ -360,6 +396,7 @@ def build_stats_ready_frames(
         dv_metadata=dv_metadata,
         dv_policy=dv_policy,
         group_map=group_map,
+        group_label_map=group_label_map,
     )
     jasp_wide_df = _build_jasp_wide_frame(
         long_df,
@@ -377,13 +414,18 @@ def build_stats_ready_frames(
 def _build_selection_summary_frame(dv_metadata: Mapping[str, object]) -> pd.DataFrame:
     fixed_meta = _common_fixed_predefined_meta(dv_metadata)
     group_meta = _common_group_significant_meta(dv_metadata)
-    if group_meta:
-        rows = _group_significant_summary_rows(group_meta)
-    elif fixed_meta:
+    if fixed_meta:
         rows = _fixed_predefined_summary_rows(fixed_meta)
+        method_meta = fixed_meta
+    elif group_meta:
+        rows = _group_significant_summary_rows(group_meta)
+        method_meta = group_meta
     else:
         rossion_meta = _common_rossion_meta(dv_metadata)
         rows = _legacy_rossion_summary_rows(rossion_meta) if rossion_meta else []
+        method_meta = rossion_meta
+    if method_meta:
+        rows.extend(_canonical_method_provenance_rows(method_meta))
     return pd.DataFrame(rows, columns=SELECTION_SUMMARY_COLUMNS)
 
 
@@ -397,6 +439,102 @@ def _summary_value(value: object) -> object:
     if isinstance(value, (list, tuple, set, Mapping)):
         return _sequence_cell(value)
     return value
+
+
+def _canonical_method_provenance_rows(
+    metadata: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Expose immutable harmonic-method identity in every summary workbook."""
+
+    detected = metadata.get("detected_significant_harmonics_hz", [])
+    included = (
+        metadata.get("included_harmonics_hz")
+        or metadata.get("selected_harmonics_hz")
+        or metadata.get("fixed_harmonic_included_frequencies_hz")
+        or []
+    )
+    return [
+        _summary_row(
+            "Harmonic selection profile ID",
+            metadata.get("harmonic_selection_profile", ""),
+        ),
+        _summary_row(
+            "Harmonic selection profile version",
+            metadata.get("harmonic_selection_profile_version", ""),
+        ),
+        _summary_row(
+            "Selection fingerprint",
+            metadata.get("selection_fingerprint", ""),
+        ),
+        _summary_row(
+            "Canonical detected harmonic frequencies (Hz)",
+            _format_sequence_cell(detected),
+        ),
+        _summary_row(
+            "Canonical included harmonic frequencies (Hz)",
+            _format_sequence_cell(included),
+        ),
+        _summary_row(
+            "Frozen/effective selection electrode mask",
+            _format_sequence_cell(metadata.get("selection_electrode_mask", [])),
+        ),
+        _summary_row("Pooling method", metadata.get("pooling_method", "")),
+        _summary_row(
+            "Pooling cell participant counts",
+            _pooling_cell_counts(metadata.get("pooling_cells")),
+        ),
+        _summary_row(
+            "Pooling cell weights",
+            _pooling_cell_weights(metadata.get("pooling_cells")),
+        ),
+        _summary_row(
+            "Selection source workbook identities",
+            _source_workbook_identities(
+                metadata.get("source_workbook_fingerprints")
+            ),
+        ),
+    ]
+
+
+def _pooling_cell_counts(value: object) -> str:
+    if not isinstance(value, (list, tuple)):
+        return ""
+    cells = [cell for cell in value if isinstance(cell, Mapping)]
+    return "; ".join(
+        f"{cell.get('group_id', '')}::{cell.get('condition', '')}="
+        f"{_format_number(cell.get('participant_count'))}"
+        for cell in cells
+    )
+
+
+def _pooling_cell_weights(value: object) -> str:
+    if not isinstance(value, (list, tuple)):
+        return ""
+    cells = [cell for cell in value if isinstance(cell, Mapping)]
+    return "; ".join(
+        (
+            f"{cell.get('group_id', '')}::{cell.get('condition', '')} "
+            f"participant={_format_number(cell.get('participant_weight_within_cell'))}, "
+            f"group={_format_number(cell.get('group_weight_within_condition'))}, "
+            f"condition={_format_number(cell.get('condition_weight'))}, "
+            f"effective={_format_number(cell.get('effective_participant_weight'))}"
+        )
+        for cell in cells
+    )
+
+
+def _source_workbook_identities(value: object) -> str:
+    if not isinstance(value, (list, tuple)):
+        return ""
+    sources = [source for source in value if isinstance(source, Mapping)]
+    return "; ".join(
+        (
+            f"{source.get('subject', '')}::{source.get('condition', '')} "
+            f"path={source.get('path', '')}, size={source.get('size_bytes', '')}, "
+            f"mtime_ns={source.get('mtime_ns', '')}"
+        )
+        for source in sources
+    )
 
 
 def _highest_harmonic_hz(values: object) -> float:
@@ -778,6 +916,7 @@ def prepare_stats_ready_export(
     dv_policy: Mapping[str, object] | None,
     group_map: Mapping[str, object] | None,
     log_func: Callable[[str], None],
+    group_label_map: Mapping[str, object] | None = None,
     save_path: str | Path | None = None,
     max_freq: float | None = None,
     selection_conditions: list[str] | None = None,
@@ -786,6 +925,11 @@ def prepare_stats_ready_export(
     """Prepare and optionally write the external-statistics Summed BCA export."""
 
     started_at = perf_counter()
+    resolved_dv_policy = _resolve_stats_ready_dv_policy(
+        dv_policy=dv_policy,
+        project_root=project_root,
+        log_func=log_func,
+    )
     log_func(
         "Stats-ready export: preparing Summed BCA data "
         f"for {len(subjects)} participants x {len(conditions)} selected conditions."
@@ -804,7 +948,7 @@ def prepare_stats_ready_export(
         log_func=log_func,
         rois=dict(rois),
         provenance_map=provenance_map,
-        dv_policy=dict(dv_policy or {}),
+        dv_policy=dict(resolved_dv_policy or {}),
         dv_metadata=dv_metadata,
         max_freq=max_freq,
         selection_conditions=selection_conditions,
@@ -833,8 +977,9 @@ def prepare_stats_ready_export(
         summed_bca=summed_bca,
         provenance_map=provenance_map,
         dv_metadata=dv_metadata,
-        dv_policy=dv_policy,
+        dv_policy=resolved_dv_policy,
         group_map=group_map,
+        group_label_map=group_label_map,
     )
     log_func(
         "Stats-ready export: workbook frames built "
@@ -868,3 +1013,30 @@ def prepare_stats_ready_export(
         workbook_path=workbook_path,
         row_count=len(frames[LONG_FORMAT_SHEET]),
     )
+
+
+def _resolve_stats_ready_dv_policy(
+    *,
+    dv_policy: Mapping[str, object] | None,
+    project_root: str | None,
+    log_func: Callable[[str], None],
+) -> Mapping[str, object] | None:
+    """Use the accepted processing profile for every managed-project export."""
+
+    if project_root in (None, ""):
+        return dv_policy
+    from Tools.Stats.analysis.canonical_harmonics import (
+        load_project_processing_harmonics,
+    )
+
+    canonical = load_project_processing_harmonics(
+        project_root=project_root,
+        log_func=log_func,
+    )
+    resolved = dv_policy_payload_from_selection_metadata(canonical.metadata)
+    log_func(
+        "Stats-ready export: using accepted processing-time harmonic profile "
+        f"{resolved['harmonic_selection_profile']} "
+        f"v{resolved['harmonic_selection_profile_version']}."
+    )
+    return resolved

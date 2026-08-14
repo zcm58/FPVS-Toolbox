@@ -19,6 +19,7 @@ from Main_App.projects.preprocessing_settings import (
 from Main_App.projects.project import PROJECT_SCHEMA_VERSION
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
+    HARMONIC_PROFILE_LEGACY_ID,
     LOCKED_ODDBALL_FREQUENCY_HZ,
 )
 
@@ -32,6 +33,14 @@ GROUP_HARMONIC_METHOD_VERSION = (
 )
 PREPROCESSING_ORDER_VERSION_LABEL = "filter_then_optional_fft_multinotch_then_downsample_v2"
 PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v8_fft_multinotch"
+_PROFILE_KEYS_OUTSIDE_LEGACY_PROCESSING_SIGNATURE = {
+    "harmonic_selection_profile",
+    "harmonic_selection_profile_version",
+    "fixed_harmonic_input_mode",
+    "fixed_harmonic_upper_harmonic_index",
+    "fixed_harmonic_upper_frequency_hz",
+    "group_significant_selection_electrodes",
+}
 
 
 @dataclass(frozen=True)
@@ -120,23 +129,44 @@ def build_group_harmonic_cache_request(
         for subject in subject_key
         for condition in condition_key
     ]
+    method_version = _method_version_for_settings(settings)
+    selection_inputs: dict[str, object] = {
+        "subjects": list(subject_key),
+        "conditions": list(condition_key),
+        "roi_definitions": (
+            _normalize_rois(rois)
+            if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID
+            else []
+        ),
+    }
+    stats_settings: dict[str, object] = {
+        "base_frequency_hz": float(base_frequency_hz),
+        "oddball_frequency_hz": float(LOCKED_ODDBALL_FREQUENCY_HZ),
+        "max_freq_hz": float(max_freq_hz) if max_freq_hz is not None else None,
+        "z_threshold": float(settings.group_significant_z_threshold),
+        "electrode_scope": str(settings.group_significant_electrode_scope),
+        "summation_method": str(settings.group_significant_summation_method),
+    }
+    if settings.harmonic_selection_profile != HARMONIC_PROFILE_LEGACY_ID:
+        selection_inputs.update(_manifest_group_selection_inputs(manifest, subject_key))
+        stats_settings.update(
+            {
+                "harmonic_selection_profile": settings.harmonic_selection_profile,
+                "harmonic_selection_profile_version": (
+                    settings.harmonic_selection_profile_version
+                ),
+                "pooling_method": settings.profile.pooling_method,
+                "selection_electrodes": list(
+                    settings.group_significant_selection_electrodes
+                ),
+            }
+        )
     fingerprint: dict[str, object] = {
         "schema_version": CACHE_SCHEMA_VERSION,
-        "method_version": GROUP_HARMONIC_METHOD_VERSION,
-        "selection_inputs": {
-            "subjects": list(subject_key),
-            "conditions": list(condition_key),
-            "roi_definitions": _normalize_rois(rois),
-        },
+        "method_version": method_version,
+        "selection_inputs": selection_inputs,
         "source_workbooks": workbooks,
-        "stats_settings": {
-            "base_frequency_hz": float(base_frequency_hz),
-            "oddball_frequency_hz": float(LOCKED_ODDBALL_FREQUENCY_HZ),
-            "max_freq_hz": float(max_freq_hz) if max_freq_hz is not None else None,
-            "z_threshold": float(settings.group_significant_z_threshold),
-            "electrode_scope": str(settings.group_significant_electrode_scope),
-            "summation_method": str(settings.group_significant_summation_method),
-        },
+        "stats_settings": stats_settings,
         "project_processing_signature": processing_signature,
         "project_processing_signature_hash": processing_signature_hash,
     }
@@ -163,6 +193,7 @@ def build_project_processing_signature(manifest: Mapping[str, object] | None) ->
     canonical_preprocessing = {
         key: _json_safe(preprocessing.get(key))
         for key in PREPROCESSING_CANONICAL_KEYS
+        if key not in _PROFILE_KEYS_OUTSIDE_LEGACY_PROCESSING_SIGNATURE
     }
     event_map_raw = source.get("event_map")
     event_map: dict[str, int] = {}
@@ -308,6 +339,9 @@ def save_cached_group_harmonic_selection(
             selection_metadata.get("detected_significant_harmonics_hz", [])
         ),
         "included_harmonics_hz": _json_safe(selection_metadata.get("included_harmonics_hz", [])),
+        "selection_fingerprint": str(
+            selection_metadata.get("selection_fingerprint") or request.cache_key
+        ),
         "highest_significant_harmonic_hz": _json_safe(
             selection_metadata.get("highest_significant_harmonic_hz")
         ),
@@ -389,6 +423,47 @@ def _normalize_rois(rois: Mapping[str, Sequence[object]] | None) -> list[dict[st
         )
         normalized.append({"name": name, "channels": channels})
     return normalized
+
+
+def _method_version_for_settings(settings: DVPolicySettings) -> str:
+    if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID:
+        return GROUP_HARMONIC_METHOD_VERSION
+    return (
+        "group_significant_harmonic_profiles_"
+        f"{settings.harmonic_selection_profile}_v"
+        f"{settings.harmonic_selection_profile_version}"
+    )
+
+
+def _manifest_group_selection_inputs(
+    manifest: Mapping[str, object],
+    subjects: Sequence[str],
+) -> dict[str, object]:
+    raw_groups = manifest.get("groups")
+    declared_group_ids = (
+        sorted((str(group_id) for group_id in raw_groups), key=str.casefold)
+        if isinstance(raw_groups, Mapping) and raw_groups
+        else ["all_participants"]
+    )
+    raw_participants = manifest.get("participants")
+    participant_lookup = {
+        str(participant_id).casefold(): row
+        for participant_id, row in (
+            raw_participants.items() if isinstance(raw_participants, Mapping) else ()
+        )
+        if isinstance(row, Mapping)
+    }
+    assignments: list[dict[str, str]] = []
+    for subject in subjects:
+        row = participant_lookup.get(str(subject).casefold())
+        group_id = str(row.get("group_id") or "") if isinstance(row, Mapping) else ""
+        if not group_id and declared_group_ids == ["all_participants"]:
+            group_id = "all_participants"
+        assignments.append({"participant_id": str(subject), "group_id": group_id})
+    return {
+        "declared_group_ids": declared_group_ids,
+        "participant_group_assignments": assignments,
+    }
 
 
 def _manifest_safe_path(project_root: Path, path: Path) -> str:

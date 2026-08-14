@@ -86,106 +86,37 @@ class StatsWindowUiMixin:
         self.conditions_scroll_area.setWidget(conditions_list_widget)
         conditions_layout.addWidget(self.conditions_scroll_area, 1)
 
-        # summed BCA definition panel
+        # canonical summed BCA definition panel
         self.dv_group = SectionCard("Summed BCA definition")
         self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         self.dv_group.setToolTip(
-            "Select how the primary Summed BCA DV is computed."
+            "Review the accepted project harmonic selection used for Summed BCA."
         )
         dv_layout = self.dv_group.content_layout
         dv_layout.setSpacing(6)
 
-        dv_method_row = QHBoxLayout()
-        dv_method_row.addWidget(QLabel("Method:"))
-        self.dv_policy_combo = QComboBox()
-        self.dv_policy_combo.setToolTip(
-            "Choose the Summed BCA harmonic policy. Group-level significant harmonics are the default."
-        )
-        self.dv_policy_combo.addItems(
-            [GROUP_SIGNIFICANT_POLICY_NAME, FIXED_PREDEFINED_POLICY_NAME]
-        )
-        self.dv_policy_combo.setMinimumContentsLength(14)
-        self.dv_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.dv_policy_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.dv_policy_combo.setCurrentText(self._dv_policy_name)
-        self.dv_policy_combo.setEnabled(True)
-        self.dv_policy_combo.currentTextChanged.connect(self._on_dv_policy_changed)
-        dv_method_row.addWidget(self.dv_policy_combo, 1)
-        dv_layout.addLayout(dv_method_row)
+        canonical_form = make_form_layout()
+        self.harmonic_profile_value = QLabel("Loading project selection...")
+        self.harmonic_profile_value.setObjectName("stats_harmonic_profile_value")
+        self.harmonic_profile_value.setWordWrap(True)
+        self.harmonic_profile_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        canonical_form.addRow("Active method:", self.harmonic_profile_value)
 
-        self.fixed_predefined_controls = QWidget()
-        fixed_predefined_layout = QVBoxLayout(self.fixed_predefined_controls)
-        fixed_predefined_layout.setContentsMargins(0, 0, 0, 0)
-        fixed_predefined_layout.setSpacing(6)
-        fixed_predefined_form = make_form_layout()
+        self.harmonic_included_value = QLabel("Loading included harmonics...")
+        self.harmonic_included_value.setObjectName("stats_harmonic_included_value")
+        self.harmonic_included_value.setWordWrap(True)
+        self.harmonic_included_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        canonical_form.addRow("Included harmonics:", self.harmonic_included_value)
+        dv_layout.addLayout(canonical_form)
 
-        self.fixed_predefined_freqs_edit = QLineEdit()
-        self.fixed_predefined_freqs_edit.setText(self._dv_fixed_harmonic_frequencies_hz)
-        self.fixed_predefined_freqs_edit.setPlaceholderText("1.2, 2.4, 3.6, 4.8, 7.2")
-        self.fixed_predefined_freqs_edit.setToolTip(
-            "Comma-separated BCA harmonic frequencies in Hz."
+        self.harmonic_selection_note = QLabel(
+            "This definition is read-only here. Change or recalculate the project "
+            "method in Advanced Harmonic Selection and Summation."
         )
-        self.fixed_predefined_freqs_edit.textChanged.connect(
-            self._on_fixed_predefined_freqs_changed
-        )
-        fixed_predefined_form.addRow("Frequencies (Hz):", self.fixed_predefined_freqs_edit)
-
-        self.fixed_predefined_exclude_base = QCheckBox("Automatically exclude base-rate overlaps")
-        self.fixed_predefined_exclude_base.setChecked(self._dv_fixed_harmonic_auto_exclude_base)
-        self.fixed_predefined_exclude_base.setToolTip(
-            "Remove requested frequencies such as 6, 12, 18, and 24 Hz when they overlap with the base rate."
-        )
-        self.fixed_predefined_exclude_base.stateChanged.connect(
-            self._on_fixed_predefined_exclude_base_changed
-        )
-        fixed_predefined_form.addRow("", self.fixed_predefined_exclude_base)
-
-        self.fixed_predefined_base_freq_value = QLabel(f"{self._current_base_freq:g} Hz")
-        self.fixed_predefined_base_freq_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        fixed_predefined_form.addRow("Base frequency:", self.fixed_predefined_base_freq_value)
-
-        fixed_predefined_layout.addLayout(fixed_predefined_form)
-
-        self.fixed_predefined_preview_btn = make_action_button("Validate harmonic list")
-        self.fixed_predefined_preview_btn.setToolTip(
-            "Validate the fixed harmonic list against BCA frequency columns."
-        )
-        self.fixed_predefined_preview_btn.clicked.connect(self._on_preview_fixed_predefined_clicked)
-        fixed_predefined_layout.addWidget(self.fixed_predefined_preview_btn)
-
-        self.fixed_predefined_preview_table = QTableWidget(0, 6)
-        self.fixed_predefined_preview_table.setHorizontalHeaderLabels(
-            ["Requested Hz", "Matched Hz", "BCA column", "Bin", "Included", "Reason"]
-        )
-        self.fixed_predefined_preview_table.verticalHeader().setVisible(False)
-        self.fixed_predefined_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.fixed_predefined_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.fixed_predefined_preview_table.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        )
-        self.fixed_predefined_preview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.fixed_predefined_preview_table.setMinimumHeight(120)
-        self.fixed_predefined_preview_table.setMaximumHeight(150)
-        fixed_predefined_header = self.fixed_predefined_preview_table.horizontalHeader()
-        for col in range(self.fixed_predefined_preview_table.columnCount()):
-            fixed_predefined_header.setSectionResizeMode(col, QHeaderView.Stretch)
-        fixed_predefined_header.setStretchLastSection(True)
-        fixed_predefined_layout.addWidget(self.fixed_predefined_preview_table)
-
-        dv_layout.addWidget(self.fixed_predefined_controls)
-
-        self.group_significant_note = QLabel(
-            "Uses one common z-significant oddball harmonic list selected from "
-            "grand-averaged FullFFT amplitude spectra; manage or recalculate this "
-            "processing-time selection in Settings > Preprocessing."
-        )
-        self.group_significant_note.setWordWrap(True)
-        self.group_significant_note.setToolTip(
-            "Selection is group-level across final included participants and selected conditions, "
-            "with base-rate overlaps excluded."
-        )
+        self.harmonic_selection_note.setObjectName("stats_harmonic_selection_note")
+        self.harmonic_selection_note.setWordWrap(True)
         self.recalculate_harmonics_btn = make_action_button(
-            "Open Recalculation Settings",
+            "Open Harmonic Settings",
             compact=True,
         )
         self.recalculate_harmonics_btn.setObjectName("stats_recalculate_harmonics_button")
@@ -194,14 +125,16 @@ class StatsWindowUiMixin:
             "can be reviewed and recalculated safely."
         )
         self.recalculate_harmonics_btn.clicked.connect(self.on_recalculate_harmonics_clicked)
-        group_significant_row = QHBoxLayout()
-        group_significant_row.setSpacing(8)
-        group_significant_row.addWidget(self.group_significant_note, 1)
-        group_significant_row.addWidget(self.recalculate_harmonics_btn, 0, Qt.AlignTop)
-        dv_layout.addLayout(group_significant_row)
-        self._set_fixed_predefined_controls_visible(
-            self._dv_policy_name == FIXED_PREDEFINED_POLICY_NAME
+        harmonic_selection_row = QHBoxLayout()
+        harmonic_selection_row.setSpacing(8)
+        harmonic_selection_row.addWidget(self.harmonic_selection_note, 1)
+        harmonic_selection_row.addWidget(
+            self.recalculate_harmonics_btn,
+            0,
+            Qt.AlignTop,
         )
+        dv_layout.addLayout(harmonic_selection_row)
+        self._refresh_canonical_harmonic_summary()
 
         self.outlier_group = QWidget()
         self.outlier_group.setObjectName("stats_outlier_flagging")

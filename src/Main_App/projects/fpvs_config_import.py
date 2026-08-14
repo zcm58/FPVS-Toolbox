@@ -14,6 +14,9 @@ from Main_App.processing.removed_electrode_detection import (
     parse_electrode_list,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import (
+    new_project_preprocessing_settings,
+)
 
 CONFIG_SUFFIX = ".fpvsconfig"
 WINDOWS_FORBIDDEN_PROJECT_CHARS = set('<>:"/\\|?*')
@@ -101,7 +104,10 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> P
     imported = read_fpvs_config(config_path)
     project_root = _unique_project_root(Path(projects_root), imported.project_title)
     project_root.mkdir(parents=True, exist_ok=False)
-    project = Project.load(project_root)
+    project = Project.load(
+        project_root,
+        manifest={"preprocessing": new_project_preprocessing_settings()},
+    )
     project.name = imported.project_title
     project.event_map = imported.event_map
     if imported.manual_removed_electrodes:

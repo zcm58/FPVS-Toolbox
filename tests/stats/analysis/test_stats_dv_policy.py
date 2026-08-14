@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -10,8 +12,10 @@ from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     LOCKED_ODDBALL_FREQUENCY_HZ,
     normalize_dv_policy,
 )
+from Tools.Stats.analysis.dv_policy_settings import HARMONIC_PROFILE_FIXED_ID  # noqa: E402
 from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
 from Tools.Stats.controller.stats_controller import SINGLE_PIPELINE_STEPS  # noqa: E402
+from Tools.Stats.ui import stats_window_exclusions  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
@@ -23,20 +27,68 @@ def _setup_window_state(window: StatsWindow) -> None:
 
 
 @pytest.mark.qt
-def test_stats_dv_policy_group_significant_is_default(qtbot):
+def test_stats_dv_policy_is_read_only_and_projectless_compatible(qtbot):
     window = StatsWindow(project_dir=".")
     qtbot.addWidget(window)
     window.show()
 
-    assert window.dv_policy_combo.count() == 2
-    assert window.dv_policy_combo.currentText() == GROUP_SIGNIFICANT_POLICY_NAME
-    assert window.dv_policy_combo.itemText(0) == GROUP_SIGNIFICANT_POLICY_NAME
-    assert window.dv_policy_combo.itemText(1) == FIXED_PREDEFINED_POLICY_NAME
-    assert window.dv_policy_combo.isEnabled() is True
+    assert not hasattr(window, "dv_policy_combo")
+    assert not hasattr(window, "fixed_predefined_exclude_base")
+    assert window.harmonic_profile_value.text() == "No project selection loaded"
+    assert window.harmonic_included_value.text() == "Unavailable"
     assert window.get_dv_policy_snapshot()["name"] == GROUP_SIGNIFICANT_POLICY_NAME
     assert window.get_dv_policy_snapshot()["fixed_harmonic_frequencies_hz"] == (
         FIXED_PREDEFINED_DEFAULT_FREQUENCIES
     )
+
+
+@pytest.mark.qt
+def test_stats_payload_and_summary_follow_canonical_fixed_selection(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+):
+    (tmp_path / "project.json").write_text("{}", encoding="utf-8")
+    selection = SimpleNamespace(
+        selected_harmonics_hz=(1.2, 2.4, 3.6),
+        metadata={
+            "harmonic_policy": "fixed_predefined_harmonic_list",
+            "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+            "harmonic_selection_profile_version": "1.0",
+            "harmonic_selection_profile_label": "Fixed / preregistered harmonic domain",
+            "fixed_harmonic_requested_frequencies_hz": [1.2, 2.4, 3.6, 6.0],
+            "fixed_harmonic_input_mode": "frequency_list",
+            "included_harmonics_hz": [1.2, 2.4, 3.6],
+            "selection_fingerprint": "abcdef1234567890",
+            "same_sample_adaptive": False,
+        },
+    )
+    monkeypatch.setattr(
+        stats_window_exclusions,
+        "load_project_processing_harmonics",
+        lambda **_kwargs: selection,
+    )
+
+    window = StatsWindow(project_dir=str(tmp_path))
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.harmonic_profile_value.text() == (
+        "Fixed / preregistered harmonic domain (v1.0)"
+    )
+    assert window.harmonic_included_value.text() == "1.2, 2.4, 3.6 Hz"
+    assert "abcdef123456" in window.harmonic_selection_note.text()
+
+    # Stale private compatibility values cannot override project-owned state.
+    window._dv_policy_name = GROUP_SIGNIFICANT_POLICY_NAME
+    window._dv_fixed_harmonic_frequencies_hz = "99"
+    window._dv_fixed_harmonic_auto_exclude_base = False
+    payload = window.get_dv_policy_snapshot()
+
+    assert payload["name"] == FIXED_PREDEFINED_POLICY_NAME
+    assert payload["harmonic_selection_profile"] == HARMONIC_PROFILE_FIXED_ID
+    assert payload["fixed_harmonic_frequencies_hz"] == "1.2, 2.4, 3.6, 6"
+    assert payload["fixed_harmonic_auto_exclude_base"] is True
 
 
 def test_normalize_dv_policy_defaults_to_group_significant():
@@ -59,7 +111,7 @@ def test_normalize_dv_policy_coerces_fixed_aliases_to_fixed_predefined():
         )
         assert settings.name == FIXED_PREDEFINED_POLICY_NAME
         assert settings.fixed_harmonic_frequencies_hz == "1.2, 2.4"
-        assert settings.fixed_harmonic_auto_exclude_base is False
+        assert settings.fixed_harmonic_auto_exclude_base is True
 
 
 def test_normalize_dv_policy_coerces_rossion_aliases_to_group_significant():

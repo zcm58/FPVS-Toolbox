@@ -3,6 +3,15 @@
 
 from __future__ import annotations
 
+from Tools.Stats.analysis.canonical_harmonics import (
+    CanonicalHarmonicSelectionError,
+    SharedHarmonicSelection,
+    load_project_processing_harmonics,
+)
+from Tools.Stats.analysis.dv_policy_settings import (
+    HARMONIC_SELECTION_PROFILES,
+    dv_policy_payload_from_selection_metadata,
+)
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
@@ -10,7 +19,14 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowExclusionsMixin:
     def _get_dv_policy_payload(self) -> dict[str, object]:
-        """Handle the get dv policy payload step for the Stats workflow."""
+        """Return the processing-owned policy, never a Stats-local selection."""
+
+        if self._project_manifest_path().is_file():
+            selection = self._load_canonical_harmonic_selection()
+            return self._apply_canonical_harmonic_selection(selection)
+        # Preserve the lightweight projectless construction used by import and
+        # GUI contract tests. Real projects always resolve the accepted
+        # processing-owned selection above.
         return {
             "name": self._dv_policy_name,
             "fixed_harmonic_frequencies_hz": str(self._dv_fixed_harmonic_frequencies_hz),
@@ -18,6 +34,111 @@ class StatsWindowExclusionsMixin:
                 self._dv_fixed_harmonic_auto_exclude_base
             ),
         }
+
+    def _project_manifest_path(self) -> Path:
+        project_root = Path(getattr(self, "_project_path", self.project_dir))
+        return project_root / "project.json"
+
+    def _load_canonical_harmonic_selection(self) -> SharedHarmonicSelection:
+        return load_project_processing_harmonics(
+            project_root=getattr(self, "_project_path", self.project_dir),
+            log_func=lambda message: logger.debug(
+                "stats_canonical_harmonic_selection",
+                extra={"selection_message": str(message)},
+            ),
+        )
+
+    def _apply_canonical_harmonic_selection(
+        self,
+        selection: SharedHarmonicSelection,
+    ) -> dict[str, object]:
+        metadata = selection.metadata
+        payload = dv_policy_payload_from_selection_metadata(metadata)
+        self._canonical_harmonic_selection = selection
+        self._dv_policy_name = str(payload["name"])
+        self._dv_fixed_harmonic_frequencies_hz = str(
+            payload.get(
+                "fixed_harmonic_frequencies_hz",
+                self._dv_fixed_harmonic_frequencies_hz,
+            )
+        )
+        self._dv_fixed_harmonic_auto_exclude_base = bool(
+            payload.get("fixed_harmonic_auto_exclude_base", True)
+        )
+
+        profile_id = str(metadata.get("harmonic_selection_profile") or "")
+        profile = HARMONIC_SELECTION_PROFILES.get(profile_id)
+        profile_label = str(
+            metadata.get("harmonic_selection_profile_label")
+            or (profile.label if profile is not None else profile_id)
+            or "Accepted project method"
+        )
+        profile_version = str(
+            metadata.get("harmonic_selection_profile_version")
+            or (profile.version if profile is not None else "")
+        )
+        if profile_version:
+            profile_label = f"{profile_label} (v{profile_version})"
+        included = ", ".join(
+            f"{frequency:g}" for frequency in selection.selected_harmonics_hz
+        )
+        fingerprint = str(metadata.get("selection_fingerprint") or "")
+
+        profile_widget = getattr(self, "harmonic_profile_value", None)
+        if profile_widget is not None:
+            profile_widget.setText(profile_label)
+        included_widget = getattr(self, "harmonic_included_value", None)
+        if included_widget is not None:
+            included_widget.setText(f"{included} Hz")
+        note = getattr(self, "harmonic_selection_note", None)
+        if note is not None:
+            fingerprint_text = (
+                f" Accepted fingerprint: {fingerprint[:12]}." if fingerprint else ""
+            )
+            note.setText(
+                "Read-only accepted processing selection. Change or recalculate "
+                "it in Advanced Harmonic Selection and Summation."
+                + fingerprint_text
+            )
+            note.setToolTip(str(metadata.get("methods_summary") or ""))
+        sync_provenance = getattr(self, "_sync_provenance_warning", None)
+        if callable(sync_provenance):
+            sync_provenance()
+        return payload
+
+    def _refresh_canonical_harmonic_summary(self) -> bool:
+        """Refresh the read-only profile and included-list summary."""
+
+        if not self._project_manifest_path().is_file():
+            self._canonical_harmonic_selection = None
+            self._set_unavailable_harmonic_summary(
+                "No project selection loaded",
+                "Open a project to inspect its accepted harmonics.",
+            )
+            return False
+        try:
+            selection = self._load_canonical_harmonic_selection()
+            self._apply_canonical_harmonic_selection(selection)
+        except (CanonicalHarmonicSelectionError, ValueError) as exc:
+            self._canonical_harmonic_selection = None
+            self._set_unavailable_harmonic_summary(
+                "No current accepted selection",
+                f"{exc} Open Harmonic Settings to recalculate it.",
+            )
+            return False
+        return True
+
+    def _set_unavailable_harmonic_summary(self, profile: str, detail: str) -> None:
+        profile_widget = getattr(self, "harmonic_profile_value", None)
+        if profile_widget is not None:
+            profile_widget.setText(profile)
+        included_widget = getattr(self, "harmonic_included_value", None)
+        if included_widget is not None:
+            included_widget.setText("Unavailable")
+        note = getattr(self, "harmonic_selection_note", None)
+        if note is not None:
+            note.setText(detail)
+            note.setToolTip(detail)
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
         """Handle the get dv policy snapshot step for the Stats workflow."""
@@ -205,22 +326,6 @@ class StatsWindowExclusionsMixin:
         if search_input is not None:
             search_input.setFocus()
 
-    def _set_fixed_predefined_controls_visible(self, visible: bool) -> None:
-        widget = getattr(self, "fixed_predefined_controls", None)
-        if widget is not None:
-            widget.setVisible(visible)
-        note = getattr(self, "group_significant_note", None)
-        if note is not None:
-            note.setVisible(not visible)
-        recalc_btn = getattr(self, "recalculate_harmonics_btn", None)
-        if recalc_btn is not None:
-            recalc_btn.setVisible(not visible)
-
-    def _clear_fixed_predefined_preview(self) -> None:
-        table = getattr(self, "fixed_predefined_preview_table", None)
-        if table is not None:
-            table.setRowCount(0)
-
     def on_recalculate_harmonics_clicked(self) -> None:
         """Open the canonical Settings workflow without deleting saved metadata."""
 
@@ -287,121 +392,6 @@ class StatsWindowExclusionsMixin:
         tools = disk_manifest.get("tools") if isinstance(disk_manifest, dict) else None
         if isinstance(tools, dict):
             manifest["tools"] = tools
-
-    def _update_fixed_predefined_preview_table(self, payload: dict[str, object]) -> None:
-        table = getattr(self, "fixed_predefined_preview_table", None)
-        if table is None:
-            return
-        rows = payload.get("selection_rows", []) if isinstance(payload, dict) else []
-        if not isinstance(rows, list):
-            rows = []
-        table.setRowCount(len(rows))
-        for row_idx, row_data in enumerate(rows):
-            row = row_data if isinstance(row_data, dict) else {}
-            values = [
-                row.get("requested_frequency_hz", ""),
-                row.get("matched_frequency_hz", ""),
-                row.get("matched_column", ""),
-                row.get("matched_bin_index", ""),
-                "Yes" if row.get("included") else "No",
-                row.get("exclusion_reason") or row.get("warning") or "Included",
-            ]
-            for col_idx, value in enumerate(values):
-                if isinstance(value, float):
-                    text = f"{value:g}"
-                else:
-                    text = "" if value is None else str(value)
-                table.setItem(row_idx, col_idx, QTableWidgetItem(text))
-        table.resizeColumnsToContents()
-
-    def _on_preview_fixed_predefined_clicked(self) -> None:
-        if not self.subject_data:
-            self._set_status("Load project data before validating the harmonic list.")
-            return
-        got = self._get_analysis_settings()
-        if not got:
-            return
-        self._current_base_freq, self._current_alpha = got
-        self._update_fixed_predefined_base_freq_label()
-
-        self.fixed_predefined_preview_btn.setEnabled(False)
-        self._set_status("Validating fixed harmonic list...")
-
-        worker = StatsWorker(
-            stats_worker_funcs.run_harmonics_preview,
-            subjects=self.subjects,
-            conditions=self._get_selected_conditions(),
-            conditions_all=list(self.conditions),
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            rois=self.rois,
-            dv_policy=self._get_dv_policy_payload(),
-            _op=f"{self._dv_policy_name} Preview",
-        )
-
-        try:
-            if not hasattr(self, "_active_workers"):
-                self._active_workers = []
-            self._active_workers.append(worker)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to track fixed-list preview worker")
-
-        def _release():
-            try:
-                if worker in self._active_workers:
-                    self._active_workers.remove(worker)
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to release fixed-list preview worker")
-
-        def _on_finished(payload: dict) -> None:
-            try:
-                self._update_fixed_predefined_preview_table(payload or {})
-                included = payload.get("fixed_harmonic_included_frequencies_hz", [])
-                count = len(included) if isinstance(included, list) else 0
-                self._set_status(f"Fixed harmonic list validated: {count} included.")
-            finally:
-                self.fixed_predefined_preview_btn.setEnabled(True)
-                _release()
-
-        def _on_error(message: str) -> None:
-            try:
-                self.append_log("General", f"Fixed harmonic list error: {message}", level="error")
-                self._set_status(message)
-            finally:
-                self.fixed_predefined_preview_btn.setEnabled(True)
-                _release()
-
-        worker.signals.message.connect(self._on_worker_message)
-        worker.signals.error.connect(_on_error)
-        worker.signals.finished.connect(_on_finished)
-        worker.signals.progress.connect(self._on_worker_progress)
-        self.pool.start(worker)
-
-    def _update_fixed_predefined_base_freq_label(self) -> None:
-        """Update the base-frequency label used by the fixed predefined policy."""
-        fixed_label = getattr(self, "fixed_predefined_base_freq_value", None)
-        if fixed_label is not None:
-            fixed_label.setText(f"{self._current_base_freq:g} Hz")
-
-    def _on_dv_policy_changed(self, text: str) -> None:
-        """Handle the on dv policy changed step for the Stats workflow."""
-        self._dv_policy_name = (
-            GROUP_SIGNIFICANT_POLICY_NAME
-            if text == GROUP_SIGNIFICANT_POLICY_NAME
-            else FIXED_PREDEFINED_POLICY_NAME
-        )
-        self._set_fixed_predefined_controls_visible(
-            self._dv_policy_name == FIXED_PREDEFINED_POLICY_NAME
-        )
-        self._clear_fixed_predefined_preview()
-
-    def _on_fixed_predefined_freqs_changed(self, text: str) -> None:
-        self._dv_fixed_harmonic_frequencies_hz = text
-        self._clear_fixed_predefined_preview()
-
-    def _on_fixed_predefined_exclude_base_changed(self, state: int) -> None:
-        self._dv_fixed_harmonic_auto_exclude_base = state == Qt.Checked
-        self._clear_fixed_predefined_preview()
 
     def _show_outlier_exclusion_dialog(self, pipeline_id: PipelineId) -> None:
         """Handle the show outlier exclusion dialog step for the Stats workflow."""

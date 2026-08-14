@@ -7,14 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from Main_App import SettingsManager
+from Main_App.processing.artifact_freshness import (
+    STATS_READY_SUMMED_BCA_ARTIFACT,
+    StalePostProcessingArtifactError,
+    require_current_artifact,
+)
 from Main_App.projects import (
     ProjectDatasetIndex,
     STATS_SUBFOLDER_NAME,
     load_project_dataset_index,
-)
-from Tools.Stats.analysis.dv_policy_settings import (
-    FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
-    GROUP_SIGNIFICANT_POLICY_NAME,
 )
 from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Stats.io.stats_ready_export import STATS_READY_WORKBOOK_NAME, prepare_stats_ready_export
@@ -38,9 +39,23 @@ def default_loreta_stats_ready_workbook_path(project_root: str | Path) -> Path:
 
 
 def stats_ready_workbook_exists(project_root: str | Path) -> bool:
-    """Return whether the LORETA prerequisite Stats-ready workbook already exists."""
+    """Return whether the LORETA prerequisite exists and is current."""
 
-    return default_loreta_stats_ready_workbook_path(project_root).is_file()
+    root = Path(project_root).expanduser().resolve()
+    workbook_path = default_loreta_stats_ready_workbook_path(root)
+    if not workbook_path.is_file():
+        return False
+    if not (root / "project.json").is_file():
+        return True
+    try:
+        require_current_artifact(
+            root,
+            STATS_READY_SUMMED_BCA_ARTIFACT,
+            workbook_path,
+        )
+    except (StalePostProcessingArtifactError, OSError, ValueError):
+        return False
+    return True
 
 
 def write_loreta_stats_ready_workbook(
@@ -82,11 +97,19 @@ def write_loreta_stats_ready_workbook(
 
     base_freq = _settings_float(manager, "analysis", "base_freq", default=6.0)
     max_freq = _settings_float(manager, "analysis", "bca_upper_limit", default=None)
-    group_labels = dataset_index.participant_group_label_map(
+    group_ids = dataset_index.participant_group_id_map(
         uppercase_keys=True,
         include_legacy_aliases=True,
     )
     group_map = {
+        subject: group_ids.get(subject.upper())
+        for subject in subjects
+    }
+    group_labels = dataset_index.participant_group_label_map(
+        uppercase_keys=True,
+        include_legacy_aliases=True,
+    )
+    group_label_map = {
         subject: group_labels.get(subject.upper())
         for subject in subjects
     }
@@ -99,12 +122,11 @@ def write_loreta_stats_ready_workbook(
         subject_data=subject_data,
         base_freq=base_freq,
         rois=rois,
-        dv_policy={
-            "name": GROUP_SIGNIFICANT_POLICY_NAME,
-            "fixed_harmonic_frequencies_hz": FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
-            "fixed_harmonic_auto_exclude_base": True,
-        },
+        # Managed-project export resolves the accepted canonical profile inside
+        # the Stats export facade; this writer must not impose a group policy.
+        dv_policy=None,
         group_map=group_map,
+        group_label_map=group_label_map,
         log_func=log,
         save_path=workbook_path,
         max_freq=max_freq,

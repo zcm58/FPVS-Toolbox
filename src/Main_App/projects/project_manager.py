@@ -30,6 +30,9 @@ from Main_App.projects.grouping import (
     validate_group_folder_name,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import (
+    new_project_preprocessing_settings,
+)
 from Main_App.projects.project_metadata import ProjectMetadata, read_project_metadata
 from Main_App.projects.projects_root import ensure_projects_root
 
@@ -253,6 +256,7 @@ def new_project(self) -> None:
                 "name": project_name,
                 "input_folder": group_folders["Input Folder"],
                 "options": {"mode": "batch"},
+                "preprocessing": new_project_preprocessing_settings(),
             },
         )
     else:
@@ -271,6 +275,7 @@ def new_project(self) -> None:
                 "name": project_name,
                 "options": {"mode": "batch"},
                 "groups": groups_payload,
+                "preprocessing": new_project_preprocessing_settings(),
             },
         )
     project.name = project_name

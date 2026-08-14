@@ -35,6 +35,7 @@ from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     ProjectConditionTopographySummary,
     _condition_display_label,
     _condition_output_id,
+    _require_current_stats_ready_workbook,
     _read_selected_harmonics,
     _resolve_conditions,
     _subject_in_ids,
@@ -153,6 +154,7 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
     dataset_index = load_project_dataset_index(root)
     dataset_index.require_group_assignments()
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
+    _require_current_stats_ready_workbook(root, stats_ready)
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
     selection = project_source_participant_selection(
@@ -357,6 +359,7 @@ def build_l2_mne_hauk_participant_zscore_conditions_from_project(
     dataset_index = load_project_dataset_index(root)
     dataset_index.require_group_assignments()
     stats_ready = root / "3 - Statistical Analysis Results" / "Stats_Ready_Summed_BCA.xlsx"
+    _require_current_stats_ready_workbook(root, stats_ready)
     selected_harmonics = _read_selected_harmonics(stats_ready)
     requested_conditions = _resolve_conditions(stats_ready, conditions=conditions)
     selection = project_source_participant_selection(

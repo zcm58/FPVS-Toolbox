@@ -926,6 +926,22 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        harmonic_thread = getattr(self, "_settings_harmonic_recalc_thread", None)
+        try:
+            harmonic_recalculation_running = (
+                harmonic_thread is not None and harmonic_thread.isRunning()
+            )
+        except RuntimeError:
+            harmonic_recalculation_running = False
+        if harmonic_recalculation_running:
+            QMessageBox.information(
+                self,
+                "Harmonic Recalculation In Progress",
+                "Wait for harmonic recalculation and downstream publication to "
+                "finish before closing FPVS Toolbox.",
+            )
+            event.ignore()
+            return
         cache_thread = getattr(self, "_project_processing_cache_thread", None)
         try:
             cache_reset_running = cache_thread is not None and cache_thread.isRunning()

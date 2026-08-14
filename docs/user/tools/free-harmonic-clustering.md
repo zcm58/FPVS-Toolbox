@@ -20,8 +20,9 @@ Clustering** entry in the Workspace Tools sidebar to open **Free Harmonic
 Clustering Analysis**. The active project must contain:
 
 - valid base and oddball frequency metadata;
-- saved processed-workbook frequency provenance in `project.json` that matches
-  the representative workbook and the current Project Settings;
+- current neutral FullFFT provenance in `project.json` that matches the
+  processed workbooks, active cohort/QC state, processing export, and current
+  Project Settings;
 - canonical conditions, participants, and, for an independent-groups run,
   canonical group assignments;
 - processed condition workbooks with compatible `FullFFT Amplitude (uV)`
@@ -30,12 +31,20 @@ Clustering Analysis**. The active project must contain:
   grid.
 
 The tool reads these values dynamically. It does not provide local frequency,
-group, condition, or participant overrides. Before opening the workbook data,
-it verifies that the current base and oddball rates match the saved provenance
-for the exact processed workbook. Missing, stale, or conflicting provenance
-blocks setup; restore the rates used for processing or regenerate the
-post-processing/Stats frequency provenance. The tool uses that record only to
-verify the rates and never reuses a Stats harmonic selection.
+group, condition, or participant overrides. Both the setup inspection and the
+direct preparation API validate the same processing-owned neutral record:
+project-relative source workbooks, exact FullFFT grid/resolution, base and
+oddball rates, cohort/QC identity, and processing/export identity. Missing,
+stale, or conflicting provenance blocks setup; restore the processed rates or
+rerun post-processing. EEG preprocessing is not required merely to rebuild
+this record.
+
+The neutral record contains no standard Stats profile or selected Summed-BCA
+harmonic list. Free Harmonic Clustering always performs its own Hermann
+automatic or fixed-ceiling preparation from original FullFFT amplitude. A
+standard profile change, or stale Stats-ready/full-audit workbook by itself,
+does not alter or block this analysis. A changed FullFFT workbook, active
+cohort, frequency-QC decision, processing/export identity, rate, or grid does.
 
 ## One Contrast Per Run
 
@@ -129,11 +138,24 @@ means the reverse. Because of normalization, the test concerns response shape
 and distribution, not overall response magnitude.
 
 Inference is cluster-level and provides weak/global family-wise error control
-for the one declared electrode x harmonic family. A significant cluster does
-not make any individual electrode, harmonic, cell, or boundary pointwise
+for the one declared electrode x harmonic family when whole-participant
+assignments are exchangeable. That control is conditional on the candidate
+domain, adjacency, node-entry threshold, and contrast family. It does not
+correct a collection of separately run contrasts, and it tends to favor
+spatially or harmonically extended effects. A significant cluster does not
+make any individual electrode, harmonic, cell, or boundary pointwise
 significant. Cluster-average effect sizes are descriptive, post-selection, and
 shape-dependent. Higher harmonics can reflect a more complex evoked waveform,
 but one harmonic should not be assigned to one neural process in isolation.
+
+Automatic mode chooses its ceiling from the observed arms and holds that
+ceiling fixed during permutations. The cluster permutation therefore controls
+the conditional family defined by that prepared domain; this fact alone does
+not prove unconditional error control for the combined adaptive-selection and
+permutation procedure. The Toolbox includes a deterministic end-to-end null
+regression harness that repeats selection and permutation, but its small,
+prespecified envelope is a gross-error smoke check rather than a calibrated
+FWER validation study.
 
 Version 1 has no result plots and no historical-run browser. The Results tab
 shows the current session's latest run. Use **Open Results Folder** to review
@@ -175,8 +197,9 @@ Report the ordered contrast and design, cohort and exclusions, exact harmonic
 domain and its selection provenance, L2 normalization, graph version/hash,
 node-entry threshold, assignment count and seed, cluster mass, membership, raw
 sign-specific p-value, Monte Carlo interval, doubled p-value when shown, and
-descriptive effect size. Retain the complete result bundle with the analysis
-record.
+descriptive effect size. Also retain the neutral FullFFT provenance method and
+source/cohort/QC/processing fingerprints exported with the run. Retain the
+complete result bundle with the analysis record.
 
 See the [Free Harmonic Clustering reporting
 checklist](../reference/methods-reporting-checklist.md#free-harmonic-clustering-analysis)

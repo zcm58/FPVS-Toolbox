@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,19 @@ from openpyxl import load_workbook
 
 from Main_App.processing import harmonic_selection_qc
 from Main_App.projects import Project
+from Tools.LORETA_Visualizer import stats_ready_workbook as stats_ready_workbook_mod
+from Tools.LORETA_Visualizer.source_producers.project_inputs import (
+    _read_selected_harmonics,
+)
+from Tools.Stats.analysis import dv_policies
+from Tools.Stats.analysis.dv_policy_settings import (
+    FIXED_PREDEFINED_POLICY_NAME,
+    HARMONIC_PROFILE_FIXED_ID,
+    HARMONIC_PROFILE_LEGACY_ID,
+    HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
+    HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
+)
+from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
 from Tools.Stats.data.group_harmonic_cache import (
     clear_cached_group_harmonic_selections,
 )
@@ -478,6 +492,478 @@ def test_processing_harmonic_selection_succeeds_after_grid_outlier_exclusion(
     assert report.selection_metadata["selected_harmonics_hz"] == pytest.approx(
         [1.2, 2.4, 3.6, 4.8, 7.2]
     )
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    (
+        HARMONIC_PROFILE_LEGACY_ID,
+        HARMONIC_PROFILE_FIXED_ID,
+        HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
+        HARMONIC_PROFILE_TWO_CONSECUTIVE_FAILURES_ID,
+    ),
+)
+def test_processing_record_persists_and_loads_every_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile_id: str,
+) -> None:
+    project_root = tmp_path / profile_id
+    condition_root = project_root / "1 - Excel Data Files" / "Faces"
+    condition_root.mkdir(parents=True)
+    preprocessing = {"harmonic_selection_profile": profile_id}
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1},
+                "preprocessing": preprocessing,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _write_group_policy_workbook(condition_root / "S1_Faces_Results.xlsx", scale=1)
+    _write_group_policy_workbook(condition_root / "S2_Faces_Results.xlsx", scale=2)
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map={"Faces": 1},
+        preprocessing=preprocessing,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_base_frequency_hz",
+        lambda: 6.0,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_analysis_bca_upper_limit_hz",
+        lambda: 10.2,
+    )
+
+    report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+    loaded = harmonic_selection_qc.load_processing_harmonic_selection(project)
+    manifest = json.loads(
+        (project_root / "project.json").read_text(encoding="utf-8")
+    )
+    active = manifest["tools"]["processing"]["harmonic_selection"]["active"]
+
+    assert active["harmonic_selection_profile"] == profile_id
+    assert active["harmonic_selection_profile_version"] == "1.0"
+    assert active["selection_fingerprint"] == report.selection_metadata[
+        "selection_fingerprint"
+    ]
+    assert loaded.to_metadata()["selection_fingerprint"] == active[
+        "selection_fingerprint"
+    ]
+    assert loaded.selected_harmonics_hz == pytest.approx(
+        report.selection_metadata["selected_harmonics_hz"]
+    )
+    assert all(
+        not Path(str(row["path"])).is_absolute()
+        for row in active["selection_metadata"]["source_workbook_fingerprints"]
+    )
+
+
+def test_processing_selection_load_migrates_group_cache_only_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    condition_root = project_root / "1 - Excel Data Files" / "Faces"
+    condition_root.mkdir(parents=True)
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1},
+                "preprocessing": {},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _write_group_policy_workbook(condition_root / "S1_Faces_Results.xlsx", scale=1)
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map={"Faces": 1},
+        preprocessing={},
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"]},
+    )
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    report = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["tools"]["processing"]["harmonic_selection"]
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    loaded = harmonic_selection_qc.load_processing_harmonic_selection(project)
+    migrated = json.loads(manifest_path.read_text(encoding="utf-8"))["tools"][
+        "processing"
+    ]["harmonic_selection"]["active"]
+
+    assert loaded.selected_harmonics_hz == pytest.approx(
+        report.selection_metadata["selected_harmonics_hz"]
+    )
+    assert migrated["selection_fingerprint"] == loaded.to_metadata()[
+        "selection_fingerprint"
+    ]
+
+
+def test_processing_selection_record_rebases_with_copied_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    condition_root = project_root / "1 - Excel Data Files" / "Faces"
+    condition_root.mkdir(parents=True)
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.1.0",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "event_map": {"Faces": 1},
+                "preprocessing": {},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _write_group_policy_workbook(condition_root / "S1_Faces_Results.xlsx", scale=1)
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_rois_from_settings",
+        lambda: {"Posterior": ["O1", "O2"]},
+    )
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(
+        Project.load(project_root)
+    )
+    copied_root = tmp_path / "Copied Project"
+    shutil.copytree(project_root, copied_root, copy_function=shutil.copy2)
+    clear_cached_group_harmonic_selections(copied_root)
+
+    loaded = harmonic_selection_qc.load_processing_harmonic_selection(
+        Project.load(copied_root)
+    )
+
+    assert loaded.selected_harmonics_hz == pytest.approx(
+        [1.2, 2.4, 3.6, 4.8, 7.2]
+    )
+
+
+def test_versioned_profile_settings_are_read_from_exact_project_manifest(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    preprocessing = {
+        "harmonic_selection_profile": HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID,
+        "harmonic_selection_profile_version": "1.0",
+        "group_significant_electrode_scope": "frozen_selection_electrodes",
+        "group_significant_selection_electrodes": ["PO8", "PO7", "PO8"],
+        "group_significant_z_threshold": 1.64,
+    }
+    (project_root / "project.json").write_text(
+        json.dumps({"preprocessing": preprocessing}),
+        encoding="utf-8",
+    )
+    # Simulate a Project instance whose older normalization surface has not
+    # retained the new keys; the processing owner reads their persisted form.
+    project = SimpleNamespace(project_root=project_root, preprocessing={})
+
+    settings = harmonic_selection_qc._harmonic_selection_settings(project)
+
+    assert settings.harmonic_selection_profile == HARMONIC_PROFILE_SIGNIFICANT_ONLY_ID
+    assert settings.harmonic_selection_profile_version == "1.0"
+    assert settings.group_significant_electrode_scope == "frozen_selection_electrodes"
+    assert settings.group_significant_selection_electrodes == ("PO7", "PO8")
+    assert settings.group_significant_z_threshold == pytest.approx(1.64)
+
+
+def test_processing_selection_atomic_manifest_failure_preserves_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = tmp_path / "project.json"
+    original = '{\n  "preserved": true\n}'
+    manifest_path.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_replace_manifest_with_retry",
+        lambda _temporary, _manifest: (_ for _ in ()).throw(
+            PermissionError("locked")
+        ),
+    )
+
+    with pytest.raises(PermissionError, match="locked"):
+        harmonic_selection_qc._write_manifest_atomic(
+            manifest_path,
+            {"preserved": False},
+        )
+
+    assert manifest_path.read_text(encoding="utf-8") == original
+    assert not list(tmp_path.glob(".project.json.harmonic-selection-*.tmp"))
+
+
+def test_managed_fixed_summed_bca_uses_only_accepted_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    condition_root = project_root / "1 - Excel Data Files" / "Faces"
+    condition_root.mkdir(parents=True)
+    preprocessing = {
+        "harmonic_selection_policy": FIXED_PREDEFINED_POLICY_NAME,
+        "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+        "harmonic_selection_profile_version": "1.0",
+        "fixed_harmonic_frequencies_hz": "1.2",
+    }
+    manifest_path = project_root / "project.json"
+    manifest = {
+        "schema_version": "2.1.0",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "event_map": {"Faces": 1},
+        "preprocessing": preprocessing,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    workbook = condition_root / "S1_Faces_Results.xlsx"
+    _write_group_policy_workbook(workbook, scale=1)
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map={"Faces": 1},
+        preprocessing=preprocessing,
+    )
+    rois = {"Posterior": ["O1", "O2"]}
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+
+    # A caller cannot widen an accepted fixed domain ad hoc: the managed
+    # project still sums only its accepted 1.2-Hz definition.
+    summed = prepare_summed_bca_data(
+        subjects=["S1"],
+        conditions=["Faces"],
+        subject_data={"S1": {"Faces": str(workbook)}},
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois=rois,
+        dv_policy={
+            "name": FIXED_PREDEFINED_POLICY_NAME,
+            "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+            "fixed_harmonic_frequencies_hz": "1.2, 2.4",
+        },
+        project_root=str(project_root),
+    )
+    assert summed is not None
+    assert summed["S1"]["Faces"]["Posterior"] == pytest.approx(1.5)
+
+    # Changing persisted scientific settings without recalculation invalidates
+    # the accepted input fingerprint instead of silently redefining Summed BCA.
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"]["fixed_harmonic_frequencies_hz"] = "1.2, 2.4"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Recalculate Harmonics"):
+        prepare_summed_bca_data(
+            subjects=["S1"],
+            conditions=["Faces"],
+            subject_data={"S1": {"Faces": str(workbook)}},
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois=rois,
+            dv_policy={
+                "name": FIXED_PREDEFINED_POLICY_NAME,
+                "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+                "fixed_harmonic_frequencies_hz": "1.2, 2.4",
+            },
+            project_root=str(project_root),
+        )
+
+
+def test_fixed_canonical_profile_drives_stats_ready_schema_and_downstream_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    preprocessing = {
+        "harmonic_selection_policy": FIXED_PREDEFINED_POLICY_NAME,
+        "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+        "harmonic_selection_profile_version": "1.0",
+        "fixed_harmonic_frequencies_hz": "1.2, 2.4, 6.0, 7.2",
+        # Backend v1 must ignore this obsolete opt-out and still exclude 6 Hz.
+        "fixed_harmonic_auto_exclude_base": False,
+    }
+    manifest = {
+        "schema_version": "2.1.0",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "event_map": {"Faces": 1, "Objects": 2},
+        "preprocessing": preprocessing,
+    }
+    project_root.mkdir(parents=True)
+    (project_root / "project.json").write_text(
+        json.dumps(manifest, indent=2),
+        encoding="utf-8",
+    )
+    for condition, scale in (("Faces", 1), ("Objects", 2)):
+        condition_root = excel_root / condition
+        condition_root.mkdir(parents=True)
+        _write_group_policy_workbook(
+            condition_root / f"S1_{condition}_Results.xlsx",
+            scale=scale,
+        )
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map=manifest["event_map"],
+        preprocessing=preprocessing,
+    )
+    rois = {"Posterior": ["O1", "O2"]}
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    accepted = harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+
+    class _Settings:
+        def get(self, _section, option, fallback=""):
+            return {"base_freq": "6.0", "bca_upper_limit": "8.4"}.get(
+                option,
+                fallback,
+            )
+
+    monkeypatch.setattr(stats_ready_workbook_mod, "SettingsManager", _Settings)
+    monkeypatch.setattr(
+        stats_ready_workbook_mod,
+        "load_rois_from_settings",
+        lambda _manager: rois,
+    )
+    result = stats_ready_workbook_mod.write_loreta_stats_ready_workbook(project_root)
+
+    selection = pd.read_excel(
+        result.workbook_path,
+        sheet_name="Harmonic_Selection",
+    )
+    included = selection.loc[
+        selection["included_in_summation"],
+        "requested_harmonic_hz",
+    ].tolist()
+    excluded_base = selection.loc[
+        selection["excluded_base_rate"],
+        "requested_harmonic_hz",
+    ].tolist()
+    assert included == pytest.approx([1.2, 2.4, 7.2])
+    assert excluded_base == pytest.approx([6.0])
+    assert _read_selected_harmonics(result.workbook_path) == (1.2, 2.4, 7.2)
+
+    summary = pd.read_excel(result.workbook_path, sheet_name="Selection_Summary")
+    summary_map = dict(zip(summary["Summary Item"], summary["Value"]))
+    assert summary_map["Harmonic selection profile ID"] == HARMONIC_PROFILE_FIXED_ID
+    assert summary_map["Harmonic selection profile version"] == "1.0"
+    assert summary_map["Selection fingerprint"] == accepted.selection_metadata[
+        "selection_fingerprint"
+    ]
+
+
+def test_managed_dv_cache_tracks_reaccepted_selection_and_workbook_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "Project"
+    condition_root = project_root / "1 - Excel Data Files" / "Faces"
+    condition_root.mkdir(parents=True)
+    preprocessing = {
+        "harmonic_selection_policy": FIXED_PREDEFINED_POLICY_NAME,
+        "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+        "harmonic_selection_profile_version": "1.0",
+        "fixed_harmonic_frequencies_hz": "1.2",
+    }
+    manifest_path = project_root / "project.json"
+    manifest = {
+        "schema_version": "2.1.0",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "event_map": {"Faces": 1},
+        "preprocessing": preprocessing,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    workbook = condition_root / "S1_Faces_Results.xlsx"
+    _write_group_policy_workbook(workbook, scale=1)
+    project = SimpleNamespace(
+        project_root=project_root,
+        event_map={"Faces": 1},
+        preprocessing=preprocessing,
+    )
+    rois = {"Posterior": ["O1", "O2"]}
+    monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
+    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    dv_policies._DV_DATA_CACHE.clear()
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(project)
+
+    caller_policy = {
+        "name": FIXED_PREDEFINED_POLICY_NAME,
+        "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
+        "fixed_harmonic_frequencies_hz": "1.2",
+    }
+    first = prepare_summed_bca_data(
+        subjects=["S1"],
+        conditions=["Faces"],
+        subject_data={"S1": {"Faces": str(workbook)}},
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois=rois,
+        dv_policy=caller_policy,
+        project_root=str(project_root),
+    )
+    assert first is not None
+    assert first["S1"]["Faces"]["Posterior"] == pytest.approx(1.5)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"]["fixed_harmonic_frequencies_hz"] = "2.4"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    harmonic_selection_qc.run_processing_harmonic_selection_qc(
+        project,
+        force_recalculate=True,
+    )
+    second = prepare_summed_bca_data(
+        subjects=["S1"],
+        conditions=["Faces"],
+        subject_data={"S1": {"Faces": str(workbook)}},
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois=rois,
+        # The accepted canonical profile, not this stale caller snapshot, wins.
+        dv_policy=caller_policy,
+        project_root=str(project_root),
+    )
+    assert second is not None
+    assert second["S1"]["Faces"]["Posterior"] == pytest.approx(100.0)
+
+    _write_group_policy_workbook(workbook, scale=12345)
+    with pytest.raises(RuntimeError, match="Recalculate Harmonics"):
+        prepare_summed_bca_data(
+            subjects=["S1"],
+            conditions=["Faces"],
+            subject_data={"S1": {"Faces": str(workbook)}},
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois=rois,
+            dv_policy=caller_policy,
+            project_root=str(project_root),
+        )
+    dv_policies._DV_DATA_CACHE.clear()
 
 
 def _write_group_policy_workbook(

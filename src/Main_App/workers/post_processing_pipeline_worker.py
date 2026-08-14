@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
+from collections.abc import Callable, Mapping
+from contextlib import ExitStack, nullcontext
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,11 +74,28 @@ class PostProcessingPipelineWorker(QObject):
     log_message = Signal(str, int)
     finished = Signal(dict)
 
-    def __init__(self, project: Any) -> None:
+    def __init__(
+        self,
+        project: Any,
+        *,
+        resume_from_selection: bool = False,
+        selection_metadata: Mapping[str, object] | None = None,
+        previous_selection_fingerprint: str | None = None,
+    ) -> None:
         super().__init__()
         self._project = project
+        self._resume_from_selection = bool(resume_from_selection)
         self._dataset_index: Any | None = None
-        self._harmonic_selection_metadata: dict[str, object] | None = None
+        self._harmonic_selection_metadata: dict[str, object] | None = (
+            dict(selection_metadata)
+            if isinstance(selection_metadata, Mapping)
+            else None
+        )
+        self._previous_selection_fingerprint = previous_selection_fingerprint
+        self._selection_fingerprint: str | None = None
+        self._selection_changed = False
+        self._artifact_targets: dict[str, Path] = {}
+        self._artifact_archives: dict[str, Path] = {}
 
     @Slot()
     def run(self) -> None:
@@ -88,6 +106,14 @@ class PostProcessingPipelineWorker(QObject):
 
             cache_stack.enter_context(xlsx_read_cache_scope())
             project_root = Path(self._project.project_root).expanduser().resolve()
+            self._capture_previous_selection_fingerprint(project_root)
+            if self._resume_from_selection:
+                self._run_from_accepted_selection(
+                    project_root,
+                    steps,
+                    cache_stack,
+                )
+                return
             qc_message = "FPVS Toolbox is checking summed BCA values before final harmonic selection."
             self._emit_phase_progress(
                 _PHASE_FREQUENCY_DOMAIN_QC,
@@ -134,27 +160,44 @@ class PostProcessingPipelineWorker(QObject):
                         "Frequency-domain QC found no review-blocking flags.",
                     )
                 )
+            # FullFFT provenance belongs to the accepted frequency-domain
+            # sources, not to any downstream harmonic-selection policy. Publish
+            # it before selection/Stats so FHC remains usable if those sibling
+            # derivatives fail.
+            steps.append(self._run_full_fft_provenance(project_root, steps))
             harmonic_message = "FPVS Toolbox is currently identifying significant harmonics."
             self._emit_phase_progress(
                 _PHASE_HARMONIC_SELECTION,
                 1,
                 harmonic_message,
             )
-            steps.append(self._run_harmonic_selection())
+            harmonic_step = self._run_harmonic_selection()
+            steps.append(harmonic_step)
             self._emit_phase_progress(
                 _PHASE_HARMONIC_SELECTION,
                 2,
                 harmonic_message,
             )
+            if harmonic_step.ok:
+                self._activate_artifact_freshness(
+                    project_root,
+                    selection_summary_path=harmonic_step.path or None,
+                )
             stats_message = "FPVS Toolbox is preparing analysis files for downstream tools."
             self._emit_phase_progress(
                 _PHASE_STATS_READY_EXPORT,
                 2,
                 stats_message,
             )
-            stats_step = self._run_stats_ready_export(project_root)
+            stats_step = self._record_artifact_freshness(
+                self._run_stats_ready_export(project_root)
+            )
             steps.append(stats_step)
-            steps.append(self._run_analysis_ready_export(project_root))
+            steps.append(
+                self._record_artifact_freshness(
+                    self._run_analysis_ready_export(project_root)
+                )
+            )
             self._emit_phase_progress(
                 _PHASE_STATS_READY_EXPORT,
                 3,
@@ -177,6 +220,9 @@ class PostProcessingPipelineWorker(QObject):
         finally:
             self._dataset_index = None
             self._harmonic_selection_metadata = None
+            self._selection_fingerprint = None
+            self._artifact_targets.clear()
+            self._artifact_archives.clear()
             cache_stack.close()
         ok = all(step.ok for step in steps)
         has_warnings = any(step.warning for step in steps)
@@ -196,6 +242,114 @@ class PostProcessingPipelineWorker(QObject):
             {
                 "ok": ok,
                 "has_warnings": has_warnings,
+                "steps": [step.as_dict() for step in steps],
+            }
+        )
+
+    def _run_from_accepted_selection(
+        self,
+        project_root: Path,
+        steps: list[PostProcessingStepResult],
+        cache_stack: ExitStack,
+    ) -> None:
+        """Rebuild only derivatives of an already accepted harmonic selection."""
+
+        if self._harmonic_selection_metadata is None:
+            raise RuntimeError(
+                "Post-processing resume requires accepted harmonic-selection metadata."
+            )
+        from Main_App.projects import load_project_dataset_index
+
+        self._activate_artifact_freshness(
+            project_root,
+            selection_summary_path=(
+                project_root
+                / "Quality Check"
+                / "Harmonic_Selection_Summary.xlsx"
+            ),
+        )
+        self._dataset_index = load_project_dataset_index(project_root)
+        if (
+            not self._selection_changed
+            and self._selection_fingerprint is not None
+            and self._project_manifest_exists(project_root)
+        ):
+            from Main_App.processing.artifact_freshness import (
+                selection_dependent_artifacts_are_current,
+            )
+
+            if selection_dependent_artifacts_are_current(
+                project_root,
+                self._selection_fingerprint,
+            ):
+                message = (
+                    "The harmonic selection is unchanged and every dependent "
+                    "post-processing artifact is already current."
+                )
+                self._emit_progress(message)
+                self._emit_phase_progress(
+                    _PHASE_COMPLETE,
+                    POST_PROCESSING_PHASE_COUNT,
+                    message,
+                )
+                self.finished.emit(
+                    {
+                        "ok": True,
+                        "has_warnings": False,
+                        "selection_changed": False,
+                        "rebuild_skipped": True,
+                        "steps": [],
+                    }
+                )
+                return
+
+        stats_message = (
+            "FPVS Toolbox is rebuilding analysis files from the accepted harmonic selection."
+        )
+        self._emit_phase_progress(
+            _PHASE_STATS_READY_EXPORT,
+            2,
+            stats_message,
+        )
+        steps.append(
+            self._record_artifact_freshness(
+                self._run_stats_ready_export(project_root)
+            )
+        )
+        steps.append(
+            self._record_artifact_freshness(
+                self._run_analysis_ready_export(project_root)
+            )
+        )
+        self._emit_phase_progress(
+            _PHASE_STATS_READY_EXPORT,
+            3,
+            stats_message,
+        )
+        cache_stack.close()
+        # The time-domain source maps use durable source-ready derivatives and
+        # the accepted harmonic list. Rebuild them after a selection change
+        # without returning to raw EEG preprocessing or participant FFT export.
+        steps.extend(self._run_source_maps(project_root))
+
+        ok = all(step.ok for step in steps)
+        has_warnings = any(step.warning for step in steps)
+        completion_message = (
+            "Selection-dependent post-processing is current."
+            if ok and not has_warnings
+            else "Selection-dependent post-processing finished with failures; old artifacts remain stale."
+        )
+        self._emit_phase_progress(
+            _PHASE_COMPLETE,
+            POST_PROCESSING_PHASE_COUNT,
+            completion_message,
+        )
+        self.finished.emit(
+            {
+                "ok": ok,
+                "has_warnings": has_warnings,
+                "selection_changed": self._selection_changed,
+                "rebuild_skipped": False,
                 "steps": [step.as_dict() for step in steps],
             }
         )
@@ -253,22 +407,38 @@ class PostProcessingPipelineWorker(QObject):
 
     def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
         self._emit_progress("FPVS Toolbox is preparing analysis files for downstream tools.")
+        artifact_id = "stats_ready_summed_bca"
+        from Main_App.processing.artifact_freshness import canonical_artifact_path
+
+        self._artifact_targets[artifact_id] = canonical_artifact_path(
+            project_root,
+            artifact_id,
+        )
         try:
             from Tools.LORETA_Visualizer.stats_ready_workbook import (
                 default_loreta_stats_ready_workbook_path,
                 write_loreta_stats_ready_workbook,
             )
 
-            self._delete_file_if_present(
-                default_loreta_stats_ready_workbook_path(project_root),
-                project_root=project_root,
+            target = default_loreta_stats_ready_workbook_path(project_root)
+            self._artifact_targets[artifact_id] = target
+            with self._artifact_rebuild_context(
+                artifact_id,
+                target,
                 label="Stats-ready Summed BCA workbook",
-            )
-            result = write_loreta_stats_ready_workbook(
-                project_root,
-                log_callback=self._emit_progress,
-                dataset_index=self._dataset_index,
-            )
+            ) as archive:
+                self._delete_file_if_present(
+                    target,
+                    project_root=project_root,
+                    label="Stats-ready Summed BCA workbook",
+                )
+                result = write_loreta_stats_ready_workbook(
+                    project_root,
+                    log_callback=self._emit_progress,
+                    dataset_index=self._dataset_index,
+                )
+            if archive is not None:
+                self._artifact_archives[artifact_id] = archive
         except PIPELINE_STEP_EXCEPTIONS as exc:
             logger.exception("post_processing_stats_ready_export_failed")
             return PostProcessingStepResult("stats_ready_summed_bca", False, str(exc))
@@ -295,15 +465,34 @@ class PostProcessingPipelineWorker(QObject):
                     "the current processing-time harmonic selection was unavailable."
                 ),
             )
-        try:
-            from Main_App.exports import write_analysis_ready_workbook
+        artifact_id = "analysis_ready_full_audit"
+        from Main_App.processing.artifact_freshness import canonical_artifact_path
 
-            result = write_analysis_ready_workbook(
-                project_root,
-                dataset_index=self._dataset_index,
-                selection_metadata=self._harmonic_selection_metadata,
-                log_callback=self._emit_progress,
+        self._artifact_targets[artifact_id] = canonical_artifact_path(
+            project_root,
+            artifact_id,
+        )
+        try:
+            from Main_App.exports import (
+                default_analysis_ready_workbook_path,
+                write_analysis_ready_workbook,
             )
+
+            target = default_analysis_ready_workbook_path(project_root)
+            self._artifact_targets[artifact_id] = target
+            with self._artifact_rebuild_context(
+                artifact_id,
+                target,
+                label="full-audit analysis-ready workbook",
+            ) as archive:
+                result = write_analysis_ready_workbook(
+                    project_root,
+                    dataset_index=self._dataset_index,
+                    selection_metadata=self._harmonic_selection_metadata,
+                    log_callback=self._emit_progress,
+                )
+            if archive is not None:
+                self._artifact_archives[artifact_id] = archive
         except PIPELINE_STEP_EXCEPTIONS as exc:
             logger.exception("post_processing_analysis_ready_export_failed")
             return PostProcessingStepResult(
@@ -322,6 +511,80 @@ class PostProcessingPipelineWorker(QObject):
             str(result.workbook_path),
         )
 
+    def _run_full_fft_provenance(
+        self,
+        project_root: Path,
+        completed_steps: list[PostProcessingStepResult],
+    ) -> PostProcessingStepResult:
+        """Publish the selection-independent FullFFT source identity after QC."""
+
+        required = {"frequency_domain_qc"}
+        successful = {step.name for step in completed_steps if step.ok}
+        if not required.issubset(successful):
+            return PostProcessingStepResult(
+                "full_fft_provenance",
+                False,
+                "Neutral FullFFT provenance was not published because "
+                "frequency-domain QC did not complete.",
+            )
+        if not self._project_manifest_exists(project_root):
+            return PostProcessingStepResult(
+                "full_fft_provenance",
+                True,
+                "Neutral FullFFT provenance is unavailable for an unmanaged project.",
+                warning=True,
+            )
+
+        try:
+            import config
+            from Main_App import SettingsManager
+            from Main_App.processing.frequency_domain_qc import (
+                mark_frequency_domain_outputs_current,
+                mark_frequency_domain_outputs_stale,
+            )
+            from Main_App.processing.full_fft_provenance import (
+                write_project_full_fft_provenance,
+            )
+
+            base_frequency_hz = float(
+                SettingsManager().get("analysis", "base_freq", "6.0")
+            )
+            oddball_frequency_hz = float(config.DEFAULT_ODDBALL_FREQ)
+            mark_frequency_domain_outputs_current(project_root)
+            record = write_project_full_fft_provenance(
+                project_root,
+                base_frequency_hz=base_frequency_hz,
+                oddball_frequency_hz=oddball_frequency_hz,
+                dataset_index=self._dataset_index,
+            )
+        except PIPELINE_STEP_EXCEPTIONS as exc:
+            try:
+                if self._project_manifest_exists(project_root):
+                    mark_frequency_domain_outputs_stale(
+                        project_root,
+                        reason=f"Neutral FullFFT provenance failed: {exc}",
+                    )
+            except PIPELINE_STEP_EXCEPTIONS:
+                logger.debug(
+                    "full_fft_provenance_stale_mark_failed",
+                    exc_info=True,
+                )
+            logger.exception("post_processing_full_fft_provenance_failed")
+            return PostProcessingStepResult(
+                "full_fft_provenance",
+                False,
+                f"Neutral FullFFT provenance failed: {exc}",
+            )
+        return PostProcessingStepResult(
+            "full_fft_provenance",
+            True,
+            (
+                "Neutral FullFFT provenance published for "
+                f"{record.source_workbook_count} active workbook(s)."
+            ),
+            str(project_root / "project.json"),
+        )
+
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
         self._emit_progress(
             "Generating Hauk-informed time-domain source-space maps for 3D visualization of oddball responses."
@@ -336,7 +599,11 @@ class PostProcessingPipelineWorker(QObject):
                 completed_before_source_maps + index - 1,
                 phase_message,
             )
-            steps.append(self._run_source_map_mode(project_root, mode))
+            steps.append(
+                self._record_artifact_freshness(
+                    self._run_source_map_mode(project_root, mode)
+                )
+            )
             self._emit_phase_progress(
                 phase_id,
                 completed_before_source_maps + index,
@@ -351,21 +618,36 @@ class PostProcessingPipelineWorker(QObject):
     ) -> PostProcessingStepResult:
         if mode == "l2_mne_source_psd":
             label = "Hauk-informed time-domain L2-MNE source maps"
+            artifact_id = mode
+            from Main_App.processing.artifact_freshness import canonical_artifact_path
+
+            self._artifact_targets[artifact_id] = canonical_artifact_path(
+                project_root,
+                artifact_id,
+            )
             try:
                 default_output_dir, write_payloads = _load_source_psd_export_api()
-
-                self._clear_output_dir(
-                    default_output_dir(project_root),
-                    project_root=project_root,
+                target = default_output_dir(project_root)
+                self._artifact_targets[artifact_id] = target
+                with self._artifact_rebuild_context(
+                    artifact_id,
+                    target,
                     label=label,
-                )
-                result = write_payloads(
-                    project=self._project,
-                    project_root=project_root,
-                    include_flagged_subjects=False,
-                    allow_fetch_fsaverage=True,
-                    progress_callback=self._emit_progress,
-                )
+                ) as archive:
+                    self._clear_output_dir(
+                        target,
+                        project_root=project_root,
+                        label=label,
+                    )
+                    result = write_payloads(
+                        project=self._project,
+                        project_root=project_root,
+                        include_flagged_subjects=False,
+                        allow_fetch_fsaverage=True,
+                        progress_callback=self._emit_progress,
+                    )
+                if archive is not None:
+                    self._artifact_archives[artifact_id] = archive
             except PIPELINE_STEP_EXCEPTIONS as exc:
                 logger.exception("post_processing_l2_mne_source_psd_maps_failed")
                 return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
@@ -414,21 +696,36 @@ class PostProcessingPipelineWorker(QObject):
 
         if mode == "eloreta_volume_source_psd":
             label = "Hauk-informed time-domain eLORETA volume source maps"
+            artifact_id = mode
+            from Main_App.processing.artifact_freshness import canonical_artifact_path
+
+            self._artifact_targets[artifact_id] = canonical_artifact_path(
+                project_root,
+                artifact_id,
+            )
             try:
                 default_output_dir, write_payloads = _load_eloreta_source_psd_export_api()
-
-                self._clear_output_dir(
-                    default_output_dir(project_root),
-                    project_root=project_root,
+                target = default_output_dir(project_root)
+                self._artifact_targets[artifact_id] = target
+                with self._artifact_rebuild_context(
+                    artifact_id,
+                    target,
                     label=label,
-                )
-                result = write_payloads(
-                    project=self._project,
-                    project_root=project_root,
-                    include_flagged_subjects=False,
-                    allow_fetch_fsaverage=True,
-                    progress_callback=self._emit_progress,
-                )
+                ) as archive:
+                    self._clear_output_dir(
+                        target,
+                        project_root=project_root,
+                        label=label,
+                    )
+                    result = write_payloads(
+                        project=self._project,
+                        project_root=project_root,
+                        include_flagged_subjects=False,
+                        allow_fetch_fsaverage=True,
+                        progress_callback=self._emit_progress,
+                    )
+                if archive is not None:
+                    self._artifact_archives[artifact_id] = archive
             except PIPELINE_STEP_EXCEPTIONS as exc:
                 logger.exception("post_processing_eloreta_volume_source_psd_maps_failed")
                 return PostProcessingStepResult(mode, False, f"{label} failed: {exc}")
@@ -476,6 +773,148 @@ class PostProcessingPipelineWorker(QObject):
             )
 
         return PostProcessingStepResult(mode, False, f"Unsupported source-map mode: {mode}")
+
+    def _capture_previous_selection_fingerprint(self, project_root: Path) -> None:
+        if self._previous_selection_fingerprint is not None:
+            return
+        if not self._project_manifest_exists(project_root):
+            return
+        from Main_App.processing.artifact_freshness import (
+            load_active_selection_fingerprint,
+        )
+
+        self._previous_selection_fingerprint = load_active_selection_fingerprint(
+            project_root
+        )
+
+    def _activate_artifact_freshness(
+        self,
+        project_root: Path,
+        *,
+        selection_summary_path: str | Path | None,
+    ) -> None:
+        if not self._project_manifest_exists(project_root):
+            return
+        if self._harmonic_selection_metadata is None:
+            raise RuntimeError(
+                "Accepted harmonic-selection metadata is unavailable for post-processing."
+            )
+        from Main_App.processing.artifact_freshness import (
+            activate_selection_freshness,
+        )
+
+        transition = activate_selection_freshness(
+            project_root,
+            self._harmonic_selection_metadata,
+            previous_fingerprint=self._previous_selection_fingerprint,
+            selection_summary_path=selection_summary_path,
+        )
+        self._selection_fingerprint = transition.selection_fingerprint
+        self._selection_changed = transition.changed
+        self._previous_selection_fingerprint = transition.previous_fingerprint
+        if transition.changed:
+            self._emit_progress(
+                "The accepted harmonic selection changed; dependent canonical "
+                "outputs were marked stale before rebuilding."
+            )
+
+    def _artifact_rebuild_context(
+        self,
+        artifact_id: str,
+        target: Path,
+        *,
+        label: str,
+    ):  # noqa: ANN202
+        if (
+            self._selection_fingerprint is None
+            or not self._project_manifest_exists(
+                Path(self._project.project_root).expanduser().resolve()
+            )
+        ):
+            return nullcontext(None)
+        from Main_App.processing.artifact_freshness import (
+            preserve_artifact_for_rebuild,
+        )
+
+        if target.exists():
+            self._emit_progress(
+                f"Preserving the preceding {label} as a stale historical artifact."
+            )
+        return preserve_artifact_for_rebuild(
+            Path(self._project.project_root).expanduser().resolve(),
+            artifact_id,
+            target,
+            self._previous_selection_fingerprint,
+        )
+
+    def _record_artifact_freshness(
+        self,
+        step: PostProcessingStepResult,
+    ) -> PostProcessingStepResult:
+        project_root = Path(self._project.project_root).expanduser().resolve()
+        target = self._artifact_targets.get(step.name)
+        if (
+            target is None
+            or self._selection_fingerprint is None
+            or not self._project_manifest_exists(project_root)
+        ):
+            return step
+        try:
+            from Main_App.processing.artifact_freshness import (
+                mark_artifact_current,
+                mark_artifact_failed,
+            )
+
+            if step.ok:
+                mark_artifact_current(
+                    project_root,
+                    step.name,
+                    target,
+                    self._selection_fingerprint,
+                    archived_path=self._artifact_archives.get(step.name),
+                )
+            else:
+                mark_artifact_failed(
+                    project_root,
+                    step.name,
+                    target,
+                    self._selection_fingerprint,
+                    step.message,
+                )
+        except PIPELINE_STEP_EXCEPTIONS as exc:
+            logger.exception(
+                "post_processing_artifact_freshness_update_failed artifact_id=%s",
+                step.name,
+            )
+            archived = self._artifact_archives.get(step.name)
+            if step.ok and archived is not None:
+                try:
+                    from Main_App.processing.artifact_freshness import (
+                        restore_preserved_artifact,
+                    )
+
+                    restore_preserved_artifact(
+                        project_root,
+                        target,
+                        archived,
+                    )
+                except PIPELINE_STEP_EXCEPTIONS:
+                    logger.exception(
+                        "post_processing_artifact_restore_failed artifact_id=%s",
+                        step.name,
+                    )
+            return PostProcessingStepResult(
+                step.name,
+                False,
+                f"{step.message} Artifact freshness could not be saved: {exc}",
+                step.path,
+                warning=step.warning,
+            )
+        return step
+
+    @staticmethod
+    def _project_manifest_exists(project_root: Path) -> bool:
+        return (project_root / "project.json").is_file()
 
     def _delete_file_if_present(
         self,
@@ -568,8 +1007,41 @@ def _load_eloreta_source_psd_export_api():  # noqa: ANN202
     )
 
 
+def run_postprocessing_from_selection(
+    project: Any,
+    selection_metadata: Mapping[str, object],
+    *,
+    previous_selection_fingerprint: str | None = None,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict[str, object]:
+    """Synchronously rebuild selection derivatives in the caller's worker thread.
+
+    This entry point intentionally starts after harmonic selection.  It never
+    loads raw EEG, preprocesses data, or regenerates participant FullFFT
+    workbooks.  GUI callers must invoke it from an existing background worker.
+    """
+
+    worker = PostProcessingPipelineWorker(
+        project,
+        resume_from_selection=True,
+        selection_metadata=selection_metadata,
+        previous_selection_fingerprint=previous_selection_fingerprint,
+    )
+    results: list[dict[str, object]] = []
+    worker.finished.connect(results.append)
+    if progress_callback is not None:
+        worker.progress.connect(progress_callback)
+    worker.run()
+    if not results:
+        raise RuntimeError(
+            "Selection-dependent post-processing finished without a result."
+        )
+    return dict(results[-1])
+
+
 __all__ = [
     "POST_PROCESSING_PHASE_COUNT",
     "PostProcessingPipelineWorker",
     "PostProcessingStepResult",
+    "run_postprocessing_from_selection",
 ]

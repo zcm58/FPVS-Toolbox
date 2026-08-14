@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 import numpy as np
@@ -9,12 +10,18 @@ import pandas as pd
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.processing.full_fft_provenance import (
+    FullFftProvenanceMissingError,
+)
 from Tools.Free_Harmonic_Clustering import inputs
 from Tools.Free_Harmonic_Clustering.models import (
     AnalysisDesign,
     FreeHarmonicInputError,
     FreeHarmonicMethodSpec,
     ProjectContrastRequest,
+)
+from Tools.Free_Harmonic_Clustering.preparation import (
+    build_available_frequency_window_plan,
 )
 
 
@@ -156,6 +163,37 @@ def _install_reader_doubles(
 
     monkeypatch.setattr(inputs, "_read_fullfft_header", read_header)
     monkeypatch.setattr(inputs, "_read_fullfft_selected_columns", read_selected)
+    provenance_header = (header_for_path or (lambda _path: _header()))(
+        Path("provenance-reference.xlsx")
+    )
+
+    def validate_provenance(
+        _project_root: Path,
+        *,
+        base_frequency_hz: float,
+        oddball_frequency_hz: float,
+        dataset_index: object,
+    ) -> object:
+        plan = build_available_frequency_window_plan(
+            provenance_header,
+            oddball_frequency_hz=oddball_frequency_hz,
+            base_frequency_hz=base_frequency_hz,
+            noise_half_width_hz=0.1,
+        )
+        return SimpleNamespace(
+            grid_fingerprint=plan.grid_fingerprint,
+            method_version="test-neutral-full-fft-v1",
+            source_fingerprint="source-fingerprint",
+            cohort_fingerprint="cohort-fingerprint",
+            frequency_qc_fingerprint="qc-fingerprint",
+            processing_export_fingerprint="processing-export-fingerprint",
+        )
+
+    monkeypatch.setattr(
+        inputs,
+        "validate_project_full_fft_provenance",
+        validate_provenance,
+    )
     return header_calls, amplitude_calls
 
 
@@ -240,6 +278,11 @@ def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
     assert len(header_calls) == len(amplitude_calls) == 4
     assert len(set(amplitude_calls)) == 4
     assert prepared.provenance.workbook_count == 4
+    assert (
+        prepared.provenance.full_fft_provenance_method_version
+        == "test-neutral-full-fft-v1"
+    )
+    assert prepared.provenance.full_fft_source_fingerprint == "source-fingerprint"
     assert prepared.provenance.reader_phase_seconds == (("xml_selected_rows", 0.004),)
     assert progress[-1] == (8, 8)
     assert prepared.snr_a.shape == prepared.values_a.shape == (2, 64, 3)
@@ -253,6 +296,35 @@ def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
         not workbook.project_relative_path.startswith(("/", "\\"))
         for workbook in prepared.source_workbooks
     )
+
+
+def test_direct_preparation_blocks_missing_neutral_provenance_before_fullfft_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _paths = _independent_project(tmp_path)
+    header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+
+    def missing_provenance(*args: object, **kwargs: object) -> object:
+        raise FullFftProvenanceMissingError(
+            "Neutral FullFFT provenance is missing. Rerun post-processing; "
+            "EEG preprocessing is not required."
+        )
+
+    monkeypatch.setattr(
+        inputs,
+        "validate_project_full_fft_provenance",
+        missing_provenance,
+    )
+
+    with pytest.raises(FreeHarmonicInputError, match="provenance is missing"):
+        inputs.prepare_project_contrast(
+            _independent_request(root),
+            FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+        )
+
+    assert header_calls == []
+    assert amplitude_calls == []
 
 
 def test_paired_conditions_use_complete_intersection_in_identical_order(

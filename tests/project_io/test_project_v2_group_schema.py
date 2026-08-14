@@ -295,6 +295,12 @@ def test_new_project_single_group_writes_no_groups_metadata(tmp_path, monkeypatc
     saved = json.loads((host.projectsRoot / "Single Study" / "project.json").read_text(encoding="utf-8"))
     assert saved["input_folder"] == str(raw_dir)
     assert saved["options"]["mode"] == "batch"
+    assert saved["preprocessing"]["harmonic_selection_profile"] == (
+        "dzhelyova_poncet_two_consecutive_failures"
+    )
+    assert saved["preprocessing"]["group_significant_electrode_scope"] == (
+        "all_scalp_electrodes"
+    )
     assert "groups" not in saved
     assert "participants" not in saved
 
@@ -377,6 +383,9 @@ def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monk
     saved = json.loads((host.projectsRoot / "Multi Study" / "project.json").read_text(encoding="utf-8"))
     assert "input_folder" not in saved
     assert saved["options"]["mode"] == "batch"
+    assert saved["preprocessing"]["harmonic_selection_profile"] == (
+        "dzhelyova_poncet_two_consecutive_failures"
+    )
     assert saved["groups"] == {
         "control": {
             "label": "Control",

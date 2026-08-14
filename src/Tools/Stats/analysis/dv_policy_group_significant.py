@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
@@ -14,13 +14,22 @@ import pandas as pd
 
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+    HARMONIC_PROFILE_LEGACY_ID,
     GROUP_SIGNIFICANT_POLICY_ID,
     GROUP_SIGNIFICANT_POLICY_LABEL,
     GROUP_SIGNIFICANT_POLICY_NAME,
     GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY,
     GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+    GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES,
     LOCKED_ODDBALL_FREQUENCY_HZ,
+)
+from Tools.Stats.analysis.harmonic_pooling import (
+    BalancedHarmonicPool,
+    HarmonicPoolingCell,
+    normalize_group_structure,
+    pool_group_condition_spectra,
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
 from Tools.Stats.data.group_harmonic_cache import (
@@ -69,6 +78,7 @@ class GroupSignificantHarmonicRow:
     excluded_base_rate: bool
     exclusion_reason: str
     warning: str
+    evaluated: bool = True
     target_amplitude_uv: float | None = None
     noise_mean_uv: float | None = None
     noise_std_uv: float | None = None
@@ -79,6 +89,7 @@ class GroupSignificantHarmonicRow:
     noise_used_frequencies_hz: tuple[float, ...] = ()
     noise_used_amplitudes_uv: tuple[float, ...] = ()
     included_in_summation: bool = False
+    condition_z_scores: tuple[tuple[str, float | None], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +108,14 @@ class _SummationGapGuardDecision:
     lower_significant_harmonic_hz: float | None
     highest_significant_harmonic_hz: float | None
     retained_cutoff_harmonic_index: int | None
+
+
+@dataclass(frozen=True)
+class _TwoConsecutiveFailureDecision:
+    cutoff_harmonic_index: int | None
+    evaluated_harmonic_indices: tuple[int, ...]
+    stopping_harmonics_hz: tuple[float, ...]
+    stopping_reason: str
 
 
 @dataclass(frozen=True)
@@ -125,6 +144,24 @@ class GroupSignificantHarmonicSelection:
     matching_tolerance_hz: float
     noise_window_bins: int
     rows: list[GroupSignificantHarmonicRow]
+    method_profile_id: str = HARMONIC_PROFILE_LEGACY_ID
+    method_profile_version: str = "1.0"
+    method_profile_label: str = "Legacy FPVS Toolbox"
+    method_citation: str = "FPVS Toolbox legacy behavior retained for reproducibility"
+    same_sample_adaptive: bool = True
+    pooling_method: str = "equal_available_workbook_amplitude_mean"
+    pooling_cells: tuple[HarmonicPoolingCell, ...] = ()
+    declared_group_ids: tuple[str, ...] = ()
+    condition_z_by_harmonic: dict[str, dict[float, float | None]] = field(
+        default_factory=dict
+    )
+    selection_electrode_mask: tuple[str, ...] = ()
+    stopping_rule: str = "highest_detected_with_one_pass_gap_guard"
+    stopping_reason: str = "highest_detected_harmonic"
+    stopping_harmonics_hz: tuple[float, ...] = ()
+    cutoff_harmonic_hz: float | None = None
+    source_workbook_fingerprints: tuple[dict[str, object], ...] = ()
+    selection_fingerprint: str | None = None
     selection_cache_source: str = "computed_this_run"
     selection_cache_saved_at: str | None = None
     selection_cache_key: str | None = None
@@ -151,23 +188,60 @@ class GroupSignificantHarmonicSelection:
             detected_freqs=detected_harmonics,
             summation_method=self.summation_method,
         )
-        return {
+        metadata: dict[str, object] = {
             "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
             "harmonic_policy_label": GROUP_SIGNIFICANT_POLICY_LABEL,
+            "harmonic_selection_profile": self.method_profile_id,
+            "harmonic_selection_profile_version": self.method_profile_version,
+            "harmonic_selection_profile_label": self.method_profile_label,
+            "harmonic_selection_profile_citation": self.method_citation,
+            "same_sample_adaptive": self.same_sample_adaptive,
+            "selection_provenance": (
+                "same_sample_adaptive" if self.same_sample_adaptive else "independent_fixed"
+            ),
             "dependent_variable": "summed_bca",
             "selection_source_sheet": FULL_FFT_AMPLITUDE_SHEET_NAME,
-            "selection_amplitude_summary": "grand_average_raw_amplitude_spectrum",
+            "selection_amplitude_summary": (
+                "grand_average_raw_amplitude_spectrum"
+                if self.method_profile_id == HARMONIC_PROFILE_LEGACY_ID
+                else "participant_cell_means_then_equal_group_condition_spectra"
+            ),
             "selection_scope": self.selection_scope,
             "selection_conditions": list(self.selection_conditions),
             "selection_subjects": list(self.selection_subjects),
             "selection_spectra_count": int(self.selection_spectra_count),
             "selection_electrode_count": int(self.selection_electrode_count),
+            "selection_electrode_mask": list(self.selection_electrode_mask),
             "electrode_scope": self.electrode_scope,
             "summation_method": self.summation_method,
-            "summation_gap_guard_rule": GROUP_SIGNIFICANT_SUMMATION_GAP_GUARD_RULE,
+            "pooling_method": self.pooling_method,
+            "pooling_cells": [cell.to_metadata() for cell in self.pooling_cells],
+            "pooling_cell_sample_sizes": {
+                f"{cell.group_id}::{cell.condition}": cell.participant_count
+                for cell in self.pooling_cells
+            },
+            "declared_group_ids": list(self.declared_group_ids),
+            "condition_z_by_harmonic": {
+                str(condition): {
+                    str(_canonical_harmonic_frequency(freq)): value
+                    for freq, value in values.items()
+                }
+                for condition, values in self.condition_z_by_harmonic.items()
+            },
+            "stopping_rule": self.stopping_rule,
+            "stopping_reason": self.stopping_reason,
+            "stopping_harmonics_hz": list(self.stopping_harmonics_hz),
+            "cutoff_harmonic_hz": self.cutoff_harmonic_hz,
+            "summation_gap_guard_rule": (
+                GROUP_SIGNIFICANT_SUMMATION_GAP_GUARD_RULE
+                if self.method_profile_id == HARMONIC_PROFILE_LEGACY_ID
+                else None
+            ),
             "summation_gap_guard_enabled": gap_guard.enabled,
             "summation_gap_guard_max_intervening_nonbase_harmonics": (
                 GROUP_SIGNIFICANT_MAX_INTERVENING_NONBASE_HARMONICS
+                if self.method_profile_id == HARMONIC_PROFILE_LEGACY_ID
+                else None
             ),
             "summation_gap_guard_applied": gap_guard.applied,
             "summation_gap_guard_intervening_nonbase_harmonic_count": (
@@ -182,7 +256,11 @@ class GroupSignificantHarmonicSelection:
                 else None
             ),
             "z_threshold": float(self.z_threshold),
-            "z_score_source": "computed_from_grand_averaged_amplitude_spectrum",
+            "z_score_source": (
+                "computed_from_grand_averaged_amplitude_spectrum"
+                if self.method_profile_id == HARMONIC_PROFILE_LEGACY_ID
+                else "condition_local_z_then_equal_weight_condition_z_mean"
+            ),
             "noise_window_bins": int(self.noise_window_bins),
             "base_frequency_hz": float(self.base_frequency_hz),
             "oddball_frequency_hz": float(self.oddball_frequency_hz),
@@ -191,6 +269,7 @@ class GroupSignificantHarmonicSelection:
             "matching_tolerance_hz": float(self.matching_tolerance_hz),
             "frequency_resolution_hz": self.frequency_resolution_hz,
             "harmonic_domain_hz": harmonic_domain,
+            "evaluated_harmonics_hz": harmonic_domain,
             "detected_significant_harmonics_hz": detected_harmonics,
             "detected_significant_columns": list(self.detected_significant_columns),
             "detected_significant_bin_indices": list(
@@ -208,6 +287,7 @@ class GroupSignificantHarmonicSelection:
                 for freq, value in self.z_by_harmonic.items()
             },
             "excluded_base_harmonics_hz": excluded_base,
+            "base_overlap_excluded_harmonics_hz": excluded_base,
             "applied_uniformly_across_participants": True,
             "applied_uniformly_across_conditions": True,
             "applied_uniformly_across_rois": True,
@@ -230,6 +310,7 @@ class GroupSignificantHarmonicSelection:
                     "excluded_base_rate": row.excluded_base_rate,
                     "exclusion_reason": row.exclusion_reason,
                     "warning": row.warning,
+                    "evaluated": row.evaluated,
                     "target_amplitude_uv": row.target_amplitude_uv,
                     "noise_mean_uv": row.noise_mean_uv,
                     "noise_std_uv": row.noise_std_uv,
@@ -240,14 +321,26 @@ class GroupSignificantHarmonicSelection:
                     "noise_used_frequencies_hz": list(row.noise_used_frequencies_hz),
                     "noise_used_amplitudes_uv": list(row.noise_used_amplitudes_uv),
                     "included_in_summation": bool(row.included_in_summation),
+                    "condition_z_scores": {
+                        condition: value for condition, value in row.condition_z_scores
+                    },
                 }
                 for row in self.rows
             ],
             "selection_cache_source": self.selection_cache_source,
             "selection_cache_saved_at": self.selection_cache_saved_at,
             "selection_cache_key": self.selection_cache_key,
+            "source_workbook_fingerprints": list(self.source_workbook_fingerprints),
             "methods_summary": _methods_summary(self),
         }
+        from Tools.Stats.analysis.canonical_harmonics import (
+            compute_selection_fingerprint,
+        )
+
+        metadata["selection_fingerprint"] = (
+            self.selection_fingerprint or compute_selection_fingerprint(metadata)
+        )
+        return metadata
 
 
 @dataclass(frozen=True)
@@ -281,6 +374,11 @@ class GroupSignificantSelectionCacheKey:
     z_threshold: float
     electrode_scope: str
     summation_method: str
+    method_profile_id: str
+    method_profile_version: str
+    selection_electrodes: tuple[str, ...]
+    group_assignments: tuple[tuple[str, str], ...]
+    declared_group_ids: tuple[str, ...]
     project_processing_signature_hash: str | None = None
 
 
@@ -366,6 +464,44 @@ def _store_group_significant_selection(
         _GROUP_SELECTION_CACHE[cache_key] = selection
 
 
+def _resolve_profile_group_structure(
+    *,
+    subjects: Sequence[str],
+    settings: DVPolicySettings,
+    project_root: str | Path | None,
+    participant_group_ids: Mapping[str, str] | None,
+    declared_group_ids: Sequence[str] | None,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID:
+        return {}, ()
+    if participant_group_ids is not None or declared_group_ids is not None:
+        return normalize_group_structure(
+            subjects=subjects,
+            participant_group_ids=participant_group_ids,
+            declared_group_ids=declared_group_ids,
+        )
+    if project_root not in (None, ""):
+        from Main_App.projects import load_project_dataset_index
+
+        dataset_index = load_project_dataset_index(Path(project_root))
+        if dataset_index.has_group_metadata:
+            return normalize_group_structure(
+                subjects=subjects,
+                participant_group_ids=dataset_index.participant_group_id_map(
+                    uppercase_keys=True,
+                    include_legacy_aliases=True,
+                ),
+                declared_group_ids=tuple(
+                    sorted(dataset_index.groups.keys(), key=str.casefold)
+                ),
+            )
+    return normalize_group_structure(
+        subjects=subjects,
+        participant_group_ids=None,
+        declared_group_ids=None,
+    )
+
+
 def _group_significant_selection_cache_key(
     *,
     subjects: List[str],
@@ -375,6 +511,8 @@ def _group_significant_selection_cache_key(
     base_frequency_hz: float,
     max_freq: float | None,
     settings: DVPolicySettings,
+    participant_group_ids: Mapping[str, str] | None = None,
+    declared_group_ids: Sequence[str] | None = None,
     project_processing_signature_hash: str | None = None,
 ) -> GroupSignificantSelectionCacheKey:
     subject_key = tuple(str(subject) for subject in subjects)
@@ -388,12 +526,24 @@ def _group_significant_selection_cache_key(
         for subject in subject_key
         for condition in condition_key
     )
-    rois_key = tuple(
-        (str(roi_name), tuple(str(channel).upper().strip() for channel in channels or ()))
-        for roi_name, channels in sorted((rois or {}).items())
+    rois_key = (
+        tuple(
+            (str(roi_name), tuple(str(channel).upper().strip() for channel in channels or ()))
+            for roi_name, channels in sorted((rois or {}).items())
+        )
+        if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID
+        else ()
     )
     return GroupSignificantSelectionCacheKey(
-        method_version=GROUP_HARMONIC_METHOD_VERSION,
+        method_version=(
+            GROUP_HARMONIC_METHOD_VERSION
+            if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID
+            else (
+                "group_significant_harmonic_profiles_"
+                f"{settings.harmonic_selection_profile}_v"
+                f"{settings.harmonic_selection_profile_version}"
+            )
+        ),
         subjects=subject_key,
         conditions=condition_key,
         workbooks=workbook_signatures,
@@ -404,6 +554,19 @@ def _group_significant_selection_cache_key(
         z_threshold=float(settings.group_significant_z_threshold),
         electrode_scope=str(settings.group_significant_electrode_scope),
         summation_method=str(settings.group_significant_summation_method),
+        method_profile_id=settings.harmonic_selection_profile,
+        method_profile_version=settings.harmonic_selection_profile_version,
+        selection_electrodes=tuple(settings.group_significant_selection_electrodes),
+        group_assignments=tuple(
+            sorted(
+                (
+                    (str(subject), str(group_id))
+                    for subject, group_id in (participant_group_ids or {}).items()
+                ),
+                key=lambda item: item[0].casefold(),
+            )
+        ),
+        declared_group_ids=tuple(str(group_id) for group_id in (declared_group_ids or ())),
         project_processing_signature_hash=project_processing_signature_hash,
     )
 
@@ -595,6 +758,51 @@ def group_significant_selection_from_metadata(
             default=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
         ),
         rows=rows,
+        method_profile_id=str(
+            metadata.get("harmonic_selection_profile") or HARMONIC_PROFILE_LEGACY_ID
+        ),
+        method_profile_version=str(
+            metadata.get("harmonic_selection_profile_version") or "1.0"
+        ),
+        method_profile_label=str(
+            metadata.get("harmonic_selection_profile_label") or "Legacy FPVS Toolbox"
+        ),
+        method_citation=str(
+            metadata.get("harmonic_selection_profile_citation")
+            or "FPVS Toolbox legacy behavior retained for reproducibility"
+        ),
+        same_sample_adaptive=bool(metadata.get("same_sample_adaptive", True)),
+        pooling_method=str(
+            metadata.get("pooling_method") or "equal_available_workbook_amplitude_mean"
+        ),
+        pooling_cells=_pooling_cells_from_metadata(metadata.get("pooling_cells")),
+        declared_group_ids=tuple(
+            _metadata_string_list(metadata.get("declared_group_ids"))
+        ),
+        condition_z_by_harmonic=_metadata_nested_float_map(
+            metadata.get("condition_z_by_harmonic")
+        ),
+        selection_electrode_mask=tuple(
+            _metadata_string_list(metadata.get("selection_electrode_mask"))
+        ),
+        stopping_rule=str(metadata.get("stopping_rule") or ""),
+        stopping_reason=str(metadata.get("stopping_reason") or ""),
+        stopping_harmonics_hz=tuple(
+            _metadata_float_list(metadata.get("stopping_harmonics_hz"))
+        ),
+        cutoff_harmonic_hz=_metadata_optional_float(
+            metadata.get("cutoff_harmonic_hz")
+        ),
+        source_workbook_fingerprints=tuple(
+            dict(item)
+            for item in _metadata_sequence(metadata.get("source_workbook_fingerprints"))
+            if isinstance(item, dict)
+        ),
+        selection_fingerprint=(
+            str(metadata.get("selection_fingerprint"))
+            if metadata.get("selection_fingerprint") not in (None, "")
+            else None
+        ),
         selection_cache_source=str(metadata.get("selection_cache_source") or "saved_project_metadata"),
         selection_cache_saved_at=(
             str(metadata.get("selection_cache_saved_at"))
@@ -629,6 +837,7 @@ def _group_significant_row_from_metadata(row_data: dict[str, object]) -> GroupSi
         excluded_base_rate=bool(row_data.get("excluded_base_rate")),
         exclusion_reason=str(row_data.get("exclusion_reason") or ""),
         warning=str(row_data.get("warning") or ""),
+        evaluated=bool(row_data.get("evaluated", True)),
         target_amplitude_uv=_metadata_optional_float(row_data.get("target_amplitude_uv")),
         noise_mean_uv=_metadata_optional_float(row_data.get("noise_mean_uv")),
         noise_std_uv=_metadata_optional_float(row_data.get("noise_std_uv")),
@@ -646,6 +855,14 @@ def _group_significant_row_from_metadata(row_data: dict[str, object]) -> GroupSi
         ),
         included_in_summation=bool(
             row_data.get("included_in_summation", row_data.get("selected", False))
+        ),
+        condition_z_scores=tuple(
+            (str(condition), _metadata_optional_float(value))
+            for condition, value in (
+                row_data.get("condition_z_scores", {}).items()
+                if isinstance(row_data.get("condition_z_scores"), dict)
+                else ()
+            )
         ),
     )
 
@@ -717,6 +934,67 @@ def _metadata_float_map(value: object) -> dict[float, float]:
     return out
 
 
+def _metadata_string_list(value: object) -> list[str]:
+    return [
+        str(item)
+        for item in _metadata_sequence(value)
+        if str(item).strip()
+    ]
+
+
+def _metadata_nested_float_map(
+    value: object,
+) -> dict[str, dict[float, float | None]]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, dict[float, float | None]] = {}
+    for condition, raw_values in value.items():
+        if not isinstance(raw_values, dict):
+            continue
+        condition_values: dict[float, float | None] = {}
+        for raw_freq, raw_z in raw_values.items():
+            freq = _metadata_optional_float(raw_freq)
+            if freq is None:
+                continue
+            condition_values[_canonical_harmonic_frequency(freq)] = (
+                _metadata_optional_float(raw_z)
+            )
+        out[str(condition)] = condition_values
+    return out
+
+
+def _pooling_cells_from_metadata(value: object) -> tuple[HarmonicPoolingCell, ...]:
+    cells: list[HarmonicPoolingCell] = []
+    for raw_cell in _metadata_sequence(value):
+        if not isinstance(raw_cell, dict):
+            continue
+        cells.append(
+            HarmonicPoolingCell(
+                group_id=str(raw_cell.get("group_id") or ""),
+                condition=str(raw_cell.get("condition") or ""),
+                participant_ids=tuple(
+                    _metadata_string_list(raw_cell.get("participant_ids"))
+                ),
+                participant_count=_metadata_int(
+                    raw_cell.get("participant_count"), default=0
+                ),
+                participant_weight_within_cell=_metadata_float(
+                    raw_cell.get("participant_weight_within_cell"), default=0.0
+                ),
+                group_weight_within_condition=_metadata_float(
+                    raw_cell.get("group_weight_within_condition"), default=0.0
+                ),
+                condition_weight=_metadata_float(
+                    raw_cell.get("condition_weight"), default=0.0
+                ),
+                effective_participant_weight=_metadata_float(
+                    raw_cell.get("effective_participant_weight"), default=0.0
+                ),
+            )
+        )
+    return tuple(cells)
+
+
 def _workbook_signature(
     *,
     subject: str,
@@ -767,6 +1045,8 @@ def build_group_significant_harmonic_selection(
     max_freq: float | None = None,
     project_root: str | Path | None = None,
     force_recalculate: bool = False,
+    participant_group_ids: Mapping[str, str] | None = None,
+    declared_group_ids: Sequence[str] | None = None,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
     electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
@@ -791,6 +1071,13 @@ def build_group_significant_harmonic_selection(
                 project_root
             ).auto_excluded_electrodes_by_participant
         )
+    resolved_group_ids, resolved_declared_groups = _resolve_profile_group_structure(
+        subjects=subjects,
+        settings=settings,
+        project_root=project_root,
+        participant_group_ids=participant_group_ids,
+        declared_group_ids=declared_group_ids,
+    )
     cache_request = build_group_harmonic_cache_request(
         project_root=project_root,
         subjects=subjects,
@@ -810,6 +1097,8 @@ def build_group_significant_harmonic_selection(
         base_frequency_hz=base_frequency_hz,
         max_freq=max_freq,
         settings=settings,
+        participant_group_ids=resolved_group_ids,
+        declared_group_ids=resolved_declared_groups,
         project_processing_signature_hash=(
             cache_request.project_processing_signature_hash
             if cache_request is not None
@@ -911,17 +1200,54 @@ def build_group_significant_harmonic_selection(
             "candidate_indices": len(required.candidate_indices),
         },
     )
-    grand_average, columns, bin_indices, spectra_count, electrode_count = _build_grand_average_amplitude(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        rois=rois,
-        electrode_scope=settings.group_significant_electrode_scope,
-        log_func=log_func,
-        frequency_columns=required.frequency_columns,
-        required_indices=required.required_indices,
-        excluded_electrodes_by_subject=electrode_exclusions_by_subject,
-    )
+    balanced_pool: BalancedHarmonicPool | None = None
+    condition_spectra: dict[str, pd.Series] = {}
+    used_electrodes: set[str] = set()
+    if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID:
+        grand_average, columns, bin_indices, spectra_count, electrode_count = (
+            _build_grand_average_amplitude(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                rois=rois,
+                electrode_scope=settings.group_significant_electrode_scope,
+                log_func=log_func,
+                frequency_columns=required.frequency_columns,
+                required_indices=required.required_indices,
+                excluded_electrodes_by_subject=electrode_exclusions_by_subject,
+                selection_electrodes=(
+                    settings.group_significant_selection_electrodes
+                ),
+                used_electrodes_out=used_electrodes,
+            )
+        )
+    else:
+        (
+            balanced_pool,
+            columns,
+            bin_indices,
+            electrode_count,
+            used_electrodes,
+        ) = _build_balanced_condition_amplitudes(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            rois=rois,
+            electrode_scope=settings.group_significant_electrode_scope,
+            selection_electrodes=settings.group_significant_selection_electrodes,
+            participant_group_ids=resolved_group_ids,
+            declared_group_ids=resolved_declared_groups,
+            log_func=log_func,
+            frequency_columns=required.frequency_columns,
+            required_indices=required.required_indices,
+            excluded_electrodes_by_subject=electrode_exclusions_by_subject,
+        )
+        condition_spectra = dict(balanced_pool.condition_spectra)
+        grand_average = pd.concat(
+            [condition_spectra[condition] for condition in conditions],
+            axis=1,
+        ).mean(axis=1, skipna=True).sort_index()
+        spectra_count = balanced_pool.workbook_count
     if grand_average.empty:
         raise RuntimeError("Group-level harmonic selection found no usable amplitude spectra.")
 
@@ -932,6 +1258,18 @@ def build_group_significant_harmonic_selection(
         int(bin_idx): float(value)
         for bin_idx, value in zip(bin_indices, grand_average.to_numpy(dtype=float))
         if np.isfinite(value)
+    }
+    condition_amplitudes_by_bin = {
+        str(condition): {
+            int(bin_idx): float(value)
+            for bin_idx, value in zip(
+                bin_indices,
+                condition_spectra[str(condition)].to_numpy(dtype=float),
+            )
+            if np.isfinite(value)
+        }
+        for condition in conditions
+        if str(condition) in condition_spectra
     }
     selected_bin_indices = set(bin_indices)
     column_by_bin = {
@@ -950,6 +1288,9 @@ def build_group_significant_harmonic_selection(
     detected_columns: list[str] = []
     detected_indices: list[int] = []
     z_by_harmonic: dict[float, float] = {}
+    condition_z_by_harmonic: dict[str, dict[float, float | None]] = {
+        str(condition): {} for condition in conditions
+    }
     excluded_base: list[float] = []
     seen_indices: set[int] = set()
 
@@ -1009,6 +1350,7 @@ def build_group_significant_harmonic_selection(
             )
             continue
 
+        selected_frequency = _canonical_harmonic_frequency(target_freq)
         noise_stats = _compute_noise_stats_for_planned_bin(
             amplitude_by_bin,
             matched_idx,
@@ -1018,8 +1360,48 @@ def build_group_significant_harmonic_selection(
         target_amp = amplitude_by_bin.get(int(matched_idx), np.nan)
         noise_mean = noise_stats.mean_uv
         noise_std = noise_stats.std_uv
-        z_score = (target_amp - noise_mean) / noise_std if noise_std > 1e-12 else np.nan
-        z_value = float(z_score) if np.isfinite(z_score) else np.nan
+        condition_z_scores: list[tuple[str, float | None]] = []
+        if condition_amplitudes_by_bin:
+            for condition in conditions:
+                condition_key = str(condition)
+                condition_amplitudes = condition_amplitudes_by_bin.get(
+                    condition_key,
+                    {},
+                )
+                condition_noise = _compute_noise_stats_for_planned_bin(
+                    condition_amplitudes,
+                    matched_idx,
+                    window_size=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
+                    min_bins=4,
+                )
+                condition_target = condition_amplitudes.get(int(matched_idx), np.nan)
+                condition_z = (
+                    (condition_target - condition_noise.mean_uv) / condition_noise.std_uv
+                    if condition_noise.std_uv > 1e-12
+                    else np.nan
+                )
+                condition_value = (
+                    float(condition_z) if np.isfinite(condition_z) else None
+                )
+                condition_z_scores.append((condition_key, condition_value))
+                condition_z_by_harmonic[condition_key][selected_frequency] = (
+                    condition_value
+                )
+            finite_condition_z = [
+                value for _condition, value in condition_z_scores if value is not None
+            ]
+            z_value = (
+                float(np.mean(finite_condition_z))
+                if len(finite_condition_z) == len(conditions)
+                else np.nan
+            )
+        else:
+            z_score = (
+                (target_amp - noise_mean) / noise_std
+                if noise_std > 1e-12
+                else np.nan
+            )
+            z_value = float(z_score) if np.isfinite(z_score) else np.nan
         noise_bin_indices = noise_stats.candidate_bin_indices
         noise_used_bin_indices = noise_stats.used_bin_indices
         noise_frequencies = tuple(
@@ -1042,10 +1424,12 @@ def build_group_significant_harmonic_selection(
             for idx in noise_used_bin_indices
             if idx in amplitude_by_bin
         )
-        selected_frequency = _canonical_harmonic_frequency(target_freq)
         harmonic_domain.append(selected_frequency)
         z_by_harmonic[selected_frequency] = z_value
-        selected = bool(np.isfinite(z_value) and z_value > settings.group_significant_z_threshold)
+        z_is_defined = bool(np.isfinite(z_value))
+        selected = bool(
+            z_is_defined and z_value > settings.group_significant_z_threshold
+        )
         if selected:
             detected_freqs.append(selected_frequency)
             detected_columns.append(f"{selected_frequency:.4f}_Hz")
@@ -1060,19 +1444,113 @@ def build_group_significant_harmonic_selection(
                 z_score=z_value if np.isfinite(z_value) else None,
                 selected=selected,
                 excluded_base_rate=False,
-                exclusion_reason="" if selected else "z_below_threshold",
-                warning="" if selected else "Z-score did not exceed threshold.",
-                target_amplitude_uv=float(target_amp) if np.isfinite(target_amp) else None,
-                noise_mean_uv=float(noise_mean) if np.isfinite(noise_mean) else None,
-                noise_std_uv=float(noise_std) if np.isfinite(noise_std) else None,
-                noise_bin_indices=noise_bin_indices,
-                noise_frequencies_hz=noise_frequencies,
-                noise_amplitudes_uv=noise_amplitudes,
-                noise_used_bin_indices=noise_used_bin_indices,
-                noise_used_frequencies_hz=noise_used_frequencies,
-                noise_used_amplitudes_uv=noise_used_amplitudes,
+                exclusion_reason=(
+                    ""
+                    if selected
+                    else "z_below_threshold"
+                    if z_is_defined
+                    else "undefined_z_score"
+                ),
+                warning=(
+                    ""
+                    if selected
+                    else "Z-score did not exceed threshold."
+                    if z_is_defined
+                    else "Z-score was undefined and cannot be classified."
+                ),
+                target_amplitude_uv=(
+                    float(target_amp)
+                    if not condition_amplitudes_by_bin and np.isfinite(target_amp)
+                    else None
+                ),
+                noise_mean_uv=(
+                    float(noise_mean)
+                    if not condition_amplitudes_by_bin and np.isfinite(noise_mean)
+                    else None
+                ),
+                noise_std_uv=(
+                    float(noise_std)
+                    if not condition_amplitudes_by_bin and np.isfinite(noise_std)
+                    else None
+                ),
+                noise_bin_indices=(
+                    noise_bin_indices if not condition_amplitudes_by_bin else ()
+                ),
+                noise_frequencies_hz=(
+                    noise_frequencies if not condition_amplitudes_by_bin else ()
+                ),
+                noise_amplitudes_uv=(
+                    noise_amplitudes if not condition_amplitudes_by_bin else ()
+                ),
+                noise_used_bin_indices=(
+                    noise_used_bin_indices if not condition_amplitudes_by_bin else ()
+                ),
+                noise_used_frequencies_hz=(
+                    noise_used_frequencies if not condition_amplitudes_by_bin else ()
+                ),
+                noise_used_amplitudes_uv=(
+                    noise_used_amplitudes if not condition_amplitudes_by_bin else ()
+                ),
+                condition_z_scores=tuple(condition_z_scores),
             )
         )
+
+    two_failure_decision: _TwoConsecutiveFailureDecision | None = None
+    if (
+        settings.group_significant_summation_method
+        == GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+    ):
+        rows, two_failure_decision = _apply_two_failure_evaluation_domain(rows)
+        evaluated_rows = [
+            row
+            for row in rows
+            if row.evaluated and not row.excluded_base_rate and row.matched_column
+        ]
+        harmonic_domain = [
+            _canonical_harmonic_frequency(row.target_frequency_hz)
+            for row in evaluated_rows
+        ]
+        evaluated_set = set(harmonic_domain)
+        z_by_harmonic = {
+            freq: value for freq, value in z_by_harmonic.items() if freq in evaluated_set
+        }
+        condition_z_by_harmonic = {
+            condition: {
+                freq: value for freq, value in values.items() if freq in evaluated_set
+            }
+            for condition, values in condition_z_by_harmonic.items()
+        }
+        detected_rows = [row for row in evaluated_rows if row.selected]
+        detected_freqs = [
+            _canonical_harmonic_frequency(row.target_frequency_hz)
+            for row in detected_rows
+        ]
+        detected_columns = [f"{freq:.4f}_Hz" for freq in detected_freqs]
+        detected_indices = [
+            int(row.matched_bin_index)
+            for row in detected_rows
+            if row.matched_bin_index is not None
+        ]
+        excluded_base = [
+            _canonical_harmonic_frequency(row.target_frequency_hz)
+            for row in rows
+            if row.evaluated and row.excluded_base_rate
+        ]
+        if not two_failure_decision.stopping_harmonics_hz:
+            candidate_summary = _format_candidate_z_summary(rows)
+            log_func(
+                "Two-consecutive-failures harmonic selection could not establish "
+                "a cutoff because the configured search domain ended before two "
+                f"consecutive eligible failures. Tested candidates: {candidate_summary}."
+            )
+            _log_candidate_diagnostics(rows, log_func)
+            raise RuntimeError(
+                "The Dzhelyova/Poncet two-consecutive-failures profile reached the "
+                "configured harmonic search ceiling before its stopping criterion "
+                "was met. Increase the BCA harmonic upper limit and recalculate, or "
+                "choose a fixed/preregistered harmonic profile. "
+                f"Tested candidates: {candidate_summary}."
+            )
 
     if not detected_freqs:
         candidate_summary = _format_candidate_z_summary(rows)
@@ -1152,6 +1630,51 @@ def build_group_significant_harmonic_selection(
         },
     )
 
+    if (
+        settings.group_significant_summation_method
+        == GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+    ):
+        assert two_failure_decision is not None
+        stopping_rule = "stop_after_two_consecutive_eligible_z_failures"
+        stopping_reason = two_failure_decision.stopping_reason
+        stopping_harmonics = two_failure_decision.stopping_harmonics_hz
+    elif (
+        settings.group_significant_summation_method
+        == GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY
+    ):
+        stopping_rule = "evaluate_prespecified_domain_include_local_z_detections_only"
+        stopping_reason = "prespecified_search_domain_evaluated"
+        stopping_harmonics = ()
+    else:
+        stopping_rule = "highest_detected_with_one_pass_gap_guard"
+        stopping_reason = (
+            "isolated_highest_gap_guard_applied"
+            if gap_guard.applied
+            else "highest_detected_harmonic"
+        )
+        stopping_harmonics = ()
+    cutoff_harmonic = max(selected_freqs) if selected_freqs else None
+    if settings.group_significant_electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN:
+        electrode_mask = tuple(settings.group_significant_selection_electrodes)
+    elif settings.group_significant_electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION:
+        electrode_mask = tuple(
+            sorted(
+                _wanted_electrodes_for_scope(
+                    rois=rois,
+                    electrode_scope=settings.group_significant_electrode_scope,
+                )
+                or (),
+            )
+        )
+    else:
+        electrode_mask = tuple(sorted(used_electrodes))
+    source_fingerprints = _selection_source_workbook_fingerprints(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        cache_request=cache_request,
+    )
+    profile = settings.profile
     selection = GroupSignificantHarmonicSelection(
         harmonic_domain_hz=harmonic_domain,
         selected_harmonics_hz=selected_freqs,
@@ -1177,6 +1700,27 @@ def build_group_significant_harmonic_selection(
         matching_tolerance_hz=GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ,
         noise_window_bins=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
         rows=rows,
+        method_profile_id=profile.method_id,
+        method_profile_version=profile.version,
+        method_profile_label=profile.label,
+        method_citation=profile.citation,
+        same_sample_adaptive=profile.same_sample,
+        pooling_method=profile.pooling_method,
+        pooling_cells=(balanced_pool.cells if balanced_pool is not None else ()),
+        declared_group_ids=(
+            balanced_pool.declared_group_ids if balanced_pool is not None else ()
+        ),
+        condition_z_by_harmonic=condition_z_by_harmonic,
+        selection_electrode_mask=electrode_mask,
+        stopping_rule=stopping_rule,
+        stopping_reason=stopping_reason,
+        stopping_harmonics_hz=tuple(stopping_harmonics),
+        cutoff_harmonic_hz=cutoff_harmonic,
+        source_workbook_fingerprints=source_fingerprints,
+    )
+    selection = replace(
+        selection,
+        selection_fingerprint=str(selection.to_metadata()["selection_fingerprint"]),
     )
     selection = _save_project_cached_selection(cache_request, selection, log_func)
     _store_group_significant_selection(cache_key, selection)
@@ -1186,7 +1730,40 @@ def build_group_significant_harmonic_selection(
 def _selection_scope_label(electrode_scope: str) -> str:
     if electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION:
         return "group_level_union_roi_electrodes_all_selected_conditions"
+    if electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN:
+        return "group_level_frozen_selection_electrodes_all_selected_conditions"
     return "group_level_all_scalp_electrodes_all_selected_conditions"
+
+
+def _selection_source_workbook_fingerprints(
+    *,
+    subjects: Sequence[str],
+    conditions: Sequence[str],
+    subject_data: Mapping[str, Mapping[str, str]],
+    cache_request: GroupHarmonicCacheRequest | None,
+) -> tuple[dict[str, object], ...]:
+    if cache_request is not None:
+        raw = cache_request.fingerprint.get("source_workbooks")
+        if isinstance(raw, list):
+            return tuple(dict(item) for item in raw if isinstance(item, Mapping))
+    return tuple(
+        {
+            "subject": signature.subject,
+            "condition": signature.condition,
+            "path": signature.path,
+            "size_bytes": signature.size_bytes,
+            "mtime_ns": signature.mtime_ns,
+        }
+        for subject in subjects
+        for condition in conditions
+        for signature in (
+            _workbook_signature(
+                subject=str(subject),
+                condition=str(condition),
+                file_path=(subject_data.get(str(subject), {}) or {}).get(str(condition)),
+            ),
+        )
+    )
 
 
 def _resolve_summation_harmonics(
@@ -1199,6 +1776,15 @@ def _resolve_summation_harmonics(
     detected_set = {_canonical_harmonic_frequency(freq) for freq in detected_freqs}
     if summation_method == GROUP_SIGNIFICANT_SUMMATION_SIGNIFICANT_ONLY:
         included_set = set(detected_set)
+    elif summation_method == GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES:
+        decision = _two_consecutive_failure_decision(rows)
+        included_set = {
+            _canonical_harmonic_frequency(row.target_frequency_hz)
+            for row in rows
+            if _is_summation_eligible(row)
+            and decision.cutoff_harmonic_index is not None
+            and row.harmonic_index <= decision.cutoff_harmonic_index
+        }
     else:
         gap_guard = _summation_gap_guard_decision(
             rows=rows,
@@ -1238,6 +1824,103 @@ def _resolve_summation_harmonics(
     ]
     included_indices = [int(row.matched_bin_index) for row in included_rows]
     return included_freqs, included_columns, included_indices, updated_rows
+
+
+def _two_consecutive_failure_decision(
+    rows: Sequence[GroupSignificantHarmonicRow],
+) -> _TwoConsecutiveFailureDecision:
+    eligible = [
+        row
+        for row in sorted(rows, key=lambda item: (item.harmonic_index, item.target_frequency_hz))
+        if row.evaluated
+        and not row.excluded_base_rate
+        and row.matched_column
+        and row.matched_bin_index is not None
+    ]
+    consecutive_failures: list[GroupSignificantHarmonicRow] = []
+    evaluated: list[GroupSignificantHarmonicRow] = []
+    for row in eligible:
+        if row.z_score is None or not np.isfinite(row.z_score):
+            undefined_conditions = [
+                condition
+                for condition, value in row.condition_z_scores
+                if value is None or not np.isfinite(value)
+            ]
+            condition_text = (
+                " Missing/undefined condition Z values: "
+                + ", ".join(undefined_conditions)
+                + "."
+                if undefined_conditions
+                else ""
+            )
+            raise RuntimeError(
+                "The Dzhelyova/Poncet two-consecutive-failures profile cannot "
+                f"classify {row.target_frequency_hz:g} Hz because its Z-score is "
+                "undefined; an undefined value is not a nonsignificant failure."
+                f"{condition_text} Ensure every condition has a common FFT grid, "
+                "finite target/noise amplitudes, enough neighboring noise bins, "
+                "and non-zero local noise SD; regenerate the frequency-domain "
+                "workbooks or choose a fixed/preregistered harmonic profile."
+            )
+        evaluated.append(row)
+        if row.selected:
+            consecutive_failures.clear()
+            continue
+        consecutive_failures.append(row)
+        if len(consecutive_failures) < 2:
+            continue
+        first_failure = consecutive_failures[-2]
+        first_position = evaluated.index(first_failure)
+        cutoff = (
+            int(evaluated[first_position - 1].harmonic_index)
+            if first_position > 0
+            else None
+        )
+        return _TwoConsecutiveFailureDecision(
+            cutoff_harmonic_index=cutoff,
+            evaluated_harmonic_indices=tuple(
+                int(candidate.harmonic_index) for candidate in evaluated
+            ),
+            stopping_harmonics_hz=tuple(
+                _canonical_harmonic_frequency(candidate.target_frequency_hz)
+                for candidate in consecutive_failures[-2:]
+            ),
+            stopping_reason="two_consecutive_eligible_harmonics_at_or_below_threshold",
+        )
+    return _TwoConsecutiveFailureDecision(
+        cutoff_harmonic_index=(int(evaluated[-1].harmonic_index) if evaluated else None),
+        evaluated_harmonic_indices=tuple(
+            int(candidate.harmonic_index) for candidate in evaluated
+        ),
+        stopping_harmonics_hz=(),
+        stopping_reason="search_domain_exhausted_before_two_consecutive_failures",
+    )
+
+
+def _apply_two_failure_evaluation_domain(
+    rows: list[GroupSignificantHarmonicRow],
+) -> tuple[list[GroupSignificantHarmonicRow], _TwoConsecutiveFailureDecision]:
+    decision = _two_consecutive_failure_decision(rows)
+    evaluated_indices = set(decision.evaluated_harmonic_indices)
+    if not decision.stopping_harmonics_hz:
+        return rows, decision
+    highest_evaluated = max(evaluated_indices, default=0)
+    updated: list[GroupSignificantHarmonicRow] = []
+    for row in rows:
+        if row.harmonic_index <= highest_evaluated:
+            updated.append(row)
+            continue
+        updated.append(
+            replace(
+                row,
+                evaluated=False,
+                selected=False,
+                exclusion_reason="not_evaluated_after_stopping_rule",
+                warning="Not evaluated after two consecutive eligible failures.",
+                included_in_summation=False,
+            )
+        )
+    return updated, decision
 
 
 def _summation_gap_guard_decision(
@@ -1316,7 +1999,8 @@ def _summation_gap_guard_decision(
 
 def _is_summation_eligible(row: GroupSignificantHarmonicRow) -> bool:
     return bool(
-        not row.excluded_base_rate
+        row.evaluated
+        and not row.excluded_base_rate
         and row.matched_column
         and row.matched_bin_index is not None
     )
@@ -1516,6 +2200,8 @@ def _build_grand_average_amplitude(
     frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
     excluded_electrodes_by_subject: Mapping[str, frozenset[str]] | None = None,
+    selection_electrodes: Sequence[str] = (),
+    used_electrodes_out: set[str] | None = None,
 ) -> tuple[pd.Series, list[str], list[int], int, int]:
     started = perf_counter()
     spectra: list[pd.Series] = []
@@ -1549,6 +2235,8 @@ def _build_grand_average_amplitude(
             excluded_electrodes_upper=(
                 excluded_electrodes_by_subject or {}
             ).get(str(pid).upper(), frozenset()),
+            selection_electrodes=selection_electrodes,
+            used_electrodes_out=used_electrodes_out,
         )
         file_read_elapsed = perf_counter() - read_started
         read_elapsed += file_read_elapsed
@@ -1617,6 +2305,95 @@ def _build_grand_average_amplitude(
         },
     )
     return grand_average, columns, bin_indices, len(spectra), electrode_count
+
+
+def _build_balanced_condition_amplitudes(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    rois: Dict[str, List[str]],
+    electrode_scope: str,
+    selection_electrodes: Sequence[str],
+    participant_group_ids: Mapping[str, str],
+    declared_group_ids: Sequence[str],
+    log_func: Callable[[str], None],
+    frequency_columns: list[tuple[float, str, int]],
+    required_indices: list[int],
+    excluded_electrodes_by_subject: Mapping[str, frozenset[str]] | None = None,
+) -> tuple[BalancedHarmonicPool, list[str], list[int], int, set[str]]:
+    """Read participant spectra and apply the declared balanced estimand."""
+
+    started = perf_counter()
+    spectra: dict[tuple[str, str], pd.Series] = {}
+    electrode_count = 0
+    used_electrodes: set[str] = set()
+    read_elapsed = 0.0
+    fft_tasks = [
+        (str(pid), str(condition), subject_data.get(pid, {}).get(condition))
+        for pid in subjects
+        for condition in conditions
+    ]
+    log_func(
+        "[PERF] Balanced FullFFT pooling started: "
+        f"{len(fft_tasks)} planned workbook reads."
+    )
+    for task_index, (pid, condition, file_path) in enumerate(fft_tasks, start=1):
+        if not file_path or not Path(file_path).exists():
+            log_func(f"Missing file for {pid} {condition}: {file_path}")
+            continue
+        read_started = perf_counter()
+        series, _file_columns, n_electrodes = _load_mean_amplitude_series(
+            file_path,
+            rois=rois,
+            electrode_scope=electrode_scope,
+            reference_frequency_columns=frequency_columns,
+            required_indices=required_indices,
+            excluded_electrodes_upper=(
+                excluded_electrodes_by_subject or {}
+            ).get(pid.upper(), frozenset()),
+            selection_electrodes=selection_electrodes,
+            used_electrodes_out=used_electrodes,
+        )
+        file_read_elapsed = perf_counter() - read_started
+        read_elapsed += file_read_elapsed
+        if series.empty:
+            log_func(f"No usable full-spectrum amplitude data for {pid} {condition}.")
+            continue
+        spectra[(pid, condition)] = series
+        electrode_count = max(electrode_count, int(n_electrodes))
+        if _should_log_progress(
+            task_index,
+            len(fft_tasks),
+            GROUP_SIGNIFICANT_FULLFFT_PROGRESS_INTERVAL,
+        ):
+            log_func(
+                "[PERF] Balanced FullFFT pooling progress: "
+                f"{task_index}/{len(fft_tasks)} workbooks "
+                f"(participant={pid}, condition={condition}, "
+                f"electrodes={n_electrodes}, elapsed={perf_counter() - started:.2f}s)."
+            )
+
+    pool = pool_group_condition_spectra(
+        spectra=spectra,
+        subjects=subjects,
+        conditions=conditions,
+        participant_group_ids=participant_group_ids,
+        declared_group_ids=declared_group_ids,
+    )
+    if not pool.condition_spectra:
+        raise RuntimeError("Balanced harmonic selection found no usable condition spectra.")
+    first_spectrum = next(iter(pool.condition_spectra.values()))
+    columns = [f"{float(freq):.4f}_Hz" for freq in first_spectrum.index]
+    bin_lookup = {str(column): int(idx) for _freq, column, idx in frequency_columns}
+    bin_indices = [bin_lookup[column] for column in columns if column in bin_lookup]
+    log_func(
+        "[PERF] Balanced FullFFT pooling finished: "
+        f"{pool.workbook_count} participant-condition spectra, "
+        f"{len(pool.cells)} complete group x condition cells in "
+        f"{perf_counter() - started:.2f}s (read phase {read_elapsed:.2f}s)."
+    )
+    return pool, columns, bin_indices, electrode_count, used_electrodes
 
 
 def _plan_required_full_fft_columns(
@@ -1927,6 +2704,8 @@ def _load_mean_amplitude_series(
     reference_frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
     excluded_electrodes_upper: Iterable[str] = (),
+    selection_electrodes: Sequence[str] = (),
+    used_electrodes_out: set[str] | None = None,
 ) -> tuple[pd.Series, list[str], int]:
     try:
         header_columns = read_xlsx_sheet_header(
@@ -1989,6 +2768,7 @@ def _load_mean_amplitude_series(
     wanted_electrodes = _wanted_electrodes_for_scope(
         rois=rois,
         electrode_scope=electrode_scope,
+        selection_electrodes=selection_electrodes,
     )
     try:
         df_fft = read_xlsx_sheet_selected_columns(
@@ -2019,11 +2799,35 @@ def _load_mean_amplitude_series(
         .str.strip()
     )
     excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
+    if electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN:
+        requested = {
+            str(electrode).strip().upper()
+            for electrode in selection_electrodes
+            if str(electrode).strip()
+        }
+        required_after_qc = requested.difference(excluded)
+        observed = {electrode for electrode in electrodes.tolist() if electrode}
+        missing = sorted(required_after_qc.difference(observed))
+        if missing:
+            raise RuntimeError(
+                "Frozen harmonic-selection mask validation failed for "
+                f"{file_path}: requested non-QC-excluded electrode(s) are missing: "
+                + ", ".join(missing)
+                + ". Regenerate the workbook with the frozen channels, correct "
+                "the a-priori mask, or record a valid frequency-domain QC "
+                "electrode exclusion before recalculating harmonics."
+            )
     include_mask = electrodes != ""
     if excluded:
         include_mask = include_mask & ~electrodes.isin(excluded)
     df_fft = df_fft.loc[include_mask].copy()
     electrode_count = len(df_fft)
+    if used_electrodes_out is not None:
+        used_electrodes_out.update(
+            electrode
+            for electrode in electrodes.loc[include_mask].tolist()
+            if electrode
+        )
 
     values: dict[float, float] = {}
     reference_columns: list[str] = []
@@ -2341,8 +3145,13 @@ def _electrodes_for_scope(
     *,
     rois: Dict[str, List[str]],
     electrode_scope: str,
+    selection_electrodes: Sequence[str] = (),
 ) -> list[str]:
-    wanted = _wanted_electrodes_for_scope(rois=rois, electrode_scope=electrode_scope)
+    wanted = _wanted_electrodes_for_scope(
+        rois=rois,
+        electrode_scope=electrode_scope,
+        selection_electrodes=selection_electrodes,
+    )
     if wanted is not None:
         return [
             idx
@@ -2357,7 +3166,14 @@ def _wanted_electrodes_for_scope(
     *,
     rois: Dict[str, List[str]],
     electrode_scope: str,
+    selection_electrodes: Sequence[str] = (),
 ) -> set[str] | None:
+    if electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN:
+        return {
+            str(electrode).strip().upper()
+            for electrode in selection_electrodes
+            if str(electrode).strip()
+        }
     if electrode_scope != GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION:
         return None
     wanted = {
@@ -2451,6 +3267,9 @@ def _frequency_resolution(freqs: Sequence[float]) -> float | None:
 def _format_candidate_z_summary(rows: Sequence[GroupSignificantHarmonicRow]) -> str:
     parts: list[str] = []
     for row in rows:
+        if not row.evaluated:
+            parts.append(f"{row.target_frequency_hz:.4f} Hz not evaluated after stopping rule")
+            continue
         if row.excluded_base_rate:
             parts.append(f"{row.target_frequency_hz:.4f} Hz excluded base overlap")
             continue
@@ -2467,6 +3286,12 @@ def _log_candidate_diagnostics(
     log_func: Callable[[str], None],
 ) -> None:
     for row in rows:
+        if not row.evaluated:
+            log_func(
+                "[DEBUG] Group harmonic candidate "
+                f"{row.target_frequency_hz:.4f} Hz not evaluated after stopping rule."
+            )
+            continue
         if row.excluded_base_rate:
             log_func(
                 "[DEBUG] Group harmonic candidate "
@@ -2525,11 +3350,12 @@ def _methods_summary(selection: GroupSignificantHarmonicSelection) -> str:
     detected = ", ".join(f"{freq:g}" for freq in selection.detected_significant_harmonics_hz)
     included = ", ".join(f"{freq:g}" for freq in selection.selected_harmonics_hz)
     excluded = ", ".join(f"{freq:g}" for freq in selection.excluded_base_harmonics_hz)
-    scope = (
-        "the union of predefined ROI electrodes"
-        if selection.electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION
-        else "all scalp electrodes"
-    )
+    if selection.electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION:
+        scope = "the union of predefined ROI electrodes"
+    elif selection.electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN:
+        scope = "the frozen a-priori harmonic-selection electrode mask"
+    else:
+        scope = "all retained scalp electrodes"
     if selection.summation_method == GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST:
         gap_guard = _summation_gap_guard_decision(
             rows=selection.rows,
@@ -2557,13 +3383,41 @@ def _methods_summary(selection: GroupSignificantHarmonicSelection) -> str:
                 "non-base harmonics lie between the two highest significant peaks; "
                 "the guard was not triggered."
             )
+    elif (
+        selection.summation_method
+        == GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+    ):
+        stopping = ", ".join(
+            f"{freq:g}" for freq in selection.stopping_harmonics_hz
+        )
+        if selection.stopping_harmonics_hz:
+            stopping_text = (
+                f"Selection stopped after consecutive failures at {stopping} Hz"
+            )
+        else:
+            stopping_text = (
+                "The configured search domain ended before two consecutive failures"
+            )
+        summation_text = (
+            f"{stopping_text}; eligible harmonics through the preceding cutoff were "
+            f"included in Summed BCA ({included} Hz)."
+        )
     else:
         summation_text = (
             f"Only z-significant oddball harmonics were included in the Summed BCA ({included} Hz)."
         )
+    if selection.pooling_cells:
+        selection_text = (
+            "Participants were averaged within each declared group x condition "
+            "cell, group spectra were weighted equally within condition, local "
+            "Z-scores were calculated separately by condition, and condition "
+            "Z-scores were weighted equally"
+        )
+    else:
+        selection_text = "Available participant-condition spectra were averaged equally"
     return (
-        "Candidate oddball harmonics were tested from the grand-averaged raw "
-        f"amplitude spectrum over {scope}; z-significant harmonics were "
+        f"Using the {selection.method_profile_label} profile, {selection_text} "
+        f"over {scope}; z-significant harmonics were "
         f"{detected} Hz. Candidate oddball harmonics "
         f"were tested against neighboring-bin noise with z>{selection.z_threshold:g}; "
         "base-rate overlaps were excluded"

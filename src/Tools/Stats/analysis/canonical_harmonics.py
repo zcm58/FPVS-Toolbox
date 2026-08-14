@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -104,6 +107,7 @@ def shared_selection_from_metadata(
         project_root=project_root,
         max_freq=max_freq,
     )
+    exploratory = bool(metadata.get("same_sample_adaptive", False))
     return SharedHarmonicSelection(
         source=CANONICAL_HARMONIC_SOURCE,
         selected_harmonics_hz=selected,
@@ -111,7 +115,7 @@ def shared_selection_from_metadata(
         fingerprint=fingerprint,
         fingerprint_text=format_harmonic_selection_fingerprint(fingerprint),
         output_label="fpvs_toolbox_significant_harmonics",
-        exploratory=False,
+        exploratory=exploratory,
     )
 
 
@@ -174,15 +178,27 @@ def harmonic_selection_fingerprint(
         or metadata.get("included_harmonics_hz")
         or metadata.get("common_harmonics_hz")
     )
-    detected = _float_tuple(
-        metadata.get("detected_significant_harmonics_hz") or selected
+    detected = (
+        _float_tuple(metadata.get("detected_significant_harmonics_hz"))
+        if "detected_significant_harmonics_hz" in metadata
+        else selected
     )
+    canonical_fingerprint = str(metadata.get("selection_fingerprint") or "")
+    if not canonical_fingerprint:
+        canonical_fingerprint = compute_selection_fingerprint(metadata)
     return {
         "source": CANONICAL_HARMONIC_SOURCE,
         "policy": str(metadata.get("harmonic_policy") or GROUP_SIGNIFICANT_POLICY_ID),
         "policy_label": str(
             metadata.get("harmonic_policy_label") or GROUP_SIGNIFICANT_POLICY_LABEL
         ),
+        "method_profile_id": str(
+            metadata.get("harmonic_selection_profile") or "legacy_fpvs_toolbox"
+        ),
+        "method_profile_version": str(
+            metadata.get("harmonic_selection_profile_version") or "1.0"
+        ),
+        "selection_fingerprint": canonical_fingerprint,
         "participant_count": len(selection_subjects),
         "participants": selection_subjects,
         "condition_count": len(selection_conditions),
@@ -217,8 +233,70 @@ def harmonic_selection_fingerprint(
         "selection_cache_source": str(metadata.get("selection_cache_source") or ""),
         "selection_cache_saved_at": str(metadata.get("selection_cache_saved_at") or ""),
         "project_root": str(project_root) if project_root not in (None, "") else "",
-        "exploratory": False,
+        "exploratory": bool(metadata.get("same_sample_adaptive", False)),
     }
+
+
+def compute_selection_fingerprint(
+    metadata: Mapping[str, object],
+    *,
+    scientific_context: Mapping[str, object] | None = None,
+) -> str:
+    """Hash stable scientific selection provenance, excluding workflow state."""
+
+    transient = {
+        "selection_fingerprint",
+        "selection_cache_source",
+        "selection_cache_saved_at",
+        "selection_cache_key",
+        "methods_summary",
+    }
+    payload = {
+        str(key): value
+        for key, value in metadata.items()
+        if str(key) not in transient
+    }
+    if scientific_context:
+        payload["scientific_context"] = dict(scientific_context)
+    for key in (
+        "selection_subjects",
+        "selection_conditions",
+        "declared_group_ids",
+        "selection_electrode_mask",
+    ):
+        values = payload.get(key)
+        if isinstance(values, (list, tuple, set)):
+            payload[key] = sorted(
+                (_json_safe(value) for value in values),
+                key=lambda value: json.dumps(value, sort_keys=True),
+            )
+    sources = payload.get("source_workbook_fingerprints")
+    if isinstance(sources, (list, tuple)):
+        payload["source_workbook_fingerprints"] = sorted(
+            (_json_safe(value) for value in sources),
+            key=lambda value: json.dumps(value, sort_keys=True),
+        )
+    cells = payload.get("pooling_cells")
+    if isinstance(cells, (list, tuple)):
+        canonical_cells: list[object] = []
+        for raw_cell in cells:
+            cell = dict(raw_cell) if isinstance(raw_cell, Mapping) else raw_cell
+            if isinstance(cell, dict) and isinstance(cell.get("participant_ids"), list):
+                cell["participant_ids"] = sorted(
+                    cell["participant_ids"], key=lambda value: str(value).casefold()
+                )
+            canonical_cells.append(_json_safe(cell))
+        payload["pooling_cells"] = sorted(
+            canonical_cells,
+            key=lambda value: json.dumps(value, sort_keys=True),
+        )
+    encoded = json.dumps(
+        _json_safe(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def format_harmonic_selection_fingerprint(fingerprint: Mapping[str, object]) -> str:
@@ -301,12 +379,34 @@ def _is_number(value: object) -> bool:
     return True
 
 
+def _json_safe(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_safe(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value) if math.isfinite(value) else None
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return str(value)
+    return float(number) if math.isfinite(number) else None
+
+
 __all__ = [
     "CANONICAL_HARMONIC_SOURCE",
     "CUSTOM_HARMONIC_SOURCE",
     "CanonicalHarmonicSelectionError",
     "SharedHarmonicSelection",
     "custom_harmonic_selection",
+    "compute_selection_fingerprint",
     "format_harmonic_selection_fingerprint",
     "harmonic_selection_fingerprint",
     "load_project_processing_harmonics",

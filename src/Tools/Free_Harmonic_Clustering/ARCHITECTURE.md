@@ -8,13 +8,15 @@ project-bound PySide6 beta surface under `gui/` gathers active-project context,
 shows preparation and current-session results, and delegates preparation and
 permutation work to workers. Neither layer changes preprocessing, workbook
 schemas, harmonic-selection caches, project metadata, ledgers, QC state, or
-source workbooks.
+source workbooks. Both layers validate the same neutral, processing-owned
+FullFFT provenance; neither requires the standard Stats harmonic cache.
 
 ## Data Flow
 
 ```text
 managed project root
-  -> canonical dataset index and QC/cohort freeze
+  -> canonical dataset index and neutral FullFFT provenance validation
+  -> QC/cohort freeze independent of standard Summed-BCA selection
   -> common FullFFT header and selected target/noise-column plan
   -> one streamed XML read per participant-condition workbook
   -> raw amplitude tensor and paper SNR/z preparation
@@ -35,8 +37,8 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
   cluster results, and export receipts.
 - `preparation.py`: exact frequency-window planning, grand-spectrum z selection,
   participant SNR, and L2 normalization.
-- `inputs.py`: canonical managed-project discovery, cohort/QC enforcement, and
-  selected-column FullFFT ingestion.
+- `inputs.py`: canonical managed-project discovery, neutral FullFFT provenance,
+  cohort/QC enforcement, and selected-column FullFFT ingestion.
 - `analysis.py`: versioned BioSemi64 adjacency, node t statistics, connected
   components, permutation nulls, cluster p-values, and cluster-average effects.
 - `api.py`: stable orchestration boundary.
@@ -95,6 +97,36 @@ excluding every base-rate overlap. Fixed mode replaces the detection step with
 a user-selected highest harmonic and applies the same dynamic fill-through and
 overlap exclusion. Missing project frequency metadata blocks preparation; the
 GUI does not offer local overrides.
+
+`Main_App.processing.full_fft_provenance` records project-relative FullFFT
+source identity, exact grid/resolution, base and oddball rates, canonical
+cohort/frequency-QC state, and processing/export ledger identity. GUI option
+inspection and direct preparation both validate this record. Standard profile
+IDs, detected/included harmonics, Summed-BCA selection fingerprints, and the
+freshness of Stats-ready/full-audit workbooks are intentionally absent. A
+standard profile change therefore cannot change this tool's candidates or
+prepared tensors; a changed FullFFT source, cohort/QC state, rate, grid, or
+processing/export identity blocks preparation until post-processing rebuilds
+the neutral record.
+
+## Inference Boundary
+
+Cluster correction applies to one declared electrode x harmonic family,
+conditional on the prepared candidate domain, the fixed spatial/free-harmonic
+adjacency, node-entry threshold, contrast family, and valid whole-participant
+exchangeability. It favors extended effects and does not turn cluster-level
+significance into pointwise evidence for a sensor, harmonic, cell, or boundary.
+Separate runs are separate uncorrected families.
+
+Automatic mode selects its observed-arm ceiling before permutation and then
+holds that domain fixed. The conditional maximum-cluster null does not by
+itself establish unconditional error control for the combined adaptive-
+selection-plus-permutation procedure. The deterministic regression harness
+repeats automatic selection and permutation across 24 seeded null replicates,
+requires the selected domain to vary while retaining at least two harmonics,
+and accepts at most 5 global rejections with 199 assignments per replicate.
+That deliberately wide, prespecified envelope detects gross regressions; it is
+not a calibrated FWER validation study.
 
 ## Embedded GUI Contract
 

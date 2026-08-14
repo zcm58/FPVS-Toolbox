@@ -40,9 +40,21 @@ _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS = (
 )
 
 _GROUP_SIGNIFICANT_POLICY_NAME = "Group-level significant harmonics (Volfart/Retter/Rossion style)"
+_FIXED_PREDEFINED_POLICY_NAME = "Fixed / predefined harmonic list"
 _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION = "union_roi_electrodes"
+_GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL = "all_scalp_electrodes"
 _GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST = "through_highest_significant"
+_GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES = "two_consecutive_failures"
 _FIXED_PREDEFINED_DEFAULT_FREQUENCIES = "1.2, 2.4, 3.6, 4.8, 7.2"
+_FIXED_HARMONIC_INPUT_FREQUENCY_LIST = "frequency_list"
+
+LEGACY_HARMONIC_SELECTION_PROFILE = "legacy_fpvs_toolbox"
+FIXED_HARMONIC_SELECTION_PROFILE = "fixed_preregistered_domain"
+SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE = "significant_only_exploratory"
+NEW_PROJECT_HARMONIC_SELECTION_PROFILE = (
+    "dzhelyova_poncet_two_consecutive_failures"
+)
+HARMONIC_SELECTION_PROFILE_VERSION = "1.0"
 
 
 _FIELDS: tuple[_Field, ...] = (
@@ -140,6 +152,22 @@ _FIELDS: tuple[_Field, ...] = (
         _STR,
     ),
     _Field(
+        "harmonic_selection_profile",
+        (
+            "harmonic_selection_profile",
+            "harmonic_selection_profile_id",
+            "harmonic_method_profile",
+        ),
+        LEGACY_HARMONIC_SELECTION_PROFILE,
+        _STR,
+    ),
+    _Field(
+        "harmonic_selection_profile_version",
+        ("harmonic_selection_profile_version",),
+        HARMONIC_SELECTION_PROFILE_VERSION,
+        _STR,
+    ),
+    _Field(
         "group_significant_electrode_scope",
         ("group_significant_electrode_scope", "harmonic_selection_electrode_scope"),
         _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
@@ -158,10 +186,37 @@ _FIELDS: tuple[_Field, ...] = (
         _STR,
     ),
     _Field(
+        "fixed_harmonic_input_mode",
+        ("fixed_harmonic_input_mode",),
+        _FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
+        _STR,
+    ),
+    _Field(
+        "fixed_harmonic_upper_harmonic_index",
+        ("fixed_harmonic_upper_harmonic_index",),
+        0,
+        _INT,
+    ),
+    _Field(
+        "fixed_harmonic_upper_frequency_hz",
+        ("fixed_harmonic_upper_frequency_hz",),
+        0.0,
+        _FLOAT,
+    ),
+    _Field(
         "fixed_harmonic_auto_exclude_base",
         ("fixed_harmonic_auto_exclude_base", "fixed_harmonics_auto_exclude_base"),
         True,
         _BOOL,
+    ),
+    _Field(
+        "group_significant_selection_electrodes",
+        (
+            "group_significant_selection_electrodes",
+            "harmonic_selection_electrodes",
+        ),
+        "",
+        _STR,
     ),
     _Field("stim_channel", ("stim_channel", "stim", "stim_channel_name"), config.DEFAULT_STIM_CHANNEL, _STR),
 )
@@ -169,6 +224,28 @@ _FIELDS: tuple[_Field, ...] = (
 
 PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(field.name for field in _FIELDS)
 PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in _FIELDS}
+
+
+def new_project_preprocessing_settings() -> Dict[str, Any]:
+    """Return explicit settings for a genuinely new Toolbox project.
+
+    Missing profile fields continue to normalize to the historical method so
+    opening an older project never silently changes its scientific outcome.
+    Project-creation entry points call this helper to opt new projects into the
+    publication-aligned, balanced two-consecutive-failure profile.
+    """
+
+    return normalize_preprocessing_settings(
+        {
+            **PREPROCESSING_DEFAULTS,
+            "harmonic_selection_profile": NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
+            "harmonic_selection_profile_version": HARMONIC_SELECTION_PROFILE_VERSION,
+            "group_significant_electrode_scope": _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+            "group_significant_summation_method": (
+                _GROUP_SIGNIFICANT_SUMMATION_TWO_CONSECUTIVE_FAILURES
+            ),
+        }
+    )
 
 _ALIASES_FOR_OUTPUT: dict[str, Iterable[str]] = {
     "downsample": ("downsample_rate",),
@@ -465,6 +542,33 @@ def normalize_preprocessing_settings(
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
 
+    # Keep the legacy policy-name field and the new versioned profile coherent.
+    # This also migrates old fixed-policy manifests that predate profile IDs.
+    profile = str(normalized["harmonic_selection_profile"])
+    policy_name = str(normalized["harmonic_selection_policy"])
+    if policy_name == _FIXED_PREDEFINED_POLICY_NAME and profile == LEGACY_HARMONIC_SELECTION_PROFILE:
+        profile = FIXED_HARMONIC_SELECTION_PROFILE
+        normalized["harmonic_selection_profile"] = profile
+    if profile == FIXED_HARMONIC_SELECTION_PROFILE:
+        normalized["harmonic_selection_policy"] = _FIXED_PREDEFINED_POLICY_NAME
+    else:
+        normalized["harmonic_selection_policy"] = _GROUP_SIGNIFICANT_POLICY_NAME
+    if (
+        profile
+        in {
+            SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE,
+            NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
+        }
+        and _first_value(
+            source,
+            ("group_significant_electrode_scope", "harmonic_selection_electrode_scope"),
+        )
+        in (None, "")
+    ):
+        normalized["group_significant_electrode_scope"] = (
+            _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL
+        )
+
     mode_raw = _first_value(
         source,
         (
@@ -519,6 +623,12 @@ def normalize_preprocessing_settings(
 
 
 __all__ = [
+    "HARMONIC_SELECTION_PROFILE_VERSION",
+    "FIXED_HARMONIC_SELECTION_PROFILE",
+    "LEGACY_HARMONIC_SELECTION_PROFILE",
+    "NEW_PROJECT_HARMONIC_SELECTION_PROFILE",
+    "SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE",
+    "new_project_preprocessing_settings",
     "normalize_preprocessing_settings",
     "normalize_manual_excluded_participants",
     "normalize_manual_excluded_participant_conditions",

@@ -51,6 +51,7 @@ RMS_WIDE_SHEET = "RMS Normalized Wide"
 SIGNED_MEAN_WIDE_SHEET = "Signed Mean Normalized Wide"
 ELECTRODE_LONG_SHEET = "Electrode Long"
 WHOLE_SCALP_SHEET = "Whole Scalp Values"
+RMS_HARMONIC_SCALES_SHEET = "RMS Harmonic Scales"
 QC_FLAGS_SHEET = "QC Flags"
 ROI_DEFINITIONS_SHEET = "ROI Definitions"
 SELECTION_SUMMARY_SHEET = "Selection Summary"
@@ -87,10 +88,22 @@ _WHOLE_SCALP_COLUMNS = [
     "Condition",
     "Source Electrode Count",
     "Finite Summed BCA Electrode Count",
-    "Whole Scalp RMS Summed BCA",
+    "Descriptive Post-Sum RMS (Not Used for Normalization)",
     "Whole Scalp Signed Mean Summed BCA",
     "Current Toolbox Exclusion",
     "QC Flag",
+    "QC Notes",
+]
+_RMS_HARMONIC_SCALE_COLUMNS = [
+    "PID",
+    "Group",
+    "Condition",
+    "Harmonic (Hz)",
+    "Source Electrode Count",
+    "Finite Electrode Count",
+    "Scalp Vector Length",
+    "Used for RMS Normalization",
+    "Current Toolbox Exclusion",
     "QC Notes",
 ]
 _QC_FLAG_COLUMNS = [
@@ -208,6 +221,7 @@ def write_analysis_ready_workbook(
     roi_rows: list[dict[str, object]] = []
     electrode_rows: list[dict[str, object]] = []
     whole_scalp_rows: list[dict[str, object]] = []
+    rms_harmonic_scale_rows: list[dict[str, object]] = []
     issue_flag_rows: list[dict[str, object]] = []
 
     for record in records:
@@ -219,6 +233,7 @@ def write_analysis_ready_workbook(
             roi_rows=roi_rows,
             electrode_rows=electrode_rows,
             whole_scalp_rows=whole_scalp_rows,
+            rms_harmonic_scale_rows=rms_harmonic_scale_rows,
             issue_flag_rows=issue_flag_rows,
         )
 
@@ -258,6 +273,10 @@ def write_analysis_ready_workbook(
         WHOLE_SCALP_SHEET: pd.DataFrame(
             whole_scalp_rows,
             columns=_WHOLE_SCALP_COLUMNS,
+        ),
+        RMS_HARMONIC_SCALES_SHEET: pd.DataFrame(
+            rms_harmonic_scale_rows,
+            columns=_RMS_HARMONIC_SCALE_COLUMNS,
         ),
         QC_FLAGS_SHEET: _finalize_qc_flags([*metadata_flag_rows, *issue_flag_rows]),
         ROI_DEFINITIONS_SHEET: _build_roi_definitions_frame(rois),
@@ -448,6 +467,7 @@ def _append_record_rows(
     roi_rows: list[dict[str, object]],
     electrode_rows: list[dict[str, object]],
     whole_scalp_rows: list[dict[str, object]],
+    rms_harmonic_scale_rows: list[dict[str, object]],
     issue_flag_rows: list[dict[str, object]],
 ) -> None:
     pid = str(record.participant_id)
@@ -460,6 +480,10 @@ def _append_record_rows(
         pid_key=pid_key,
         condition_key=condition_key,
     )
+    auto_electrodes = exclusion_context.auto_electrodes_by_participant.get(
+        pid_key,
+        frozenset(),
+    )
 
     try:
         frame = read_xlsx_sheet_selected_columns(
@@ -468,7 +492,7 @@ def _append_record_rows(
             required_columns=["Electrode", *selected_columns],
             require_all=True,
         )
-        prepared, record_issue_notes = _prepare_electrode_values(
+        prepared, record_issue_notes, harmonic_scales = _prepare_electrode_values(
             frame,
             selected_columns=selected_columns,
         )
@@ -516,12 +540,27 @@ def _append_record_rows(
                 condition=condition,
                 source_count=0,
                 finite_count=0,
-                rms=math.nan,
+                descriptive_rms=math.nan,
                 signed_mean=math.nan,
                 excluded=base_excluded,
                 notes=combined_notes,
             )
         )
+        for selected_column in selected_columns:
+            rms_harmonic_scale_rows.append(
+                _rms_harmonic_scale_row(
+                    pid=pid,
+                    group=group,
+                    condition=condition,
+                    selected_column=selected_column,
+                    source_count=0,
+                    finite_count=0,
+                    vector_length=math.nan,
+                    used=False,
+                    excluded=base_excluded or bool(auto_electrodes),
+                    notes=[*combined_notes, "Source workbook could not be normalized."],
+                )
+            )
         return
 
     if record_issue_notes:
@@ -538,14 +577,17 @@ def _append_record_rows(
 
     finite_raw = pd.to_numeric(prepared["Raw Summed BCA"], errors="coerce")
     finite_raw = finite_raw[np.isfinite(finite_raw)]
-    rms = float(np.sqrt(np.mean(np.square(finite_raw.to_numpy(dtype=float))))) if not finite_raw.empty else math.nan
+    descriptive_rms = (
+        float(np.sqrt(np.mean(np.square(finite_raw.to_numpy(dtype=float))))) if not finite_raw.empty else math.nan
+    )
     signed_mean = float(finite_raw.mean()) if not finite_raw.empty else math.nan
     normalization_notes: list[str] = []
-    if not math.isfinite(rms) or rms == 0.0:
-        normalization_notes.append("Whole-scalp RMS was zero or unavailable; RMS-normalized values are blank.")
-        prepared["RMS Normalized BCA"] = math.nan
-    else:
-        prepared["RMS Normalized BCA"] = prepared["Raw Summed BCA"] / rms
+    if not all(bool(scale["Used for RMS Normalization"]) for scale in harmonic_scales):
+        normalization_notes.append(
+            "At least one selected harmonic lacked a complete, positive "
+            "whole-scalp vector length; publication-style RMS-normalized "
+            "values are blank."
+        )
     if not math.isfinite(signed_mean) or signed_mean == 0.0:
         normalization_notes.append(
             "Whole-scalp signed mean was zero or unavailable; signed-mean-normalized values are blank."
@@ -565,10 +607,6 @@ def _append_record_rows(
             notes="; ".join(normalization_notes),
         )
 
-    auto_electrodes = exclusion_context.auto_electrodes_by_participant.get(
-        pid_key,
-        frozenset(),
-    )
     for _, electrode_row in prepared.iterrows():
         electrode = str(electrode_row["Electrode"])
         electrode_key = electrode.upper()
@@ -606,6 +644,25 @@ def _append_record_rows(
             "Current Toolbox automatic electrode exclusion(s), retained in this "
             "full-audit export: " + ", ".join(sorted(auto_electrodes))
         )
+    for scale in harmonic_scales:
+        rms_harmonic_scale_rows.append(
+            _rms_harmonic_scale_row(
+                pid=pid,
+                group=group,
+                condition=condition,
+                selected_column=str(scale["Selected Column"]),
+                source_count=int(scale["Source Electrode Count"]),
+                finite_count=int(scale["Finite Electrode Count"]),
+                vector_length=scale["Scalp Vector Length"],
+                used=bool(scale["Used for RMS Normalization"]),
+                excluded=base_excluded or bool(auto_electrodes),
+                notes=[
+                    *base_notes,
+                    *record_issue_notes,
+                    str(scale["QC Notes"] or ""),
+                ],
+            )
+        )
     whole_scalp_rows.append(
         _whole_scalp_row(
             pid=pid,
@@ -613,7 +670,7 @@ def _append_record_rows(
             condition=condition,
             source_count=len(prepared),
             finite_count=len(finite_raw),
-            rms=rms,
+            descriptive_rms=descriptive_rms,
             signed_mean=signed_mean,
             excluded=base_excluded or bool(auto_electrodes),
             notes=all_record_notes,
@@ -691,43 +748,80 @@ def _prepare_electrode_values(
     frame: pd.DataFrame,
     *,
     selected_columns: Sequence[str],
-) -> tuple[pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, list[str], list[dict[str, object]]]:
     if "Electrode" not in frame.columns:
         raise RuntimeError("The BCA (uV) sheet is missing the exact 'Electrode' column.")
-    prepared = frame.loc[:, ["Electrode", *selected_columns]].copy()
-    prepared["Electrode"] = prepared["Electrode"].astype(str).str.strip().str.upper()
-    prepared = prepared[prepared["Electrode"].ne("") & prepared["Electrode"].ne("NAN")]
-    if prepared.empty:
+    source = frame.loc[:, ["Electrode", *selected_columns]].copy()
+    source["Electrode"] = source["Electrode"].astype(str).str.strip().str.upper()
+    source = source[source["Electrode"].ne("") & source["Electrode"].ne("NAN")]
+    if source.empty:
         raise RuntimeError("The BCA (uV) sheet contains no electrode rows.")
-    numeric = prepared.loc[:, selected_columns].apply(pd.to_numeric, errors="coerce")
+    numeric = source.loc[:, selected_columns].apply(pd.to_numeric, errors="coerce")
     numeric = numeric.replace([np.inf, -np.inf], np.nan)
-    missing_mask = numeric.isna()
-    prepared["Missing Selected Harmonics"] = [
-        ", ".join(column for column in selected_columns if bool(mask[column])) for _, mask in missing_mask.iterrows()
-    ]
-    prepared["Raw Summed BCA"] = numeric.sum(axis=1, min_count=1)
     notes: list[str] = []
-    nonfinite_count = int(missing_mask.to_numpy().sum())
+    source_missing_mask = numeric.isna()
+    nonfinite_count = int(source_missing_mask.to_numpy().sum())
     if nonfinite_count:
-        affected_electrodes = int(missing_mask.any(axis=1).sum())
+        affected_electrodes = int(source_missing_mask.any(axis=1).sum())
         notes.append(
             f"{nonfinite_count} selected BCA cell(s) were non-finite across "
             f"{affected_electrodes} electrode row(s); available finite harmonics "
-            "were retained in the electrode sum."
+            "were retained in Raw Summed BCA, but complete whole-scalp coverage "
+            "is required for RMS normalization."
         )
-    duplicate_mask = prepared["Electrode"].duplicated(keep=False)
+    duplicate_mask = source["Electrode"].duplicated(keep=False)
     if duplicate_mask.any():
-        duplicate_names = sorted(set(prepared.loc[duplicate_mask, "Electrode"]))
-        notes.append("Duplicate source electrode row(s) were averaged: " + ", ".join(duplicate_names))
-        prepared = prepared.groupby("Electrode", sort=False, as_index=False).agg(
+        duplicate_names = sorted(set(source.loc[duplicate_mask, "Electrode"]))
+        notes.append(
+            "Duplicate source electrode row(s) were averaged separately at each harmonic: " + ", ".join(duplicate_names)
+        )
+        numeric.insert(0, "Electrode", source["Electrode"].to_numpy())
+        numeric = numeric.groupby("Electrode", sort=False, as_index=True).mean()
+    else:
+        numeric.index = source["Electrode"].to_numpy()
+        numeric.index.name = "Electrode"
+
+    missing_mask = numeric.isna()
+    prepared = pd.DataFrame({"Electrode": numeric.index.astype(str)})
+    prepared["Missing Selected Harmonics"] = [
+        ", ".join(column for column in selected_columns if bool(mask[column])) for _, mask in missing_mask.iterrows()
+    ]
+    prepared["Raw Summed BCA"] = numeric.sum(axis=1, min_count=1).to_numpy()
+
+    source_count = len(numeric)
+    finite_counts = numeric.notna().sum(axis=0)
+    vector_lengths = np.sqrt(np.square(numeric).sum(axis=0, min_count=1))
+    valid_scales = finite_counts.eq(source_count) & np.isfinite(vector_lengths) & vector_lengths.gt(0.0)
+    safe_scales = vector_lengths.where(valid_scales)
+    normalized = numeric.div(safe_scales, axis="columns")
+    prepared["RMS Normalized BCA"] = normalized.sum(
+        axis=1,
+        min_count=len(selected_columns),
+    ).to_numpy()
+
+    harmonic_scales: list[dict[str, object]] = []
+    for selected_column in selected_columns:
+        finite_count = int(finite_counts[selected_column])
+        vector_length = float(vector_lengths[selected_column])
+        used = bool(valid_scales[selected_column])
+        scale_notes: list[str] = []
+        if finite_count != source_count:
+            scale_notes.append(
+                f"Complete scalp coverage unavailable ({finite_count}/{source_count} finite electrodes)."
+            )
+        if not math.isfinite(vector_length) or vector_length <= 0.0:
+            scale_notes.append("Scalp vector length was zero or non-finite.")
+        harmonic_scales.append(
             {
-                "Raw Summed BCA": "mean",
-                "Missing Selected Harmonics": lambda values: ", ".join(
-                    _ordered_unique(item.strip() for value in values for item in str(value).split(",") if item.strip())
-                ),
+                "Selected Column": selected_column,
+                "Source Electrode Count": source_count,
+                "Finite Electrode Count": finite_count,
+                "Scalp Vector Length": vector_length,
+                "Used for RMS Normalization": used,
+                "QC Notes": "; ".join(scale_notes),
             }
         )
-    return prepared, notes
+    return prepared, notes, harmonic_scales
 
 
 def _build_exclusion_context(
@@ -954,7 +1048,7 @@ def _whole_scalp_row(
     condition: str,
     source_count: int,
     finite_count: int,
-    rms: object,
+    descriptive_rms: object,
     signed_mean: object,
     excluded: bool,
     notes: Sequence[str],
@@ -966,10 +1060,39 @@ def _whole_scalp_row(
         "Condition": condition,
         "Source Electrode Count": source_count,
         "Finite Summed BCA Electrode Count": finite_count,
-        "Whole Scalp RMS Summed BCA": rms,
+        "Descriptive Post-Sum RMS (Not Used for Normalization)": descriptive_rms,
         "Whole Scalp Signed Mean Summed BCA": signed_mean,
         "Current Toolbox Exclusion": _yes_no(excluded),
         "QC Flag": _yes_no(bool(combined)),
+        "QC Notes": combined,
+    }
+
+
+def _rms_harmonic_scale_row(
+    *,
+    pid: str,
+    group: str,
+    condition: str,
+    selected_column: str,
+    source_count: int,
+    finite_count: int,
+    vector_length: object,
+    used: bool,
+    excluded: bool,
+    notes: Sequence[str],
+) -> dict[str, object]:
+    combined = "; ".join(_ordered_unique(note for note in notes if note))
+    frequency = _finite_float(str(selected_column).removesuffix("_Hz"))
+    return {
+        "PID": pid,
+        "Group": group,
+        "Condition": condition,
+        "Harmonic (Hz)": frequency if frequency is not None else math.nan,
+        "Source Electrode Count": source_count,
+        "Finite Electrode Count": finite_count,
+        "Scalp Vector Length": vector_length,
+        "Used for RMS Normalization": _yes_no(used),
+        "Current Toolbox Exclusion": _yes_no(excluded),
         "QC Notes": combined,
     }
 
@@ -1083,7 +1206,20 @@ def _build_analysis_notes_frame(
         ),
         (
             "RMS Normalized BCA",
-            "Each electrode's Raw Summed BCA was divided by the root mean square of Raw Summed BCA across all finite source electrodes for that participant-condition, then averaged within ROI.",
+            "For each participant, condition, and selected harmonic, each "
+            "electrode BCA was divided by the scalp vector length "
+            "sqrt(sum of squared BCA across all source electrodes). These "
+            "dimensionless electrode values were then summed across harmonics "
+            "and averaged within ROI, matching the sequence in Dzhelyova et "
+            "al. (2017) and the vector-normalization method of McCarthy and "
+            "Wood (1985).",
+        ),
+        (
+            "RMS terminology",
+            "The cited FPVS publication calls this denominator RMS, but its "
+            "stated calculation is root-sum-square (scalp vector length), not "
+            "the conventional root mean square. No division by electrode "
+            "count was applied.",
         ),
         (
             "Signed Mean Normalized BCA",
@@ -1096,6 +1232,13 @@ def _build_analysis_notes_frame(
         (
             "QC fields",
             "QC and current-exclusion columns are annotations only. No flagged participant, condition, ROI, or electrode was removed from this export.",
+        ),
+        (
+            "RMS Harmonic Scales",
+            "This audit sheet records the harmonic-specific scalp vector "
+            "lengths used before harmonic summation. The post-sum RMS retained "
+            "in Whole Scalp Values is descriptive only and was not used for "
+            "normalization.",
         ),
         (
             "External analysis",

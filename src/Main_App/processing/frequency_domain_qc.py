@@ -120,6 +120,7 @@ def run_frequency_domain_qc_review(
     rois = load_rois_from_settings() or {}
     settings = _harmonic_selection_settings(project)
     selected_harmonics, provisional_metadata = _provisional_harmonics(
+        project_root=project_root,
         subjects=subjects,
         conditions=ordered_conditions,
         subject_data=subject_data,
@@ -484,6 +485,7 @@ def thresholds_summary_lines() -> list[str]:
 
 def _provisional_harmonics(
     *,
+    project_root: Path,
     subjects: list[str],
     conditions: list[str],
     subject_data: dict[str, dict[str, str]],
@@ -509,7 +511,7 @@ def _provisional_harmonics(
             log_func=log_func,
             settings=settings,
             max_freq=_analysis_bca_upper_limit_hz(),
-            project_root=None,
+            project_root=project_root,
         )
         return (
             tuple(round(float(freq), 4) for freq in selection.selected_harmonics_hz),
@@ -526,6 +528,9 @@ def _provisional_harmonics(
         auto_exclude_base_overlaps=settings.fixed_harmonic_auto_exclude_base,
         base_overlap_tolerance_hz=settings.fixed_harmonic_base_tolerance_hz,
         matching_tolerance_hz=settings.fixed_harmonic_matching_tolerance_hz,
+        input_mode=settings.fixed_harmonic_input_mode,
+        upper_harmonic_index=settings.fixed_harmonic_upper_harmonic_index,
+        upper_frequency_hz=settings.fixed_harmonic_upper_frequency_hz,
     )
     return (
         tuple(round(float(freq), 4) for freq in selection.included_frequencies_hz),
@@ -904,35 +909,70 @@ def _harmonic_selection_settings(project: Any) -> Any:
         normalize_dv_policy,
     )
 
-    raw_preprocessing = getattr(project, "preprocessing", {}) or {}
+    raw_preprocessing: Mapping[str, object] = (
+        getattr(project, "preprocessing", {}) or {}
+    )
+    project_root = getattr(project, "project_root", None)
+    if project_root not in (None, ""):
+        manifest_path = Path(project_root).resolve(strict=False) / "project.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = None
+        if isinstance(manifest, Mapping) and isinstance(
+            manifest.get("preprocessing"), Mapping
+        ):
+            raw_preprocessing = manifest["preprocessing"]
     try:
         preprocessing = normalize_preprocessing_settings(raw_preprocessing)
     except ValueError:
         preprocessing = normalize_preprocessing_settings({})
-    return normalize_dv_policy(
-        {
-            "name": preprocessing.get(
-                "harmonic_selection_policy",
-                GROUP_SIGNIFICANT_POLICY_NAME,
-            ),
-            "fixed_harmonic_frequencies_hz": preprocessing.get(
-                "fixed_harmonic_frequencies_hz",
-                "",
-            ),
-            "fixed_harmonic_auto_exclude_base": preprocessing.get(
-                "fixed_harmonic_auto_exclude_base",
-                True,
-            ),
-            "group_significant_electrode_scope": preprocessing.get(
-                "group_significant_electrode_scope",
-                GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
-            ),
-            "group_significant_summation_method": preprocessing.get(
-                "group_significant_summation_method",
-                GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
-            ),
-        }
-    )
+    policy: dict[str, object] = {
+        "name": preprocessing.get(
+            "harmonic_selection_policy",
+            GROUP_SIGNIFICANT_POLICY_NAME,
+        ),
+        "harmonic_selection_profile": raw_preprocessing.get(
+            "harmonic_selection_profile"
+        ),
+        "harmonic_selection_profile_version": raw_preprocessing.get(
+            "harmonic_selection_profile_version"
+        ),
+        "fixed_harmonic_frequencies_hz": preprocessing.get(
+            "fixed_harmonic_frequencies_hz",
+            "",
+        ),
+        "fixed_harmonic_input_mode": raw_preprocessing.get(
+            "fixed_harmonic_input_mode"
+        ),
+        "fixed_harmonic_upper_harmonic_index": raw_preprocessing.get(
+            "fixed_harmonic_upper_harmonic_index"
+        ),
+        "fixed_harmonic_upper_frequency_hz": raw_preprocessing.get(
+            "fixed_harmonic_upper_frequency_hz"
+        ),
+        "fixed_harmonic_auto_exclude_base": preprocessing.get(
+            "fixed_harmonic_auto_exclude_base",
+            True,
+        ),
+        "group_significant_selection_electrodes": raw_preprocessing.get(
+            "group_significant_selection_electrodes"
+        ),
+        "group_significant_summation_method": preprocessing.get(
+            "group_significant_summation_method",
+            GROUP_SIGNIFICANT_SUMMATION_THROUGH_HIGHEST,
+        ),
+    }
+    if "group_significant_electrode_scope" in raw_preprocessing:
+        policy["group_significant_electrode_scope"] = raw_preprocessing[
+            "group_significant_electrode_scope"
+        ]
+    elif raw_preprocessing.get("harmonic_selection_profile") in (None, ""):
+        policy["group_significant_electrode_scope"] = preprocessing.get(
+            "group_significant_electrode_scope",
+            GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ROI_UNION,
+        )
+    return normalize_dv_policy(policy)
 
 
 def _filter_preprocessing_manual_exclusions(project: Any, subjects: list[str]) -> list[str]:

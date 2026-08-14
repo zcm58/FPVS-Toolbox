@@ -1023,9 +1023,13 @@ def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, 
             participant_ids=("P1", "P2"),
             conditions=("Color", "Semantic"),
             subject_data=lambda: {"P1": {"Color": "p1.xlsx"}},
+            participant_group_id_map=lambda **_kwargs: {
+                "P1": "control_id",
+                "P2": "patient_id",
+            },
             participant_group_label_map=lambda **_kwargs: {
-                "P1": "Control",
-                "P2": "Patient",
+                "P1": "Shared display label",
+                "P2": "Shared display label",
             },
         ),
     )
@@ -1047,11 +1051,15 @@ def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, 
     assert captured["max_freq"] == 16.8
     assert captured["rois"] == {"LOT": ["P7", "PO7"]}
     assert captured["selection_conditions"] == ["Color", "Semantic"]
-    assert captured["group_map"] == {"P1": "Control", "P2": "Patient"}
+    assert captured["group_map"] == {"P1": "control_id", "P2": "patient_id"}
+    assert captured["group_label_map"] == {
+        "P1": "Shared display label",
+        "P2": "Shared display label",
+    }
     assert captured["required_group_assignments"] is True
     assert captured["save_path"] == expected_path
     assert captured["project_root"] == str(tmp_path.resolve())
-    assert captured["dv_policy"]["name"].startswith("Group-level significant harmonics")
+    assert captured["dv_policy"] is None
     assert logs == ["Scanning processed project workbooks for the LORETA summary report..."]
 
 

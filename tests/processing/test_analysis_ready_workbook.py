@@ -94,7 +94,34 @@ def _write_bca_workbook(
 def _selection_metadata() -> dict[str, object]:
     return {
         "harmonic_policy": "group_significant_harmonics",
+        "harmonic_selection_profile": "significant_only_exploratory",
+        "harmonic_selection_profile_version": "1.0",
+        "selection_fingerprint": "c" * 64,
         "selected_harmonics_hz": [1.2, 2.4],
+        "included_harmonics_hz": [1.2, 2.4],
+        "detected_significant_harmonics_hz": [1.2],
+        "selection_electrode_mask": ["O1", "O2"],
+        "pooling_method": "balanced_group_condition_then_equal_condition_z",
+        "pooling_cells": [
+            {
+                "group_id": "anxious",
+                "condition": "Condition A",
+                "participant_count": 1,
+                "participant_weight_within_cell": 1.0,
+                "group_weight_within_condition": 0.5,
+                "condition_weight": 0.5,
+                "effective_participant_weight": 0.25,
+            }
+        ],
+        "source_workbook_fingerprints": [
+            {
+                "subject": "P1",
+                "condition": "Condition A",
+                "path": "1 - Excel Data Files/Condition A/Anxious/P1_Condition A_Results.xlsx",
+                "size_bytes": 123,
+                "mtime_ns": 456,
+            }
+        ],
         "selection_rows": [
             {
                 "target_frequency_hz": 1.2,
@@ -192,7 +219,9 @@ def test_full_audit_workbook_keeps_excluded_values_and_flags(
     assert p1_rot["Raw Summed BCA"] == pytest.approx(7.0)
     assert p1_rot["Current Toolbox Exclusion"] == "Yes"
     assert "O2" in p1_rot["QC Notes"]
-    assert p1_rot["RMS Normalized BCA"] == pytest.approx(7.0 / math.sqrt((3.0**2 + 7.0**2 + 11.0**2) / 3.0))
+    assert p1_rot["RMS Normalized BCA"] == pytest.approx(
+        3.0 / math.sqrt(1.0**2 + 3.0**2 + 5.0**2) + 4.0 / math.sqrt(2.0**2 + 4.0**2 + 6.0**2)
+    )
     assert p1_rot["Signed Mean Normalized BCA"] == pytest.approx(1.0)
 
     electrodes = pd.read_excel(result.workbook_path, sheet_name="Electrode Long")
@@ -201,6 +230,26 @@ def test_full_audit_workbook_keeps_excluded_values_and_flags(
     ].iloc[0]
     assert flagged_o2["Raw Summed BCA"] == pytest.approx(7.0)
     assert flagged_o2["Current Toolbox Exclusion"] == "Yes"
+
+    harmonic_scales = pd.read_excel(
+        result.workbook_path,
+        sheet_name="RMS Harmonic Scales",
+    )
+    p1_condition_a = harmonic_scales.loc[
+        harmonic_scales["PID"].eq("P1") & harmonic_scales["Condition"].eq("Condition A")
+    ].sort_values("Harmonic (Hz)")
+    assert list(p1_condition_a["Scalp Vector Length"]) == pytest.approx(
+        [math.sqrt(1.0**2 + 3.0**2 + 5.0**2), math.sqrt(2.0**2 + 4.0**2 + 6.0**2)]
+    )
+    assert set(p1_condition_a["Used for RMS Normalization"]) == {"Yes"}
+
+    whole_scalp = pd.read_excel(result.workbook_path, sheet_name="Whole Scalp Values")
+    p1_condition_a_whole_scalp = whole_scalp.loc[
+        whole_scalp["PID"].eq("P1") & whole_scalp["Condition"].eq("Condition A")
+    ].iloc[0]
+    assert p1_condition_a_whole_scalp["Descriptive Post-Sum RMS (Not Used for Normalization)"] == pytest.approx(
+        math.sqrt((3.0**2 + 7.0**2 + 11.0**2) / 3.0)
+    )
 
     wide = pd.read_excel(result.workbook_path, sheet_name="Raw BCA Wide")
     p2_wide = wide.loc[wide["PID"].eq("P2")].iloc[0]
@@ -215,6 +264,7 @@ def test_full_audit_workbook_keeps_excluded_values_and_flags(
         "Signed Mean Normalized Wide",
         "Electrode Long",
         "Whole Scalp Values",
+        "RMS Harmonic Scales",
         "QC Flags",
         "ROI Definitions",
         "Selection Summary",
@@ -228,12 +278,53 @@ def test_full_audit_workbook_keeps_excluded_values_and_flags(
     assert sheet["A2"].alignment.horizontal == "center"
     assert all("path" not in str(cell.value or "").casefold() for cell in sheet[1])
 
+    selection_summary = pd.read_excel(
+        result.workbook_path,
+        sheet_name="Selection Summary",
+    )
+    summary = dict(
+        zip(selection_summary["Summary Item"], selection_summary["Value"])
+    )
+    assert summary["Harmonic selection profile ID"] == (
+        "significant_only_exploratory"
+    )
+    assert summary["Harmonic selection profile version"] == "1.0"
+    assert summary["Selection fingerprint"] == "c" * 64
+    assert summary["Frozen/effective selection electrode mask"] == "O1; O2"
+    assert summary["Pooling cell participant counts"] == "anxious::Condition A=1"
+    assert "P1::Condition A" in summary["Selection source workbook identities"]
+
 
 def test_full_audit_export_rejects_index_for_another_project(tmp_path: Path) -> None:
     wrong_index = SimpleNamespace(project_root=tmp_path / "Other Project")
 
     with pytest.raises(ValueError, match="different project root"):
         write_analysis_ready_workbook(tmp_path, dataset_index=wrong_index)
+
+
+def test_publication_rms_normalization_requires_complete_positive_harmonic_scales() -> None:
+    frame = pd.DataFrame(
+        {
+            "Electrode": ["O1", "O2"],
+            "1.2000_Hz": [0.0, 0.0],
+            "2.4000_Hz": [1.0, math.nan],
+        }
+    )
+
+    prepared, notes, harmonic_scales = export_module._prepare_electrode_values(
+        frame,
+        selected_columns=["1.2000_Hz", "2.4000_Hz"],
+    )
+
+    assert prepared["Raw Summed BCA"].tolist() == pytest.approx([1.0, 0.0])
+    assert prepared["RMS Normalized BCA"].isna().all()
+    assert [scale["Used for RMS Normalization"] for scale in harmonic_scales] == [
+        False,
+        False,
+    ]
+    assert harmonic_scales[0]["Scalp Vector Length"] == pytest.approx(0.0)
+    assert harmonic_scales[1]["Finite Electrode Count"] == 1
+    assert any("complete whole-scalp coverage" in note for note in notes)
 
 
 def test_atomic_writer_preserves_previous_workbook_when_rebuild_fails(

@@ -1,7 +1,7 @@
 """Fixed predefined harmonic-list Summed BCA DV policy helpers."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
@@ -10,6 +10,9 @@ import pandas as pd
 
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
+    FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
+    FIXED_HARMONIC_INPUT_UPPER_FREQUENCY,
+    FIXED_HARMONIC_INPUT_UPPER_HARMONIC,
     FIXED_PREDEFINED_POLICY_ID,
     FIXED_PREDEFINED_POLICY_LABEL,
     LOCKED_ODDBALL_FREQUENCY_HZ,
@@ -47,6 +50,7 @@ class FixedHarmonicSelection:
     duplicate_frequencies_hz: list[float]
     oddball_frequency_hz: float
     base_frequency_hz: float
+    base_overlap_exclusion_requested: bool
     base_overlap_exclusion_enabled: bool
     base_overlap_tolerance_hz: float
     matching_tolerance_hz: float
@@ -54,13 +58,24 @@ class FixedHarmonicSelection:
     validation_status: str
     warnings: list[str]
     rows: list[FixedHarmonicRow]
+    input_mode: str = FIXED_HARMONIC_INPUT_FREQUENCY_LIST
+    method_profile_id: str = "fixed_preregistered_domain"
+    method_profile_version: str = "1.0"
+    method_profile_label: str = "Fixed / preregistered harmonic domain"
+    source_workbook_fingerprints: tuple[dict[str, object], ...] = ()
+    selection_fingerprint: str | None = None
 
     def to_metadata(self) -> dict[str, object]:
-        return {
+        metadata: dict[str, object] = {
             "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
             "harmonic_policy_label": FIXED_PREDEFINED_POLICY_LABEL,
+            "harmonic_selection_profile": self.method_profile_id,
+            "harmonic_selection_profile_version": self.method_profile_version,
+            "harmonic_selection_profile_label": self.method_profile_label,
+            "same_sample_adaptive": False,
+            "selection_provenance": "user_fixed_unverified",
             "dependent_variable": "summed_bca",
-            "fixed_harmonic_input_mode": "frequency_hz",
+            "fixed_harmonic_input_mode": self.input_mode,
             "fixed_harmonic_requested_values": list(self.requested_values),
             "fixed_harmonic_requested_frequencies_hz": list(self.requested_frequencies_hz),
             "fixed_harmonic_matched_frequencies_hz": list(self.matched_frequencies_hz),
@@ -69,14 +84,29 @@ class FixedHarmonicSelection:
             "fixed_harmonic_included_frequencies_hz": list(self.included_frequencies_hz),
             "fixed_harmonic_included_columns": list(self.included_columns),
             "fixed_harmonic_included_bin_indices": list(self.included_bin_indices),
+            "evaluated_harmonics_hz": list(self.requested_frequencies_hz),
+            "detected_significant_harmonics_hz": [],
+            "included_harmonics_hz": list(self.included_frequencies_hz),
+            "selected_harmonics_hz": list(self.included_frequencies_hz),
+            "selected_columns": list(self.included_columns),
+            "selected_bin_indices": list(self.included_bin_indices),
             "fixed_harmonic_indices": [
                 _harmonic_index(freq, self.oddball_frequency_hz)
                 for freq in self.included_frequencies_hz
             ],
             "base_frequency_hz": float(self.base_frequency_hz),
             "oddball_frequency_hz": float(self.oddball_frequency_hz),
+            "base_overlap_exclusion_requested": bool(
+                self.base_overlap_exclusion_requested
+            ),
             "base_overlap_exclusion_enabled": bool(self.base_overlap_exclusion_enabled),
+            "base_overlap_exclusion_rule": (
+                "mandatory_dynamic_base_frequency_multiples_v1"
+            ),
             "excluded_base_overlap_frequencies_hz": list(self.excluded_base_overlap_frequencies_hz),
+            "base_overlap_excluded_harmonics_hz": list(
+                self.excluded_base_overlap_frequencies_hz
+            ),
             "duplicate_frequencies_hz": list(self.duplicate_frequencies_hz),
             "base_overlap_tolerance_hz": float(self.base_overlap_tolerance_hz),
             "matching_tolerance_hz": float(self.matching_tolerance_hz),
@@ -102,7 +132,16 @@ class FixedHarmonicSelection:
                 for row in self.rows
             ],
             "methods_summary": _methods_summary(self),
+            "source_workbook_fingerprints": list(self.source_workbook_fingerprints),
         }
+        from Tools.Stats.analysis.canonical_harmonics import (
+            compute_selection_fingerprint,
+        )
+
+        metadata["selection_fingerprint"] = (
+            self.selection_fingerprint or compute_selection_fingerprint(metadata)
+        )
+        return metadata
 
 
 def parse_fixed_harmonic_frequency_list(value: object) -> list[float]:
@@ -136,16 +175,31 @@ def build_fixed_harmonic_selection(
     auto_exclude_base_overlaps: bool = True,
     base_overlap_tolerance_hz: float = 0.01,
     matching_tolerance_hz: float = 0.01,
+    input_mode: str = FIXED_HARMONIC_INPUT_FREQUENCY_LIST,
+    upper_harmonic_index: int | None = None,
+    upper_frequency_hz: float | None = None,
 ) -> FixedHarmonicSelection:
-    requested_raw = parse_fixed_harmonic_frequency_list(requested_values)
     base = float(base_frequency_hz)
     oddball = float(LOCKED_ODDBALL_FREQUENCY_HZ)
+    requested_raw = _fixed_requested_frequencies(
+        requested_values=requested_values,
+        input_mode=input_mode,
+        oddball_frequency_hz=oddball,
+        upper_harmonic_index=upper_harmonic_index,
+        upper_frequency_hz=upper_frequency_hz,
+    )
     bca_freqs = _parse_bca_frequency_columns(bca_columns)
     if not bca_freqs:
         raise RuntimeError("No frequency columns found in the BCA (uV) sheet.")
 
     frequency_resolution = _frequency_resolution([freq for freq, _column, _idx in bca_freqs])
     warnings: list[str] = []
+    requested_base_overlap_exclusion = bool(auto_exclude_base_overlaps)
+    if not requested_base_overlap_exclusion:
+        warnings.append(
+            "A disabled base-overlap request was ignored because fixed profile "
+            "v1 requires dynamic exclusion of the base frequency and its harmonics."
+        )
     rows: list[FixedHarmonicRow] = []
     seen_requested: set[float] = set()
     seen_columns: set[str] = set()
@@ -183,23 +237,19 @@ def build_fixed_harmonic_selection(
         if _is_base_overlap(freq, base, base_overlap_tolerance_hz):
             excluded_base.append(float(freq))
             warning = "Base-rate overlap excluded."
-            if not auto_exclude_base_overlaps:
-                warning = "Base-rate overlap retained because auto-exclusion is disabled."
-                warnings.append(f"Base-rate overlap retained: {freq:g} Hz")
-            else:
-                warnings.append(f"Base-rate overlap excluded: {freq:g} Hz")
-                rows.append(
-                    FixedHarmonicRow(
-                        requested_frequency_hz=float(freq),
-                        matched_frequency_hz=None,
-                        matched_column=None,
-                        matched_bin_index=None,
-                        included=False,
-                        exclusion_reason="base_rate_overlap",
-                        warning=warning,
-                    )
+            warnings.append(f"Base-rate overlap excluded: {freq:g} Hz")
+            rows.append(
+                FixedHarmonicRow(
+                    requested_frequency_hz=float(freq),
+                    matched_frequency_hz=None,
+                    matched_column=None,
+                    matched_bin_index=None,
+                    included=False,
+                    exclusion_reason="base_rate_overlap",
+                    warning=warning,
                 )
-                continue
+            )
+            continue
 
         exact_match = _exact_bca_frequency(bca_freqs, freq)
         if exact_match is None:
@@ -266,7 +316,8 @@ def build_fixed_harmonic_selection(
     if not included_freqs:
         raise RuntimeError(
             "Fixed predefined harmonic list produced no included BCA harmonics. "
-            "Check the requested frequencies, base-overlap option, and source workbook columns."
+            "Check the requested frequencies, mandatory base-overlap exclusions, "
+            "and source workbook columns."
         )
 
     return FixedHarmonicSelection(
@@ -282,14 +333,43 @@ def build_fixed_harmonic_selection(
         duplicate_frequencies_hz=duplicate_freqs,
         oddball_frequency_hz=float(oddball),
         base_frequency_hz=float(base),
-        base_overlap_exclusion_enabled=bool(auto_exclude_base_overlaps),
+        base_overlap_exclusion_requested=requested_base_overlap_exclusion,
+        base_overlap_exclusion_enabled=True,
         base_overlap_tolerance_hz=float(base_overlap_tolerance_hz),
         matching_tolerance_hz=float(matching_tolerance_hz),
         frequency_resolution_hz=frequency_resolution,
         validation_status=validation_status,
         warnings=warnings,
         rows=rows,
+        input_mode=input_mode,
     )
+
+
+def _fixed_requested_frequencies(
+    *,
+    requested_values: object,
+    input_mode: str,
+    oddball_frequency_hz: float,
+    upper_harmonic_index: int | None,
+    upper_frequency_hz: float | None,
+) -> list[float]:
+    if input_mode == FIXED_HARMONIC_INPUT_FREQUENCY_LIST:
+        return parse_fixed_harmonic_frequency_list(requested_values)
+    if input_mode == FIXED_HARMONIC_INPUT_UPPER_HARMONIC:
+        if upper_harmonic_index is None or int(upper_harmonic_index) <= 0:
+            raise ValueError("Enter a positive upper oddball-harmonic index.")
+        highest = int(upper_harmonic_index)
+    elif input_mode == FIXED_HARMONIC_INPUT_UPPER_FREQUENCY:
+        if upper_frequency_hz is None or not np.isfinite(upper_frequency_hz):
+            raise ValueError("Enter a positive upper harmonic frequency in Hz.")
+        highest = int(np.floor(float(upper_frequency_hz) / oddball_frequency_hz + 1e-12))
+        if highest <= 0:
+            raise ValueError(
+                "The upper frequency must include at least the first oddball harmonic."
+            )
+    else:
+        raise ValueError(f"Unsupported fixed harmonic input mode: {input_mode!r}.")
+    return [float(oddball_frequency_hz * index) for index in range(1, highest + 1)]
 
 
 def build_fixed_predefined_preview_payload(
@@ -312,6 +392,9 @@ def build_fixed_predefined_preview_payload(
         auto_exclude_base_overlaps=settings.fixed_harmonic_auto_exclude_base,
         base_overlap_tolerance_hz=settings.fixed_harmonic_base_tolerance_hz,
         matching_tolerance_hz=settings.fixed_harmonic_matching_tolerance_hz,
+        input_mode=settings.fixed_harmonic_input_mode,
+        upper_harmonic_index=settings.fixed_harmonic_upper_harmonic_index,
+        upper_frequency_hz=settings.fixed_harmonic_upper_frequency_hz,
     )
     return selection.to_metadata()
 
@@ -328,6 +411,7 @@ def _prepare_fixed_predefined_bca_data(
     settings: DVPolicySettings,
     dv_metadata: Optional[dict[str, object]] = None,
     project_root: str | Path | None = None,
+    use_accepted_processing_selection: bool = False,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
@@ -347,23 +431,79 @@ def _prepare_fixed_predefined_bca_data(
             ).auto_excluded_electrodes_by_participant
         )
 
-    columns = _find_first_bca_columns(subjects, conditions, subject_data, base_freq, log_func)
-    if columns is None:
-        log_func("Unable to read any BCA columns to validate fixed harmonics.")
-        return None
+    if use_accepted_processing_selection:
+        if project_root in (None, ""):
+            raise RuntimeError(
+                "Accepted fixed harmonic selection requires a loaded project."
+            )
+        from Main_App.processing.harmonic_selection_qc import (
+            PersistedFixedHarmonicSelection,
+            load_processing_harmonic_selection,
+        )
+        from Main_App.projects.project import Project
 
-    selection = build_fixed_harmonic_selection(
-        requested_values=settings.fixed_harmonic_frequencies_hz,
-        bca_columns=columns,
-        base_frequency_hz=base_freq,
-        auto_exclude_base_overlaps=settings.fixed_harmonic_auto_exclude_base,
-        base_overlap_tolerance_hz=settings.fixed_harmonic_base_tolerance_hz,
-        matching_tolerance_hz=settings.fixed_harmonic_matching_tolerance_hz,
-    )
-    log_func(
-        "Fixed predefined harmonics selected: "
-        + ", ".join(f"{freq:g} Hz" for freq in selection.included_frequencies_hz)
-    )
+        selection = load_processing_harmonic_selection(
+            Project.load(Path(project_root)),
+            log_func=log_func,
+        )
+        if not isinstance(selection, PersistedFixedHarmonicSelection):
+            raise RuntimeError(
+                "The accepted project harmonic selection is not a fixed profile. "
+                "Use Settings > Recalculate Harmonics before running fixed Summed BCA."
+            )
+        log_func(
+            "Using accepted processing-time fixed harmonics: "
+            + ", ".join(
+                f"{freq:g} Hz" for freq in selection.included_frequencies_hz
+            )
+        )
+    else:
+        columns = _find_first_bca_columns(
+            subjects,
+            conditions,
+            subject_data,
+            base_freq,
+            log_func,
+        )
+        if columns is None:
+            log_func("Unable to read any BCA columns to validate fixed harmonics.")
+            return None
+
+        selection = build_fixed_harmonic_selection(
+            requested_values=settings.fixed_harmonic_frequencies_hz,
+            bca_columns=columns,
+            base_frequency_hz=base_freq,
+            auto_exclude_base_overlaps=settings.fixed_harmonic_auto_exclude_base,
+            base_overlap_tolerance_hz=settings.fixed_harmonic_base_tolerance_hz,
+            matching_tolerance_hz=settings.fixed_harmonic_matching_tolerance_hz,
+            input_mode=settings.fixed_harmonic_input_mode,
+            upper_harmonic_index=settings.fixed_harmonic_upper_harmonic_index,
+            upper_frequency_hz=settings.fixed_harmonic_upper_frequency_hz,
+        )
+        selection = replace(
+            selection,
+            method_profile_id=settings.profile.method_id,
+            method_profile_version=settings.profile.version,
+            method_profile_label=settings.profile.label,
+            source_workbook_fingerprints=_fixed_source_workbook_fingerprints(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                project_root=project_root,
+            ),
+        )
+        selection = replace(
+            selection,
+            selection_fingerprint=str(
+                selection.to_metadata()["selection_fingerprint"]
+            ),
+        )
+        log_func(
+            "Fixed predefined harmonics selected: "
+            + ", ".join(
+                f"{freq:g} Hz" for freq in selection.included_frequencies_hz
+            )
+        )
 
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
     for pid in subjects:
@@ -405,11 +545,22 @@ def _prepare_fixed_predefined_bca_data(
                     provenance_map[(pid, cond_name, roi_name)] = provenance
 
     if dv_metadata is not None:
-        dv_metadata.update(
-            settings.to_metadata(base_freq=base_freq, selected_conditions=conditions)
+        selection_metadata = selection.to_metadata()
+        policy_metadata = settings.to_metadata(
+            base_freq=base_freq,
+            selected_conditions=conditions,
         )
+        for key in (
+            "harmonic_selection_profile",
+            "harmonic_selection_profile_version",
+            "harmonic_selection_profile_label",
+            "fixed_harmonic_input_mode",
+        ):
+            if key in selection_metadata:
+                policy_metadata[key] = selection_metadata[key]
+        dv_metadata.update(policy_metadata)
         dv_metadata["policy_name"] = settings.name
-        dv_metadata["fixed_predefined_harmonics"] = selection.to_metadata()
+        dv_metadata["fixed_predefined_harmonics"] = selection_metadata
 
     total = 0
     finite = 0
@@ -451,6 +602,51 @@ def _find_first_bca_columns(
             except Exception as exc:  # noqa: BLE001
                 log_func(f"Failed to read BCA columns from {file_path}: {exc}")
     return None
+
+
+def _fixed_source_workbook_fingerprints(
+    *,
+    subjects: Sequence[str],
+    conditions: Sequence[str],
+    subject_data: Dict[str, Dict[str, str]],
+    project_root: str | Path | None,
+) -> tuple[dict[str, object], ...]:
+    root = Path(project_root).resolve() if project_root not in (None, "") else None
+    fingerprints: list[dict[str, object]] = []
+    for subject in subjects:
+        for condition in conditions:
+            raw_path = (subject_data.get(subject, {}) or {}).get(condition)
+            path = Path(raw_path).resolve(strict=False) if raw_path else None
+            if path is None:
+                path_text = ""
+                size_bytes = None
+                mtime_ns = None
+            else:
+                if root is not None:
+                    try:
+                        path_text = str(path.relative_to(root))
+                    except ValueError:
+                        path_text = str(path)
+                else:
+                    path_text = str(path)
+                try:
+                    stat = path.stat()
+                except OSError:
+                    size_bytes = None
+                    mtime_ns = None
+                else:
+                    size_bytes = int(stat.st_size)
+                    mtime_ns = int(stat.st_mtime_ns)
+            fingerprints.append(
+                {
+                    "subject": str(subject),
+                    "condition": str(condition),
+                    "path": path_text,
+                    "size_bytes": size_bytes,
+                    "mtime_ns": mtime_ns,
+                }
+            )
+    return tuple(fingerprints)
 
 
 def _aggregate_bca_sum_harmonics(
@@ -665,8 +861,8 @@ def _methods_summary(selection: FixedHarmonicSelection) -> str:
         "Baseline-corrected amplitudes were summed across a fixed predefined set "
         f"of oddball harmonics ({harmonics} Hz) to create the response amplitude "
         "used for statistical analysis. Frequencies overlapping with the base "
-        "stimulation frequency and its harmonics were excluded when the "
-        "base-overlap option was enabled. The same selected harmonic set was "
+        "stimulation frequency and its harmonics were excluded under the "
+        "mandatory fixed-profile v1 rule. The same selected harmonic set was "
         "applied to each participant, condition, and ROI. SNR values were not "
         "used as the primary dependent variable."
     )

@@ -34,6 +34,57 @@ _RETIRED_EPOCH_KEYS = {
 }
 
 
+class _FakeSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args):
+        for callback in tuple(self._callbacks):
+            callback(*args)
+
+
+class _FakeSettingsWorker:
+    def __init__(self):
+        self.finished = _FakeSignal()
+        self.failed = _FakeSignal()
+        self.deleted = False
+
+    def moveToThread(self, _thread):
+        return None
+
+    def run(self):
+        return None
+
+    def deleteLater(self):
+        self.deleted = True
+
+
+class _FakeSettingsThread:
+    def __init__(self, *, start_error: Exception | None = None):
+        self.started = _FakeSignal()
+        self.finished = _FakeSignal()
+        self._start_error = start_error
+        self._running = False
+        self.deleted = False
+
+    def start(self):
+        if self._start_error is not None:
+            raise self._start_error
+        self._running = True
+
+    def quit(self):
+        self._running = False
+
+    def isRunning(self):
+        return self._running
+
+    def deleteLater(self):
+        self.deleted = True
+
+
 def _prep_project(root):
     proj_root = root / "project"
     proj_root.mkdir()
@@ -67,6 +118,8 @@ def _prep_project(root):
             "manual_excluded_participants": [],
             "max_parallel_workers_override": 0,
             "harmonic_selection_policy": "Group-level significant harmonics (Volfart/Retter/Rossion style)",
+            "harmonic_selection_profile": "legacy_fpvs_toolbox",
+            "harmonic_selection_profile_version": "1.0",
             "group_significant_electrode_scope": "union_roi_electrodes",
             "group_significant_summation_method": "through_highest_significant",
             "fixed_harmonic_frequencies_hz": "1.2, 2.4, 3.6, 4.8, 7.2",
@@ -106,7 +159,9 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
 
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[3].setText("3.5")
-    significant_only_index = dlg.harmonic_summation_method_combo.findData("significant_only")
+    significant_only_index = dlg.harmonic_summation_method_combo.findData(
+        "significant_only_exploratory"
+    )
     dlg.harmonic_summation_method_combo.setCurrentIndex(significant_only_index)
     all_electrodes_index = dlg.harmonic_electrode_scope_combo.findData("all_scalp_electrodes")
     dlg.harmonic_electrode_scope_combo.setCurrentIndex(all_electrodes_index)
@@ -134,6 +189,9 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
         "Group-level significant harmonics (Volfart/Retter/Rossion style)"
     )
     assert reloaded.preprocessing["group_significant_summation_method"] == "significant_only"
+    assert reloaded.preprocessing["harmonic_selection_profile"] == (
+        "significant_only_exploratory"
+    )
     assert reloaded.preprocessing["group_significant_electrode_scope"] == "all_scalp_electrodes"
     assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
@@ -259,7 +317,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
-    assert "Harmonic Selection" in cards
+    assert "Advanced Harmonic Selection and Summation" in cards
     assert "Application Options" in cards
     assert "Processing QC" in cards
     assert "Diagnostics" not in cards
@@ -298,29 +356,46 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg.line_noise_filter_enabled_check.setChecked(True)
     assert dlg.line_noise_frequency_combo.isEnabled() is True
     assert dlg.line_noise_frequency_combo.currentData() == 50
-    assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_summation_method_combo)
-    assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_electrode_scope_combo)
-    assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_freqs_edit)
-    assert cards["Harmonic Selection"].isAncestorOf(dlg.recalculate_harmonics_button)
-    assert cards["Harmonic Selection"].isAncestorOf(dlg.harmonic_recalculation_status)
-    assert cards["Harmonic Selection"].isAncestorOf(dlg.fixed_harmonic_warning)
-    assert dlg.fixed_harmonic_warning.isVisible() is False
+    harmonic_card = cards["Advanced Harmonic Selection and Summation"]
+    assert harmonic_card.isAncestorOf(dlg.harmonic_summation_method_combo)
+    assert harmonic_card.isAncestorOf(dlg.harmonic_electrode_scope_combo)
+    assert harmonic_card.isAncestorOf(dlg.fixed_harmonic_freqs_edit)
+    assert harmonic_card.isAncestorOf(dlg.recalculate_harmonics_button)
+    assert harmonic_card.isAncestorOf(dlg.harmonic_recalculation_status)
+    assert harmonic_card.isAncestorOf(dlg.fixed_harmonic_warning)
+    assert dlg.fixed_harmonic_warning.isVisible() is True
     assert dlg.recalculate_harmonics_button.text() == "Recalculate Harmonics"
     assert dlg.recalculate_harmonics_button.isEnabled() is True
     assert dlg.findChild(ActionRow, "settings_harmonic_selection_actions") is not None
     assert dlg.harmonic_summation_method_combo.itemText(0) == (
-        "Up to highest significant (trim gaps >10)"
+        "Dzhelyova/Poncet — stop after two consecutive failures (recommended)"
     )
-    assert dlg.harmonic_summation_method_combo.itemText(1) == "Significant harmonics only"
-    assert dlg.harmonic_summation_method_combo.itemText(2) == "Fixed harmonic list"
-    assert dlg.harmonic_summation_method_combo.currentData() == "through_highest_significant"
+    assert dlg.harmonic_summation_method_combo.itemText(1) == (
+        "Fixed / preregistered harmonic domain"
+    )
+    assert dlg.harmonic_summation_method_combo.itemText(2) == (
+        "Significant-only (exploratory)"
+    )
+    assert dlg.harmonic_summation_method_combo.currentData() == "legacy_fpvs_toolbox"
     assert dlg.harmonic_electrode_scope_combo.currentData() == "union_roi_electrodes"
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
-    fixed_list_index = dlg.harmonic_summation_method_combo.findData("fixed_predefined")
+    fixed_list_index = dlg.harmonic_summation_method_combo.findData(
+        "fixed_preregistered_domain"
+    )
     dlg.harmonic_summation_method_combo.setCurrentIndex(fixed_list_index)
     assert dlg.fixed_harmonic_freqs_edit.isEnabled() is True
+    assert dlg.fixed_harmonic_input_mode_combo.isEnabled() is True
     assert dlg.harmonic_electrode_scope_combo.isEnabled() is False
+    assert dlg.fixed_harmonic_exclude_base_check.isChecked() is True
+    assert dlg.fixed_harmonic_exclude_base_check.isEnabled() is False
     assert dlg.fixed_harmonic_warning.isVisible() is True
+    upper_index_mode = dlg.fixed_harmonic_input_mode_combo.findData(
+        "upper_harmonic_index"
+    )
+    dlg.fixed_harmonic_input_mode_combo.setCurrentIndex(upper_index_mode)
+    assert dlg.fixed_harmonic_freqs_edit.isEnabled() is False
+    assert dlg.fixed_harmonic_upper_index_edit.isEnabled() is True
+    assert dlg.fixed_harmonic_upper_frequency_edit.isEnabled() is False
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
     assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
     assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)
@@ -381,7 +456,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     rois_tab = dlg.tabs.widget(rois_tab_index)
     advanced_tab = dlg.tabs.widget(advanced_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
-    assert preproc_tab.isAncestorOf(cards["Harmonic Selection"])
+    assert preproc_tab.isAncestorOf(cards["Advanced Harmonic Selection and Summation"])
     assert advanced_tab.isAncestorOf(cards["Application Options"])
     assert advanced_tab.isAncestorOf(cards["Processing QC"])
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])
@@ -448,7 +523,7 @@ def test_harmonic_setting_change_after_processing_prompts_recalculation(
     started: list[bool] = []
     monkeypatch.setattr(
         dlg,
-        "_start_harmonic_recalculation",
+        "_start_full_fft_grid_review",
         lambda **_kwargs: started.append(True) or True,
     )
     questions: list[tuple[str, str]] = []
@@ -460,13 +535,367 @@ def test_harmonic_setting_change_after_processing_prompts_recalculation(
         ),
     )
 
-    significant_only_index = dlg.harmonic_summation_method_combo.findData("significant_only")
+    significant_only_index = dlg.harmonic_summation_method_combo.findData(
+        "significant_only_exploratory"
+    )
     dlg.harmonic_summation_method_combo.setCurrentIndex(significant_only_index)
     dlg._save()
 
     assert questions and questions[0][0] == "Recalculate Harmonics?"
     assert "already has processed data" in questions[0][1]
     assert started == [True]
+
+
+def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    validated = dlg._validated_preproc_payload()
+    assert validated is not None
+    assert dlg._harmonic_settings_changed_after_processing(validated) is False
+
+    original_base = dlg.base_freq_edit.text()
+    dlg.base_freq_edit.setText("5.88")
+    assert dlg._harmonic_settings_changed_after_processing(validated) is True
+    dlg.base_freq_edit.setText(original_base)
+
+    original_limit = dlg.bca_limit_edit.text()
+    dlg.bca_limit_edit.setText("18.0")
+    assert dlg._harmonic_settings_changed_after_processing(validated) is True
+    dlg.bca_limit_edit.setText(original_limit)
+
+    roi_pairs = dlg.roi_editor.get_pairs()
+    dlg.roi_editor.set_pairs([*roi_pairs, ("Audit ROI", ["OZ"])])
+    assert dlg._harmonic_settings_changed_after_processing(validated) is True
+
+
+def test_explicit_harmonic_recalculation_persists_all_selection_inputs(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    resumed: list[bool] = []
+    monkeypatch.setattr(
+        dlg,
+        "_resume_frequency_domain_post_processing",
+        lambda: resumed.append(True),
+    )
+
+    dlg.base_freq_edit.setText("5.88")
+    dlg.bca_limit_edit.setText("17.64")
+    dlg.roi_editor.set_pairs([("Selection Audit", ["O1", "O2"])])
+    dlg._on_recalculate_harmonics_clicked()
+
+    assert resumed == [True]
+    assert float(win.settings.get("analysis", "base_freq", "0")) == pytest.approx(5.88)
+    assert float(win.settings.get("analysis", "bca_upper_limit", "0")) == pytest.approx(
+        17.64
+    )
+    assert win.settings.get_roi_pairs() == [("Selection Audit", ["O1", "O2"])]
+
+
+def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
+    tmp_path,
+    qtbot,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    original_base = win.settings.get("analysis", "base_freq", "6.0")
+    original_rois = win.settings.get_roi_pairs()
+    original_condition_exclusions = {
+        "P01": ["Condition A"],
+    }
+    dlg._manual_excluded_participant_conditions = dict(
+        original_condition_exclusions
+    )
+    dlg._capture_harmonic_settings_rollback()
+
+    profile_index = dlg.harmonic_summation_method_combo.findData(
+        "significant_only_exploratory"
+    )
+    dlg.harmonic_summation_method_combo.setCurrentIndex(profile_index)
+    dlg.base_freq_edit.setText("5.88")
+    dlg.roi_editor.set_pairs([("Temporary", ["OZ"])])
+    dlg._manual_excluded_participant_conditions = {
+        "P02": ["Condition B"],
+    }
+    validated = dlg._validated_preproc_payload()
+    assert validated is not None
+    assert dlg._save_project_preprocessing_for_harmonic_recalculation(validated)
+    assert dlg._save_analysis_inputs_for_harmonic_recalculation()
+
+    dlg._restore_harmonic_settings_after_cancel()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
+    assert win.settings.get("analysis", "base_freq", "") == original_base
+    assert win.settings.get_roi_pairs() == original_rois
+    assert (
+        dlg._manual_excluded_participant_conditions
+        == original_condition_exclusions
+    )
+
+
+def test_harmonic_worker_failure_before_selection_restores_staged_settings(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    dlg._capture_harmonic_settings_rollback()
+
+    profile_index = dlg.harmonic_summation_method_combo.findData(
+        "significant_only_exploratory"
+    )
+    dlg.harmonic_summation_method_combo.setCurrentIndex(profile_index)
+    validated = dlg._validated_preproc_payload()
+    assert validated is not None
+    assert dlg._save_project_preprocessing_for_harmonic_recalculation(validated)
+
+    fake_thread = _FakeSettingsThread()
+    fake_worker = _FakeSettingsWorker()
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: fake_thread)
+    import Main_App.workers.harmonic_selection_worker as harmonic_worker_module
+
+    monkeypatch.setattr(
+        harmonic_worker_module,
+        "ProcessingHarmonicSelectionWorker",
+        lambda _project: fake_worker,
+    )
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args, **_kwargs: None)
+
+    before_tools = json.loads(
+        (project.project_root / "project.json").read_text(encoding="utf-8")
+    ).get("tools")
+    assert dlg._start_harmonic_recalculation() is True
+    after_start_tools = json.loads(
+        (project.project_root / "project.json").read_text(encoding="utf-8")
+    ).get("tools")
+    assert after_start_tools == before_tools
+    assert win._settings_worker_navigation_locked is True
+
+    fake_worker.finished.emit({"ok": False, "error": "selection failed"})
+    fake_thread.finished.emit()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
+    assert win._settings_harmonic_recalc_thread is None
+    assert win._settings_worker_navigation_locked is False
+
+
+def test_harmonic_thread_start_failure_releases_settings_worker_state(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    fake_thread = _FakeSettingsThread(start_error=RuntimeError("start failed"))
+    fake_worker = _FakeSettingsWorker()
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: fake_thread)
+    import Main_App.workers.harmonic_selection_worker as harmonic_worker_module
+
+    monkeypatch.setattr(
+        harmonic_worker_module,
+        "ProcessingHarmonicSelectionWorker",
+        lambda _project: fake_worker,
+    )
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args, **_kwargs: warnings.append(
+            (title, message)
+        ),
+    )
+
+    assert dlg._start_harmonic_recalculation() is False
+    assert win._settings_harmonic_recalc_thread is None
+    assert win._settings_harmonic_recalc_worker is None
+    assert win._settings_harmonic_recalc_bridge is None
+    assert win._settings_worker_navigation_locked is False
+    assert dlg.recalculate_harmonics_button.isEnabled() is True
+    assert fake_worker.deleted is True
+    assert fake_thread.deleted is True
+    assert warnings and warnings[-1][0] == "Recalculation Unavailable"
+
+
+def test_fft_grid_thread_start_failure_releases_settings_worker_state(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    fake_thread = _FakeSettingsThread(start_error=RuntimeError("start failed"))
+    fake_worker = _FakeSettingsWorker()
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: fake_thread)
+    import Main_App.workers.full_fft_grid_qc_worker as grid_worker_module
+
+    monkeypatch.setattr(
+        grid_worker_module,
+        "FullFftGridQcWorker",
+        lambda _project_root: fake_worker,
+    )
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args, **_kwargs: warnings.append(
+            (title, message)
+        ),
+    )
+
+    assert dlg._start_full_fft_grid_review(recalculate_after=True) is False
+    assert win._settings_full_fft_grid_qc_thread is None
+    assert win._settings_full_fft_grid_qc_worker is None
+    assert win._settings_full_fft_grid_qc_bridge is None
+    assert win._settings_worker_navigation_locked is False
+    assert dlg.recalculate_harmonics_button.isEnabled() is True
+    assert fake_worker.deleted is True
+    assert fake_thread.deleted is True
+    assert warnings and warnings[-1][0] == "FFT Grid Check Unavailable"
+
+
+def test_embedded_settings_reject_is_blocked_while_harmonic_worker_runs(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    page = settings_panel.EmbeddedSettingsPage(win.settings, win, project)
+    qtbot.addWidget(page)
+    returned_home = []
+    monkeypatch.setattr(page, "_return_to_home", lambda: returned_home.append(True))
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, message, *_args, **_kwargs: messages.append(
+            (title, message)
+        ),
+    )
+    thread = _FakeSettingsThread()
+    thread.start()
+    win._settings_harmonic_recalc_thread = thread
+
+    page.reject()
+
+    assert returned_home == []
+    assert messages and messages[-1][0] == "Harmonic Recalculation In Progress"
+
+
+def test_declined_harmonic_recalculation_marks_only_summed_bca_outputs_stale(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+    manifest_path = project.project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.setdefault("tools", {}).setdefault("processing", {})[
+        "full_fft_provenance"
+    ] = {"status": "current", "token": "unchanged"}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(Project.load(project.project_root))
+    dlg = SettingsDialog(win.settings, win, win.currentProject)
+    qtbot.addWidget(dlg)
+    monkeypatch.setattr(dlg, "_project_has_processed_outputs", lambda: True)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.No,
+    )
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args, **_kwargs: warnings.append(
+            (title, message)
+        ),
+    )
+
+    profile_index = dlg.harmonic_summation_method_combo.findData(
+        "significant_only_exploratory"
+    )
+    dlg.harmonic_summation_method_combo.setCurrentIndex(profile_index)
+    dlg._save()
+
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    artifacts = saved["tools"]["post_processing"]["artifact_freshness"][
+        "artifacts"
+    ]
+    assert artifacts["harmonic_selection_summary"]["status"] == "stale"
+    assert artifacts["stats_ready_summed_bca"]["status"] == "stale"
+    assert artifacts["analysis_ready_full_audit"]["status"] == "stale"
+    assert saved["tools"]["processing"]["full_fft_provenance"] == {
+        "status": "current",
+        "token": "unchanged",
+    }
+    assert warnings and warnings[-1][0] == "Summed-BCA Outputs Are Stale"
 
 
 def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, monkeypatch):

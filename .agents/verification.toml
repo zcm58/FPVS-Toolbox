@@ -40,10 +40,12 @@ manual_smoke = []
 audits = ["protected", "source-localization"]
 tests = [
   "tests/gui/test_processing_post_status_text.py",
+  "tests/processing/test_artifact_freshness.py",
   "tests/processing/test_condition_spectral_qc.py",
   "tests/processing/test_fft_crop_utils.py",
   "tests/processing/test_fft_multinotch.py",
   "tests/processing/test_filter_downsample_order.py",
+  "tests/processing/test_processing_full_fft_provenance.py",
   "tests/processing/test_full_fft_grid_qc.py",
   "tests/processing/test_frequency_domain_qc.py",
   "tests/processing/test_harmonic_selection_qc.py",
@@ -136,6 +138,7 @@ tests = [
   "tests/stats/analysis/test_fixed_predefined_harmonics.py",
   "tests/stats/analysis/test_full_snr_reference_equivalence.py",
   "tests/stats/analysis/test_group_comparisons.py",
+  "tests/stats/analysis/test_harmonic_selection_profiles.py",
   "tests/stats/analysis/test_inference_contracts.py",
   "tests/stats/analysis/test_lmm_contrasts.py",
   "tests/stats/analysis/test_mixed_effects_model_omnibus.py",

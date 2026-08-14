@@ -8,7 +8,9 @@ Primary paths:
   Hermann-style sensor x harmonic cluster-permutation method. Its numerical
   backend remains GUI-neutral and its thin PySide6 page is an embedded beta tool.
   It reads original FullFFT condition workbooks, not Stats-ready Summed BCA,
-  and does not alter the locked Stats harmonic-selection/noise/summation rules.
+  validates processing-owned neutral FullFFT provenance rather than a Stats
+  harmonic cache, and does not alter or consume the standard Stats profile,
+  included list, noise, or summation rules.
   It supports one two-level paired-condition or independent-group contrast per
   run on a complete BioSemi64 tensor.
 - `src/Tools/Stats/`: active single- and multi-group statistics GUI, controller,
@@ -103,10 +105,11 @@ Stats grouping:
   `analysis/resampling.py`: legacy compatibility surfaces. Paired post-hocs,
   standalone Welch cell tests, and complete-matrix max-|t| are not primary
   Standard FPVS Screening routes.
-- `analysis/canonical_harmonics.py`: thin shared API for resolving the
-  saved processing-time FPVS Toolbox significant-harmonic list and readable
-  fingerprint. Processing remains the only active project workflow allowed to
-  calculate and persist that list. Scalp Maps and the default Individual
+- `analysis/canonical_harmonics.py`: thin shared API for resolving the saved
+  processing-time FPVS Toolbox harmonic-selection result and deterministic
+  scientific fingerprint. The result keeps evaluated, detected, and included
+  harmonics separate. Processing remains the only active project workflow
+  allowed to calculate and persist it. Scalp Maps and the default Individual
   Detectability workflow consume this API and fail clearly when the saved
   selection is missing or stale instead of recalculating it.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
@@ -147,69 +150,101 @@ Rules:
 - New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
 - New summary-reporting code should import from `Tools.Stats.reporting.summary`; keep `Tools.Stats.reporting.summary_utils` as a compatibility facade.
 - `Main_App.processing.harmonic_selection_qc` owns the authoritative
-  project-wide significant-harmonic calculation at processing completion and
-  explicit Settings recalculation. The exact fingerprinted selection in
+  project-wide harmonic selection and summation calculation at processing
+  completion and explicit Settings recalculation. The exact fingerprinted
+  selection in
   `project.json` is the downstream source of truth. Active project consumers
   must load it; they must not derive a condition-, participant-, ROI-, or
   tool-specific replacement. A missing or stale cache is a user-actionable
-  reprocess/recalculate error.
+  post-process/recalculate error; it does not imply that raw EEG preprocessing
+  must be repeated.
 - The Stats page may link users to
-  `Settings > Preprocessing > Harmonic Selection`, but it must not clear the
+  `Settings > Preprocessing > Advanced Harmonic Selection and Summation`, but
+  it must not clear the
   saved selection, claim that the next Stats run will recalculate it, or start
   a second recalculation workflow. FFT-grid review, background calculation,
   persistence verification, and success/failure feedback remain owned by the
   canonical Settings workflow.
 - Stats-ready exports must stay explicit and additive. Keep
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
-  BCA DV facade, preserve `subject_id` and group labels, and surface missing
-  metadata instead of silently changing values. Group-level significant
-  harmonic summation is the default and primary DV policy. Fixed/predefined
-  summation remains available as an alternate policy and also requires exact
-  selected `BCA (uV)` harmonic columns; do not use nearest-column matching for
-  requested fixed harmonics. The default group-level significant-harmonics
-  policy detects significant non-base oddball harmonics from grand-averaged
-  `FullFFT Amplitude (uV)` spectra over the union of predefined ROI electrodes.
-  The default summation method then includes eligible non-base oddball harmonics
-  up to the highest detected significant harmonic, subject to one locked
-  isolated-highest guard. If more than 10 eligible non-base harmonics lie
-  strictly between the two highest detected significant peaks, base-rate
-  overlaps excluded from the count, the highest peak and all intervening
-  harmonics above the next-highest peak are omitted from summation. Exactly 10
-  remains allowed. The upper peak remains recorded as detected, and the guard
-  is applied only to the original highest/next-highest pair rather than
-  recursively. The resulting included harmonic list is applied uniformly to
-  every participant, selected condition, and ROI.
-  The oddball frequency is locked at 1.2 Hz. The BCA harmonic upper limit is
-  only the stop frequency for candidate generation: build
-  `1.2, 2.4, 3.6, ...` up to that ceiling, excluding base-rate overlaps. Never
-  derive oddball spacing from the base frequency, the BCA upper limit, a stale
-  settings payload, or a requested max frequency. This policy expects exact
-  nominal oddball-harmonic columns generated by the locked FFT crop behavior in
-  `docs/agent/architecture/fft-crop-method.md`; do not add a nearest-bin
-  workaround in Stats for off-grid FullFFT workbooks.
-- The group-level significant-harmonics selection math is locked. Build one
-  grand-averaged raw amplitude spectrum from `FullFFT Amplitude (uV)` across
-  selected participants and conditions after averaging each workbook across the
-  union of predefined ROI electrodes. For each non-base candidate oddball
-  harmonic, compute z from that grand-average spectrum as
-  `(target_amplitude - noise_mean) / noise_std`, mark harmonics with
-  `z > 1.64` as detected significant, and keep one included harmonic list for
-  every participant, selected condition, and ROI. The
-  neighboring-noise window is also locked: use +/-10 FFT bins around the target
-  bin, exclude target-1, target, and target+1, require at least four finite
-  noise bins, drop the single minimum and single maximum finite amplitude
-  values when more than two finite values remain, then compute the noise mean
-  and population SD (`ddof=0`) from the remaining values. Do not switch this
-  step to workbook `Z Score` sheets, ROI-specific Z gating, SNR values,
-  nearest-bin matching, inclusive `>= 1.64`, sample SD, or a different
-  neighboring-bin rule unless the user explicitly requests a statistical-method
-  change.
-- The project harmonic-cache fingerprint must version the isolated-highest gap
-  guard. A cache written by the earlier unguarded through-highest method must
-  miss and require `Recalculate Harmonics` or normal post-processing before it
-  can become the downstream source of truth. This recalculates harmonic
-  selection from existing FullFFT workbooks; it does not require EEG
-  preprocessing.
+  BCA DV facade, preserve `subject_id`, the stable canonical `group_id`, and a
+  separate human-readable `group_label`, and surface missing metadata instead
+  of silently changing values. Pooling, cache identity, and inference use
+  `group_id`; labels are presentation only, and duplicate labels must not
+  collapse distinct groups. Every standard
+  consumer receives the exact canonical `included_harmonics_hz` and selection
+  fingerprint. It must not reinterpret the detected list, refill an internal
+  gap, truncate a cutoff, or choose its own harmonic set. One common included
+  list applies to every participant, group, selected condition, electrode, and
+  ROI so comparisons keep one dependent-variable definition.
+- The four v1 profile IDs and algorithms are locked:
+  - `legacy_fpvs_toolbox` reproduces older project values: equal weight for
+    every available participant-condition workbook, the saved Legacy electrode
+    scope (including mutable ROI union), strict local `z > 1.64` detections,
+    fill through the highest detection, and the one-pass isolated-highest gap
+    guard. When more than 10 eligible non-base harmonics lie strictly between
+    the two highest detected peaks, it records the upper peak as detected but
+    omits that peak and every intervening harmonic above the next-highest peak.
+    Exactly 10 remains allowed and the guard is not applied recursively.
+  - `fixed_preregistered_domain` accepts an exact Hz list, an upper oddball-
+    harmonic index, or an upper frequency. It generates the requested domain,
+    always removes dynamically derived base-rate overlaps, and requires exact
+    `{frequency:.4f}_Hz` BCA columns. Base-overlap exclusion is not a user-
+    selectable switch. It performs no local-Z detection and is
+    independently selected only when the research provenance actually supports
+    that statement.
+  - `significant_only_exploratory` evaluates a bounded common adaptive domain
+    and includes only the strict local `z > 1.64` detections. It is same-sample
+    post-selection, not a confirmatory correction for searching harmonics.
+  - `dzhelyova_poncet_two_consecutive_failures` calculates condition-specific
+    Z-scores, averages them equally, stops after two consecutive eligible
+    non-base candidates have `z <= 1.64`, and includes every eligible harmonic
+    through the candidate immediately before that failure pair. A base-rate
+    overlap neither enters the sum nor counts as a failure. Reaching the
+    configured search ceiling before the failure pair is a hard error that asks
+    the user to raise the ceiling or choose a fixed/preregistered profile.
+- Missing/unversioned existing projects resolve to `legacy_fpvs_toolbox` v1.
+  Genuinely new projects must persist
+  `dzhelyova_poncet_two_consecutive_failures` v1 explicitly; they must not rely
+  on the absence fallback. Unknown profiles or unsupported versions fail with
+  a migration error instead of guessing.
+- Adaptive non-legacy pooling is balanced and locked. First average
+  participants within every declared group x condition cell. Then weight
+  declared groups equally within condition, compute the local-Z spectrum
+  separately for each condition, and weight declared condition Z-scores
+  equally. Export each cell's participant IDs, N, within-cell participant
+  weight, group weight, condition weight, and effective participant weight. An
+  entirely missing declared group x condition cell blocks selection instead of
+  silently renormalizing the remaining cells; the remedy is to complete the
+  dataset or choose a fixed/preregistered domain. Equal group weighting is the
+  declared common-selector estimand, not a claim that it is universally
+  preferable to population weighting.
+- Non-legacy adaptive profiles select over all retained scalp electrodes by
+  default or one nonempty frozen a-priori electrode mask stored with project
+  state and provenance. They cannot derive their mask from mutable Stats ROIs.
+  Changing downstream ROI definitions therefore does not change or invalidate
+  an all-scalp/frozen selection. Dynamic ROI-union selection remains a Legacy-
+  only compatibility behavior.
+- Adaptive local-Z math remains locked across profiles. The oddball frequency
+  is 1.2 Hz; the BCA upper limit defines only the candidate ceiling. For each
+  condition spectrum and eligible candidate, compute
+  `(target_amplitude - noise_mean) / noise_std`. Use +/-10 FFT bins around the
+  target, exclude target-1, target, and target+1, require at least four finite
+  noise bins, drop one finite minimum and maximum when more than two remain,
+  and calculate the population SD (`ddof=0`). Detection is strict `z > 1.64`.
+  Never switch to workbook `Z Score` sheets, SNR, nearest-bin matching,
+  inclusive `>=`, sample SD, or a different noise rule without an explicitly
+  scoped statistical-method change. Candidate and BCA columns remain exact
+  nominal oddball-harmonic columns generated by the locked FFT crop behavior;
+  do not add a nearest-bin workaround.
+- The project harmonic-cache identity includes the named profile/version,
+  profile parameters, canonical group assignments, frozen/all-scalp/Legacy
+  electrode scope, eligible cohort, event/preprocessing signature, exact
+  source-workbook fingerprints, and the Legacy isolated-highest guard version
+  when applicable. A mismatch requires Recalculate Harmonics or normal post-
+  processing. Recalculation reads existing FullFFT/BCA workbooks and resumes
+  selection-dependent exports; it never requires EEG preprocessing or FFT
+  regeneration.
 - Processing completion and explicit Settings recalculation must verify that
   the exact current fingerprint was persisted to `project.json` before
   reporting success. An in-memory selection alone is insufficient because
@@ -217,12 +252,18 @@ Rules:
   report a recalculation failure instead of allowing a later source-map cache
   error; an eligible in-memory hit may first repair the missing durable entry.
 - Harmonic-cache identity includes the frequency-domain QC method, thresholds,
-  participant/electrode exclusions, and the normalized
-  participant-condition exclusion cohort, but not
-  `frequency_domain_qc.downstream_outputs_stale`. That field is workflow status
-  toggled around downstream regeneration, not a scientific input. Cache lookup
-  may accept an older entry that differs only by this retired status bit; every
-  scientific setting and source-workbook fingerprint must still match exactly.
+  participant/electrode exclusions, and normalized participant-condition
+  cohort, but not `frequency_domain_qc.downstream_outputs_stale`. That field is
+  workflow state toggled around regeneration, not a scientific input. The
+  canonical selection metadata receives a deterministic
+  `selection_fingerprint`; accepting an identical fingerprint leaves current
+  derivatives intact, while a changed fingerprint marks the Stats-ready,
+  full-audit, L2-MNE Hauk source-PSD map, and eLORETA Hauk source-PSD map
+  artifacts stale before rebuilding them. Per-artifact current, stale, and
+  failed state lives in processing-owned project metadata rather than in a
+  tool-local interpretation. A recorded `current` state is insufficient when the
+  canonical target has been removed; downstream readiness also verifies that
+  the recorded file or directory still exists.
 - Frequency-domain QC exclusions are applied before final harmonic selection,
   Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
   Maps metric collection, and source-map input preparation. Full participant
@@ -231,8 +272,8 @@ Rules:
   that electrode for that participant across conditions; source-map preparation
   conservatively skips participants with automatic electrode-level exclusions
   because inverse payloads require complete topographies.
-- The group-level significant-harmonics policy must fail fast from workbook
-  headers when exact nominal oddball-harmonic columns are missing. Header
+- Adaptive harmonic-selection profiles must fail fast from workbook headers
+  when exact nominal oddball-harmonic columns are missing. Header
   preflight happens in the Stats worker before QC screening, grand-average
   amplitude row loading, and `BCA (uV)` aggregation, so an off-grid FullFFT
   workbook should not trigger expensive downstream sheet reads.
@@ -247,10 +288,10 @@ Rules:
   without guessing and does not start recalculation until the proposed included
   workbooks share one valid grid. It does not change Stats' exact-column or
   neighboring-noise rules.
-- After group-level harmonics are selected, the `BCA (uV)` sheet must also
+- After the canonical harmonic list is selected, the `BCA (uV)` sheet must also
   contain exact included harmonic columns such as `1.2000_Hz`. Do not use
   tolerance matching, nearest-column matching, or policy fallbacks for selected
-  group harmonics; missing exact selected columns are hard failures.
+  canonical harmonics; missing exact included columns are hard failures.
 - Stats folder scans consume the shared project dataset index and may rebind
   the window to the manifest-owning project root
   only when the selected Excel folder belongs to that manifest-defined Excel
@@ -365,6 +406,9 @@ does not mean numerically identical to every paper:
 
 | Published precedent | Toolbox implementation | Required interpretation |
 | --- | --- | --- |
+| [Dzhelyova et al. (2017)](https://academic.oup.com/cercor/article/27/8/4106/3056435) and the cited Poncet-style convention evaluate condition grand spectra and stop after two consecutive harmonics fail a local `z > 1.64` screen. | The named `dzhelyova_poncet_two_consecutive_failures` profile implements that stopping convention, skips base-rate overlaps in the failure count, and sums the eligible common range through the preceding cutoff. Its multi-group extension first balances declared group x condition cells and then averages condition Z-scores equally. | This profile is publication-aligned for the stopping rule, but the balanced multi-group estimand is an explicit Toolbox extension and the local-Z search is still same-sample adaptive rather than formal across-harmonic familywise correction. |
+| Published FPVS studies also use an a-priori upper harmonic or fixed included set when justified by prior work or a prespecified protocol. | `fixed_preregistered_domain` accepts an exact frequency list, upper harmonic index, or upper frequency and applies one exact common list after mandatory dynamic base-overlap exclusion. | The profile is confirmatory only when the domain was actually fixed independently; selecting it after inspecting these data does not create independent provenance. |
+| No cited publication directly defines the Toolbox's one-pass greater-than-10 isolated-highest gap guard. | `legacy_fpvs_toolbox` retains equal-available-workbook pooling, fill through the highest detection, and that guard solely for numerical reproducibility of older projects. | Legacy is defensible as a versioned reproducibility policy, but it must not be reported as an exact Dzhelyova/Poncet implementation. |
 | Summed baseline-corrected amplitude as the dependent variable, with Condition/Expression and ROI as within-subject factors, Group as a between-subject factor, and a participant random intercept appears in [Vandenheever et al. (2025)](https://doi.org/10.1016/j.ijpsycho.2025.113212), [Van der Donck et al. (2020)](https://doi.org/10.1111/jcpp.13201), [Vettori et al. (2020)](https://doi.org/10.3389/fpsyt.2020.00332), and [Samaey et al. (2024)](https://doi.org/10.1186/s12916-024-03610-w). | Single-group Condition x ROI and multi-group Group x Condition x ROI mixed models use Summed BCA and participant grouping. | The dependent variable and factorial mixed-model structure have direct FPVS precedent. |
 | Several cited R/lmer analyses report omnibus F tests and contrasts with Kenward-Roger denominator degrees of freedom; Van der Donck and Samaey used REML-based models, and Samaey also used selected random slopes. | `statsmodels` provides final REML estimates, while the Toolbox refits explicit nested models under ML and uses asymptotic chi-square likelihood-ratio tests. | Toolbox LRT p-values are not F tests using Kenward-Roger or Satterthwaite denominator-degree-of-freedom approximations and may differ materially, especially in small samples. Report the backend and test exactly. |
 | Vandenheever, Van der Donck, and Samaey used Bonferroni-adjusted planned/post-hoc contrasts; Vettori used fitted-model `emmeans` contrasts with Tukey adjustment. | Standard screening fixes Holm family-wise correction for each named family. Explanatory and direct group-cell contrasts are model-estimated from the accepted LMM and use two-sided asymptotic Wald inference. | Holm is a defensible family-wise correction and is usually less conservative than simple Bonferroni, but neither its family definitions nor the Toolbox's asymptotic Wald contrasts numerically replicate Bonferroni-, Tukey-, `emmeans`-, or Kenward-Roger-based results. |
