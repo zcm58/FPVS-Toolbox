@@ -470,7 +470,8 @@ def test_stats_tool_info_uses_expected_nonexpert_tabs():
         "How to interpret results",
     ]
     combined_html = "\n".join(tab.html for tab in STATS_TOOL_INFO.tabs)
+    normalized_html = " ".join(combined_html.split())
     assert "finite" in combined_html.casefold()
     assert "without imputation" in combined_html
     assert "exploratory post-selection" in combined_html
-    assert "does <b>not</b> prove equivalence" in combined_html
+    assert "it does <b>not</b> prove equivalence or no effect" in normalized_html

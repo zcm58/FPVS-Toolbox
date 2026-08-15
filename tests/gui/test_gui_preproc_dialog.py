@@ -60,7 +60,7 @@ class _FakeSettingsWorker:
     def run(self):
         return None
 
-    def deleteLater(self):
+    def deleteLater(self, *_args):
         self.deleted = True
 
 

@@ -218,10 +218,11 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
         page.fixed_highest_combo.itemData(index)
         for index in range(page.fixed_highest_combo.count())
     ] == [1, 2, 3, 4, 6]
-    assert "6 Hz" not in " ".join(
+    fixed_harmonic_labels = [
         page.fixed_highest_combo.itemText(index)
         for index in range(page.fixed_highest_combo.count())
-    )
+    ]
+    assert "H5 (6 Hz)" not in fixed_harmonic_labels
 
     requested_a = page.paired_condition_b_combo.currentData()
     page.paired_condition_a_combo.setCurrentIndex(

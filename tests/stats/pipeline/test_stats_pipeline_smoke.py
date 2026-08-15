@@ -4,6 +4,7 @@ pd = pytest.importorskip("pandas")
 
 try:
     from PySide6.QtCore import Qt
+    from Tools.Stats.analysis.prepared_analysis import prepare_analysis_payload
     from Tools.Stats.controller.stats_controller import PipelineId, StepId, WORKER_FN_BY_STEP
     from Tools.Stats.ui.stats_window import StatsWindow
     from Tools.Stats.workers import stats_workers
@@ -38,8 +39,31 @@ def patched_workers(monkeypatch):
     def fake_baseline(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "baseline"}
 
-    def fake_prepare(*_args, **_kwargs):
-        return {"prepared_payload": object()}
+    def fake_prepare(*_args, **kwargs):
+        prepared = prepare_analysis_payload(
+            pd.DataFrame(
+                [
+                    {
+                        "subject": "S1",
+                        "condition": "C1",
+                        "roi": "ROI",
+                        "value": 1.0,
+                    }
+                ]
+            ),
+            mode=kwargs["mode"],
+            run_spec=kwargs["run_spec"],
+            dv_col="value",
+            subject_col="subject",
+            condition_col="condition",
+            roi_col="roi",
+            frozen_participants=("S1",),
+            selected_conditions=("C1",),
+            selected_rois=("ROI",),
+            analysis_scope=kwargs["analysis_scope"],
+            preparation_id="single-pipeline-smoke",
+        )
+        return {"prepared_payload": prepared}
 
     def fake_report(*_args, **_kwargs):
         return {"exported": True, "report_text": "screening complete"}

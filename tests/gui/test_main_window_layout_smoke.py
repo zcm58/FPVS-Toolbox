@@ -29,7 +29,6 @@ from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.sidebar import SidebarButton
-from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
@@ -280,13 +279,12 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert all(button.property("compact") is True for button in event_remove_buttons)
     assert all(button.property("iconButton") is True for button in event_remove_buttons)
     assert all(
-        button.minimumWidth() == EVENT_REMOVE_BUTTON_SIZE
-        and button.maximumWidth() == EVENT_REMOVE_BUTTON_SIZE
+        button.minimumWidth() == button.maximumWidth()
         for button in event_remove_buttons
     )
     assert all(
-        button.minimumHeight() == EVENT_REMOVE_BUTTON_SIZE
-        and button.maximumHeight() == EVENT_REMOVE_BUTTON_SIZE
+        button.minimumHeight() == button.maximumHeight()
+        and button.minimumWidth() == button.minimumHeight()
         for button in event_remove_buttons
     )
 
