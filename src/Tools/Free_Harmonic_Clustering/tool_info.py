@@ -6,13 +6,6 @@ from Main_App.gui.components import SurfaceSize, ToolInfoContent, ToolInfoTab
 
 PAPER_URL = "https://doi.org/10.1111/psyp.70361"
 PUBLIC_REPOSITORY_URL = "https://github.com/oliver-hermann1/FPVS_Multiharmonic"
-TOOL_GUIDE_URL = (
-    "https://zcm58.github.io/FPVS-Toolbox-Repo/tools/free-harmonic-clustering/"
-)
-REPORTING_GUIDE_URL = (
-    "https://zcm58.github.io/FPVS-Toolbox-Repo/"
-    "reference/methods-reporting-checklist/#free-harmonic-clustering-analysis"
-)
 
 OVERVIEW_HTML = """
 <h2>What This Analysis Tests</h2>
@@ -156,22 +149,19 @@ magnitude.
 """
 
 REFERENCES_HTML = f"""
-<h2>Method and Reporting Resources</h2>
+<h2>References</h2>
 <ul>
   <li><a href="{PAPER_URL}">Hermann, Wong Hiu Ching, and Stothart (2026),
   <i>Preserving Harmonic Structure in FPVS-Oddball: A Two-Dimensional
   Cluster-Based Permutation Approach</i></a></li>
   <li><a href="{PUBLIC_REPOSITORY_URL}">Hermann et al. public
   FPVS_Multiharmonic repository</a></li>
-  <li><a href="{TOOL_GUIDE_URL}">FPVS Toolbox Free Harmonic Clustering user
-  guide</a></li>
-  <li><a href="{REPORTING_GUIDE_URL}">FPVS Toolbox methods and manuscript
-  reporting checklist</a></li>
 </ul>
 <p>
-The paper and public repository are the primary method references. The Toolbox
-guide documents this clean-room implementation, its fixed settings, outputs,
-and reporting requirements.
+FPVS Toolbox mirrors the Free Harmonic Clustering implementation described by
+Hermann et al. (2026) and in the authors' public GitHub repository. All credit
+for this methodology goes to the authors. Links to the paper and repository
+appear above.
 </p>
 """
 
@@ -228,6 +218,4 @@ __all__ = [
     "PAPER_URL",
     "PUBLIC_REPOSITORY_URL",
     "REFERENCES_HTML",
-    "REPORTING_GUIDE_URL",
-    "TOOL_GUIDE_URL",
 ]
