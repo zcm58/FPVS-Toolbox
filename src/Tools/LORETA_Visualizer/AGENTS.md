@@ -205,16 +205,28 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 - Non-surface z-score display may use saved
   `cluster_mask_source_indices`; positive-only filtering is allowed only when
   the mask is disabled or unavailable.
-- Transparent volume display uses a display-smoothed grid/contour clipped to the
-  current brain surface, not source-point glyphs. Clipping and interpolation do
-  not change saved payload values or statistics.
-- eLORETA volume payloads may also render on orthogonal fsaverage MRI slices.
-  Slice rendering is display/export-only, uses prepared points, and standardizes
-  anatomy planes across the loaded conditions for the current
-  method/summary/mask state. It must keep the same mask/exploratory filtering as
-  volume display, crop to anatomy bounds, use comparable Gaussian-neighbor
-  smoothing, and surface visible errors when anatomy, template generation, or
-  the all-condition reference is unavailable.
+- The Hauk-style L2-MNE route is a cortical source model. Its prepared values
+  live on the cortical sheet and may render only as cortical surface paint,
+  including the split-hemisphere and combined-surface views.
+- eLORETA is a separate FPVS Toolbox volumetric extension. Its prepared volume
+  points use their own source space and mask; cerebral pial meshes and other
+  anatomical display meshes are context only. They must never clip volume
+  points, remove values from the volume color-scale inputs, or redefine the
+  valid volume source domain.
+- Interactive 3D volume display uses a display-smoothed grid/contour, not
+  screen-aligned source-point glyphs. It may constrain interpolation to the
+  prepared source support, but anatomical context meshes must never act as
+  interpolation or source masks. The contour is
+  display-only interpolation around tested grid locations, not anatomy, an
+  additional set of tested locations, or an inferential cluster boundary.
+- eLORETA volume payloads may also render on orthogonal fsaverage MRI slices,
+  which are the preferred view for anatomical localization. Slice rendering is
+  display/export-only, uses prepared points, and standardizes anatomy planes
+  across the loaded conditions for the current method/summary/mask state. It
+  must keep the same mask/exploratory filtering as volume display, crop to
+  anatomy bounds, use comparable Gaussian-neighbor smoothing, and surface
+  visible errors when anatomy, template generation, or the all-condition
+  reference is unavailable.
 - Transparent mesh modes use plain alpha blending. Do not re-enable VTK depth
   peeling without visible validation on supported Windows 11 and CachyOS
   (Arch Linux) VTK/graphics stacks;

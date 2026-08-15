@@ -78,6 +78,13 @@ The Method and Display controls only select and render already-prepared values.
 Surface painting, volume smoothing, MRI slices, masks, and camera choices do not
 change the inverse calculation or orientation pooling.
 </p>
+<p>
+The L2-MNE source space is strictly cortical within this workflow and is
+therefore shown only on the cortical surface. The Toolbox eLORETA extension has
+a separate 10 mm volume source grid bounded by the inverse model's inner-skull
+BEM setup. It is not restricted to, snapped onto, or clipped by the cerebral
+pial surface, and a grid location does not by itself establish a tissue label.
+</p>
 
 <h3>Cluster-Based Permutation Mask</h3>
 <p>
@@ -112,6 +119,25 @@ labeled legacy because their pooled free-orientation result was basis-dependent.
 Previously generated amplitude-derived eLORETA manifests also retain their
 legacy labels; neither historical route is treated as the corrected vector-norm
 result.
+</p>
+<p>
+The 3D volume overlay uses Gaussian smoothing around the retained source-grid
+locations. This display-only interpolation does not create additional
+significant source locations. Only the original grid locations and values
+entered the group statistics: the apparent contour boundary and the space
+between grid locations are not additional tested locations or anatomical
+boundaries. A one- or two-location result is still rendered as a compact 3D
+volume tied to grid spacing, rather than as a screen-aligned square.
+</p>
+<p>
+When available, the translucent 3D backdrop is derived from fsaverage's
+skull-stripped whole-brain MRI; otherwise the cerebral pial surface provides
+fallback orientation context. The anatomical backdrop is not a clipping
+boundary: neither version defines the eLORETA source space, removes volume
+locations, or changes the color scale. MRI slices are the preferred view for
+anatomical localization because they show the volume estimate in direct
+relation to template anatomy. The interactive 3D view is a complementary
+spatial overview.
 </p>
 
 <h3>fsaverage Anatomy</h3>

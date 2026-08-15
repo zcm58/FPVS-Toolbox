@@ -6,7 +6,11 @@ from Tools.LORETA_Visualizer.gui import (
     _cluster_mask_display_status_text,
     _participant_cohort_status_text,
 )
-from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, make_source_payload
+from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_SURFACE_MESH,
+    SOURCE_KIND_VOLUME_POINTS,
+    make_source_payload,
+)
 
 
 def _surface_payload(*, mask_indices: list[int], participant_count: int = 24):
@@ -31,11 +35,61 @@ def _surface_payload(*, mask_indices: list[int], participant_count: int = 24):
     )
 
 
+def _volume_payload(*, mask_indices: list[int]):
+    return make_source_payload(
+        points=np.asarray(
+            [[0.0, -0.8, -0.4], [0.1, -0.9, -0.3], [0.0, -1.0, -0.2]],
+            dtype=float,
+        ),
+        values=np.asarray([1.4, 1.7, 1.6], dtype=float),
+        label="volume z",
+        kind=SOURCE_KIND_VOLUME_POINTS,
+        source_model="eloreta_volume_hauk_source_psd_vector_norm_v1_mean",
+        value_label="source-space z-score",
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_source_indices": mask_indices,
+            "cluster_mask_source_index_count": len(mask_indices),
+            "participant_count": 18,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+
 def test_cluster_mask_status_describes_group_significant_vertices() -> None:
     status = _cluster_mask_display_status_text(_surface_payload(mask_indices=[1]), use_cluster_mask=True)
 
     assert status == (
         "The vertices displayed here were significant across the group after the cluster-based permutation test.",
+        "info",
+    )
+
+
+def test_cluster_mask_status_describes_interpolated_volume_locations() -> None:
+    status = _cluster_mask_display_status_text(
+        _volume_payload(mask_indices=[0, 2]),
+        use_cluster_mask=True,
+    )
+
+    assert status == (
+        "The saved group-level mask retained 2 volume-grid locations after cluster-based "
+        "permutation correction. Displayed colors are interpolation around those tested locations.",
+        "info",
+    )
+
+
+def test_cluster_mask_status_uses_singular_volume_location() -> None:
+    status = _cluster_mask_display_status_text(
+        _volume_payload(mask_indices=[1]),
+        use_cluster_mask=True,
+    )
+
+    assert status == (
+        "The saved group-level mask retained 1 volume-grid location after cluster-based "
+        "permutation correction. Displayed colors are interpolation around those tested locations.",
         "info",
     )
 

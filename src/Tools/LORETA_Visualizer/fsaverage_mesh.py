@@ -29,7 +29,7 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     fpvs_toolbox_root,
     preferred_fsaverage_dirs,
 )
-from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh
+from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh, BrainVolumeContextMesh
 from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_FSAVERAGE, MeshDisplayTransform
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_SURFACE = "pial"
 DEFAULT_PUBLICATION_SPLIT_SURFACE = "inflated"
 DEFAULT_MAX_TRIANGLES = 120000
+DEFAULT_VOLUME_CONTEXT_MAX_TRIANGLES = 80000
+FSAVERAGE_BRAINMASK_RELATIVE_PATH = Path("mri") / "brainmask.mgz"
 SURFACE_CHOICES = ("pial", "inflated", "white")
-DISPLAY_MESH_CACHE_VERSION = "1"
+DISPLAY_MESH_CACHE_VERSION = "2"
 DISPLAY_MESH_MEMORY_CACHE_MAX_ITEMS = 4
 LORETA_DISPLAY_MESH_CACHE_RELATIVE_DIR = Path(".fpvs_cache") / "loreta_visualizer" / "meshes"
 _DISPLAY_MESH_MEMORY_CACHE: OrderedDict[str, FsaverageMeshResult] = OrderedDict()
@@ -101,6 +103,11 @@ def load_fsaverage_brain_mesh(
     native_points, faces = _combine_hemispheres(left_vertices, left_faces, right_vertices, right_faces)
     display_transform = _display_transform(native_points)
     points = display_transform.to_display_points(native_points)
+    volume_context = _load_fsaverage_volume_context(
+        fsaverage_dir,
+        display_transform=display_transform,
+        max_triangles=DEFAULT_VOLUME_CONTEXT_MAX_TRIANGLES,
+    )
     left_shade_values, right_shade_values, split_shading_source = _read_publication_shading(
         surf_dir,
         left_vertex_count=len(left_vertices),
@@ -147,6 +154,7 @@ def load_fsaverage_brain_mesh(
         display_transform=display_transform,
         left_hemisphere=left_hemisphere,
         right_hemisphere=right_hemisphere,
+        volume_context=volume_context,
     )
     result = FsaverageMeshResult(
         mesh=mesh,
@@ -217,6 +225,20 @@ def _display_mesh_source_file_fingerprints(fsaverage_dir: Path, *, surface: str)
                 "mtime_ns": int(stat.st_mtime_ns),
             }
         )
+    brainmask_path = Path(fsaverage_dir) / FSAVERAGE_BRAINMASK_RELATIVE_PATH
+    try:
+        brainmask_stat = brainmask_path.stat()
+    except OSError:
+        fingerprints.append({"name": str(FSAVERAGE_BRAINMASK_RELATIVE_PATH), "exists": False})
+    else:
+        fingerprints.append(
+            {
+                "name": str(FSAVERAGE_BRAINMASK_RELATIVE_PATH),
+                "exists": True,
+                "size": int(brainmask_stat.st_size),
+                "mtime_ns": int(brainmask_stat.st_mtime_ns),
+            }
+        )
     return fingerprints
 
 
@@ -262,6 +284,7 @@ def _load_cached_mesh_result(cache_key: str) -> FsaverageMeshResult | None:
                 display_transform=display_transform,
                 left_hemisphere=_hemisphere_from_cached_arrays("left", data, metadata),
                 right_hemisphere=_hemisphere_from_cached_arrays("right", data, metadata),
+                volume_context=_volume_context_from_cached_arrays(data, metadata),
             )
             return FsaverageMeshResult(
                 mesh=mesh,
@@ -300,6 +323,7 @@ def _write_cached_mesh_result(cache_key: str, result: FsaverageMeshResult) -> No
         }
         _add_hemisphere_to_cached_arrays("left", result.mesh.left_hemisphere, arrays, metadata)
         _add_hemisphere_to_cached_arrays("right", result.mesh.right_hemisphere, arrays, metadata)
+        _add_volume_context_to_cached_arrays(result.mesh.volume_context, arrays, metadata)
         arrays["metadata_json"] = np.asarray(json.dumps(metadata, sort_keys=True))
 
         temp_path = cache_path.with_name(f"{cache_path.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp.npz")
@@ -378,6 +402,173 @@ def _hemisphere_from_cached_arrays(
 def _optional_cached_string(value: object) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _add_volume_context_to_cached_arrays(
+    context: BrainVolumeContextMesh | None,
+    arrays: dict[str, np.ndarray],
+    metadata: dict[str, object],
+) -> None:
+    metadata["volume_context_present"] = context is not None
+    if context is None:
+        arrays["volume_context_points"] = np.empty((0, 3), dtype=float)
+        arrays["volume_context_faces"] = np.empty((0,), dtype=np.int64)
+        metadata["volume_context_source_label"] = ""
+        return
+    arrays["volume_context_points"] = np.asarray(context.points, dtype=float)
+    arrays["volume_context_faces"] = np.asarray(context.faces, dtype=np.int64)
+    metadata["volume_context_source_label"] = context.source_label
+
+
+def _volume_context_from_cached_arrays(
+    data: object,
+    metadata: dict[str, object],
+) -> BrainVolumeContextMesh | None:
+    if not bool(metadata.get("volume_context_present", False)):
+        return None
+    return BrainVolumeContextMesh(
+        points=np.asarray(data["volume_context_points"], dtype=float),
+        faces=np.asarray(data["volume_context_faces"], dtype=np.int64),
+        source_label=str(metadata.get("volume_context_source_label") or "whole-brain context"),
+    )
+
+
+def _load_fsaverage_volume_context(
+    fsaverage_dir: Path,
+    *,
+    display_transform: MeshDisplayTransform,
+    max_triangles: int,
+) -> BrainVolumeContextMesh | None:
+    """Build a non-authoritative whole-brain backdrop from fsaverage brainmask."""
+
+    brainmask_path = Path(fsaverage_dir) / FSAVERAGE_BRAINMASK_RELATIVE_PATH
+    if not brainmask_path.is_file():
+        logger.info("fsaverage_volume_context_unavailable", extra={"path": str(brainmask_path)})
+        return None
+    try:
+        import nibabel as nib
+
+        image = nib.load(str(brainmask_path), mmap=True)
+        data = np.squeeze(np.asarray(image.dataobj))
+        if data.ndim != 3:
+            raise ValueError(f"Expected a 3D brainmask, found shape {data.shape!r}.")
+        mask = np.isfinite(data) & (data > 0)
+        if not np.any(mask):
+            raise ValueError("Brainmask contains no nonzero anatomy voxels.")
+        return _brainmask_volume_context_from_arrays(
+            mask,
+            vox_to_ras=_mri_vox_to_surface_ras(image),
+            display_transform=display_transform,
+            max_triangles=max_triangles,
+            source_label="fsaverage skull-stripped whole-brain anatomy",
+        )
+    except (
+        AttributeError,
+        ImportError,
+        MemoryError,
+        ModuleNotFoundError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        logger.warning(
+            "fsaverage_volume_context_failed",
+            extra={"path": str(brainmask_path), "error": str(exc)},
+        )
+        return None
+
+
+def _brainmask_volume_context_from_arrays(
+    mask: np.ndarray,
+    *,
+    vox_to_ras: np.ndarray,
+    display_transform: MeshDisplayTransform,
+    max_triangles: int,
+    source_label: str,
+) -> BrainVolumeContextMesh:
+    """Contour a binary MRI brainmask into renderer display coordinates."""
+
+    brainmask = np.asarray(mask, dtype=bool)
+    if brainmask.ndim != 3 or min(brainmask.shape) < 3:
+        raise ValueError("Whole-brain context requires a 3D mask with at least three voxels per axis.")
+    if not np.any(brainmask):
+        raise ValueError("Whole-brain context mask is empty.")
+    transform = np.asarray(vox_to_ras, dtype=float)
+    if transform.shape != (4, 4) or not np.all(np.isfinite(transform)):
+        raise ValueError("Whole-brain context voxel-to-RAS transform must be a finite 4 x 4 matrix.")
+
+    try:
+        import pyvista as pv
+        from scipy.ndimage import binary_fill_holes
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeError("PyVista and SciPy are required for whole-brain 3D context.") from exc
+
+    filled_mask = binary_fill_holes(brainmask)
+    occupied_axes = tuple(
+        np.flatnonzero(np.any(filled_mask, axis=tuple(other for other in range(3) if other != axis)))
+        for axis in range(3)
+    )
+    lower = np.asarray([indices[0] for indices in occupied_axes], dtype=int)
+    upper = np.asarray([indices[-1] + 1 for indices in occupied_axes], dtype=int)
+    cropped = filled_mask[tuple(slice(int(lo), int(hi)) for lo, hi in zip(lower, upper, strict=True))]
+    cropped = np.pad(cropped.astype(np.uint8, copy=False), 1, mode="constant")
+    origin = tuple(float(value) for value in (lower - 1))
+    grid = pv.ImageData(
+        dimensions=tuple(int(value) for value in cropped.shape),
+        origin=origin,
+    )
+    grid.point_data["brainmask"] = cropped.ravel(order="F")
+    surface = grid.contour([0.5], scalars="brainmask").triangulate()
+    if getattr(surface, "n_points", 0) <= 0 or getattr(surface, "n_cells", 0) <= 0:
+        raise ValueError("Whole-brain context contour is empty.")
+
+    triangle_limit = max(0, int(max_triangles))
+    if triangle_limit and int(surface.n_cells) > triangle_limit:
+        target_reduction = 1.0 - (triangle_limit / max(int(surface.n_cells), 1))
+        surface = surface.decimate_pro(
+            target_reduction,
+            preserve_topology=True,
+            boundary_vertex_deletion=False,
+            splitting=False,
+        ).triangulate()
+    try:
+        surface = surface.smooth(
+            n_iter=12,
+            relaxation_factor=0.08,
+            boundary_smoothing=False,
+            feature_smoothing=False,
+        )
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        logger.debug("fsaverage_volume_context_smoothing_failed", exc_info=True)
+
+    voxel_points = np.asarray(surface.points, dtype=float)
+    homogeneous = np.column_stack((voxel_points, np.ones(len(voxel_points), dtype=float)))
+    native_points = (homogeneous @ transform.T)[:, :3]
+    display_points = display_transform.to_display_points(
+        native_points,
+        coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+    return BrainVolumeContextMesh(
+        points=np.asarray(display_points, dtype=float),
+        faces=np.asarray(surface.faces, dtype=np.int64),
+        source_label=str(source_label),
+    )
+
+
+def _mri_vox_to_surface_ras(image: object) -> np.ndarray:
+    """Return the FreeSurfer surface-RAS transform for an MRI volume."""
+
+    header = getattr(image, "header", None)
+    get_tkr = getattr(header, "get_vox2ras_tkr", None)
+    if callable(get_tkr):
+        transform = get_tkr()
+        if transform is not None:
+            return np.asarray(transform, dtype=float)
+    affine = getattr(image, "affine", None)
+    if affine is None:
+        raise ValueError("MRI volume does not expose a voxel-to-RAS affine.")
+    return np.asarray(affine, dtype=float)
 
 
 def _validate_surface(surface: str) -> str:
@@ -553,6 +744,7 @@ def _decimate_surface(
     display_transform: MeshDisplayTransform,
     left_hemisphere: BrainHemisphereMesh | None = None,
     right_hemisphere: BrainHemisphereMesh | None = None,
+    volume_context: BrainVolumeContextMesh | None = None,
 ) -> BrainMesh:
     if max_triangles <= 0 or len(faces) <= max_triangles:
         return BrainMesh(
@@ -561,6 +753,7 @@ def _decimate_surface(
             display_transform=display_transform,
             left_hemisphere=left_hemisphere,
             right_hemisphere=right_hemisphere,
+            volume_context=volume_context,
         )
     try:
         import pyvista as pv
@@ -585,6 +778,7 @@ def _decimate_surface(
             display_transform=display_transform,
             left_hemisphere=left_hemisphere,
             right_hemisphere=right_hemisphere,
+            volume_context=volume_context,
         )
     except (AttributeError, RuntimeError, TypeError, ValueError, ImportError, ModuleNotFoundError) as exc:
         logger.warning(
@@ -597,6 +791,7 @@ def _decimate_surface(
             display_transform=display_transform,
             left_hemisphere=left_hemisphere,
             right_hemisphere=right_hemisphere,
+            volume_context=volume_context,
         )
 
 

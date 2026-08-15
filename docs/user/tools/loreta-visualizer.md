@@ -43,6 +43,12 @@ model, inverse-method assumptions, and regularization. It provides a
 source-space view aligned with the outer cortical sheet; it does not uniquely
 identify the generators of the scalp signal.
 
+This is a cortical source model: every candidate source belongs to the
+reconstructed cortical sheet. The split-hemisphere and combined-surface views
+paint those cortical values on cortical anatomy. The method does not estimate
+activity at arbitrary locations inside the head, and it cannot produce a
+separate cerebellar, brainstem, or other non-cortical volume source.
+
 The recommended L2 setting is "Cortical normal (Hauk-style)" and is recorded as
 `l2_mne_hauk_source_psd_cortical_normal_v1`. It asks MNE to estimate the
 component normal to the cortical surface before converting source power to
@@ -79,6 +85,17 @@ EEG-only fsaverage volume method. Because eLORETA is still a low-resolution
 inverse method, interpret the result as an estimated source-space pattern, not
 a precise anatomical location.
 
+Unlike the L2-MNE cortical model, the eLORETA candidate sources lie on a 10 mm
+three-dimensional fsaverage grid bounded by the inverse model's inner-skull
+BEM setup. A location can therefore lie outside the two cerebral pial surfaces
+without being outside the volumetric source model, but its inclusion in that
+grid does not by itself assign it to brain tissue. The
+pial or whole-brain mesh shown in the 3D viewer is anatomical context only: it
+does not validate a tissue label, clip the prepared volume estimate, or turn a
+volume result into a cortical result. Use MRI slices to judge the approximate
+template-anatomical position, and retain the usual caution about deep-source
+resolution and EEG-only template localization.
+
 ## Inputs
 
 The current methods use the signed, repetition-averaged source-ready FIF files
@@ -94,16 +111,30 @@ needed only when those derivatives are missing, stale, or invalid.
 
 Depending on the loaded source-map method, you can use options such as:
 
-- cortical surface view, a 3D interactable model of the cortical surface
-- split-hemisphere cortical view, which allows you to view both left and right hemispheres simultaneously
-- transparent brain mesh view for inspecting the prepared eLORETA volume estimate;
-- MRI slice view (beta) for viewing that estimate against template anatomy.
+- **Cortical surface — split hemispheres**, the default Hauk-style L2-MNE view
+  for viewing both cortical hemispheres simultaneously;
+- **Cortical surface — combined**, an interactable combined cortical model for
+  the same L2-MNE surface values;
+- **3D volume overlay**, an interactable contour around retained eLORETA
+  volume-grid estimates; and
+- **MRI slices (recommended for anatomy)**, orthogonal template-anatomy views
+  of the same retained eLORETA volume values.
 
 The available options may differ depending on whether you are viewing an L2-MNE cortical map or an eLORETA volume map.
 
 Display choices never change the source calculation. Surface painting, volume
 smoothing, masks, camera position, and MRI slices operate on already-prepared
 values; the L2 orientation choice affects only the next source-map rebuild.
+
+For a volume map, the 3D colors are created by interpolating around the retained
+10 mm source-grid locations. This produces a readable contour rather than
+fixed-size screen pixels, but it does not create additional measured or tested
+locations. The contour is not an anatomical structure and its visible extent
+is not the statistical cluster boundary. The cerebral pial mesh, or the
+skull-stripped whole-brain shell when available, is a translucent landmark and
+never removes retained volume points or changes the map's automatic color
+scale. MRI slices should be the primary view when assigning an approximate
+anatomical description; use the 3D overlay for spatial overview and interaction.
 
 Cluster-permutation masks require at least two eligible participant maps in
 each displayed condition/group. With only one eligible participant, FPVS
@@ -116,6 +147,8 @@ as an inferential group result.
 The LORETA Visualizer can export source-map figures from supported views.
 
 Use exported figures as review or presentation images unless your analysis plan specifically includes source-space reporting. If you report source-space results, cite the relevant source-estimation method and describe the workflow used to generate the maps.
+For volume figures, also identify whether the figure used MRI slices or the 3D
+interpolated contour and state that interpolation was display-only.
 
 ## Basic Steps
 

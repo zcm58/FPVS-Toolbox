@@ -10,6 +10,10 @@ an anatomical brain mesh plus prepared source-activation payloads. It supports
 both transparent overlay views for volume/deep payloads and opaque cortical
 paint views for the current L2-MNE cortical-surface method, including the
 default publication-style split-hemisphere layout.
+The Hauk-style L2-MNE route is strictly cortical: its candidate sources and
+display values live on the cortical sheet. The independent eLORETA route is an
+FPVS Toolbox volumetric extension and must retain its volume-grid locations
+even when they do not lie inside the cerebral pial meshes.
 It is a new source-localization visualization branch. It is not a revival,
 refactor, or design continuation of the removed `Tools.SourceLocalization`
 implementation.
@@ -191,14 +195,19 @@ Volume masks are recomputed with volume adjacency and stored as
 `cluster_mask_source_indices` rather than surface vertex indices.
 
 The renderer displays prepared eLORETA `volume_points` through a smoothed,
-display-space grid/contour overlay in transparent mesh mode. This smoothing is
-for visualization only: it is applied after source-mask/exploratory filtering
-and does not modify saved source values, source-space statistics, or payload
-metadata. The transparent mesh view additionally clips volume overlays to the
-currently displayed brain surface so outside-shell volume activity is not
-painted against a cortical mesh that does not anatomically contain it.
+display-space grid/contour overlay in 3D volume mode. This smoothing is for
+visualization only: it is applied after source-mask/exploratory filtering and
+does not modify saved source values, source-space statistics, or payload
+metadata. Cerebral pial surfaces and whole-brain anatomical actors are context
+only. They never filter prepared volume points, change the values used for the
+color scale, or define the valid volume source domain. Display interpolation
+may be constrained to the prepared source support, but anatomical context
+meshes never act as source or interpolation masks. The contour does not
+represent anatomy, newly tested source locations, or additional inferential
+cluster extent.
 The GUI also exposes an orthogonal MRI slice display for eLORETA volume
-payloads. That view uses the same prepared payload values and display
+payloads as the preferred view for anatomical localization. That view uses the
+same prepared payload values and display
 filtering, maps display points back into the fsaverage MRI voxel frame, chooses
 a shared slice triplet from the loaded condition set for the selected
 method/summary/mask state, and interpolates values onto axial, coronal, and
@@ -302,8 +311,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   Export Figures modal so future display-specific exports can be added without
   crowding the side panel. The method selector groups loaded manifests by
   source method, keeps condition/summary selection method-local, and restricts
-  non-cortical volume payloads to Transparent brain mesh and MRI slices
-  displays. After Main App post-processing attempts source generation, an
+  Hauk-style L2-MNE payloads to cortical surface displays and non-cortical
+  volume payloads to 3D volume overlay and MRI-slice displays. After Main App
+  post-processing attempts source generation, an
   already-cached visualizer page reloads any successfully written current
   source-map manifest even when its sibling method failed. If neither current
   manifest survives the attempted rebuild, the page clears only a previously
@@ -312,7 +322,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   estimation and does not instantiate the page when it has not been opened.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
-  paint actors, split-hemisphere publication actors, and camera controls. It
+  paint actors, split-hemisphere publication actors, optional whole-brain
+  volume-context actors, and camera controls. Anatomical actors never decide
+  which prepared volume points or scalar values are valid. It
   disables VTK depth peeling and relies on normal alpha blending so
   transparent brain meshes remain visible across supported Windows 11 and
   CachyOS (Arch Linux) graphics stacks. It must not calculate source estimates.
@@ -325,8 +337,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
   `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths fail fast.
 - `fsaverage_mesh.py`: fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It also preserves
-  display-only left/right hemisphere meshes for publication layout. The
-  combined mesh remains pial for the single-surface and transparent views;
+  display-only left/right hemisphere meshes for publication layout and may
+  construct a skull-stripped whole-brain context mesh from fsaverage MRI data
+  for volumetric display. The combined cortical mesh remains pial for the
+  single-surface view;
   fsaverage inflated hemispheres are used only as the split-view display canvas
   when their topology matches the pial/source surface. FreeSurfer `curv` or
   `sulc` morph values may be read as split-view gray-white underlay shading.
@@ -359,11 +373,14 @@ compact rebuild summaries, but source-estimation math still belongs only to
   interpolate already-computed values for visualization, but it must not compute
   source estimates or change payload values.
 - `volume_overlay.py`: display-only smoothing from prepared volume source
-  points onto a regular PyVista grid for transparent mesh contour overlays.
-  The transparent mesh view may clip this overlay to the displayed cortical
-  surface, but it must not mutate saved source values or source-space masks.
+  points onto a regular PyVista grid for 3D contour overlays. Cerebral pial and
+  anatomical context meshes must not clip the prepared points or scalar-range
+  inputs. Interpolation may be bounded by prepared volume source support, but
+  it must not use anatomical context as a mask, mutate saved source values or
+  source-space masks, or imply statistical support between grid locations.
 - `volume_slices.py`: display/export-only orthogonal MRI slice rendering for
-  prepared volume point payloads. It requires `fsaverage/mri/brain.mgz`, builds
+  prepared volume point payloads and the preferred display for anatomical
+  localization. It requires `fsaverage/mri/brain.mgz`, builds
   a visualizer-only 0.5 mm display template in the untracked root
   `.fpvs_cache/loreta_visualizer/mri_templates/` cache, and loads that higher
   sampling underlay for embedded and exported MRI slices. The cache preserves
@@ -628,9 +645,11 @@ amplitude-derived L2-MNE manifest remain importable with explicit method labels,
 but neither is used as a fallback when signed FIF inputs are missing or invalid.
 Current eLORETA volume payloads use the same saved cluster-mask toggle semantics:
 when enabled, saved source-index cluster masks filter displayed source
-locations; when disabled or unavailable, transparent volume z-score overlays
-use positive-only exploratory display filtering. Display behavior does not
-change saved payload values.
+locations; when disabled or unavailable, volume z-score overlays use
+positive-only exploratory display filtering. Pial/anatomical context does not
+perform a second source filter. Both MRI slices and 3D contours interpolate the
+retained values for display only, and neither adds tested locations or changes
+saved payload values.
 
 On first open, if no current time-domain source manifest exists, the GUI may
 start one background rebuild that generates default cortical-normal L2-MNE and

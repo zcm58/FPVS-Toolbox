@@ -32,6 +32,12 @@ def test_loreta_method_info_copy_covers_mask_and_references() -> None:
     assert "eloreta_volume_hauk_source_psd_v1" in html
     assert "basis-dependent" in html
     assert "Hauk-informed Toolbox extension" in normalized_html
+    assert "L2-MNE source space is strictly cortical" in normalized_html
+    assert "not a clipping boundary" in normalized_html
+    assert "skull-stripped whole-brain" in normalized_html
+    assert "MRI slices are the preferred view for anatomical localization" in normalized_html
+    assert "display-only interpolation" in normalized_html
+    assert "does not create additional significant source locations" in normalized_html
     assert "fsaverage template" in normalized_html
     assert "Both methods are EEG-only" in normalized_html
     assert "https://doi.org/10.1016/j.neuroimage.2021.118460" in html

@@ -391,12 +391,21 @@ estimator than the older pooled-orientation implementation. Source Map Options
 can instead select "Legacy MNE pooled orientation" to reproduce older
 `l2_mne_hauk_source_psd_v1` maps; the two results use separate method labels,
 provenance, and caches.
+Both L2 variants are cortical source models: candidate sources and displayed
+values live on the reconstructed cortical sheet. They do not estimate arbitrary
+interior, cerebellar, brainstem, or other non-cortical volume locations.
 
 The independent volume inverse uses `method="eLORETA"`, a 10 mm fsaverage
 volume grid, `loose=1.0`, `depth=None`, `fixed=False`, and `lambda2=1/9`. Its
 current method identity is `eloreta_volume_hauk_source_psd_vector_norm_v1`.
 It preserves complex exact-bin coefficients through a vector inverse rather
 than accepting a basis-dependent scalar pooling of free orientations.
+This eLORETA method is the separate FPVS Toolbox volumetric extension. Its
+candidate sources lie on the inner-skull-BEM-bounded fsaverage volume grid, so
+a prepared location need not lie inside either cerebral pial surface and grid
+membership alone does not assign a tissue label. Pial and whole-brain meshes in
+the viewer are anatomical context only; they do not define or clip the volume
+source space and do not remove values from automatic color-scale calculations.
 Because the Toolbox workflow does not require a separate resting/noise
 recording, it builds MNE's ad-hoc diagonal EEG noise covariance. This is an
 intentional Toolbox adaptation of the Hauk reference pipeline, which used a
@@ -446,8 +455,19 @@ loadable but are not relabeled as corrected vector-norm results.
 
 All orientation selection, inverse calculation, vector pooling, harmonic
 aggregation, and z scoring happen in source producers before the visualizer
-loads a payload. Mesh, split-hemisphere, transparent-volume, and MRI-slice
+loads a payload. Cortical-surface, 3D-volume, and MRI-slice
 choices change only the display of saved values.
+
+For volumetric results, orthogonal MRI slices are the preferred view for
+approximate anatomical localization. The interactive 3D view interpolates the
+retained volume-grid values into a readable contour. That interpolation is
+display-only: its triangles and intermediate colored locations were not
+separately tested, the contour is not an anatomical structure, and its visible
+extent is not an inferential cluster boundary. A cerebral pial mesh or
+skull-stripped whole-brain shell may provide spatial context, but neither
+performs an additional source filter. Report anatomical descriptions cautiously
+because the estimates use EEG-only template anatomy rather than individual MRI
+and coregistration.
 
 For projects with more than one canonical participant group, the Toolbox
 creates a separate source summary and cluster-inference input for each group and
@@ -512,6 +532,9 @@ Report at least:
 - the MNE version, cortical spacing, volume-grid spacing, each method's
   independent inverse settings, ad-hoc diagonal EEG noise covariance, and
   source settings;
+- that L2-MNE used a cortical-sheet source domain while eLORETA used the
+  independent 10 mm volumetric source domain; pial or whole-brain display
+  anatomy did not clip the prepared volume estimates;
 - L2 `pick_ori="normal"` and square-root PSD amplitude conversion, plus eLORETA
   exact-bin complex periodic-Hann coefficients, `pick_ori="vector"`, and
   `sqrt(sum(abs(Cxyz)^2))` orientation pooling;
@@ -520,7 +543,10 @@ Report at least:
   one global minimum/maximum removal, and population SD (`ddof=0`);
 - participant exclusions, flagged-participant policy, group summary, and each
   method's source-space cluster inference, plus L2-MNE ROI/lateralization
-  settings and every source-only complete-case omission and its reason; and
+  settings and every source-only complete-case omission and its reason;
+- whether a reported volume figure used MRI slices or the 3D contour, and that
+  slice/contour interpolation was display-only rather than additional tested
+  locations or inferential extent; and
 - that cortical-normal L2 follows the Hauk estimator more closely but remains
   Toolbox-adapted, and that vector-norm eLORETA is a Toolbox extension, citing
   both the study and public code reference below.

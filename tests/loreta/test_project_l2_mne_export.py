@@ -33,6 +33,7 @@ from Tools.LORETA_Visualizer.gui import (
     _activation_display_payload,
     _coerce_existing_project_root,
     _display_mode_allowed_for_payload,
+    _display_mode_options_for_payload,
     _group_manifest_conditions,
     _group_manifest_methods,
     _ordered_source_summary_ids,
@@ -373,13 +374,32 @@ def test_loreta_display_modes_keep_mri_slices_volume_only() -> None:
         source_model="l2_mne_cortical_surface_hauk_zscore_beta",
         normalize_values=False,
     )
+    generic_payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([1.0], dtype=float),
+        label="Prepared source",
+        normalize_values=False,
+    )
 
     assert _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_TRANSPARENT_MESH)
     assert _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_MRI_SLICES)
     assert not _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_SPLIT_HEMISPHERE)
+    assert not _display_mode_allowed_for_payload(volume_payload, DISPLAY_MODE_CORTICAL_SURFACE)
     assert _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_SPLIT_HEMISPHERE)
     assert _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_CORTICAL_SURFACE)
+    assert not _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_TRANSPARENT_MESH)
     assert not _display_mode_allowed_for_payload(surface_payload, DISPLAY_MODE_MRI_SLICES)
+    assert _display_mode_options_for_payload(volume_payload) == (
+        ("3D volume overlay", DISPLAY_MODE_TRANSPARENT_MESH),
+        ("MRI slices (recommended for anatomy)", DISPLAY_MODE_MRI_SLICES),
+    )
+    assert _display_mode_options_for_payload(surface_payload) == (
+        ("Cortical surface — split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
+        ("Cortical surface — combined", DISPLAY_MODE_CORTICAL_SURFACE),
+    )
+    assert _display_mode_options_for_payload(generic_payload) == (
+        ("3D source overlay", DISPLAY_MODE_TRANSPARENT_MESH),
+    )
 
 
 def test_loreta_manifest_conditions_group_participant_summary_entries(tmp_path) -> None:
@@ -481,19 +501,31 @@ def test_loreta_manifest_methods_group_source_psd_and_legacy_entries_separately(
         SOURCE_METHOD_ELORETA_VOLUME,
     }
     assert list(groups[SOURCE_METHOD_L2_MNE_SOURCE_PSD].condition_groups) == ["color_response"]
+    assert groups[SOURCE_METHOD_L2_MNE_SOURCE_PSD].label == "L2-MNE cortical source PSD (Hauk-style)"
     assert list(groups[SOURCE_METHOD_L2_MNE_SURFACE].condition_groups) == ["color_response"]
     assert list(groups[SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD].condition_groups) == [
         "color_response"
     ]
-    assert groups[SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD].label == "eLORETA volume source PSD"
+    assert groups[SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD].label == (
+        "eLORETA volumetric source PSD (Toolbox extension)"
+    )
     assert list(groups[SOURCE_METHOD_ELORETA_VOLUME].condition_groups) == ["color_response"]
     assert groups[SOURCE_METHOD_ELORETA_VOLUME].label == "Legacy amplitude-derived eLORETA"
 
 
 def test_volume_display_payload_uses_source_cluster_mask_then_positive_exploratory_values() -> None:
     payload = make_source_payload(
-        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
-        values=np.asarray([-1.0, 0.5, 3.0], dtype=float),
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [0.2, 0.0, 0.0],
+                [0.4, 0.0, 0.0],
+                [0.9, -0.7, -0.4],
+                [-0.9, 0.7, 0.4],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-1.0, 0.5, 3.0, 20.0, 99.0], dtype=float),
         label="eLORETA volume",
         kind="volume_points",
         source_model="eloreta_volume_participant_zscore_mean",
@@ -501,7 +533,7 @@ def test_volume_display_payload_uses_source_cluster_mask_then_positive_explorato
         metadata={
             "source_value_unit": "z-score",
             "cluster_mask": "source_space_cluster_permutation",
-            "cluster_mask_source_indices": [0, 2],
+            "cluster_mask_source_indices": [0, 2, 3],
         },
         normalize_values=False,
     )
@@ -509,9 +541,13 @@ def test_volume_display_payload_uses_source_cluster_mask_then_positive_explorato
     masked = _activation_display_payload(payload, transparent_mesh_display=True, use_cluster_mask=True)
     exploratory = _activation_display_payload(payload, transparent_mesh_display=True, use_cluster_mask=False)
 
-    assert masked.values.tolist() == [-1.0, 3.0]
+    assert masked.values.tolist() == [-1.0, 3.0, 20.0]
+    assert float(np.nanmax(masked.values)) == 20.0
+    assert 99.0 not in masked.values
     assert masked.metadata["display_value_filter"] == "cluster_mask"
-    assert exploratory.values.tolist() == [0.5, 3.0]
+    assert masked.metadata["display_value_filter_original_point_count"] == 5
+    assert masked.metadata["display_value_filter_rendered_point_count"] == 3
+    assert exploratory.values.tolist() == [0.5, 3.0, 20.0, 99.0]
     assert exploratory.metadata["display_value_filter_threshold"] == 0.0
 
 

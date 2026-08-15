@@ -141,6 +141,8 @@ class BrainRendererWidget(QWidget):
         self._split_left_state: _SplitHemisphereState | None = None
         self._split_right_state: _SplitHemisphereState | None = None
         self._surface: Any | None = None
+        self._volume_context_surface: Any | None = None
+        self._brain_actor_context: str | None = None
         self._current_mesh: BrainMesh | None = None
         self._brain_opacity = initial_opacity
         self._activation_opacity = 0.72
@@ -154,6 +156,7 @@ class BrainRendererWidget(QWidget):
         self._cortical_paint_z_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._cortical_paint_use_cluster_mask = True
         self._last_activation_payload: SourcePayload | None = None
+        self._last_volume_support_points: np.ndarray | None = None
         self._volume_overlay_active = False
         self._transparent_spin_enabled = False
         self._transparent_spin_angle_degrees = 0.0
@@ -191,7 +194,9 @@ class BrainRendererWidget(QWidget):
         mesh = make_synthetic_brain_mesh()
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
+        self._volume_context_surface = self._to_volume_context_polydata(pv, mesh)
         self._brain_actor = self._add_brain_actor(self._surface)
+        self._brain_actor_context = "cortical"
         plotter.add_axes(interactive=False)
         plotter.camera_position = "xy"
         plotter.reset_camera()
@@ -213,6 +218,13 @@ class BrainRendererWidget(QWidget):
         except (AttributeError, RuntimeError, TypeError, ValueError):
             logger.debug("loreta_mesh_normals_failed", exc_info=True)
             return surface
+
+    @classmethod
+    def _to_volume_context_polydata(cls, pv: Any, mesh: BrainMesh) -> Any | None:
+        context = getattr(mesh, "volume_context", None)
+        if context is None or len(context.points) == 0 or len(context.faces) == 0:
+            return None
+        return cls._to_surface_polydata(pv, context.points, context.faces)
 
     @staticmethod
     def _apply_brain_material(actor: Any) -> None:
@@ -428,46 +440,65 @@ class BrainRendererWidget(QWidget):
         self._split_left_state = None
         self._split_right_state = None
         self._last_activation_payload = None
+        self._last_volume_support_points = None
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
+        self._volume_context_surface = self._to_volume_context_polydata(pv, mesh)
         self._brain_actor = self._add_brain_actor(self._surface)
+        self._brain_actor_context = "cortical"
         if reset_camera:
             plotter.reset_camera()
         plotter.render()
         self._sync_transparent_spin_state(reset_orientation=reset_camera)
 
-    def set_activation_payload(self, payload: SourcePayload) -> None:
-        plotter = self._plotter
+    def set_activation_payload(
+        self,
+        payload: SourcePayload,
+        *,
+        volume_support_points: np.ndarray | None = None,
+    ) -> None:
+        plotter = getattr(self, "_plotter", None)
         if plotter is None:
             return
         import pyvista as pv
 
+        previous_payload = getattr(self, "_last_activation_payload", None)
+        if payload.kind == SOURCE_KIND_VOLUME_POINTS:
+            if volume_support_points is not None:
+                self._last_volume_support_points = _validated_volume_support_points(volume_support_points)
+            elif payload is not previous_payload:
+                self._last_volume_support_points = np.asarray(payload.points, dtype=float).copy()
+        else:
+            self._last_volume_support_points = None
         self._last_activation_payload = payload
         preserve_split_view = (
-            self._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE
-            and self._split_hemisphere_active
+            getattr(self, "_display_mode", DISPLAY_MODE_TRANSPARENT_MESH) == DISPLAY_MODE_SPLIT_HEMISPHERE
+            and getattr(self, "_split_hemisphere_active", False)
         )
         self._remove_activation_actor(render=False)
         self._remove_split_hemisphere_actors(render=False)
         self._split_hemisphere_active = False
         if len(payload.points) == 0:
-            self._restore_base_brain_actor(render=False)
+            self._restore_base_brain_actor(render=False, payload=payload)
             plotter.render()
             self._sync_transparent_spin_state()
             return
         if uses_cortical_surface_paint(payload):
             if (
-                self._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE
+                getattr(self, "_display_mode", DISPLAY_MODE_TRANSPARENT_MESH) == DISPLAY_MODE_SPLIT_HEMISPHERE
                 and self._set_split_hemisphere_payload(payload, reset_camera=not preserve_split_view)
             ):
                 plotter.render()
                 self._sync_transparent_spin_state()
                 return
-            if self._display_mode == DISPLAY_MODE_CORTICAL_SURFACE and self._set_cortical_paint_payload(payload):
+            if (
+                getattr(self, "_display_mode", DISPLAY_MODE_TRANSPARENT_MESH) == DISPLAY_MODE_CORTICAL_SURFACE
+                and self._set_cortical_paint_payload(payload)
+            ):
                 plotter.render()
                 self._sync_transparent_spin_state()
                 return
-        self._restore_base_brain_actor(render=False)
+        self._restore_base_brain_actor(render=False, payload=payload)
         self._add_activation_overlay(pv, payload)
         plotter.render()
         self._sync_transparent_spin_state()
@@ -477,7 +508,12 @@ class BrainRendererWidget(QWidget):
         if plotter is None:
             return
         self._volume_overlay_active = False
-        if payload.kind == SOURCE_KIND_VOLUME_POINTS and self._add_smoothed_volume_overlay(pv, payload):
+        if payload.kind == SOURCE_KIND_VOLUME_POINTS:
+            if self._add_smoothed_volume_overlay(pv, payload):
+                return
+            if self._add_volume_glyph_fallback(pv, payload):
+                return
+            self._volume_overlay_active = True
             return
         mesh_kinds = {SOURCE_KIND_ROI_MESH, SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH}
         has_faces = payload.faces is not None and len(payload.faces) > 0
@@ -488,11 +524,10 @@ class BrainRendererWidget(QWidget):
             style = "surface"
         else:
             cloud = pv.PolyData(payload.points)
-            is_volume_points = payload.kind == SOURCE_KIND_VOLUME_POINTS
             is_surface_points = payload.kind == SOURCE_KIND_SURFACE_POINTS
             render_points_as_spheres = False
-            point_size = 18 if is_volume_points else 22
-            style = "points_gaussian" if (is_surface_points or is_volume_points) else "points"
+            point_size = 22
+            style = "points_gaussian" if is_surface_points else "points"
         cloud["activation"] = payload.values
         self._activation_actor = plotter.add_mesh(
             cloud,
@@ -514,23 +549,14 @@ class BrainRendererWidget(QWidget):
         self._activation_actor.SetVisibility(self._activation_visible)
 
     def display_payload_for_current_mesh(self, payload: SourcePayload) -> SourcePayload:
-        """Return the renderer-facing payload after display-only mesh clipping."""
-        if payload.kind != SOURCE_KIND_VOLUME_POINTS:
-            return payload
-        try:
-            import pyvista as pv
-        except (ImportError, ModuleNotFoundError):
-            return payload
-        clipped_payload = self._volume_payload_inside_brain_surface(pv, payload)
-        if clipped_payload is None:
-            return _empty_clipped_volume_payload(payload)
-        return clipped_payload
+        """Return a payload unchanged; anatomical meshes never define source support."""
+
+        return payload
 
     def _add_smoothed_volume_overlay(self, pv: Any, payload: SourcePayload) -> bool:
         plotter = self._plotter
         if plotter is None:
             return False
-        payload = self.display_payload_for_current_mesh(payload)
         if len(payload.points) == 0:
             self._volume_overlay_active = True
             return True
@@ -538,13 +564,17 @@ class BrainRendererWidget(QWidget):
             overlay = build_smoothed_volume_overlay(
                 payload.points,
                 payload.values,
-                display_bounds=self._volume_display_bounds(),
+                support_points=self._volume_support_points(payload),
+                source_spacing=self._volume_source_spacing(),
                 min_visible_value=self._volume_min_visible_value(),
             )
-        except (ImportError, ValueError) as exc:
+        except (ImportError, MemoryError, RuntimeError, TypeError, ValueError) as exc:
             logger.debug("loreta_volume_overlay_smoothing_failed", extra={"error": str(exc)})
             return False
         if overlay is None:
+            if len(_visible_volume_source_arrays(payload, self._volume_min_visible_value())[0]) == 0:
+                self._volume_overlay_active = True
+                return True
             return False
 
         try:
@@ -554,7 +584,6 @@ class BrainRendererWidget(QWidget):
                 origin=overlay.origin,
             )
             grid.point_data["activation"] = overlay.values.ravel(order="F")
-            self._clip_volume_grid_to_brain_surface(pv, grid)
             if not np.any(np.asarray(grid.point_data["activation"], dtype=float) >= min(overlay.contour_values)):
                 self._volume_overlay_active = True
                 return True
@@ -586,77 +615,89 @@ class BrainRendererWidget(QWidget):
         self._volume_overlay_active = True
         return True
 
-    def _volume_payload_inside_brain_surface(self, pv: Any, payload: SourcePayload) -> SourcePayload | None:
-        mask = self._volume_enclosed_point_mask(pv, payload.points)
-        if mask is None:
-            return payload
-        if not np.any(mask):
-            return None
-        if np.all(mask):
-            return payload
-        metadata = dict(payload.metadata)
-        metadata.update(
-            {
-                "display_surface_clip": "current_brain_mesh_enclosed_points",
-                "display_surface_clip_original_point_count": int(len(payload.points)),
-                "display_surface_clip_rendered_point_count": int(np.count_nonzero(mask)),
-            }
-        )
-        return SourcePayload(
-            points=np.asarray(payload.points, dtype=float)[mask],
-            values=np.asarray(payload.values, dtype=float).reshape(-1)[mask],
-            label=payload.label,
-            kind=payload.kind,
-            coordinate_space=payload.coordinate_space,
-            source_model=payload.source_model,
-            value_label=payload.value_label,
-            faces=None,
-            metadata=metadata,
-        )
+    def _add_volume_glyph_fallback(self, pv: Any, payload: SourcePayload) -> bool:
+        """Render true 3D source-sized spheres if contour construction fails."""
 
-    def _clip_volume_grid_to_brain_surface(self, pv: Any, grid: Any) -> None:
-        points = getattr(grid, "points", None)
-        if points is None:
-            return
-        mask = self._volume_enclosed_point_mask(pv, np.asarray(points, dtype=float))
-        if mask is None:
-            return
+        plotter = getattr(self, "_plotter", None)
+        if plotter is None or len(payload.points) == 0:
+            return False
+        points, values = _visible_volume_source_arrays(payload, self._volume_min_visible_value())
+        if len(points) == 0:
+            self._volume_overlay_active = True
+            return True
+        spacing = self._volume_source_spacing()
+        if spacing is None:
+            spacing = _nearest_positive_point_spacing(self._volume_support_points(payload)) or 0.08
         try:
-            activation = np.asarray(grid.point_data["activation"], dtype=float).reshape(-1).copy()
-        except (KeyError, TypeError, ValueError):
-            return
-        if len(mask) != len(activation):
-            return
-        activation[~mask] = 0.0
-        grid.point_data["activation"] = activation
-
-    def _volume_enclosed_point_mask(self, pv: Any, points: np.ndarray) -> np.ndarray | None:
-        surface = getattr(self, "_surface", None)
-        if surface is None or getattr(surface, "n_points", 0) <= 0 or getattr(surface, "n_cells", 0) <= 0:
-            return None
-        source_points = np.asarray(points, dtype=float)
-        if source_points.ndim != 2 or source_points.shape[1] != 3 or len(source_points) == 0:
-            return None
-        try:
-            cloud = pv.PolyData(source_points)
-            enclosed = cloud.select_enclosed_points(surface, tolerance=0.0, check_surface=False)
-            mask = np.asarray(enclosed.point_data["SelectedPoints"], dtype=bool).reshape(-1)
-        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
-            logger.debug("loreta_volume_surface_clip_failed", exc_info=True)
-            return None
-        if len(mask) != len(source_points):
-            return None
-        return mask
-
-    def _volume_display_bounds(self) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
-        mesh = self._current_mesh
-        if mesh is None or len(mesh.points) == 0:
-            return None
-        points = np.asarray(mesh.points, dtype=float)
-        return (
-            tuple(float(value) for value in np.min(points, axis=0)),
-            tuple(float(value) for value in np.max(points, axis=0)),
+            cloud = pv.PolyData(points)
+            cloud["activation"] = values
+            cloud["glyph_scale"] = np.full(len(points), float(spacing), dtype=float)
+            sphere = pv.Sphere(radius=0.5, theta_resolution=18, phi_resolution=18)
+            glyphs = cloud.glyph(
+                scale="glyph_scale",
+                orient=False,
+                geom=sphere,
+                factor=1.0,
+            )
+            if getattr(glyphs, "n_points", 0) <= 0 or getattr(glyphs, "n_cells", 0) <= 0:
+                return False
+            self._activation_actor = plotter.add_mesh(
+                glyphs,
+                scalars="activation",
+                cmap=list(LORETA_SMOOTH_SCALAR_COLORS),
+                clim=self._activation_scalar_range,
+                interpolate_before_map=True,
+                opacity=self._activation_opacity,
+                lighting=False,
+                ambient=1.0,
+                diffuse=0.0,
+                specular=0.0,
+                smooth_shading=True,
+                show_scalar_bar=False,
+            )
+        except (AttributeError, MemoryError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("loreta_volume_3d_fallback_failed", extra={"error": str(exc)})
+            return False
+        logger.warning(
+            "loreta_volume_contour_used_3d_glyph_fallback",
+            extra={"source_point_count": int(len(points))},
         )
+        self._activation_actor.SetVisibility(self._activation_visible)
+        self._volume_overlay_active = True
+        return True
+
+    def _volume_support_points(self, payload: SourcePayload) -> np.ndarray:
+        support = getattr(self, "_last_volume_support_points", None)
+        if support is None or len(support) == 0:
+            return np.asarray(payload.points, dtype=float)
+        return np.asarray(support, dtype=float)
+
+    def _volume_source_spacing(self) -> float | None:
+        payload = getattr(self, "_last_activation_payload", None)
+        mesh = getattr(self, "_current_mesh", None)
+        if payload is None or mesh is None:
+            return None
+        metadata = getattr(payload, "metadata", {}) or {}
+        spacing_value = next(
+            (
+                metadata.get(key)
+                for key in (
+                    "forward_model_volume_pos_mm",
+                    "volume_pos_mm",
+                    "config_volume_pos_mm",
+                )
+                if metadata.get(key) is not None
+            ),
+            None,
+        )
+        try:
+            spacing_mm = float(spacing_value)
+            radius = float(mesh.display_transform.radius)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if not np.isfinite(spacing_mm) or spacing_mm <= 0.0 or not np.isfinite(radius) or radius <= 0.0:
+            return None
+        return spacing_mm / radius
 
     def _volume_min_visible_value(self) -> float | None:
         vmin = float(self._activation_scalar_range[0])
@@ -688,6 +729,7 @@ class BrainRendererWidget(QWidget):
         self._remove_brain_actor(render=False)
         self._remove_split_hemisphere_actors(render=False)
         self._brain_actor = self._add_cortical_paint_actor(paint_surface)
+        self._brain_actor_context = "cortical_paint"
         self._cortical_paint_active = True
         self._split_hemisphere_active = False
         self._set_cortical_paint_scalar_visibility(self._activation_visible)
@@ -792,7 +834,7 @@ class BrainRendererWidget(QWidget):
         if refresh and payload is not None:
             self.set_activation_payload(payload)
             return
-        self._restore_base_brain_actor(render=refresh)
+        self._restore_base_brain_actor(render=refresh, payload=payload)
         self._sync_transparent_spin_state(reset_orientation=mode == DISPLAY_MODE_TRANSPARENT_MESH)
 
     def display_mode(self) -> str:
@@ -893,27 +935,36 @@ class BrainRendererWidget(QWidget):
             plotter.render()
 
     def _transparent_spin_focal_point(self) -> np.ndarray:
-        mesh = self._current_mesh
-        if mesh is None or len(mesh.points) == 0:
-            return np.zeros(3, dtype=float)
-        points = np.asarray(mesh.points, dtype=float)
-        finite_points = points[np.all(np.isfinite(points), axis=1)]
+        finite_points = self._transparent_spin_reference_points()
         if len(finite_points) == 0:
             return np.zeros(3, dtype=float)
         return np.mean(finite_points, axis=0).astype(float)
 
     def _transparent_spin_camera_distance(self, focal: np.ndarray) -> float:
-        mesh = self._current_mesh
-        if mesh is None or len(mesh.points) == 0:
-            return _TRANSPARENT_SPIN_MIN_DISTANCE
-        points = np.asarray(mesh.points, dtype=float)
-        finite_points = points[np.all(np.isfinite(points), axis=1)]
+        finite_points = self._transparent_spin_reference_points()
         if len(finite_points) == 0:
             return _TRANSPARENT_SPIN_MIN_DISTANCE
         radius = float(np.max(np.linalg.norm(finite_points - focal, axis=1)))
         if not np.isfinite(radius) or radius <= 1e-9:
             return _TRANSPARENT_SPIN_MIN_DISTANCE
         return max(radius * _TRANSPARENT_SPIN_DISTANCE_SCALE, _TRANSPARENT_SPIN_MIN_DISTANCE)
+
+    def _transparent_spin_reference_points(self) -> np.ndarray:
+        surface = (
+            getattr(self, "_volume_context_surface", None)
+            if getattr(self, "_brain_actor_context", None) == "whole_brain_anatomy"
+            else getattr(self, "_surface", None)
+        )
+        points = getattr(surface, "points", None)
+        if points is None:
+            mesh = getattr(self, "_current_mesh", None)
+            points = getattr(mesh, "points", None)
+        if points is None:
+            return np.empty((0, 3), dtype=float)
+        points_array = np.asarray(points, dtype=float)
+        if points_array.ndim != 2 or points_array.shape[1] != 3:
+            return np.empty((0, 3), dtype=float)
+        return points_array[np.all(np.isfinite(points_array), axis=1)]
 
     def rotate_split_hemisphere(self, side: str, degrees: float) -> None:
         if side == "left":
@@ -964,20 +1015,41 @@ class BrainRendererWidget(QWidget):
     def _use_cortical_paint_cluster_mask(self) -> bool:
         return bool(getattr(self, "_cortical_paint_use_cluster_mask", True))
 
-    def _restore_base_brain_actor(self, *, render: bool) -> None:
-        if not self._cortical_paint_active:
-            return
-        plotter = self._plotter
-        surface = self._surface
+    def _restore_base_brain_actor(
+        self,
+        *,
+        render: bool,
+        payload: SourcePayload | None = None,
+    ) -> None:
+        plotter = getattr(self, "_plotter", None)
+        surface, context = self._base_brain_surface_for_payload(payload)
         if plotter is None or surface is None:
+            return
+        if (
+            getattr(self, "_brain_actor", None) is not None
+            and getattr(self, "_brain_actor_context", None) == context
+            and not getattr(self, "_cortical_paint_active", False)
+            and not getattr(self, "_split_hemisphere_active", False)
+        ):
             return
         self._remove_brain_actor(render=False)
         self._remove_split_hemisphere_actors(render=False)
         self._brain_actor = self._add_brain_actor(surface)
+        self._brain_actor_context = context
         self._cortical_paint_active = False
         self._split_hemisphere_active = False
         if render:
             plotter.render()
+
+    def _base_brain_surface_for_payload(self, payload: SourcePayload | None) -> tuple[Any | None, str]:
+        if (
+            getattr(self, "_display_mode", DISPLAY_MODE_TRANSPARENT_MESH) == DISPLAY_MODE_TRANSPARENT_MESH
+            and payload is not None
+            and payload.kind == SOURCE_KIND_VOLUME_POINTS
+            and getattr(self, "_volume_context_surface", None) is not None
+        ):
+            return self._volume_context_surface, "whole_brain_anatomy"
+        return getattr(self, "_surface", None), "cortical"
 
     def set_activation_scalar_range(self, vmin: float, vmax: float, *, refresh: bool = True) -> None:
         if vmax <= vmin:
@@ -1077,6 +1149,7 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         actor = self._brain_actor
         self._brain_actor = None
+        self._brain_actor_context = None
         if plotter is None or actor is None:
             return
         try:
@@ -1197,10 +1270,13 @@ class BrainRendererWidget(QWidget):
         self._split_left_state = None
         self._split_right_state = None
         self._surface = None
+        self._volume_context_surface = None
         self._current_mesh = None
+        self._brain_actor_context = None
         self._cortical_paint_active = False
         self._split_hemisphere_active = False
         self._last_activation_payload = None
+        self._last_volume_support_points = None
         if plotter is None:
             return
         try:
@@ -1741,26 +1817,42 @@ def _cortical_paint_display_values(values: np.ndarray, *, scalar_range: tuple[fl
     return np.where(np.isfinite(scalar_values) & (scalar_values >= vmin), scalar_values, np.nan)
 
 
-def _empty_clipped_volume_payload(payload: SourcePayload) -> SourcePayload:
-    metadata = dict(payload.metadata)
-    metadata.update(
-        {
-            "display_surface_clip": "current_brain_mesh_enclosed_points",
-            "display_surface_clip_original_point_count": int(len(payload.points)),
-            "display_surface_clip_rendered_point_count": 0,
-        }
-    )
-    return SourcePayload(
-        points=np.empty((0, 3), dtype=float),
-        values=np.empty((0,), dtype=float),
-        label=payload.label,
-        kind=payload.kind,
-        coordinate_space=payload.coordinate_space,
-        source_model=payload.source_model,
-        value_label=payload.value_label,
-        faces=None,
-        metadata=metadata,
-    )
+def _validated_volume_support_points(points: np.ndarray) -> np.ndarray:
+    support = np.asarray(points, dtype=float)
+    if support.ndim != 2 or support.shape[1] != 3:
+        raise ValueError("Volume source support must be an N x 3 array.")
+    support = support[np.all(np.isfinite(support), axis=1)]
+    return support.copy()
+
+
+def _visible_volume_source_arrays(
+    payload: SourcePayload,
+    min_visible_value: float | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    points = np.asarray(payload.points, dtype=float)
+    values = np.asarray(payload.values, dtype=float).reshape(-1)
+    if points.ndim != 2 or points.shape[1] != 3 or len(points) != len(values):
+        return np.empty((0, 3), dtype=float), np.empty((0,), dtype=float)
+    visible = np.isfinite(values) & np.all(np.isfinite(points), axis=1)
+    if min_visible_value is not None:
+        visible &= values > float(min_visible_value)
+    return points[visible], values[visible]
+
+
+def _nearest_positive_point_spacing(points: np.ndarray) -> float | None:
+    source_points = np.asarray(points, dtype=float)
+    source_points = source_points[np.all(np.isfinite(source_points), axis=1)]
+    if len(source_points) < 2:
+        return None
+    try:
+        from scipy.spatial import cKDTree
+
+        distances, _indices = cKDTree(source_points).query(source_points, k=2)
+    except (ImportError, ModuleNotFoundError, RuntimeError, TypeError, ValueError):
+        return None
+    nearest = np.asarray(distances, dtype=float)[:, 1]
+    finite = nearest[np.isfinite(nearest) & (nearest > 1e-9)]
+    return float(np.median(finite)) if len(finite) else None
 
 
 def _publication_base_rgb(count: int, shade_values: np.ndarray | None) -> np.ndarray:

@@ -147,10 +147,10 @@ ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
 )
 DEFAULT_STACKED_CORTICAL_ZSCORE_SCALAR_RANGE = (0.0, 3.5)
 DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("Split Hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
-    ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
-    ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
-    ("MRI slices", DISPLAY_MODE_MRI_SLICES),
+    ("Cortical surface — split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
+    ("Cortical surface — combined", DISPLAY_MODE_CORTICAL_SURFACE),
+    ("3D volume overlay", DISPLAY_MODE_TRANSPARENT_MESH),
+    ("MRI slices (recommended for anatomy)", DISPLAY_MODE_MRI_SLICES),
 )
 SOURCE_METHOD_L2_MNE_SOURCE_PSD = "l2_mne_source_psd"
 SOURCE_METHOD_L2_MNE_SURFACE = "l2_mne_surface"
@@ -158,8 +158,11 @@ SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD = "eloreta_volume_source_psd"
 SOURCE_METHOD_ELORETA_VOLUME = "eloreta_volume"
 SOURCE_METHOD_PREPARED = "prepared_source"
 SOURCE_METHOD_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("L2-MNE source PSD", SOURCE_METHOD_L2_MNE_SOURCE_PSD),
-    ("eLORETA volume source PSD", SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD),
+    ("L2-MNE cortical source PSD (Hauk-style)", SOURCE_METHOD_L2_MNE_SOURCE_PSD),
+    (
+        "eLORETA volumetric source PSD (Toolbox extension)",
+        SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD,
+    ),
     ("Legacy amplitude-derived L2-MNE", SOURCE_METHOD_L2_MNE_SURFACE),
     ("Legacy amplitude-derived eLORETA", SOURCE_METHOD_ELORETA_VOLUME),
 )
@@ -1029,6 +1032,20 @@ def _cluster_mask_display_status_text(
             "warning",
         )
     if payload_has_cluster_mask(payload):
+        if payload.kind == SOURCE_KIND_VOLUME_POINTS:
+            retained_count = payload.metadata.get("cluster_mask_source_index_count")
+            try:
+                retained_count = int(retained_count)
+            except (TypeError, ValueError):
+                retained_mask = payload_cluster_mask(payload)
+                retained_count = int(np.count_nonzero(retained_mask)) if retained_mask is not None else 0
+            noun = "location" if retained_count == 1 else "locations"
+            return (
+                f"The saved group-level mask retained {retained_count} volume-grid {noun} after "
+                "cluster-based permutation correction. Displayed colors are interpolation around "
+                "those tested locations.",
+                "info",
+            )
         return (
             CLUSTER_MASK_SIGNIFICANT_STATUS_TEMPLATE.format(source_points=source_points),
             "info",
@@ -1037,15 +1054,19 @@ def _cluster_mask_display_status_text(
 
 
 def _display_mode_allowed_for_payload(payload: SourcePayload, display_mode: str) -> bool:
+    return any(mode == display_mode for _label, mode in _display_mode_options_for_payload(payload))
+
+
+def _display_mode_options_for_payload(payload: SourcePayload | None) -> tuple[tuple[str, str], ...]:
+    if payload is None:
+        return DISPLAY_MODE_OPTIONS
     if uses_cortical_surface_paint(payload):
-        return display_mode in {
-            DISPLAY_MODE_SPLIT_HEMISPHERE,
-            DISPLAY_MODE_CORTICAL_SURFACE,
-            DISPLAY_MODE_TRANSPARENT_MESH,
-        }
-    if payload.kind == SOURCE_KIND_VOLUME_POINTS:
-        return display_mode in {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES}
-    return display_mode == DISPLAY_MODE_TRANSPARENT_MESH
+        allowed = {DISPLAY_MODE_SPLIT_HEMISPHERE, DISPLAY_MODE_CORTICAL_SURFACE}
+    elif payload.kind == SOURCE_KIND_VOLUME_POINTS:
+        allowed = {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES}
+    else:
+        return (("3D source overlay", DISPLAY_MODE_TRANSPARENT_MESH),)
+    return tuple(option for option in DISPLAY_MODE_OPTIONS if option[1] in allowed)
 
 
 def _preferred_display_mode_for_payload(payload: SourcePayload) -> str:
@@ -2059,6 +2080,34 @@ class LoretaVisualizerWindow(QWidget):
                     return
         finally:
             self.display_mode_combo.blockSignals(previous_block_state)
+
+    def _sync_display_mode_combo_options(self, payload: SourcePayload | None) -> None:
+        if not hasattr(self, "display_mode_combo"):
+            return
+        options = _display_mode_options_for_payload(payload)
+        previous_block_state = self.display_mode_combo.blockSignals(True)
+        try:
+            self.display_mode_combo.clear()
+            for label, mode in options:
+                self.display_mode_combo.addItem(label, mode)
+            for index in range(self.display_mode_combo.count()):
+                if self.display_mode_combo.itemData(index) == self._display_mode:
+                    self.display_mode_combo.setCurrentIndex(index)
+                    break
+        finally:
+            self.display_mode_combo.blockSignals(previous_block_state)
+        if payload is not None and payload.kind == SOURCE_KIND_VOLUME_POINTS:
+            self.display_mode_combo.setToolTip(
+                "3D uses display-only interpolation of retained volume-grid estimates. "
+                "The anatomical shell is context, not the source boundary; use MRI slices "
+                "for anatomical localization."
+            )
+        elif payload is not None and uses_cortical_surface_paint(payload):
+            self.display_mode_combo.setToolTip(
+                "Hauk-style L2-MNE values are displayed only on the cortical source surface."
+            )
+        else:
+            self.display_mode_combo.setToolTip("Choose a display compatible with the loaded source payload.")
 
     def _on_display_mode_changed(self, _index: int) -> None:
         mode = self.display_mode_combo.currentData()
@@ -3391,9 +3440,14 @@ class LoretaVisualizerWindow(QWidget):
             if result.split_shading_source
             else ""
         )
+        volume_context_note = (
+            f" 3D volume view uses {result.mesh.volume_context.source_label} as anatomical context."
+            if result.mesh.volume_context is not None
+            else " 3D volume view uses cerebral pial anatomy as fallback context."
+        )
         self.mesh_status.set_text(
             f"Using {result.source_label} mesh from cache ({result.triangle_count:,} triangles)."
-            f"{split_note}{shading_note}"
+            f"{split_note}{shading_note}{volume_context_note}"
         )
         self._ensure_default_project_zscore_maps()
 
@@ -3508,6 +3562,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._source_activation_payload = None
         self._current_activation_payload = None
+        self._sync_display_mode_combo_options(None)
         if self.mri_slice_view is not None:
             self.mri_slice_view.clear_slice_image("MRI slices will appear after an eLORETA volume source map is loaded.")
         self._sync_activation_render_mode_controls()
@@ -3523,14 +3578,12 @@ class LoretaVisualizerWindow(QWidget):
         self._source_activation_payload = payload
         if not _display_mode_allowed_for_payload(payload, self._display_mode):
             self._display_mode = _preferred_display_mode_for_payload(payload)
-            self._set_display_mode_combo_data(self._display_mode)
+        self._sync_display_mode_combo_options(payload)
         display_payload = _activation_display_payload(
             payload,
             transparent_mesh_display=self._display_mode in {DISPLAY_MODE_TRANSPARENT_MESH, DISPLAY_MODE_MRI_SLICES},
             use_cluster_mask=self._use_cluster_mask,
         )
-        if self._display_mode == DISPLAY_MODE_TRANSPARENT_MESH:
-            display_payload = renderer.display_payload_for_current_mesh(display_payload)
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
         renderer.set_display_mode(self._display_mode, refresh=False)
@@ -3542,7 +3595,14 @@ class LoretaVisualizerWindow(QWidget):
         if self._display_mode == DISPLAY_MODE_MRI_SLICES:
             self._render_mri_slice_payload(display_payload, scalar_range=(vmin, vmax))
             return
-        renderer.set_activation_payload(display_payload)
+        renderer.set_activation_payload(
+            display_payload,
+            volume_support_points=(
+                np.asarray(payload.points, dtype=float)
+                if payload.kind == SOURCE_KIND_VOLUME_POINTS
+                else None
+            ),
+        )
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
         renderer.set_activation_visible(self._activation_visible)
 
