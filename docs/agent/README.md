@@ -22,6 +22,9 @@ active. Windows 11 and CachyOS setup commands live only in
 - `quality/figure-generation.md`: publication figure output, DPI, typography, and renderer-boundary standard.
 - `quality/removed-electrode-detection-calibration.md`: calibration and
   accuracy-testing guide for conservative removed-electrode auto QC.
+- `quality/free-harmonic-clustering-null-calibration.md`: frozen two-layer
+  automatic-domain null-validation protocol, manual powered runner, acceptance
+  envelope, and receipt boundary.
 - `references/`: external or copied reference material useful to agents.
 - `reviews/`: pre-ship and review checklists.
 

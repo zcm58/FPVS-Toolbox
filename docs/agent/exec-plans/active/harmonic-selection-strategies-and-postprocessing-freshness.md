@@ -294,9 +294,11 @@ claim unconditional error control for that adaptive workflow.
   one-time compatibility path that requests post-processing rebuild when
   neutral provenance is absent.
 - Separate FullFFT-input freshness from Summed-BCA-derivative freshness.
-- Add an end-to-end null-simulation harness for the complete automatic FHC
-  selection-plus-permutation pipeline, with its acceptance envelope declared
-  before results are inspected.
+- Retain the deterministic 24 x 199 automatic-selection-plus-permutation
+  harness as routine regression smoke.
+- Add a separate resumable 4,000 x 10,000 powered calibration, with 2,000 paired
+  and 2,000 independent replicates, four frozen 500-replicate regimes per
+  design, immutable receipts, and prespecified exact-binomial acceptance rules.
 
 #### Definition of Done
 
@@ -306,9 +308,11 @@ claim unconditional error control for that adaptive workflow.
       selection cache is absent.
 - [x] Stale Summed BCA alone does not block clustering; stale FullFFT does.
 - [x] GUI inspection and direct preparation enforce the same provenance.
-- [ ] Empirical null error is reported for the complete automatic workflow;
-      any failure of the prespecified envelope changes the default or its
-      confirmatory interpretation rather than being hidden.
+- [ ] A complete powered-calibration receipt reports empirical global-null
+      rejection for all 4,000 automatic-workflow replicates; every design and
+      regime passes its prespecified exact-binomial guardrail, or the
+      default/confirmatory interpretation is changed and the failure reported.
+      The 24 x 199 smoke does not satisfy this item.
 
 ### Phase 2 - Policy model, persistence, and migration
 
@@ -468,6 +472,20 @@ python .agents/scripts/verify.py --scope repo --tier precommit
 
 Qt smoke definitions execute in CI. Do not use offscreen Qt locally.
 
+### Powered FHC calibration protocol — pending
+
+`fhc_automatic_unconditional_null_v1` freezes 2,000 paired and 2,000
+independent global-null replicates, four 500-replicate regimes per design, and
+the production 10,000 assignments. Each design requires a one-sided 97.5%
+exact Clopper-Pearson upper bound below `.070` (at most 117/2,000), and each
+regime requires a one-sided 95% upper bound below `.10` (at most 38/500).
+
+The resumable manual runner and pending receipt schema are documented in
+`docs/agent/quality/free-harmonic-clustering-null-calibration.md`. The powered
+execution has not run, no result is recorded here, and partial checkpoints do
+not close the Phase 1 acceptance item. The 4,000 x 10,000 workload is excluded
+from routine pytest, focused verification, and precommit.
+
 ## Visible Manual Smoke Path
 
 Run in a normal visible supported Windows 11 or CachyOS session:
@@ -589,3 +607,9 @@ Run in a normal visible supported Windows 11 or CachyOS session:
   progress bar and status labels. Success returns Home; review cancellation or
   a pre-persistence failure restores Settings. Explicit Recalculate Harmonics
   remains available as a Settings-local workflow.
+- 2026-08-15: Froze the separate
+  `fhc_automatic_unconditional_null_v1` powered-calibration protocol, exact
+  binomial guardrails, deterministic task/seed schedule, resumable manual
+  runner, fast receipt/configuration checks, and pending receipt schema. The
+  powered run remains pending; no inferential result or closed acceptance item
+  is claimed by this framework checkpoint.

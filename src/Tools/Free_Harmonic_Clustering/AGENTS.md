@@ -46,11 +46,22 @@ one contrast, then delegates long work to signal-driven workers.
   adjacency, node-entry threshold, declared contrast family, and valid whole-
   participant exchangeability. It favors extended effects, does not provide
   pointwise node significance, and does not correct separately run contrasts.
-- Automatic observed-arm ceiling selection is held fixed during each
-  permutation run. Maintain the deterministic end-to-end null regression that
-  repeats selection and permutation per replicate, but label its prespecified
-  small envelope as a smoke regression, not calibrated unconditional FWER
-  validation.
+- Keep automatic-domain validation explicitly two-layered. Routine focused/CI
+  verification runs the deterministic 24-null-replicate x 199-assignment
+  regression smoke with at most five global rejections. It detects gross
+  regressions only and is not calibration or evidence of unconditional FWER
+  control.
+- Formal validation is the separate resumable
+  `fhc_automatic_unconditional_null_v1` release diagnostic: 4,000 seeded null
+  replicates, split into 2,000 paired and 2,000 independent replicates, with
+  four frozen 500-replicate regimes per design and the production 10,000
+  assignments per replicate. Keep it outside routine pytest, focused
+  verification, and precommit.
+- Formal acceptance requires every prespecified guardrail: within each design,
+  a one-sided 97.5% exact Clopper-Pearson upper bound below `.070` (at most
+  117/2,000 rejections), and within each regime, a one-sided 95% upper bound
+  below `.10` (at most 38/500). Report every miss; never substitute the smoke
+  layer or tune the envelope after results are inspected.
 - Require complete finite maps on one shared frequency grid and one shared
   BioSemi64 sensor set. Do not zero-fill or perform node-wise omission.
 - Resolve all writes beneath the explicit managed project root. Do not mutate
@@ -126,6 +137,12 @@ Do not make tests depend on the developer's ACR project. Run:
 ```powershell
 python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused
 ```
+
+The focused command runs only the 24 x 199 smoke layer. The powered
+4,000 x 10,000 calibration is manual, resumable release validation owned by
+`docs/agent/quality/free-harmonic-clustering-null-calibration.md`. A pending,
+partial, interrupted, or unreviewed receipt is not a pass and must not support
+a changed statistical claim.
 
 The headless numerical modules must not import PySide6. Keep GUI smoke coverage
 registered for CI and do not run Qt locally on Windows.

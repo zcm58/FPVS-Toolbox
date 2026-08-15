@@ -19,6 +19,7 @@ shell-specific setup is needed.
 | Project paths, dialogs, exports, generated files | `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` |
 | Stats package structure | `python .agents/scripts/audit/agent_audit.py --check stats-structure` |
 | Free Harmonic Clustering backend and embedded beta GUI | `python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused` |
+| Powered FHC automatic-domain null calibration | `python scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py --help` |
 | Stats reporting size and legibility | `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` |
 | Cache/temp/debt-marker cleanup | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` |
 
@@ -36,6 +37,7 @@ shell-specific setup is needed.
 | Publication figure generation, `.png`/`.pdf` outputs, 600 dpi, figure typography | `project-path-audit` | `docs/agent/quality/figure-generation.md` |
 | Stats analysis, GUI/pipeline structure, reporting, exports | `pyside6-gui-cleanup` plus focused Stats tests | `docs/agent/architecture/statistics-tools.md` |
 | Free Harmonic Clustering, FullFFT tensor reads, cluster permutations | `project-path-audit` plus focused backend tests | `src/Tools/Free_Harmonic_Clustering/AGENTS.md`; `src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md` |
+| Powered FHC automatic-domain validation | `project-path-audit` plus the manual resumable runner | `docs/agent/quality/free-harmonic-clustering-null-calibration.md` |
 | LORETA Visualizer, source visualization, or source-localization-adjacent rendering | `legacy-boundary-review` plus focused tool tests | `src/Tools/LORETA_Visualizer/AGENTS.md`; `src/Tools/LORETA_Visualizer/ARCHITECTURE.md` |
 | Publication scalp maps and source-data exports | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
 | FPVS sequence illustration figures, manual stimulus image slots, and high-DPI export | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Sequence_Figure/AGENTS.md` |
@@ -57,7 +59,9 @@ fallback), or the no-offscreen-Qt rule.
 - `.agents/scripts/smoke/`, when present: optional agent-facing probes, never a
   default gate. Its absence is valid.
 - `scripts/debug/`: focused debugging probes.
-- `scripts/manual_diagnostics/`: developer-run project/data probes.
+- `scripts/manual_diagnostics/`: developer-run project/data probes and
+  explicitly scoped resumable scientific-calibration runners. Long
+  calibrations are never default verification gates.
 - `scripts/packaging/`: release packaging and installer inputs.
 - `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Do not read
   or use as architectural precedent unless the user explicitly asks.
@@ -83,8 +87,9 @@ python .agents/scripts/verify.py --scope <scope> --tier focused
 
 Supported scopes are `gui`, `updates`, `project-io`, `processing`,
 `plot-generator`, `publication-maps`, `ratio-calculator`, `sequence-figure`,
-`sensitivity-analysis`, `stats`, `loreta`, `figures`, and `legacy-boundary`. Use `--scope repo --tier
-precommit` for the broad local handoff gate. The driver owns the executable
+`sensitivity-analysis`, `stats`, `free-harmonic-clustering`, `loreta`,
+`figures`, and `legacy-boundary`. Use `--scope repo --tier precommit` for the
+broad local handoff gate. The driver owns the executable
 test registry and excludes Qt execution locally.
 
 PySide6/pytest-qt targets remain useful coverage definitions, but execute them
@@ -92,6 +97,16 @@ only in the configured CI Qt job or an explicitly user-approved safe visible
 environment. Never set `QT_QPA_PLATFORM=offscreen` on local development
 machines.
 See `docs/agent/quality/test-selection.md` for what each scope covers.
+
+## Long-Running Scientific Validation
+
+Free Harmonic Clustering has two distinct validation routes. The focused
+verification command owns the deterministic 24 x 199 regression smoke. The
+4,000 x 10,000 powered calibration is a separate manual diagnostic with a
+frozen protocol, resumable checkpoints, and a reviewed final receipt. Run it
+only from `docs/agent/quality/free-harmonic-clustering-null-calibration.md`;
+never put it in routine pytest/precommit or substitute partial output for a
+completed assessment.
 
 ## Reading Rule
 

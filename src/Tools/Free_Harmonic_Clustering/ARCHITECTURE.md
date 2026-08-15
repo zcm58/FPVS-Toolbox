@@ -41,6 +41,10 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
   cohort/QC enforcement, and selected-column FullFFT ingestion.
 - `analysis.py`: versioned BioSemi64 adjacency, node t statistics, connected
   components, permutation nulls, cluster p-values, and cluster-average effects.
+- `null_calibration.py`: GUI-neutral frozen powered-null generators, stable seed
+  schedule, exact acceptance bounds, resumable result models, and receipt
+  validation. It is developer validation code and is not imported by runtime
+  GUI/API paths.
 - `api.py`: stable orchestration boundary.
 - `exports.py`: contained, atomic, provenance-rich result publication.
 - `__main__.py`: headless command entry point; no separate scientific behavior.
@@ -122,12 +126,40 @@ Separate runs are separate uncorrected families.
 Automatic mode selects its observed-arm ceiling before permutation and then
 holds that domain fixed. The conditional maximum-cluster null does not by
 itself establish unconditional error control for the combined adaptive-
-selection-plus-permutation procedure. The deterministic regression harness
-repeats automatic selection and permutation across 24 seeded null replicates,
-requires the selected domain to vary while retaining at least two harmonics,
-and accepts at most 5 global rejections with 199 assignments per replicate.
-That deliberately wide, prespecified envelope detects gross regressions; it is
-not a calibrated FWER validation study.
+selection-plus-permutation procedure.
+
+## Automatic-Domain Validation Layers
+
+A global rejection means that one null replicate produces at least one
+significant positive or negative cluster at the raw sign-specific `.025`
+threshold.
+
+Layer 1 is the deterministic CI regression smoke: 24 independent-group null
+replicates, 199 assignments per replicate, automatic selection repeated end to
+end, and at most five global rejections. Its deliberately broad envelope
+protects implementation behavior but cannot estimate or establish
+unconditional FWER.
+
+Layer 2 is the separate powered
+`fhc_automatic_unconditional_null_v1` calibration: 4,000 null replicates using
+the production 10,000 assignments, balanced as 2,000 paired and 2,000
+independent replicates and four frozen 500-replicate regimes within each design.
+Each design must have a one-sided 97.5% exact Clopper-Pearson upper bound below
+`.070` (at most 117/2,000), and each regime a one-sided 95% upper bound below
+`.10` (at most 38/500).
+
+`null_calibration.py` owns the GUI-neutral frozen generator, deterministic
+seeds, acceptance calculations, and receipt validation. The resumable developer
+runner under `scripts/manual_diagnostics/` records the method and adjacency
+identities, protocol fingerprint, completed scientific rows, rejection counts,
+exact bounds, and execution environment. It is never a routine test target.
+The frozen protocol and pending receipt schema live in
+`docs/agent/quality/free-harmonic-clustering-null-calibration.md`.
+
+Until a final receipt is completed and reviewed, automatic-mode inference
+retains only the conditional interpretation above. Even a passing receipt would
+support the frozen simulated regimes rather than prove universal error control
+for every data-generating process.
 
 ## Embedded GUI Contract
 

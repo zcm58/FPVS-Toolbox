@@ -1,0 +1,101 @@
+{
+  "assessment": null,
+  "protocol": {
+    "base_frequency_hz": 6.0,
+    "calibration_implementation_version": "1.1",
+    "cluster_alpha_per_tail": 0.025,
+    "cluster_entry_alpha": 0.01,
+    "design_error_bound": 0.07,
+    "design_upper_confidence": 0.975,
+    "determinism_check": {
+      "permutation_batch_size": 7,
+      "permutations_per_replicate": 19,
+      "protocol_id": "fhc_null_determinism_smoke_v1",
+      "replicate_index": 10000
+    },
+    "frequency_correlation_geometry": "physical_fft_bin_ar1",
+    "frequency_margin_hz": 0.1,
+    "frequency_step_hz": 0.025,
+    "harmonic_selection_mode": "automatic",
+    "harmonic_z_ddof": 1,
+    "harmonic_z_threshold": 3.29,
+    "independent_group_sizes": [
+      18,
+      16
+    ],
+    "max_harmonic_hz": 48.0,
+    "method_version": "hermann_free_harmonic_clustering_cleanroom_v2",
+    "noise_half_width_hz": 0.1,
+    "oddball_frequency_hz": 1.2,
+    "paired_participant_count": 18,
+    "permutation_batch_size": 512,
+    "permutations_per_replicate": 10000,
+    "protocol_id": "fhc_automatic_unconditional_null_v1",
+    "replicates_per_scenario": 500,
+    "scenario_error_bound": 0.1,
+    "scenario_upper_confidence": 0.95,
+    "scenarios": [
+      {
+        "distribution": "lognormal",
+        "frequency_correlation": 0.0,
+        "log_scale": 0.18,
+        "paired_shared_fraction": 0.6,
+        "scenario_id": "iid_two_harmonic_lognormal",
+        "sensor_smoothing": 0.0,
+        "student_t_degrees_of_freedom": null,
+        "target_boosts": [
+          2.0,
+          1.35
+        ]
+      },
+      {
+        "distribution": "lognormal",
+        "frequency_correlation": 0.55,
+        "log_scale": 0.18,
+        "paired_shared_fraction": 0.6,
+        "scenario_id": "correlated_two_harmonic_lognormal",
+        "sensor_smoothing": 0.35,
+        "student_t_degrees_of_freedom": null,
+        "target_boosts": [
+          2.0,
+          1.35
+        ]
+      },
+      {
+        "distribution": "lognormal",
+        "frequency_correlation": 0.3,
+        "log_scale": 0.18,
+        "paired_shared_fraction": 0.6,
+        "scenario_id": "threshold_edge_lognormal",
+        "sensor_smoothing": 0.2,
+        "student_t_degrees_of_freedom": null,
+        "target_boosts": [
+          0.08,
+          0.016,
+          0.012,
+          0.008
+        ]
+      },
+      {
+        "distribution": "student_lognormal",
+        "frequency_correlation": 0.3,
+        "log_scale": 0.2,
+        "paired_shared_fraction": 0.6,
+        "scenario_id": "heavy_tail_two_harmonic",
+        "sensor_smoothing": 0.2,
+        "student_t_degrees_of_freedom": 5.0,
+        "target_boosts": [
+          0.5,
+          0.2
+        ]
+      }
+    ],
+    "sensor_adjacency_fingerprint_sha256": "9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6",
+    "sensor_adjacency_version": "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
+  },
+  "protocol_fingerprint_sha256": "178739203fc5fd32702681546cae9ad50d153b79c850921531aee8410a585936",
+  "protocol_id": "fhc_automatic_unconditional_null_v1",
+  "runtime": null,
+  "schema_version": 1,
+  "status": "pending"
+}

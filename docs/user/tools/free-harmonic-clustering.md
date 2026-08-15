@@ -161,10 +161,19 @@ Automatic mode chooses its ceiling from the observed arms and holds that
 ceiling fixed during permutations. The cluster permutation therefore controls
 the conditional family defined by that prepared domain; this fact alone does
 not prove unconditional error control for the combined adaptive-selection and
-permutation procedure. The Toolbox includes a deterministic end-to-end null
-regression harness that repeats selection and permutation, but its small,
-prespecified envelope is a gross-error smoke check rather than a calibrated
-FWER validation study.
+permutation procedure.
+
+The Toolbox separates software regression testing from formal statistical
+calibration. Routine automated testing repeats 24 seeded null analyses with 199
+assignments each and permits at most five global rejections. This small envelope
+is only a gross-error smoke check.
+
+A separate powered protocol is frozen for 4,000 null replicates: 2,000 paired
+and 2,000 independent, divided among four 500-replicate regimes per design,
+using the production 10,000 assignments. Its design-level and regime-level
+exact-binomial guardrails were fixed before execution. The powered run is still
+pending; there is no completed result receipt. Do not report the 24 x 199 smoke
+as calibrated FWER evidence or describe the pending powered protocol as a pass.
 
 Version 1 has no result plots and no historical-run browser. The Results tab
 shows the current session's latest run. Use **Open Results Folder** to review

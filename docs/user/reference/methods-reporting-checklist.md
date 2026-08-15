@@ -343,10 +343,18 @@ tensors, spatial adjacency, dependency version, or expected outputs.
   effects and does not correct a collection of separately run contrasts.
 - For Hermann automatic selection, state that the domain was selected from the
   observed arms and then held fixed during permutation. Conditional cluster
-  correction alone is not proof of unconditional error control for this
-  selection-plus-permutation workflow. The Toolbox's deterministic end-to-end
-  null harness is a regression smoke envelope, not a calibrated validation
-  study or a replacement for design-specific simulation.
+  correction alone does not establish unconditional error control for the
+  combined workflow.
+- State the validation layer and status accurately. The deterministic
+  24-replicate x 199-assignment, at-most-five-rejection harness is software
+  regression smoke only and must not be reported as calibrated FWER evidence.
+- If relying on a future completed powered-calibration receipt, cite its
+  Toolbox commit, frozen configuration/generator and adjacency identities,
+  paired and independent designs, regimes, 4,000 replicate count, 10,000
+  assignments per replicate, seeds, rejection definition, rejection counts,
+  and exact Clopper-Pearson bounds. Until a final reviewed receipt exists,
+  report the powered calibration as pending. Do not generalize a passing
+  simulation beyond its frozen regimes.
 
 Retain `Free_Harmonic_Clustering_Results.xlsx`, the run manifest, compressed
 arrays, machine-readable result tables, source-workbook provenance, exact
