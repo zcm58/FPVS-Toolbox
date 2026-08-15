@@ -1,5 +1,4 @@
 import importlib.util
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,7 +43,7 @@ def _build_worker_project(root: Path) -> Project:
 
 
 def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
-    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     project = _build_worker_project(tmp_path / "proj")
 
@@ -68,6 +67,11 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
         "run_preprocessing_qc_workflow",
         lambda *_args, **_kwargs: True,
     )
+    monkeypatch.setattr(
+        processing_inputs,
+        "participant_review_rows",
+        lambda *_args, **_kwargs: [],
+    )
 
     win.start_processing()
     qtbot.waitUntil(lambda: not getattr(win, "_run_active", False), timeout=2000)
@@ -79,7 +83,7 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
 
 
 def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monkeypatch):
-    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     project = _build_worker_project(tmp_path / "proj_override")
     project.update_preprocessing({**project.preprocessing, "max_parallel_workers_override": 6})
@@ -110,6 +114,11 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
         processing_inputs,
         "run_preprocessing_qc_workflow",
         lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        processing_inputs,
+        "participant_review_rows",
+        lambda *_args, **_kwargs: [],
     )
 
     win.start_processing()
