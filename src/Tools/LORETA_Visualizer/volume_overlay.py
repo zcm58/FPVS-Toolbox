@@ -17,6 +17,9 @@ DEFAULT_VOLUME_CONTOUR_MAX_COUNT = 7
 DEFAULT_VOLUME_CONTOUR_FRACTION = 0.62
 DEFAULT_VOLUME_PADDING = 0.28
 DEFAULT_VOLUME_EDGE_ZERO_MARGIN = 2
+DEFAULT_VOLUME_SOURCE_SPACING = 0.08
+DEFAULT_VOLUME_PADDING_SPACINGS = 1.5
+DEFAULT_VOLUME_SUPPORT_RADIUS_SPACINGS = 1.05
 
 
 @dataclass(frozen=True)
@@ -30,12 +33,15 @@ class SmoothedVolumeOverlay:
     contour_values: tuple[float, ...]
     source_point_count: int
     rendered_point_count: int
+    support_point_count: int = 0
 
 
 def build_smoothed_volume_overlay(
     points: np.ndarray,
     values: np.ndarray,
     *,
+    support_points: np.ndarray | None = None,
+    source_spacing: float | None = None,
     display_bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None,
     min_visible_value: float | None = 0.0,
     max_dimension: int = DEFAULT_VOLUME_GRID_MAX_DIMENSION,
@@ -56,19 +62,31 @@ def build_smoothed_volume_overlay(
     """
 
     source_points, source_values = _valid_source_arrays(points, values)
+    support = _valid_support_points(source_points if support_points is None else support_points)
+    support = _merge_source_support(support, source_points)
+    if len(source_points) == 0 or len(support) == 0:
+        return None
     if min_visible_value is not None:
         floor = float(min_visible_value)
         keep = source_values > floor
         source_points = source_points[keep]
         source_values = source_values[keep]
-    if len(source_points) < 3:
+    if len(source_points) == 0:
         return None
 
-    bounds_min, bounds_max = _grid_bounds(source_points, display_bounds=display_bounds, padding=padding)
+    resolved_source_spacing = _resolve_source_spacing(support, source_spacing=source_spacing)
+    bounds_min, bounds_max = _grid_bounds(
+        support,
+        display_bounds=display_bounds,
+        padding=padding,
+        source_spacing=resolved_source_spacing,
+    )
+    support_inside_bounds = np.all((support >= bounds_min) & (support <= bounds_max), axis=1)
+    support = support[support_inside_bounds]
     inside_bounds = np.all((source_points >= bounds_min) & (source_points <= bounds_max), axis=1)
     source_points = source_points[inside_bounds]
     source_values = source_values[inside_bounds]
-    if len(source_points) < 3:
+    if len(source_points) == 0 or len(support) == 0:
         return None
 
     dimensions = _grid_dimensions(bounds_min, bounds_max, max_dimension=max_dimension, min_dimension=min_dimension)
@@ -76,14 +94,25 @@ def build_smoothed_volume_overlay(
     spacing = tuple(_axis_spacing(axis_values) for axis_values in axes)
     grid_points = _grid_points(axes)
 
-    sigma = _gaussian_sigma(source_points, spacing=spacing)
+    sigma = _gaussian_sigma(
+        support,
+        spacing=spacing,
+        source_spacing=resolved_source_spacing,
+    )
     grid_values = _gaussian_interpolated_values(
         grid_points,
         source_points,
         source_values,
         sigma=sigma,
         neighbors=gaussian_neighbors,
-    ).reshape(dimensions, order="F")
+    )
+    support_mask = _volume_support_mask(
+        grid_points,
+        support,
+        source_spacing=resolved_source_spacing,
+    )
+    grid_values[~support_mask] = 0.0
+    grid_values = grid_values.reshape(dimensions, order="F")
     grid_values = _zero_grid_edges(grid_values, margin=edge_zero_margin)
 
     contour_values = _contour_values(
@@ -106,6 +135,7 @@ def build_smoothed_volume_overlay(
         contour_values=contour_values,
         source_point_count=int(len(points)),
         rendered_point_count=int(len(source_points)),
+        support_point_count=int(len(support)),
     )
 
 
@@ -120,19 +150,65 @@ def _valid_source_arrays(points: np.ndarray, values: np.ndarray) -> tuple[np.nda
     return source_points[finite], source_values[finite]
 
 
+def _valid_support_points(points: np.ndarray) -> np.ndarray:
+    support = np.asarray(points, dtype=float)
+    if support.ndim != 2 or support.shape[1] != 3:
+        raise ValueError("Volume source support must be an N x 3 array.")
+    finite = np.all(np.isfinite(support), axis=1)
+    return support[finite]
+
+
+def _merge_source_support(support_points: np.ndarray, source_points: np.ndarray) -> np.ndarray:
+    """Ensure every rendered source is contained in the explicit support."""
+
+    support = np.asarray(support_points, dtype=float)
+    sources = np.asarray(source_points, dtype=float)
+    if len(support) == 0:
+        combined = sources
+    elif len(sources) == 0:
+        combined = support
+    else:
+        combined = np.vstack((support, sources))
+    if len(combined) == 0:
+        return np.empty((0, 3), dtype=float)
+    return np.unique(combined, axis=0)
+
+
+def _resolve_source_spacing(source_points: np.ndarray, *, source_spacing: float | None) -> float:
+    if source_spacing is not None:
+        hinted = float(source_spacing)
+        if np.isfinite(hinted) and hinted > 1e-9:
+            return hinted
+    if len(source_points) >= 2:
+        from scipy.spatial import cKDTree
+
+        tree = cKDTree(source_points)
+        distances, _indices = tree.query(source_points, k=2)
+        nearest = np.asarray(distances, dtype=float)[:, 1]
+        finite = nearest[np.isfinite(nearest) & (nearest > 1e-9)]
+        if len(finite):
+            return float(np.median(finite))
+    return DEFAULT_VOLUME_SOURCE_SPACING
+
+
 def _grid_bounds(
     source_points: np.ndarray,
     *,
     display_bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None,
     padding: float,
+    source_spacing: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     source_min = np.min(source_points, axis=0)
     source_max = np.max(source_points, axis=0)
     source_span = source_max - source_min
-    local_span = np.where(source_span <= 1e-9, max(float(np.max(source_span)), 0.1), source_span)
     pad = max(float(padding), 0.0)
-    bounds_min = source_min - local_span * pad
-    bounds_max = source_max + local_span * pad
+    spacing = max(float(source_spacing), 1e-6)
+    fractional_padding = source_span * pad
+    minimum_padding = spacing * 0.75
+    maximum_padding = spacing * DEFAULT_VOLUME_PADDING_SPACINGS
+    padding_distance = np.clip(fractional_padding, minimum_padding, maximum_padding)
+    bounds_min = source_min - padding_distance
+    bounds_max = source_max + padding_distance
 
     if display_bounds is not None:
         display_min = np.asarray(display_bounds[0], dtype=float)
@@ -183,8 +259,17 @@ def _grid_points(axes: Sequence[np.ndarray]) -> np.ndarray:
     )
 
 
-def _gaussian_sigma(source_points: np.ndarray, *, spacing: Sequence[float]) -> float:
+def _gaussian_sigma(
+    source_points: np.ndarray,
+    *,
+    spacing: Sequence[float],
+    source_spacing: float | None = None,
+) -> float:
     grid_spacing = max(float(np.max(np.abs(spacing))), 1e-6)
+    if source_spacing is not None:
+        resolved = float(source_spacing)
+        if np.isfinite(resolved) and resolved > 1e-9:
+            return max(resolved * 0.65, grid_spacing * 1.1, 1e-6)
     if len(source_points) < 2:
         return grid_spacing * 2.0
     from scipy.spatial import cKDTree
@@ -231,8 +316,23 @@ def _gaussian_interpolated_values(
     weight_sums = np.sum(weights, axis=1)
     output = np.zeros(len(grid_points), dtype=float)
     nonzero = weight_sums > 0.0
-    output[nonzero] = np.sum(weights[nonzero] * neighbor_values[nonzero], axis=1) / weight_sums[nonzero]
+    denominator = np.maximum(weight_sums[nonzero], 1.0)
+    output[nonzero] = np.sum(weights[nonzero] * neighbor_values[nonzero], axis=1) / denominator
     return output
+
+
+def _volume_support_mask(
+    grid_points: np.ndarray,
+    support_points: np.ndarray,
+    *,
+    source_spacing: float,
+) -> np.ndarray:
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(support_points)
+    distances, _indices = tree.query(grid_points, k=1)
+    radius = max(float(source_spacing), 1e-6) * DEFAULT_VOLUME_SUPPORT_RADIUS_SPACINGS
+    return np.asarray(distances, dtype=float) <= radius
 
 
 def _contour_values(

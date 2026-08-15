@@ -15,7 +15,11 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     fetch_fsaverage_into_subjects_dir,
 )
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult
-from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh
+from Tools.LORETA_Visualizer.synthetic_brain import (
+    BrainHemisphereMesh,
+    BrainMesh,
+    BrainVolumeContextMesh,
+)
 from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_FSAVERAGE, MeshDisplayTransform
 
 
@@ -120,11 +124,20 @@ def test_display_mesh_cache_round_trip_preserves_split_mesh(monkeypatch, tmp_pat
         shade_source="curv",
         surface="inflated",
     )
+    volume_context = BrainVolumeContextMesh(
+        points=np.asarray(
+            [[-0.4, -0.5, -0.6], [0.4, -0.5, -0.6], [0.0, 0.4, 0.6]],
+            dtype=float,
+        ),
+        faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
+        source_label="fsaverage skull-stripped whole-brain anatomy",
+    )
     mesh = BrainMesh(
         points=np.asarray([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.0, 0.5, 0.0]], dtype=float),
         faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
         display_transform=display_transform,
         left_hemisphere=left_hemisphere,
+        volume_context=volume_context,
     )
     result = FsaverageMeshResult(
         mesh=mesh,
@@ -152,6 +165,113 @@ def test_display_mesh_cache_round_trip_preserves_split_mesh(monkeypatch, tmp_pat
     assert loaded.mesh.left_hemisphere.surface == "inflated"
     assert np.allclose(loaded.mesh.left_hemisphere.shade_values, left_hemisphere.shade_values)
     assert loaded.mesh.right_hemisphere is None
+    assert loaded.mesh.volume_context is not None
+    assert np.allclose(loaded.mesh.volume_context.points, volume_context.points)
+    assert np.array_equal(loaded.mesh.volume_context.faces, volume_context.faces)
+    assert loaded.mesh.volume_context.source_label == volume_context.source_label
+
+
+def test_brainmask_volume_context_preserves_inferior_whole_brain_extent() -> None:
+    mask = np.zeros((12, 12, 12), dtype=bool)
+    mask[3:9, 3:9, 4:10] = True
+    mask[4:8, 4:8, 1:5] = True
+    display_transform = MeshDisplayTransform(
+        center=np.zeros(3, dtype=float),
+        radius=10.0,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+
+    context = fsaverage_mesh._brainmask_volume_context_from_arrays(
+        mask,
+        vox_to_ras=np.eye(4, dtype=float),
+        display_transform=display_transform,
+        max_triangles=5000,
+        source_label="synthetic whole-brain anatomy",
+    )
+
+    assert context.source_label == "synthetic whole-brain anatomy"
+    assert context.points.ndim == 2
+    assert context.points.shape[1] == 3
+    assert np.all(np.isfinite(context.points))
+    assert len(context.faces) > 0
+    assert float(np.min(context.points[:, 2])) < 0.1
+    assert float(np.max(context.points[:, 2])) > 0.9
+
+
+def test_fsaverage_volume_context_loads_brainmask_mgz(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+    fsaverage_dir = tmp_path / "fsaverage"
+    mri_dir = fsaverage_dir / "mri"
+    mri_dir.mkdir(parents=True)
+    mask = np.zeros((12, 12, 12), dtype=np.int16)
+    mask[2:10, 2:10, 3:10] = 1
+    mask[4:8, 4:8, 1:4] = 1
+    nib.save(nib.MGHImage(mask, np.eye(4, dtype=float)), str(mri_dir / "brainmask.mgz"))
+    display_transform = MeshDisplayTransform(
+        center=np.zeros(3, dtype=float),
+        radius=100.0,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+
+    context = fsaverage_mesh._load_fsaverage_volume_context(
+        fsaverage_dir,
+        display_transform=display_transform,
+        max_triangles=5000,
+    )
+
+    assert context is not None
+    assert context.source_label == "fsaverage skull-stripped whole-brain anatomy"
+    assert len(context.points) > 0
+    assert len(context.faces) > 0
+    assert np.all(np.isfinite(context.points))
+
+
+def test_missing_fsaverage_brainmask_keeps_volume_context_optional(tmp_path: Path) -> None:
+    display_transform = MeshDisplayTransform(
+        center=np.zeros(3, dtype=float),
+        radius=1.0,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+
+    assert (
+        fsaverage_mesh._load_fsaverage_volume_context(
+            tmp_path / "fsaverage",
+            display_transform=display_transform,
+            max_triangles=5000,
+        )
+        is None
+    )
+
+
+def test_display_mesh_cache_key_tracks_brainmask_changes(tmp_path: Path) -> None:
+    fsaverage_dir = tmp_path / "fsaverage"
+    surf_dir = fsaverage_dir / "surf"
+    surf_dir.mkdir(parents=True)
+    for name in ("lh.pial", "rh.pial"):
+        (surf_dir / name).write_bytes(b"surface")
+
+    without_brainmask = fsaverage_mesh._display_mesh_cache_key(
+        fsaverage_dir,
+        surface="pial",
+        max_triangles=120000,
+    )
+    brainmask_path = fsaverage_dir / "mri" / "brainmask.mgz"
+    brainmask_path.parent.mkdir(parents=True)
+    brainmask_path.write_bytes(b"brainmask-v1")
+    with_brainmask = fsaverage_mesh._display_mesh_cache_key(
+        fsaverage_dir,
+        surface="pial",
+        max_triangles=120000,
+    )
+    brainmask_path.write_bytes(b"brainmask-version-two")
+    updated_brainmask = fsaverage_mesh._display_mesh_cache_key(
+        fsaverage_dir,
+        surface="pial",
+        max_triangles=120000,
+    )
+
+    assert without_brainmask != with_brainmask
+    assert with_brainmask != updated_brainmask
 
 
 def _zip_bytes(files: dict[str, bytes]) -> bytes:

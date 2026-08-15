@@ -22,6 +22,15 @@ class BrainHemisphereMesh:
 
 
 @dataclass(frozen=True)
+class BrainVolumeContextMesh:
+    """Optional anatomy-only backdrop, never a volume-source support mask."""
+
+    points: np.ndarray
+    faces: np.ndarray
+    source_label: str = "whole-brain context"
+
+
+@dataclass(frozen=True)
 class BrainMesh:
     """Triangle mesh payload consumed by the rendering adapter."""
 
@@ -30,6 +39,7 @@ class BrainMesh:
     display_transform: MeshDisplayTransform = field(default_factory=MeshDisplayTransform.identity)
     left_hemisphere: BrainHemisphereMesh | None = None
     right_hemisphere: BrainHemisphereMesh | None = None
+    volume_context: BrainVolumeContextMesh | None = None
 
 
 def make_synthetic_brain_mesh(

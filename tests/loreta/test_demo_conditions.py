@@ -790,6 +790,8 @@ def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeyp
     renderer._activation_actor = None
     renderer._split_left_actor = None
     renderer._split_right_actor = None
+    renderer._last_activation_payload = None
+    renderer._last_volume_support_points = None
     reset_camera_values: list[bool] = []
 
     def fake_set_split_payload(
@@ -806,6 +808,55 @@ def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeyp
     renderer.set_activation_payload(payload)
 
     assert reset_camera_values == [False]
+
+
+def test_strict_hauk_l2_surface_stays_on_split_cortical_path(monkeypatch) -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        values=np.asarray([2.0, 3.0, 4.0], dtype=float),
+        label="Hauk-style cortical-normal L2-MNE",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_hauk_source_psd_cortical_normal_v1_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "base_producer_method": "l2_mne_hauk_source_psd_cortical_normal_v1",
+        },
+        normalize_values=False,
+    )
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = _FakePlotter()
+    renderer._display_mode = DISPLAY_MODE_SPLIT_HEMISPHERE
+    renderer._split_hemisphere_active = True
+    renderer._activation_actor = None
+    renderer._split_left_actor = None
+    renderer._split_right_actor = None
+    renderer._last_activation_payload = None
+    renderer._last_volume_support_points = np.asarray([[9.0, 9.0, 9.0]], dtype=float)
+    routed_payloads: list[object] = []
+
+    def fake_set_split_payload(
+        _self: BrainRendererWidget,
+        routed_payload,
+        *,
+        reset_camera: bool = True,
+    ) -> bool:
+        routed_payloads.append((routed_payload, reset_camera))
+        return True
+
+    def fail_generic_overlay(*_args, **_kwargs) -> None:
+        raise AssertionError("Strict Hauk L2-MNE must not enter the volume/generic overlay path.")
+
+    monkeypatch.setattr(BrainRendererWidget, "_set_split_hemisphere_payload", fake_set_split_payload)
+    monkeypatch.setattr(BrainRendererWidget, "_add_activation_overlay", fail_generic_overlay)
+    monkeypatch.setattr(BrainRendererWidget, "_sync_transparent_spin_state", lambda *_args, **_kwargs: None)
+
+    renderer.set_activation_payload(payload)
+
+    assert routed_payloads == [(payload, False)]
+    assert renderer._last_activation_payload is payload
+    assert renderer._last_volume_support_points is None
 
 
 class _FakePlotter:
