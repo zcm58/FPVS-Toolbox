@@ -103,12 +103,15 @@ the page implementation.
 
 - Use the shared `SectionCard`, `StatusBanner`, `ActionRow`, and tabbed
   `ToolInfoContent` patterns. Do not nest cards.
-- The Setup & Preparation tab must freeze and display cohort, exclusions,
-  harmonic selection, direction, and prepared array shape before enabling
-  permutations.
-- The Results tab shows the current session's latest run only, with significant
-  clusters first by ascending raw tail p. Past runs remain available through
-  Open Results Folder.
+- Use the numbered Setup, Review and Run, and Results tabs as a gated workflow.
+  Review and Run unlocks only after preparation freezes and displays the cohort,
+  exclusions, harmonic selection, direction, and prepared array shape; Results
+  unlocks only after permutations complete.
+- Keep the embedded task pages free of page-level scroll areas. Bounded result
+  tables may scroll internally when their data exceeds the available viewport.
+- Results shows the current session's latest run only, with separate
+  Significant and All clusters views and significant clusters ordered by
+  ascending raw tail p. Past runs remain available through Open Results Folder.
 - The primary human-readable artifact is a polished
   `Free_Harmonic_Clustering_Results.xlsx` workbook. Retain machine-readable
   CSV, compressed-array, and manifest artifacts alongside it.

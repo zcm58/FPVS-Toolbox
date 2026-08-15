@@ -51,8 +51,9 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 - `gui/models.py`: GUI-only prepared/result view models.
 - `gui/workers.py`: cancellable signal-driven preparation and permutation
   workers; workers do not touch widgets.
-- `gui/page.py`: embedded `FreeHarmonicClusteringPage` with flat Setup &
-  Preparation and Results tabs.
+- `gui/page.py`: embedded `FreeHarmonicClusteringPage` with scroll-free,
+  numbered Setup, Review and Run, and Results task tabs plus a compact persistent
+  status/action footer.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
 ## Contrast Modes
@@ -131,14 +132,17 @@ not a calibrated FWER validation study.
 ## Embedded GUI Contract
 
 - The page is visible only when Beta Tools are enabled.
-- Setup & Preparation resolves one contrast, displays the A-minus-B direction,
-  and previews included/excluded participants, incomplete pairs, selected
-  harmonics, source coverage, and participant x sensor x harmonic shape.
+- Setup resolves one contrast and displays the A-minus-B direction. Successful
+  preparation unlocks Review and Run, which freezes and displays concise cohort,
+  exclusion, harmonic, source-coverage, and participant x sensor x harmonic
+  summaries; full long-list values remain available in tooltips and exports.
 - Prepared arrays remain in memory so Run Permutations does not reread source
   workbooks.
-- The Results tab is disabled before completion and shows only the current
-  session's latest run. Significant clusters appear first by ascending raw
-  sign-specific p-value. Version 1 has no plots or run-history browser.
+- Results is disabled before completion and shows only the current session's
+  latest run. Its Significant and All clusters views are bounded within the tab;
+  only their data tables may scroll. Significant clusters appear first by
+  ascending raw sign-specific p-value. Version 1 has no plots or run-history
+  browser.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
   information dialog explains fixed-domain fill-through and base-overlap
   exclusion.

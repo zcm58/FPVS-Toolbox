@@ -58,3 +58,25 @@ must not bundle or depend on the private ACR project.
 Do not run Qt or pytest-qt locally on Windows. Run static/import/non-GUI checks
 locally, keep GUI smoke definitions for CI, and document a visible manual smoke
 path.
+
+## Scroll-Free Task Tabs Follow-Up (2026-08-15)
+
+- [x] Replace the page-level setup/results scroll areas with gated **1. Setup**,
+      **2. Review and Run**, and **3. Results** task tabs.
+- [x] Keep status and context-aware actions visible in a compact footer; split
+      preparation review and result tables into bounded, task-focused views.
+- [x] Summarize unusually long cohort/audit values in the cards while retaining
+      their full values in tooltips and completed exports.
+- [x] Update the CI-only Qt smoke contract and scoped/user documentation.
+- [x] Run focused and precommit non-Qt verification and record the results.
+
+Verification:
+
+- `verify.py --scope free-harmonic-clustering --tier focused`: passed, including
+  80 backend tests.
+- `verify.py --scope gui --tier focused`: passed static/import checks.
+- `verify.py --scope repo --tier precommit`: audits, lint, compilation, and
+  1,576 tests passed; 3 tests were skipped. Three unrelated preprocessing
+  memmap tests initially hit sandbox-denied Windows temp paths, then passed 3/3
+  when rerun outside the sandbox.
+- Qt/pytest-qt execution remains assigned to CI or an approved visible session.

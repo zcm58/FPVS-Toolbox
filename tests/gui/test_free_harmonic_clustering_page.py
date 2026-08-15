@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 QtCore = pytest.importorskip("PySide6.QtCore")
+QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
 from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
 from Main_App.gui import main_window as main_window_module  # noqa: E402
@@ -137,10 +138,34 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     page = _page(qtbot, tmp_path)
 
     assert page.project_root == tmp_path.resolve()
-    assert page.tabs.count() == 2
-    assert page.tabs.tabText(0) == "Setup & Preparation"
-    assert page.tabs.tabText(1) == "Results"
-    assert not page.tabs.isTabEnabled(1)
+    assert [
+        page.tabs.tabText(index) for index in range(page.tabs.count())
+    ] == ["1. Setup", "2. Review and Run", "3. Results"]
+    assert page.tabs.currentWidget() is page.setup_tab
+    assert not page.tabs.isTabEnabled(page.tabs.indexOf(page.review_tab))
+    assert not page.tabs.isTabEnabled(page.tabs.indexOf(page.results_tab))
+    assert [
+        page.results_tabs.tabText(index)
+        for index in range(page.results_tabs.count())
+    ] == ["Significant", "All clusters"]
+    assert page.results_tabs.currentWidget() is page.significant_results_tab
+    assert page.findChildren(QtWidgets.QScrollArea) == []
+    assert page.setup_tab.isAncestorOf(page.design_combo)
+    assert page.review_tab.isAncestorOf(page.review_design_label)
+    assert page.results_tab.isAncestorOf(page.results_tabs)
+    assert page.significant_results_tab.isAncestorOf(page.significant_table)
+    assert page.all_clusters_tab.isAncestorOf(page.all_clusters_table)
+    for widget in (
+        page.workflow_status,
+        page.progress_bar,
+        page.workflow_actions,
+        page.prepare_button,
+        page.run_button,
+        page.cancel_button,
+        page.setup_open_results_button,
+    ):
+        assert page.isAncestorOf(widget)
+        assert not page.tabs.isAncestorOf(widget)
     assert page.design_combo.currentText() == "Paired Conditions"
     assert page.harmonic_mode_combo.currentText() == "Hermann automatic selection"
     assert page.paired_condition_a_combo.count() == 3
@@ -180,7 +205,14 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     prepared = _prepared(tmp_path)
     page._on_preparation_completed(prepared)
 
+    review_index = page.tabs.indexOf(page.review_tab)
+    results_index = page.tabs.indexOf(page.results_tab)
+    assert page.tabs.isTabEnabled(review_index)
+    assert not page.tabs.isTabEnabled(results_index)
+    assert page.tabs.currentWidget() is page.review_tab
     assert page.run_button.isEnabled()
+    assert page.run_button.isVisible()
+    assert not page.prepare_button.isVisible()
     assert "P20" in page.review_exclusions_label.text()
     assert "P10 / Neutral Happy" in page.review_exclusions_label.text()
     assert "Strict z > 3.29" in page.review_selection_audit_label.text()
@@ -233,8 +265,12 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     )
     page._on_run_completed(outcome)
 
-    assert page.tabs.isTabEnabled(1)
+    assert page.tabs.isTabEnabled(review_index)
+    assert page.tabs.isTabEnabled(results_index)
     assert page.tabs.currentWidget() is page.results_tab
+    assert page.results_tabs.currentWidget() is page.significant_results_tab
+    assert not page.run_button.isVisible()
+    assert not page.workflow_actions.isVisible()
     assert page.significant_table.rowCount() == 1
     assert page.all_clusters_table.rowCount() == 2
     assert page.all_clusters_table.item(0, 5).text() == "0.0043"
@@ -242,12 +278,16 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     assert page.all_clusters_table.item(1, 9).text() == "No"
     assert "more permutations are recommended" in page.result_status.text()
     assert "p <= .025" in page.significant_status.text()
+    page.results_tabs.setCurrentWidget(page.all_clusters_tab)
+    qtbot.waitUntil(page.all_clusters_table.isVisible)
+    assert not page.significant_table.isVisible()
 
     assert not page.refresh_project_context(
         project_root=tmp_path,
         frequency_snapshot=ProjectFrequencySnapshot(1.2, 6.0),
     )
-    assert page.tabs.isTabEnabled(1)
+    assert page.tabs.isTabEnabled(review_index)
+    assert page.tabs.isTabEnabled(results_index)
     assert not page.has_active_work
 
     page._inspection_failed = True
@@ -268,7 +308,9 @@ def test_preparation_and_results_use_locked_current_session_presentation(
         project_root=tmp_path,
         frequency_snapshot=None,
     )
-    assert not page.tabs.isTabEnabled(1)
+    assert not page.tabs.isTabEnabled(review_index)
+    assert not page.tabs.isTabEnabled(results_index)
+    assert page.tabs.currentWidget() is page.setup_tab
     assert not page.prepare_button.isEnabled()
     assert "Project Settings" in page.workflow_status.text()
 

@@ -84,8 +84,9 @@ particular base rate, oddball rate, or upper frequency is hard-coded.
 
 ## Prepare, Review, Then Run
 
-Select **Prepare Analysis** before running permutations. The preparation review
-shows:
+Define the comparison in **1. Setup**, then select **Prepare Analysis** in the
+persistent action strip. Successful preparation unlocks and opens **2. Review
+and Run**. That review shows:
 
 - the design and A minus B direction;
 - included participants, group sizes, exclusions, incomplete pairs, and final
@@ -94,6 +95,12 @@ shows:
   z-score audit or fixed-domain provenance;
 - the prepared data shape: participants x electrodes x harmonics; and
 - sensor and source-workbook validation.
+
+Long participant, exclusion, or selection lists are shortened in the visible
+cards so the page remains readable without a page scrollbar. Hover over a
+shortened value for the full list; the completed workbook also records the full
+cohort and method provenance. Select **Run Permutations** from this tab to unlock
+**3. Results**.
 
 Preparation builds the numerical arrays once and reuses them for the
 permutation run, avoiding a second workbook read. Condition workbooks are read
@@ -125,12 +132,14 @@ preserving group sizes. Sensors and harmonics are never shuffled separately.
 
 ## Reading Results
 
-The Results tab places clusters meeting the Hermann-compatible threshold first,
-ordered by the raw sign-specific p-value. The primary cluster p-value is
-evaluated at `.025` per direction for a two-tailed family alpha of `.05`. The
-doubled p-value is included as a secondary two-sided presentation, not as a
-second test. A Monte Carlo interval records uncertainty from the finite number
-of assignments.
+The Results tab opens on **Significant**, which places clusters meeting the
+Hermann-compatible threshold first, ordered by the raw sign-specific p-value.
+Use **All clusters** for the complete current-session table. The task pages do
+not use page-level scrolling; result tables scroll internally only when their
+data exceed the available viewport. The primary cluster p-value is evaluated at
+`.025` per direction for a two-tailed family alpha of `.05`. The doubled p-value
+is included as a secondary two-sided presentation, not as a second test. A Monte
+Carlo interval records uncertainty from the finite number of assignments.
 
 A positive cluster means that the L2-normalized response is relatively stronger
 for A than B over the connected electrode x harmonic cells. A negative cluster

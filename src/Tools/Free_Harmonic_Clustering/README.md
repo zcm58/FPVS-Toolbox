@@ -34,15 +34,16 @@ and FullFFT availability. It does not offer local metadata or participant
 overrides.
 
 1. Choose Paired Conditions or Independent Groups and define one A-minus-B
-   contrast.
+   contrast in **1. Setup**.
 2. Use the default Hermann automatic harmonic selection, or choose the highest
    fixed oddball harmonic. Both modes fill through and exclude all dynamically
    identified base-rate overlaps.
 3. Select **Prepare Analysis** and review the frozen cohort, exclusions,
-   harmonic domain, source coverage, and participant x sensor x harmonic shape.
+   harmonic domain, source coverage, and participant x sensor x harmonic shape
+   in the newly unlocked **2. Review and Run** tab.
 4. Select **Run Permutations**. The prepared arrays remain in memory, so source
-   workbooks are not read again.
-5. Review significant clusters first, then the full cluster table. Use **Open
+   workbooks are not read again, and completion unlocks **3. Results**.
+5. Review the **Significant** view first, then **All clusters**. Use **Open
    Results Folder** for the polished Excel workbook and complete provenance.
 
 The GUI exposes the locked Hermann-compatible profile rather than advanced
@@ -52,9 +53,11 @@ FieldTrip-style BioSemi64 spatial reconstruction, and separate signed nulls.
 Raw sign-specific cluster p-values are judged at `.025`; doubled p-values are
 secondary two-sided presentations.
 
-The embedded Results tab shows the current session's latest run only. Plots,
-an all-condition batch, a historical-run browser, and clipboard/manuscript
-helpers are deferred beyond version 1.
+The embedded task tabs do not use page-level scrolling; result tables scroll
+internally only when their rows or columns exceed the available viewport. The
+Results tab shows the current session's latest run only. Plots, an all-condition
+batch, a historical-run browser, and clipboard/manuscript helpers are deferred
+beyond version 1.
 
 ## Headless use
 
