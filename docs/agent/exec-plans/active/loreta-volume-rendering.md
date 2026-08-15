@@ -1,6 +1,6 @@
 # LORETA Volume Rendering
 
-Status: implemented
+Status: complete; ready for plan retirement
 Owner: FPVS Toolbox
 Feature branch: `codex/loreta-volume-rendering`
 
@@ -78,3 +78,10 @@ sprites.
   loaded the 120,000-triangle pial display plus an 80,000-triangle whole-brain
   context. Local offscreen/pytest-qt execution remained intentionally skipped;
   the visible smoke path above remains the final interactive check.
+- 2026-08-15: Merged the feature branch into
+  `codex/harmonic-selection-strategies-plan` (`83f543d2`). A normal visible
+  Windows 11 review exercised the corrected L2 split rendering, and the user
+  confirmed that the exercised LORETA behavior works well. At the user's
+  explicit direction, no further visible smoke is required. This closes the
+  interactive acceptance requirement without claiming that every item in the
+  longer optional comparison path was individually exercised.

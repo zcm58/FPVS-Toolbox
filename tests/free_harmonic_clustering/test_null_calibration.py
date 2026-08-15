@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 
@@ -44,6 +45,13 @@ RECEIPT_TEMPLATE_PATH = (
     / "agent"
     / "quality"
     / "free-harmonic-clustering-null-calibration-v1-receipt-template.json"
+)
+COMPLETED_RECEIPT_PATH = (
+    REPOSITORY_ROOT
+    / "docs"
+    / "agent"
+    / "quality"
+    / "free-harmonic-clustering-null-calibration-v1-receipt.json"
 )
 
 
@@ -98,6 +106,134 @@ def test_pending_receipt_template_matches_the_frozen_protocol() -> None:
 
     assert committed == pending_calibration_receipt_template()
     validate_calibration_receipt(committed, allow_pending=True)
+
+
+def test_completed_receipt_records_the_reviewed_powered_pass() -> None:
+    normalized_bytes = COMPLETED_RECEIPT_PATH.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(normalized_bytes).hexdigest() == (
+        "89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd"
+    )
+    committed = json.loads(normalized_bytes)
+
+    validate_calibration_receipt(committed)
+    assert committed["status"] == "complete"
+    assessment = committed["assessment"]
+    assert assessment["status"] == assessment["powered_null_status"] == "pass"
+    assert assessment["complete_task_set"] is True
+    assert assessment["received_replicates"] == assessment["expected_replicates"] == 4_000
+    assert assessment["missing_task_ids"] == []
+    assert assessment["duplicate_task_ids"] == []
+    assert assessment["unexpected_task_ids"] == []
+    assert assessment["invalid_task_rows"] == []
+    assert assessment["ordered_results_sha256"] == (
+        "1e5444baec5faabc18a286167de82208a811f83e5aab3eb9bf92bdaac803d448"
+    )
+
+    assert {
+        design: (
+            summary["global_rejections"],
+            summary["global_rejection_rate"],
+            summary["positive_rejections"],
+            summary["negative_rejections"],
+            summary["upper_bound"],
+        )
+        for design, summary in assessment["designs"].items()
+    } == {
+        "independent_groups": (111, 0.0555, 60, 55, 0.06645369553133039),
+        "paired_conditions": (91, 0.0455, 43, 49, 0.055572191006579195),
+    }
+    assert {
+        scenario: (
+            summary["global_rejections"],
+            summary["global_rejection_rate"],
+            summary["upper_bound"],
+        )
+        for scenario, summary in assessment["scenarios"].items()
+    } == {
+        "independent_groups:correlated_two_harmonic_lognormal": (
+            30,
+            0.06,
+            0.08050473428435695,
+        ),
+        "independent_groups:heavy_tail_two_harmonic": (
+            26,
+            0.052,
+            0.0714220697504856,
+        ),
+        "independent_groups:iid_two_harmonic_lognormal": (
+            31,
+            0.062,
+            0.08276150904882956,
+        ),
+        "independent_groups:threshold_edge_lognormal": (
+            24,
+            0.048,
+            0.06684328408121025,
+        ),
+        "paired_conditions:correlated_two_harmonic_lognormal": (
+            23,
+            0.046,
+            0.06454329632416769,
+        ),
+        "paired_conditions:heavy_tail_two_harmonic": (
+            21,
+            0.042,
+            0.059919946848314386,
+        ),
+        "paired_conditions:iid_two_harmonic_lognormal": (
+            18,
+            0.036,
+            0.05291833696978857,
+        ),
+        "paired_conditions:threshold_edge_lognormal": (
+            29,
+            0.058,
+            0.07824266578566919,
+        ),
+    }
+    assert all(
+        summary["completed"] == summary["replicates"]
+        and summary["errors"] == 0
+        and summary["no_selection"] == 0
+        and summary["passes_error_bound"] is True
+        and summary["passes_validity"] is True
+        for summaries in (assessment["designs"], assessment["scenarios"])
+        for summary in summaries.values()
+    )
+
+    determinism = assessment["determinism_check"]
+    assert determinism["status"] == "pass"
+    assert {
+        determinism["serial_results_sha256"],
+        determinism["resumed_results_sha256"],
+        determinism["parallel_results_sha256"],
+    } == {"1d6e59ca6f2ce1d964edd89543cac89d620f38c394776fa873b965e201f75808"}
+    assert committed["runtime"] == {
+        "completed_checkpoint_rows": 4_000,
+        "numpy": "2.3.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.9",
+        "scientific_source_sha256": {
+            "scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py": (
+                "f25b5a997814c74b492d9dfec17fa845c0ce1ecde74ecbd9aa501a76cdeb5cf0"
+            ),
+            "src/Tools/Free_Harmonic_Clustering/analysis.py": (
+                "9f35425e4438ba6070922f1291370a1f1dcb8e13459722e71681ba0f04c44346"
+            ),
+            "src/Tools/Free_Harmonic_Clustering/models.py": (
+                "bb793ccad27fb9872e33406d1ba525a17fdd1ca9db69a0bf71e352bae6f4d213"
+            ),
+            "src/Tools/Free_Harmonic_Clustering/null_calibration.py": (
+                "454d4243812311d32e234fe2d9e5720b94cadd508494dea9011f0b8999eba68a"
+            ),
+            "src/Tools/Free_Harmonic_Clustering/preparation.py": (
+                "a41151267d89f88320cfb30e40c2ec3ec065947991fee9f2294d284dbd3535cc"
+            ),
+        },
+        "scipy": "1.16.0",
+        "toolbox_commit": "770811911f2d7e07bd3db8af735150ecb38181b3",
+        "workers": 32,
+    }
 
 
 def test_checkpoint_row_round_trip_preserves_scientific_result() -> None:

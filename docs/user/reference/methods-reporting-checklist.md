@@ -348,13 +348,16 @@ tensors, spatial adjacency, dependency version, or expected outputs.
 - State the validation layer and status accurately. The deterministic
   24-replicate x 199-assignment, at-most-five-rejection harness is software
   regression smoke only and must not be reported as calibrated FWER evidence.
-- If relying on a future completed powered-calibration receipt, cite its
+- If relying on the reviewed powered-calibration receipt, cite its
   Toolbox commit, frozen configuration/generator and adjacency identities,
   paired and independent designs, regimes, 4,000 replicate count, 10,000
   assignments per replicate, seeds, rejection definition, rejection counts,
-  and exact Clopper-Pearson bounds. Until a final reviewed receipt exists,
-  report the powered calibration as pending. Do not generalize a passing
-  simulation beyond its frozen regimes.
+  and exact Clopper-Pearson bounds. The frozen v1 run recorded 111/2,000
+  independent-group rejections (`.0555`; one-sided 97.5% upper bound `.06645`)
+  and 91/2,000 paired-condition rejections (`.0455`; upper bound `.05557`),
+  with every design-by-regime guardrail passing. Do not generalize this bounded
+  simulation evidence beyond its frozen regimes, present it as universal proof
+  or power, or imply that it validates the truth of a real-data finding.
 
 Retain `Free_Harmonic_Clustering_Results.xlsx`, the run manifest, compressed
 arrays, machine-readable result tables, source-workbook provenance, exact

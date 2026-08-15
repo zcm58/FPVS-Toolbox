@@ -1,6 +1,6 @@
 # Free Harmonic Clustering Automatic-Domain Null Calibration
 
-Status: protocol frozen; powered execution pending
+Status: protocol frozen; powered execution complete; reviewed PASS on 2026-08-15
 
 Protocol: `fhc_automatic_unconditional_null_v1`
 
@@ -9,8 +9,10 @@ Hermann automatic-domain selection plus cluster-permutation workflow. It is a
 separate, explicitly invoked scientific validation study. It is not part of
 pytest, focused verification, precommit, or the user-facing application.
 
-No powered result has been run or accepted yet. The committed JSON file is a
-pending receipt template, not evidence that the acceptance envelope passed.
+The reviewed powered result passed every prespecified guardrail. The durable
+completed receipt is
+`free-harmonic-clustering-null-calibration-v1-receipt.json`. The separate
+pending template remains unchanged and is still not result evidence.
 
 ## Two Validation Layers
 
@@ -34,6 +36,92 @@ The powered layer is the protocol on this page:
 
 It runs only through
 `scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py`.
+
+## Reviewed Powered Result
+
+The 2026-08-15 run completed all 4,000 scheduled replicates and its overall,
+powered-null, and determinism assessments all have status `pass`. There were no
+missing, duplicate, unexpected, or invalid task rows, no execution errors, and
+no no-selection outcomes.
+
+The two design-level decisions were:
+
+| Design | Global rejections | Rate | Positive / negative | 97.5% upper bound | Critical count | Selected ceilings | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| Independent groups | 111 / 2,000 | `.0555` | 60 / 55 | `.06645369553133039` | 117 | 32 distinct, 1-39 | PASS |
+| Paired conditions | 91 / 2,000 | `.0455` | 43 / 49 | `.055572191006579195` | 117 | 32 distinct, 1-39 | PASS |
+
+Both exact one-sided 97.5% bounds are below the frozen `.070` design limit.
+The independent-groups result is the narrower pass: 111 rejections are six
+below the maximum passing count of 117.
+
+The eight design x regime decisions were:
+
+| Design | Regime | Global rejections | Rate | Positive / negative | 95% upper bound | Selected ceilings | Result |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| Independent groups | `iid_two_harmonic_lognormal` | 31 / 500 | `.062` | 18 / 14 | `.08276150904882956` | 31 distinct, 2-39 | PASS |
+| Independent groups | `correlated_two_harmonic_lognormal` | 30 / 500 | `.060` | 13 / 17 | `.08050473428435695` | 31 distinct, 2-39 | PASS |
+| Independent groups | `threshold_edge_lognormal` | 24 / 500 | `.048` | 14 / 13 | `.06684328408121025` | 32 distinct, 1-39 | PASS |
+| Independent groups | `heavy_tail_two_harmonic` | 26 / 500 | `.052` | 15 / 11 | `.0714220697504856` | 31 distinct, 2-39 | PASS |
+| Paired conditions | `iid_two_harmonic_lognormal` | 18 / 500 | `.036` | 8 / 10 | `.05291833696978857` | 31 distinct, 2-39 | PASS |
+| Paired conditions | `correlated_two_harmonic_lognormal` | 23 / 500 | `.046` | 12 / 11 | `.06454329632416769` | 31 distinct, 2-39 | PASS |
+| Paired conditions | `threshold_edge_lognormal` | 29 / 500 | `.058` | 13 / 17 | `.07824266578566919` | 32 distinct, 1-39 | PASS |
+| Paired conditions | `heavy_tail_two_harmonic` | 21 / 500 | `.042` | 10 / 11 | `.059919946848314386` | 32 distinct, 1-39 | PASS |
+
+Every cell completed 500 replicates with zero errors and zero no-selection
+outcomes. Every exact one-sided 95% bound is below the frozen `.10` cell limit,
+and every cell is below the maximum passing count of 38. Positive and negative
+counts need not sum to the global count because one replicate can reject in
+both tails.
+
+### Reviewed Artifact And Execution Identity
+
+The completed receipt has SHA-256
+`89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd`.
+Its canonical ordered scientific-results fingerprint is
+`1e5444baec5faabc18a286167de82208a811f83e5aab3eb9bf92bdaac803d448`.
+The serial, resumed, and parallel non-official determinism checks all produced
+`1d6e59ca6f2ce1d964edd89543cac89d620f38c394776fa873b965e201f75808`.
+
+The reviewed local output also had these raw byte hashes:
+
+| Output | SHA-256 |
+| --- | --- |
+| `protocol.json` | `9163f76a0fff73d1b87067b7861e1bafb581e4f2b7e98ae8d456b92c6f5bad5a` |
+| `receipt.json` | `89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd` |
+| `results.jsonl` | `6afd766f082224c22b17de6db8dc405e0515c87d7857c23620ad72b8c5d52cc2` |
+
+The raw checkpoint hash includes elapsed timings. The receipt's ordered-results
+fingerprint excludes elapsed time and is the scientific identity intended to
+match across serial, resumed, and parallel execution.
+
+The run used toolbox commit
+`770811911f2d7e07bd3db8af735150ecb38181b3`, Python `3.13.9`, NumPy `2.3.1`,
+SciPy `1.16.0`, platform `Windows-11-10.0.26200-SP0`, and 32 workers. The
+reviewed scientific source hashes were:
+
+| Source | SHA-256 |
+| --- | --- |
+| `scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py` | `f25b5a997814c74b492d9dfec17fa845c0ce1ecde74ecbd9aa501a76cdeb5cf0` |
+| `src/Tools/Free_Harmonic_Clustering/analysis.py` | `9f35425e4438ba6070922f1291370a1f1dcb8e13459722e71681ba0f04c44346` |
+| `src/Tools/Free_Harmonic_Clustering/models.py` | `bb793ccad27fb9872e33406d1ba525a17fdd1ca9db69a0bf71e352bae6f4d213` |
+| `src/Tools/Free_Harmonic_Clustering/null_calibration.py` | `454d4243812311d32e234fe2d9e5720b94cadd508494dea9011f0b8999eba68a` |
+| `src/Tools/Free_Harmonic_Clustering/preparation.py` | `a41151267d89f88320cfb30e40c2ec3ec065947991fee9f2294d284dbd3535cc` |
+
+The recorded protocol fingerprint remains
+`178739203fc5fd32702681546cae9ad50d153b79c850921531aee8410a585936`.
+
+### Interpretation Limits
+
+This PASS supports the complete adaptive selection plus cluster-permutation
+workflow only for the frozen designs, generators, sample sizes, adjacency, and
+numerical settings under the prespecified `.070` design and `.10` regime
+limits. It is not mathematical proof for arbitrary data-generating processes,
+does not establish power under non-null effects, and does not mean that every
+observed rejection rate must be below `.05`. The determinism assessment is a
+two-task, 19-assignment execution-mode check, not a second powered run. The
+receipt contains the exact source and runtime identity but no completion
+timestamp or command line.
 
 ## Frozen Numerical Method
 
@@ -98,11 +186,11 @@ powered outcome is inspected requires a new protocol ID and a new receipt.
 The frozen protocol fingerprint is
 `178739203fc5fd32702681546cae9ad50d153b79c850921531aee8410a585936`.
 The generator/receipt implementation version is `1.1`; the completed runtime
-receipt will additionally hash the five scientific/execution source files.
-The first invocation stores those hashes plus exact Python, NumPy, SciPy, and
-platform identities in `protocol.json`; every resume must match them before a
-checkpoint row is accepted. Loaded rows must also match their scheduled task
-metadata and both deterministic seeds.
+receipt hashes the five scientific/execution source files. The first invocation
+stored those hashes plus exact Python, NumPy, SciPy, and platform identities in
+`protocol.json`; every resume had to match them before a checkpoint row was
+accepted. Loaded rows also had to match their scheduled task metadata and both
+deterministic seeds.
 
 ## Prespecified Acceptance Envelope
 
@@ -161,8 +249,9 @@ receipt and its raw-results fingerprint are the durable evidence.
 The pending schema/protocol template is
 `docs/agent/quality/free-harmonic-clustering-null-calibration-v1-receipt-template.json`.
 It has `status: pending`, no assessment, and must never be cited as a result.
-After the powered run, review the generated receipt before committing a final
-receipt or changing any user-facing claim.
+It remains unchanged. The separately reviewed completed result is
+`docs/agent/quality/free-harmonic-clustering-null-calibration-v1-receipt.json`;
+it has `status: complete` and assessment status `pass`.
 
 Invalidate and rerun the powered calibration after a change to automatic
 selection, SNR/L2 preparation, cluster construction or p-values, default

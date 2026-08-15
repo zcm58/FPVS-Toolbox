@@ -1,5 +1,7 @@
 # Free Harmonic Clustering GUI v1
 
+Status: complete; ready for plan retirement
+
 ## Objective
 
 Embed the clean-room Free Harmonic Clustering Analysis backend as a beta,
@@ -38,14 +40,18 @@ existing one-contrast statistical contract.
 - [x] Add synthetic backend coverage and CI-only GUI smoke definitions.
 - [x] Update tool architecture and user-facing documentation.
 - [x] Run focused and precommit verification.
-- [ ] Manually reproduce the canonical ACR Neutral Happy result through the
+- [x] Manually reproduce the canonical ACR Neutral Happy result through the
       GUI: 18 anxious versus 16 non-anxious, retained H1/H2, positive H1
       C1/Cz/CPz cluster, raw one-tail p approximately .0043.
 
-The identical public inspection, preparation, and permutation APIs passed a
-read-only headless replay on the canonical ACR project (raw tail
-`p = .00429957`). The checkbox remains open because local Qt execution requires
-separate approval for a safe visible session.
+The identical public inspection, preparation, and permutation APIs first
+passed a read-only replay on the canonical ACR project (raw tail
+`p = .00429957`). A subsequently approved normal visible Windows 11 session
+reproduced that result end to end through the GUI: run
+`20260815T201425Z-60cd4199`, 18 anxious versus 16 non-anxious participants,
+retained H1/H2, and positive H1 cluster C1 over CPz/Cz with raw one-tail
+`p = .0043`. The Significant and All Clusters result tabs and additive run
+folder action also worked as expected.
 
 ## Release Gate
 
@@ -55,9 +61,10 @@ must not bundle or depend on the private ACR project.
 
 ## Local Qt Constraint
 
-Do not run Qt or pytest-qt locally on Windows. Run static/import/non-GUI checks
-locally, keep GUI smoke definitions for CI, and document a visible manual smoke
-path.
+Do not run offscreen Qt or pytest-qt locally on Windows. Run
+static/import/non-GUI checks locally and keep automated GUI smoke definitions
+for CI. A normal visible manual session may be used only when explicitly
+approved, as it was for the accepted canonical replay above.
 
 ## Scroll-Free Task Tabs Follow-Up (2026-08-15)
 

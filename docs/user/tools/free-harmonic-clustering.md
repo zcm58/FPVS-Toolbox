@@ -171,9 +171,21 @@ is only a gross-error smoke check.
 A separate powered protocol is frozen for 4,000 null replicates: 2,000 paired
 and 2,000 independent, divided among four 500-replicate regimes per design,
 using the production 10,000 assignments. Its design-level and regime-level
-exact-binomial guardrails were fixed before execution. The powered run is still
-pending; there is no completed result receipt. Do not report the 24 x 199 smoke
-as calibrated FWER evidence or describe the pending powered protocol as a pass.
+exact-binomial guardrails were fixed before execution. The reviewed run passed
+every guardrail: independent groups rejected in 111/2,000 replicates (`.0555`;
+one-sided 97.5% exact upper bound `.06645`) and paired conditions in 91/2,000
+(`.0455`; upper bound `.05557`). All eight 500-replicate regime cells passed;
+the largest was 31/500 (`.062`; one-sided 95% upper bound `.08276`). There were
+no errors or no-selection replicates, and the deterministic execution check
+passed.
+
+This result is bounded empirical evidence for the frozen simulated regimes,
+not mathematical proof of universal error control, a power analysis, or
+evidence that any real-data result is true. Automatic-mode cluster inference
+remains conditional on the candidate domain, adjacency, node-entry threshold,
+contrast family, and valid whole-participant exchangeability. Do not report the
+24 x 199 smoke as calibrated evidence or generalize the powered result beyond
+its documented regimes.
 
 Version 1 has no result plots and no historical-run browser. The Results tab
 shows the current session's latest run. Use **Open Results Folder** to review

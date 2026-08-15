@@ -2,19 +2,19 @@
 
 ## Status
 
-The core implementation and its automated verification were complete on feature
-branch `codex/harmonic-selection-strategies-plan` as of 2026-08-14. The working
-tree contains the four profile engines, balanced pooling, explicit new-project/
-legacy migration, neutral FullFFT provenance, Free Harmonic Clustering
-decoupling, per-artifact freshness, post-selection rebuild, and the Settings
-integration on a dedicated Harmonics tab. Save-triggered rebuilds now use the
-shared post-processing activity screen while the guarded Settings page stays
-alive in the background; explicit recalculation can remain Settings-local.
-Architecture and user-method documentation reflect those boundaries. The plan
-remains active for the visible supported-platform GUI smoke and a separately
-powered FHC automatic-domain null-calibration study; the latter is validation of a
-conditional inferential claim, not unfinished standard Summed-BCA
-implementation.
+Complete on feature branch `codex/harmonic-selection-strategies-plan` as of
+2026-08-15. The branch contains the four profile engines, balanced pooling,
+explicit new-project/legacy migration, neutral FullFFT provenance, Free
+Harmonic Clustering decoupling, per-artifact freshness, post-selection rebuild,
+and the Settings integration on a dedicated Harmonics tab. Save-triggered
+rebuilds use the shared post-processing activity screen while the guarded
+Settings page stays alive in the background; explicit recalculation can remain
+Settings-local. Architecture and user-method documentation reflect those
+boundaries. The separately powered FHC automatic-domain null calibration
+completed and passed every prespecified guardrail. The visible supported-
+platform acceptance requirement was closed after the user confirmed the
+exercised behavior and explicitly waived further visible smoke. This plan is
+ready for retirement under the active-plan convention.
 
 Created 2026-08-14. This plan overlaps the active
 `stats-standard-screening-lmm.md`, `multi-group-project-foundation.md`, and
@@ -308,7 +308,7 @@ claim unconditional error control for that adaptive workflow.
       selection cache is absent.
 - [x] Stale Summed BCA alone does not block clustering; stale FullFFT does.
 - [x] GUI inspection and direct preparation enforce the same provenance.
-- [ ] A complete powered-calibration receipt reports empirical global-null
+- [x] A complete powered-calibration receipt reports empirical global-null
       rejection for all 4,000 automatic-workflow replicates; every design and
       regime passes its prespecified exact-binomial guardrail, or the
       default/confirmatory interpretation is changed and the failure reported.
@@ -432,7 +432,10 @@ claim unconditional error control for that adaptive workflow.
 
 - [x] GUI, workbooks, reports, user docs, and method fingerprints agree.
 - [x] Existing-project legacy reproduction and new-profile tests pass.
-- [ ] The visible manual smoke path passes on a supported platform.
+- [x] The visible/manual acceptance requirement is closed on a supported
+      platform: the user confirmed the exercised behavior and explicitly
+      waived the remaining scripted smoke steps. This does not claim that all
+      nine optional checks below were individually executed.
 - [x] Architecture and nearest scoped `AGENTS.md` files describe final
       ownership and dependency boundaries.
 
@@ -472,7 +475,7 @@ python .agents/scripts/verify.py --scope repo --tier precommit
 
 Qt smoke definitions execute in CI. Do not use offscreen Qt locally.
 
-### Powered FHC calibration protocol — pending
+### Powered FHC calibration protocol — complete
 
 `fhc_automatic_unconditional_null_v1` freezes 2,000 paired and 2,000
 independent global-null replicates, four 500-replicate regimes per design, and
@@ -480,13 +483,32 @@ the production 10,000 assignments. Each design requires a one-sided 97.5%
 exact Clopper-Pearson upper bound below `.070` (at most 117/2,000), and each
 regime requires a one-sided 95% upper bound below `.10` (at most 38/500).
 
-The resumable manual runner and pending receipt schema are documented in
-`docs/agent/quality/free-harmonic-clustering-null-calibration.md`. The powered
-execution has not run, no result is recorded here, and partial checkpoints do
-not close the Phase 1 acceptance item. The 4,000 x 10,000 workload is excluded
-from routine pytest, focused verification, and precommit.
+The reviewed run completed all 4,000 replicates and passed every prespecified
+guardrail. Independent groups rejected in 111/2,000 replicates (`.0555`; one-
+sided 97.5% exact upper bound `.06645369553133039`) and paired conditions in
+91/2,000 (`.0455`; upper bound `.055572191006579195`). All eight design-by-
+regime cells passed their 95% upper-bound guardrail; the largest cell was the
+independent iid regime at 31/500 (`.062`; upper bound
+`.08276150904882956`). There were no errors or no-selection replicates,
+selection ceilings varied in every cell, and the deterministic serial/resume/
+parallel check passed.
+
+The protocol, bounded interpretation, and reviewed receipt are documented in
+`docs/agent/quality/free-harmonic-clustering-null-calibration.md` and
+`docs/agent/quality/free-harmonic-clustering-null-calibration-v1-receipt.json`.
+The receipt SHA-256 is
+`89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd`.
+This is empirical evidence within the frozen simulated regimes, not universal
+proof of error control. The 4,000 x 10,000 workload remains excluded from
+routine pytest, focused verification, and precommit.
 
 ## Visible Manual Smoke Path
+
+Closure note (2026-08-15): the user reported that the exercised visible
+behavior works well and explicitly directed that no further visible smoke is
+required. The nine-step path below remains an optional future regression aid;
+it was not fully executed in this session. Focused automated coverage is the
+evidence for the unexercised rollback, staleness, and simulated-failure paths.
 
 Run in a normal visible supported Windows 11 or CachyOS session:
 
@@ -613,3 +635,17 @@ Run in a normal visible supported Windows 11 or CachyOS session:
   runner, fast receipt/configuration checks, and pending receipt schema. The
   powered run remains pending; no inferential result or closed acceptance item
   is claimed by this framework checkpoint.
+- 2026-08-15: Closed the supported-platform visible acceptance requirement
+  after the user confirmed that the exercised behavior works well and
+  explicitly waived any further visible smoke. The full nine-step destructive
+  Settings path was not represented as completed; its unexercised rollback and
+  failure branches remain covered by focused automated tests. The powered FHC
+  calibration is now the only open item in this plan.
+- 2026-08-15: Completed and independently rebuilt the frozen 4,000-replicate
+  powered FHC calibration receipt. Independent groups rejected in 111/2,000
+  replicates (97.5% upper bound `.06645369553133039`) and paired conditions in
+  91/2,000 (upper bound `.055572191006579195`); every design and regime passed
+  its prespecified bound, with zero errors and no-selection replicates. The
+  deterministic serial/resume/parallel check passed. The reviewed receipt is
+  preserved as a durable quality artifact, so the final open acceptance item
+  is closed and this plan is ready for retirement.

@@ -62,6 +62,12 @@ one contrast, then delegates long work to signal-driven workers.
   117/2,000 rejections), and within each regime, a one-sided 95% upper bound
   below `.10` (at most 38/500). Report every miss; never substitute the smoke
   layer or tune the envelope after results are inspected.
+- The reviewed v1 receipt passed every guardrail: independent groups rejected
+  in 111/2,000 replicates (97.5% upper bound `.06645369553133039`) and paired
+  conditions in 91/2,000 (upper bound `.055572191006579195`); all eight regime
+  cells passed, with zero errors or no-selection replicates. Treat this only as
+  bounded empirical evidence for the frozen simulated regimes, never as
+  universal proof, a power result, or evidence that a real-data finding is true.
 - Require complete finite maps on one shared frequency grid and one shared
   BioSemi64 sensor set. Do not zero-fill or perform node-wise omission.
 - Resolve all writes beneath the explicit managed project root. Do not mutate
@@ -140,9 +146,11 @@ python .agents/scripts/verify.py --scope free-harmonic-clustering --tier focused
 
 The focused command runs only the 24 x 199 smoke layer. The powered
 4,000 x 10,000 calibration is manual, resumable release validation owned by
-`docs/agent/quality/free-harmonic-clustering-null-calibration.md`. A pending,
-partial, interrupted, or unreviewed receipt is not a pass and must not support
-a changed statistical claim.
+`docs/agent/quality/free-harmonic-clustering-null-calibration.md`. The reviewed
+v1 receipt is
+`docs/agent/quality/free-harmonic-clustering-null-calibration-v1-receipt.json`.
+A pending, partial, interrupted, or unreviewed later receipt is not a pass and
+must not support a changed statistical claim.
 
 The headless numerical modules must not import PySide6. Keep GUI smoke coverage
 registered for CI and do not run Qt locally on Windows.

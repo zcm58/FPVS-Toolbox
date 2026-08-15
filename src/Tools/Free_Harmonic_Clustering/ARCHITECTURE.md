@@ -153,13 +153,23 @@ seeds, acceptance calculations, and receipt validation. The resumable developer
 runner under `scripts/manual_diagnostics/` records the method and adjacency
 identities, protocol fingerprint, completed scientific rows, rejection counts,
 exact bounds, and execution environment. It is never a routine test target.
-The frozen protocol and pending receipt schema live in
-`docs/agent/quality/free-harmonic-clustering-null-calibration.md`.
+The frozen protocol and receipt schema live in
+`docs/agent/quality/free-harmonic-clustering-null-calibration.md`. The reviewed
+v1 receipt is
+`docs/agent/quality/free-harmonic-clustering-null-calibration-v1-receipt.json`.
+It records 111/2,000 independent-group global rejections (`.0555`; one-sided
+97.5% upper bound `.06645369553133039`) and 91/2,000 paired-condition
+rejections (`.0455`; upper bound `.055572191006579195`). All eight 500-
+replicate design-by-regime cells passed the prespecified 95% upper-bound rule;
+the largest was 31/500 (`.062`; upper bound `.08276150904882956`). No replicate
+errored or failed to select, selection ceilings varied in every cell, and the
+serial/resume/parallel determinism check passed.
 
-Until a final receipt is completed and reviewed, automatic-mode inference
-retains only the conditional interpretation above. Even a passing receipt would
-support the frozen simulated regimes rather than prove universal error control
-for every data-generating process.
+This completed calibration is bounded empirical evidence for the frozen
+simulated regimes. It does not prove universal error control, statistical
+power, or the truth of a real-data result. Automatic-mode inference remains
+conditional on the candidate domain, adjacency, node-entry threshold, contrast
+family, and whole-participant exchangeability.
 
 ## Embedded GUI Contract
 
