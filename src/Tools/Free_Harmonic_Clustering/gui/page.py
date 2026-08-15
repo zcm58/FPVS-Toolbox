@@ -243,11 +243,11 @@ class FreeHarmonicClusteringPage(QWidget):
         self.design_combo.setObjectName("free_harmonic_design_combo")
         self.design_combo.addItem(
             "Paired Conditions",
-            GuiAnalysisDesign.PAIRED_CONDITIONS,
+            GuiAnalysisDesign.PAIRED_CONDITIONS.value,
         )
         self.design_combo.addItem(
             "Independent Groups",
-            GuiAnalysisDesign.INDEPENDENT_GROUPS,
+            GuiAnalysisDesign.INDEPENDENT_GROUPS.value,
         )
         form.addRow("Analysis mode:", self.design_combo)
 
@@ -313,11 +313,11 @@ class FreeHarmonicClusteringPage(QWidget):
         self.harmonic_mode_combo.setObjectName("free_harmonic_mode_combo")
         self.harmonic_mode_combo.addItem(
             "Hermann automatic selection",
-            GuiHarmonicMode.AUTOMATIC,
+            GuiHarmonicMode.AUTOMATIC.value,
         )
         self.harmonic_mode_combo.addItem(
             "Fixed harmonic list",
-            GuiHarmonicMode.FIXED_HIGHEST,
+            GuiHarmonicMode.FIXED_HIGHEST.value,
         )
         form.addRow("Harmonic domain:", self.harmonic_mode_combo)
 
@@ -845,16 +845,34 @@ class FreeHarmonicClusteringPage(QWidget):
             self._updating_controls = False
 
     # ------------------------------------------------------------- interaction
+    def _selected_design(self) -> GuiAnalysisDesign | None:
+        value = self.design_combo.currentData()
+        if not isinstance(value, str):
+            return None
+        try:
+            return GuiAnalysisDesign(value)
+        except ValueError:
+            return None
+
+    def _selected_harmonic_mode(self) -> GuiHarmonicMode | None:
+        value = self.harmonic_mode_combo.currentData()
+        if not isinstance(value, str):
+            return None
+        try:
+            return GuiHarmonicMode(value)
+        except ValueError:
+            return None
+
     @Slot()
     def _on_design_changed(self) -> None:
-        design = self.design_combo.currentData()
+        design = self._selected_design()
         paired = design is GuiAnalysisDesign.PAIRED_CONDITIONS
         self.design_stack.setCurrentIndex(0 if paired else 1)
         self._on_setup_changed()
 
     @Slot()
     def _on_harmonic_mode_changed(self) -> None:
-        fixed = self.harmonic_mode_combo.currentData() is GuiHarmonicMode.FIXED_HIGHEST
+        fixed = self._selected_harmonic_mode() is GuiHarmonicMode.FIXED_HIGHEST
         self.fixed_highest_label.setVisible(fixed)
         self.fixed_highest_combo.parentWidget().setVisible(fixed)
         self.fixed_highest_combo.setEnabled(
@@ -876,7 +894,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._update_buttons()
 
     def _update_direction_label(self) -> None:
-        design = self.design_combo.currentData()
+        design = self._selected_design()
         if design is GuiAnalysisDesign.PAIRED_CONDITIONS:
             arm_a = self.paired_condition_a_combo.currentText() or "Condition A"
             arm_b = self.paired_condition_b_combo.currentText() or "Condition B"
@@ -889,7 +907,7 @@ class FreeHarmonicClusteringPage(QWidget):
 
     @Slot()
     def _swap_a_b(self) -> None:
-        if self.design_combo.currentData() is GuiAnalysisDesign.PAIRED_CONDITIONS:
+        if self._selected_design() is GuiAnalysisDesign.PAIRED_CONDITIONS:
             left = self.paired_condition_a_combo.currentIndex()
             right = self.paired_condition_b_combo.currentIndex()
             self.paired_condition_a_combo.setCurrentIndex(right)
@@ -904,8 +922,8 @@ class FreeHarmonicClusteringPage(QWidget):
     def _current_setup(self) -> AnalysisSetup:
         if self._options is None or self._frequency_snapshot is None:
             raise ValueError("Project inputs have not been loaded.")
-        design = self.design_combo.currentData()
-        if not isinstance(design, GuiAnalysisDesign):
+        design = self._selected_design()
+        if design is None:
             raise ValueError("Choose an analysis mode.")
         if design is GuiAnalysisDesign.PAIRED_CONDITIONS:
             condition_a = str(self.paired_condition_a_combo.currentData() or "")
@@ -925,8 +943,8 @@ class FreeHarmonicClusteringPage(QWidget):
             if not group_a or not group_b or group_a.casefold() == group_b.casefold():
                 raise ValueError("Independent analysis requires two different groups.")
 
-        harmonic_mode = self.harmonic_mode_combo.currentData()
-        if not isinstance(harmonic_mode, GuiHarmonicMode):
+        harmonic_mode = self._selected_harmonic_mode()
+        if harmonic_mode is None:
             raise ValueError("Choose a harmonic-domain mode.")
         fixed_order = None
         if harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
@@ -1578,7 +1596,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.harmonic_mode_combo.setEnabled(not busy and self._options is not None)
         self.design_stack.setEnabled(not busy and self._options is not None)
         self.swap_button.setEnabled(not busy and self._options is not None)
-        fixed = self.harmonic_mode_combo.currentData() is GuiHarmonicMode.FIXED_HIGHEST
+        fixed = self._selected_harmonic_mode() is GuiHarmonicMode.FIXED_HIGHEST
         self.fixed_highest_combo.setEnabled(
             not busy and fixed and self._options is not None and self.fixed_highest_combo.count() > 0
         )

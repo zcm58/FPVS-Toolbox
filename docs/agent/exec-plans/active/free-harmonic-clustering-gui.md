@@ -80,3 +80,23 @@ Verification:
   memmap tests initially hit sandbox-denied Windows temp paths, then passed 3/3
   when rerun outside the sandbox.
 - Qt/pytest-qt execution remains assigned to CI or an approved visible session.
+
+## Prepare Enablement Follow-Up (2026-08-15)
+
+- [x] Normalize the analysis-design and harmonic-mode combo-box values at the
+      Qt boundary so Windows string round-tripping cannot invalidate visible
+      selections and leave **Prepare Analysis** disabled.
+- [x] Add CI-only pytest-qt coverage for the canonical independent-groups setup,
+      including enabled state and preparation dispatch without starting real
+      analysis work.
+
+Verification:
+
+- `verify.py --scope free-harmonic-clustering --tier focused`: passed, including
+  80 backend tests.
+- `verify.py --scope gui --tier focused`: passed static/import checks.
+- `verify.py --scope repo --tier precommit`: audits, lint, compilation, and
+  1,576 tests passed; 3 tests were skipped. Three unrelated preprocessing
+  memmap tests initially hit sandbox-denied Windows temp paths, then passed 3/3
+  when rerun outside the sandbox.
+- Qt/pytest-qt execution remains assigned to CI or an approved visible session.

@@ -18,6 +18,8 @@ from Tools.Free_Harmonic_Clustering.gui import (  # noqa: E402
     has_active_operations,
 )
 from Tools.Free_Harmonic_Clustering.gui.models import (  # noqa: E402
+    GuiAnalysisDesign,
+    GuiHarmonicMode,
     GroupChoice,
     ProjectAnalysisOptions,
     RunOutcome,
@@ -194,6 +196,48 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     page._active_stage = "inspection"
     page._on_operation_cancelled()
     assert page._inspection_failed
+
+
+def test_valid_independent_setup_enables_and_dispatches_preparation(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    page = _page(qtbot, tmp_path)
+
+    # Windows Qt can round-trip str-backed Enum user data as plain strings.
+    page.design_combo.setItemData(
+        1,
+        GuiAnalysisDesign.INDEPENDENT_GROUPS.value,
+    )
+    page.harmonic_mode_combo.setItemData(
+        0,
+        GuiHarmonicMode.AUTOMATIC.value,
+    )
+    page.design_combo.setCurrentIndex(1)
+
+    setup = page._current_setup()
+    assert setup.design is GuiAnalysisDesign.INDEPENDENT_GROUPS
+    assert setup.condition_a == "Neutral Happy"
+    assert setup.group_ids == ("anxious", "non_anxious")
+    assert setup.harmonic_mode is GuiHarmonicMode.AUTOMATIC
+    assert page._setup_error() is None
+    assert page.prepare_button.isEnabled()
+
+    started_stages: list[str] = []
+
+    def _record_start(
+        _worker: object,
+        *,
+        stage: str,
+        **_kwargs: object,
+    ) -> None:
+        started_stages.append(stage)
+
+    monkeypatch.setattr(page, "_start_operation", _record_start)
+    qtbot.mouseClick(page.prepare_button, QtCore.Qt.LeftButton)
+
+    assert started_stages == ["preparation"]
 
 
 def test_preparation_and_results_use_locked_current_session_presentation(
