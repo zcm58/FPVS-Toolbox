@@ -838,7 +838,7 @@ def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
     assert win.menuBar().isEnabled() is True
     assert win.btn_start.text() == "Start Processing"
     assert win.busy is False
-    assert not win.lbl_debug.isHidden()
+    assert win.lbl_debug.isHidden()
 
 
 def test_harmonic_thread_start_failure_releases_settings_worker_state(
