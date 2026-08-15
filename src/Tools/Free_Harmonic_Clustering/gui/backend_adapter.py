@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Protocol
 
 import logging
@@ -193,6 +194,16 @@ class FreeHarmonicBackendAdapter:
         progress: ProgressSink,
         cancel_check: CancelCheck,
     ) -> ProjectAnalysisOptions:
+        started_at = perf_counter()
+        root = Path(project_root)
+        logger.info(
+            "free_harmonic_gui_inspection_started",
+            extra={
+                "project_root": str(root),
+                "oddball_frequency_hz": frequencies.oddball_frequency_hz,
+                "base_frequency_hz": frequencies.base_frequency_hz,
+            },
+        )
         if cancel_check():
             self._raise_cancelled()
         progress(0, 1, "Reading project conditions and FullFFT headers...")
@@ -207,13 +218,13 @@ class FreeHarmonicBackendAdapter:
             ) from exc
 
         raw = inspect_project_analysis_options(
-            Path(project_root),
+            root,
             oddball_frequency_hz=frequencies.oddball_frequency_hz,
             base_frequency_hz=frequencies.base_frequency_hz,
         )
         if cancel_check():
             self._raise_cancelled()
-        options = _normalized_options(raw, Path(project_root))
+        options = _normalized_options(raw, root)
         if frequencies.max_harmonic_hz is not None:
             keep = tuple(
                 index
@@ -257,6 +268,18 @@ class FreeHarmonicBackendAdapter:
                 ),
                 diagnostics=options.diagnostics,
             )
+        logger.info(
+            "free_harmonic_gui_inspection_completed",
+            extra={
+                "project_root": str(root),
+                "elapsed_ms": round((perf_counter() - started_at) * 1000.0, 3),
+                "condition_count": len(options.conditions),
+                "group_count": len(options.groups),
+                "eligible_harmonic_count": len(options.eligible_orders),
+                "workbook_count": options.workbook_count,
+                "diagnostic_count": len(options.diagnostics),
+            },
+        )
         progress(1, 1, "Project inputs are ready.")
         return options
 

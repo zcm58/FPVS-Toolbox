@@ -1085,6 +1085,14 @@ class FreeHarmonicClusteringPage(QWidget):
 
     @Slot()
     def _on_operation_thread_finished(self) -> None:
+        finished_stage = self._active_stage or "unknown"
+        logger.info(
+            "free_harmonic_gui_operation_thread_finished",
+            extra={
+                "stage": finished_stage,
+                "project_root": str(self._project_root),
+            },
+        )
         self._thread = None
         self._worker = None
         self._completion_callback = None

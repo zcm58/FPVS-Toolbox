@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event
+from time import perf_counter
 
 import logging
 
@@ -44,6 +45,13 @@ class _CancellableWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        started_at = perf_counter()
+        worker_type = type(self).__name__
+        outcome = "failed"
+        logger.info(
+            "free_harmonic_gui_worker_started",
+            extra={"worker": worker_type},
+        )
         try:
             result = self._execute()
         except Exception as exc:
@@ -51,19 +59,29 @@ class _CancellableWorker(QObject):
                 "FreeHarmonicCancelledError",
                 "AnalysisCancelled",
             }:
+                outcome = "cancelled"
                 self.cancelled.emit()
             else:
                 logger.exception(
                     "free_harmonic_gui_worker_failed",
-                    extra={"worker": type(self).__name__},
+                    extra={"worker": worker_type},
                 )
                 self.failed.emit(str(exc))
         else:
             # A returned operation is complete. In particular, cancellation
             # can arrive while the final atomic export is already publishing;
             # do not hide a successfully returned receipt as "cancelled".
+            outcome = "completed"
             self.completed.emit(result)
         finally:
+            logger.info(
+                "free_harmonic_gui_worker_finalized",
+                extra={
+                    "worker": worker_type,
+                    "outcome": outcome,
+                    "elapsed_ms": round((perf_counter() - started_at) * 1000.0, 3),
+                },
+            )
             self.finished.emit()
 
 

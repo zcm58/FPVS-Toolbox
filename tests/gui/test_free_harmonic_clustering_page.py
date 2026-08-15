@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import get_ident
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -261,6 +263,73 @@ def test_diagnostics_status_points_to_exclusion_review(
     assert "Prepare Analysis" in page.workflow_status.text()
     assert "Excluded/incomplete" in page.workflow_status.text()
     assert "2. Review and Run" in page.workflow_status.text()
+
+
+def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    class ThreadedInspectionBackend(_FakeBackend):
+        def __init__(self, results_parent: Path) -> None:
+            super().__init__(results_parent)
+            self.gui_thread_ident = get_ident()
+            self.ran_off_gui_thread = False
+
+        def inspect_project(
+            self,
+            project_root: Path,
+            _frequencies,
+            *,
+            progress,
+            cancel_check,
+        ) -> ProjectAnalysisOptions:
+            self.ran_off_gui_thread = get_ident() != self.gui_thread_ident
+            progress(0, 1, "Inspecting project inputs...")
+            deadline = time.monotonic() + 0.08
+            while time.monotonic() < deadline:
+                if cancel_check():
+                    raise RuntimeError("Inspection was cancelled unexpectedly.")
+                time.sleep(0.005)
+            progress(1, 1, "Project inputs are ready.")
+            return _options(project_root)
+
+    results_parent = tmp_path / "3 - Statistical Analysis Results" / (
+        "Free Harmonic Clustering Analysis"
+    )
+    results_parent.mkdir(parents=True)
+    backend = ThreadedInspectionBackend(results_parent)
+    page = FreeHarmonicClusteringPage(
+        project_root=tmp_path,
+        frequency_snapshot=ProjectFrequencySnapshot(1.2, 6.0),
+        backend=backend,
+        auto_discover=False,
+    )
+    qtbot.addWidget(page)
+    page.show()
+    qtbot.waitExposed(page)
+
+    heartbeats: list[bool] = []
+    heartbeat = QtCore.QTimer(page)
+    heartbeat.setInterval(5)
+    heartbeat.timeout.connect(lambda: heartbeats.append(True))
+    heartbeat.start()
+    page._begin_project_inspection()
+
+    qtbot.waitUntil(
+        lambda: page._options is not None and not page.has_active_work,
+        timeout=3_000,
+    )
+    heartbeat.stop()
+    qtbot.waitUntil(lambda: not has_active_operations(), timeout=1_000)
+
+    assert backend.ran_off_gui_thread
+    assert len(heartbeats) >= 2
+    assert page.independent_condition_combo.count() == 3
+    assert page.independent_group_a_combo.count() == 2
+    assert page.fixed_highest_combo.count() == 5
+    assert not page.progress_bar.isVisible()
+    assert page.prepare_button.isEnabled()
+    assert "Project inputs loaded" in page.workflow_status.text()
 
 
 def test_paired_condition_guard_invalidates_prepared_state(

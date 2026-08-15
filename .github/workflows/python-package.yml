@@ -29,9 +29,16 @@ jobs:
         python-version: "3.13"
         cache: pip
         cache-dependency-path: requirements.txt
+    - name: Install Linux Qt runtime dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends libegl1
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Verify Qt runtime imports
+      run: python -c "from PySide6 import QtCore, QtGui, QtTest, QtWidgets"
     - name: Test with pytest
       run: python -m pytest --allow-qt-tests -q
