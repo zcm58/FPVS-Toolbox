@@ -7,7 +7,9 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt
 
+from Tools.Stats.common.stats_core import PipelineId
 from Tools.Stats.ui import stats_window as stats_mod
+from Tools.Stats.ui.inference_view_model import pipeline_steps_for_options
 from Tools.Stats.ui.stats_window import StatsWindow
 from Tools.Stats.workers.stats_workers import StatsWorker
 
@@ -65,7 +67,13 @@ def test_single_group_run_smoke(qtbot, monkeypatch, app):
 
     qtbot.mouseClick(win.analyze_single_btn, Qt.LeftButton)
 
-    assert captured == [{}]
+    assert captured == [
+        {
+            "step_ids": pipeline_steps_for_options(
+                win._native_options_by_pipeline[PipelineId.SINGLE]
+            )
+        }
+    ]
 
 
 @pytest.mark.qt
@@ -99,7 +107,12 @@ def test_single_group_advanced_actions_keep_screening_and_diagnostics(
 
 
 @pytest.mark.qt
-def test_single_group_actions_disabled_for_multi_group_project(qtbot, monkeypatch, app, tmp_path):
+def test_primary_actions_remain_enabled_for_multi_group_project(
+    qtbot,
+    monkeypatch,
+    app,
+    tmp_path,
+):
     project_dir = tmp_path / "multi-group-project"
     project_dir.mkdir()
     (project_dir / "project.json").write_text(
@@ -117,19 +130,20 @@ def test_single_group_actions_disabled_for_multi_group_project(qtbot, monkeypatc
     win = StatsWindow(project_dir=str(project_dir))
     qtbot.addWidget(win)
     _prepare_window(win, monkeypatch)
-    captured: list[dict] = []
+    win._group_participant_counts = {"control": 1, "clinical": 1}
+    win._populate_group_pair_combo()
+    captured: list[PipelineId] = []
 
     monkeypatch.setattr(
-        win._controller,
-        "run_single_group_analysis",
-        lambda **kwargs: captured.append(kwargs),
+        win,
+        "run_primary_analysis",
+        lambda: captured.append(win._native_pipeline_id()),
         raising=False,
     )
 
-    assert win.analyze_single_btn.isEnabled() is False
-    assert win.single_advanced_btn.isEnabled() is False
+    assert win.analyze_single_btn.isEnabled() is True
+    assert win.single_advanced_btn.isEnabled() is True
 
     win.on_analyze_single_group_clicked()
 
-    assert captured == []
-    assert "disabled for multi-group projects" in win.lbl_status.text()
+    assert captured == [PipelineId.MULTI]

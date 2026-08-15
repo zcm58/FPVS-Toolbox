@@ -13,7 +13,7 @@ from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     normalize_dv_policy,
 )
 from Tools.Stats.analysis.dv_policy_settings import HARMONIC_PROFILE_FIXED_ID  # noqa: E402
-from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
+from Tools.Stats.common.stats_core import PipelineId  # noqa: E402
 from Tools.Stats.controller.stats_controller import SINGLE_PIPELINE_STEPS  # noqa: E402
 from Tools.Stats.ui import stats_window_exclusions  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
@@ -147,12 +147,7 @@ def test_stats_dv_policy_does_not_change_step_queue(qtbot):
     steps = window._controller._build_steps(PipelineId.SINGLE, SINGLE_PIPELINE_STEPS)
     ids = [step.id for step in steps]
 
-    assert ids == [
-        StepId.RM_ANOVA,
-        StepId.MIXED_MODEL,
-        StepId.INTERACTION_POSTHOCS,
-        StepId.BASELINE_VS_ZERO,
-    ]
+    assert ids == list(SINGLE_PIPELINE_STEPS)
     for step in steps:
         if "dv_policy" in step.kwargs:
             assert step.kwargs["dv_policy"]["name"] == GROUP_SIGNIFICANT_POLICY_NAME

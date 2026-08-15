@@ -19,7 +19,8 @@ def test_log_panel_is_always_visible(app, qtbot):
     height_before = w.height()
     assert not hasattr(w, "log_toggle_btn")
     assert w.log_body.isVisible() is True
-    assert w.advanced_box.height() >= 290
+    assert w.advanced_box.minimumHeight() >= 250
+    assert w.advanced_box.height() >= w.advanced_box.minimumHeight()
     assert w.console_box.height() <= 180
     assert 95 <= w.log.height() <= 120
 

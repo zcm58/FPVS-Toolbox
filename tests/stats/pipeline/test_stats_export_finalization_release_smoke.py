@@ -98,10 +98,22 @@ def test_stats_export_finalization_release_smoke(
 
     def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb, message_cb=None):
         del self, error_cb, message_cb
-        payload = {
-            "mixed_results_df": pd.DataFrame({"Effect": ["roi"], "Pr > F": [0.5]}),
-            "output_text": "mixed model done",
-        }
+        if step.id is StepId.PREPARE_ANALYSIS:
+            payload = {"prepared_payload": object()}
+        elif step.id is StepId.MIXED_MODEL:
+            payload = {
+                "mixed_results_df": pd.DataFrame(
+                    {"Effect": ["roi"], "Pr > F": [0.5]}
+                ),
+                "output_text": "mixed model done",
+            }
+        else:
+            win.export_results("lmm", win.mixed_model_results_data, tmp_path)
+            payload = {
+                "exported": True,
+                "numeric_exported": True,
+                "export_path": str(tmp_path),
+            }
         finished_cb(pipeline_id, step.id, payload)
 
     monkeypatch.setattr(StatsWindow, "start_step_worker", start_immediate, raising=False)

@@ -1,7 +1,7 @@
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QLabel, QPushButton
 
-from Main_App.gui.typography import font_for_role
+from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.settings_dialog import _SettingsDialog
 from Main_App.gui.components import ActionRow, PathPickerRow, SectionCard, SubsectionHeaderLabel
@@ -31,9 +31,11 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert "Legend labels (optional)" in section_titles
     assert len(window.findChildren(SectionCard)) >= 6
     assert window.params_box.header.title_label.font().bold()
+    header_font = window.params_box.header.title_label.font()
+    header_spec = FONT_ROLES["subsection_header"]
     assert (
-        window.params_box.header.title_label.font().pointSize()
-        == font_for_role("subsection_header").pointSize()
+        header_font.pointSize() == header_spec.point_size
+        or header_font.pixelSize() == header_spec.css_size_px
     )
     legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
     legend_field_top = window.legend_condition_a_edit.mapTo(window, QPoint(0, 0)).y()

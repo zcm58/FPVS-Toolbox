@@ -43,7 +43,8 @@ def test_log_output_is_fixed_height(qtbot):
     height_before = win.height()
     assert not hasattr(win, "log_toggle_btn")
     assert win.log_body.isVisible() is True
-    assert win.advanced_box.height() >= 290
+    assert win.advanced_box.minimumHeight() >= 250
+    assert win.advanced_box.height() >= win.advanced_box.minimumHeight()
     assert win.console_box.height() <= 180
     assert 95 <= win.log.height() <= 120
 

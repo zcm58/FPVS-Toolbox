@@ -45,5 +45,5 @@ def test_finish_all_prompts_to_view_generated_plots(qtbot, monkeypatch, tmp_path
 
     window._finish_all()
 
-    assert prompts == [("Finished", "Plots have been successfully generated. View plots?")]
+    assert prompts == [("Finished", "Generated 1 figure file.\n\nView plots?")]
     assert opened == [True]

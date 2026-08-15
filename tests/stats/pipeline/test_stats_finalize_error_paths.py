@@ -9,7 +9,7 @@ import pandas as pd
 from PySide6.QtCore import Qt
 
 from Tools.Stats.workers import stats_workers
-from Tools.Stats.common.stats_core import PipelineId
+from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.ui.stats_window import StatsWindow
 
 
@@ -41,7 +41,13 @@ def fast_window(monkeypatch, qtbot, tmp_path, patched_workers):
         return True
 
     def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb, message_cb=None):
-        finished_cb(pipeline_id, step.id, {})
+        if step.id is StepId.PREPARE_ANALYSIS:
+            payload = {"prepared_payload": object()}
+        elif step.id is StepId.REPORT_BUNDLE:
+            payload = {"exported": True}
+        else:
+            payload = {}
+        finished_cb(pipeline_id, step.id, payload)
 
     def fake_get_step_config(self, pipeline_id, step_id):  # noqa: ARG001
         return {}, lambda payload: None

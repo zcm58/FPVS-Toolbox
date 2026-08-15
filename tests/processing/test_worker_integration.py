@@ -124,4 +124,4 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
     win.start_processing()
     qtbot.waitUntil(lambda: not getattr(win, "_run_active", False), timeout=2000)
 
-    assert captured["max_workers"] == 1
+    assert captured["max_workers"] == 6

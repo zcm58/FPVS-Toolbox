@@ -207,7 +207,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert not hasattr(window, "fixed_predefined_controls")
     assert not hasattr(window, "fixed_predefined_exclude_base")
     assert window.recalculate_harmonics_btn.text() == "Open Harmonic Settings"
-    assert "Settings > Preprocessing" in window.recalculate_harmonics_btn.toolTip()
+    assert "Settings > Harmonics" in window.recalculate_harmonics_btn.toolTip()
 
     assert window.analysis_design_group.objectName() == "stats_analysis_design_group"
     assert window.analysis_mode_value.objectName() == "stats_analysis_mode_value"
@@ -449,7 +449,6 @@ def test_stats_harmonic_action_opens_settings_without_clearing_cache(
     workspace = QStackedWidget(host)
 
     window = StatsWindow(parent=host, project_dir=str(tmp_path))
-    qtbot.addWidget(window)
     workspace.addWidget(window)
     window.show()
     window.setup_tabs.setCurrentIndex(1)

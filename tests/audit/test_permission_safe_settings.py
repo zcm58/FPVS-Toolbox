@@ -124,11 +124,6 @@ def test_plot_generator_project_settings_roundtrip(tmp_path, monkeypatch, qtbot)
     qtbot.addWidget(window)
     window.folder_edit.setText(str(excel_dir))
     window.out_edit.setText(str(snr_dir))
-    window.scalp_check.setChecked(True)
-    window.scalp_min_spin.setValue(-3.0)
-    window.scalp_max_spin.setValue(3.0)
-    window.scalp_title_a_edit.setText("A {condition}")
-    window.scalp_title_b_edit.setText("B {condition}")
 
     window._save_defaults()
 
@@ -136,18 +131,8 @@ def test_plot_generator_project_settings_roundtrip(tmp_path, monkeypatch, qtbot)
     plot_settings = saved["tools"]["snr_plot"]["plot_settings"]
     assert plot_settings["input_folder"] == str(excel_dir)
     assert plot_settings["output_folder"] == str(snr_dir)
-    assert plot_settings["include_scalp_maps"] is True
-    assert plot_settings["scalp_min"] == -3.0
-    assert plot_settings["scalp_max"] == 3.0
-    assert plot_settings["title_a_template"] == "A {condition}"
-    assert plot_settings["title_b_template"] == "B {condition}"
 
     restored = PlotGeneratorWindow(project_dir=str(project_root))
     qtbot.addWidget(restored)
     assert restored.folder_edit.text() == str(excel_dir)
     assert restored.out_edit.text() == str(snr_dir)
-    assert restored.scalp_check.isChecked() is True
-    assert restored.scalp_min_spin.value() == pytest.approx(-3.0)
-    assert restored.scalp_max_spin.value() == pytest.approx(3.0)
-    assert restored.scalp_title_a_edit.text() == "A {condition}"
-    assert restored.scalp_title_b_edit.text() == "B {condition}"

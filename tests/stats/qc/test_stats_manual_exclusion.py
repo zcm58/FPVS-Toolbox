@@ -38,7 +38,10 @@ def test_manual_exclusion_state_in_payload(qtbot, monkeypatch) -> None:
     assert "P2" in window.manual_exclusion_list.toolTip()
     assert window.manual_exclusion_summary_label.text() == "Excluded: 1"
 
-    kwargs, _handler = window.get_step_config(PipelineId.SINGLE, StepId.RM_ANOVA)
+    kwargs, _handler = window.get_step_config(
+        PipelineId.SINGLE,
+        StepId.PREPARE_ANALYSIS,
+    )
     assert kwargs["manual_excluded_pids"] == ["P2"]
 
 

@@ -1541,12 +1541,6 @@ class StatsWindowPipelineMixin:
             return kwargs, store
 
         if step_id is StepId.RM_ANOVA:
-            if options.analysis_scope == "available_case":
-                raise ValueError(
-                    "RM-ANOVA is not available for available-case data. "
-                    "Use the mixed-model step."
-                )
-
             def handle_rm_anova(payload: dict) -> None:
                 store(payload)
                 self._apply_rm_anova_results(payload, update_text=False)

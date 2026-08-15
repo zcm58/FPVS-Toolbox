@@ -194,7 +194,7 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert "Prepare Analysis" in page.workflow_status.text()
     assert "2. Review and Run" in page.workflow_status.text()
     assert page.setup_open_results_button.isEnabled()
-    assert page.open_results_button.isEnabled()
+    assert not page.open_results_button.isEnabled()
     for combo in (
         page.paired_condition_a_combo,
         page.paired_condition_b_combo,
@@ -492,6 +492,7 @@ def test_preparation_and_results_use_locked_current_session_presentation(
 
     page._inspection_failed = True
     retries: list[bool] = []
+    begin_project_inspection = page._begin_project_inspection
     monkeypatch.setattr(
         page,
         "_begin_project_inspection",
@@ -503,6 +504,11 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     )
     assert retries == [True]
     page._inspection_failed = False
+    monkeypatch.setattr(
+        page,
+        "_begin_project_inspection",
+        begin_project_inspection,
+    )
 
     assert page.refresh_project_context(
         project_root=tmp_path,

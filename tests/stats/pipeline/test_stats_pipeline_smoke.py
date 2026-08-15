@@ -38,6 +38,12 @@ def patched_workers(monkeypatch):
     def fake_baseline(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "baseline"}
 
+    def fake_prepare(*_args, **_kwargs):
+        return {"prepared_payload": object()}
+
+    def fake_report(*_args, **_kwargs):
+        return {"exported": True, "report_text": "screening complete"}
+
     monkeypatch.setattr(stats_workers, "run_rm_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_lmm", fake_lmm, raising=False)
     monkeypatch.setattr(stats_workers, "run_posthoc", fake_posthoc, raising=False)
@@ -46,6 +52,8 @@ def patched_workers(monkeypatch):
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.MIXED_MODEL, fake_lmm)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.INTERACTION_POSTHOCS, fake_posthoc)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BASELINE_VS_ZERO, fake_baseline)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.PREPARE_ANALYSIS, fake_prepare)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.REPORT_BUNDLE, fake_report)
     return dummy_df
 
 

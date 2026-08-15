@@ -215,7 +215,7 @@ def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
     assert dialog.tab_widget.tabText(5) == "Methods"
     assert dialog.minimumWidth() == 600
     assert "Sample size (N) is the number of participants" in text
-    assert "repeated measurements = conditions × ROIs" in text
+    assert "measurements = conditions × ROIs" in text
     assert "does not isolate the condition effect" in text
     assert "Green and MacLeod (2016)" in text
     assert "10.1111/2041-210X.12504" in text

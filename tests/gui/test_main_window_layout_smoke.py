@@ -279,8 +279,16 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert all(button.property("variant") == "secondary" for button in event_remove_buttons)
     assert all(button.property("compact") is True for button in event_remove_buttons)
     assert all(button.property("iconButton") is True for button in event_remove_buttons)
-    assert all(button.width() == EVENT_REMOVE_BUTTON_SIZE for button in event_remove_buttons)
-    assert all(button.height() == EVENT_REMOVE_BUTTON_SIZE for button in event_remove_buttons)
+    assert all(
+        button.minimumWidth() == EVENT_REMOVE_BUTTON_SIZE
+        and button.maximumWidth() == EVENT_REMOVE_BUTTON_SIZE
+        for button in event_remove_buttons
+    )
+    assert all(
+        button.minimumHeight() == EVENT_REMOVE_BUTTON_SIZE
+        and button.maximumHeight() == EVENT_REMOVE_BUTTON_SIZE
+        for button in event_remove_buttons
+    )
 
     assert hasattr(win, "row_single_file")
     assert hasattr(win, "row_input_folder")

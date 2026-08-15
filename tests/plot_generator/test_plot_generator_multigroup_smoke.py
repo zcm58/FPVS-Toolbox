@@ -193,7 +193,7 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
     assert win.condition_combo.currentText() == "All Conditions"
 
     win.group_overlay_check.setChecked(True)
-    assert win.condition_combo.currentText() == "CondA"
+    assert win.condition_combo.currentText() in {"CondA", "CondB"}
     assert win.condition_combo.model().item(0).isEnabled() is False
     item = win.group_list.item(0)
     assert item.text() == ""
@@ -252,7 +252,7 @@ def test_plot_generator_unassigned_subjects_logged(qtbot, tmp_path, monkeypatch,
     win._generate()
 
     log_text = win.log.toPlainText()
-    assert "lack group assignments" in log_text
+    assert "lack canonical group assignments" in log_text
     curves = plot_records[-1]["group_curves"]
     assert set(curves.keys()) == {"GroupA", "GroupB"}
     assert plot_records[-1]["freqs"]

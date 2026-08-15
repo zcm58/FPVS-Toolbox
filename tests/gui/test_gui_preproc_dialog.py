@@ -77,7 +77,7 @@ class _FakeSettingsThread:
             raise self._start_error
         self._running = True
 
-    def quit(self):
+    def quit(self, *_args):
         self._running = False
 
     def isRunning(self):
@@ -366,7 +366,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert harmonic_card.isAncestorOf(dlg.recalculate_harmonics_button)
     assert harmonic_card.isAncestorOf(dlg.harmonic_recalculation_status)
     assert harmonic_card.isAncestorOf(dlg.fixed_harmonic_warning)
-    assert dlg.fixed_harmonic_warning.isVisible() is True
+    assert dlg.fixed_harmonic_warning.isHidden() is False
     assert dlg.recalculate_harmonics_button.text() == "Recalculate Harmonics"
     assert dlg.recalculate_harmonics_button.isEnabled() is True
     assert dlg.findChild(ActionRow, "settings_harmonic_selection_actions") is not None
@@ -391,7 +391,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.harmonic_electrode_scope_combo.isEnabled() is False
     assert dlg.fixed_harmonic_exclude_base_check.isChecked() is True
     assert dlg.fixed_harmonic_exclude_base_check.isEnabled() is False
-    assert dlg.fixed_harmonic_warning.isVisible() is True
+    assert dlg.fixed_harmonic_warning.isHidden() is False
     upper_index_mode = dlg.fixed_harmonic_input_mode_combo.findData(
         "upper_harmonic_index"
     )

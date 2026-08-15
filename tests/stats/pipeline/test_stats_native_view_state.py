@@ -3,8 +3,16 @@ from __future__ import annotations
 import pytest
 
 from Tools.Stats.analysis.dv_policies import GROUP_SIGNIFICANT_POLICY_NAME
+from Tools.Stats.analysis.inference_contracts import (
+    Alternative,
+    AnalysisProfile,
+    CorrectionMethod,
+    HarmonicProvenance,
+)
+from Tools.Stats.analysis.prepared_analysis import AnalysisMode
 from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.ui.stats_window_actions import StatsWindowActionsMixin
+from Tools.Stats.ui.inference_view_model import NativeInferenceOptions
 from Tools.Stats.ui.stats_window_pipeline import StatsWindowPipelineMixin
 from Tools.Stats.ui.stats_window_support import (
     build_native_group_state,
@@ -183,6 +191,54 @@ def test_pipeline_fallback_uses_locked_standard_screening_methods() -> None:
     assert snapshot["response_alternative"] == "greater"
     assert snapshot["analysis_scope"] == "available_case"
     assert snapshot["strict_omnibus_family"] is True
+
+
+def test_available_case_anova_config_defers_compatibility_to_worker() -> None:
+    view = StatsWindowPipelineMixin()
+    options = NativeInferenceOptions(
+        mode=AnalysisMode.SINGLE,
+        profile=AnalysisProfile.PUBLISHED_STYLE_EXPLORATORY,
+        correction=CorrectionMethod.HOLM,
+        alternative=Alternative.GREATER,
+        harmonic_provenance=HarmonicProvenance.SAME_SAMPLE_ADAPTIVE,
+        alpha=0.05,
+        analysis_scope="available_case",
+    )
+    view._native_options_for = lambda _pipeline_id: options
+    view._native_state_by_pipeline = {
+        PipelineId.SINGLE: {"selected_conditions": ["Faces", "Objects"]}
+    }
+    view._pipeline_outlier_config = {}
+    view._get_outlier_exclusion_payload = lambda: {}
+    view._pipeline_qc_config = {}
+    view._get_qc_exclusion_payload = lambda: {}
+    view._pipeline_qc_state = {}
+    view._pipeline_dv_policy = {}
+    view._get_dv_policy_payload = lambda: {}
+    stored: list[tuple[PipelineId, StepId, dict]] = []
+    applied: list[tuple[dict, bool]] = []
+    view._store_native_step_payload = (
+        lambda pipeline_id, step_id, payload: stored.append(
+            (pipeline_id, step_id, payload)
+        )
+    )
+    view._apply_rm_anova_results = (
+        lambda payload, *, update_text: applied.append((payload, update_text))
+    )
+
+    kwargs, handler = view.get_step_config(
+        PipelineId.SINGLE,
+        StepId.RM_ANOVA,
+    )
+    skipped = {
+        "status": "skipped",
+        "status_code": "anova_requires_complete_unique_grid",
+    }
+    handler(skipped)
+
+    assert kwargs == {}
+    assert stored == [(PipelineId.SINGLE, StepId.RM_ANOVA, skipped)]
+    assert applied == [(skipped, False)]
 
 
 def test_standard_multigroup_pair_requires_exactly_two_groups() -> None:

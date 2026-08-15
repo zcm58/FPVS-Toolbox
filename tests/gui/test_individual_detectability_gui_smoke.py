@@ -67,7 +67,7 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     assert window.status_label.property("statusVariant") == "info"
     assert window.use_custom_harmonics_check.isChecked() is False
     assert window.harmonics_edit.isEnabled() is False
-    assert window.custom_harmonics_warning.isVisible() is False
+    assert window.custom_harmonics_warning.isHidden() is True
     assert "FPVS Toolbox significant harmonics" in window.summary_box.toPlainText()
     assert window.run_btn.property("variant") == "primary"
     assert window.toggle_log_btn.property("variant") == "tertiary"
@@ -76,7 +76,8 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     for card in cards.values():
         assert card.shell_layout.spacing() == SECTION_HEADER_CONTENT_GAP
         assert card.content_layout.spacing() == SECTION_HEADER_CONTENT_GAP
-        assert card.shell_layout.alignmentOf(card.header) & QtCore.Qt.AlignmentFlag.AlignTop
+        header_item = card.shell_layout.itemAt(card.shell_layout.indexOf(card.header))
+        assert header_item.alignment() & QtCore.Qt.AlignmentFlag.AlignTop
     assert cards["individual_detectability_output"].maximumHeight() == (
         COMPACT_SECTION_MAX_HEIGHT
     )
@@ -130,7 +131,7 @@ def test_individual_detectability_scan_populates_participants_with_missingness(
     }
     window.use_custom_harmonics_check.setChecked(True)
     assert window.harmonics_edit.isEnabled() is True
-    assert window.custom_harmonics_warning.isVisible() is True
+    assert window.custom_harmonics_warning.isHidden() is False
     assert window._collect_output_stems() == {
         "AngryNeutral": "AngryNeutral_individual_detectability_grid_custom_harmonics",
         "HappyNeutral": "HappyNeutral_individual_detectability_grid_custom_harmonics",
