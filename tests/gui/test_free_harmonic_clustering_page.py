@@ -48,7 +48,11 @@ class _FakeBackend:
         raise AssertionError("This smoke applies results directly.")
 
 
-def _options(project_root: Path) -> ProjectAnalysisOptions:
+def _options(
+    project_root: Path,
+    *,
+    diagnostics: tuple[str, ...] = (),
+) -> ProjectAnalysisOptions:
     return ProjectAnalysisOptions(
         project_root=project_root,
         conditions=("Neutral Happy", "Neutral Fear", "Positive Happy"),
@@ -64,6 +68,7 @@ def _options(project_root: Path) -> ProjectAnalysisOptions:
         effective_harmonic_upper_hz=19.2,
         frequency_resolution_hz=0.01,
         compatibility_message="Exact cohort grids are checked during Prepare.",
+        diagnostics=diagnostics,
     )
 
 
@@ -115,7 +120,12 @@ def _prepared(project_root: Path):
     )
 
 
-def _page(qtbot, tmp_path: Path) -> FreeHarmonicClusteringPage:
+def _page(
+    qtbot,
+    tmp_path: Path,
+    *,
+    diagnostics: tuple[str, ...] = (),
+) -> FreeHarmonicClusteringPage:
     results_parent = tmp_path / "3 - Statistical Analysis Results" / (
         "Free Harmonic Clustering Analysis"
     )
@@ -129,7 +139,7 @@ def _page(qtbot, tmp_path: Path) -> FreeHarmonicClusteringPage:
     qtbot.addWidget(page)
     page.show()
     qtbot.waitExposed(page)
-    page._on_inspection_completed(_options(tmp_path))
+    page._on_inspection_completed(_options(tmp_path, diagnostics=diagnostics))
     return page
 
 
@@ -152,6 +162,13 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     ] == ["Significant", "All clusters"]
     assert page.results_tabs.currentWidget() is page.significant_results_tab
     assert page.findChildren(QtWidgets.QScrollArea) == []
+    for removed_object_name in (
+        "free_harmonic_beta_banner",
+        "free_harmonic_profile_card",
+        "free_harmonic_discovery_note",
+        "free_harmonic_swap_button",
+    ):
+        assert page.findChild(QtWidgets.QWidget, removed_object_name) is None
     assert page.setup_tab.isAncestorOf(page.design_combo)
     assert page.review_tab.isAncestorOf(page.review_design_label)
     assert page.results_tab.isAncestorOf(page.results_tabs)
@@ -172,8 +189,26 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert page.harmonic_mode_combo.currentText() == "Hermann automatic selection"
     assert page.paired_condition_a_combo.count() == 3
     assert page.paired_group_filter_combo.itemData(0) is None
+    assert "Prepare Analysis" in page.workflow_status.text()
+    assert "2. Review and Run" in page.workflow_status.text()
     assert page.setup_open_results_button.isEnabled()
     assert page.open_results_button.isEnabled()
+    for combo in (
+        page.paired_condition_a_combo,
+        page.paired_condition_b_combo,
+        page.paired_group_filter_combo,
+        page.independent_group_a_combo,
+        page.independent_group_b_combo,
+    ):
+        assert (
+            combo.sizePolicy().horizontalPolicy()
+            == QtWidgets.QSizePolicy.Expanding
+        )
+        assert combo.minimumContentsLength() >= 24
+    assert (
+        page.design_stack.sizePolicy().horizontalPolicy()
+        == QtWidgets.QSizePolicy.Expanding
+    )
 
     page.harmonic_mode_combo.setCurrentIndex(1)
     assert page.fixed_highest_combo.isEnabled()
@@ -186,16 +221,69 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
         for index in range(page.fixed_highest_combo.count())
     )
 
-    original_a = page.paired_condition_a_combo.currentText()
-    original_b = page.paired_condition_b_combo.currentText()
-    qtbot.mouseClick(page.swap_button, QtCore.Qt.LeftButton)
-    assert page.paired_condition_a_combo.currentText() == original_b
-    assert page.paired_condition_b_combo.currentText() == original_a
+    requested_a = page.paired_condition_b_combo.currentData()
+    page.paired_condition_a_combo.setCurrentIndex(
+        page.paired_condition_b_combo.currentIndex()
+    )
+    assert page.paired_condition_a_combo.currentData() == requested_a
+    assert (
+        page.paired_condition_a_combo.currentData()
+        != page.paired_condition_b_combo.currentData()
+    )
+    requested_b = page.paired_condition_a_combo.currentData()
+    page.paired_condition_b_combo.setCurrentIndex(
+        page.paired_condition_a_combo.currentIndex()
+    )
+    assert page.paired_condition_b_combo.currentData() == requested_b
+    assert (
+        page.paired_condition_a_combo.currentData()
+        != page.paired_condition_b_combo.currentData()
+    )
     assert "positive clusters indicate" in page.direction_label.text()
+    assert page._setup_error() is None
+    assert page.prepare_button.isEnabled()
 
     page._active_stage = "inspection"
     page._on_operation_cancelled()
     assert page._inspection_failed
+
+
+def test_diagnostics_status_points_to_exclusion_review(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    page = _page(
+        qtbot,
+        tmp_path,
+        diagnostics=("Two project-QC exclusions are active.",),
+    )
+
+    assert "Prepare Analysis" in page.workflow_status.text()
+    assert "Excluded/incomplete" in page.workflow_status.text()
+    assert "2. Review and Run" in page.workflow_status.text()
+
+
+def test_paired_condition_guard_invalidates_prepared_state(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    page = _page(qtbot, tmp_path)
+    page._on_preparation_completed(_prepared(tmp_path))
+    assert page._prepared is not None
+
+    requested_a = page.paired_condition_b_combo.currentData()
+    page.paired_condition_a_combo.setCurrentIndex(
+        page.paired_condition_b_combo.currentIndex()
+    )
+
+    assert page.paired_condition_a_combo.currentData() == requested_a
+    assert (
+        page.paired_condition_a_combo.currentData()
+        != page.paired_condition_b_combo.currentData()
+    )
+    assert page._prepared is None
+    assert page.tabs.currentWidget() is page.setup_tab
+    assert "Setup changed" in page.workflow_status.text()
 
 
 def test_valid_independent_setup_enables_and_dispatches_preparation(
@@ -261,7 +349,6 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     assert "P10 / Neutral Happy" in page.review_exclusions_label.text()
     assert "Strict z > 3.29" in page.review_selection_audit_label.text()
     assert "H2 (z=3.80)" in page.review_selection_audit_label.text()
-    assert "H5 (6 Hz)" in page.review_frequency_domain_label.text()
     assert "4 managed workbook" in page.review_source_coverage_label.text()
     assert "2 + 2 participants" in page.review_shape_label.text()
 

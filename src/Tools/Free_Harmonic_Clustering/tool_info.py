@@ -31,8 +31,8 @@ responses are first collapsed into one summed value.
 </ul>
 <p>
 Each run tests one ordered contrast. Positive clusters indicate A &gt; B and
-negative clusters indicate A &lt; B. Use <b>Swap A/B</b> when the opposite
-direction is easier to interpret.
+negative clusters indicate A &lt; B. Set A and B directly in the setup controls;
+select them in the opposite order to reverse the contrast.
 </p>
 
 <h3>Project-Bound Workflow</h3>
@@ -58,6 +58,22 @@ published method and public implementation where the available information is
 sufficient, but it is not a copy and is not claimed to reproduce unpublished
 author tensors, software state, or adjacency data exactly.
 </p>
+
+<h3>Locked Method Settings</h3>
+<p>
+The GUI exposes one locked, read-only cluster/permutation profile rather than
+advanced statistical controls. Every completed result bundle records the full
+profile and reproducibility provenance.
+</p>
+<ul>
+  <li>10,000 whole-participant assignments by default;</li>
+  <li>cluster correction across one electrode &times; harmonic family;</li>
+  <li>automatic harmonic selection using strict z &gt; 3.29;</li>
+  <li>raw sign-specific cluster p-values evaluated at &le; .025 in each
+  direction;</li>
+  <li>participant/arm L2 normalization; and</li>
+  <li>a deterministic, recorded random seed.</li>
+</ul>
 
 <h3>Signal Preparation</h3>
 <ol>
@@ -87,15 +103,19 @@ The fixed spatial graph is a versioned 197-edge FieldTrip-style reconstruction
 for BioSemi64. It was independently reconstructed for the Toolbox and is
 <b>not</b> the authors' adjacency matrix. Spatial neighbors connect at the same
 harmonic; all retained harmonics at one electrode are mutually adjacent.
+Together, these connections define the single electrode &times; harmonic family
+over which clusters are corrected.
 </p>
 <p>
 Nodes enter positive or negative clusters at a two-sided alpha of .01. Cluster
 mass is the signed sum of t values. The default 10,000 assignments permute
 whole participant arrays: paired runs use sign flips and independent runs
 preserve group sizes while shuffling labels. Separate positive and negative
-extreme-cluster null distributions are used. Monte Carlo p-values use strict
-extreme comparisons and the +1 correction. The recorded random seed and
-assignment provenance make the run reproducible.
+extreme-cluster null distributions are used. Raw sign-specific cluster
+p-values are evaluated at &le; .025 in each direction for a two-tailed family
+alpha of .05. Monte Carlo p-values use strict extreme comparisons and the +1
+correction. The recorded random seed and assignment provenance make the run
+reproducible.
 </p>
 """
 

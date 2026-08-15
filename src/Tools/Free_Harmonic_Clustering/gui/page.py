@@ -183,19 +183,6 @@ class FreeHarmonicClusteringPage(QWidget):
         header_layout.addWidget(self.about_button, 0, Qt.AlignTop)
         root_layout.addWidget(header)
 
-        self.beta_banner = StatusBanner(
-            "Beta: this clean-room implementation mirrors the published "
-            "Hermann et al. method where the available information permits.",
-            self,
-            variant="warning",
-        )
-        self.beta_banner.setObjectName("free_harmonic_beta_banner")
-        beta_wrapper = QWidget(self)
-        beta_layout = QVBoxLayout(beta_wrapper)
-        beta_layout.setContentsMargins(24, 0, 24, 0)
-        beta_layout.addWidget(self.beta_banner)
-        root_layout.addWidget(beta_wrapper)
-
         self.tabs = QTabWidget(self)
         self.tabs.setObjectName("free_harmonic_main_tabs")
         self.setup_tab = QWidget(self.tabs)
@@ -221,21 +208,13 @@ class FreeHarmonicClusteringPage(QWidget):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 16, 24, 16)
         layout.setSpacing(14)
-        top_grid = QGridLayout()
-        top_grid.setContentsMargins(0, 0, 0, 0)
-        top_grid.setHorizontalSpacing(14)
-        top_grid.setVerticalSpacing(14)
-        top_grid.setColumnStretch(0, 3)
-        top_grid.setColumnStretch(1, 2)
-        top_grid.setRowStretch(0, 1)
-        layout.addLayout(top_grid, 1)
 
         setup_card = SectionCard(
             "Analysis setup",
             content,
             object_name="free_harmonic_setup_card",
         )
-        top_grid.addWidget(setup_card, 0, 0)
+        layout.addWidget(setup_card, 1)
         form = make_form_layout()
         setup_card.content_layout.addLayout(form)
 
@@ -253,6 +232,7 @@ class FreeHarmonicClusteringPage(QWidget):
 
         self.design_stack = QStackedWidget(setup_card.content)
         self.design_stack.setObjectName("free_harmonic_design_stack")
+        self.design_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form.addRow(self.design_stack)
         paired_panel = QWidget(self.design_stack)
         paired_form = make_form_layout()
@@ -294,14 +274,20 @@ class FreeHarmonicClusteringPage(QWidget):
         independent_form.addRow("Group B:", self.independent_group_b_combo)
         self.design_stack.addWidget(independent_panel)
 
-        self.swap_button = make_action_button(
-            "Swap A/B",
-            variant="secondary",
-            compact=True,
-            parent=setup_card.content,
-        )
-        self.swap_button.setObjectName("free_harmonic_swap_button")
-        form.addRow("Contrast order:", self.swap_button)
+        for combo in (
+            self.design_combo,
+            self.paired_condition_a_combo,
+            self.paired_condition_b_combo,
+            self.paired_group_filter_combo,
+            self.independent_condition_combo,
+            self.independent_group_a_combo,
+            self.independent_group_b_combo,
+        ):
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            combo.setSizeAdjustPolicy(
+                QComboBox.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(24)
 
         self.direction_label = QLabel("Contrast: A - B", setup_card.content)
         self.direction_label.setObjectName("free_harmonic_direction_label")
@@ -336,46 +322,6 @@ class FreeHarmonicClusteringPage(QWidget):
         fixed_layout.addWidget(self.harmonic_info_button)
         self.fixed_highest_label = QLabel("Highest included harmonic:", setup_card.content)
         form.addRow(self.fixed_highest_label, fixed_row)
-
-        self.discovery_note = QLabel(
-            "Project choices are loaded from canonical metadata and the actual "
-            "FullFFT header.",
-            setup_card.content,
-        )
-        self.discovery_note.setObjectName("free_harmonic_discovery_note")
-        self.discovery_note.setWordWrap(True)
-        self.discovery_note.setProperty("caption", True)
-        form.addRow(self.discovery_note)
-
-        profile_card = SectionCard(
-            "Hermann-compatible profile",
-            content,
-            object_name="free_harmonic_profile_card",
-        )
-        top_grid.addWidget(profile_card, 0, 1)
-        profile = QLabel(
-            "Fixed, read-only method\n\n"
-            "10,000 whole-participant permutations\n"
-            "Cluster-corrected across electrodes x harmonics\n"
-            "Automatic harmonic selection uses z > 3.29\n"
-            "Raw cluster p <= .025 in each direction\n"
-            "Participant/arm L2 normalization\n"
-            "Deterministic, recorded random seed",
-            profile_card.content,
-        )
-        profile.setObjectName("free_harmonic_profile_summary")
-        profile.setWordWrap(True)
-        profile_card.content_layout.addWidget(profile)
-        profile_note = QLabel(
-            "Use About this analysis in the page header for full settings and "
-            "limitations. Every completed result bundle records the complete "
-            "method profile.",
-            profile_card.content,
-        )
-        profile_note.setWordWrap(True)
-        profile_note.setProperty("caption", True)
-        profile_card.content_layout.addWidget(profile_note)
-        profile_card.content_layout.addStretch(1)
 
     def _build_review_tab(self) -> None:
         layout = QGridLayout(self.review_tab)
@@ -415,12 +361,10 @@ class FreeHarmonicClusteringPage(QWidget):
         inputs_card.content_layout.addLayout(inputs_form)
         self.review_harmonics_label = QLabel("Not prepared", inputs_card.content)
         self.review_selection_audit_label = QLabel("Not prepared", inputs_card.content)
-        self.review_frequency_domain_label = QLabel("Not prepared", inputs_card.content)
         self.review_source_coverage_label = QLabel("Not prepared", inputs_card.content)
         self.review_shape_label = QLabel("Not prepared", inputs_card.content)
         inputs_form.addRow("Harmonics:", self.review_harmonics_label)
         inputs_form.addRow("Selection audit:", self.review_selection_audit_label)
-        inputs_form.addRow("Frequency domain:", self.review_frequency_domain_label)
         inputs_form.addRow("Source coverage:", self.review_source_coverage_label)
         inputs_form.addRow("Data shape:", self.review_shape_label)
 
@@ -432,7 +376,6 @@ class FreeHarmonicClusteringPage(QWidget):
             self.review_exclusions_label,
             self.review_harmonics_label,
             self.review_selection_audit_label,
-            self.review_frequency_domain_label,
             self.review_source_coverage_label,
             self.review_shape_label,
         ):
@@ -635,9 +578,13 @@ class FreeHarmonicClusteringPage(QWidget):
         self.harmonic_mode_combo.currentIndexChanged.connect(
             self._on_harmonic_mode_changed
         )
+        self.paired_condition_a_combo.currentIndexChanged.connect(
+            self._on_paired_condition_a_changed
+        )
+        self.paired_condition_b_combo.currentIndexChanged.connect(
+            self._on_paired_condition_b_changed
+        )
         for combo in (
-            self.paired_condition_a_combo,
-            self.paired_condition_b_combo,
             self.paired_group_filter_combo,
             self.independent_condition_combo,
             self.independent_group_a_combo,
@@ -645,7 +592,6 @@ class FreeHarmonicClusteringPage(QWidget):
             self.fixed_highest_combo,
         ):
             combo.currentIndexChanged.connect(self._on_setup_changed)
-        self.swap_button.clicked.connect(self._swap_a_b)
         self.prepare_button.clicked.connect(self._prepare_analysis)
         self.run_button.clicked.connect(self._run_permutations)
         self.cancel_button.clicked.connect(self.cancel_active_work)
@@ -761,14 +707,15 @@ class FreeHarmonicClusteringPage(QWidget):
         elif value.diagnostics:
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
-                "Project inputs loaded with dataset diagnostics. Review exclusions "
-                "in the preparation summary before running."
+                "Project inputs loaded with dataset diagnostics. Select Prepare "
+                "Analysis, then review Excluded/incomplete in 2. Review and Run "
+                "before starting permutations."
             )
         else:
             self.workflow_status.set_variant("info")
             self.workflow_status.set_text(
-                "Project inputs loaded. Exact selected-cohort grid compatibility "
-                "will be validated during Prepare Analysis."
+                "Project inputs loaded. Select Prepare Analysis to verify the "
+                "cohort and open 2. Review and Run."
             )
         self._update_buttons()
 
@@ -806,23 +753,6 @@ class FreeHarmonicClusteringPage(QWidget):
                 self.fixed_highest_combo.setCurrentIndex(
                     self.fixed_highest_combo.count() - 1
                 )
-            excluded = ", ".join(
-                f"H{order} ({_frequency_text(frequency)})"
-                for order, frequency in zip(
-                    options.excluded_base_orders,
-                    options.excluded_base_harmonics_hz,
-                    strict=True,
-                )
-            )
-            upper = (
-                "unknown"
-                if options.fft_upper_hz is None
-                else _frequency_text(options.fft_upper_hz)
-            )
-            note = f"FullFFT upper frequency: {upper}."
-            if excluded:
-                note += f" Base-rate overlaps excluded: {excluded}."
-            self.discovery_note.setText(note)
         finally:
             self._updating_controls = False
         self._on_design_changed()
@@ -893,6 +823,49 @@ class FreeHarmonicClusteringPage(QWidget):
         self._update_direction_label()
         self._update_buttons()
 
+    @Slot()
+    def _on_paired_condition_a_changed(self) -> None:
+        self._keep_paired_conditions_distinct(
+            self.paired_condition_a_combo,
+            self.paired_condition_b_combo,
+        )
+        self._on_setup_changed()
+
+    @Slot()
+    def _on_paired_condition_b_changed(self) -> None:
+        self._keep_paired_conditions_distinct(
+            self.paired_condition_b_combo,
+            self.paired_condition_a_combo,
+        )
+        self._on_setup_changed()
+
+    def _keep_paired_conditions_distinct(
+        self,
+        changed_combo: QComboBox,
+        other_combo: QComboBox,
+    ) -> None:
+        if self._updating_controls:
+            return
+        selected = changed_combo.currentData()
+        other_selected = other_combo.currentData()
+        if (
+            selected is None
+            or other_selected is None
+            or str(selected).casefold() != str(other_selected).casefold()
+        ):
+            return
+        selected_key = str(selected).casefold()
+        for index in range(other_combo.count()):
+            candidate = other_combo.itemData(index)
+            if candidate is None or str(candidate).casefold() == selected_key:
+                continue
+            signals_were_blocked = other_combo.blockSignals(True)
+            try:
+                other_combo.setCurrentIndex(index)
+            finally:
+                other_combo.blockSignals(signals_were_blocked)
+            return
+
     def _update_direction_label(self) -> None:
         design = self._selected_design()
         if design is GuiAnalysisDesign.PAIRED_CONDITIONS:
@@ -904,20 +877,6 @@ class FreeHarmonicClusteringPage(QWidget):
         self.direction_label.setText(
             f"Contrast: {arm_a} - {arm_b}; positive clusters indicate {arm_a} > {arm_b}."
         )
-
-    @Slot()
-    def _swap_a_b(self) -> None:
-        if self._selected_design() is GuiAnalysisDesign.PAIRED_CONDITIONS:
-            left = self.paired_condition_a_combo.currentIndex()
-            right = self.paired_condition_b_combo.currentIndex()
-            self.paired_condition_a_combo.setCurrentIndex(right)
-            self.paired_condition_b_combo.setCurrentIndex(left)
-        else:
-            left = self.independent_group_a_combo.currentIndex()
-            right = self.independent_group_b_combo.currentIndex()
-            self.independent_group_a_combo.setCurrentIndex(right)
-            self.independent_group_b_combo.setCurrentIndex(left)
-        self._on_setup_changed()
 
     def _current_setup(self) -> AnalysisSetup:
         if self._options is None or self._frequency_snapshot is None:
@@ -1275,33 +1234,6 @@ class FreeHarmonicClusteringPage(QWidget):
         self.review_selection_audit_label.setToolTip(
             full_selection_audit if full_selection_audit != selection_audit else ""
         )
-        frequency_plan = getattr(prepared, "frequency_plan", None)
-        excluded_orders = tuple(
-            int(value)
-            for value in getattr(frequency_plan, "excluded_base_orders", ())
-        )
-        excluded_hz = tuple(
-            float(value)
-            for value in getattr(
-                frequency_plan,
-                "excluded_base_harmonics_hz",
-                (),
-            )
-        )
-        excluded_text = ", ".join(
-            f"H{order} ({_frequency_text(frequency)})"
-            for order, frequency in zip(
-                excluded_orders,
-                excluded_hz,
-                strict=True,
-            )
-        )
-        resolution = getattr(frequency_plan, "frequency_resolution_hz", None)
-        self.review_frequency_domain_label.setText(
-            f"Base-rate overlaps excluded: {excluded_text or 'none'}; "
-            f"FullFFT resolution: "
-            f"{'unknown' if resolution is None else _frequency_text(float(resolution))}."
-        )
         workbook_count = int(getattr(provenance, "workbook_count", 0)) if provenance else 0
         source_sheet = str(getattr(provenance, "source_sheet", "FullFFT Amplitude (uV)"))
         selected_columns = int(
@@ -1538,7 +1470,6 @@ class FreeHarmonicClusteringPage(QWidget):
             self.review_exclusions_label,
             self.review_harmonics_label,
             self.review_selection_audit_label,
-            self.review_frequency_domain_label,
             self.review_source_coverage_label,
             self.review_shape_label,
         ):
@@ -1595,7 +1526,6 @@ class FreeHarmonicClusteringPage(QWidget):
         self.design_combo.setEnabled(not busy and self._options is not None)
         self.harmonic_mode_combo.setEnabled(not busy and self._options is not None)
         self.design_stack.setEnabled(not busy and self._options is not None)
-        self.swap_button.setEnabled(not busy and self._options is not None)
         fixed = self._selected_harmonic_mode() is GuiHarmonicMode.FIXED_HIGHEST
         self.fixed_highest_combo.setEnabled(
             not busy and fixed and self._options is not None and self.fixed_highest_combo.count() > 0

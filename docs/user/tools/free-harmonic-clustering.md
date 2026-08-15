@@ -58,8 +58,8 @@ Choose one ordered two-level contrast:
   preserved.
 
 The direction is always displayed as A minus B. Positive clusters indicate
-A > B and negative clusters indicate A < B. **Swap A/B** reverses that
-direction without changing the scientific method.
+A > B and negative clusters indicate A < B. Set A and B directly in Setup;
+select them in the opposite order to reverse the contrast.
 
 Version 1 does not run an omnibus test, group x condition interaction, or
 automatic batch across conditions. A collection of separately run condition
@@ -91,8 +91,8 @@ and Run**. That review shows:
 - the design and A minus B direction;
 - included participants, group sizes, exclusions, incomplete pairs, and final
   sample size;
-- detected and retained harmonics, base-rate-overlap exclusions, and automatic
-  z-score audit or fixed-domain provenance;
+- detected and retained harmonics plus the automatic z-score audit or
+  fixed-domain provenance;
 - the prepared data shape: participants x electrodes x harmonics; and
 - sensor and source-workbook validation.
 

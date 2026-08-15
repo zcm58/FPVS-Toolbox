@@ -27,8 +27,8 @@ existing one-contrast statistical contract.
   `3 - Statistical Analysis Results/Free Harmonic Clustering Analysis/`,
   including a polished human-readable Excel workbook and machine-readable
   provenance artifacts.
-- Expose the page only when Beta Tools are enabled. Show a non-blocking beta
-  banner and tabbed method/interpretation/reference information.
+- Expose the page only when Beta Tools are enabled and provide tabbed
+  method/interpretation/reference information from the page header.
 
 ## Implementation Steps
 
@@ -79,6 +79,28 @@ Verification:
   1,576 tests passed; 3 tests were skipped. Three unrelated preprocessing
   memmap tests initially hit sandbox-denied Windows temp paths, then passed 3/3
   when rerun outside the sandbox.
+- Qt/pytest-qt execution remains assigned to CI or an approved visible session.
+
+## Setup Simplification Follow-Up (2026-08-15)
+
+- [x] Remove the redundant inline beta banner, Hermann profile card, contrast
+      swap button, and visible FullFFT/base-overlap detail rows.
+- [x] Consolidate the fixed statistical profile in the page-header info
+      dialog's **Method** tab and point contrast-order guidance at the A/B
+      selectors.
+- [x] Let the Setup card and dynamically populated selectors use the available
+      width, and keep paired Condition A/B choices distinct automatically.
+- [x] Make the dataset-diagnostics banner identify the exact review tab and
+      row where exclusions appear.
+- [x] Run focused and precommit non-Qt verification and record the results.
+
+Verification:
+
+- `verify.py --scope free-harmonic-clustering --tier focused`: passed, including
+  81 backend and method-information tests.
+- `verify.py --scope gui --tier focused`: passed static/import checks.
+- `verify.py --scope repo --tier precommit`: audits, lint, compilation, and
+  1,580 tests passed; 3 tests were skipped.
 - Qt/pytest-qt execution remains assigned to CI or an approved visible session.
 
 ## Prepare Enablement Follow-Up (2026-08-15)
