@@ -2,15 +2,17 @@
 
 ## Status
 
-Implementation and automated verification are complete on feature branch
-`codex/harmonic-selection-strategies-plan` as of 2026-08-14. The working tree
-contains the four profile engines, balanced pooling, explicit new-project/
+The core implementation and its automated verification were complete on feature
+branch `codex/harmonic-selection-strategies-plan` as of 2026-08-14. The working
+tree contains the four profile engines, balanced pooling, explicit new-project/
 legacy migration, neutral FullFFT provenance, Free Harmonic Clustering
-decoupling, per-artifact freshness, post-selection rebuild, and the Advanced
-Settings integration on a dedicated Harmonics tab. Architecture and user-method
-documentation now reflects those boundaries. The plan remains active for the
-visible supported-platform GUI smoke and a separately powered FHC
-automatic-domain null-calibration study; the latter is validation of a
+decoupling, per-artifact freshness, post-selection rebuild, and the Settings
+integration on a dedicated Harmonics tab. Save-triggered rebuilds now use the
+shared post-processing activity screen while the guarded Settings page stays
+alive in the background; explicit recalculation can remain Settings-local.
+Architecture and user-method documentation reflect those boundaries. The plan
+remains active for the visible supported-platform GUI smoke and a separately
+powered FHC automatic-domain null-calibration study; the latter is validation of a
 conditional inferential claim, not unfinished standard Summed-BCA
 implementation.
 
@@ -388,6 +390,11 @@ claim unconditional error control for that adaptive workflow.
   pre-start FFT-grid/exclusion review, a close guard once the worker starts,
   and actionable failure states. In-flight harmonic selection/publication is
   not cooperatively cancellable in this version.
+- Route a Save-triggered confirmed rebuild through the shared post-processing
+  activity presentation while retaining the guarded embedded Settings page in
+  the background. Return Home after success and restore Settings after review
+  cancellation or a pre-persistence failure; the explicit Recalculate action
+  may remain Settings-local.
 - Route long selection and export work through workers and signals.
 
 #### Definition of Done
@@ -396,7 +403,10 @@ claim unconditional error control for that adaptive workflow.
 - [x] The UI distinguishes detections from harmonics actually included in BCA.
 - [x] Cancelling the pre-start FFT-grid/exclusion review leaves project/app
       settings and current artifacts unchanged; once the worker starts,
-      Settings stays open until it finishes.
+      Settings remains alive and guarded in the background until it finishes.
+- [x] A Save-triggered rebuild shows the normal spinner, progress bar, and
+      structured post-processing phases; success returns Home, while review
+      cancellation or pre-persistence failure restores Settings.
 - [x] Changed settings visibly require/recommend post-processing rebuild.
 - [x] Project switching cannot retain another project's method or worker state.
 
@@ -478,10 +488,15 @@ Run in a normal visible supported Windows 11 or CachyOS session:
    contrast and confirm its own selected domain and tensors do not change.
 8. Corrupt or stale FullFFT provenance and confirm clustering blocks with a
    rebuild instruction while stale Summed BCA alone does not block it.
-9. Confirm pre-start review cancellation restores the saved settings, Settings
-   cannot close after the worker starts, project switching remains guarded,
-   and repeated rebuilds plus a simulated export failure retain the last
-   reproducible artifact.
+9. Confirm a Save-triggered rebuild switches from Settings to the normal
+   post-processing activity screen, shows the spinner and structured phase
+   progress, and returns Home after success. Confirm pre-start review
+   cancellation or pre-persistence failure restores both the saved settings and
+   the Settings page, Settings cannot close while alive in the background,
+   project switching remains guarded, and repeated rebuilds plus a simulated
+   export failure retain the last reproducible artifact. Trigger explicit
+   Recalculate Harmonics separately and confirm that its status can remain on
+   the Harmonics tab.
 
 ## Residual Risks
 
@@ -567,3 +582,10 @@ Run in a normal visible supported Windows 11 or CachyOS session:
   regression cannot silently return. The GUI and Stats focused gates plus the
   repository precommit gate passed (1,579 tests, 3 skipped); Qt execution and
   the visible smoke remain assigned to CI/a supported visible session.
+- 2026-08-15: Routed Save-triggered harmonic rebuilds through the shared
+  post-processing activity screen. The guarded embedded Settings page stays
+  alive in the background, the FullFFT-grid audit uses indeterminate progress,
+  and harmonic/publication workers forward structured phases to the normal
+  progress bar and status labels. Success returns Home; review cancellation or
+  a pre-persistence failure restores Settings. Explicit Recalculate Harmonics
+  remains available as a Settings-local workflow.

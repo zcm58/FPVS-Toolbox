@@ -140,17 +140,28 @@ same-sample adaptive profiles as exploratory.
 Applying a project method change requires confirmation and starts background
 recalculation plus selection-dependent post-processing. The UI must report that
 this uses existing FullFFT/BCA workbooks and does not rerun EEG preprocessing.
-It remains disabled/busy until the worker's result and thread-finished signals
-arrive, then reports the saved method/fingerprint and derivative rebuild or an
-actionable failure. Before the worker starts, the dialog snapshots project
-preprocessing, app analysis/ROI settings, and its project cache. A validation
-or save failure, failed/incompatible grid review, or user cancellation of the
-exclusion-review dialog restores that snapshot; derivative freshness is not
-changed merely because the worker starts. A pre-persistence selection failure
-also restores the snapshot. Once a replacement selection is persisted,
+For a Save-triggered immediate rebuild, the embedded Settings page remains
+alive and guarded in the background while `workspace_stack` shows the shared
+`processing_page`. The grid audit begins with indeterminate progress; harmonic
+selection and selection-dependent publication then use the normal spinner,
+progress bar, phase title, step count, and status message. The processing action
+is disabled and labelled as in progress because this worker has no cooperative
+cancel action. A successful run closes the Settings workflow and returns Home.
+The explicit **Recalculate Harmonics** action may remain Settings-local and use
+its inline status banner instead of changing workspace pages.
+
+Before either workflow starts, Settings snapshots project preprocessing, app
+analysis/ROI settings, and its project cache. A validation or save failure,
+failed/incompatible grid review, user cancellation of the exclusion-review
+dialog, or pre-persistence selection failure restores that snapshot. A
+Save-triggered activity page then returns to the still-live Settings page so
+the user can review or correct the inputs. Derivative freshness is not changed
+merely because the worker starts. Once a replacement selection is persisted,
 Settings cannot be closed or rejected and shell navigation remains locked until
-publication finishes; the running worker has no cooperative cancel action.
-Project switching must not retain another project's method or worker state.
+publication finishes; a publication failure returns to Settings with the new
+method committed and its dependent outputs marked stale or failed. Project
+switching must not retain another project's method, activity-page state, or
+worker state.
 
 The sidebar's default tool list is Standard FPVS Screening, Sensitivity Analysis,
 SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence Figure, in that order.

@@ -50,6 +50,8 @@ class _FakeSettingsWorker:
     def __init__(self):
         self.finished = _FakeSignal()
         self.failed = _FakeSignal()
+        self.progress = _FakeSignal()
+        self.phase_progress = _FakeSignal()
         self.deleted = False
 
     def moveToThread(self, _thread):
@@ -728,6 +730,117 @@ def test_harmonic_worker_failure_before_selection_restores_staged_settings(
     assert win._settings_worker_navigation_locked is False
 
 
+def test_embedded_settings_harmonic_save_uses_post_processing_activity_page(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    win.show()
+    win.open_settings_window()
+    page = win._settings_page
+    assert page is not None
+    monkeypatch.setattr(page, "_project_has_processed_outputs", lambda: True)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *_args, **_kwargs: None,
+    )
+
+    grid_thread = _FakeSettingsThread()
+    harmonic_thread = _FakeSettingsThread()
+    threads = iter((grid_thread, harmonic_thread))
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: next(threads))
+    grid_worker = _FakeSettingsWorker()
+    harmonic_worker = _FakeSettingsWorker()
+    import Main_App.workers.full_fft_grid_qc_worker as grid_worker_module
+    import Main_App.workers.harmonic_selection_worker as harmonic_worker_module
+
+    monkeypatch.setattr(
+        grid_worker_module,
+        "FullFftGridQcWorker",
+        lambda _project_root: grid_worker,
+    )
+    monkeypatch.setattr(
+        harmonic_worker_module,
+        "ProcessingHarmonicSelectionWorker",
+        lambda _project: harmonic_worker,
+    )
+
+    profile_index = page.harmonic_summation_method_combo.findData(
+        "significant_only_exploratory"
+    )
+    page.harmonic_summation_method_combo.setCurrentIndex(profile_index)
+    page.debug_check.setChecked(True)
+    page._save()
+
+    assert win.workspace_stack.currentWidget() is win.processing_page
+    assert not win.processing_spinner.isHidden()
+    assert win.processing_files_card.isHidden()
+    assert not win.processing_status_card.isHidden()
+    assert win.processing_progress_heading_label.text() == "Post-Processing Progress"
+    assert (win.progress_bar.minimum(), win.progress_bar.maximum()) == (0, 0)
+    assert win.btn_start.text() == "Post-processing in progress"
+    assert win.btn_start.isEnabled() is False
+    assert win.busy is True
+    assert win.sidebar.isEnabled() is True
+    assert win.sidebar.property("processingLocked") is True
+
+    audit = SimpleNamespace(
+        review_candidates=(),
+        has_unresolved_grid_conflict=False,
+        is_compatible_with_exclusions=lambda _exclusions: True,
+    )
+    grid_worker.finished.emit(audit)
+    harmonic_worker.phase_progress.emit(
+        "stats_ready_export",
+        3,
+        5,
+        "FPVS Toolbox is rebuilding analysis files.",
+    )
+
+    assert win.processing_title_label.text() == "Preparing Analysis Outputs"
+    assert win.processing_message_label.text() == (
+        "FPVS Toolbox is rebuilding analysis files."
+    )
+    assert win.processing_step_label.text() == "Post-processing phase 3 of 5"
+    qtbot.waitUntil(lambda: win.progress_bar.value() == 60, timeout=1_000)
+
+    harmonic_worker.finished.emit(
+        {
+            "ok": True,
+            "workbook_path": "Quality Check/Harmonic_Selection_Summary.xlsx",
+        }
+    )
+    harmonic_thread.finished.emit()
+
+    # The harmonic worker can finish before the preceding grid thread releases.
+    # Keep the shared activity and navigation lock until both workers are gone.
+    assert win.workspace_stack.currentWidget() is win.processing_page
+    assert win.sidebar.property("processingLocked") is True
+
+    grid_thread.finished.emit()
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    assert win.processing_spinner.isHidden()
+    assert win.sidebar.property("processingLocked") is False
+    assert win.menuBar().isEnabled() is True
+    assert win.btn_start.text() == "Start Processing"
+    assert win.busy is False
+    assert not win.lbl_debug.isHidden()
+
+
 def test_harmonic_thread_start_failure_releases_settings_worker_state(
     tmp_path,
     qtbot,
@@ -816,6 +929,124 @@ def test_fft_grid_thread_start_failure_releases_settings_worker_state(
     assert fake_worker.deleted is True
     assert fake_thread.deleted is True
     assert warnings and warnings[-1][0] == "FFT Grid Check Unavailable"
+
+
+def test_fft_grid_activity_presentation_failure_keeps_running_worker_owned(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    fake_thread = _FakeSettingsThread()
+    fake_worker = _FakeSettingsWorker()
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: fake_thread)
+    import Main_App.workers.full_fft_grid_qc_worker as grid_worker_module
+
+    monkeypatch.setattr(
+        grid_worker_module,
+        "FullFftGridQcWorker",
+        lambda _project_root: fake_worker,
+    )
+    monkeypatch.setattr(
+        dlg,
+        "_begin_settings_post_processing_activity",
+        lambda: (_ for _ in ()).throw(RuntimeError("activity failed")),
+    )
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_args, **_kwargs: None)
+
+    assert dlg._start_full_fft_grid_review(
+        recalculate_after=True,
+        accept_on_success=True,
+    )
+    assert fake_thread.isRunning() is True
+    assert win._settings_full_fft_grid_qc_thread is fake_thread
+    assert win._settings_full_fft_grid_qc_worker is fake_worker
+    assert win._settings_worker_navigation_locked is True
+
+    fake_worker.failed.emit("grid failed")
+    fake_thread.finished.emit()
+
+    assert win._settings_full_fft_grid_qc_thread is None
+    assert win._settings_full_fft_grid_qc_worker is None
+    assert win._settings_worker_navigation_locked is False
+
+
+def test_changed_fft_exclusions_resume_when_grid_thread_finishes_inside_review(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    fake_thread = _FakeSettingsThread()
+    fake_worker = _FakeSettingsWorker()
+    monkeypatch.setattr(settings_panel, "QThread", lambda _owner: fake_thread)
+    import Main_App.workers.full_fft_grid_qc_worker as grid_worker_module
+
+    monkeypatch.setattr(
+        grid_worker_module,
+        "FullFftGridQcWorker",
+        lambda _project_root: fake_worker,
+    )
+    saved_exclusions = []
+    monkeypatch.setattr(
+        dlg,
+        "_save_participant_condition_exclusions",
+        lambda exclusions, **_kwargs: saved_exclusions.append(exclusions) or True,
+    )
+    resumed = []
+    monkeypatch.setattr(
+        dlg,
+        "_resume_frequency_domain_post_processing",
+        lambda: resumed.append(True),
+    )
+
+    class _NestedReviewDialog:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec(self):
+            fake_thread.finished.emit()
+            return QDialog.Accepted
+
+        @staticmethod
+        def excluded_participant_conditions():
+            return {"P01": ["Condition A"]}
+
+    monkeypatch.setattr(
+        settings_panel,
+        "ParticipantConditionExclusionsDialog",
+        _NestedReviewDialog,
+    )
+
+    assert dlg._start_full_fft_grid_review(recalculate_after=True)
+    audit = SimpleNamespace(
+        review_candidates=(object(),),
+        has_unresolved_grid_conflict=False,
+        is_compatible_with_exclusions=lambda _exclusions: True,
+    )
+    fake_worker.finished.emit(audit)
+
+    assert saved_exclusions == [{"P01": ["Condition A"]}]
+    assert resumed == [True]
+    assert win._settings_full_fft_grid_qc_thread is None
 
 
 def test_embedded_settings_reject_is_blocked_while_harmonic_worker_runs(

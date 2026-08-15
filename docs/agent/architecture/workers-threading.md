@@ -65,11 +65,14 @@ Common long-running work:
   the shared processing start guard until the worker emits completion or
   failure; the worker never touches widgets.
 - Settings harmonic recalculation runs its FullFFT-grid audit and harmonic
-  selection in separate background `QThread` workers. Result, failure, and
-  thread-finished signals must pass through the main-thread
-  `_SettingsWorkerUiBridge` before updating Settings widgets, opening review or
-  result dialogs, or releasing GUI controls. After selection is accepted, the
-  harmonic worker calls the post-processing resume entry point with the exact
+  selection in separate background `QThread` workers. Result, failure, text
+  progress, structured phase progress, and thread-finished signals must pass
+  through the main-thread `_SettingsWorkerUiBridge` before updating GUI state,
+  opening review or result dialogs, or releasing controls. The harmonic worker
+  emits selection milestones and forwards the nested post-processing worker's
+  `(phase_id, completed_units, total_units, user_message)` events; numeric
+  progress must not be inferred from its free-form status messages. After
+  selection is accepted, the worker resumes publication with the exact
   selection metadata. This resume begins after harmonic selection, rebuilds
   the Stats-ready and full-audit workbooks plus both Hauk source-PSD map
   directories, and never loads BDFs, preprocesses EEG, or regenerates FFT
@@ -78,6 +81,17 @@ Common long-running work:
   still exists with a current matching record, it may finish as a no-op. A
   standard selection-only rebuild leaves neutral FullFFT provenance unchanged
   because its source/cohort inputs did not change.
+- A confirmed Save-triggered harmonic rebuild shows the shared post-processing
+  activity page while the embedded Settings page remains alive and guarded in
+  the background. The FullFFT-grid audit uses indeterminate progress, then the
+  harmonic and publication phase signals drive the normal progress bar and
+  status presentation. The non-cancellable processing action remains disabled.
+  Success returns Home; cancellation, grid/validation failure, or a selection
+  failure before persistence restores the snapshot and returns to Settings. A
+  later publication failure also returns to Settings but keeps the newly saved
+  method and correctly stale/failed derivative records. The explicit
+  **Recalculate Harmonics** action may remain on Settings with its inline status
+  presentation.
 - Settings snapshots project preprocessing, app analysis/ROI configuration,
   and its project cache before it persists inputs for recalculation. A failed
   save, failed grid audit, incompatible grid, or cancelled exclusion-review
@@ -88,8 +102,9 @@ Common long-running work:
   persisted, the new method is committed and a later export failure restores
   the preceding file/directory but leaves it stale or failed for the required
   fingerprint. Settings close/reject and application navigation remain locked
-  throughout the grid-review-to-harmonic-worker handoff, and the current
-  implementation does not cooperatively cancel an in-flight
+  throughout the grid-review-to-harmonic-worker handoff even when the shared
+  activity page is visible and Settings is only alive in the background. The
+  current implementation does not cooperatively cancel an in-flight
   selection-plus-publication run.
 - An accepted participant-condition exclusion changes the FullFFT cohort, not
   only the selected harmonic list. After the grid worker releases its thread,

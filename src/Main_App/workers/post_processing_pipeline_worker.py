@@ -1013,6 +1013,7 @@ def run_postprocessing_from_selection(
     *,
     previous_selection_fingerprint: str | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    phase_progress_callback: Callable[[str, int, int, str], None] | None = None,
 ) -> dict[str, object]:
     """Synchronously rebuild selection derivatives in the caller's worker thread.
 
@@ -1031,6 +1032,8 @@ def run_postprocessing_from_selection(
     worker.finished.connect(results.append)
     if progress_callback is not None:
         worker.progress.connect(progress_callback)
+    if phase_progress_callback is not None:
+        worker.phase_progress.connect(phase_progress_callback)
     worker.run()
     if not results:
         raise RuntimeError(

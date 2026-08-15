@@ -611,7 +611,7 @@ def _begin_preflight_page(
     _set_label(host, "processing_title_label", _DATA_QUALITY_CHECK_TITLE)
     _set_data_quality_sections(
         host,
-        summary_heading="What to do now",
+        summary_heading="What's Happening Now",
         live_heading="Live status",
         checklist=checklist,
     )

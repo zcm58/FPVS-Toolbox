@@ -50,6 +50,7 @@ def test_settings_worker_forces_transactional_harmonic_recalculation(
     qtbot,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
 ) -> None:
     calls: list[dict[str, object]] = []
     report = SimpleNamespace(
@@ -68,8 +69,34 @@ def test_settings_worker_forces_transactional_harmonic_recalculation(
         "run_processing_harmonic_selection_qc",
         _run,
     )
-    project = SimpleNamespace(project_root=Path("Example Project"))
+    from Main_App.workers import post_processing_pipeline_worker
+
+    def _run_downstream(_project, _selection_metadata, **kwargs):
+        kwargs["progress_callback"]("Rebuilding Stats-ready outputs.")
+        kwargs["phase_progress_callback"](
+            "stats_ready_export",
+            3,
+            5,
+            "Preparing analysis files.",
+        )
+        return {"ok": True, "steps": []}
+
+    monkeypatch.setattr(
+        post_processing_pipeline_worker,
+        "run_postprocessing_from_selection",
+        _run_downstream,
+    )
+    (tmp_path / "project.json").write_text("{}", encoding="utf-8")
+    project = SimpleNamespace(project_root=tmp_path)
     worker = harmonic_selection_worker.ProcessingHarmonicSelectionWorker(project)
+    progress_messages: list[str] = []
+    phase_updates: list[tuple[str, int, int, str]] = []
+    worker.progress.connect(progress_messages.append)
+    worker.phase_progress.connect(
+        lambda phase_id, completed, total, message: phase_updates.append(
+            (phase_id, completed, total, message)
+        )
+    )
 
     with caplog.at_level(logging.INFO, logger=harmonic_selection_worker.__name__):
         with qtbot.waitSignal(worker.finished) as blocker:
@@ -80,6 +107,17 @@ def test_settings_worker_forces_transactional_harmonic_recalculation(
     assert callable(calls[0]["log_func"])
     assert calls[0]["force_recalculate"] is True
     assert blocker.args[0]["ok"] is True
+    assert "Reading FullFFT workbooks 1/2." in progress_messages
+    assert "Rebuilding Stats-ready outputs." in progress_messages
+    observed_phases = [
+        (phase_id, completed, total)
+        for phase_id, completed, total, _message in phase_updates
+    ]
+    assert observed_phases == [
+        ("harmonic_selection", 1, 5),
+        ("harmonic_selection", 2, 5),
+        ("stats_ready_export", 3, 5),
+    ]
     assert "harmonic_recalculation_started" in caplog.text
     assert "harmonic_recalculation_progress" in caplog.text
     assert "Reading FullFFT workbooks 1/2." in caplog.text

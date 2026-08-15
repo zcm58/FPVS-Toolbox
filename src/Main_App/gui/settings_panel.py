@@ -111,12 +111,16 @@ class _SettingsWorkerUiBridge(QObject):
         *,
         result_callback: Callable[[object], None],
         failed_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+        phase_progress_callback: Callable[[str, int, int, str], None] | None = None,
         thread_finished_callback: Callable[[], None] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._result_callback = result_callback
         self._failed_callback = failed_callback
+        self._progress_callback = progress_callback
+        self._phase_progress_callback = phase_progress_callback
         self._thread_finished_callback = thread_finished_callback
 
     @Slot(object)
@@ -127,6 +131,27 @@ class _SettingsWorkerUiBridge(QObject):
     def handle_failed(self, message: str) -> None:
         if self._failed_callback is not None:
             self._failed_callback(message)
+
+    @Slot(str)
+    def handle_progress(self, message: str) -> None:
+        if self._progress_callback is not None:
+            self._progress_callback(message)
+
+    @Slot(str, int, int, str)
+    def handle_phase_progress(
+        self,
+        phase_id: str,
+        completed_units: int,
+        total_units: int,
+        message: str,
+    ) -> None:
+        if self._phase_progress_callback is not None:
+            self._phase_progress_callback(
+                phase_id,
+                completed_units,
+                total_units,
+                message,
+            )
 
     @Slot()
     def handle_thread_finished(self) -> None:
@@ -1597,7 +1622,10 @@ class SettingsDialog(QDialog):
             return
         from Main_App.gui.processing_workflows import resume_post_processing
 
-        self.accept()
+        if self._settings_post_processing_activity_is_active():
+            self._handoff_settings_activity_to_frequency_post_processing()
+        else:
+            self.accept()
         resume_post_processing(host)
 
     def _on_recalculate_harmonics_clicked(self) -> None:
@@ -1748,6 +1776,170 @@ class SettingsDialog(QDialog):
         shell_status._set_processing_navigation_locked(owner, True)
         owner._settings_worker_navigation_locked = True
 
+    def _settings_post_processing_activity_is_active(self) -> bool:
+        owner = getattr(self, "host", None)
+        if owner is None or owner is self:
+            return False
+        return bool(
+            getattr(owner, "_settings_post_processing_activity_active", False)
+        )
+
+    def _begin_settings_post_processing_activity(self) -> bool:
+        """Show the shared processing page for a Save-triggered rebuild."""
+
+        owner = getattr(self, "host", None)
+        if owner is None or owner is self:
+            return False
+        if self._settings_post_processing_activity_is_active():
+            return True
+        workspace = getattr(owner, "workspace_stack", None)
+        processing_page = getattr(owner, "processing_page", None)
+        if workspace is None or processing_page is None:
+            return False
+        try:
+            if workspace.currentWidget() is not self:
+                return False
+        except RuntimeError:
+            return False
+
+        from Main_App.gui import shell_status
+
+        start_button = getattr(owner, "btn_start", None)
+        if start_button is not None:
+            owner._settings_post_processing_start_button_state = (
+                start_button.text(),
+                start_button.isEnabled(),
+            )
+        shell_status.prepare_post_processing_activity(owner)
+        owner._settings_post_processing_busy_state = bool(
+            getattr(owner, "busy", False)
+        )
+        owner.busy = True
+        owner._settings_post_processing_activity_active = True
+        shell_status.show_processing_page(owner)
+        if start_button is not None:
+            start_button.setText("Post-processing in progress")
+            start_button.setEnabled(False)
+
+        self._set_settings_post_processing_stage(
+            title="Checking Processed FFT Grids",
+            message=(
+                "FPVS Toolbox is checking existing FullFFT workbooks before "
+                "recalculating harmonics."
+            ),
+            step="Preparing harmonic recalculation",
+            indeterminate=True,
+        )
+        return True
+
+    def _set_settings_post_processing_stage(
+        self,
+        *,
+        title: str,
+        message: str,
+        step: str,
+        indeterminate: bool = False,
+    ) -> None:
+        owner = getattr(self, "host", None)
+        if owner is None or not self._settings_post_processing_activity_is_active():
+            return
+        title_label = getattr(owner, "processing_title_label", None)
+        if title_label is not None:
+            title_label.setText(title)
+        message_label = getattr(owner, "processing_message_label", None)
+        if message_label is not None:
+            message_label.setText(message)
+        step_label = getattr(owner, "processing_step_label", None)
+        if step_label is not None:
+            step_label.setText(step)
+            step_label.setVisible(True)
+        if not indeterminate:
+            return
+        progress_animation = getattr(owner, "_progress_anim", None)
+        if progress_animation is not None:
+            progress_animation.stop()
+        progress_bar = getattr(owner, "progress_bar", None)
+        if progress_bar is not None:
+            progress_bar.setRange(0, 0)
+            progress_bar.setVisible(True)
+
+    def _finish_settings_post_processing_activity(
+        self,
+        *,
+        return_home: bool,
+    ) -> None:
+        owner = getattr(self, "host", None)
+        if owner is None or not self._settings_post_processing_activity_is_active():
+            return
+        from Main_App.gui import shell_status
+
+        if return_home:
+            owner._processing_return_widget = getattr(owner, "homeWidget", None)
+        shell_status.hide_processing_page(owner)
+        owner._settings_post_processing_activity_active = False
+        start_button = getattr(owner, "btn_start", None)
+        start_state = getattr(
+            owner,
+            "_settings_post_processing_start_button_state",
+            None,
+        )
+        if start_button is not None and isinstance(start_state, tuple):
+            start_button.setText(str(start_state[0]))
+            start_button.setEnabled(bool(start_state[1]))
+        if hasattr(owner, "_settings_post_processing_start_button_state"):
+            del owner._settings_post_processing_start_button_state
+        owner.busy = bool(
+            getattr(owner, "_settings_post_processing_busy_state", False)
+        )
+        if hasattr(owner, "_settings_post_processing_busy_state"):
+            del owner._settings_post_processing_busy_state
+        if return_home:
+            self.accept()
+
+    def _finish_settings_post_processing_activity_when_idle(
+        self,
+        *,
+        return_home: bool | None = None,
+    ) -> None:
+        """Finish the shared activity only after both Settings workers release."""
+
+        owner = getattr(self, "host", None)
+        if owner is None or owner is self:
+            return
+        if return_home is not None:
+            owner._settings_post_processing_pending_return_home = bool(return_home)
+        if getattr(owner, "_settings_full_fft_grid_qc_thread", None) is not None:
+            return
+        if getattr(owner, "_settings_harmonic_recalc_thread", None) is not None:
+            return
+        pending = getattr(
+            owner,
+            "_settings_post_processing_pending_return_home",
+            None,
+        )
+        if hasattr(owner, "_settings_post_processing_pending_return_home"):
+            del owner._settings_post_processing_pending_return_home
+        if pending is not None:
+            self._finish_settings_post_processing_activity(
+                return_home=bool(pending),
+            )
+
+    def _handoff_settings_activity_to_frequency_post_processing(self) -> None:
+        owner = getattr(self, "host", None)
+        if owner is None or not self._settings_post_processing_activity_is_active():
+            return
+        refresh_host = getattr(self, "_refresh_host_settings_indicators", None)
+        if callable(refresh_host):
+            refresh_host()
+        owner._processing_return_widget = getattr(owner, "homeWidget", None)
+        owner._settings_post_processing_activity_active = False
+        if hasattr(owner, "_settings_post_processing_pending_return_home"):
+            del owner._settings_post_processing_pending_return_home
+        if hasattr(owner, "_settings_post_processing_busy_state"):
+            del owner._settings_post_processing_busy_state
+        if hasattr(owner, "_settings_post_processing_start_button_state"):
+            del owner._settings_post_processing_start_button_state
+
     def _unlock_settings_navigation_if_idle(self) -> None:
         owner = getattr(self, "host", None)
         if owner is None or owner is self:
@@ -1833,6 +2025,15 @@ class SettingsDialog(QDialog):
         owner._settings_full_fft_grid_qc_worker = worker
         self._lock_settings_navigation()
         resume_frequency_postprocessing_after_release = False
+        frequency_postprocessing_resume_started = False
+        activity_handed_off = False
+
+        def _resume_frequency_postprocessing_once() -> None:
+            nonlocal frequency_postprocessing_resume_started
+            if frequency_postprocessing_resume_started:
+                return
+            frequency_postprocessing_resume_started = True
+            self._resume_frequency_domain_post_processing()
 
         def _release_worker() -> None:
             owner._settings_full_fft_grid_qc_thread = None
@@ -1842,9 +2043,14 @@ class SettingsDialog(QDialog):
                 self._set_full_fft_grid_review_controls_enabled(True)
             self._unlock_settings_navigation_if_idle()
             if resume_frequency_postprocessing_after_release:
-                self._resume_frequency_domain_post_processing()
+                _resume_frequency_postprocessing_once()
+            elif accept_on_success:
+                self._finish_settings_post_processing_activity_when_idle(
+                    return_home=False if not activity_handed_off else None,
+                )
 
         def _handle_finished(audit: object) -> None:
+            nonlocal activity_handed_off
             nonlocal resume_frequency_postprocessing_after_release
             candidates = tuple(getattr(audit, "review_candidates", ()) or ())
             should_open = (
@@ -1912,10 +2118,18 @@ class SettingsDialog(QDialog):
                     # provenance and frequency-domain QC must be rebuilt too.
                     self._clear_harmonic_settings_rollback()
                     resume_frequency_postprocessing_after_release = True
+                    activity_handed_off = True
+                    if (
+                        getattr(owner, "_settings_full_fft_grid_qc_thread", None)
+                        is None
+                    ):
+                        _resume_frequency_postprocessing_once()
                     return
-                if not self._start_harmonic_recalculation(
+                if self._start_harmonic_recalculation(
                     accept_on_success=accept_on_success
                 ):
+                    activity_handed_off = True
+                else:
                     self._restore_harmonic_settings_after_cancel()
             else:
                 self._set_harmonic_recalculation_status(
@@ -1968,6 +2182,18 @@ class SettingsDialog(QDialog):
                 f"The FFT grid check could not start: {exc}",
             )
             return False
+        if accept_on_success:
+            try:
+                self._begin_settings_post_processing_activity()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "settings_post_processing_activity_presentation_failed"
+                )
+                self._set_harmonic_recalculation_status(
+                    "The FFT grid check is still running in the background; "
+                    "progress could not be shown on the processing page.",
+                    "warning",
+                )
         return True
 
     def _start_harmonic_recalculation(self, *, accept_on_success: bool = False) -> bool:
@@ -2029,10 +2255,63 @@ class SettingsDialog(QDialog):
         owner._settings_harmonic_recalc_thread = thread
         owner._settings_harmonic_recalc_worker = worker
         self._lock_settings_navigation()
+        activity_return_home = False
+        active_phase_id = "harmonic_selection"
+
+        def _handle_progress(message: str) -> None:
+            if not self._settings_post_processing_activity_is_active():
+                return
+            from Main_App.gui.processing_workflows import (
+                _post_processing_phase_display_state,
+            )
+
+            title, display_message, phase_index = (
+                _post_processing_phase_display_state(active_phase_id)
+            )
+            self._set_settings_post_processing_stage(
+                title=title,
+                message=display_message,
+                step=f"Post-processing phase {phase_index}",
+            )
+
+        def _handle_phase_progress(
+            phase_id: str,
+            completed_units: int,
+            total_units: int,
+            message: str,
+        ) -> None:
+            nonlocal active_phase_id
+            active_phase_id = str(phase_id)
+            if not self._settings_post_processing_activity_is_active():
+                return
+            from Main_App.gui import shell_status
+            from Main_App.gui.processing_workflows import (
+                _post_processing_phase_display_state,
+            )
+
+            title, display_message, phase_index = (
+                _post_processing_phase_display_state(active_phase_id, message)
+            )
+            self._set_settings_post_processing_stage(
+                title=title,
+                message=display_message,
+                step=(
+                    f"Post-processing phase {phase_index} of "
+                    f"{max(1, int(total_units))}"
+                ),
+            )
+            shell_status.update_post_processing_progress(
+                owner,
+                completed_units=completed_units,
+                total_units=total_units,
+                phase_index=phase_index,
+            )
 
         def _handle_finished(result: object) -> None:
+            nonlocal activity_return_home
             payload = result if isinstance(result, dict) else {}
             if payload.get("ok"):
+                activity_return_home = bool(accept_on_success)
                 self._clear_harmonic_settings_rollback()
                 workbook_path = payload.get("workbook_path", "")
                 self._initial_harmonic_settings_signature = (
@@ -2053,7 +2332,10 @@ class SettingsDialog(QDialog):
                         f"preprocessing was not rerun.\n\nSelection audit:\n{workbook_path}"
                     ),
                 )
-                if accept_on_success:
+                if (
+                    accept_on_success
+                    and not self._settings_post_processing_activity_is_active()
+                ):
                     self.accept()
             else:
                 if payload.get("selection_recalculated"):
@@ -2079,9 +2361,15 @@ class SettingsDialog(QDialog):
             owner._settings_harmonic_recalc_bridge = None
             self._set_full_fft_grid_review_controls_enabled(True)
             self._unlock_settings_navigation_if_idle()
+            if accept_on_success:
+                self._finish_settings_post_processing_activity_when_idle(
+                    return_home=activity_return_home,
+                )
 
         bridge = _SettingsWorkerUiBridge(
             result_callback=_handle_finished,
+            progress_callback=_handle_progress,
+            phase_progress_callback=_handle_phase_progress,
             thread_finished_callback=_release_worker,
             parent=owner,
         )
@@ -2091,6 +2379,8 @@ class SettingsDialog(QDialog):
             worker.finished.connect(thread.quit)
             worker.finished.connect(worker.deleteLater)
             worker.finished.connect(bridge.handle_result)
+            worker.progress.connect(bridge.handle_progress)
+            worker.phase_progress.connect(bridge.handle_phase_progress)
             thread.finished.connect(bridge.handle_thread_finished)
             thread.finished.connect(bridge.deleteLater)
             thread.finished.connect(thread.deleteLater)
@@ -2112,6 +2402,18 @@ class SettingsDialog(QDialog):
                 f"Harmonic recalculation could not start: {exc}",
             )
             return False
+        if accept_on_success:
+            try:
+                self._begin_settings_post_processing_activity()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "settings_post_processing_activity_presentation_failed"
+                )
+                self._set_harmonic_recalculation_status(
+                    "Harmonic recalculation is still running in the background; "
+                    "progress could not be shown on the processing page.",
+                    "warning",
+                )
         return True
 
     def _removed_electrode_detection_mode(self) -> str:
@@ -2801,13 +3103,19 @@ class EmbeddedSettingsPage(SettingsDialog):
             return
         self._return_to_home()
 
-    def _return_to_home(self) -> None:
+    def _refresh_host_settings_indicators(self) -> None:
         host = getattr(self, "host", None)
         if host is None:
             return
         debug_label = getattr(host, "lbl_debug", None)
         if debug_label is not None:
             debug_label.setVisible(host.settings.debug_enabled())
+
+    def _return_to_home(self) -> None:
+        host = getattr(self, "host", None)
+        if host is None:
+            return
+        self._refresh_host_settings_indicators()
         show_home_page = getattr(host, "show_home_page", None)
         if callable(show_home_page):
             show_home_page()

@@ -97,7 +97,7 @@ New projects use **Dzhelyova/Poncet — stop after two consecutive failures
 explicitly change them, so upgrading the Toolbox does not silently change old
 results.
 
-The Advanced Settings card offers four profiles:
+The **Harmonics** tab in Settings offers four profiles:
 
 | Profile | What defines the Summed-BCA harmonics? | Interpretation |
 | --- | --- | --- |
@@ -158,11 +158,25 @@ Settings snapshots the saved project method plus the relevant app analysis and
 ROI settings. Cancelling the FFT-grid/exclusion review, or failing validation
 before a replacement selection is saved, restores that snapshot and leaves
 current artifacts unchanged. Starting the worker alone does not stale the old
-outputs. Settings stays open and project navigation remains locked until the
-worker finishes. Once a replacement selection is saved, that method becomes
-the project definition; a later export failure preserves the last reproducible
-files but records them as stale or failed for the newly required selection
-rather than presenting them as current.
+outputs.
+
+When you change a Summed-BCA definition, choose **Save**, and confirm the
+immediate rebuild, the Settings page stays alive and guarded in the background
+while the main post-processing activity screen opens. The spinner, progress
+bar, current phase, and status text show the FullFFT-grid check, harmonic
+selection, workbook rebuild, and source-map phases. Project navigation remains
+locked, and the processing action is disabled because this run cannot be
+cancelled after selection begins. A successful rebuild returns to Home. If the
+review is cancelled or validation, grid review, or selection fails before a
+replacement selection is saved, the previous settings are restored and the
+Settings page is shown again. Using **Recalculate Harmonics** directly may
+instead keep Settings visible and report status within the Harmonics tab.
+
+Once a replacement selection is saved, that method becomes the project
+definition; a later export failure preserves the last reproducible files but
+records them as stale or failed for the newly required selection rather than
+presenting them as current. The Settings page is shown again so the warning and
+remedy remain available.
 
 Changing participant-condition FFT-crop exclusions changes the active FullFFT
 cohort. After that review is accepted, the Toolbox resumes frequency-domain QC

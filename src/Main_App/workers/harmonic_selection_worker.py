@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 class ProcessingHarmonicSelectionWorker(QObject):
     """Run harmonic-selection QC without touching GUI widgets."""
 
+    progress = Signal(str)
+    phase_progress = Signal(str, int, int, str)
     finished = Signal(dict)
 
     def __init__(self, project) -> None:
@@ -36,6 +38,7 @@ class ProcessingHarmonicSelectionWorker(QObject):
             if not text:
                 return
             messages.append(text)
+            self.progress.emit(text)
             logger.info(
                 "harmonic_recalculation_progress project_root=%r message=%r",
                 project_root,
@@ -48,6 +51,20 @@ class ProcessingHarmonicSelectionWorker(QObject):
         )
         report = None
         try:
+            from Main_App.workers.post_processing_pipeline_worker import (
+                POST_PROCESSING_PHASE_COUNT,
+                run_postprocessing_from_selection,
+            )
+
+            harmonic_message = (
+                "FPVS Toolbox is recalculating the accepted harmonic selection."
+            )
+            self.phase_progress.emit(
+                "harmonic_selection",
+                1,
+                POST_PROCESSING_PHASE_COUNT,
+                harmonic_message,
+            )
             if (
                 resolved_project_root is not None
                 and (resolved_project_root / "project.json").is_file()
@@ -64,14 +81,17 @@ class ProcessingHarmonicSelectionWorker(QObject):
                 log_func=_record_status,
                 force_recalculate=True,
             )
+            self.phase_progress.emit(
+                "harmonic_selection",
+                2,
+                POST_PROCESSING_PHASE_COUNT,
+                harmonic_message,
+            )
             downstream_result: dict[str, object] | None = None
             if (
                 resolved_project_root is not None
                 and (resolved_project_root / "project.json").is_file()
             ):
-                from Main_App.workers.post_processing_pipeline_worker import (
-                    run_postprocessing_from_selection,
-                )
                 _record_status(
                     "Rebuilding selection-dependent outputs without rerunning EEG preprocessing or FFT export."
                 )
@@ -80,6 +100,7 @@ class ProcessingHarmonicSelectionWorker(QObject):
                     report.selection_metadata,
                     previous_selection_fingerprint=previous_selection_fingerprint,
                     progress_callback=_record_status,
+                    phase_progress_callback=self.phase_progress.emit,
                 )
                 if not bool(downstream_result.get("ok")):
                     failed_steps = [
