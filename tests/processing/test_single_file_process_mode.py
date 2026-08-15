@@ -1,5 +1,4 @@
 import importlib.util
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +17,7 @@ import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 
 
 def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkeypatch):
-    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     QApplication.instance() or QApplication([])
 
@@ -71,6 +70,11 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
         "run_preprocessing_qc_workflow",
         lambda *_args, **_kwargs: True,
     )
+    monkeypatch.setattr(
+        processing_inputs,
+        "participant_review_rows",
+        lambda *_args, **_kwargs: [],
+    )
 
     def _fail_legacy_start(self):
         raise AssertionError("Legacy start_processing was called unexpectedly.")
@@ -101,7 +105,7 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
 
 
 def test_batch_non_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkeypatch):
-    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     QApplication.instance() or QApplication([])
 
@@ -149,6 +153,11 @@ def test_batch_non_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkey
         processing_inputs,
         "run_preprocessing_qc_workflow",
         lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        processing_inputs,
+        "participant_review_rows",
+        lambda *_args, **_kwargs: [],
     )
 
     def _fail_legacy_start(self):
