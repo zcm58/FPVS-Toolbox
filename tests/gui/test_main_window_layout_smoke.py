@@ -46,27 +46,35 @@ from Tools.Stats import StatsWindow
 
 DEFAULT_TOOL_ROLES = [
     "btn_free_harmonic_clustering",
-    "btn_sensitivity_analysis",
     "btn_graphs",
     "btn_publication_maps",
-    "btn_loreta_visualizer",
-    "btn_sequence_figure",
 ]
 DEFAULT_TOOL_LABELS = [
     "Free Harmonic Clustering",
-    "Sensitivity Analysis",
     "SNR Plots",
     "Scalp Maps",
-    "LORETA Visualizer",
-    "Sequence Figure",
 ]
 BETA_TOOL_ROLES = [
     "btn_data",
+    "btn_sensitivity_analysis",
+    "btn_loreta_visualizer",
+    "btn_sequence_figure",
     "btn_ratio",
     "btn_individual_detectability",
 ]
 BETA_TOOL_LABELS = [
     "Data Screening",
+    "Sensitivity Analysis",
+    "LORETA Visualizer",
+    "Sequence Figure",
+    "Ratio Calculator",
+    "Individual Detectability",
+]
+BETA_TOOL_ACCESSIBLE_NAMES = [
+    "Standard FPVS Screening",
+    "Sensitivity Analysis",
+    "LORETA Visualizer",
+    "Sequence Figure",
     "Ratio Calculator",
     "Individual Detectability",
 ]
@@ -137,10 +145,10 @@ def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     free_harmonic_button = _sidebar_button(win, "btn_free_harmonic_clustering")
     assert free_harmonic_button.toolTip() == "Free Harmonic Clustering Analysis"
     assert free_harmonic_button.accessibleName() == "Free Harmonic Clustering Analysis"
-    assert not any(
-        widget.property("role") == "btn_data"
-        for widget in win.sidebar.findChildren(QWidget)
-    )
+    visible_roles = {
+        widget.property("role") for widget in win.sidebar.findChildren(QWidget)
+    }
+    assert not set(BETA_TOOL_ROLES) & visible_roles
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -161,9 +169,13 @@ def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     label_index = tools_layout.indexOf(win.sidebar_beta_tools_label)
     assert divider_index < label_index
     assert label_index > len(DEFAULT_TOOL_ROLES) - 1
-    stats_button = _sidebar_button(win, "btn_data")
-    assert stats_button.toolTip() == "Standard FPVS Screening (Beta)"
-    assert stats_button.accessibleName() == "Standard FPVS Screening"
+    beta_buttons = [_sidebar_button(win, role) for role in BETA_TOOL_ROLES]
+    assert [button.accessibleName() for button in beta_buttons] == (
+        BETA_TOOL_ACCESSIBLE_NAMES
+    )
+    assert [button.toolTip() for button in beta_buttons] == [
+        f"{name} (Beta)" for name in BETA_TOOL_ACCESSIBLE_NAMES
+    ]
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -700,6 +712,7 @@ def test_sidebar_ratio_calculator_embeds_in_main_workspace(
     monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", lambda _key: None)
     project_root = tmp_path / "project"
     project_root.mkdir()
     win.currentProject = SimpleNamespace(
@@ -741,6 +754,7 @@ def test_sidebar_stats_embeds_in_main_workspace(
     monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", lambda _key: None)
     project_root = tmp_path / "project"
     project_root.mkdir()
     win.currentProject = SimpleNamespace(
@@ -785,6 +799,11 @@ def test_sidebar_free_harmonic_clustering_is_available_without_beta_tools(
     monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    monkeypatch.setattr(
+        win,
+        "_acknowledge_beta_tool_warning",
+        lambda key: pytest.fail(f"Stable tool requested beta warning: {key}"),
+    )
     project_root = tmp_path / "project"
     project_root.mkdir()
     win.currentProject = SimpleNamespace(project_root=project_root)
@@ -823,7 +842,8 @@ def test_sidebar_sensitivity_analysis_embeds_without_project_data(
         "Tools.Sensitivity_Analysis.gui._new_lmm_seed",
         lambda: next(generated),
     )
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", lambda _key: None)
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
@@ -865,6 +885,11 @@ def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
     monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    monkeypatch.setattr(
+        win,
+        "_acknowledge_beta_tool_warning",
+        lambda key: pytest.fail(f"Stable tool requested beta warning: {key}"),
+    )
     project_root = tmp_path / "project"
     excel_dir = project_root / "1 - Excel Data Files"
     snr_dir = project_root / "2 - SNR Plots"
@@ -924,6 +949,11 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
+    monkeypatch.setattr(
+        win,
+        "_acknowledge_beta_tool_warning",
+        lambda key: pytest.fail(f"Stable tool requested beta warning: {key}"),
+    )
     project_root = tmp_path / "project"
     excel_dir = project_root / "1 - Excel Data Files"
     excel_dir.mkdir(parents=True)
@@ -1111,34 +1141,71 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert selected_roles == ["btn_home"]
 
 
-def test_loreta_sidebar_open_shows_beta_warning_once(
+def test_beta_warning_is_generic_and_shown_once_per_tool(
     tmp_path: Path,
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
-    page = QWidget(win.workspace_stack)
-    page.setObjectName("embedded_loreta_visualizer_page")
-    win.workspace_stack.addWidget(page)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     warning_calls: list[tuple[str, str]] = []
+    events: list[str] = []
 
     def fake_warning(parent, title, message, *args):
         warning_calls.append((title, message))
+        events.append("warning")
         return QMessageBox.StandardButton.Ok
 
     monkeypatch.setattr(main_window_module.QMessageBox, "warning", fake_warning)
-    monkeypatch.setattr(win, "_ensure_loreta_visualizer_page", lambda: page)
 
-    win.open_loreta_visualizer()
-    win.open_loreta_visualizer()
+    def opener() -> None:
+        events.append("opened")
+
+    win._open_beta_tool("btn_loreta_visualizer", opener)
+    win._open_beta_tool("btn_loreta_visualizer", opener)
+    win._open_beta_tool("btn_sequence_figure", opener)
 
     assert warning_calls == [
         (
-            "Source Localization Beta",
-            "Warning: the source localization tool is currently in beta. Features are subject to change.",
-        )
+            "Beta Tool",
+            "This tool is currently in beta. Features are subject to change.",
+        ),
+        (
+            "Beta Tool",
+            "This tool is currently in beta. Features are subject to change.",
+        ),
     ]
-    assert win.workspace_stack.currentWidget() is page
+    assert events == ["warning", "opened", "opened", "warning", "opened"]
+
+
+@pytest.mark.parametrize(
+    ("role", "opener_name"),
+    [
+        ("btn_data", "open_stats_analyzer"),
+        ("btn_sensitivity_analysis", "open_sensitivity_analysis"),
+        ("btn_loreta_visualizer", "open_loreta_visualizer"),
+        ("btn_sequence_figure", "open_sequence_figure"),
+        ("btn_ratio", "open_ratio_calculator"),
+        ("btn_individual_detectability", "open_individual_detectability"),
+    ],
+)
+def test_beta_registry_routes_every_entry_through_shared_gate(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+    role: str,
+    opener_name: str,
+) -> None:
+    routed: list[tuple[str, str]] = []
+
+    def route_beta(self, tool_key: str, opener) -> None:
+        routed.append((tool_key, opener.__name__))
+
+    monkeypatch.setattr(main_window_module.MainWindow, "_open_beta_tool", route_beta)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+
+    qtbot.mouseClick(_sidebar_button(win, role), Qt.LeftButton)
+
+    assert routed == [(role, opener_name)]
 
 
 def test_sidebar_individual_detectability_embeds_in_main_workspace(
@@ -1147,6 +1214,7 @@ def test_sidebar_individual_detectability_embeds_in_main_workspace(
     monkeypatch,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    monkeypatch.setattr(win, "_acknowledge_beta_tool_warning", lambda _key: None)
     project_root = tmp_path / "project"
     excel_dir = project_root / "1 - Excel Data Files"
     excel_dir.mkdir(parents=True)

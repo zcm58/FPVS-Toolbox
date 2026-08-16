@@ -749,17 +749,25 @@ class MainWindow(QMainWindow):
             self._loreta_visualizer_page = page
         return page
 
-    def _acknowledge_loreta_beta_warning(self) -> None:
-        if getattr(self, "_loreta_beta_warning_acknowledged", False):
+    def _open_beta_tool(self, tool_key: str, opener: Callable[[], None]) -> None:
+        """Apply the shared beta gate before invoking a registered tool."""
+
+        self._acknowledge_beta_tool_warning(tool_key)
+        opener()
+
+    def _acknowledge_beta_tool_warning(self, tool_key: str) -> None:
+        acknowledged = getattr(self, "_acknowledged_beta_tools", set())
+        if tool_key in acknowledged:
             return
         QMessageBox.warning(
             self,
-            "Source Localization Beta",
-            "Warning: the source localization tool is currently in beta. Features are subject to change.",
+            "Beta Tool",
+            "This tool is currently in beta. Features are subject to change.",
             QMessageBox.StandardButton.Ok,
             QMessageBox.StandardButton.Ok,
         )
-        self._loreta_beta_warning_acknowledged = True
+        acknowledged.add(tool_key)
+        self._acknowledged_beta_tools = acknowledged
 
     def open_plot_generator(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("SNR Plots"):
@@ -780,7 +788,6 @@ class MainWindow(QMainWindow):
     def open_loreta_visualizer(self) -> None:
         if not self._frequency_domain_outputs_ready_for_tool("LORETA Visualizer"):
             return
-        self._acknowledge_loreta_beta_warning()
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_loreta_visualizer_page())

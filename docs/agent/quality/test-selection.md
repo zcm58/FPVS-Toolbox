@@ -29,7 +29,7 @@ environment.
 
 | Scope | Local focused coverage | Qt coverage retained for CI |
 | --- | --- | --- |
-| `gui` | GUI import boundaries, syntax/static checks, non-window contracts | Main-window layout/wiring, dialogs, settings/status, embedded-page smoke |
+| `gui` | GUI import boundaries, syntax/static checks, non-window contracts | Main-window layout/wiring, stable/beta visibility, per-tool beta acknowledgement, dialogs, settings/status, embedded-page smoke |
 | `updates` | Release selection, download/install backend, packaging syntax, GUI-module compilation | Update dialog and manager interaction |
 | `project-io` | Project settings, enumeration/scanning, result paths, manifest contracts | File dialogs and visible project workflows |
 | `processing` | Order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |

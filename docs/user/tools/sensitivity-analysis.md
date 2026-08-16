@@ -6,6 +6,9 @@ G*Power-style, idealized design-sensitivity calculator and is separate from the
 Standard FPVS Screening tool. Its primary result is a minimum standardized
 detectable contrast conditional on the entered assumptions.
 
+Sensitivity Analysis is currently available under **Beta Tools**. Enable Beta
+Tools in **Settings > Advanced**, then close and reopen FPVS Toolbox.
+
 The tool does not read participant data or project settings. It does not save,
 export, or modify any files. Because it does not inspect observed data, it does
 not validate residuals, variance estimates, convergence, missingness, or the

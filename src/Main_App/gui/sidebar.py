@@ -2,6 +2,7 @@
 # Sidebar construction helpers (custom buttons with precise icon/text alignment)
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
@@ -44,20 +45,25 @@ DEFAULT_TOOL_SPECS = (
         "harmonic",
         "open_free_harmonic_clustering",
     ),
-    ("btn_sensitivity_analysis", "Sensitivity Analysis", "sensitivity", "open_sensitivity_analysis"),
     ("btn_graphs", "SNR Plots", "chart", "open_plot_generator"),
     ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),
-    ("btn_loreta_visualizer", "LORETA Visualizer", "loreta", "open_loreta_visualizer"),
-    ("btn_sequence_figure", "Sequence Figure", "sequence", "open_sequence_figure"),
 )
 
 BETA_TOOL_SPECS = (
     # Navigation text is shortened for the fixed-width sidebar. The page,
     # accessible name, tooltip, documentation, and exports use the full title.
     ("btn_data", "Data Screening", "stats", "open_stats_analyzer"),
+    ("btn_sensitivity_analysis", "Sensitivity Analysis", "sensitivity", "open_sensitivity_analysis"),
+    ("btn_loreta_visualizer", "LORETA Visualizer", "loreta", "open_loreta_visualizer"),
+    ("btn_sequence_figure", "Sequence Figure", "sequence", "open_sequence_figure"),
     ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
     ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
 )
+
+TOOL_ACCESSIBLE_NAMES = {
+    "btn_data": "Standard FPVS Screening",
+    "btn_free_harmonic_clustering": "Free Harmonic Clustering Analysis",
+}
 
 
 def _resolve_icon(source: QIcon | str | Path) -> QIcon:
@@ -223,9 +229,10 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
             sidebar_icon(icon_kind, ICON_PX),
             getattr(host, slot_name),
         )
-        if role == "btn_free_harmonic_clustering":
-            button.setToolTip("Free Harmonic Clustering Analysis")
-            button.setAccessibleName("Free Harmonic Clustering Analysis")
+        accessible_name = TOOL_ACCESSIBLE_NAMES.get(role)
+        if accessible_name:
+            button.setToolTip(accessible_name)
+            button.setAccessibleName(accessible_name)
 
     host.sidebar_beta_tools_divider = None
     host.sidebar_beta_tools_label = None
@@ -247,16 +254,17 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
     host.sidebar_beta_tools_label = beta_label
 
     for role, text, icon_kind, slot_name in BETA_TOOL_SPECS:
+        opener = getattr(host, slot_name)
         button = make_button(
             layout,
             role,
             text,
             sidebar_icon(icon_kind, ICON_PX),
-            getattr(host, slot_name),
+            partial(host._open_beta_tool, role, opener),
         )
-        if role == "btn_data":
-            button.setToolTip("Standard FPVS Screening (Beta)")
-            button.setAccessibleName("Standard FPVS Screening")
+        accessible_name = TOOL_ACCESSIBLE_NAMES.get(role, text)
+        button.setToolTip(f"{accessible_name} (Beta)")
+        button.setAccessibleName(accessible_name)
 
 
 def init_sidebar(self) -> None:

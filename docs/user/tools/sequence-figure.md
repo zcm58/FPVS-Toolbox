@@ -3,6 +3,9 @@
 Sequence Figure creates a five-image diagram of an FPVS oddball sequence for a
 manuscript, poster, presentation, preregistration, or study handout.
 
+Sequence Figure is currently available under **Beta Tools**. Enable Beta Tools
+in **Settings > Advanced**, then close and reopen FPVS Toolbox.
+
 ## Layout
 
 The first four slots are base images and the fifth slot is the oddball image.

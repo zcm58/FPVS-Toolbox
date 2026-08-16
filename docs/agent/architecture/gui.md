@@ -163,13 +163,20 @@ method committed and its dependent outputs marked stale or failed. Project
 switching must not retain another project's method, activity-page state, or
 worker state.
 
-The sidebar's default tool list is Free Harmonic Clustering Analysis,
-Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence
-Figure, in that order. Standard FPVS Screening, Ratio Calculator, and Individual
+The sidebar's default tool list is Free Harmonic Clustering Analysis, SNR Plots,
+and Scalp Maps, in that order. Standard FPVS Screening, Sensitivity Analysis,
+LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual
 Detectability are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
 **Beta Tools** subsection only when the global Settings option
 `tools.enable_beta_tools` is enabled and the app has been restarted.
+
+The Beta Tools registry owns the shared gate: every entry in `BETA_TOOL_SPECS`
+is connected through `MainWindow._open_beta_tool`, so adding a beta tool to the
+registry must not require per-tool warning code. Before that tool's opener runs
+for the first time in each app session, show an OK-only warning titled `Beta
+Tool` with the text `This tool is currently in beta. Features are subject to
+change.` Track acknowledgement separately for each beta registry role.
 
 When the active project changes through create/open/import/path workflows, the
 main shell must return to Home and discard project-bound embedded page instances.

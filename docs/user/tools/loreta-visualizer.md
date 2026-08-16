@@ -2,6 +2,9 @@
 
 The LORETA Visualizer helps you view beta source-space maps from FPVS Toolbox projects.
 
+The tool is currently available under **Beta Tools**. Enable Beta Tools in
+**Settings > Advanced**, then close and reopen FPVS Toolbox.
+
 Use this tool when you want to see where an FPVS oddball response is estimated to appear in source space, instead of only reviewing electrode-level scalp plots. The visualizer can show cortical-surface maps based on L2 minimum-norm estimation (L2-MNE) and volume maps based on eLORETA.
 
 Source estimation is an interpretive visualization step. It can help you inspect likely source-space patterns, but it should not be treated as exact anatomical proof from scalp EEG alone.
