@@ -339,7 +339,7 @@ def _source_snapshot(
 
 
 def _read_full_fft_header(path: Path) -> list[object]:
-    from Tools.Stats.io.xlsx_selected_reader import read_xlsx_sheet_header
+    from Main_App.io import read_xlsx_sheet_header
 
     return read_xlsx_sheet_header(path, sheet_name=FULL_FFT_SHEET_NAME)
 

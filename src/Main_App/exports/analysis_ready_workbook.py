@@ -25,6 +25,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from Main_App import SettingsManager
+from Main_App.io import read_xlsx_sheet_selected_columns
 from Main_App.processing.frequency_domain_qc import load_frequency_domain_qc_state
 from Main_App.projects import (
     ProjectDatasetIndex,
@@ -37,7 +38,6 @@ from Tools.Stats.io.harmonic_selection_export import (
     HARMONIC_SELECTION_QC_WORKBOOK_NAME,
     build_harmonic_selection_frames,
 )
-from Tools.Stats.io.xlsx_selected_reader import read_xlsx_sheet_selected_columns
 
 logger = logging.getLogger(__name__)
 

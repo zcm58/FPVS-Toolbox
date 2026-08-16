@@ -102,7 +102,7 @@ class PostProcessingPipelineWorker(QObject):
         steps: list[PostProcessingStepResult] = []
         cache_stack = ExitStack()
         try:
-            from Tools.Stats.io.xlsx_selected_reader import xlsx_read_cache_scope
+            from Main_App.io import xlsx_read_cache_scope
 
             cache_stack.enter_context(xlsx_read_cache_scope())
             project_root = Path(self._project.project_root).expanduser().resolve()

@@ -19,7 +19,9 @@ next narrow file or focused document.
   `processing_ledger.py` also records source-derivative readiness and confines
   incremental cleanup to ledger-recorded files under the versioned derivative
   root.
-- `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
+- `src/Main_App/io/`: canonical import surface for shared I/O. It owns the
+  exact-column/header XLSX reader and delegates to the existing shared BDF
+  loader implementation during the package-layout migration.
 - `src/Main_App/projects/`: canonical owner for project model, project manager
   workflows, project metadata scanning, projects-root helpers, preprocessing
   settings normalization, canonical group/participant metadata, and the
@@ -43,10 +45,10 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/Free_Harmonic_Clustering/`: clean-room Free Harmonic Clustering
   Analysis backend plus a thin embedded default GUI. It uses canonical
   managed-project identities,
-  selected-column FullFFT ingestion, paper-specific SNR/z and participant L2
-  normalization, complete same-sensor harmonic adjacency, and paired or
-  independent whole-tensor permutation inference. Its scientific modules remain
-  widget-free and separate from Standard FPVS Screening.
+  selected-column FullFFT ingestion through `Main_App.io`, paper-specific SNR/z
+  and participant L2 normalization, complete same-sensor harmonic adjacency,
+  and paired or independent whole-tensor permutation inference. Its scientific
+  modules remain widget-free and separate from Standard FPVS Screening.
 - `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines,
   reporting, I/O, and shared helpers grouped by function. Removed
   `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.

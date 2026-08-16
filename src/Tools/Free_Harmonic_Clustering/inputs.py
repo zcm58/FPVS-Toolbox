@@ -12,6 +12,10 @@ from typing import Any
 import numpy as np
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.io import (
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+)
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
 )
@@ -26,11 +30,6 @@ from Main_App.projects import (
     load_project_dataset_index,
     normalize_preprocessing_settings,
 )
-from Tools.Stats.io.xlsx_selected_reader import (
-    read_xlsx_sheet_header,
-    read_xlsx_sheet_selected_columns,
-)
-
 from .models import (
     AnalysisDesign,
     CohortWorkbook,
@@ -73,7 +72,7 @@ class _SelectedCohort:
 
 
 def _read_fullfft_header(path: Path) -> list[object]:
-    """Private seam around the existing streaming Stats XML header reader."""
+    """Private seam around the shared streaming XML header reader."""
 
     return read_xlsx_sheet_header(path, sheet_name=FULL_FFT_SHEET)
 

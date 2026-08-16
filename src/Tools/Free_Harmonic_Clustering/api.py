@@ -55,12 +55,12 @@ def inspect_project_analysis_options(
     app-global settings are never silently treated as processed-project data.
     """
 
+    from Main_App.io import read_xlsx_sheet_header
     from Main_App.processing.full_fft_provenance import (
         FullFftProvenanceError,
         validate_project_full_fft_provenance,
     )
     from Main_App.projects import load_project_dataset_index
-    from Tools.Stats.io.xlsx_selected_reader import read_xlsx_sheet_header
 
     from .preparation import build_available_frequency_window_plan
 

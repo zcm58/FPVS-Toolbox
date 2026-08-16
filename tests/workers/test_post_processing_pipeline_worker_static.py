@@ -110,7 +110,7 @@ def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:
         statement
         for statement in try_node.body
         if isinstance(statement, ast.ImportFrom)
-        and statement.module == "Tools.Stats.io.xlsx_selected_reader"
+        and statement.module == "Main_App.io"
     )
     assert [alias.name for alias in cache_import.names] == ["xlsx_read_cache_scope"]
 

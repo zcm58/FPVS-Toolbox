@@ -17,6 +17,12 @@ from Main_App.io.load_utils import (
     _try_warning_log,
     load_eeg_file,
 )
+from Main_App.io.xlsx_selected_reader import (
+    MissingXlsxColumnsError,
+    read_xlsx_sheet_header,
+    read_xlsx_sheet_selected_columns,
+    xlsx_read_cache_scope,
+)
 
 __all__ = [
     "BDF_RECORDING_NOT_STARTED_REASON",
@@ -34,4 +40,8 @@ __all__ = [
     "_resolve_stim",
     "_try_warning_log",
     "load_eeg_file",
+    "MissingXlsxColumnsError",
+    "read_xlsx_sheet_header",
+    "read_xlsx_sheet_selected_columns",
+    "xlsx_read_cache_scope",
 ]

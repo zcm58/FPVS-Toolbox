@@ -39,9 +39,11 @@ uses all registered raw roots, carries stable group IDs through review and
 incremental planning, computes condition/group output paths, and locks the
 fingerprinted group layout after the first current-run grouped workbook.
 
-`src/Main_App/io/` is now the canonical Main App BDF loader import surface. It
-delegates to the existing shared loader implementation while the BDF loading
-contract and tests protect behavior.
+`src/Main_App/io/` is now the canonical Main App I/O import surface. It owns the
+shared exact-column/header XLSX reader used by processing and downstream tools,
+while `Tools.Stats.io.xlsx_selected_reader` remains a compatibility adapter. It
+also delegates to the existing shared BDF loader implementation while the BDF
+loading contract and tests protect behavior.
 
 `src/Main_App/workers/` is now the canonical Main App worker import surface. It
 owns the Qt worker and multiprocessing bridge implementations while

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ast
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +23,62 @@ from Tools.Free_Harmonic_Clustering.models import (
 from Tools.Free_Harmonic_Clustering.preparation import (
     build_available_frequency_window_plan,
 )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "expected_reader_names"),
+    [
+        ("api.py", {"read_xlsx_sheet_header"}),
+        (
+            "inputs.py",
+            {"read_xlsx_sheet_header", "read_xlsx_sheet_selected_columns"},
+        ),
+    ],
+)
+def test_headless_xlsx_inputs_use_shared_main_app_io(
+    module_name: str,
+    expected_reader_names: set[str],
+) -> None:
+    module_path = Path(api.__file__).with_name(module_name)
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    main_app_reader_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "Main_App.io"
+        for alias in node.names
+    }
+    stats_imports = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and node.module.startswith("Tools.Stats")
+    }
+
+    assert expected_reader_names <= main_app_reader_names
+    assert stats_imports == set()
+
+
+def test_fhc_provenance_import_does_not_load_beta_stats_package() -> None:
+    src_root = Path(api.__file__).parents[2]
+    script = (
+        "import sys; "
+        f"sys.path.insert(0, {str(src_root)!r}); "
+        "import Tools.Free_Harmonic_Clustering.api; "
+        "import Main_App.processing.full_fft_provenance; "
+        "loaded = sorted(name for name in sys.modules "
+        "if name == 'Tools.Stats' or name.startswith('Tools.Stats.')); "
+        "print('\\n'.join(loaded))"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == ""
 
 
 def _request(tmp_path: Path) -> ProjectContrastRequest:
@@ -177,9 +236,9 @@ def test_project_options_use_one_header_and_allow_ungrouped_paired_project(
         *(f"{frequency:.6f}_Hz" for frequency in frequencies),
     ]
 
+    import Main_App.io
     import Main_App.projects
     import Main_App.processing.full_fft_provenance
-    import Tools.Stats.io.xlsx_selected_reader
 
     monkeypatch.setattr(
         Main_App.projects,
@@ -193,7 +252,7 @@ def test_project_options_use_one_header_and_allow_ungrouped_paired_project(
         return header
 
     monkeypatch.setattr(
-        Tools.Stats.io.xlsx_selected_reader,
+        Main_App.io,
         "read_xlsx_sheet_header",
         fake_header,
     )
@@ -278,9 +337,9 @@ def test_project_options_surface_neutral_provenance_failures_before_header_io(
         diagnostics=(),
     )
 
+    import Main_App.io
     import Main_App.projects
     import Main_App.processing.full_fft_provenance
-    import Tools.Stats.io.xlsx_selected_reader
 
     monkeypatch.setattr(
         Main_App.projects,
@@ -288,7 +347,7 @@ def test_project_options_surface_neutral_provenance_failures_before_header_io(
         lambda _root: dataset,
     )
     monkeypatch.setattr(
-        Tools.Stats.io.xlsx_selected_reader,
+        Main_App.io,
         "read_xlsx_sheet_header",
         lambda *args, **kwargs: pytest.fail(
             "rate mismatch must block before the workbook header is opened"
@@ -343,9 +402,9 @@ def test_project_options_ignore_stats_harmonic_cache_when_neutral_record_is_vali
         diagnostics=(),
     )
 
+    import Main_App.io
     import Main_App.projects
     import Main_App.processing.full_fft_provenance
-    import Tools.Stats.io.xlsx_selected_reader
 
     monkeypatch.setattr(
         Main_App.projects,
@@ -370,7 +429,7 @@ def test_project_options_ignore_stats_harmonic_cache_when_neutral_record_is_vali
         ),
     )
     monkeypatch.setattr(
-        Tools.Stats.io.xlsx_selected_reader,
+        Main_App.io,
         "read_xlsx_sheet_header",
         lambda *args, **kwargs: header,
     )

@@ -37,7 +37,10 @@ Primary areas:
   active EEG preprocessing, the stable `process_data` entry point,
   processing-controller helpers, project-local neutral FullFFT provenance, and
   per-artifact freshness for derivatives of the accepted harmonic selection.
-- `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
+- `src/Main_App/io/`: canonical Main App I/O import surface. It owns the shared
+  exact-column/header XLSX reader and currently delegates BDF loading to the
+  existing shared implementation while the repo moves toward purpose-based
+  Main App folders.
 - `src/Main_App/projects/`: canonical Main App project import surface. It owns
   the project model, project manager workflows, project metadata scanning,
   projects-root helpers, preprocessing-settings normalization, canonical

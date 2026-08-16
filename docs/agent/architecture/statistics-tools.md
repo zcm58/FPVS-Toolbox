@@ -117,7 +117,8 @@ Stats grouping:
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
   QC screening keeps the shared dataset-index subject/condition mapping as its
   file source. For `.xlsx` workbooks it reads only the `BCA (uV)` harmonic
-  columns and union of ROI electrodes through the selected-column reader, then
+  columns and union of ROI electrodes through the `Main_App.io` selected-column
+  reader; the former Stats module is a compatibility adapter. It then
   vectorizes the per-ROI harmonic means. Non-`.xlsx` inputs retain the
   serialized full-reader fallback. Missing mappings/files, QC thresholds, and
   exclusion/reporting semantics are unchanged.

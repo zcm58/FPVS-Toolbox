@@ -9,19 +9,21 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
 )
-from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.projects.grouping import (
     project_group_context,
     resolve_group_output_directory,
     resolve_output_directory,
 )
+
+if TYPE_CHECKING:
+    from Main_App.processing.processing_controller import RawFileInfo
 
 logger = logging.getLogger(__name__)
 

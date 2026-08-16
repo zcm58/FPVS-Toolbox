@@ -31,7 +31,7 @@ environment.
 | --- | --- | --- |
 | `gui` | GUI import boundaries, syntax/static checks, non-window contracts | Main-window layout/wiring, stable/beta visibility, per-tool beta acknowledgement, dialogs, settings/status, embedded-page smoke |
 | `updates` | Release selection, download/install backend, packaging syntax, GUI-module compilation | Update dialog and manager interaction |
-| `project-io` | Project settings, enumeration/scanning, result paths, manifest contracts | File dialogs and visible project workflows |
+| `project-io` | Project settings, enumeration/scanning, result paths, manifest contracts, shared exact XLSX reading | File dialogs and visible project workflows |
 | `processing` | Order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |
 | `plot-generator` | Excel/config helpers, aggregation, FFT/SNR behavior, rendering and export contracts | Plot Generator page/layout/workflow smoke |
 | `publication-maps` | Source workbook, processing-time harmonics, BCA/SNR rendering, paired outputs, colorbars | Embedded Scalp Maps page behavior |

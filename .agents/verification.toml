@@ -32,6 +32,7 @@ tests = [
   "tests/project_io/test_project_results_layout.py",
   "tests/project_io/test_project_scan_job.py",
   "tests/project_io/test_project_v2_group_schema.py",
+  "tests/project_io/test_main_app_xlsx_selected_reader.py",
 ]
 include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
 manual_smoke = []
@@ -157,6 +158,7 @@ tests = [
   "tests/stats/controller/test_native_pipeline_controller.py",
   "tests/stats/data/test_stats_project_context.py",
   "tests/stats/io/test_stats_ready_export.py",
+  "tests/stats/io/test_xlsx_selected_reader.py",
   "tests/stats/pipeline/test_stats_file_scanner.py",
   "tests/stats/pipeline/test_stats_native_view_state.py",
   "tests/stats/pipeline/test_stats_posthoc_gate.py",
@@ -171,7 +173,10 @@ manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning, o
 
 [scopes.free-harmonic-clustering]
 audits = ["gui", "paths"]
-tests = ["tests/free_harmonic_clustering"]
+tests = [
+  "tests/free_harmonic_clustering",
+  "tests/project_io/test_main_app_xlsx_selected_reader.py",
+]
 include = [
   "src/Tools/Free_Harmonic_Clustering/**",
   "src/Main_App/gui/icons.py",
@@ -179,6 +184,7 @@ include = [
   "src/Main_App/gui/project_workflows.py",
   "src/Main_App/gui/sidebar.py",
   "tests/free_harmonic_clustering/**",
+  "tests/project_io/test_main_app_xlsx_selected_reader.py",
   "tests/gui/test_free_harmonic_clustering*.py",
   "tests/gui/test_main_window_layout_smoke.py",
   "tests/gui/test_project_context_reset.py",

@@ -547,7 +547,7 @@ def _collect_summed_bca_flags(
     thresholds: FrequencyDomainQcThresholds,
     log_func: Callable[[str], None],
 ) -> list[dict[str, object]]:
-    from Tools.Stats.io.xlsx_selected_reader import (
+    from Main_App.io import (
         MissingXlsxColumnsError,
         read_xlsx_sheet_selected_columns,
     )
@@ -883,7 +883,7 @@ def _find_first_bca_columns(
     conditions: Sequence[str],
     subject_data: Mapping[str, Mapping[str, str]],
 ) -> list[object]:
-    from Tools.Stats.io.xlsx_selected_reader import read_xlsx_sheet_header
+    from Main_App.io import read_xlsx_sheet_header
 
     for subject in subjects:
         for condition in conditions:

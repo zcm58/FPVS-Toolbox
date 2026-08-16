@@ -68,6 +68,9 @@ fallback), or the no-offscreen-Qt rule.
 
 ## Execution Plans
 
+- For v3 stabilization, default-tool cleanup, UX identity, packaging, or
+  release work, read
+  `docs/agent/exec-plans/active/v3-release-readiness.md` first.
 - Active plans live in `docs/agent/exec-plans/active/`; read them before
   changing the covered area.
 - Future plans live in `docs/agent/exec-plans/future/`; read them only when

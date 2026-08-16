@@ -240,7 +240,7 @@ def _inspect_workbook_grid(
     already_excluded: bool,
 ) -> FullFftGridObservation:
     try:
-        from Tools.Stats.io.xlsx_selected_reader import read_xlsx_sheet_header
+        from Main_App.io import read_xlsx_sheet_header
 
         header = read_xlsx_sheet_header(
             record.path,

@@ -38,7 +38,8 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 - `preparation.py`: exact frequency-window planning, grand-spectrum z selection,
   participant SNR, and L2 normalization.
 - `inputs.py`: canonical managed-project discovery, neutral FullFFT provenance,
-  cohort/QC enforcement, and selected-column FullFFT ingestion.
+  cohort/QC enforcement, and selected-column FullFFT ingestion through the
+  shared `Main_App.io` reader.
 - `analysis.py`: versioned BioSemi64 adjacency, node t statistics, connected
   components, permutation nulls, cluster p-values, and cluster-average effects.
 - `null_calibration.py`: GUI-neutral frozen powered-null generators, stable seed

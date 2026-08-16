@@ -18,6 +18,9 @@ one contrast, then delegates long work to signal-driven workers.
 - Read scientific inputs only from original `FullFFT Amplitude (uV)` condition
   workbooks discovered through `Main_App.projects.load_project_dataset_index`.
   Do not read Stats-ready Summed BCA workbooks.
+- Read exact FullFFT headers and selected columns through the neutral
+  `Main_App.io` XLSX-reader surface. Do not depend on the beta Stats package's
+  compatibility adapter.
 - Both GUI inspection and direct preparation must validate
   `Main_App.processing.full_fft_provenance`. That neutral project-local record
   owns source paths, rates, grid, cohort/QC, and processing/export identity. Do
