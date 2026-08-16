@@ -33,6 +33,32 @@ class _FakeWidget:
         self.shutdown_calls += 1
 
 
+class _FakeSignal:
+    def __init__(self) -> None:
+        self.callbacks = []
+
+    def connect(self, callback) -> None:
+        self.callbacks.append(callback)
+
+    def emit(self) -> None:
+        for callback in tuple(self.callbacks):
+            callback()
+
+
+class _ActivePublicationMapsWidget(_FakeWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = True
+        self.generation_idle = _FakeSignal()
+
+    def has_active_generation(self) -> bool:
+        return self.active
+
+    def finish(self) -> None:
+        self.active = False
+        self.generation_idle.emit()
+
+
 def test_project_context_reset_discards_embedded_pages_and_returns_home() -> None:
     workspace = _FakeWorkspace()
     settings_page = _FakeWidget()
@@ -70,3 +96,37 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     assert free_harmonic_page in workspace.removed
     assert free_harmonic_page.shutdown_calls == 1
     assert ratio_page in workspace.removed
+
+
+def test_project_context_reset_waits_for_active_scalp_maps_worker() -> None:
+    workspace = _FakeWorkspace()
+    publication_maps_page = _ActivePublicationMapsWidget()
+    other_page = _FakeWidget()
+    home_calls = []
+    host = SimpleNamespace(
+        workspace_stack=workspace,
+        _settings_dialog=None,
+        _settings_page=other_page,
+        _stats_page=None,
+        _free_harmonic_clustering_page=None,
+        _ratio_calculator_page=None,
+        _individual_detectability_page=None,
+        _plot_generator_page=None,
+        _publication_maps_page=publication_maps_page,
+        _loreta_visualizer_page=None,
+        show_home_page=lambda: home_calls.append("home"),
+    )
+
+    completed = project_workflows.reset_project_context_workspace(host)
+
+    assert completed is False
+    assert publication_maps_page.shutdown_calls == 1
+    assert workspace.removed == []
+    assert home_calls == []
+
+    publication_maps_page.finish()
+
+    assert host._publication_maps_page is None
+    assert publication_maps_page in workspace.removed
+    assert other_page in workspace.removed
+    assert home_calls == ["home"]

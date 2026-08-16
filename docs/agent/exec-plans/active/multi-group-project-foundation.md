@@ -3,12 +3,12 @@
 ## Status
 
 Active. The processing foundation and shared processed-workbook index are
-implemented and covered by focused tests. Current group-aware consumers are
-being migrated to the `Main_App.projects` API; remaining figure/summary tools
-still need explicit group selection without changes to their scientific
+implemented and covered by focused tests. Publication Maps now uses the shared
+index and explicit group selection. Ratio Calculator and Individual
+Detectability remain to be migrated without changes to their scientific
 calculations or existing exports.
 
-Last reviewed against the repository on 2026-07-28.
+Last reviewed against the repository on 2026-08-16.
 
 ## Goal
 
@@ -235,7 +235,7 @@ the manifest assignment.
    filters by canonical group before computing participant means.
 5. [x] Change Plot Generator manifest/path/discovery helpers to shared adapters
    while preserving its canonical-Excel-root and manifest-membership policies.
-6. [ ] Add group-aware selection to Publication Maps without changing map
+6. [x] Add group-aware selection to Publication Maps without changing map
    calculations.
 7. [ ] Migrate Ratio Calculator and Individual Detectability from flat-folder
    globbing to indexed records before offering per-group output controls.
@@ -289,8 +289,8 @@ selection, and diagnostics only.
 - [x] Stats compatibility wrapper migrated to the shared index.
 - [x] Processing QC and LORETA cross-tool Stats dependencies removed.
 - [x] Plot Generator discovery migrated to the shared index.
-- [ ] Remaining figure/summary tools migrated and given explicit group
-      selection where appropriate.
+- [ ] Ratio Calculator and Individual Detectability migrated and given explicit
+      group selection where appropriate. Publication Maps is complete.
 
 ## Verification
 

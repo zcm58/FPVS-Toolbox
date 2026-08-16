@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QThread, Qt, QUrl
+from PySide6.QtCore import QThread, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,7 +47,11 @@ from Main_App.gui.components import (
     show_error,
     show_tool_info,
 )
-from Tools.Publication_Maps.excel_inputs import discover_conditions
+from Main_App.projects import GroupInfo, ProjectDatasetIndex, load_project_dataset_index
+from Tools.Publication_Maps.generation_outcome import (
+    PublicationMapsOutcomeStatus,
+    PublicationMapsWorkerOutcome,
+)
 from Tools.Publication_Maps.models import (
     ColorBounds,
     DEFAULT_BCA_HIGH_COLOR,
@@ -56,6 +60,7 @@ from Tools.Publication_Maps.models import (
     PublicationMapRequest,
     PublicationMetric,
 )
+from Tools.Publication_Maps.output_contract import validate_output_root
 from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO
 from Tools.Publication_Maps.worker import PublicationMapsWorker
 
@@ -64,10 +69,15 @@ logger = logging.getLogger(__name__)
 SCALP_MAPS_OUTPUT_FOLDER = "4 - Scalp Maps"
 SCALP_MAPS_TOP_ROW_MIN_HEIGHT = 340
 SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT = 240
+ALL_GROUPS_VALUE = "__all_canonical_groups__"
+ALL_GROUPS_LABEL = "All groups (separate outputs)"
 
 
 class PublicationMapsWindow(QWidget):
     """Embedded tool page for Stats-selected publication scalp maps."""
+
+    post_processing_required = Signal(str, str, str)
+    generation_idle = Signal()
 
     def __init__(
         self,
@@ -94,10 +104,14 @@ class PublicationMapsWindow(QWidget):
         self._busy = False
         self._host_navigation_locked = False
         self._last_generated_figure_count = 0
+        self._pending_outcome: PublicationMapsWorkerOutcome | None = None
+        self._cancel_requested = False
         self._settings_fallback: SettingsManager | None = None
         self.bca_low_color = DEFAULT_BCA_LOW_COLOR
         self.bca_high_color = DEFAULT_BCA_HIGH_COLOR
-        self._conditions = []
+        self._dataset_index: ProjectDatasetIndex | None = None
+        self._conditions: tuple[str, ...] = ()
+        self._condition_counts: dict[str, int] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -168,11 +182,32 @@ class PublicationMapsWindow(QWidget):
         self.input_root_edit = self.input_root_row.line_edit
         self.input_root_btn = self.input_root_row.button
         self.input_root_btn.clicked.connect(self._browse_input_root)
+        self.input_root_edit.textChanged.connect(self._on_input_root_changed)
+        if self._project_root is not None:
+            managed_input_tooltip = (
+                "Scalp Maps uses the active project's configured Excel root. "
+                "Change that folder in Project Settings."
+            )
+            self.input_root_edit.setReadOnly(True)
+            self.input_root_edit.setToolTip(managed_input_tooltip)
+            self.input_root_btn.setEnabled(False)
+            self.input_root_btn.setToolTip(managed_input_tooltip)
 
-        self.refresh_btn = make_action_button("Refresh conditions", compact=True, parent=group)
+        self.group_combo = QComboBox(group)
+        self.group_combo.setObjectName("publication_maps_group_combo")
+        self.group_combo.setToolTip(
+            "Choose one canonical project group, or generate a separate output "
+            "set for every group."
+        )
+        self.group_combo.currentIndexChanged.connect(
+            lambda _index: self._on_group_selection_changed()
+        )
+
+        self.refresh_btn = make_action_button("Refresh project data", compact=True, parent=group)
         self.refresh_btn.clicked.connect(self._refresh_conditions)
 
         form.addRow("Excel root folder:", self.input_root_row)
+        form.addRow("Group:", self.group_combo)
         form.addRow("", self.refresh_btn)
         group.content_layout.addLayout(form)
         return group
@@ -376,6 +411,7 @@ class PublicationMapsWindow(QWidget):
         self.output_root_edit = self.output_root_row.line_edit
         self.output_root_btn = self.output_root_row.button
         self.output_root_btn.clicked.connect(self._browse_output_root)
+        self.output_root_edit.textChanged.connect(self._on_output_root_changed)
         self.open_output_btn = make_action_button("Open", compact=True, parent=group)
         self.open_output_btn.clicked.connect(self._open_output_folder)
         self.output_root_row.row_layout.insertWidget(1, self.open_output_btn)
@@ -451,7 +487,6 @@ class PublicationMapsWindow(QWidget):
         self.progress.setValue(0)
         self.status_label = StatusBanner("Ready.", group)
         self.status_label.setObjectName("publication_maps_status")
-        self.status_label.hide()
         self.run_btn = make_action_button("Run", variant="primary", parent=group)
         self.cancel_btn = make_action_button("Cancel", compact=True, parent=group)
         self.cancel_btn.setEnabled(False)
@@ -468,6 +503,7 @@ class PublicationMapsWindow(QWidget):
         self.log_box.setMinimumHeight(100)
         self.log_box.setProperty("logSurface", True)
 
+        group.content_layout.addWidget(self.status_label)
         group.content_layout.addWidget(row)
         group.content_layout.addWidget(self.log_box)
         return group
@@ -492,7 +528,7 @@ class PublicationMapsWindow(QWidget):
     def _default_excel_root(self) -> Path | None:
         if not self._project_root:
             return None
-        proj = getattr(self.parent(), "currentProject", None)
+        proj = getattr(self._embedded_host(), "currentProject", None)
         subfolders = getattr(proj, "subfolders", {}) if proj is not None else {}
         excel = subfolders.get("excel") if isinstance(subfolders, dict) else None
         if excel:
@@ -504,7 +540,7 @@ class PublicationMapsWindow(QWidget):
     def _default_output_root(self) -> Path | None:
         if not self._project_root:
             return None
-        proj = getattr(self.parent(), "currentProject", None)
+        proj = getattr(self._embedded_host(), "currentProject", None)
         results_root = getattr(proj, "results_folder", self._project_root)
         results = Path(results_root)
         if not results.is_absolute():
@@ -541,24 +577,193 @@ class PublicationMapsWindow(QWidget):
             return excel_root
         return self._project_root or Path.home()
 
+    def _on_input_root_changed(self, _text: str) -> None:
+        self._dataset_index = None
+        self._conditions = ()
+        self._condition_counts = {}
+        self.group_combo.blockSignals(True)
+        try:
+            self.group_combo.clear()
+            self.group_combo.addItem("Refresh to load groups", None)
+        finally:
+            self.group_combo.blockSignals(False)
+        self.conditions_list.clear()
+        self.status_label.set_text(
+            "Project data path changed. Refresh project data before running."
+        )
+        self.status_label.set_variant("info")
+        self._update_run_state()
+
     def _refresh_conditions(self) -> None:
         root_text = self.input_root_edit.text().strip()
-        root = Path(root_text) if root_text else Path()
-        self._conditions = discover_conditions(root) if root_text else []
+        if not root_text:
+            self._dataset_index = None
+            self._conditions = ()
+            self._condition_counts = {}
+            self._populate_group_combo()
+            self.conditions_list.clear()
+            self.status_label.set_text("Select the active project's Excel folder.")
+            self.status_label.set_variant("info")
+            self._update_run_state()
+            return
+
+        try:
+            dataset_index = load_project_dataset_index(Path(root_text))
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Unable to load the Scalp Maps project dataset index.",
+                exc_info=exc,
+                extra={
+                    "operation": "publication_maps_dataset_index",
+                    "input_root": root_text,
+                },
+            )
+            self._dataset_index = None
+            self._conditions = ()
+            self._condition_counts = {}
+            self._populate_group_combo()
+            self.conditions_list.clear()
+            self.status_label.set_text(f"Project data could not be loaded: {exc}")
+            self.status_label.set_variant("error")
+            self._update_run_state()
+            return
+
+        active_project_mismatch = False
+        if self._project_root is not None:
+            try:
+                requested_root = Path(root_text).resolve(strict=False)
+                active_project_mismatch = (
+                    dataset_index.manifest is None
+                    or dataset_index.project_root.resolve(strict=False)
+                    != self._project_root.resolve(strict=False)
+                    or requested_root
+                    != dataset_index.excel_root.resolve(strict=False)
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                active_project_mismatch = True
+        if active_project_mismatch:
+            self._dataset_index = None
+            self._conditions = ()
+            self._condition_counts = {}
+            self._populate_group_combo()
+            self.conditions_list.clear()
+            self.status_label.set_text(
+                "Choose the active project's configured Excel folder. "
+                "Unmanaged data and folders from another project cannot be "
+                "used while a project is loaded."
+            )
+            self.status_label.set_variant("error")
+            self._update_run_state()
+            return
+
+        self._dataset_index = dataset_index
+        self._populate_group_combo()
+        self._populate_conditions_from_index()
+        self._set_ready_status()
+        self._update_run_state()
+
+    def _set_ready_status(self) -> None:
+        output_root_error = self._output_root_validation_error()
+        if output_root_error is not None:
+            self.status_label.set_text(output_root_error)
+            self.status_label.set_variant("error")
+            return
+        workbook_count = len(self._scoped_records())
+        group_count = len(self._request_groups())
+        self.status_label.set_text(
+            f"Ready: {workbook_count} indexed workbook(s) across "
+            f"{group_count} output group(s)."
+        )
+        self.status_label.set_variant("info")
+
+    def _populate_group_combo(self) -> None:
+        previous = self.group_combo.currentData()
+        dataset_index = self._dataset_index
+        self.group_combo.blockSignals(True)
+        try:
+            self.group_combo.clear()
+            if dataset_index is None:
+                self.group_combo.addItem("No project data loaded", None)
+                return
+            groups = dataset_index.ordered_groups
+            if not groups:
+                self.group_combo.addItem("Ungrouped dataset", None)
+                return
+            label_counts: dict[str, int] = {}
+            for group in groups:
+                key = group.label.casefold()
+                label_counts[key] = label_counts.get(key, 0) + 1
+            if len(groups) > 1:
+                self.group_combo.addItem(ALL_GROUPS_LABEL, ALL_GROUPS_VALUE)
+            for group in groups:
+                display = group.label
+                if label_counts[group.label.casefold()] > 1:
+                    display = f"{group.label} ({group.group_id})"
+                self.group_combo.addItem(display, group.group_id)
+            previous_index = self.group_combo.findData(previous)
+            self.group_combo.setCurrentIndex(
+                previous_index if previous_index >= 0 else 0
+            )
+        finally:
+            self.group_combo.blockSignals(False)
+
+    def _on_group_selection_changed(self) -> None:
+        if self._dataset_index is None:
+            self._update_run_state()
+            return
+        self._populate_conditions_from_index()
+        self._set_ready_status()
+        self._update_run_state()
+
+    def _request_groups(self) -> tuple[GroupInfo | None, ...]:
+        dataset_index = self._dataset_index
+        if dataset_index is None:
+            return ()
+        groups = dataset_index.ordered_groups
+        if not groups:
+            return (None,)
+        selected = self.group_combo.currentData()
+        if selected == ALL_GROUPS_VALUE:
+            return groups
+        group = dataset_index.groups.get(str(selected))
+        return (group,) if group is not None else ()
+
+    def _scoped_records(self) -> tuple[object, ...]:
+        dataset_index = self._dataset_index
+        if dataset_index is None:
+            return ()
+        groups = self._request_groups()
+        group_ids = tuple(group.group_id for group in groups if group is not None)
+        if group_ids:
+            return dataset_index.select(group_ids=group_ids)
+        return dataset_index.workbooks
+
+    def _populate_conditions_from_index(self) -> None:
+        previously_checked = set(self._selected_conditions())
+        had_conditions = self.conditions_list.count() > 0
+        counts: dict[str, int] = {}
+        for record in self._scoped_records():
+            condition = str(record.condition)
+            counts[condition] = counts.get(condition, 0) + 1
+        self._conditions = tuple(sorted(counts, key=str.casefold))
+        self._condition_counts = counts
         self.conditions_list.blockSignals(True)
         try:
             self.conditions_list.clear()
             for condition in self._conditions:
-                item = QListWidgetItem(f"{condition.name} ({len(condition.files)})")
-                item.setData(Qt.UserRole, condition.name)
+                item = QListWidgetItem(f"{condition} ({counts[condition]})")
+                item.setData(Qt.UserRole, condition)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked)
+                item.setCheckState(
+                    Qt.Checked
+                    if not had_conditions or condition in previously_checked
+                    else Qt.Unchecked
+                )
                 self.conditions_list.addItem(item)
         finally:
             self.conditions_list.blockSignals(False)
         self._sync_paired_condition_selectors()
         self._update_condition_summary()
-        self._update_run_state()
 
     def _set_all_conditions(self, checked: bool) -> None:
         self.conditions_list.blockSignals(True)
@@ -592,10 +797,13 @@ class PublicationMapsWindow(QWidget):
 
     def _update_condition_summary(self) -> None:
         selected_conditions = self._selected_conditions()
-        selected = set(selected_conditions)
-        total_files = sum(len(condition.files) for condition in self._conditions if condition.name in selected)
+        total_files = sum(
+            self._condition_counts.get(condition, 0)
+            for condition in selected_conditions
+        )
         self.conditions_summary.setText(
-            f"Selected conditions: {len(selected)} | Total files: {total_files}"
+            f"Selected conditions: {len(selected_conditions)} | "
+            f"Indexed workbooks: {total_files}"
         )
         if hasattr(self, "paired_figures_check"):
             self._sync_paired_condition_selectors(selected_conditions)
@@ -609,10 +817,38 @@ class PublicationMapsWindow(QWidget):
         self._update_condition_summary()
         ready = bool(self.input_root_edit.text().strip())
         ready = ready and bool(self.output_root_edit.text().strip())
+        ready = ready and self._dataset_index is not None
+        ready = ready and bool(self._request_groups())
         ready = ready and bool(self._selected_conditions())
         ready = ready and bool(self._selected_metrics())
         ready = ready and self._paired_conditions_valid()
+        ready = ready and self._output_root_validation_error() is None
         self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
+
+    def _on_output_root_changed(self, _text: str) -> None:
+        validation_error = self._output_root_validation_error()
+        if validation_error is not None:
+            self.status_label.set_text(validation_error)
+            self.status_label.set_variant("error")
+        elif self._dataset_index is not None:
+            self._set_ready_status()
+        self._update_run_state()
+
+    def _output_root_validation_error(self) -> str | None:
+        input_text = self.input_root_edit.text().strip()
+        output_text = self.output_root_edit.text().strip()
+        if not input_text or not output_text:
+            return None
+        request = PublicationMapRequest(
+            input_root=Path(input_text),
+            output_root=Path(output_text),
+            conditions=(),
+        )
+        try:
+            validate_output_root(request)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return str(exc)
+        return None
 
     def _sync_paired_condition_selectors(
         self,
@@ -758,6 +994,7 @@ class PublicationMapsWindow(QWidget):
     def _lockable_widgets(self) -> tuple[QWidget, ...]:
         return (
             self.input_root_row,
+            self.group_combo,
             self.refresh_btn,
             self.conditions_list,
             self.select_all_btn,
@@ -826,7 +1063,7 @@ class PublicationMapsWindow(QWidget):
         if not busy:
             self._update_run_state()
 
-    def _collect_request(self) -> PublicationMapRequest:
+    def _collect_requests(self) -> tuple[PublicationMapRequest, ...]:
         self._refresh_analysis_setting_labels()
         metrics = self._selected_metrics()
         color_bounds: dict[PublicationMetric, ColorBounds] = {}
@@ -856,45 +1093,49 @@ class PublicationMapsWindow(QWidget):
                 low_color=self.bca_low_color,
                 high_color=self.bca_high_color,
             )
-        return PublicationMapRequest(
-            input_root=Path(self.input_root_edit.text().strip()),
-            output_root=Path(self.output_root_edit.text().strip()),
-            conditions=self._selected_conditions(),
-            metrics=metrics,
-            color_bounds=color_bounds,
-            export_png=True,
-            export_pdf=True,
-            export_paired_figures=(
-                self.paired_figures_check.isChecked()
-                and len(self._selected_conditions()) >= 2
-                and self._paired_conditions_valid()
-            ),
-            paired_conditions=(
-                self._selected_paired_conditions()
-                if self.paired_figures_check.isChecked()
-                else ()
-            ),
-            project_root=self._project_root,
+        selected_conditions = self._selected_conditions()
+        paired_enabled = (
+            self.paired_figures_check.isChecked()
+            and len(selected_conditions) >= 2
+            and self._paired_conditions_valid()
+        )
+        return tuple(
+            PublicationMapRequest(
+                input_root=Path(self.input_root_edit.text().strip()),
+                output_root=Path(self.output_root_edit.text().strip()),
+                conditions=selected_conditions,
+                metrics=metrics,
+                color_bounds=color_bounds,
+                export_png=True,
+                export_pdf=True,
+                export_paired_figures=paired_enabled,
+                paired_conditions=(
+                    self._selected_paired_conditions() if paired_enabled else ()
+                ),
+                project_root=self._project_root,
+                group_id=None if group is None else group.group_id,
+                group_label=None if group is None else group.label,
+                group_folder=None if group is None else group.folder_name,
+            )
+            for group in self._request_groups()
         )
 
     def _start_run(self) -> None:
-        if self._thread is not None:
+        if self.has_active_generation():
             return
         if not self._selected_conditions():
-            show_error(self, "Scalp Maps", "Select at least one condition.")
+            self._show_validation_error("Select at least one condition.")
             return
         selected_metrics = self._selected_metrics()
         if not selected_metrics:
-            show_error(self, "Scalp Maps", "Select at least one metric.")
+            self._show_validation_error("Select at least one metric.")
             return
         if (
             PublicationMetric.BCA in selected_metrics
             and self.fixed_bca_range_check.isChecked()
             and not self._fixed_bca_range_is_valid()
         ):
-            show_error(
-                self,
-                "Scalp Maps",
+            self._show_validation_error(
                 "The upper BCA range limit must be greater than the lower limit.",
             )
             return
@@ -903,88 +1144,206 @@ class PublicationMapsWindow(QWidget):
             and self.fixed_snr_range_check.isChecked()
             and not self._fixed_snr_range_is_valid()
         ):
-            show_error(
-                self,
-                "Scalp Maps",
+            self._show_validation_error(
                 "The upper SNR range limit must be greater than the lower limit.",
             )
             return
         if self.paired_figures_check.isChecked() and not self._paired_conditions_valid():
-            show_error(
-                self,
-                "Scalp Maps",
+            self._show_validation_error(
                 "Select two different checked conditions for the paired scalp-map figure.",
             )
             return
-        request = self._collect_request()
+        requests = self._collect_requests()
+        if not requests:
+            self._show_validation_error(
+                "Refresh project data and select a canonical group before running."
+            )
+            return
+        output_root_error = self._output_root_validation_error()
+        if output_root_error is not None:
+            self._show_validation_error(output_root_error)
+            return
         self._last_generated_figure_count = 0
+        self._pending_outcome = None
+        self._cancel_requested = False
         self.log_box.clear()
         self.progress.setValue(0)
-        self.status_label.set_text("Starting...")
+        self.status_label.set_text(
+            f"Starting {len(requests)} group-scoped generation request(s)..."
+        )
         self.status_label.set_variant("info")
 
         self._thread = QThread()
-        self._worker = PublicationMapsWorker(request)
+        self._worker = PublicationMapsWorker(requests)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.progress.setValue)
         self._worker.message.connect(self._append_log)
-        self._worker.error.connect(self._on_worker_error)
         self._worker.finished.connect(self._on_worker_finished)
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.finished.connect(self._thread.quit)
         self._thread.finished.connect(self._cleanup_worker)
+        self._thread.finished.connect(self._thread.deleteLater)
         self._set_busy_state(True)
         self._thread.start()
 
     def _cancel_run(self) -> None:
+        if not self.has_active_generation() or self._cancel_requested:
+            return
+        self._cancel_requested = True
         if self._worker is not None:
-            self._worker.cancel()
-            self._append_log("Cancel requested.")
+            try:
+                self._worker.cancel()
+            except RuntimeError:
+                logger.debug(
+                    "Scalp Maps worker was released during cancellation.",
+                    exc_info=True,
+                )
+        self.cancel_btn.setEnabled(False)
+        self.status_label.set_variant("warning")
+        self._append_log(
+            "Cancellation requested; waiting for the active worker to stop."
+        )
 
-    def _append_log(self, message: str) -> None:
-        self.log_box.appendPlainText(message)
+    def has_active_generation(self) -> bool:
+        """Return whether this page still owns an unfinished worker lifecycle."""
+
+        return self._worker is not None or self._thread is not None
+
+    def shutdown(self) -> bool:
+        """Request cancellation and report whether destruction must be deferred."""
+
+        if not self.has_active_generation():
+            return False
+        self._cancel_run()
+        return True
+
+    def _show_validation_error(self, message: str) -> None:
         self.status_label.set_text(message)
-
-    def _on_worker_error(self, message: str) -> None:
-        self._append_log(message)
         self.status_label.set_variant("error")
-        show_error(self, "Scalp Maps error", message)
-        if self._thread is not None:
-            self._thread.quit()
-        else:
-            self._set_busy_state(False)
+        self._append_log(message, update_status=False)
 
-    def _on_worker_finished(self, result: object) -> None:
-        self.status_label.set_text("Complete.")
-        self.status_label.set_variant("success")
-        diagnostics = getattr(result, "diagnostics", [])
-        for diagnostic in diagnostics:
-            detail = f" ({diagnostic.detail})" if diagnostic.detail else ""
-            prefix = f"[{diagnostic.level}]"
-            location = " ".join(
-                part for part in (diagnostic.condition, diagnostic.workbook) if part
-            )
-            self._append_log(f"{prefix} {location} {diagnostic.message}{detail}".strip())
-        source_path = getattr(result, "source_workbook_path", None)
-        if source_path:
-            self._append_log(f"Source workbook: {source_path}")
-        figure_paths = list(getattr(result, "figure_paths", []))
-        self._last_generated_figure_count = len(figure_paths)
-        for path in figure_paths:
-            self._append_log(f"Figure: {path}")
-        self.progress.setValue(100)
+    def _append_log(self, message: str, *, update_status: bool = True) -> None:
+        self.log_box.appendPlainText(message)
+        if update_status:
+            self.status_label.set_text(message)
+
+    def _on_worker_finished(self, outcome: object) -> None:
+        if isinstance(outcome, PublicationMapsWorkerOutcome):
+            self._pending_outcome = outcome
+            return
+        self._pending_outcome = PublicationMapsWorkerOutcome.error(
+            "Scalp Maps returned an invalid worker outcome."
+        )
 
     def _cleanup_worker(self) -> None:
-        if self._worker is not None:
-            self._worker.deleteLater()
-        if self._thread is not None:
-            self._thread.deleteLater()
+        worker = self._worker
+        outcome = self._pending_outcome
+        if outcome is None and worker is not None:
+            candidate = getattr(worker, "outcome", None)
+            if isinstance(candidate, PublicationMapsWorkerOutcome):
+                outcome = candidate
         self._worker = None
         self._thread = None
+        self._pending_outcome = None
         self._set_busy_state(False)
-        if self._last_generated_figure_count > 0:
-            self._prompt_open_output_folder()
+        if outcome is None:
+            outcome = PublicationMapsWorkerOutcome.error(
+                "The Scalp Maps worker exited without a terminal outcome."
+            )
+        self._handle_worker_outcome(outcome)
+        self._cancel_requested = False
         self._last_generated_figure_count = 0
+        self.generation_idle.emit()
+
+    def _handle_worker_outcome(
+        self,
+        outcome: PublicationMapsWorkerOutcome,
+    ) -> None:
+        if outcome.status is PublicationMapsOutcomeStatus.CANCELLED:
+            self.status_label.set_text("Generation cancelled. No new output was published.")
+            self.status_label.set_variant("warning")
+            self._append_log(
+                "Generation cancelled. No new output was published.",
+                update_status=False,
+            )
+            return
+        if outcome.status is PublicationMapsOutcomeStatus.POST_PROCESSING_REQUIRED:
+            reason = outcome.message or "Saved post-processing outputs are missing or stale."
+            self.status_label.set_text(
+                "Post-processing is required before scalp maps can be generated."
+            )
+            self.status_label.set_variant("warning")
+            self._append_log(
+                f"Post-processing required: {reason}",
+                update_status=False,
+            )
+            if outcome.project_root:
+                self.post_processing_required.emit(
+                    "Scalp Maps",
+                    reason,
+                    outcome.project_root,
+                )
+            else:
+                show_error(
+                    self,
+                    "Scalp Maps error",
+                    "Load the affected project before rerunning post-processing.",
+                )
+            return
+        if outcome.status is PublicationMapsOutcomeStatus.ERROR:
+            message = outcome.message or "Scalp-map generation failed."
+            self.status_label.set_text(message)
+            self.status_label.set_variant("error")
+            self._append_log(message, update_status=False)
+            show_error(self, "Scalp Maps error", message)
+            return
+
+        for result in outcome.results:
+            group_label = getattr(result, "group_label", None)
+            group_prefix = f"[{group_label}] " if group_label else ""
+            for diagnostic in getattr(result, "diagnostics", []):
+                detail = f" ({diagnostic.detail})" if diagnostic.detail else ""
+                prefix = f"[{diagnostic.level}]"
+                location = " ".join(
+                    part
+                    for part in (diagnostic.condition, diagnostic.workbook)
+                    if part
+                )
+                self._append_log(
+                    f"{group_prefix}{prefix} {location} "
+                    f"{diagnostic.message}{detail}".strip(),
+                    update_status=False,
+                )
+            source_path = getattr(result, "source_workbook_path", None)
+            if source_path:
+                self._append_log(
+                    f"{group_prefix}Source workbook: {source_path}",
+                    update_status=False,
+                )
+            figure_paths = list(getattr(result, "figure_paths", []))
+            self._last_generated_figure_count += len(figure_paths)
+            for path in figure_paths:
+                self._append_log(
+                    f"{group_prefix}Figure: {path}",
+                    update_status=False,
+                )
+
+        self.progress.setValue(100)
+        if self._last_generated_figure_count <= 0:
+            message = "Scalp Maps completed without publishing any figure files."
+            self.status_label.set_text(message)
+            self.status_label.set_variant("error")
+            self._append_log(message, update_status=False)
+            show_error(self, "Scalp Maps error", message)
+            return
+        group_count = len(outcome.results)
+        self.status_label.set_text(
+            f"Complete: {self._last_generated_figure_count} figure file(s) "
+            f"for {group_count} group output(s)."
+        )
+        self.status_label.set_variant("success")
+        self._prompt_open_output_folder()
 
     def _prompt_open_output_folder(self) -> None:
         if confirm(

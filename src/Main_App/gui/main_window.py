@@ -730,6 +730,9 @@ class MainWindow(QMainWindow):
                 embedded=True,
             )
             page.setObjectName("embedded_publication_maps_page")
+            page.post_processing_required.connect(
+                self.request_post_processing_rebuild
+            )
             self.workspace_stack.addWidget(page)
             self._publication_maps_page = page
         return page
@@ -1032,6 +1035,31 @@ class MainWindow(QMainWindow):
                     self,
                     "SNR Plot Generation Is Stopping",
                     "Cancellation was requested. Wait for the active SNR plot "
+                    "worker to stop before closing FPVS Toolbox.",
+                )
+                event.ignore()
+                return
+        publication_maps_page = getattr(self, "_publication_maps_page", None)
+        if publication_maps_page is not None:
+            has_active_generation = getattr(
+                publication_maps_page,
+                "has_active_generation",
+                None,
+            )
+            try:
+                scalp_map_generation_running = bool(
+                    callable(has_active_generation) and has_active_generation()
+                )
+            except RuntimeError:
+                scalp_map_generation_running = False
+            if scalp_map_generation_running:
+                shutdown = getattr(publication_maps_page, "shutdown", None)
+                if callable(shutdown):
+                    shutdown()
+                QMessageBox.information(
+                    self,
+                    "Scalp Map Generation Is Stopping",
+                    "Cancellation was requested. Wait for the active Scalp Maps "
                     "worker to stop before closing FPVS Toolbox.",
                 )
                 event.ignore()

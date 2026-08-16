@@ -131,6 +131,18 @@ def _processing_cache_reset_is_busy(host: Any) -> bool:
                 return True
         except RuntimeError:
             continue
+    publication_maps_page = getattr(host, "_publication_maps_page", None)
+    has_active_generation = getattr(
+        publication_maps_page,
+        "has_active_generation",
+        None,
+    )
+    if callable(has_active_generation):
+        try:
+            if has_active_generation():
+                return True
+        except RuntimeError:
+            pass
     return False
 
 
@@ -402,10 +414,44 @@ def _retire_widget(widget: Any, *, workspace: Any, seen: set[int]) -> None:
             pass
 
 
-def reset_project_context_workspace(host: Any) -> None:
+def reset_project_context_workspace(host: Any) -> bool:
     """Discard project-bound embedded pages after the active project changes."""
     workspace = getattr(host, "workspace_stack", None)
     seen: set[int] = set()
+
+    publication_maps_page = getattr(host, "_publication_maps_page", None)
+    has_active_generation = getattr(
+        publication_maps_page,
+        "has_active_generation",
+        None,
+    )
+    try:
+        publication_maps_active = bool(
+            callable(has_active_generation) and has_active_generation()
+        )
+    except RuntimeError:
+        publication_maps_active = False
+    if publication_maps_active:
+        shutdown = getattr(publication_maps_page, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+        if not getattr(host, "_publication_maps_context_reset_pending", False):
+            idle_signal = getattr(publication_maps_page, "generation_idle", None)
+            connector = getattr(idle_signal, "connect", None)
+            if callable(connector):
+                host._publication_maps_context_reset_pending = True
+
+                def finish_deferred_reset() -> None:
+                    host._publication_maps_context_reset_pending = False
+                    reset_project_context_workspace(host)
+
+                connector(finish_deferred_reset)
+            else:
+                logger.error(
+                    "Active Scalp Maps page has no generation-idle signal; "
+                    "project workspace reset remains deferred."
+                )
+        return False
 
     settings_dialog = getattr(host, "_settings_dialog", None)
     if settings_dialog is not None:
@@ -442,6 +488,7 @@ def reset_project_context_workspace(host: Any) -> None:
     show_home_page = getattr(host, "show_home_page", None)
     if callable(show_home_page):
         show_home_page()
+    return True
 
 
 def load_project(

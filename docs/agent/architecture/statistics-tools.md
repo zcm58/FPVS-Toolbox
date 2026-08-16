@@ -39,9 +39,13 @@ Primary paths:
 - `src/Tools/Publication_Maps/`: embedded Scalp Maps tool. Current scope is
   BCA, SNR, and z-score publication scalp maps. It must load the authoritative
   processing-time significant-harmonic selection from project metadata; it must
-  not calculate or silently replace that list. It then aggregates exact selected
-  metric columns per electrode before condition-level averaging and
-  PNG/PDF/source-data export.
+  not calculate or silently replace that list. It discovers processed inputs
+  through `Main_App.projects.dataset_index`, selects exactly one canonical group
+  before aggregation, and treats an all-groups action as separate group-scoped
+  runs. It then aggregates exact selected metric columns per electrode before
+  condition-level averaging and transactional PNG/PDF/source-data export.
+  Requested input failures are fatal rather than partial-cohort success, and
+  missing montage sensors are omitted rather than converted to zero.
   Its GUI reads base frequency and BCA upper-limit values from Settings and
   exposes low/high BCA color selectors plus an optional fixed BCA colorbar
   range for rendered palette endpoints and scaling. Rendered labels use shared

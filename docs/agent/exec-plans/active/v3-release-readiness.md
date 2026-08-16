@@ -57,6 +57,19 @@ exclusions before derivative loading and sample-count selection. Large
 available-case omission sets use bounded log summaries while exact participant,
 condition, and reason rows remain in source validation artifacts.
 
+Scalp Maps release-closeout progress on 2026-08-16: managed runs now use the
+canonical processed-workbook index and exact project Excel root, resolve one
+group before aggregation, and route All groups to separate group folders.
+Active workbook/schema/value failures are fatal rather than silently reducing
+the cohort. Missing sensors are omitted instead of zero-filled, with minimum
+coverage enforced. Source workbooks carry exact cohort, harmonic, QC, toolbox,
+and contributing-file identities. Multi-group publication is transactional and
+cancellation is cooperative through worker exit; stale processing uses the
+shared recovery dialog. The focused Scalp Maps gate passed 73 tests, project
+I/O passed 83, and Stats passed 384. Repo precommit reached 1,713 passing tests
+and three skips; its four Windows sandbox-only named-pipe/memmap ACL failures
+all passed on an exact normal-ACL rerun.
+
 Baseline: `v2.1.2`. At the 2026-08-16 audit, `main` was 217 commits and 633
 changed files beyond that tag, while `src/config.py` still reported `2.1.2`.
 That scope warrants a major release rather than a patch release.
@@ -166,26 +179,26 @@ threshold/p-value rules, or relevant numerical dependencies change.
 
 #### Scalp Maps
 
-- [ ] Replace recursive condition-folder workbook discovery and filename-based
+- [x] Replace recursive condition-folder workbook discovery and filename-based
       participant inference with `Main_App.projects.dataset_index`.
-- [ ] Select one canonical `group_id` before aggregation. An all-groups action
+- [x] Select one canonical `group_id` before aggregation. An all-groups action
       must create separate group outputs; it must never pool groups implicitly.
-- [ ] Apply shared participant-condition exclusions, duplicate preference, and
+- [x] Apply shared participant-condition exclusions, duplicate preference, and
       dataset diagnostics. Hard-fail empty, unassigned, or ambiguous cohorts.
-- [ ] Add group ID/label, participant N, included/excluded identities, harmonic
+- [x] Add group ID/label, participant N, included/excluded identities, harmonic
       profile/list/fingerprint, QC provenance, toolbox version, and file hashes
       to source-data output.
-- [ ] Treat an unreadable active workbook, missing requested sheet, or missing
+- [x] Treat an unreadable active workbook, missing requested sheet, or missing
       exact harmonic column as a fatal requested-output error unless a future
       explicit partial-cohort mode is designed and visibly labelled.
-- [ ] Stop converting missing sensors to numerical zero. Either render only
+- [x] Stop converting missing sensors to numerical zero. Either render only
       defined channels with a documented coverage rule or block insufficient
       coverage; missing data must not affect interpolation or color scaling as
       if it were measured zero.
-- [ ] Make cancellation explicit and cooperative through reading, aggregation,
+- [x] Make cancellation explicit and cooperative through reading, aggregation,
       source export, and rendering. A cancelled run must not emit a normal
       completion result.
-- [ ] Add focused and CI-only GUI coverage for single/multi-group selection,
+- [x] Add focused and CI-only GUI coverage for single/multi-group selection,
       one-bad-workbook failure, sensor coverage, busy/navigation state,
       cancellation, and completion/error status.
 
@@ -251,7 +264,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Consolidate the three selected-column XLSX readers only after exact-value,
       column-order, missing-column, and performance characterization tests are
       in place.
-- [ ] Remove Scalp Maps' dependency on Plot Generator's private participant-ID
+- [x] Remove Scalp Maps' dependency on Plot Generator's private participant-ID
       parser by using canonical dataset records.
 - [ ] Share run/cancel/completion and output-folder behavior through existing
       PySide6 components where behavior is genuinely identical.

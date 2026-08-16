@@ -961,6 +961,16 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     (excel_dir / "CondA" / "P01_CondA_Results.xlsx").touch()
     (excel_dir / "CondB").mkdir()
     (excel_dir / "CondB" / "P01_CondB_Results.xlsx").touch()
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "name": "Scalp Maps layout smoke",
+                "subfolders": {"excel": "1 - Excel Data Files"},
+                "participants": {"P01": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
     win.currentProject = SimpleNamespace(
         project_root=project_root,
         input_folder=project_root,
@@ -1049,7 +1059,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.paired_condition_b_combo.currentText() == "CondB"
     assert page.paired_condition_a_combo.isEnabled()
     assert page.paired_condition_b_combo.isEnabled()
-    assert not page.status_label.isVisible()
+    assert page.status_label.isVisible()
     page._set_busy_state(True)
     qtbot.wait(20)
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -87,6 +87,9 @@ class PublicationMapRequest:
     paired_conditions: tuple[str, ...] = ()
     png_dpi: int = DEFAULT_FIGURE_DPI
     project_root: Path | None = None
+    group_id: str | None = None
+    group_label: str | None = None
+    group_folder: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,10 +101,12 @@ class Diagnostic:
     condition: str = ""
     workbook: str = ""
     detail: str = ""
+    code: str = ""
 
     def to_row(self) -> dict[str, str]:
         return {
             "level": self.level,
+            "code": self.code,
             "condition": self.condition,
             "workbook": self.workbook,
             "message": self.message,
@@ -125,6 +130,31 @@ class WorkbookEntry:
     condition: str
     subject_id: str
     path: Path
+    group_id: str | None = None
+    group_label: str | None = None
+    group_folder: str | None = None
+    sha256: str = ""
+    size_bytes: int | None = None
+    mtime_ns: int | None = None
+
+    @property
+    def participant_id(self) -> str:
+        """Return the canonical project participant identity."""
+
+        return self.subject_id
+
+
+@dataclass(frozen=True)
+class ExcludedCohortEntry:
+    """Canonical participant/workbook excluded from one map request."""
+
+    participant_id: str
+    condition: str
+    reason: str
+    path: Path | None = None
+    group_id: str | None = None
+    group_label: str | None = None
+    group_folder: str | None = None
 
 
 @dataclass
@@ -138,6 +168,24 @@ class PublicationMapResult:
     source_workbook_path: Path | None = None
     selected_harmonics_hz: tuple[float, ...] = ()
     selection_metadata: dict[str, object] = field(default_factory=dict)
+    group_id: str | None = None
+    group_label: str | None = None
+    group_folder: str | None = None
+    included_workbooks: tuple[WorkbookEntry, ...] = ()
+    excluded_cohort: tuple[ExcludedCohortEntry, ...] = ()
+    qc_provenance: dict[str, object] = field(default_factory=dict)
+
+
+class PublicationMapError(RuntimeError):
+    """Base error for a requested publication-map run."""
+
+
+class PublicationMapCohortError(PublicationMapError):
+    """Raised when canonical project cohort selection is unsafe or empty."""
+
+
+class PublicationMapInputError(PublicationMapError):
+    """Raised when an active requested workbook cannot supply exact inputs."""
 
 
 @dataclass(frozen=True)

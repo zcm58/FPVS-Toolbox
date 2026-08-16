@@ -10,6 +10,16 @@ Rules:
   API. Scalp Maps must never calculate, substitute, or silently refresh the
   processing-time list. Missing or stale metadata is a hard, user-actionable
   reprocess/recalculate error.
+- Processed-workbook discovery and participant/group identity must come from
+  `Main_App.projects.dataset_index`. Do not scan condition folders recursively,
+  infer participant IDs from filenames, or infer groups from output folders.
+- Resolve exactly one canonical `group_id` before participant aggregation. An
+  all-groups GUI action must run each canonical group separately and publish to
+  that group's validated output folder; it must never pool groups implicitly.
+- Apply the shared participant, participant-condition, and frequency-domain
+  exclusions before aggregation. Preserve dataset-index duplicate preference
+  and diagnostics, and reject empty, unassigned, or ambiguous requested
+  cohorts.
 - BCA summation and SNR averaging must use the exact selected `"{freq:.4f}_Hz"`
   columns, matching Stats behavior. Do not add nearest-column fallback.
 - Z-score maps read the `Z Score` sheet, use the exact selected
@@ -21,6 +31,22 @@ Rules:
 - Preserve signed BCA values in exported source data. Rendered BCA values may
   clip negative values to the low color, and the source workbook must make that
   visible.
+- An unreadable active workbook, missing requested sheet, missing Electrode
+  column, or missing exact selected harmonic column is fatal for the requested
+  output. Do not publish a silently reduced participant cohort.
+- Missing or non-finite montage sensors are missing data. Never replace them
+  with numerical zero. Render only finite defined sensors, require the
+  documented minimum non-collinear coverage, and exclude missing sensors from
+  interpolation and color scaling.
+- Source-data workbooks must identify the canonical group and cohort, selected
+  harmonics/profile/fingerprint, applied exclusions and diagnostics, toolbox
+  version, and contributing workbook identities/hashes. Grouped outputs must
+  not overwrite one another.
+- Generation is cooperative and transactional. Cancellation must be checked
+  through discovery, reading, aggregation, source export, and rendering; it
+  must produce a distinct cancelled outcome and must not publish a partial
+  artifact set or a normal completion result. Keep the worker/thread and host
+  navigation locked until the worker actually returns.
 - Visible figure titles should be condition names only. Selected harmonics,
   subject counts, and cache/source provenance belong in exports and diagnostics.
 - Single-condition and paired-condition figures should fit a standard US letter

@@ -115,9 +115,14 @@ manual_smoke = ["Open SNR Plots from the Main App and generate the changed plot 
 
 [scopes.publication-maps]
 audits = ["gui", "paths"]
-tests = ["tests/publication_maps/test_bca_publication_maps.py", "tests/publication_maps/test_xlsx_metric_reader.py"]
+tests = [
+  "tests/publication_maps/test_bca_publication_maps.py",
+  "tests/publication_maps/test_publication_maps_cohort.py",
+  "tests/publication_maps/test_publication_output_contract.py",
+  "tests/publication_maps/test_xlsx_metric_reader.py",
+]
 include = ["src/Tools/Publication_Maps/**", "tests/publication_maps/**"]
-manual_smoke = ["Open Scalp Maps from the Main App and generate the changed map type in a visible session."]
+manual_smoke = ["Open a managed multi-group project, launch Scalp Maps, verify the canonical Excel input is read-only, select All groups, and confirm each group publishes to its own folder. Start another run and cancel it; verify navigation remains locked until the worker exits and no partial workbook or figure pair is published. Confirm a stale harmonic selection offers the shared post-processing recovery action, an unreadable active workbook fails without a partial cohort, and missing sensors are reported rather than rendered as zero."]
 
 [scopes.ratio-calculator]
 audits = ["gui", "paths"]

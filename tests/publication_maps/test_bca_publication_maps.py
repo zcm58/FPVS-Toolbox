@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -22,6 +23,7 @@ from Tools.Publication_Maps import metrics as publication_map_metrics
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
 from Tools.Publication_Maps.excel_inputs import discover_conditions
+from Tools.Publication_Maps.generation_outcome import PublicationMapsOutcomeStatus
 from Tools.Publication_Maps.metrics import build_publication_map_result
 from Tools.Publication_Maps.models import (
     ColorBounds,
@@ -29,6 +31,7 @@ from Tools.Publication_Maps.models import (
     GRAND_AVERAGE_SHEET,
     LONG_VALUES_SHEET,
     PARAMETERS_SHEET,
+    PublicationMapInputError,
     PublicationMapRequest,
     PublicationMapResult,
     PublicationMetric,
@@ -40,6 +43,7 @@ from Tools.Publication_Maps.rendering import (
     _colorbar_text_kwargs,
     _combined_paired_layout_rects,
     _metric_limits,
+    _render_paired_topomap,
     _paired_condition_title_kwargs,
     _style_colorbar,
     colorbar_label_for_metric,
@@ -47,6 +51,7 @@ from Tools.Publication_Maps.rendering import (
     export_source_workbook,
     render_publication_figures,
 )
+from Tools.Publication_Maps.scalp_io import InsufficientSensorCoverageError
 from Tools.Publication_Maps.worker import PublicationMapsWorker
 from Tools.Stats.analysis.canonical_harmonics import CanonicalHarmonicSelectionError
 
@@ -74,6 +79,28 @@ def test_discovers_condition_workbooks_and_skips_excel_lock_files(tmp_path: Path
 
     assert [condition.name for condition in conditions] == ["Faces"]
     assert [path.name for path in conditions[0].files] == ["P01_Faces_Results.xlsx"]
+
+
+def test_paired_render_closes_figure_when_sensor_coverage_is_insufficient(
+    tmp_path: Path,
+) -> None:
+    values = pd.DataFrame({"electrode": ["O1"], "render_value": [1.0]})
+    open_figures = set(plt.get_fignums())
+
+    with pytest.raises(InsufficientSensorCoverageError):
+        _render_paired_topomap(
+            values,
+            values,
+            metric=PublicationMetric.BCA,
+            first_title="First",
+            second_title="Second",
+            output_path=tmp_path / "paired.png",
+            bounds=ColorBounds(),
+            dpi=600,
+            cancel_check=None,
+        )
+
+    assert set(plt.get_fignums()) == open_figures
 
 
 def test_bca_maps_use_stats_group_significant_selection_and_sum_per_electrode(
@@ -186,17 +213,11 @@ def test_snr_maps_report_missing_exact_selected_columns(tmp_path: Path) -> None:
         metrics=(PublicationMetric.SNR,),
     )
 
-    result = build_publication_map_result(request)
-
-    diagnostic = next(
-        diag
-        for diag in result.diagnostics
-        if diag.message == "Missing exact selected SNR harmonic columns."
-    )
-    assert diagnostic.workbook == workbook.name
-    assert "3.6000_Hz" in diagnostic.detail
-    assert result.long_values.empty
-    assert result.grand_average_values.empty
+    with pytest.raises(
+        PublicationMapInputError,
+        match=r"Missing exact selected SNR harmonic columns.*3\.6000_Hz",
+    ):
+        build_publication_map_result(request)
 
 
 def test_bca_maps_use_saved_processing_harmonic_cache(tmp_path: Path) -> None:
@@ -720,28 +741,60 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
     )
     calls: list[str] = []
 
-    def fake_build(seen_request: PublicationMapRequest) -> PublicationMapResult:
+    def fake_build(
+        seen_request: PublicationMapRequest,
+        *,
+        cancel_check,
+    ) -> PublicationMapResult:
         assert seen_request is request
+        cancel_check()
         calls.append("build")
         return result
 
     def fake_export(
         seen_result: PublicationMapResult,
         seen_request: PublicationMapRequest,
+        *,
+        cancel_check,
+        transaction,
     ) -> Path:
         assert seen_result is result
         assert seen_request is request
+        assert transaction is not None
+        cancel_check()
         calls.append("export")
         return seen_request.output_root / "Publication_Scalp_Maps_Source_Data.xlsx"
 
     def fake_render(
         seen_result: PublicationMapResult,
         seen_request: PublicationMapRequest,
+        *,
+        cancel_check,
+        transaction,
     ) -> list[Path]:
         assert seen_result is result
         assert seen_request is request
+        assert transaction is not None
+        cancel_check()
         calls.append("render")
         return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.pdf"]
+
+    class FakeTransaction:
+        def __init__(self, seen_request: PublicationMapRequest) -> None:
+            assert seen_request is request
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def ensure_request_target(self, seen_request: PublicationMapRequest) -> None:
+            assert seen_request is request
+
+        def commit(self, *, cancel_check) -> None:
+            cancel_check()
+            calls.append("commit")
 
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.build_publication_map_result",
@@ -749,6 +802,10 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
     )
     monkeypatch.setattr("Tools.Publication_Maps.worker.export_source_workbook", fake_export)
     monkeypatch.setattr("Tools.Publication_Maps.worker.render_publication_figures", fake_render)
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.PublicationArtifactTransaction",
+        FakeTransaction,
+    )
 
     worker = PublicationMapsWorker(request)
     progress: list[int] = []
@@ -762,17 +819,283 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
 
     worker.run()
 
-    assert calls == ["build", "export", "render"]
-    assert progress == [5, 55, 70, 100]
+    assert calls == ["build", "render", "export", "commit"]
+    assert progress == [5, 55, 80, 95, 100]
     assert messages == [
-        "Reading workbooks...",
-        "Writing source-data workbook...",
-        "Rendering scalp maps...",
-        "Complete.",
+        "[Ungrouped dataset] Reading indexed workbooks...",
+        "[Ungrouped dataset] Rendering scalp maps...",
+        "[Ungrouped dataset] Writing source-data workbook...",
+        "[Ungrouped dataset] Output staged.",
+        "Publishing the complete Scalp Maps output set...",
     ]
     assert errors == []
     assert len(finished) == 1
-    assert finished[0] is result
+    assert finished[0].status is PublicationMapsOutcomeStatus.SUCCESS
+    assert finished[0].results == (result,)
+
+
+def test_worker_rejects_distinct_groups_sharing_an_output_directory(
+    tmp_path: Path,
+) -> None:
+    request = PublicationMapRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=tmp_path,
+        group_id="control",
+        group_label="Control",
+        group_folder="Shared",
+    )
+
+    with pytest.raises(ValueError, match="unique output directories"):
+        PublicationMapsWorker(
+            (
+                request,
+                replace(
+                    request,
+                    group_id="clinical",
+                    group_label="Clinical",
+                ),
+            )
+        )
+
+
+def test_worker_commit_wins_when_cancel_arrives_after_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = PublicationMapRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=tmp_path,
+    )
+    result = PublicationMapResult(
+        long_values=pd.DataFrame(),
+        grand_average_values=pd.DataFrame(),
+    )
+    worker_holder: list[PublicationMapsWorker] = []
+
+    def fake_build(_request, *, cancel_check):
+        cancel_check()
+        return result
+
+    def fake_export(_result, _request, *, cancel_check, transaction):
+        cancel_check()
+        assert transaction is not None
+
+    def fake_render(_result, _request, *, cancel_check, transaction):
+        cancel_check()
+        assert transaction is not None
+        return [request.output_root / "Faces.pdf"]
+
+    class CommitThenCancelTransaction:
+        def __init__(self, _request) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def ensure_request_target(self, _request) -> None:
+            return None
+
+        def commit(self, *, cancel_check) -> None:
+            cancel_check()
+            worker_holder[0].cancel()
+
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.build_publication_map_result",
+        fake_build,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.export_source_workbook",
+        fake_export,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.render_publication_figures",
+        fake_render,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.PublicationArtifactTransaction",
+        CommitThenCancelTransaction,
+    )
+
+    worker = PublicationMapsWorker(request)
+    worker_holder.append(worker)
+    finished: list[object] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert len(finished) == 1
+    assert finished[0].status is PublicationMapsOutcomeStatus.SUCCESS
+    assert finished[0].results == (result,)
+
+
+def test_worker_does_not_publish_source_only_when_no_figure_is_renderable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = PublicationMapRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=tmp_path,
+    )
+    result = PublicationMapResult(
+        long_values=pd.DataFrame(),
+        grand_average_values=pd.DataFrame(),
+    )
+    calls: list[str] = []
+
+    def fake_build(_request, *, cancel_check):
+        cancel_check()
+        return result
+
+    def fake_render(_result, _request, *, cancel_check, transaction):
+        cancel_check()
+        assert transaction is not None
+        calls.append("render")
+        return []
+
+    def unexpected_export(*_args, **_kwargs):
+        pytest.fail("Source export must not run when no figure is renderable.")
+
+    class FakeTransaction:
+        def __init__(self, _request) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, *_args) -> None:
+            assert exc_type is PublicationMapInputError
+            calls.append("abort")
+
+        def ensure_request_target(self, _request) -> None:
+            return None
+
+        def commit(self, **_kwargs) -> None:
+            pytest.fail("A source-only transaction must not be committed.")
+
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.build_publication_map_result",
+        fake_build,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.render_publication_figures",
+        fake_render,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.export_source_workbook",
+        unexpected_export,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.PublicationArtifactTransaction",
+        FakeTransaction,
+    )
+    worker = PublicationMapsWorker(request)
+    finished: list[object] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert calls == ["render", "abort"]
+    assert len(finished) == 1
+    assert finished[0].status is PublicationMapsOutcomeStatus.ERROR
+    assert "No renderable scalp-map figures" in finished[0].message
+
+
+def test_worker_emits_distinct_cancelled_outcome_before_work(tmp_path: Path) -> None:
+    request = PublicationMapRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=tmp_path,
+    )
+    worker = PublicationMapsWorker(request)
+    finished: list[object] = []
+    errors: list[str] = []
+    worker.finished.connect(finished.append)
+    worker.error.connect(errors.append)
+
+    worker.cancel()
+    worker.run()
+
+    assert len(finished) == 1
+    assert finished[0].status is PublicationMapsOutcomeStatus.CANCELLED
+    assert finished[0].results == ()
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    ("worker_error", "expected_status"),
+    [
+        (
+            PublicationMapInputError("Requested workbook is corrupt."),
+            PublicationMapsOutcomeStatus.ERROR,
+        ),
+        (
+            CanonicalHarmonicSelectionError(
+                "Saved harmonic selection is stale.",
+                reason="missing_processing_selection",
+            ),
+            PublicationMapsOutcomeStatus.POST_PROCESSING_REQUIRED,
+        ),
+    ],
+)
+def test_worker_distinguishes_error_from_post_processing_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    worker_error: Exception,
+    expected_status: PublicationMapsOutcomeStatus,
+) -> None:
+    request = PublicationMapRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=tmp_path,
+    )
+
+    class FakeTransaction:
+        def __init__(self, _request) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def ensure_request_target(self, _request) -> None:
+            return None
+
+    def fail_build(_request, *, cancel_check):
+        cancel_check()
+        raise worker_error
+
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.PublicationArtifactTransaction",
+        FakeTransaction,
+    )
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.build_publication_map_result",
+        fail_build,
+    )
+    worker = PublicationMapsWorker(request)
+    finished: list[object] = []
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert len(finished) == 1
+    assert finished[0].status is expected_status
+    assert finished[0].message == str(worker_error)
+    if expected_status is PublicationMapsOutcomeStatus.POST_PROCESSING_REQUIRED:
+        assert finished[0].project_root == str(tmp_path.resolve(strict=False))
 
 
 def _write_project_workbooks(
@@ -793,6 +1116,7 @@ def _write_project_workbooks(
                 "event_map": {
                     condition: index for index, condition in enumerate(conditions, start=1)
                 },
+                "participants": {subject: {} for subject in subjects},
                 "preprocessing": {},
             },
             indent=2,
@@ -833,47 +1157,62 @@ def _write_group_policy_workbook(
         fft_values.append(base_noise)
     full_fft = pd.DataFrame(
         {
-            f"{freq:.4f}_Hz": [value, value, value]
+            f"{freq:.4f}_Hz": [value, value, value, value]
             for freq, value in zip(frequency_values, fft_values)
         },
-        index=["O1", "O2", "FZ"],
+        index=["O1", "O2", "FZ", "F3"],
     )
     full_fft.index.name = "Electrode"
 
     bca = pd.DataFrame(
         {
-            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5 * scale],
-            "2.4000_Hz": [100.0, 100.0, 100.0],
-            "3.6000_Hz": [0.5, 0.5, 0.1],
-            "4.8000_Hz": [100.0, 100.0, 100.0],
-            "6.0000_Hz": [100.0, 100.0, 100.0],
-            "7.2000_Hz": [1.0, 1.0, 0.1],
+            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5 * scale, 0.25 * scale],
+            "2.4000_Hz": [100.0, 100.0, 100.0, 100.0],
+            "3.6000_Hz": [0.5, 0.5, 0.1, 0.1],
+            "4.8000_Hz": [100.0, 100.0, 100.0, 100.0],
+            "6.0000_Hz": [100.0, 100.0, 100.0, 100.0],
+            "7.2000_Hz": [1.0, 1.0, 0.1, 0.1],
         },
-        index=["O1", "O2", "FZ"],
+        index=["O1", "O2", "FZ", "F3"],
     )
     bca.index.name = "Electrode"
     snr = pd.DataFrame(
         {
-            "1.2000_Hz": [1.0 + 0.1 * scale, 1.2 + 0.1 * scale, 1.4 + 0.1 * scale],
-            "2.4000_Hz": [9.0, 9.0, 9.0],
-            "3.6000_Hz": [1.2 + 0.1 * scale, 1.4 + 0.1 * scale, 1.6 + 0.1 * scale],
-            "4.8000_Hz": [9.0, 9.0, 9.0],
-            "6.0000_Hz": [9.0, 9.0, 9.0],
-            "7.2000_Hz": [1.4 + 0.1 * scale, 1.6 + 0.1 * scale, 1.8 + 0.1 * scale],
+            "1.2000_Hz": [
+                1.0 + 0.1 * scale,
+                1.2 + 0.1 * scale,
+                1.4 + 0.1 * scale,
+                1.1 + 0.1 * scale,
+            ],
+            "2.4000_Hz": [9.0, 9.0, 9.0, 9.0],
+            "3.6000_Hz": [
+                1.2 + 0.1 * scale,
+                1.4 + 0.1 * scale,
+                1.6 + 0.1 * scale,
+                1.3 + 0.1 * scale,
+            ],
+            "4.8000_Hz": [9.0, 9.0, 9.0, 9.0],
+            "6.0000_Hz": [9.0, 9.0, 9.0, 9.0],
+            "7.2000_Hz": [
+                1.4 + 0.1 * scale,
+                1.6 + 0.1 * scale,
+                1.8 + 0.1 * scale,
+                1.5 + 0.1 * scale,
+            ],
         },
-        index=["O1", "O2", "FZ"],
+        index=["O1", "O2", "FZ", "F3"],
     )
     snr.index.name = "Electrode"
     z_score = pd.DataFrame(
         {
-            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5 * scale],
-            "2.4000_Hz": [9.0, 9.0, 9.0],
-            "3.6000_Hz": [2.0, 1.0, 0.5],
-            "4.8000_Hz": [9.0, 9.0, 9.0],
-            "6.0000_Hz": [9.0, 9.0, 9.0],
-            "7.2000_Hz": [3.0, 2.0, 1.0],
+            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5 * scale, 0.25 * scale],
+            "2.4000_Hz": [9.0, 9.0, 9.0, 9.0],
+            "3.6000_Hz": [2.0, 1.0, 0.5, 0.25],
+            "4.8000_Hz": [9.0, 9.0, 9.0, 9.0],
+            "6.0000_Hz": [9.0, 9.0, 9.0, 9.0],
+            "7.2000_Hz": [3.0, 2.0, 1.0, 0.5],
         },
-        index=["O1", "O2", "FZ"],
+        index=["O1", "O2", "FZ", "F3"],
     )
     z_score.index.name = "Electrode"
     with pd.ExcelWriter(path, engine="openpyxl") as writer:

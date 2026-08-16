@@ -14,18 +14,22 @@ conditions using the significant-harmonic list saved when processing completed.
 
 <h3>Typical Workflow</h3>
 <p>
-Select the Excel root folder, choose one or more conditions, confirm metric and
-color-scale options, and run the export. When two conditions are selected, the
-paired condition figure option creates side-by-side maps for easier visual
-comparison. If the processing-time harmonic selection is missing or stale,
-reprocess the project or recalculate harmonic selection from Settings.
+Open a managed project, choose one canonical group (or All groups for separate
+group outputs), select one or more conditions, confirm metric and color-scale
+options, and run the export. The project&apos;s canonical processed-Excel root is
+selected automatically and cannot be narrowed to a subgroup folder. When two
+conditions are selected, the paired condition figure option creates
+side-by-side maps for easier visual comparison. If processing-time harmonic
+selection is missing or stale, the Post-processing Required dialog can launch
+the shared rebuild workflow; EEG preprocessing is not repeated.
 </p>
 
 <h3>Output Notes</h3>
 <p>
 The tool writes matching high-resolution PNG and PDF figure assets plus a
-source workbook. Fixed color ranges are useful when comparing conditions across
-the same manuscript figure set.
+source workbook. Multi-group projects write each group into its own named
+output folder and never pool groups implicitly. Fixed color ranges are useful
+when comparing conditions across the same manuscript figure set.
 </p>
 """
 

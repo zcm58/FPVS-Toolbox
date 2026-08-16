@@ -14,7 +14,9 @@ project results folder unless you choose another location.
 ## Inputs
 
 Select one or more processed conditions, the metrics to draw, and the output
-folder. Scalp Maps loads the project-wide significant-harmonic list that FPVS
+folder. In a multi-group project, select one group or choose all groups to
+create a separate output set for each group. Groups are never pooled into one
+map. Scalp Maps loads the project-wide significant-harmonic list that FPVS
 Toolbox saved when processing completed. Selecting fewer conditions or applying
 display exclusions does not recalculate or replace that list.
 
@@ -31,7 +33,9 @@ relevant sheets:
 - `Z Score` for z-score maps.
 
 Workbooks missing exact selected columns are reported rather than matched to a
-nearby frequency.
+nearby frequency. An unreadable active workbook or a missing requested sheet,
+electrode column, or exact harmonic column stops that requested run; the tool
+does not silently publish a reduced participant cohort.
 
 ## How Values Are Combined
 
@@ -42,8 +46,10 @@ nearby frequency.
 - Z-scores are combined as `sum(z) / sqrt(K)`, where `K` is the number of
   selected harmonics, then averaged across participants.
 
-Frequency-domain participant and electrode exclusions recorded by the project
-are applied before aggregation.
+Project participant, participant-condition, and frequency-domain participant
+and electrode exclusions are applied before aggregation. Canonical participant
+and group identity comes from `project.json` through the shared processed-data
+index, not from filenames or folder names.
 
 ## Figure Options
 
@@ -62,14 +68,23 @@ the signed values remain in the source-data workbook.
 ## Outputs
 
 The tool writes matching 600-DPI `.png` and `.pdf` figures and
-`Publication_Scalp_Maps_Source_Data.xlsx`. The source workbook contains long-form
-participant values, grand-average plotted values, selection parameters, and
-diagnostics. Keep it with the figures so the plotted values and harmonic policy
-remain auditable.
+`Publication_Scalp_Maps_Source_Data.xlsx`. For multi-group projects, each group
+gets its own canonical output folder. The source workbook contains long-form
+participant values, grand-average plotted values, group and cohort identity,
+included and excluded participants, selected harmonic profile/list/fingerprint,
+QC provenance, toolbox version, contributing-file hashes, and diagnostics.
+Keep it with the figures so the plotted values and harmonic policy remain
+auditable.
 
-Scalp topographies interpolate measurements across electrodes. They show the
-sensor-space distribution and should not be described as anatomical source
-locations.
+Generation is transactional: cancelling or encountering an error does not
+publish a partial set of figures/source data. The Generate action and project
+navigation remain locked until the active worker has actually stopped.
+
+Scalp topographies interpolate measurements across electrodes. Missing or
+non-finite sensors are omitted rather than converted to zero, and a map is
+blocked when too few non-collinear sensors remain for stable interpolation.
+They show the sensor-space distribution and should not be described as
+anatomical source locations.
 
 ## References
 

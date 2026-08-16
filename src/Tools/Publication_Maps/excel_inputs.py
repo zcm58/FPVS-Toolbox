@@ -8,8 +8,13 @@ from typing import Iterable
 
 import pandas as pd
 
-from Main_App.Shared.file_filters import is_excel_workbook_file
-from Tools.Plot_Generator.excel_inputs import _infer_subject_id_from_path
+from Main_App.projects import (
+    DatasetIndexError,
+    GroupInfo,
+    ProjectDatasetIndex,
+    WorkbookRecord,
+    load_project_dataset_index,
+)
 from Tools.Publication_Maps.models import ConditionInfo, FrequencyColumn, WorkbookEntry
 
 BCA_SHEET = "BCA (uV)"
@@ -21,19 +26,178 @@ _FREQUENCY_TOLERANCE_HZ = 0.00005
 
 
 def discover_conditions(input_root: Path) -> list[ConditionInfo]:
-    """Return condition folders with workbook counts under an Excel root."""
+    """Return canonical indexed conditions with active workbook counts."""
 
     root = Path(input_root)
     if not root.exists():
         return []
-    conditions: list[ConditionInfo] = []
-    for child in sorted(root.iterdir(), key=lambda path: path.name.lower()):
-        if not child.is_dir():
-            continue
-        files = tuple(_iter_excel_files(child))
-        if files:
-            conditions.append(ConditionInfo(name=child.name, path=child, files=files))
-    return conditions
+    try:
+        index = load_project_dataset_index(root)
+    except DatasetIndexError:
+        return []
+    records_by_condition: dict[str, list[WorkbookRecord]] = {}
+    for record in index.workbooks:
+        records_by_condition.setdefault(record.condition, []).append(record)
+    return [
+        ConditionInfo(
+            name=condition,
+            path=index.excel_root / condition,
+            files=tuple(record.path for record in records),
+        )
+        for condition, records in sorted(
+            records_by_condition.items(),
+            key=lambda item: item[0].casefold(),
+        )
+    ]
+
+
+def load_publication_dataset_index(
+    input_root: str | Path,
+    *,
+    project_root: str | Path | None = None,
+) -> ProjectDatasetIndex:
+    """Load the shared index and bind managed input to the active project."""
+
+    index = load_project_dataset_index(input_root)
+    if project_root in (None, ""):
+        return index
+    expected_root = Path(project_root).expanduser().resolve(strict=False)
+    if index.manifest is None:
+        raise DatasetIndexError(
+            f"Scalp Maps input must be inside the active project's configured Excel root: {expected_root}"
+        )
+    indexed_root = index.project_root.expanduser().resolve(strict=False)
+    if indexed_root != expected_root:
+        raise DatasetIndexError(
+            f"Scalp Maps input belongs to a different project: {indexed_root} (active project: {expected_root})."
+        )
+    requested_root = Path(input_root).expanduser().resolve(strict=False)
+    canonical_excel_root = index.excel_root.expanduser().resolve(strict=False)
+    if requested_root != canonical_excel_root:
+        raise DatasetIndexError(
+            "Scalp Maps input must be the active project's exact configured "
+            f"Excel root: {canonical_excel_root}."
+        )
+    return index
+
+
+def resolve_publication_group(
+    index: ProjectDatasetIndex,
+    *,
+    group_id: str | None = None,
+    group_label: str | None = None,
+    group_folder: str | None = None,
+) -> GroupInfo | None:
+    """Resolve exactly one canonical project group for aggregation."""
+
+    requested_id = str(group_id or "").strip()
+    requested_label = str(group_label or "").strip()
+    requested_folder = str(group_folder or "").strip()
+    ordered_groups = index.ordered_groups
+    if not ordered_groups:
+        if requested_id or requested_label or requested_folder:
+            raise DatasetIndexError("This project has no canonical group metadata for the requested Scalp Maps group.")
+        return None
+
+    if not requested_id:
+        if len(ordered_groups) > 1:
+            raise DatasetIndexError(
+                "Select one canonical project group before generating Scalp Maps. "
+                "An all-groups action must run each group separately."
+            )
+        group = ordered_groups[0]
+    else:
+        matches = [group for group in ordered_groups if group.group_id.casefold() == requested_id.casefold()]
+        if not matches:
+            raise DatasetIndexError(f"Unknown canonical project group_id: {requested_id}.")
+        group = matches[0]
+
+    if requested_label and requested_label != group.label:
+        raise DatasetIndexError(f"Selected group label changed for {group.group_id}; reopen Scalp Maps.")
+    if requested_folder and requested_folder != group.folder_name:
+        raise DatasetIndexError(f"Selected group output folder changed for {group.group_id}; reopen Scalp Maps.")
+    return group
+
+
+def select_publication_workbooks(
+    index: ProjectDatasetIndex,
+    conditions: Iterable[str],
+    *,
+    excluded_subjects: Iterable[str] = (),
+    group_id: str | None = None,
+    group_label: str | None = None,
+    group_folder: str | None = None,
+) -> tuple[tuple[WorkbookEntry, ...], GroupInfo | None]:
+    """Select active canonical workbook records for one group-scoped run."""
+
+    requested_conditions = tuple(
+        dict.fromkeys(str(condition).strip() for condition in conditions if str(condition).strip())
+    )
+    if not requested_conditions:
+        raise DatasetIndexError("Select at least one condition for Scalp Maps.")
+    _require_requested_group_assignments(index, requested_conditions)
+    group = resolve_publication_group(
+        index,
+        group_id=group_id,
+        group_label=group_label,
+        group_folder=group_folder,
+    )
+    records = index.select(
+        conditions=requested_conditions,
+        group_ids=None if group is None else (group.group_id,),
+        require_nonempty_groups=False,
+    )
+    excluded = {str(subject).strip().casefold() for subject in excluded_subjects if str(subject).strip()}
+    records = tuple(record for record in records if record.participant_id.casefold() not in excluded)
+    present_conditions = {record.condition.casefold() for record in records}
+    empty_conditions = [
+        condition for condition in requested_conditions if condition.casefold() not in present_conditions
+    ]
+    if empty_conditions:
+        scope = ""
+        if group is not None:
+            scope = f" for group {group.group_id}"
+        raise DatasetIndexError(
+            f"No active canonical workbooks remain{scope} for condition(s): {', '.join(empty_conditions)}."
+        )
+    canonical_folder = None if group is None else group.folder_name
+    entries = tuple(
+        WorkbookEntry(
+            condition=record.condition,
+            subject_id=record.participant_id,
+            path=record.path,
+            group_id=record.group_id,
+            group_label=record.group_label,
+            group_folder=canonical_folder,
+        )
+        for record in records
+    )
+    return entries, group
+
+
+def _require_requested_group_assignments(
+    index: ProjectDatasetIndex,
+    requested_conditions: tuple[str, ...],
+) -> None:
+    """Reject ambiguous active cohorts only within the requested conditions."""
+
+    if not index.has_group_metadata:
+        return
+    condition_keys = {condition.casefold() for condition in requested_conditions}
+    unassigned = sorted(
+        {
+            record.participant_id
+            for record in index.workbooks
+            if record.condition.casefold() in condition_keys and record.group_id is None
+        },
+        key=str.casefold,
+    )
+    if unassigned:
+        raise DatasetIndexError(
+            "Grouped project workbook identity is incomplete for the requested "
+            "Scalp Maps condition(s): participants without a canonical group "
+            "assignment: " + ", ".join(unassigned)
+        )
 
 
 def discover_workbooks(
@@ -41,38 +205,26 @@ def discover_workbooks(
     conditions: Iterable[str],
     *,
     excluded_subjects: Iterable[str] = (),
+    project_root: str | Path | None = None,
+    group_id: str | None = None,
+    group_label: str | None = None,
+    group_folder: str | None = None,
 ) -> list[WorkbookEntry]:
-    """Return selected workbooks under condition folders."""
+    """Return shared-index workbooks for one canonical group scope."""
 
-    root = Path(input_root)
-    excluded = {str(subject).strip().upper() for subject in excluded_subjects}
-    entries: list[WorkbookEntry] = []
-    for condition in conditions:
-        condition_name = str(condition)
-        condition_dir = root / condition_name
-        if not condition_dir.is_dir():
-            continue
-        for workbook in _iter_excel_files(condition_dir):
-            subject_id = _infer_subject_id_from_path(workbook) or workbook.stem.upper()
-            if subject_id.upper() in excluded:
-                continue
-            entries.append(
-                WorkbookEntry(
-                    condition=condition_name,
-                    subject_id=subject_id,
-                    path=workbook,
-                )
-            )
-    return entries
-
-
-def _iter_excel_files(folder: Path) -> list[Path]:
-    files = [
-        path
-        for path in folder.rglob("*.xlsx")
-        if path.is_file() and is_excel_workbook_file(path)
-    ]
-    return sorted(files, key=lambda path: str(path).lower())
+    index = load_publication_dataset_index(
+        input_root,
+        project_root=project_root,
+    )
+    entries, _group = select_publication_workbooks(
+        index,
+        conditions,
+        excluded_subjects=excluded_subjects,
+        group_id=group_id,
+        group_label=group_label,
+        group_folder=group_folder,
+    )
+    return list(entries)
 
 
 def parse_frequency_column_name(column: object) -> float | None:

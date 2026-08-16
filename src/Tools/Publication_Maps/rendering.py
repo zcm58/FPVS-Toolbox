@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib
@@ -29,11 +31,23 @@ from Tools.Publication_Maps.models import (
     ColorBounds,
     DEFAULT_Z_SCORE_THRESHOLD,
     Diagnostic,
+    PublicationMapInputError,
     PublicationMapRequest,
     PublicationMapResult,
     PublicationMetric,
 )
+from Tools.Publication_Maps.output_contract import (
+    PublicationArtifactTransaction,
+    request_output_root,
+)
 from Tools.Publication_Maps.scalp_io import align_render_values
+from Tools.Publication_Maps.source_provenance import (
+    COHORT_SHEET,
+    PROVENANCE_SHEET,
+    SENSOR_COVERAGE_SHEET,
+    SOURCE_FILES_SHEET,
+    build_source_workbook_frames,
+)
 
 apply_matplotlib_figure_style()
 
@@ -64,26 +78,137 @@ BCA_COLORBAR_LABEL = "Baseline-corrected amplitude (µV)"
 def export_source_workbook(
     result: PublicationMapResult,
     request: PublicationMapRequest,
+    *,
+    cancel_check: Callable[[], None] | None = None,
+    transaction: PublicationArtifactTransaction | None = None,
 ) -> Path:
-    """Write long values, grand averages, diagnostics, and parameters."""
+    """Stage a complete, auditable source workbook for atomic publication."""
 
-    request.output_root.mkdir(parents=True, exist_ok=True)
-    workbook_path = request.output_root / SOURCE_WORKBOOK_NAME
-    diagnostics_df = pd.DataFrame([diag.to_row() for diag in result.diagnostics])
-    requested_metrics = _request_metrics(request)
-    metric_params = _metric_parameter_rows(request, requested_metrics)
-    params_df = pd.DataFrame(
+    effective_request = _request_with_result_group(request, result)
+    owns_transaction = transaction is None
+    active_transaction = transaction or PublicationArtifactTransaction(effective_request)
+    try:
+        active_transaction.ensure_request_target(effective_request)
+        _checkpoint(cancel_check)
+        frames = build_source_workbook_frames(
+            result,
+            effective_request,
+            cancel_check=cancel_check,
+        )
+        diagnostics_df = pd.DataFrame([diag.to_row() for diag in result.diagnostics])
+        requested_metrics = _request_metrics(effective_request)
+        metric_params = _metric_parameter_rows(effective_request, requested_metrics)
+        final_root = request_output_root(effective_request)
+        workbook_path = final_root / SOURCE_WORKBOOK_NAME
+        staged_path = active_transaction.stage_path(workbook_path)
+        params_df = _source_parameter_frame(
+            result,
+            effective_request,
+            requested_metrics=requested_metrics,
+            metric_params=metric_params,
+            output_root=final_root,
+            source_file_count=len(frames.source_files),
+            cohort=frames.cohort,
+        )
+        with pd.ExcelWriter(staged_path) as writer:
+            _write_source_sheet(
+                writer,
+                frames.long_values,
+                sheet_name=LONG_VALUES_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                frames.grand_average_values,
+                sheet_name=GRAND_AVERAGE_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                frames.cohort,
+                sheet_name=COHORT_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                frames.source_files,
+                sheet_name=SOURCE_FILES_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                frames.provenance,
+                sheet_name=PROVENANCE_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                frames.sensor_coverage,
+                sheet_name=SENSOR_COVERAGE_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                diagnostics_df,
+                sheet_name=DIAGNOSTICS_SHEET,
+                cancel_check=cancel_check,
+            )
+            _write_source_sheet(
+                writer,
+                params_df,
+                sheet_name=PARAMETERS_SHEET,
+                cancel_check=cancel_check,
+            )
+        _checkpoint(cancel_check)
+        result.source_workbook_path = workbook_path
+        if owns_transaction:
+            active_transaction.commit(cancel_check=cancel_check)
+        return workbook_path
+    except Exception:  # Transaction boundary: discard staging for any writer/cancel failure.
+        if owns_transaction:
+            active_transaction.abort()
+        raise
+
+
+def _source_parameter_frame(
+    result: PublicationMapResult,
+    request: PublicationMapRequest,
+    *,
+    requested_metrics: tuple[PublicationMetric, ...],
+    metric_params: list[dict[str, object]],
+    output_root: Path,
+    source_file_count: int,
+    cohort: pd.DataFrame,
+) -> pd.DataFrame:
+    included = cohort[cohort["disposition"].eq("included")] if not cohort.empty else cohort
+    participant_n = int(included["participant_id"].replace("", np.nan).nunique()) if not included.empty else 0
+    selection_metadata = result.selection_metadata
+    return pd.DataFrame(
         [
             {"key": "input_root", "value": str(request.input_root)},
-            {"key": "output_root", "value": str(request.output_root)},
+            {"key": "output_root", "value": str(output_root)},
+            {"key": "group_id", "value": getattr(request, "group_id", "") or ""},
+            {"key": "group_label", "value": getattr(request, "group_label", "") or ""},
+            {"key": "group_folder", "value": getattr(request, "group_folder", "") or ""},
+            {"key": "included_participant_n", "value": participant_n},
+            {"key": "source_file_count", "value": int(source_file_count)},
             {"key": "conditions", "value": "; ".join(request.conditions)},
             {
                 "key": "metrics",
                 "value": "; ".join(metric.value for metric in requested_metrics),
             },
+            {"key": "harmonic_source", "value": "processing_time_project_selection"},
             {
-                "key": "harmonic_source",
-                "value": "processing_time_project_selection",
+                "key": "harmonic_selection_profile",
+                "value": selection_metadata.get("harmonic_selection_profile", ""),
+            },
+            {
+                "key": "harmonic_selection_profile_version",
+                "value": selection_metadata.get("harmonic_selection_profile_version", ""),
+            },
+            {
+                "key": "selection_fingerprint",
+                "value": selection_metadata.get("selection_fingerprint", ""),
             },
             {
                 "key": "selected_harmonics_hz",
@@ -91,24 +216,29 @@ def export_source_workbook(
             },
             {
                 "key": "base_frequency_hz",
-                "value": result.selection_metadata.get("base_frequency_hz", ""),
+                "value": selection_metadata.get("base_frequency_hz", ""),
             },
             *metric_params,
             {"key": "export_paired_figures", "value": request.export_paired_figures},
             {"key": "paired_conditions", "value": "; ".join(request.paired_conditions)},
             {
                 "key": "selection_cache_source",
-                "value": result.selection_metadata.get("selection_cache_source", ""),
+                "value": selection_metadata.get("selection_cache_source", ""),
             },
         ]
     )
-    with pd.ExcelWriter(workbook_path) as writer:
-        result.long_values.to_excel(writer, sheet_name=LONG_VALUES_SHEET, index=False)
-        result.grand_average_values.to_excel(writer, sheet_name=GRAND_AVERAGE_SHEET, index=False)
-        diagnostics_df.to_excel(writer, sheet_name=DIAGNOSTICS_SHEET, index=False)
-        params_df.to_excel(writer, sheet_name=PARAMETERS_SHEET, index=False)
-    result.source_workbook_path = workbook_path
-    return workbook_path
+
+
+def _write_source_sheet(
+    writer: pd.ExcelWriter,
+    frame: pd.DataFrame,
+    *,
+    sheet_name: str,
+    cancel_check: Callable[[], None] | None,
+) -> None:
+    _checkpoint(cancel_check)
+    frame.to_excel(writer, sheet_name=sheet_name, index=False)
+    _checkpoint(cancel_check)
 
 
 def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric, ...]:
@@ -118,6 +248,32 @@ def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric,
         if normalized not in metrics:
             metrics.append(normalized)
     return tuple(metrics) or (PublicationMetric.BCA,)
+
+
+def _request_with_result_group(
+    request: PublicationMapRequest,
+    result: PublicationMapResult,
+) -> PublicationMapRequest:
+    """Fill blank request identity from a backend-resolved sole group."""
+
+    updates: dict[str, object] = {}
+    for name in ("group_id", "group_label", "group_folder"):
+        if not hasattr(request, name):
+            continue
+        request_value = getattr(request, name, None)
+        result_value = getattr(result, name, None)
+        if (
+            request_value not in (None, "")
+            and result_value not in (None, "")
+            and request_value != result_value
+        ):
+            raise PublicationMapInputError(
+                "Scalp Maps group identity changed between analysis and output "
+                f"for {name}: request={request_value!r}, result={result_value!r}."
+            )
+        if request_value in (None, "") and result_value not in (None, ""):
+            updates[name] = result_value
+    return replace(request, **updates) if updates else request
 
 
 def _metric_parameter_rows(
@@ -149,18 +305,65 @@ def _metric_parameter_rows(
 def render_publication_figures(
     result: PublicationMapResult,
     request: PublicationMapRequest,
+    *,
+    cancel_check: Callable[[], None] | None = None,
+    transaction: PublicationArtifactTransaction | None = None,
 ) -> list[Path]:
-    """Render grand-average scalp maps in the request."""
+    """Stage every requested figure and publish the batch atomically."""
+
+    effective_request = _request_with_result_group(request, result)
+    owns_transaction = transaction is None
+    active_transaction = transaction or PublicationArtifactTransaction(effective_request)
+    try:
+        active_transaction.ensure_request_target(effective_request)
+        staging_root = active_transaction.staging_output_root_for(effective_request)
+        staging_updates: dict[str, object] = {"output_root": staging_root}
+        if hasattr(effective_request, "group_folder"):
+            staging_updates["group_folder"] = None
+        staging_request = replace(effective_request, **staging_updates)
+        staged_paths = _render_publication_figures_staged(
+            result,
+            staging_request,
+            cancel_check=cancel_check,
+        )
+        _checkpoint(cancel_check)
+        final_paths = [
+            active_transaction.register_staged_path(path)
+            for path in staged_paths
+        ]
+        result.figure_paths = final_paths
+        if owns_transaction:
+            active_transaction.commit(cancel_check=cancel_check)
+        return final_paths
+    except Exception:  # Transaction boundary: discard staging for any render/cancel failure.
+        if owns_transaction:
+            active_transaction.abort()
+        raise
+
+
+def _render_publication_figures_staged(
+    result: PublicationMapResult,
+    request: PublicationMapRequest,
+    *,
+    cancel_check: Callable[[], None] | None,
+) -> list[Path]:
+    """Render a complete figure batch below a transaction staging root."""
 
     request.output_root.mkdir(parents=True, exist_ok=True)
     rendered: list[Path] = []
     grand = result.grand_average_values
     if grand.empty:
         return rendered
+    _assert_unique_figure_stems(result, request)
 
     if request.export_paired_figures:
-        rendered.extend(_render_paired_condition_figures(result, request))
-        result.figure_paths = rendered
+        rendered.extend(
+            _render_paired_condition_figures(
+                result,
+                request,
+                cancel_check=cancel_check,
+            )
+        )
         return rendered
 
     group_cols = ["condition", "metric", "map_label"]
@@ -181,6 +384,7 @@ def render_publication_figures(
         stem = sanitize_filename_stem(f"{condition}_{metric.value}_{map_label}")
         bounds = request.color_bounds.get(metric, ColorBounds())
         if request.export_png:
+            _checkpoint(cancel_check)
             png_path = request.output_root / f"{stem}.png"
             render_topomap(
                 montage_group,
@@ -189,9 +393,11 @@ def render_publication_figures(
                 output_path=png_path,
                 bounds=bounds,
                 dpi=request.png_dpi,
+                cancel_check=cancel_check,
             )
             rendered.append(png_path)
         if request.export_pdf:
+            _checkpoint(cancel_check)
             pdf_path = request.output_root / f"{stem}.pdf"
             render_topomap(
                 montage_group,
@@ -200,10 +406,59 @@ def render_publication_figures(
                 output_path=pdf_path,
                 bounds=bounds,
                 dpi=request.png_dpi,
+                cancel_check=cancel_check,
             )
             rendered.append(pdf_path)
-    result.figure_paths = rendered
     return rendered
+
+
+def _assert_unique_figure_stems(
+    result: PublicationMapResult,
+    request: PublicationMapRequest,
+) -> None:
+    """Reject lossy filename collisions before any staged figure is written."""
+
+    grand = result.grand_average_values
+    raw_stems: list[str] = []
+    if request.export_paired_figures:
+        pairs = _paired_condition_pairs(request, set(grand["condition"]))
+        metrics = _request_metrics(request)
+        if PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
+            ordered = tuple(
+                metric
+                for metric in COMBINED_PAIRED_METRIC_ORDER
+                if metric in metrics
+            )
+            metric_stem = "_".join(metric.value for metric in ordered)
+            raw_stems.extend(
+                f"{first}_and_{second}_{metric_stem}_paired"
+                for first, second in pairs
+            )
+        else:
+            raw_stems.extend(
+                f"{first}_and_{second}_{metric.value}_paired"
+                for metric in metrics
+                for first, second in pairs
+            )
+    else:
+        raw_stems.extend(
+            f"{condition}_{metric_value}_{map_label}"
+            for condition, metric_value, map_label in grand[
+                ["condition", "metric", "map_label"]
+            ].drop_duplicates().itertuples(index=False, name=None)
+        )
+
+    seen: dict[str, str] = {}
+    for raw_stem in raw_stems:
+        safe_stem = sanitize_filename_stem(raw_stem)
+        prior = seen.get(safe_stem.casefold())
+        if prior is not None:
+            raise PublicationMapInputError(
+                "Scalp Maps output names collide after Windows-safe filename "
+                f"normalization: {prior!r} and {raw_stem!r}. Rename the "
+                "conditions so each requested figure has a distinct name."
+            )
+        seen[safe_stem.casefold()] = raw_stem
 
 
 def render_topomap(
@@ -214,11 +469,13 @@ def render_topomap(
     output_path: Path,
     bounds: ColorBounds = ColorBounds(),
     dpi: int = 300,
+    cancel_check: Callable[[], None] | None = None,
 ) -> None:
     """Render one MNE topomap from grand-average values."""
 
     fig, ax = plt.subplots(figsize=SINGLE_MAP_FIGSIZE, dpi=dpi)
     try:
+        _checkpoint(cancel_check)
         cmap = colormap_for_metric(metric, bounds)
         im, missing_count = _draw_topomap(
             values,
@@ -240,14 +497,14 @@ def render_topomap(
             ax.text(
                 0.5,
                 -0.08,
-                f"Missing montage values rendered as 0: {missing_count}",
+                f"Missing montage values omitted: {missing_count}",
                 transform=ax.transAxes,
                 ha="center",
                 va="top",
                 **figure_text_kwargs("small"),
             )
         fig.tight_layout()
-        _save_figure(fig, output_path, dpi=dpi)
+        _save_figure(fig, output_path, dpi=dpi, cancel_check=cancel_check)
     finally:
         plt.close(fig)
 
@@ -273,6 +530,8 @@ def colormap_for_metric(metric: PublicationMetric, bounds: ColorBounds | None = 
 def _render_paired_condition_figures(
     result: PublicationMapResult,
     request: PublicationMapRequest,
+    *,
+    cancel_check: Callable[[], None] | None,
 ) -> list[Path]:
     grand = result.grand_average_values
     if grand.empty:
@@ -289,6 +548,7 @@ def _render_paired_condition_figures(
             result,
             request,
             condition_pairs=condition_pairs,
+            cancel_check=cancel_check,
         )
 
     for metric in metrics:
@@ -307,6 +567,7 @@ def _render_paired_condition_figures(
                 continue
             stem = sanitize_filename_stem(f"{first}_and_{second}_{metric.value}_paired")
             if request.export_png:
+                _checkpoint(cancel_check)
                 png_path = request.output_root / f"{stem}.png"
                 _render_paired_topomap(
                     first_group,
@@ -317,9 +578,11 @@ def _render_paired_condition_figures(
                     output_path=png_path,
                     bounds=bounds,
                     dpi=request.png_dpi,
+                    cancel_check=cancel_check,
                 )
                 rendered.append(png_path)
             if request.export_pdf:
+                _checkpoint(cancel_check)
                 pdf_path = request.output_root / f"{stem}.pdf"
                 _render_paired_topomap(
                     first_group,
@@ -330,6 +593,7 @@ def _render_paired_condition_figures(
                     output_path=pdf_path,
                     bounds=bounds,
                     dpi=request.png_dpi,
+                    cancel_check=cancel_check,
                 )
                 rendered.append(pdf_path)
     return rendered
@@ -340,6 +604,7 @@ def _render_combined_paired_condition_figures(
     request: PublicationMapRequest,
     *,
     condition_pairs: list[tuple[str, str]],
+    cancel_check: Callable[[], None] | None,
 ) -> list[Path]:
     grand = result.grand_average_values
     rendered: list[Path] = []
@@ -369,6 +634,7 @@ def _render_combined_paired_condition_figures(
         metric_stem = "_".join(metric.value for metric in metrics)
         stem = sanitize_filename_stem(f"{first}_and_{second}_{metric_stem}_paired")
         if request.export_png:
+            _checkpoint(cancel_check)
             png_path = request.output_root / f"{stem}.png"
             _render_combined_paired_topomap(
                 groups,
@@ -378,9 +644,11 @@ def _render_combined_paired_condition_figures(
                 output_path=png_path,
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
+                cancel_check=cancel_check,
             )
             rendered.append(png_path)
         if request.export_pdf:
+            _checkpoint(cancel_check)
             pdf_path = request.output_root / f"{stem}.pdf"
             _render_combined_paired_topomap(
                 groups,
@@ -390,6 +658,7 @@ def _render_combined_paired_condition_figures(
                 output_path=pdf_path,
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
+                cancel_check=cancel_check,
             )
             rendered.append(pdf_path)
     return rendered
@@ -435,16 +704,18 @@ def _render_paired_topomap(
     output_path: Path,
     bounds: ColorBounds,
     dpi: int,
+    cancel_check: Callable[[], None] | None,
 ) -> None:
+    _checkpoint(cancel_check)
     fig, axes = plt.subplots(1, 2, figsize=PAIRED_MAP_FIGSIZE, dpi=dpi)
-    cmap = colormap_for_metric(metric, bounds)
-    shared_vlim = _paired_vlim(
-        first_values,
-        second_values,
-        metric=metric,
-        bounds=bounds,
-    )
     try:
+        cmap = colormap_for_metric(metric, bounds)
+        shared_vlim = _paired_vlim(
+            first_values,
+            second_values,
+            metric=metric,
+            bounds=bounds,
+        )
         im, first_missing = _draw_topomap(
             first_values,
             ax=axes[0],
@@ -475,7 +746,7 @@ def _render_paired_topomap(
             extend=_colorbar_extend(metric),
         )
         _style_colorbar(cbar, metric=metric)
-        _save_figure(fig, output_path, dpi=dpi)
+        _save_figure(fig, output_path, dpi=dpi, cancel_check=cancel_check)
     finally:
         plt.close(fig)
 
@@ -489,11 +760,14 @@ def _render_combined_paired_topomap(
     output_path: Path,
     bounds_by_metric: dict[PublicationMetric, ColorBounds],
     dpi: int,
+    cancel_check: Callable[[], None] | None,
 ) -> None:
+    _checkpoint(cancel_check)
     fig = plt.figure(figsize=_combined_paired_figsize(metrics), dpi=dpi)
     layout = _combined_paired_layout_rects(metrics=metrics)
     try:
         for row_idx, metric in enumerate(metrics):
+            _checkpoint(cancel_check)
             first_values, second_values = values_by_metric[metric]
             row_layout = layout[metric]
             row_axes = [
@@ -542,7 +816,7 @@ def _render_combined_paired_topomap(
                 _add_missing_note(row_axes[1], second_missing)
             cbar = fig.colorbar(im, cax=cax, extend=_colorbar_extend(metric))
             _style_colorbar(cbar, metric=metric)
-        _save_figure(fig, output_path, dpi=dpi)
+        _save_figure(fig, output_path, dpi=dpi, cancel_check=cancel_check)
     finally:
         plt.close(fig)
 
@@ -643,7 +917,7 @@ def _add_missing_note(ax: plt.Axes, missing_count: int) -> None:
     ax.text(
         0.5,
         -0.08,
-        f"Missing montage values rendered as 0: {missing_count}",
+        f"Missing montage values omitted: {missing_count}",
         transform=ax.transAxes,
         ha="center",
         va="top",
@@ -696,9 +970,16 @@ def _colorbar_text_kwargs() -> dict[str, object]:
     return kwargs
 
 
-def _save_figure(fig: plt.Figure, output_path: Path, *, dpi: int) -> None:
+def _save_figure(
+    fig: plt.Figure,
+    output_path: Path,
+    *,
+    dpi: int,
+    cancel_check: Callable[[], None] | None = None,
+) -> None:
     """Save figure with transparent backgrounds for PDF composition workflows."""
 
+    _checkpoint(cancel_check)
     transparent = output_path.suffix.lower() == ".pdf"
     if transparent:
         fig.patch.set_alpha(0)
@@ -706,6 +987,7 @@ def _save_figure(fig: plt.Figure, output_path: Path, *, dpi: int) -> None:
             ax.set_facecolor("none")
             ax.patch.set_alpha(0)
     fig.savefig(output_path, dpi=dpi, transparent=transparent)
+    _checkpoint(cancel_check)
 
 
 def sanitize_filename_stem(value: str) -> str:
@@ -789,3 +1071,8 @@ def _plot_topomap_compat(
             outlines="head",
         )
         return im
+
+
+def _checkpoint(cancel_check: Callable[[], None] | None) -> None:
+    if cancel_check is not None:
+        cancel_check()
