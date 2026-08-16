@@ -19,6 +19,15 @@ compact session from the final packaged Windows RC. That session must include
 the canonical ACR reproduction plus the ordinary cancellation/output checks
 below; it is not another powered calibration.
 
+SNR grid-safety progress on 2026-08-16: two-condition overlays now require the
+same ordered physical FullSNR grid already required within each condition. A
+mismatch is reported before aggregation or rendering, and matching/mismatching
+worker regressions protect the contract without adding GUI or resampling logic.
+The Plot Generator focused gate now runs 49 locally safe tests, including six
+existing locally safe Plot Generator test modules that were previously omitted
+from the scope. Repo precommit passed 1,624 tests with three skips, and the
+strict documentation build passed.
+
 Baseline: `v2.1.2`. At the 2026-08-16 audit, `main` was 217 commits and 633
 changed files beyond that tag, while `src/config.py` still reported `2.1.2`.
 That scope warrants a major release rather than a patch release.
@@ -110,7 +119,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
 
 #### SNR Plots
 
-- [ ] Before a two-condition overlay, require identical physical frequency
+- [x] Before a two-condition overlay, require identical physical frequency
       grids. Reject mismatched grids with a clear message instead of plotting
       condition B against condition A's x-axis.
 - [ ] Make cancellation cooperative. Keep the worker/thread and navigation

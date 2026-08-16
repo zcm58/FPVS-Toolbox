@@ -151,6 +151,140 @@ def test_full_snr_skips_workbook_with_mismatched_frequency_grid(
     )
 
 
+def test_condition_overlay_plots_matching_frequency_grids(tmp_path, monkeypatch):
+    module = _import_module()
+    captured = {}
+
+    monkeypatch.setattr(
+        module._Worker,
+        "_list_excel_files",
+        lambda self, condition: [tmp_path / f"{condition}.xlsx"],
+    )
+    monkeypatch.setattr(
+        module._Worker,
+        "_collect_data",
+        lambda self, condition, **_kwargs: (
+            [1.0, 2.0],
+            {"condition": condition},
+        ),
+    )
+    monkeypatch.setattr(
+        module._Worker,
+        "_aggregate_roi_data",
+        lambda self, data: {
+            "Central": [1.0, 2.0]
+            if data["condition"] == "Condition A"
+            else [3.0, 4.0]
+        },
+    )
+    monkeypatch.setattr(
+        module._Worker,
+        "_plot_overlay",
+        lambda self, freqs, avg_a, avg_b: captured.update(
+            {"freqs": freqs, "avg_a": avg_a, "avg_b": avg_b}
+        ),
+    )
+    monkeypatch.setattr(module._Worker, "_emit", lambda *args, **kwargs: None)
+
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Condition A",
+        condition_b="Condition B",
+        overlay=True,
+        roi_map={"Central": ["Cz"]},
+        selected_roi="Central",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=2.0,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path),
+        spectral_qc_enabled=False,
+    )
+
+    worker._run()
+
+    assert captured == {
+        "freqs": [1.0, 2.0],
+        "avg_a": {"Central": [1.0, 2.0]},
+        "avg_b": {"Central": [3.0, 4.0]},
+    }
+    assert worker.failed_items == []
+
+
+@pytest.mark.parametrize("grid_b", ([1.0, 2.0001], [1.0]))
+def test_condition_overlay_rejects_mismatched_frequency_grids(
+    tmp_path,
+    monkeypatch,
+    grid_b,
+):
+    module = _import_module()
+    messages = []
+
+    monkeypatch.setattr(
+        module._Worker,
+        "_list_excel_files",
+        lambda self, condition: [tmp_path / f"{condition}.xlsx"],
+    )
+
+    def fake_collect(self, condition, **_kwargs):
+        grid = [1.0, 2.0] if condition == "Condition A" else grid_b
+        return grid, {"condition": condition}
+
+    monkeypatch.setattr(module._Worker, "_collect_data", fake_collect)
+    monkeypatch.setattr(
+        module._Worker,
+        "_aggregate_roi_data",
+        lambda *args, **kwargs: pytest.fail(
+            "mismatched condition grids must block before aggregation"
+        ),
+    )
+    monkeypatch.setattr(
+        module._Worker,
+        "_plot_overlay",
+        lambda *args, **kwargs: pytest.fail(
+            "mismatched condition grids must not be plotted"
+        ),
+    )
+    monkeypatch.setattr(
+        module._Worker,
+        "_emit",
+        lambda self, message, *_args: messages.append(message),
+    )
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Condition A",
+        condition_b="Condition B",
+        overlay=True,
+        roi_map={"Central": ["Cz"]},
+        selected_roi="Central",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=2.0,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path),
+        spectral_qc_enabled=False,
+    )
+
+    worker._run()
+
+    assert worker.failed_items == [
+        {
+            "item": "Condition A vs Condition B",
+            "error": "Condition overlay FullSNR frequency grid mismatch",
+        }
+    ]
+    assert any(
+        "the two conditions use different FullSNR frequency grids" in message
+        for message in messages
+    )
+
+
 def test_excel_discovery_ignores_sidecar_and_temp_workbooks(tmp_path, monkeypatch):
     module = _import_module()
 

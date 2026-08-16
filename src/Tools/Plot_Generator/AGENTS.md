@@ -68,6 +68,9 @@ v2.1 project contract:
   non-group figure. Preserve normal single-condition filenames.
 - Never average FullSNR workbooks positionally when their selected frequency
   grids differ. Skip and report the incompatible workbook instead.
+- Never draw a two-condition overlay unless the two accepted condition grids
+  also match. Report the mismatch and write no overlay rather than plotting
+  condition B values against condition A's physical frequencies.
 - Plot Generator is SNR-line-plot only. Scalp maps belong to the dedicated
   scalp plotting tool; do not reintroduce scalp-map GUI controls, BCA/Z scalp
   data collection, MNE topomap rendering, or Plot Generator scalp helper modules.

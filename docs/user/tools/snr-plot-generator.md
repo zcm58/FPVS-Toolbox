@@ -70,7 +70,9 @@ reports generated files, warnings, skipped items, and quality-control reports.
 
 All participant workbooks contributing to one figure must use the same FullSNR
 frequency grid. A workbook with a different grid is skipped and reported rather
-than being averaged into the wrong frequency positions.
+than being averaged into the wrong frequency positions. A two-condition overlay
+also requires the two accepted condition grids to match. If they do not, the
+tool reports the mismatch and writes no overlay figure.
 
 SNR is a descriptive frequency-domain normalization. A peak can help show that
 the target response stands above neighboring frequencies, but it is not by

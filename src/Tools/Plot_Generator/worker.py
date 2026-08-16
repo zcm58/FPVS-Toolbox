@@ -15,6 +15,7 @@ from PySide6.QtCore import QObject, Signal
 from Tools.Plot_Generator.aggregation import PlotAggregationMixin
 from Tools.Plot_Generator.data_collection import PlotDataCollectionMixin
 from Tools.Plot_Generator.excel_inputs import (
+    _frequency_grids_match,
     _frequency_pairs_from_columns,
     _infer_subject_id_from_path,
     _select_frequency_pairs,
@@ -366,6 +367,20 @@ class _Worker(
                 total_override=total,
             )
             if freqs_a and data_a and freqs_b and data_b:
+                if not _frequency_grids_match(freqs_a, freqs_b):
+                    comparison = f"{self.condition} vs {self.condition_b}"
+                    self._record_failure(
+                        item=comparison,
+                        error="Condition overlay FullSNR frequency grid mismatch",
+                    )
+                    self._emit(
+                        f"Cannot overlay {comparison}: the two conditions use "
+                        "different FullSNR frequency grids. Reprocess both "
+                        "conditions with the same frequency-grid settings.",
+                        total,
+                        total,
+                    )
+                    return
                 avg_a = self._aggregate_roi_data(data_a)
                 avg_b = self._aggregate_roi_data(data_b)
                 if avg_a and avg_b:
