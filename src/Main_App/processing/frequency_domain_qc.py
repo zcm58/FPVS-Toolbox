@@ -87,7 +87,7 @@ def run_frequency_domain_qc_review(
 
     project_root = Path(project.project_root).resolve()
     thresholds = DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS
-    from Tools.Stats.data.shared_rois import load_rois_from_settings
+    from Main_App.processing.roi_settings import load_rois_from_settings
 
     if dataset_index is None:
         dataset_index = load_project_dataset_index(project_root)

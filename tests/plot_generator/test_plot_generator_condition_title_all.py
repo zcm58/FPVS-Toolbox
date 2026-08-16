@@ -52,6 +52,7 @@ def test_all_conditions_titles(tmp_path, monkeypatch):
     class DummyWorker:
         def __init__(self, *args, **kwargs):
             captured["title"] = args[4]
+            captured["out_dir"] = args[11]
             self.progress = _DummySignal()
             self.finished = _DummySignal()
 
@@ -76,6 +77,7 @@ def test_all_conditions_titles(tmp_path, monkeypatch):
     win._start_next_condition()
 
     assert captured.get("title") == "Fruit vs Veg"
+    assert captured.get("out_dir") == str(tmp_path)
     assert win.title_edit.text() == "Fruit vs Veg"
 
     app.quit()

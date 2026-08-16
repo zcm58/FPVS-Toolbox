@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from numbers import Number
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 import openpyxl
@@ -26,7 +26,9 @@ from Main_App.processing.artifact_freshness import (
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Main_App.projects import (
     GroupInfo,
+    load_project_manifest_for_dataset_path,
     load_project_dataset_index,
+    normalize_manual_excluded_participants,
 )
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNEFPVSCondition
 
@@ -80,6 +82,7 @@ def project_source_participant_selection(
     project_root: str | Path,
     *,
     include_flagged_subjects: bool = False,
+    project_preprocessing: Mapping[str, object] | None = None,
 ) -> ProjectSourceParticipantSelection:
     """Return the current project-level source participant exclusion set."""
 
@@ -96,6 +99,20 @@ def project_source_participant_selection(
         if electrodes
     }
     excluded_lookup = set(excluded_subjects)
+    preprocessing = project_preprocessing
+    if preprocessing is None:
+        manifest = load_project_manifest_for_dataset_path(root)
+        manifest_preprocessing = manifest.get("preprocessing") if manifest else None
+        preprocessing = (
+            manifest_preprocessing
+            if isinstance(manifest_preprocessing, Mapping)
+            else {}
+        )
+    excluded_lookup.update(
+        normalize_manual_excluded_participants(
+            preprocessing.get("manual_excluded_participants")
+        )
+    )
     excluded_lookup.update(frequency_exclusions.excluded_participants)
     excluded_lookup.update(source_electrode_excluded_subjects)
     if not include_flagged_subjects:
@@ -440,8 +457,7 @@ def _subject_in_ids(
     participant_id: str,
     participant_ids: Sequence[str] | set[str],
 ) -> bool:
-    lookup = set(participant_ids)
-    return (
-        participant_id in lookup
-        or _normalize_subject_id(participant_id) in lookup
-    )
+    normalized_participant = _normalize_subject_id(participant_id)
+    return normalized_participant in {
+        _normalize_subject_id(candidate) for candidate in participant_ids
+    }

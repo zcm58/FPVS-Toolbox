@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from Main_App.Shared.post_process import post_process as _shared_post_process
 from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui.components import show_post_processing_required
 from typing import Callable
 from types import MethodType, SimpleNamespace
 from collections import deque
@@ -709,6 +710,9 @@ class MainWindow(QMainWindow):
         if page is None:
             page = PlotGeneratorWindow(parent=self)
             page.setObjectName("embedded_plot_generator_page")
+            page.post_processing_required.connect(
+                self.request_post_processing_rebuild
+            )
             self.workspace_stack.addWidget(page)
             self._plot_generator_page = page
         return page
@@ -808,20 +812,65 @@ class MainWindow(QMainWindow):
             return True
         if not stale:
             return True
-        QMessageBox.warning(
-            self,
-            "Regenerate Frequency-Domain Outputs",
+        self.request_post_processing_rebuild(
+            tool_name,
             (
-                "Frequency-domain exclusions changed for this project. "
-                "Resume post-processing before using "
-                f"{tool_name}."
+                "Frequency-domain exclusions changed after the current "
+                "downstream outputs were created."
             ),
+            str(project.project_root),
         )
-        try:
-            processing_workflows._set_resume_post_processing_pending(self, True)
-        except Exception:
-            logger.debug("frequency_domain_resume_button_set_failed", exc_info=True)
         return False
+
+    def request_post_processing_rebuild(
+        self,
+        tool_name: str,
+        reason: str,
+        project_root: str,
+    ) -> bool:
+        """Offer and launch the shared post-processing rebuild for one tool."""
+
+        project = getattr(self, "currentProject", None)
+        active_root = getattr(project, "project_root", None)
+        if project is None or active_root is None:
+            QMessageBox.warning(
+                self,
+                "No Project",
+                "Load the affected project before running post-processing.",
+            )
+            return False
+        try:
+            same_project = (
+                Path(project_root).resolve(strict=False)
+                == Path(active_root).resolve(strict=False)
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            same_project = False
+        if not same_project:
+            QMessageBox.warning(
+                self,
+                "Different Project Selected",
+                (
+                    f"{tool_name} reported stale outputs for a different project. "
+                    "Open that project before running post-processing."
+                ),
+            )
+            return False
+        if getattr(self, "_post_processing_pipeline_thread", None) is not None:
+            QMessageBox.information(
+                self,
+                "Post-processing Already Running",
+                "Wait for the current post-processing operation to finish.",
+            )
+            return False
+        if not show_post_processing_required(
+            self,
+            tool_name=tool_name,
+            reason=reason,
+        ):
+            return False
+        processing_workflows.resume_post_processing(self)
+        return True
 
     def show_about_dialog(self) -> None:
         tool_workflows.show_about_dialog(self, FPVS_TOOLBOX_VERSION)
@@ -962,6 +1011,31 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
+        plot_generator_page = getattr(self, "_plot_generator_page", None)
+        if plot_generator_page is not None:
+            has_active_generation = getattr(
+                plot_generator_page,
+                "has_active_generation",
+                None,
+            )
+            try:
+                snr_generation_running = bool(
+                    callable(has_active_generation) and has_active_generation()
+                )
+            except RuntimeError:
+                snr_generation_running = False
+            if snr_generation_running:
+                shutdown = getattr(plot_generator_page, "shutdown", None)
+                if callable(shutdown):
+                    shutdown()
+                QMessageBox.information(
+                    self,
+                    "SNR Plot Generation Is Stopping",
+                    "Cancellation was requested. Wait for the active SNR plot "
+                    "worker to stop before closing FPVS Toolbox.",
+                )
+                event.ignore()
+                return
         from Tools.Free_Harmonic_Clustering.gui import (
             cancel_all_active_operations,
             has_active_operations,

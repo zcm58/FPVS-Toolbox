@@ -12,7 +12,9 @@ next narrow file or focused document.
   post-processing exports; `source_time_domain_export.py` writes the signed,
   repetition-averaged EEG Raw FIF/JSON pairs and participant commit manifests
   consumed by the current source-PSD workflow; `figure_style.py` and
-  `table_style.py` own GUI-neutral publication styling.
+  `table_style.py` own GUI-neutral publication styling. Figure-style imports
+  stay lightweight; Stats-dependent workbook builders are loaded lazily through
+  compatibility attributes.
 - `src/Main_App/Shared/paths.py`: resource path helper for source and frozen bundles.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical package for active EEG preprocessing and processing entry-point ownership. `preprocess.py` owns the active preprocessing implementation, `processing.py` owns the stable no-op `process_data` coordinator, and `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route. `preflight_qc.py` coordinates GUI-neutral raw QC; `preflight_qc_plan.py` owns condition/event sample planning and shared locked FFT-span reuse; `preflight_qc_cache.py` owns the project-local condition-aware QC cache; and `raw_channel_qc.py`/`raw_spectral_qc.py` own the versioned v1 and condition-aware v2 evaluators.
@@ -55,10 +57,13 @@ Current `Legacy_App` runtime couplings:
   The Main App exposes this UI through its optional Beta Tools section.
 - `src/Tools/Plot_Generator/`: embedded SNR plot generation. The Main App
   imports the compatibility facade in `plot_generator.py`; `gui.py` owns the
-  page implementation, `generation_workflow.py` owns QThread launch/cancel and
+  page implementation, `generation_workflow.py` launches QThread work, the
+  focused `generation_lifecycle.py` owns cooperative cancel/shutdown and
   completion handling, and `worker.py` keeps `_Worker` as the QObject shell.
   Focused helpers own config, Excel input parsing, data collection, ROI/group
-  aggregation, and line/overlay rendering. This tool does not own scalp maps.
+  aggregation, direct paired PNG/PDF publication, spectral-QC evidence, and
+  line/overlay rendering. This tool does not own
+  scalp maps.
 - `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
   `gui.py` is the public window facade; `gui_condition_selection.py`,
   `gui_sections.py`, `gui_rois.py`, `gui_participants.py`,

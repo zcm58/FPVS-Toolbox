@@ -3,7 +3,7 @@ line plots from Excel files created by the FPVS Toolbox. The Main App GUI is its
 only user-facing entry point. GUI adjustments
 and minor bug fixes are allowed. Keep processing code modular and under 500 lines
 per file. ROI definitions should be loaded from the existing settings using the
-utilities in `Tools.Stats`. Plots should be averaged across participants within
+neutral utilities in `Main_App.processing.roi_settings`. Plots should be averaged across participants within
 each condition and saved to a user-selected output folder.
 
 Current ownership map:
@@ -11,11 +11,13 @@ Current ownership map:
 - `plot_generator.py`: Main App-imported embedded compatibility facade that
   preserves patchable worker/thread hooks; it is not a standalone entry point.
 - `gui.py`: `PlotGeneratorWindow` page implementation.
-- `generation_workflow.py`: condition queueing, QThread worker launch/cancel,
-  progress aggregation, and completion handling.
+- `generation_workflow.py`: condition queueing, QThread worker launch, progress
+  aggregation, and participant-exclusion prompts.
+- `generation_lifecycle.py`: cooperative cancel/shutdown, navigation locking,
+  worker outcomes, and completion/thread-exit handling.
 - `generation_outcome.py`: pure worker-payload normalization and
   completion-summary formatting used by the GUI workflow.
-- `ui_sections.py`, `settings_dialog.py`, `gui_settings.py`,
+- `ui_sections.py`, `ui_actions.py`, `settings_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
   GUI, settings, selection, and thin shared-project adapters.
 - `worker.py`: `_Worker` QObject shell, signals, stop state, timing, run
@@ -31,14 +33,21 @@ Current ownership map:
   data collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
   unknown-subject warnings.
+- `analysis_context.py`: managed-project versus legacy-folder resolution,
+  frozen processing rates, and the active-workbook provenance boundary.
+- `source_data.py` and `output_interface.py`: in-memory contributor/sample-size
+  bookkeeping plus managed analysis-context checks for direct figure output.
+- `source_identity.py`: stable read-time source-workbook fingerprints and
+  publication-time verification of the exact contributing bytes.
 - `spectral_qc.py`: post-processing, report-only electrode-level spectral
   artifact flagging and FullFFT evidence assembly for SNR plots.
+- `spectral_qc_workflow.py`: worker-side spectral-QC orchestration and audit
+  records without expanding the QObject shell.
 - `spectral_qc_alerts.py`: plain-language GUI alert summaries for SNR spectral
   QC findings and whole-participant spectral exclusion candidates.
-- `spectral_qc_report.py`: Quality Check workbook export for SNR plot spectral
-  QC reports.
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
-  configuration.
+  configuration; `render_naming.py` owns widget-free, collision-safe artifact
+  stems.
 
 v2.1 project contract:
 
@@ -53,8 +62,9 @@ v2.1 project contract:
   from the project manifest's resolved Excel subfolder. Do not let saved
   SNR Plots `input_folder` settings override that canonical project root.
   Group Options should only activate when that canonical Excel root is selected.
-- Multi-group plotting is a one-condition, group-overlay workflow. Hide the
-  condition overlay checkbox in multi-group mode. The A/B colors, custom legend
+- Multi-group plotting is a one-condition, group-overlay workflow. The group
+  overlay is mandatory for canonical multi-group projects; hide the condition
+  overlay checkbox and never emit an implicit pooled all-groups curve. The A/B colors, custom legend
   labels, and peak labels map to the first and second selected groups; groups
   three and higher use deterministic automatic colors, distinct marker shapes,
   and their canonical display labels.
@@ -63,14 +73,63 @@ v2.1 project contract:
   is named in the log and completion warnings and omitted from that figure. If
   every selected group is empty for an ROI, skip the figure rather than
   rendering a pooled all-participant curve.
+- Filter intentionally unselected groups before all workbook and spectral-QC
+  reads. Track those workbooks as internal dispositions and log them as
+  information, not completion warnings.
+- Record project-index participant-condition exclusions as structured,
+  noncontributing internal dispositions even though they are intentionally
+  absent from the active workbook cohort.
+- Treat every non-finite FullSNR value (`NaN`, `+inf`, or `-inf`) as missing for
+  electrode, participant, and group means.
 - Group-overlay PNG/PDF pairs append `_group_overlay` to the normal
   `<title or condition> - <ROI>` stem so they cannot overwrite the corresponding
   non-group figure. Preserve normal single-condition filenames.
+- Preserve canonical project group IDs behind selected display labels;
+  presentation labels must not become group identity.
 - Never average FullSNR workbooks positionally when their selected frequency
   grids differ. Skip and report the incompatible workbook instead.
 - Never draw a two-condition overlay unless the two accepted condition grids
   also match. Report the mismatch and write no overlay rather than plotting
   condition B values against condition A's physical frequencies.
+- Resolve the selected input folder through the shared dataset index before
+  reading source workbooks. Managed projects must use the current neutral
+  FullFFT provenance's frozen base/oddball rates and exact workbook family;
+  missing or stale provenance is a hard stop. Unmanaged folders may retain the
+  documented legacy settings fallback but must not borrow exclusions or QC
+  output routing from an unrelated active GUI project. Rebuild the managed
+  dataset index and revalidate the originally captured rates, cohort, source,
+  frequency-QC, and processing/export identities when publishing provenance-
+  bearing artifacts.
+- A managed-provenance failure must return the affected canonical project root
+  and actionable stale reason to the embedded page. The page emits the shared
+  post-processing-required request; only the Main App shell may show the shared
+  modal and launch its existing post-processing pipeline. Plot Generator must
+  not create a second post-processing worker or rerun EEG preprocessing.
+- Cancellation is cooperative. A visible cancel requests worker stop, suppresses
+  queued conditions and normal completion, and keeps generation/navigation
+  locked until the worker thread actually exits. Collection, QC, rendering, and
+  figure saving need explicit cancellation checkpoints. A cancellation received
+  after a figure pair is saved keeps and reports those completed files while
+  still suppressing later queued conditions.
+- The embedded page must expose a nonblocking active-generation/shutdown
+  contract. App close requests cooperative cancellation and is deferred until
+  the worker thread has actually exited; never synchronously wait on the GUI
+  thread or destroy a running `QThread`.
+- Publication output is figures only: write matching PNG and PDF files directly
+  to the selected output folder. Do not create per-run subfolders, plotted-
+  source spreadsheets, spectral-QC workbooks, or JSON manifests.
+- Spectral QC is report-only. If no cells can be evaluated because participant
+  or shared-electrode coverage is insufficient, record the evidence as
+  unavailable with a reason; never present zero evaluated cells as a completed
+  negative QC result. Surface flags and evidence limitations in the completion
+  warning without creating an export workbook.
+- A post-run offer to add whole-participant exclusions may modify only the same
+  managed project whose frozen provenance produced the flags. Suppress that
+  offer for unmanaged folders, a different browsed project, or missing/mixed
+  run identity; never write exclusions into whichever GUI project happens to
+  be active. The confirmation defaults to No; an accepted change marks
+  frequency-domain outputs stale and routes through the same shared
+  post-processing-required action.
 - Plot Generator is SNR-line-plot only. Scalp maps belong to the dedicated
   scalp plotting tool; do not reintroduce scalp-map GUI controls, BCA/Z scalp
   data collection, MNE topomap rendering, or Plot Generator scalp helper modules.

@@ -60,6 +60,24 @@ def test_validate_config_rejects_qt_test_in_local_bundle(tmp_path: Path) -> None
     assert errors == ["gui: focused local bundle includes Qt test: tests/gui/test_window.py"]
 
 
+def test_changed_files_omits_deleted_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = tmp_path / "src" / "kept.py"
+    existing.parent.mkdir(parents=True)
+    existing.touch()
+
+    def fake_git_lines(_repo_root: Path, *args: str) -> list[str]:
+        if args[:2] == ("diff", "--name-only"):
+            return ["src/kept.py", "src/deleted.py"]
+        return []
+
+    monkeypatch.setattr(verify, "_git_lines", fake_git_lines)
+
+    assert verify.changed_files(tmp_path) == ("src/kept.py",)
+
+
 def test_precommit_lints_all_changed_python_files() -> None:
     scope = verify.VerificationScope(
         name="repo",

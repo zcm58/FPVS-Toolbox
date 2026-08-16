@@ -1,7 +1,6 @@
 """Widget assembly helpers for the Plot Generator GUI."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import (
-    ActionRow,
     PathPickerRow,
     SectionCard,
     SubsectionHeaderLabel,
@@ -33,12 +31,13 @@ from Main_App.gui.components import (
     make_info_button,
     show_tool_info,
 )
+from Main_App.processing.roi_settings import ALL_ROIS_OPTION
 from Tools.Plot_Generator.gui_settings import (
     _LEGEND_DEFAULT_A_PEAKS,
     _LEGEND_DEFAULT_B_PEAKS,
 )
 from Tools.Plot_Generator.tool_info import SNR_PLOTS_TOOL_INFO
-from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+from Tools.Plot_Generator.ui_actions import build_generation_action_row
 
 
 class PlotGeneratorUiSectionsMixin:
@@ -466,36 +465,7 @@ class PlotGeneratorUiSectionsMixin:
         root_layout.addWidget(file_box)
         root_layout.addWidget(content_widget, 1)
 
-        self.save_defaults_btn = make_action_button("Save Defaults")
-        self.save_defaults_btn.setToolTip("Save current folders as defaults")
-        self.save_defaults_btn.clicked.connect(self._save_defaults)
-        self.load_defaults_btn = make_action_button("Reset to Default settings")
-        self.load_defaults_btn.setToolTip("Reset all values to defaults")
-        self.load_defaults_btn.clicked.connect(self._load_defaults)
-        self.gen_btn = make_action_button("Generate", variant="primary")
-        self.gen_btn.setToolTip("Start plot generation")
-        self.gen_btn.clicked.connect(self._generate)
-        self.gen_btn.setEnabled(False)
-        self.cancel_btn = make_action_button("Cancel", variant="danger")
-        self.cancel_btn.setToolTip("Cancel generation")
-        self.cancel_btn.setEnabled(False)
-        self.cancel_btn.clicked.connect(self._cancel_generation)
-        self.gen_btn.setDefault(True)
-        self.gen_btn.setAutoDefault(True)
-        self.gen_btn.setMinimumWidth(110)
-
-        actions_widget = ActionRow(self, alignment=Qt.AlignLeft, spacing=12)
-        actions_widget.setObjectName("plot_generator_bottom_actions")
-        actions_widget.row_layout.setContentsMargins(8, 8, 8, 8)
-        actions_widget.add_button(self.save_defaults_btn)
-        actions_widget.add_button(self.load_defaults_btn)
-        actions_widget.row_layout.addSpacing(8)
-        actions_widget.row_layout.addWidget(self.progress_bar, 1)
-        actions_widget.row_layout.addSpacing(12)
-        actions_widget.add_button(self.gen_btn)
-        actions_widget.add_button(self.cancel_btn)
-
-        root_layout.addWidget(actions_widget, alignment=Qt.AlignHCenter)
+        build_generation_action_row(self, root_layout)
 
         self.folder_edit.textChanged.connect(self._check_required)
         self.out_edit.textChanged.connect(self._check_required)

@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QPropertyAnimation, QThread
+from PySide6.QtCore import QPropertyAnimation, QThread, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -18,8 +18,8 @@ from PySide6.QtWidgets import QColorDialog
 
 from Main_App import SettingsManager
 from Main_App.gui.components import apply_font_role
+from Main_App.processing.roi_settings import load_rois_from_settings
 from Main_App.projects.project import Project
-from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
@@ -51,6 +51,8 @@ class PlotGeneratorWindow(
     QWidget,
 ):
     """Main window for generating plots."""
+
+    post_processing_required = Signal(str, str, str)
 
     def __init__(
         self,
@@ -203,7 +205,10 @@ class PlotGeneratorWindow(
         self._failed_items: list[dict[str, str]] = []
         self._warning_items: list[dict[str, str]] = []
         self._spectral_qc_flags: list[dict[str, object]] = []
-        self._spectral_qc_report_paths: list[str] = []
+        self._spectral_qc_analysis_identities: list[
+            tuple[str | None, str | None]
+        ] = []
+        self._post_processing_required_request: tuple[str, str] | None = None
         self._gen_params: (
             tuple[
                 str,

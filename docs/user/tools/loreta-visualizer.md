@@ -106,6 +106,13 @@ created during processing plus the saved project harmonic selection. When
 source maps are available, the visualizer loads the prepared source-map files
 for the selected conditions.
 
+Source-map cohorts honor the project's saved whole-participant and
+participant-condition QC exclusions. Genuine missing condition outputs use an
+available-case policy: a participant may contribute to the conditions with a
+valid derivative without being silently added to conditions they did not
+complete. The source validation report records every omission and reason even
+when the application log shows only a compact summary.
+
 The canonical L2-MNE and eLORETA Hauk source-PSD map directories are tracked
 against the accepted harmonic-selection fingerprint. Changing the standard
 included list marks both map directories stale along with the Stats-ready and

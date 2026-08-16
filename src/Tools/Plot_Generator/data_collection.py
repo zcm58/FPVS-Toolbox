@@ -1,78 +1,57 @@
 """Excel discovery and data collection helpers for Plot Generator workers."""
-
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
-import zipfile
-from xml.etree import ElementTree
 
 import numpy as np
-import pandas as pd
 
-from Main_App.projects import (
-    DatasetIndexError,
-    ProjectDatasetIndex,
-    WorkbookRecord,
-    load_project_dataset_index,
-)
+from Main_App.projects import DatasetIndexError, ProjectDatasetIndex
+from Main_App.projects import WorkbookRecord, load_project_dataset_index
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 from Tools.Plot_Generator.excel_inputs import (
     _frequency_grids_match,
     _infer_subject_id_from_path,
 )
-from Tools.Plot_Generator.full_snr_reader import (
-    _read_full_snr_sheet_read_only,
+from Tools.Plot_Generator.project_paths import _is_relative_to
+from Tools.Plot_Generator.source_identity import (
+    SNRPublicationCancelled, SNRPublicationError,
+    capture_stable_source_identity,
+    verify_source_identity_after_read,
 )
-from Tools.Plot_Generator.spectral_qc import (
-    SpectralQcThresholds,
-    electrode_snr_data,
-    flag_spectral_qc_electrode_outliers,
-    interpolate_fullfft_electrode_data,
-    read_full_fft_sheet_read_only,
-    summarize_spectral_qc_records,
-)
-from Tools.Plot_Generator.spectral_qc_report import (
-    resolve_quality_check_dir,
-    write_spectral_qc_report,
-)
+from Tools.Plot_Generator.spectral_qc_workflow import PlotSpectralQcWorkflowMixin
 
 
-class PlotDataCollectionMixin:
+class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
     """Worker-state helpers for Excel discovery and FullSNR data collection."""
 
     def _load_dataset_index(self) -> ProjectDatasetIndex:
         """Load the shared read-only workbook index once in the worker thread."""
-
+        if self._cancellation_checkpoint():
+            raise RuntimeError("SNR plot generation was cancelled")
         if getattr(self, "_dataset_index_loaded", False):
             return self._dataset_index
-        dataset_source = (
-            self.project_root
-            if self.multi_group_mode and self.project_root
-            else self.folder
-        )
+        dataset_source = self.folder
         try:
             index = load_project_dataset_index(dataset_source)
         except DatasetIndexError as exc:
             raise RuntimeError(
                 f"Unable to index processed workbooks under {dataset_source}: {exc}"
             ) from exc
+        if self._cancellation_checkpoint():
+            raise RuntimeError("SNR plot generation was cancelled")
         for diagnostic in index.diagnostics:
             if (
                 diagnostic.code == "unresolved_participant"
                 and index.manifest is None
             ):
                 continue
-            self._emit(
-                f"Dataset index warning [{diagnostic.code}]: "
-                f"{diagnostic.message}"
-            )
-        self._dataset_index = index
-        self._dataset_index_loaded = True
-        self._workbook_records_by_path = {
-            record.path.resolve(strict=False): record
-            for record in index.workbooks
-        }
+            self._record_dataset_index_diagnostic(index, diagnostic)
+        if index.manifest is not None and len(index.ordered_groups) > 1:
+            self.multi_group_mode = True
+            group_mode_error = self._group_mode_configuration_error()
+            if group_mode_error is not None:
+                raise RuntimeError(group_mode_error)
         if index.manifest is not None:
             canonical_groups = index.participant_group_label_map(
                 uppercase_keys=True,
@@ -111,6 +90,21 @@ class PlotDataCollectionMixin:
                     "using the current canonical project assignments."
                 )
             self.subject_groups = canonical_groups
+        self._dataset_index = index
+        self._dataset_index_loaded = True
+        self._workbook_records_by_path = {
+            record.path.resolve(strict=False): record
+            for record in index.workbooks
+        }
+        self._configure_analysis_context(index)
+        for record in getattr(index, "excluded_workbooks", ()):
+            self._track_input_workbook(
+                record.path,
+                condition=record.condition,
+                status="excluded",
+                participant_id=record.participant_id.upper(),
+                reason="project participant-condition exclusion",
+            )
         return index
 
     def _count_excel_files(self, condition: str) -> int:
@@ -142,7 +136,10 @@ class PlotDataCollectionMixin:
                     for path in diagnostic.paths
                     if _is_relative_to(path, cond_folder)
                 )
-        return sorted(paths)
+        return self._restrict_to_provenance_workbooks(
+            sorted(paths),
+            condition=condition,
+        )
 
     def _workbook_record(self, excel_path: Path) -> WorkbookRecord | None:
         self._load_dataset_index()
@@ -159,85 +156,6 @@ class PlotDataCollectionMixin:
             self.subject_groups.keys() if self.subject_groups else None,
         )
 
-    def _read_full_snr_direct(
-        self,
-        excel_path: Path,
-        *,
-        included_electrodes_upper: set[str] | None,
-    ) -> tuple[pd.DataFrame, List[float], List[str]]:
-        return self._timed_call(
-            "excel_load",
-            lambda: _read_full_snr_sheet_read_only(
-                excel_path,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                timing_details=self._timing_details,
-                included_electrodes_upper=included_electrodes_upper,
-            ),
-        )
-
-    def _read_full_fft_direct(
-        self,
-        excel_path: Path,
-        *,
-        included_electrodes_upper: set[str] | None,
-    ) -> tuple[pd.DataFrame, List[float], List[str]]:
-        return self._timed_call(
-            "excel_load",
-            lambda: read_full_fft_sheet_read_only(
-                excel_path,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                timing_details=self._timing_details,
-                included_electrodes_upper=included_electrodes_upper,
-            ),
-        )
-
-    def _apply_spectral_qc_to_condition(
-        self,
-        condition: str,
-        freqs: Sequence[float],
-        subject_snr_data: dict[str, dict[str, list[float]]],
-        subject_fft_data: dict[str, dict[str, list[float]]],
-        source_workbooks: dict[str, str],
-    ) -> None:
-        if not self.spectral_qc_enabled or not subject_fft_data:
-            return
-
-        thresholds = SpectralQcThresholds()
-        result = flag_spectral_qc_electrode_outliers(
-            condition=condition,
-            freqs=freqs,
-            subject_snr_data=subject_snr_data,
-            subject_fft_data=subject_fft_data,
-            source_workbooks=source_workbooks,
-            oddball_freq=self._analysis_oddball_freq,
-            base_freq=self._analysis_base_freq,
-            thresholds=thresholds,
-        )
-        quality_check_dir = resolve_quality_check_dir(
-            project_root=self.project_root,
-            input_folder=self.folder,
-            out_dir=str(self.out_dir),
-        )
-        result = write_spectral_qc_report(
-            result=result,
-            condition=condition,
-            quality_check_dir=quality_check_dir,
-            thresholds=thresholds,
-            oddball_freq=self._analysis_oddball_freq,
-            base_freq=self._analysis_base_freq,
-        )
-        if result.report_path is not None:
-            self._record_qc_report_path(result.report_path)
-            self._record_spectral_qc_flags(summarize_spectral_qc_records(result.records))
-            self._emit(
-                f"Unexpected SNR peak report saved: {result.report_path} "
-                f"({result.flagged_cells} electrode-frequency rows flagged).",
-                0,
-                0,
-            )
-
     def _collect_data(
         self,
         condition: str,
@@ -246,18 +164,24 @@ class PlotDataCollectionMixin:
         offset: int = 0,
         total_override: int | None = None,
     ) -> tuple[List[float], Dict[str, Dict[str, List[float]]]]:
+        if self._cancellation_checkpoint():
+            return [], {}
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
             return [], {}
-
+        self._load_dataset_index()
         self.out_dir.mkdir(parents=True, exist_ok=True)
-
         files = list(excel_files) if excel_files is not None else self._list_excel_files(condition)
+        files = self._restrict_to_provenance_workbooks(
+            files,
+            condition=condition,
+        )
+        if self._cancellation_checkpoint():
+            return [], {}
         if not files:
             self._emit("No Excel files found for condition.")
             return [], {}
-
         total_files = len(files)
         overall_total = total_override if total_override is not None else total_files
         processed_files = 0
@@ -266,15 +190,15 @@ class PlotDataCollectionMixin:
             offset + processed_files,
             overall_total,
         )
-
         roi_names = self._selected_roi_names()
-
         subject_roi_data: Dict[str, Dict[str, List[float]]] = {}
         subject_snr_data: dict[str, dict[str, list[float]]] = {}
         subject_fft_data: dict[str, dict[str, list[float]]] = {}
         source_workbooks: dict[str, str] = {}
+        spectral_qc_unavailable: dict[str, str] = {}
         freqs: Iterable[float] | None = None
         self._unknown_subject_files.clear()
+        self._unselected_group_files.clear()
         roi_channels_upper = {
             roi: {ch.upper() for ch in self.roi_map.get(roi, [])}
             for roi in roi_names
@@ -288,7 +212,11 @@ class PlotDataCollectionMixin:
             for channels in roi_channels_upper.values()
             for channel in channels
         }
-        frequency_exclusions = active_frequency_domain_exclusions(self.project_root)
+        frequency_exclusions = active_frequency_domain_exclusions(
+            self._analysis_project_root
+        )
+        if self._cancellation_checkpoint():
+            return [], {}
         excluded_participants = {
             str(participant).upper()
             for participant in frequency_exclusions.excluded_participants
@@ -298,9 +226,12 @@ class PlotDataCollectionMixin:
         )
 
         for excel_path in files:
-            if self._stop_requested:
-                self._emit("Generation cancelled by user.")
+            if self._cancellation_checkpoint():
                 return [], {}
+            self._track_input_workbook(
+                excel_path,
+                condition=condition,
+            )
             subject_id = self._subject_id_for_workbook(excel_path)
             if not subject_id:
                 self._emit(
@@ -309,6 +240,19 @@ class PlotDataCollectionMixin:
                     overall_total,
                 )
                 self._record_failure(item=excel_path.name, error="Unable to determine subject ID")
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="excluded",
+                    reason="unable to determine participant ID",
+                )
+                processed_files += 1
+                continue
+            if self._exclude_group_input_before_read(
+                excel_path,
+                condition=condition,
+                participant_id=subject_id,
+            ):
                 processed_files += 1
                 continue
             if subject_id.upper() in excluded_participants:
@@ -316,6 +260,13 @@ class PlotDataCollectionMixin:
                     f"Skipping {excel_path.name}: participant is frequency-domain excluded.",
                     offset + processed_files,
                     overall_total,
+                )
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="excluded",
+                    participant_id=subject_id,
+                    reason="frequency-domain participant exclusion",
                 )
                 processed_files += 1
                 continue
@@ -336,17 +287,32 @@ class PlotDataCollectionMixin:
                 overall_total,
             )
             try:
+                workbook_identity_before_read = capture_stable_source_identity(
+                    excel_path,
+                    cancellation_checkpoint=self._cancellation_checkpoint,
+                )
                 df, ordered_freqs, ordered_cols = self._read_full_snr_direct(
                     excel_path,
                     included_electrodes_upper=read_electrodes,
                 )
             except Exception as exc:
+                if self._cancellation_checkpoint():
+                    raise
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="failed",
+                    participant_id=subject_id,
+                    reason="FullSNR sheet could not be read",
+                )
                 message = (
                     "FullSNR sheet is required for SNR plots and could not be "
                     f"read from {excel_path.name}: {exc}"
                 )
                 self._emit(message, offset + processed_files, overall_total)
                 raise RuntimeError(message) from exc
+            if self._cancellation_checkpoint():
+                return [], {}
             if not ordered_cols:
                 self._emit(
                     f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
@@ -357,6 +323,13 @@ class PlotDataCollectionMixin:
                     item=excel_path.name,
                     error="No frequencies in selected x-range",
                 )
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="excluded",
+                    participant_id=subject_id,
+                    reason="no frequencies in selected x-range",
+                )
                 processed_files += 1
                 continue
             self._emit(
@@ -365,17 +338,9 @@ class PlotDataCollectionMixin:
                 overall_total,
             )
 
-            unassigned_group_subject = (
-                self.enable_group_overlay
-                and self.multi_group_mode
-                and self.subject_groups
-                and subject_id not in self.subject_groups
-            )
-            if unassigned_group_subject:
-                self._unknown_subject_files.add(excel_path.name)
-            elif freqs is None:
-                freqs = list(ordered_freqs)
-            elif not _frequency_grids_match(list(freqs), ordered_freqs):
+            if freqs is not None and not _frequency_grids_match(
+                list(freqs), ordered_freqs
+            ):
                 message = (
                     f"Skipping {excel_path.name}: its FullSNR frequency "
                     "grid does not match the first usable workbook."
@@ -388,6 +353,13 @@ class PlotDataCollectionMixin:
                 self._record_failure(
                     item=excel_path.name,
                     error="FullSNR frequency grid mismatch",
+                )
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="excluded",
+                    participant_id=subject_id,
+                    reason="FullSNR frequency grid mismatch",
                 )
                 processed_files += 1
                 continue
@@ -413,9 +385,9 @@ class PlotDataCollectionMixin:
                     continue
 
                 roi_values = snr_values[roi_mask]
-                valid = ~np.isnan(roi_values)
+                valid = np.isfinite(roi_values)
                 counts = valid.sum(axis=0)
-                sums = np.nansum(roi_values, axis=0)
+                sums = np.where(valid, roi_values, 0.0).sum(axis=0)
                 means = np.divide(
                     sums,
                     counts,
@@ -424,48 +396,81 @@ class PlotDataCollectionMixin:
                 ).tolist()
                 subject_roi_data.setdefault(subject_id, {})[roi] = means
 
-            if self.spectral_qc_enabled:
-                try:
-                    full_snr_df, full_snr_freqs, full_snr_cols = self._read_full_snr_direct(
-                        excel_path,
-                        included_electrodes_upper=None,
-                    )
-                    full_fft_df, full_fft_freqs, full_fft_cols = self._read_full_fft_direct(
-                        excel_path,
-                        included_electrodes_upper=None,
-                    )
-                except (
-                    OSError,
-                    KeyError,
-                    ValueError,
-                    zipfile.BadZipFile,
-                    ElementTree.ParseError,
-                ):
-                    full_snr_df = pd.DataFrame()
-                    full_snr_freqs = []
-                    full_snr_cols = []
-                    full_fft_df = pd.DataFrame()
-                    full_fft_freqs = []
-                    full_fft_cols = []
-                if full_snr_cols and full_fft_cols and full_snr_freqs == ordered_freqs:
-                    snr_by_electrode = electrode_snr_data(full_snr_df, full_snr_cols)
-                    fft_by_electrode = interpolate_fullfft_electrode_data(
-                        full_fft_df,
-                        full_fft_freqs,
-                        full_fft_cols,
-                        ordered_freqs,
-                    )
-                    for electrode in excluded_electrodes:
-                        snr_by_electrode.pop(str(electrode).upper(), None)
-                        fft_by_electrode.pop(str(electrode).upper(), None)
-                    if snr_by_electrode and fft_by_electrode:
-                        subject_snr_data[subject_id] = snr_by_electrode
-                        subject_fft_data[subject_id] = fft_by_electrode
-                        source_workbooks[subject_id] = str(excel_path)
+            has_usable_roi_data = any(
+                subject_id in self._participants_with_roi(subject_roi_data, roi)
+                for roi in roi_names
+            )
+            if not has_usable_roi_data:
+                subject_roi_data.pop(subject_id, None)
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="excluded",
+                    participant_id=subject_id,
+                    reason="no usable selected-ROI data",
+                )
+                processed_files += 1
+                self._emit("", offset + processed_files, overall_total)
+                continue
 
+            if freqs is None:
+                freqs = list(ordered_freqs)
+
+            if self.spectral_qc_enabled:
+                if self._cancellation_checkpoint():
+                    return [], {}
+                snr_evidence, fft_evidence, qc_unavailable_reason = (
+                    self._assemble_spectral_qc_evidence(
+                        excel_path,
+                        ordered_freqs=ordered_freqs,
+                        excluded_electrodes=tuple(excluded_electrodes),
+                    )
+                )
+                if self._cancellation_checkpoint():
+                    return [], {}
+                if snr_evidence and fft_evidence:
+                    subject_snr_data[subject_id] = snr_evidence
+                    subject_fft_data[subject_id] = fft_evidence
+                    source_workbooks[subject_id] = str(excel_path)
+                if subject_id not in source_workbooks:
+                    reason = qc_unavailable_reason or (
+                        "spectral-QC evidence was unavailable"
+                    )
+                    self._note_spectral_qc_unavailable(
+                        spectral_qc_unavailable,
+                        condition=condition,
+                        participant_id=subject_id,
+                        workbook_path=excel_path,
+                        reason=reason,
+                    )
+
+            try:
+                read_identity = verify_source_identity_after_read(
+                    excel_path,
+                    before_read=workbook_identity_before_read,
+                    cancellation_checkpoint=self._cancellation_checkpoint,
+                )
+            except SNRPublicationCancelled:
+                raise
+            except (OSError, SNRPublicationError):
+                self._track_input_workbook(
+                    excel_path,
+                    condition=condition,
+                    status="failed",
+                    participant_id=subject_id,
+                    reason="source workbook changed during read-time fingerprinting",
+                )
+                raise
+            self._track_input_workbook(
+                excel_path,
+                condition=condition,
+                status="included",
+                participant_id=subject_id,
+                read_sha256=read_identity.sha256,
+                read_size_bytes=read_identity.size_bytes,
+            )
             processed_files += 1
             self._emit("", offset + processed_files, overall_total)
-
         if not freqs:
             self._emit(
                 "No frequency data found.",
@@ -473,25 +478,21 @@ class PlotDataCollectionMixin:
                 overall_total,
             )
             return [], {}
-
         if not subject_roi_data:
             self._emit("No ROI data to plot.")
             return [], {}
-
         freq_list = list(freqs)
+        if self._cancellation_checkpoint():
+            return [], {}
         self._apply_spectral_qc_to_condition(
             condition,
             freq_list,
             subject_snr_data,
             subject_fft_data,
             source_workbooks,
+            spectral_qc_unavailable,
+            sorted(subject_roi_data),
         )
+        if self._cancellation_checkpoint():
+            return [], {}
         return freq_list, subject_roi_data
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
-    except ValueError:
-        return False
-    return True

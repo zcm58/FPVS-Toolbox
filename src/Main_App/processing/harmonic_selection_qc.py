@@ -35,7 +35,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
 from Tools.Stats.analysis.canonical_harmonics import (
     compute_selection_fingerprint,
 )
-from Tools.Stats.data.shared_rois import load_rois_from_settings
+from Main_App.processing.roi_settings import load_rois_from_settings
 from Tools.Stats.data.group_harmonic_cache import (
     GroupHarmonicCacheRequest,
     build_group_harmonic_cache_request,

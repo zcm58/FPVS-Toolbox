@@ -11,6 +11,8 @@ from openpyxl import Workbook
 import pytest
 
 from Main_App.processing.full_fft_provenance import (
+    FullFftProvenanceStaleError,
+    require_current_project_full_fft_provenance,
     validate_project_full_fft_provenance,
     write_project_full_fft_provenance,
 )
@@ -102,3 +104,47 @@ def test_failed_manifest_replace_preserves_project_and_cleans_staging(
 
     assert manifest_path.read_bytes() == before
     assert not (root / ".project.json.full-fft-provenance.tmp").exists()
+
+
+def test_require_current_full_fft_provenance_uses_saved_rates_and_checks_inputs(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    written = write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=7.5,
+        oddball_frequency_hz=1.25,
+    )
+
+    current = require_current_project_full_fft_provenance(root)
+
+    assert current == written
+    assert current.base_frequency_hz == 7.5
+    assert current.oddball_frequency_hz == 1.25
+
+    workbook_path = root / Path(current.source_paths[0])
+    workbook_path.touch()
+    with pytest.raises(FullFftProvenanceStaleError, match="workbook path, size"):
+        require_current_project_full_fft_provenance(root)
+
+
+def test_rate_mismatch_wins_when_saved_full_fft_inputs_are_also_stale(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    record = write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    (root / Path(record.source_paths[0])).touch()
+
+    with pytest.raises(
+        FullFftProvenanceStaleError,
+        match="Current Project Settings rates do not match",
+    ):
+        validate_project_full_fft_provenance(
+            root,
+            base_frequency_hz=7.5,
+            oddball_frequency_hz=1.2,
+        )

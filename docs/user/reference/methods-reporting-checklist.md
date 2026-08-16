@@ -420,16 +420,20 @@ processing ledger records the source-readiness warning and treats the missing
 source output as work that must be rescheduled; it does not label a missing
 derivative as reusable.
 
-Source-map generation uses a complete-case source cohort. If a completed
-participant is missing any canonical condition, or its ledger explicitly says
-the source derivative is incomplete, that participant is omitted from every
-source condition rather than aborting maps for all other participants. This is
-a source-only omission: it does not alter the participant's available Excel
-outputs or automatically add the participant to the project's general
+Source-map generation uses the versioned
+`available_case_by_group_condition_v1` cohort policy. Saved whole-participant
+QC exclusions remove that participant from every source cohort. A completed
+participant with an explicitly missing or saved-QC-excluded condition is
+omitted only from that participant-condition cell and can still contribute to
+other conditions with valid derivatives. A participant with unknown source
+availability, no remaining source condition, or a globally incomplete source
+derivative is omitted from every source condition. Source-only omissions do
+not alter available Excel outputs or automatically enter the project's general
 exclusion workbook. The prepared manifest, participant sidecar, validation
-report, processing log, and LORETA status identify every omitted participant
-and reason. Files that claim to be complete but fail checksum, compatibility,
-or manifest validation still stop the source build.
+report identify every omitted participant-condition and reason; the processing
+log and LORETA status may summarize large omission sets by scope and reason.
+Files that claim to be retained but fail checksum, compatibility, or manifest
+validation still stop the source build.
 
 These signed FIF/JSON derivatives are sufficient input for the source-method
 orientation changes described below. If they are already present and valid,
@@ -438,7 +442,8 @@ you can rebuild the source maps without reprocessing the participant EEG.
 ### Current Source Calculations
 
 The normal source build is intentionally EEG-only and generates both current
-methods. They use the same signed FIF derivatives, complete-case source cohort,
+methods. They use the same signed FIF derivatives, available-case
+group-condition source cohorts,
 saved oddball harmonics, exact FPVS frequency bins, and neighboring-bin z-score
 algorithm. They do not share source values: each inverse produces and caches
 its own participant source-amplitude and z-score arrays.
@@ -605,7 +610,8 @@ Report at least:
   one global minimum/maximum removal, and population SD (`ddof=0`);
 - participant exclusions, flagged-participant policy, group summary, and each
   method's source-space cluster inference, plus L2-MNE ROI/lateralization
-  settings and every source-only complete-case omission and its reason;
+  settings, saved whole-participant and participant-condition QC exclusions,
+  and every source-only available-case omission and its reason;
 - whether a reported volume figure used MRI slices or the 3D contour, and that
   slice/contour interpolation was display-only rather than additional tested
   locations or inferential extent; and

@@ -1,6 +1,5 @@
 import importlib.util
 
-import openpyxl
 import pandas as pd
 import pytest
 
@@ -9,7 +8,11 @@ from Tools.Plot_Generator.spectral_qc_alerts import (
     build_spectral_qc_alert_message,
     whole_participant_exclusion_candidates,
 )
-from Tools.Plot_Generator.spectral_qc import interpolate_fullfft_electrode_data
+from Tools.Plot_Generator.spectral_qc import (
+    SpectralQcThresholds,
+    flag_spectral_qc_electrode_outliers,
+    interpolate_fullfft_electrode_data,
+)
 
 
 def _import_module():
@@ -72,6 +75,14 @@ def test_spectral_qc_flags_off_harmonic_electrodes_without_changing_plot_values(
     def dummy_plot(self, freqs, roi_data, group_curves=None):
         captured["freqs"] = freqs
         captured["roi_data"] = roi_data
+        png_path = self.out_dir / "qc-test.png"
+        pdf_path = self.out_dir / "qc-test.pdf"
+        png_path.write_bytes(b"png")
+        pdf_path.write_bytes(b"pdf")
+        self._record_figure_pair(
+            png_path=png_path,
+            pdf_path=pdf_path,
+        )
 
     monkeypatch.setattr(module._Worker, "_plot", dummy_plot)
     monkeypatch.setattr(
@@ -102,28 +113,47 @@ def test_spectral_qc_flags_off_harmonic_electrodes_without_changing_plot_values(
         spectral_qc_enabled=True,
     )
 
-    worker._run()
+    worker.run()
 
     assert captured["freqs"] == [1.0, 1.2]
     assert captured["roi_data"]["All"] == pytest.approx([1.0, 2.0])
 
-    report = project_root / "Quality Check" / "SNR_Unexpected_Peaks_Cond.xlsx"
-    assert report.exists()
-    assert str(report) in worker.qc_report_paths
-    assert any("1 electrode-frequency rows flagged" in message for message in messages)
+    assert worker.spectral_qc_flags[0]["pid"] == "P04"
+    assert not list(project_root.rglob("SNR_Unexpected_Peaks_*.xlsx"))
+    assert (out_dir / "qc-test.png").is_file()
+    assert (out_dir / "qc-test.pdf").is_file()
+    assert not list(out_dir.glob("SNR_Plot_Run_*"))
 
-    wb = openpyxl.load_workbook(report, data_only=True)
-    summary = dict(wb["Summary"].iter_rows(min_row=2, max_col=2, values_only=True))
-    assert summary["Flag behavior"] == "Report-only; SNR plot aggregation values are not changed."
-    assert (
-        summary["Reason"]
-        == "Strong SNR/FFT peak at a frequency that is not base, oddball, or a harmonic."
+
+def test_spectral_qc_inner_scan_honors_cooperative_cancellation():
+    checkpoint_calls = 0
+
+    def cancellation_checkpoint() -> bool:
+        nonlocal checkpoint_calls
+        checkpoint_calls += 1
+        return checkpoint_calls >= 2
+
+    result = flag_spectral_qc_electrode_outliers(
+        condition="Cond",
+        freqs=[1.0, 1.1, 1.2],
+        subject_snr_data={
+            pid: {"OZ": [1.0, 1.0, 1.0]}
+            for pid in ("P01", "P02", "P03")
+        },
+        subject_fft_data={
+            pid: {"OZ": [0.5, 0.5, 0.5]}
+            for pid in ("P01", "P02", "P03")
+        },
+        source_workbooks={},
+        oddball_freq=1.2,
+        base_freq=6.0,
+        thresholds=SpectralQcThresholds(),
+        cancellation_checkpoint=cancellation_checkpoint,
     )
-    rows = list(wb["Flagged Electrodes"].iter_rows(values_only=True))
-    assert rows[0][:4] == ("Condition", "PID", "Electrode", "Frequency (Hz)")
-    assert rows[1][0:4] == ("Cond", "P04", "FT7", 1.0)
-    assert rows[1][4] == "off_harmonic_fft_snr_outlier"
-    assert len(rows) == 2
+
+    assert checkpoint_calls == 2
+    assert result.checked_cells == 0
+    assert result.flagged_cells == 0
 
 
 def test_spectral_qc_can_be_disabled(tmp_path, monkeypatch):
@@ -164,7 +194,96 @@ def test_spectral_qc_can_be_disabled(tmp_path, monkeypatch):
     worker._run()
 
     assert captured["roi_data"]["All"] == [1.0, 2.0]
-    assert worker.qc_report_paths == []
+
+
+def test_optional_qc_conversion_failure_does_not_abort_plot_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    module = _import_module()
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Posterior": ["Oz"]},
+        selected_roi="Posterior",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=1.0,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path / "plots"),
+        spectral_qc_enabled=True,
+    )
+    snr_frame = pd.DataFrame(
+        {"Electrode": ["Oz", "FT7"], "1.0_Hz": [2.0, "malformed"]}
+    )
+    fft_frame = pd.DataFrame(
+        {"Electrode": ["Oz", "FT7"], "1.0_Hz": [1.0, 2.0]}
+    )
+    monkeypatch.setattr(
+        worker,
+        "_read_full_snr_direct",
+        lambda *_args, **_kwargs: (snr_frame, [1.0], ["1.0_Hz"]),
+    )
+    monkeypatch.setattr(
+        worker,
+        "_read_full_fft_direct",
+        lambda *_args, **_kwargs: (fft_frame, [1.0], ["1.0_Hz"]),
+    )
+
+    snr_evidence, fft_evidence, reason = worker._assemble_spectral_qc_evidence(
+        tmp_path / "P01_Cond_Results.xlsx",
+        ordered_freqs=[1.0],
+        excluded_electrodes=(),
+    )
+
+    assert snr_evidence == {}
+    assert fft_evidence == {}
+    assert reason is not None and "read/conversion failed" in reason
+
+
+def test_spectral_qc_with_zero_evaluated_cells_is_unavailable_not_complete(
+    tmp_path,
+    monkeypatch,
+):
+    module = _import_module()
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Posterior": ["Oz"]},
+        selected_roi="Posterior",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=1.0,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path / "plots"),
+        spectral_qc_enabled=True,
+    )
+    messages: list[str] = []
+    monkeypatch.setattr(worker, "_emit", lambda message, *_args: messages.append(message))
+    worker._apply_spectral_qc_to_condition(
+        "Cond",
+        [1.0],
+        {"P01": {"OZ": [2.0]}, "P02": {"OZ": [2.0]}},
+        {"P01": {"OZ": [1.0]}, "P02": {"OZ": [1.0]}},
+        {"P01": "P01.xlsx", "P02": "P02.xlsx"},
+        {},
+        ["P01", "P02"],
+    )
+
+    audit = worker.spectral_qc_runs[0]
+    assert audit["status"] == "unavailable"
+    assert audit["checked_cells"] == 0
+    assert "at least 3 participants" in audit["status_reason"]
+    assert worker.warning_items[0]["code"] == (
+        "spectral_qc_insufficient_shared_evidence"
+    )
+    assert any("Spectral QC unavailable" in message for message in messages)
 
 
 def test_fullfft_electrode_data_uses_interpolated_plot_grid():
@@ -215,7 +334,6 @@ def test_spectral_qc_alert_message_recommends_reprocessing_flagged_electrodes():
     ]
     message = build_spectral_qc_alert_message(
         flags,
-        [r"C:\Project\Quality Check\SNR_Unexpected_Peaks_Erotic.xlsx"],
     )
     candidates = whole_participant_exclusion_candidates(flags)
 
@@ -230,7 +348,7 @@ def test_spectral_qc_alert_message_recommends_reprocessing_flagged_electrodes():
     assert "P12: all 64 scalp electrodes were flagged in Erotic" in message
     assert "Recommendation: exclude these participant(s), then reprocess" in message
     assert "Localized electrode candidates: 1 participant-electrode pair" in message
-    assert "SNR_Unexpected_Peaks_Erotic.xlsx" in message
+    assert "Full details were saved" not in message
     assert candidates == [
         {
             "pid": "P12",

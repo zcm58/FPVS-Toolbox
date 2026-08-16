@@ -94,8 +94,10 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
 - Source-PSD project orchestration uses the versioned
   `available_case_by_group_condition_v1` eligibility policy. A completed
   participant contributes to every canonical condition with a committed
-  derivative; an explicitly missing condition omits only that
-  participant-condition input. Every prepared group-condition map records its
+  derivative; an explicitly missing condition or saved project
+  participant-condition QC exclusion omits only that participant-condition
+  input, while saved whole-participant exclusions remove that participant from
+  every source cohort. Every prepared group-condition map records its
   own participant count and identities. Group-condition cells with no retained
   participants are omitted, while one-participant cells remain descriptive and
   skip inferential cluster masking. Participants whose available conditions
@@ -103,6 +105,9 @@ preprocessing, project I/O, diagnostics, or unrelated tool packages.
   globally source-ineligible. Record both omission scopes in the prepared
   manifest, participant sidecar, validation report, logs, and GUI status; do not
   add source-only omissions to the general participant exclusion workbook.
+  Console/log warnings may summarize large omission sets by reason and
+  condition, but the durable validation report must retain every individual
+  omission.
   Before either inverse runs, the shared input adapter selects the exact sample
   count `N` supported by a unique modal number of participants.
   Participant-condition derivatives with another `N`

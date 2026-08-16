@@ -18,6 +18,7 @@ tests/gui/test_settings_and_status.py
 tests/gui/test_sidebar_vector_icons.py
 tests/gui/test_ui_components_smoke.py
 tests/gui/test_update_manager_manual_force.py
+tests/plot_generator/test_plot_generator_cancellation_qt.py
 tests/plot_generator/test_plot_generator_condition_title_all.py
 tests/plot_generator/test_plot_generator_generation_outcome.py
 tests/plot_generator/test_plot_generator_gui.py

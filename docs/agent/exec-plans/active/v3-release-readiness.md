@@ -23,10 +23,39 @@ SNR grid-safety progress on 2026-08-16: two-condition overlays now require the
 same ordered physical FullSNR grid already required within each condition. A
 mismatch is reported before aggregation or rendering, and matching/mismatching
 worker regressions protect the contract without adding GUI or resampling logic.
-The Plot Generator focused gate now runs 49 locally safe tests, including six
-existing locally safe Plot Generator test modules that were previously omitted
-from the scope. Repo precommit passed 1,624 tests with three skips, and the
-strict documentation build passed.
+The Plot Generator focused gate was expanded to include the previously omitted
+locally safe rendering and QC modules.
+
+SNR release-closeout progress on 2026-08-16: cancellation is now cooperative;
+managed runs consume frozen processing provenance and the exact active workbook
+family; multi-group projects cannot fall through to an implicitly pooled curve;
+and each completed figure is written as a matching PNG/PDF pair directly into
+the selected `2 - SNR Plots` folder. The figures-only product decision removes
+per-run subfolders, plotted-source CSV files, QC workbooks, and JSON manifests.
+App close defers while an active plotting thread cancels cooperatively.
+Non-finite values are handled
+consistently as missing, figures use the shared 6.5-inch publication-width
+contract, and selected group labels are mapped to canonical project group IDs
+during aggregation. The expanded Plot Generator focused gate passes 106 locally
+safe tests. Its registered pytest-qt cancellation, close-deferral, and
+multi-group lifecycle smokes remain CI-only.
+Final local SNR handoff verification passed Plot Generator (106 tests),
+processing (359 tests and one skip), project I/O (83 tests), Stats (384 tests),
+strict documentation, and repo precommit (1,685 tests and three skips), plus
+the applicable GUI/path/structure audits, Ruff, and compilation checks.
+
+SNR stale-state recovery progress on 2026-08-16: managed-provenance failures
+now carry the affected project identity and reason to one shared Main App
+**Post-processing Required** dialog. Acceptance launches the existing
+post-processing activity workflow and reuses processed workbooks without EEG
+preprocessing. SNR participant exclusions default to No, mark downstream
+frequency outputs stale when accepted, and use the same recovery action.
+
+LORETA source-cohort follow-up on 2026-08-16: the shared L2/eLORETA input plan
+now applies the project's saved whole-participant and participant-condition QC
+exclusions before derivative loading and sample-count selection. Large
+available-case omission sets use bounded log summaries while exact participant,
+condition, and reason rows remain in source validation artifacts.
 
 Baseline: `v2.1.2`. At the 2026-08-16 audit, `main` was 217 commits and 633
 changed files beyond that tag, while `src/config.py` still reported `2.1.2`.
@@ -122,19 +151,17 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [x] Before a two-condition overlay, require identical physical frequency
       grids. Reject mismatched grids with a clear message instead of plotting
       condition B against condition A's x-axis.
-- [ ] Make cancellation cooperative. Keep the worker/thread and navigation
+- [x] Make cancellation cooperative. Keep the worker/thread and navigation
       locked until the worker actually returns; never permit overlapping
       generation or writes after a visible cancel.
-- [ ] For project-backed runs, take base/oddball rates and expected spectral-QC
+- [x] For project-backed runs, take base/oddball rates and expected spectral-QC
       frequencies from frozen project/processing provenance, not mutable
       application-global settings.
-- [ ] Export the plotted source values and a run manifest: frequency grid,
-      curves, per-frequency/ROI N, included/excluded participant IDs, ROI
-      electrodes, rates, settings, warnings, and input/output hashes.
-- [ ] Publish paired PNG/PDF and source-data outputs atomically so cancellation
-      or failure cannot leave a result that looks complete.
-- [ ] Add focused regression coverage for mismatched grids, cancellation,
-      atomic output, spectral-QC provenance, PDF/PNG figure dimensions, and
+- [x] Keep SNR output intentionally figures-only: write matching PNG/PDF files
+      directly into `2 - SNR Plots`, without per-run folders, spreadsheets, QC
+      workbooks, or manifests.
+- [x] Add focused regression coverage for mismatched grids, cancellation,
+      direct figure output, spectral-QC behavior, PDF/PNG figure dimensions, and
       participant counts.
 
 #### Scalp Maps

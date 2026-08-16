@@ -680,28 +680,7 @@ def write_project_full_fft_provenance(
     return _record_from_metadata(root, metadata)
 
 
-def validate_project_full_fft_provenance(
-    project_root: str | Path,
-    *,
-    base_frequency_hz: float,
-    oddball_frequency_hz: float,
-    dataset_index: ProjectDatasetIndex | None = None,
-) -> FullFftProvenance:
-    """Validate rates, cohort/QC identity, and FullFFT file freshness."""
-
-    root = Path(project_root).expanduser().resolve(strict=False)
-    if not root.is_dir() or not (root / "project.json").is_file():
-        raise FullFftProvenanceError(
-            "project_root must be an existing managed project containing project.json."
-        )
-    supplied_base_hz = _positive_frequency(
-        base_frequency_hz,
-        label="base_frequency_hz",
-    )
-    supplied_oddball_hz = _positive_frequency(
-        oddball_frequency_hz,
-        label="oddball_frequency_hz",
-    )
+def _saved_full_fft_provenance(root: Path) -> FullFftProvenance:
     manifest = _read_manifest(root)
     metadata = _metadata_from_manifest(manifest)
     if metadata is None:
@@ -710,19 +689,15 @@ def validate_project_full_fft_provenance(
             "record or its last post-processing run did not finish. Rerun "
             "post-processing; EEG preprocessing is not required."
         )
-    record = _record_from_metadata(root, metadata)
-    if not (
-        _same_rate(record.base_frequency_hz, supplied_base_hz)
-        and _same_rate(record.oddball_frequency_hz, supplied_oddball_hz)
-    ):
-        raise FullFftProvenanceStaleError(
-            "Current Project Settings rates do not match neutral FullFFT "
-            "provenance: current "
-            f"base={supplied_base_hz:g} Hz / oddball={supplied_oddball_hz:g} Hz; "
-            f"processed base={record.base_frequency_hz:g} Hz / "
-            f"oddball={record.oddball_frequency_hz:g} Hz. Restore the processed "
-            "rates or rerun post-processing; EEG preprocessing is not required."
-        )
+    return _record_from_metadata(root, metadata)
+
+
+def _require_current_full_fft_record(
+    root: Path,
+    record: FullFftProvenance,
+    *,
+    dataset_index: ProjectDatasetIndex | None,
+) -> FullFftProvenance:
     index = _load_dataset_index(root, dataset_index)
     try:
         current = _source_snapshot(root, index)
@@ -751,6 +726,74 @@ def validate_project_full_fft_provenance(
             + ". Rerun post-processing; EEG preprocessing is not required."
         )
     return record
+
+
+def require_current_project_full_fft_provenance(
+    project_root: str | Path,
+    *,
+    dataset_index: ProjectDatasetIndex | None = None,
+) -> FullFftProvenance:
+    """Return the current saved FullFFT identity for a managed project.
+
+    Unlike :func:`validate_project_full_fft_provenance`, this entry point does
+    not compare against caller-supplied rates.  It treats the immutable rates
+    saved with the processing record as authoritative while validating the
+    current cohort, workbook, frequency-QC, and processing/export identities.
+    """
+
+    root = Path(project_root).expanduser().resolve(strict=False)
+    if not root.is_dir() or not (root / "project.json").is_file():
+        raise FullFftProvenanceError(
+            "project_root must be an existing managed project containing project.json."
+        )
+    record = _saved_full_fft_provenance(root)
+    return _require_current_full_fft_record(
+        root,
+        record,
+        dataset_index=dataset_index,
+    )
+
+
+def validate_project_full_fft_provenance(
+    project_root: str | Path,
+    *,
+    base_frequency_hz: float,
+    oddball_frequency_hz: float,
+    dataset_index: ProjectDatasetIndex | None = None,
+) -> FullFftProvenance:
+    """Validate rates, cohort/QC identity, and FullFFT file freshness."""
+
+    root = Path(project_root).expanduser().resolve(strict=False)
+    if not root.is_dir() or not (root / "project.json").is_file():
+        raise FullFftProvenanceError(
+            "project_root must be an existing managed project containing project.json."
+        )
+    supplied_base_hz = _positive_frequency(
+        base_frequency_hz,
+        label="base_frequency_hz",
+    )
+    supplied_oddball_hz = _positive_frequency(
+        oddball_frequency_hz,
+        label="oddball_frequency_hz",
+    )
+    record = _saved_full_fft_provenance(root)
+    if not (
+        _same_rate(record.base_frequency_hz, supplied_base_hz)
+        and _same_rate(record.oddball_frequency_hz, supplied_oddball_hz)
+    ):
+        raise FullFftProvenanceStaleError(
+            "Current Project Settings rates do not match neutral FullFFT "
+            "provenance: current "
+            f"base={supplied_base_hz:g} Hz / oddball={supplied_oddball_hz:g} Hz; "
+            f"processed base={record.base_frequency_hz:g} Hz / "
+            f"oddball={record.oddball_frequency_hz:g} Hz. Restore the processed "
+            "rates or rerun post-processing; EEG preprocessing is not required."
+        )
+    return _require_current_full_fft_record(
+        root,
+        record,
+        dataset_index=dataset_index,
+    )
 
 
 def mark_project_full_fft_provenance_stale(
@@ -783,6 +826,7 @@ __all__ = [
     "FullFftProvenanceMissingError",
     "FullFftProvenanceStaleError",
     "mark_project_full_fft_provenance_stale",
+    "require_current_project_full_fft_provenance",
     "validate_project_full_fft_provenance",
     "write_project_full_fft_provenance",
 ]

@@ -17,6 +17,7 @@ from Main_App.gui.components import (
     ActionRow,
     AppDialog,
     PathPickerRow,
+    PostProcessingRequiredDialog,
     SectionCard,
     StatusBanner,
     SubsectionHeaderLabel,
@@ -45,6 +46,7 @@ EXPECTED_COMPONENT_EXPORTS = (
     "BusySpinner",
     "CardHeader",
     "PathPickerRow",
+    "PostProcessingRequiredDialog",
     "SectionCard",
     "StatusBanner",
     "SubsectionHeaderLabel",
@@ -66,6 +68,7 @@ EXPECTED_COMPONENT_EXPORTS = (
     "matplotlib_font_kwargs",
     "show_error",
     "show_info",
+    "show_post_processing_required",
     "show_tool_info",
     "show_warning",
 )
@@ -496,6 +499,26 @@ def test_component_action_row_emits_button_signals(qtbot) -> None:
     assert row.objectName() == "run_action_row"
     assert row.row_layout.spacing() == 12
     assert row.row_layout.indexOf(run_button) >= 0
+
+
+def test_post_processing_required_dialog_explains_scope_and_actions(qtbot) -> None:
+    dialog = PostProcessingRequiredDialog(
+        tool_name="SNR Plots",
+        reason="The active workbook cohort changed.",
+    )
+    qtbot.addWidget(dialog)
+
+    assert "SNR Plots cannot continue" in dialog.findChild(
+        StatusBanner,
+        "post_processing_required_banner",
+    ).text()
+    assert "EEG preprocessing is not rerun" in dialog.findChild(
+        QLabel,
+        "post_processing_required_explanation",
+    ).text()
+    assert dialog.run_button.text() == "Run Post-processing"
+    assert dialog.run_button.isDefault()
+    assert dialog.cancel_button.text() == "Not Now"
 
 
 def test_component_message_helpers_delegate_to_qmessagebox(monkeypatch) -> None:

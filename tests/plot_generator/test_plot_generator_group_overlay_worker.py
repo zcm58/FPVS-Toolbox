@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from Main_App.processing.full_fft_provenance import (
+    write_project_full_fft_provenance,
+)
 from Tools.Plot_Generator import data_collection
 from Tools.Plot_Generator.generation_outcome import (
     format_completion_summary,
@@ -15,7 +18,7 @@ from Tools.Plot_Generator.generation_outcome import (
 )
 from Tools.Plot_Generator.rendering import _group_color, _group_marker
 from Tools.Plot_Generator.worker import _Worker
-from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+from Main_App.processing.roi_settings import ALL_ROIS_OPTION
 
 
 def _write_full_snr(path: Path, values: list[float]) -> None:
@@ -29,6 +32,18 @@ def _write_full_snr(path: Path, values: list[float]) -> None:
     )
     with pd.ExcelWriter(path) as writer:
         df.to_excel(writer, sheet_name="FullSNR", index=False)
+        pd.DataFrame(
+            {
+                "Electrode": ["Cz"],
+                "0.0_Hz": [1.0],
+                "1.2_Hz": [1.0],
+                "2.4_Hz": [1.0],
+            }
+        ).to_excel(
+            writer,
+            sheet_name="FullFFT Amplitude (uV)",
+            index=False,
+        )
 
 
 def test_group_overlay_completion_outcome_helpers() -> None:
@@ -163,6 +178,11 @@ def test_group_overlay_matches_project_participant_ids_from_excel_names(
         / "E2P1initial_Angry_Results.xlsx",
         [1.0, 3.0],
     )
+    write_project_full_fft_provenance(
+        project_root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
 
     worker = _Worker(
         str(excel_root),
@@ -193,7 +213,7 @@ def test_group_overlay_matches_project_participant_ids_from_excel_names(
 
     monkeypatch.setattr(worker, "_plot", fake_plot)
 
-    worker.run()
+    worker._run()
 
     assert captured["roi_data"] == {"Central": [1.5, 3.5]}
     assert captured["group_curves"] == {
@@ -241,6 +261,11 @@ def test_worker_uses_shared_index_preference_for_grouped_workbook(
         excel_root / condition / "Control" / "P01_Faces_Results.xlsx",
         [2.0, 4.0],
     )
+    write_project_full_fft_provenance(
+        project_root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
     worker = _Worker(
         str(excel_root),
         condition,
@@ -265,7 +290,7 @@ def test_worker_uses_shared_index_preference_for_grouped_workbook(
         ),
     )
 
-    worker.run()
+    worker._run()
 
     assert captured == {
         "freqs": [1.0, 2.0],

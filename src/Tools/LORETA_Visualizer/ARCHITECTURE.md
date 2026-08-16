@@ -616,14 +616,18 @@ stale, checksum-mismatched, incompatible-channel, or off-bin retained sets
 rather than falling back to amplitude workbooks. Before that strict load, the
 project exporter applies `available_case_by_group_condition_v1`: each completed
 participant contributes to every canonical condition with a committed
-derivative, while an explicitly missing condition omits only that
-participant-condition input. Each prepared map records its own participant
+derivative, while an explicitly missing condition or saved project
+participant-condition QC exclusion omits only that participant-condition
+input. Saved whole-participant exclusions remove that participant from every
+source cohort. Each prepared map records its own participant
 count and identities. Empty group-condition cells are omitted; one-participant
 cells remain descriptive without an inferential cluster mask. Participants
 with unknown availability or no available canonical conditions are omitted
 globally. Both omission scopes and reasons are written to the prepared
 manifest, participant sidecar, validation report, structured log, and GUI
-warning status. A derivative with a nonmodal sample count is a condition-level
+warning status. Large structured-log warning sets are summarized by reason and
+condition; individual rows remain in the validation artifacts. A derivative
+with a nonmodal sample count is a condition-level
 source omission; a tied sample-count distribution, or a retained derivative
 that is missing, corrupt, stale, or otherwise incompatible, still stops the
 build. The FIF

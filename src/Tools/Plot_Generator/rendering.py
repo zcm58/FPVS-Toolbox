@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 import time
 from typing import Dict, List
 
@@ -12,10 +11,16 @@ import numpy as np
 
 from Main_App.exports.figure_style import (
     FIGURE_EXPORT_DPI,
+    FIGURE_STANDARD_LANDSCAPE_SIZE_IN,
     apply_axis_text_style,
     apply_matplotlib_figure_style,
     figure_legend_kwargs,
     figure_text_kwargs,
+)
+from Tools.Plot_Generator.render_naming import (
+    GROUP_OVERLAY_SUFFIX,
+    claim_figure_stem,
+    safe_figure_stem,
 )
 
 matplotlib.use("Agg")
@@ -32,20 +37,10 @@ plt.rcParams.update(
 
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
-_GROUP_OVERLAY_SUFFIX = "_group_overlay"
 _GROUP_MARKERS = ("o", "^", "s", "D", "P", "X", "v", "<", ">")
-_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*]+')
 
-
-def _safe_figure_stem(*, base_title: str, roi: str) -> str:
-    """Return a Windows-safe figure stem while preserving the title/ROI shape."""
-
-    title = str(base_title or "").strip() or "SNR Plot"
-    roi_label = str(roi or "").strip() or "ROI"
-    stem = f"{title} - {roi_label}"
-    stem = _ILLEGAL_FILENAME_CHARS.sub("_", stem)
-    stem = re.sub(r"\s+", " ", stem).strip(" ._")
-    return stem or "SNR Plot"
+# Compatibility re-export for tests and older callers of the private helper.
+_safe_figure_stem = safe_figure_stem
 
 
 def _group_color(
@@ -87,12 +82,19 @@ def _label_with_sample_size(label: str, sample_size: int | None) -> str:
 class PlotRenderingMixin:
     """Worker-state helpers for PNG/PDF line and overlay plot rendering."""
 
+    def _resolve_legend_label(self, custom: str | None, default: str) -> str:
+        if self.legend_custom_enabled and custom is not None and custom.strip():
+            return custom.strip()
+        return default
+
     def _plot(
         self,
         freqs: List[float],
         roi_data: Dict[str, List[float]],
         group_curves: Dict[str, Dict[str, List[float]]] | None = None,
     ) -> None:
+        if self._cancellation_checkpoint():
+            return
         odd_freqs = self._visible_oddball_frequencies(freqs)
 
         group_curves = group_curves or {}
@@ -110,11 +112,10 @@ class PlotRenderingMixin:
         ]
 
         for roi, amps in roi_data.items():
-            if self._stop_requested:
-                self._emit("Generation cancelled by user.")
+            if self._cancellation_checkpoint():
                 return
             render_started = time.perf_counter()
-            fig, ax = plt.subplots(figsize=(10, 4))
+            fig, ax = plt.subplots(figsize=FIGURE_STANDARD_LANDSCAPE_SIZE_IN)
 
             if use_group_overlay:
                 plotted = False
@@ -167,7 +168,13 @@ class PlotRenderingMixin:
                     freqs,
                     amps,
                     color=self.stem_color,
-                    label=self._resolve_legend_label(self.legend_condition_a, self.condition),
+                    label=_label_with_sample_size(
+                        self._resolve_legend_label(
+                            self.legend_condition_a,
+                            self.condition,
+                        ),
+                        self.roi_sample_sizes.get(roi),
+                    ),
                 )
                 self._emit(
                     f"Plotted {len(amps)} SNR values for ROI {roi}", 0, 0
@@ -271,20 +278,22 @@ class PlotRenderingMixin:
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             fig.tight_layout()
-            figure_stem = _safe_figure_stem(
+            if self._cancellation_checkpoint():
+                plt.close(fig)
+                return
+            figure_stem = claim_figure_stem(
+                self,
                 base_title=self.title or self.condition,
                 roi=roi,
+                suffix=GROUP_OVERLAY_SUFFIX if use_group_overlay else "",
             )
-            if use_group_overlay:
-                figure_stem += _GROUP_OVERLAY_SUFFIX
             fname = f"{figure_stem}.png"
             save_kwargs = {
                 "dpi": FIGURE_EXPORT_DPI,
-                "pad_inches": 0.05,
-                "bbox_inches": "tight",
             }
             out_path = self.out_dir / fname
             pdf_path = out_path.with_suffix(".pdf")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
@@ -293,8 +302,10 @@ class PlotRenderingMixin:
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)
-            self._record_generated_path(out_path)
-            self._record_generated_path(pdf_path)
+            self._record_figure_pair(
+                png_path=out_path,
+                pdf_path=pdf_path,
+            )
             self._emit(f"Saved {fname}")
 
     def _plot_overlay(
@@ -303,27 +314,44 @@ class PlotRenderingMixin:
         data_a: Dict[str, List[float]],
         data_b: Dict[str, List[float]],
     ) -> None:
+        if self._cancellation_checkpoint():
+            return
         odd_freqs = self._visible_oddball_frequencies(freqs)
 
         for roi in data_a:
-            if self._stop_requested:
-                self._emit("Generation cancelled by user.")
+            if self._cancellation_checkpoint():
                 return
             render_started = time.perf_counter()
-            fig, ax = plt.subplots(figsize=(10, 4))
+            fig, ax = plt.subplots(figsize=FIGURE_STANDARD_LANDSCAPE_SIZE_IN)
 
             ax.plot(
                 freqs,
                 data_a[roi],
                 color=self.stem_color,
-                label=self._resolve_legend_label(self.legend_condition_a, self.condition),
+                label=_label_with_sample_size(
+                    self._resolve_legend_label(
+                        self.legend_condition_a,
+                        self.condition,
+                    ),
+                    self.overlay_roi_sample_sizes.get(
+                        self.condition,
+                        {},
+                    ).get(roi),
+                ),
             )
             ax.plot(
                 freqs,
                 data_b.get(roi, []),
                 color=self.stem_color_b,
-                label=self._resolve_legend_label(
-                    self.legend_condition_b, self.condition_b or ""
+                label=_label_with_sample_size(
+                    self._resolve_legend_label(
+                        self.legend_condition_b,
+                        self.condition_b or "",
+                    ),
+                    self.overlay_roi_sample_sizes.get(
+                        self.condition_b or "",
+                        {},
+                    ).get(roi),
                 ),
             )
 
@@ -405,27 +433,36 @@ class PlotRenderingMixin:
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             fig.tight_layout()
+            if self._cancellation_checkpoint():
+                plt.close(fig)
+                return
 
-            fname = f"{_safe_figure_stem(base_title=base, roi=roi)}.png"
+            figure_stem = claim_figure_stem(
+                self,
+                base_title=base,
+                roi=roi,
+            )
+            fname = f"{figure_stem}.png"
             out_path = self.out_dir / fname
             pdf_path = out_path.with_suffix(".pdf")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
                 fig.savefig(
                     out_path,
                     dpi=FIGURE_EXPORT_DPI,
-                    pad_inches=0.05,
                 )
                 fig.savefig(
                     pdf_path,
                     format="pdf",
                     dpi=FIGURE_EXPORT_DPI,
-                    pad_inches=0.05,
                 )
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)
-            self._record_generated_path(out_path)
-            self._record_generated_path(pdf_path)
+            self._record_figure_pair(
+                png_path=out_path,
+                pdf_path=pdf_path,
+            )
             self._emit(f"Saved {fname}")

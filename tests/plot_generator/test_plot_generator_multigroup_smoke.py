@@ -190,11 +190,15 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
     win.out_edit.setText(str(output_dir))
 
     assert win.group_box.isVisible()
-    assert win.condition_combo.currentText() == "All Conditions"
-
-    win.group_overlay_check.setChecked(True)
+    assert win.group_overlay_check.isChecked()
+    assert not win.group_overlay_check.isEnabled()
+    assert win.group_list.isEnabled()
+    assert win.legend_condition_a_edit.text() == "GroupA"
+    assert win.legend_condition_b_edit.text() == "GroupB"
     assert win.condition_combo.currentText() in {"CondA", "CondB"}
     assert win.condition_combo.model().item(0).isEnabled() is False
+    win.group_overlay_check.setChecked(False)
+    assert win.group_overlay_check.isChecked()
     item = win.group_list.item(0)
     assert item.text() == ""
     assert item.data(Qt.UserRole) == "GroupA"

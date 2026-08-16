@@ -9,6 +9,7 @@ from typing import Dict, List, Sequence
 
 import pandas as pd
 from Main_App import SettingsManager
+from Main_App.processing.full_fft_provenance import FullFftProvenanceError
 
 from PySide6.QtCore import QObject, Signal
 
@@ -21,6 +22,7 @@ from Tools.Plot_Generator.excel_inputs import (
     _select_frequency_pairs,
 )
 from Tools.Plot_Generator.rendering import PlotRenderingMixin, matplotlib, plt
+from Tools.Plot_Generator.output_interface import PlotOutputInterfaceMixin
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ class _Worker(
     PlotDataCollectionMixin,
     PlotAggregationMixin,
     PlotRenderingMixin,
+    PlotOutputInterfaceMixin,
 ):
     """Worker to process Excel files and generate plots."""
 
@@ -129,11 +132,12 @@ class _Worker(
         self.stem_color_b = self.config.stem_color_b.lower()
         self.condition_b = self.config.condition_b
         self.overlay = self.config.overlay
-        self._analysis_base_freq = self._read_analysis_float("base_freq", 0.0)
+        self._analysis_base_freq = self._read_analysis_float("base_freq", 6.0)
         self._analysis_oddball_freq = self._read_analysis_float(
             "oddball_freq", _DEFAULT_ODDBALL_FREQ
         )
         # Maintain explicit oddballs override for compatibility with older callers.
+        self._explicit_oddballs = bool(self.config.oddballs)
         if self.config.oddballs:
             parsed_oddballs: List[float] = []
             for odd in self.config.oddballs:
@@ -149,6 +153,8 @@ class _Worker(
             self.oddballs = self._derive_oddball_harmonics(self.x_max)
         self.use_matlab_style = self.config.use_matlab_style
         self._stop_requested = False
+        self._cancellation_reported = False
+        self._completed_figure_saved = False
         normalized_groups = {
             pid.upper(): grp
             for pid, grp in (self.config.subject_groups or {}).items()
@@ -161,6 +167,7 @@ class _Worker(
         self.enable_group_overlay = bool(self.config.enable_group_overlay and ordered)
         self.multi_group_mode = self.config.multi_group_mode
         self._unknown_subject_files: set[str] = set()
+        self._unselected_group_files: set[str] = set()
         self.legend_custom_enabled = self.config.legend_custom_enabled
         self.legend_condition_a = self.config.legend_condition_a
         self.legend_condition_b = self.config.legend_condition_b
@@ -171,7 +178,6 @@ class _Worker(
         self._dataset_index_loaded = False
         self._workbook_records_by_path = {}
         self.generated_paths: list[str] = []
-        self.qc_report_paths: list[str] = []
         self.spectral_qc_flags: list[dict[str, object]] = []
         self.failed_items: list[dict[str, str]] = []
         self.warning_items: list[dict[str, str]] = []
@@ -183,26 +189,49 @@ class _Worker(
             "file_save": 0.0,
         }
         self._timing_details: dict[str, float] = {}
+        self._post_processing_required_reason: str | None = None
+        self._initialize_plot_output_interface()
 
     def run(self) -> None:
         try:
-            self._run()
+            if not self._cancellation_checkpoint():
+                self._run()
+        except FullFftProvenanceError as exc:
+            if not self._cancellation_checkpoint():
+                self._post_processing_required_reason = str(exc)
+                self._record_failure(
+                    item=self.condition,
+                    error=f"Post-processing required: {exc}",
+                )
+                logger.warning(
+                    "SNR plot generation requires refreshed post-processing.",
+                    extra={
+                        "operation": "snr_plot_post_processing_required",
+                        "project_root": (
+                            str(self._analysis_project_root)
+                            if self._analysis_project_root is not None
+                            else self.project_root
+                        ),
+                    },
+                )
+                self._emit(f"Post-processing is required before plotting: {exc}")
         except Exception as exc:
-            self._record_failure(
-                item=self.condition,
-                error=f"Unhandled worker exception: {exc}",
-            )
-            logger.error(
-                "SNR plot generation failed.",
-                exc_info=exc,
-                extra={
-                    "operation": "snr_plot_generate",
-                    "project_root": self.project_root,
-                    "compare_two_conditions": self.overlay,
-                    "custom_labels_enabled": self.legend_custom_enabled,
-                },
-            )
-            self._emit("SNR plot generation failed. See logs for details.", 0, 0)
+            if not self._cancellation_checkpoint():
+                self._record_failure(
+                    item=self.condition,
+                    error=f"Unhandled worker exception: {exc}",
+                )
+                logger.error(
+                    "SNR plot generation failed.",
+                    exc_info=exc,
+                    extra={
+                        "operation": "snr_plot_generate",
+                        "project_root": self.project_root,
+                        "compare_two_conditions": self.overlay,
+                        "custom_labels_enabled": self.legend_custom_enabled,
+                    },
+                )
+                self._emit(f"SNR plot generation failed: {exc}", 0, 0)
         finally:
             self._emit_timing_summary()
             self.finished.emit(
@@ -210,15 +239,35 @@ class _Worker(
                     "condition": self.condition,
                     "overlay": self.overlay,
                     "generated_paths": list(self.generated_paths),
-                    "qc_report_paths": list(self.qc_report_paths),
                     "spectral_qc_flags": list(self.spectral_qc_flags),
                     "failed_items": list(self.failed_items),
                     "warning_items": list(self.warning_items),
+                    "cancelled": (
+                        self._stop_requested and not self._completed_figure_saved
+                    ),
+                    "analysis_source_kind": self._analysis_source_kind,
+                    "analysis_project_root": (
+                        str(self._analysis_project_root)
+                        if self._analysis_project_root is not None else None
+                    ),
+                    "post_processing_required_reason": (
+                        self._post_processing_required_reason
+                    ),
                 }
             )
 
     def stop(self) -> None:
         self._stop_requested = True
+
+    def _cancellation_checkpoint(self) -> bool:
+        """Return whether cancellation was requested and report it once."""
+
+        if not self._stop_requested:
+            return False
+        if not self._cancellation_reported:
+            self._emit("Generation cancelled by user.")
+            self._cancellation_reported = True
+        return True
 
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
@@ -272,16 +321,8 @@ class _Worker(
             },
         )
 
-    def _resolve_legend_label(self, custom: str | None, default: str) -> str:
-        if self.legend_custom_enabled and custom is not None and custom.strip():
-            return custom.strip()
-        return default
-
     def _record_generated_path(self, path: Path) -> None:
         self.generated_paths.append(str(path))
-
-    def _record_qc_report_path(self, path: Path) -> None:
-        self.qc_report_paths.append(str(path))
 
     def _record_spectral_qc_flags(self, flags: list[dict[str, object]]) -> None:
         self.spectral_qc_flags.extend(flags)
@@ -348,9 +389,20 @@ class _Worker(
         return [freq for freq in self.oddballs if lo <= freq <= hi]
 
     def _run(self) -> None:
+        if self._cancellation_checkpoint():
+            return
+        group_mode_error = self._group_mode_configuration_error()
+        if group_mode_error is not None:
+            self._record_failure(item=self.condition, error=group_mode_error)
+            self._emit(group_mode_error, 0, 0)
+            return
         if self.overlay and self.condition_b:
             files_a = self._list_excel_files(self.condition)
+            if self._cancellation_checkpoint():
+                return
             files_b = self._list_excel_files(self.condition_b)
+            if self._cancellation_checkpoint():
+                return
             total_a = len(files_a)
             total_b = len(files_b)
             total = total_a + total_b
@@ -360,12 +412,16 @@ class _Worker(
                 offset=0,
                 total_override=total,
             )
+            if self._cancellation_checkpoint():
+                return
             freqs_b, data_b = self._collect_data(
                 self.condition_b,
                 excel_files=files_b,
                 offset=total_a,
                 total_override=total,
             )
+            if self._cancellation_checkpoint():
+                return
             if freqs_a and data_a and freqs_b and data_b:
                 if not _frequency_grids_match(freqs_a, freqs_b):
                     comparison = f"{self.condition} vs {self.condition_b}"
@@ -382,17 +438,36 @@ class _Worker(
                     )
                     return
                 avg_a = self._aggregate_roi_data(data_a)
+                if self._cancellation_checkpoint():
+                    return
                 avg_b = self._aggregate_roi_data(data_b)
+                if self._cancellation_checkpoint():
+                    return
+                avg_a, avg_b = self._matched_overlay_roi_data(avg_a, avg_b)
                 if avg_a and avg_b:
+                    self._revalidate_analysis_context_for_output()
+                    self._prepare_overlay_source_curves(
+                        frequencies_hz=freqs_a,
+                        condition_a=self.condition,
+                        subject_data_a=data_a,
+                        plotted_data_a=avg_a,
+                        condition_b=self.condition_b,
+                        subject_data_b=data_b,
+                        plotted_data_b=avg_b,
+                    )
                     self._plot_overlay(freqs_a, avg_a, avg_b)
             return
 
         freqs, subject_data = self._collect_data(self.condition)
+        if self._cancellation_checkpoint():
+            return
         if self.enable_group_overlay and (not freqs or not subject_data):
             self._build_group_curves({})
             return
         if freqs and subject_data:
             averaged = self._aggregate_roi_data(subject_data)
+            if self._cancellation_checkpoint():
+                return
             if self.enable_group_overlay:
                 group_curves = self._build_group_curves(subject_data)
                 if not group_curves:
@@ -400,10 +475,24 @@ class _Worker(
                 if not averaged:
                     self._emit("No ROI data to plot.")
                     return
+                self._revalidate_analysis_context_for_output()
+                self._prepare_single_source_curves(
+                    frequencies_hz=freqs,
+                    condition=self.condition,
+                    subject_data=subject_data,
+                    plotted_roi_data=averaged,
+                    group_curves=group_curves,
+                )
                 self._plot(freqs, averaged, group_curves)
             else:
                 if not averaged:
                     self._emit("No ROI data to plot.")
                     return
+                self._revalidate_analysis_context_for_output()
+                self._prepare_single_source_curves(
+                    frequencies_hz=freqs,
+                    condition=self.condition,
+                    subject_data=subject_data,
+                    plotted_roi_data=averaged,
+                )
                 self._plot(freqs, averaged)
-

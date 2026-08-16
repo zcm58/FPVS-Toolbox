@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import math
 from pathlib import Path
@@ -26,6 +27,7 @@ from Tools.Plot_Generator.full_snr_reader import (
 )
 
 FULLFFT_SHEET_NAME = "FullFFT Amplitude (uV)"
+SPECTRAL_QC_METHOD_VERSION = "snr_unexpected_peak_qc_v1"
 
 _EPSILON = 1e-12
 
@@ -365,6 +367,7 @@ def flag_spectral_qc_electrode_outliers(
     oddball_freq: float,
     base_freq: float,
     thresholds: SpectralQcThresholds,
+    cancellation_checkpoint: Callable[[], bool] | None = None,
 ) -> SpectralQcResult:
     """Flag suspicious off-harmonic electrode peaks without mutating plot data."""
 
@@ -379,6 +382,8 @@ def flag_spectral_qc_electrode_outliers(
     )
 
     for electrode in electrode_names:
+        if cancellation_checkpoint is not None and cancellation_checkpoint():
+            break
         pids = [
             pid
             for pid, electrode_values in subject_snr_data.items()
@@ -388,6 +393,13 @@ def flag_spectral_qc_electrode_outliers(
             continue
 
         for freq_index, freq in enumerate(freqs):
+            if cancellation_checkpoint is not None and cancellation_checkpoint():
+                return SpectralQcResult(
+                    records=tuple(records),
+                    report_path=None,
+                    checked_cells=checked_cells,
+                    flagged_cells=len(records),
+                )
             if is_expected_frequency(
                 float(freq),
                 oddball_freq=oddball_freq,

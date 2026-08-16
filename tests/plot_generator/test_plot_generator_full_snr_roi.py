@@ -7,8 +7,8 @@ if importlib.util.find_spec("matplotlib") is None:
 
 import pandas as pd
 
-from Tools.Plot_Generator import data_collection as plot_data_collection
-from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+from Main_App.processing.roi_settings import ALL_ROIS_OPTION
+from Tools.Plot_Generator import full_snr_reader
 
 
 def _import_module():
@@ -165,7 +165,11 @@ def test_condition_overlay_plots_matching_frequency_grids(tmp_path, monkeypatch)
         "_collect_data",
         lambda self, condition, **_kwargs: (
             [1.0, 2.0],
-            {"condition": condition},
+            {
+                "P01" if condition == "Condition A" else "P02": {
+                    "Central": [1.0, 2.0]
+                }
+            },
         ),
     )
     monkeypatch.setattr(
@@ -173,7 +177,7 @@ def test_condition_overlay_plots_matching_frequency_grids(tmp_path, monkeypatch)
         "_aggregate_roi_data",
         lambda self, data: {
             "Central": [1.0, 2.0]
-            if data["condition"] == "Condition A"
+            if "P01" in data
             else [3.0, 4.0]
         },
     )
@@ -508,8 +512,8 @@ def test_full_snr_uses_direct_sheet_read(tmp_path, monkeypatch):
     def fail_pandas_excel(*args, **kwargs):
         raise AssertionError("FullSNR fast path should not use Pandas Excel readers")
 
-    monkeypatch.setattr(plot_data_collection.pd, "read_excel", fail_pandas_excel)
-    monkeypatch.setattr(plot_data_collection.pd, "ExcelFile", fail_pandas_excel)
+    monkeypatch.setattr(full_snr_reader.pd, "read_excel", fail_pandas_excel)
+    monkeypatch.setattr(full_snr_reader.pd, "ExcelFile", fail_pandas_excel)
     monkeypatch.setattr(module._Worker, "_emit", lambda *a, **k: None)
 
     captured = {}
@@ -557,7 +561,7 @@ def test_full_snr_direct_read_filters_to_selected_roi_electrodes(tmp_path):
 
     timing_details = {}
 
-    filtered, ordered_freqs, ordered_cols = plot_data_collection._read_full_snr_sheet_read_only(
+    filtered, ordered_freqs, ordered_cols = full_snr_reader._read_full_snr_sheet_read_only(
         excel_path,
         x_min=1.0,
         x_max=2.0,

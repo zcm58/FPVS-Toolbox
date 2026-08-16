@@ -92,16 +92,21 @@ manual_smoke = []
 audits = ["gui", "paths"]
 tests = [
   "tests/plot_generator/test_plot_generator_baseline.py",
+  "tests/plot_generator/test_plot_generator_analysis_context.py",
+  "tests/plot_generator/test_plot_generator_cancellation.py",
+  "tests/plot_generator/test_plot_generator_default_boundary.py",
   "tests/plot_generator/test_plot_generator_excel_inputs.py",
   "tests/plot_generator/test_plot_generator_export_pdf_smoke.py",
   "tests/plot_generator/test_plot_generator_fft_snr.py",
   "tests/plot_generator/test_plot_generator_full_snr_roi.py",
   "tests/plot_generator/test_plot_generator_gridlines.py",
   "tests/plot_generator/test_plot_generator_group_overlay_worker.py",
+  "tests/plot_generator/test_plot_generator_group_integrity.py",
   "tests/plot_generator/test_plot_generator_manifest_utils.py",
   "tests/plot_generator/test_plot_generator_oddballs_from_xmax.py",
   "tests/plot_generator/test_plot_generator_project_input_policy.py",
   "tests/plot_generator/test_plot_generator_spectral_qc.py",
+  "tests/plot_generator/test_plot_generator_rendering_contract.py",
   "tests/plot_generator/test_plot_generator_title_roi.py",
   "tests/plot_generator/test_plot_generator_worker_config.py",
 ]

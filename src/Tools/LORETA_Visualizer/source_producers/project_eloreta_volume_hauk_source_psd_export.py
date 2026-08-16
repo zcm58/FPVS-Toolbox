@@ -71,6 +71,7 @@ from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_exp
     active_project_hauk_source_psd_root,
     build_project_hauk_source_psd_input_plan,
     enrich_project_hauk_source_psd_provenance,
+    log_project_source_condition_omission_summary,
     reconcile_project_hauk_source_psd_sampling_contract,
     resolve_project_hauk_source_psd_harmonics,
 )
@@ -592,14 +593,11 @@ def _report_source_ineligible_participants(
                 f"{len(omitted_participants)} participant(s)."
             ),
         )
-        for item in plan.source_condition_omissions:
-            logger.warning(
-                "project_eloreta_hauk_source_condition_omitted participant=%s condition=%s reason=%s detail=%s",
-                item.participant_id,
-                item.condition_id,
-                item.reason_code,
-                item.detail,
-            )
+        log_project_source_condition_omission_summary(
+            logger,
+            event_name="project_eloreta_hauk_source_condition_omission_summary",
+            omissions=plan.source_condition_omissions,
+        )
     if not plan.source_ineligible_participants:
         return
     skipped_ids = ", ".join(item.participant_id for item in plan.source_ineligible_participants)

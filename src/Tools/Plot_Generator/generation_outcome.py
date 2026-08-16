@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
+
+
+MANAGED_ANALYSIS_SOURCE_KIND = "managed_full_fft_provenance"
 
 
 @dataclass(frozen=True)
@@ -11,10 +15,13 @@ class NormalizedWorkerOutcome:
     """Validated collection values from one Plot Generator worker payload."""
 
     generated_paths: tuple[str, ...]
-    qc_report_paths: tuple[str, ...]
     spectral_qc_flags: tuple[dict[str, object], ...]
     failed_items: tuple[dict[str, str], ...]
     warning_items: tuple[dict[str, str], ...]
+    cancelled: bool
+    analysis_source_kind: str | None
+    analysis_project_root: str | None
+    post_processing_required_reason: str | None
 
 
 def normalize_worker_outcome(
@@ -26,11 +33,6 @@ def normalize_worker_outcome(
         generated_paths=tuple(
             str(path)
             for path in _payload_list(payload, "generated_paths")
-            if isinstance(path, str) and path
-        ),
-        qc_report_paths=tuple(
-            str(path)
-            for path in _payload_list(payload, "qc_report_paths")
             if isinstance(path, str) and path
         ),
         spectral_qc_flags=tuple(
@@ -55,6 +57,38 @@ def normalize_worker_outcome(
             for item in _payload_list(payload, "warning_items")
             if isinstance(item, dict)
         ),
+        cancelled=payload.get("cancelled") is True,
+        analysis_source_kind=_optional_payload_string(
+            payload,
+            "analysis_source_kind",
+        ),
+        analysis_project_root=_optional_payload_string(
+            payload,
+            "analysis_project_root",
+        ),
+        post_processing_required_reason=_optional_payload_string(
+            payload,
+            "post_processing_required_reason",
+        ),
+    )
+
+
+def managed_analysis_matches_active_project(
+    *,
+    analysis_source_kind: str | None,
+    analysis_project_root: str | Path | None,
+    active_project_root: str | Path | None,
+) -> bool:
+    """Return whether a run may update the active project's exclusions."""
+
+    if analysis_source_kind != MANAGED_ANALYSIS_SOURCE_KIND:
+        return False
+    resolved_analysis_root = _resolved_nonempty_path(analysis_project_root)
+    resolved_active_root = _resolved_nonempty_path(active_project_root)
+    return (
+        resolved_analysis_root is not None
+        and resolved_active_root is not None
+        and resolved_analysis_root == resolved_active_root
     )
 
 
@@ -99,6 +133,23 @@ def _payload_list(
 ) -> tuple[object, ...]:
     value = payload.get(key, [])
     return tuple(value) if isinstance(value, (list, tuple)) else ()
+
+
+def _optional_payload_string(
+    payload: Mapping[str, object],
+    key: str,
+) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _resolved_nonempty_path(value: str | Path | None) -> Path | None:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        return Path(value).resolve(strict=False)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
 
 
 def _pluralized(count: int, singular: str, plural: str) -> str:

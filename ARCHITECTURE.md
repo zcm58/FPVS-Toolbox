@@ -32,10 +32,10 @@ Primary areas:
 
 - `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/gui/components/`: canonical shared component layer for new and migrated GUI surfaces. Prefer this import surface for shared cards, buttons, forms, status banners, window/dialog shells, action rows, and message helpers.
-- `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling.
+- `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving. It also owns GUI-neutral publication figure and publication-table style contracts used by export tooling. The lightweight style surface must not eagerly import Stats-owned workbook builders; heavy processing exports remain lazy compatibility attributes.
 - `src/Main_App/processing/`: canonical Main App processing package. It owns
   active EEG preprocessing, the stable `process_data` entry point,
-  processing-controller helpers, project-local neutral FullFFT provenance, and
+  processing-controller helpers, neutral ROI settings, project-local neutral FullFFT provenance, and
   per-artifact freshness for derivatives of the accepted harmonic selection.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It owns the shared
   exact-column/header XLSX reader and currently delegates BDF loading to the

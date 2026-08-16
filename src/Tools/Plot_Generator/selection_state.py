@@ -19,7 +19,7 @@ from Tools.Plot_Generator.manifest_utils import (
     load_manifest_for_excel_root,
     normalize_participants_map,
 )
-from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+from Main_App.processing.roi_settings import ALL_ROIS_OPTION
 
 
 ALL_CONDITIONS_OPTION = "All Conditions"
@@ -64,11 +64,15 @@ class PlotGeneratorSelectionMixin:
         self._check_required()
 
     def _overlay_toggled(self, checked: bool) -> None:
+        if checked and self._has_multi_groups:
+            with QSignalBlocker(self.overlay_check):
+                self.overlay_check.setChecked(False)
+            checked = False
         if checked:
             self._ensure_condition_a_valid_for_overlay()
             self._set_all_conditions_enabled(False)
             self._update_selector_columns(True)
-            if self.group_box.isVisible():
+            if self._has_multi_groups:
                 self.group_overlay_check.setChecked(False)
                 self.group_overlay_check.setEnabled(False)
                 self.group_list.setEnabled(False)
@@ -78,15 +82,24 @@ class PlotGeneratorSelectionMixin:
                 "Enter base chart name (e.g. Color Response vs Category Response)"
             )
         else:
-            self._set_all_conditions_enabled(True)
             self._update_selector_columns(False)
             self._update_chart_title_state(self.condition_combo.currentText())
-            if self.group_box.isVisible():
-                self.group_overlay_check.setEnabled(True)
-                self.group_list.setEnabled(self.group_overlay_check.isChecked())
+            if self._has_multi_groups:
+                with QSignalBlocker(self.group_overlay_check):
+                    self.group_overlay_check.setChecked(True)
+                self.group_overlay_check.setEnabled(False)
+                self.group_list.setEnabled(True)
+                self._ensure_condition_a_valid_for_overlay()
+                self._set_all_conditions_enabled(False)
+            else:
+                self._set_all_conditions_enabled(True)
         self._update_legend_group_visibility()
 
     def _on_group_overlay_toggled(self, checked: bool) -> None:
+        if self._has_multi_groups and not checked:
+            with QSignalBlocker(self.group_overlay_check):
+                self.group_overlay_check.setChecked(True)
+            checked = True
         self.group_list.setEnabled(checked)
         self._update_group_color_widgets()
         if checked:
@@ -171,16 +184,12 @@ class PlotGeneratorSelectionMixin:
                     self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
                     self.condition_combo.addItems(subfolders)
                     self.condition_b_combo.addItems(subfolders)
-            if self.overlay_check.isChecked():
+            if self.overlay_check.isChecked() or self._group_overlay_enabled():
                 self._ensure_condition_a_valid_for_overlay()
                 self._set_all_conditions_enabled(False)
             else:
                 self._set_all_conditions_enabled(True)
-            self._update_chart_title_state(
-                ALL_CONDITIONS_OPTION
-                if subfolders
-                else self.condition_combo.currentText()
-            )
+            self._update_chart_title_state(self.condition_combo.currentText())
             self._check_required()
         finally:
             self._populating_conditions = False
@@ -202,9 +211,13 @@ class PlotGeneratorSelectionMixin:
         ) and self._folder_is_canonical_project_excel_root(folder)
         self.group_box.setVisible(self._has_multi_groups)
         self._update_multigroup_mode_controls()
-        self.group_overlay_check.setChecked(False)
-        self.group_overlay_check.setEnabled(
-            self._has_multi_groups and not self.overlay_check.isChecked()
+        with QSignalBlocker(self.group_overlay_check):
+            self.group_overlay_check.setChecked(self._has_multi_groups)
+        self.group_overlay_check.setEnabled(False)
+        self.group_overlay_check.setToolTip(
+            "Required for canonical multi-group projects."
+            if self._has_multi_groups
+            else ""
         )
         self.group_list.clear()
         self._group_checkboxes = {}
@@ -220,10 +233,13 @@ class PlotGeneratorSelectionMixin:
                 row = self._make_group_row_widget(name)
                 item.setSizeHint(row.sizeHint())
                 self.group_list.setItemWidget(item, row)
-            self.group_list.setEnabled(False)
+            self.group_list.setEnabled(True)
             self._update_group_color_widgets()
+            self._force_legend_defaults()
         else:
             self.group_list.setEnabled(False)
+            self._sync_legend_defaults_with_conditions()
+        self._update_legend_group_visibility()
 
     def _make_group_row_widget(self, group_name: str):
         row = QWidget()
@@ -289,11 +305,15 @@ class PlotGeneratorSelectionMixin:
         return []
 
     def _group_overlay_enabled(self) -> bool:
+        if self._has_multi_groups:
+            return True
         return self.group_box.isVisible() and self.group_overlay_check.isChecked()
 
     def _group_worker_kwargs(
         self, overlay_enabled: bool, selected_groups: list[str]
     ) -> dict:
+        if self._has_multi_groups:
+            overlay_enabled = True
         if not overlay_enabled:
             return {
                 "subject_groups": dict(self._subject_groups_map)

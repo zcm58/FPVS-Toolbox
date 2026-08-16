@@ -1177,6 +1177,118 @@ def test_beta_warning_is_generic_and_shown_once_per_tool(
     assert events == ["warning", "opened", "opened", "warning", "opened"]
 
 
+def test_shared_post_processing_remedy_launches_for_active_project(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+    prompts: list[tuple[str, str]] = []
+    launches: list[object] = []
+    monkeypatch.setattr(
+        main_window_module,
+        "show_post_processing_required",
+        lambda _parent, *, tool_name, reason: (
+            prompts.append((tool_name, reason)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        main_window_module.processing_workflows,
+        "resume_post_processing",
+        launches.append,
+    )
+
+    started = win.request_post_processing_rebuild(
+        "SNR Plots",
+        "The active workbook cohort changed.",
+        str(project_root),
+    )
+
+    assert started is True
+    assert prompts == [("SNR Plots", "The active workbook cohort changed.")]
+    assert launches == [win]
+
+
+def test_shared_post_processing_remedy_rejects_different_project(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    active_root = tmp_path / "active-project"
+    other_root = tmp_path / "other-project"
+    active_root.mkdir()
+    other_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=active_root)
+    warnings: list[tuple[str, str]] = []
+    prompts: list[object] = []
+    launches: list[object] = []
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "show_post_processing_required",
+        lambda *_args, **_kwargs: prompts.append(object()) or True,
+    )
+    monkeypatch.setattr(
+        main_window_module.processing_workflows,
+        "resume_post_processing",
+        launches.append,
+    )
+
+    started = win.request_post_processing_rebuild(
+        "SNR Plots",
+        "The active workbook cohort changed.",
+        str(other_root),
+    )
+
+    assert started is False
+    assert warnings == [
+        (
+            "Different Project Selected",
+            "SNR Plots reported stale outputs for a different project. "
+            "Open that project before running post-processing.",
+        )
+    ]
+    assert prompts == []
+    assert launches == []
+
+
+def test_snr_page_routes_post_processing_request_to_main_window(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    requests: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        win,
+        "request_post_processing_rebuild",
+        lambda *args: requests.append(args) or True,
+    )
+    page = win._ensure_plot_generator_page()
+
+    page.post_processing_required.emit(
+        "SNR Plots",
+        "The active workbook cohort changed.",
+        str(tmp_path / "project"),
+    )
+
+    assert requests == [
+        (
+            "SNR Plots",
+            "The active workbook cohort changed.",
+            str(tmp_path / "project"),
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     ("role", "opener_name"),
     [

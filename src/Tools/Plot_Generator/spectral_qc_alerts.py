@@ -293,7 +293,6 @@ def whole_participant_exclusion_candidates(
 
 def build_spectral_qc_alert_message(
     flags: list[dict[str, object]],
-    report_paths: list[str],
 ) -> str:
     """Build the GUI warning text for report-only unexpected SNR peak flags."""
     condition_groups = _summarize_condition_groups(flags)
@@ -369,21 +368,6 @@ def build_spectral_qc_alert_message(
             ]
         )
 
-    if report_paths:
-        first_path = str(report_paths[0])
-        from pathlib import Path
-
-        report_dir = str(Path(first_path).parent)
-        report_names = [Path(path).name for path in report_paths[:4]]
-        lines.extend(
-            [
-                "",
-                f"Full details were saved in: {report_dir}",
-                "Reports: " + ", ".join(report_names),
-            ]
-        )
-        if len(report_paths) > 4:
-            lines.append(f"Plus {len(report_paths) - 4} additional report(s).")
     return "\n".join(lines)
 
 

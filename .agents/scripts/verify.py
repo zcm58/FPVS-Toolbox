@@ -129,11 +129,15 @@ def validate_config(
 
 
 def changed_files(repo_root: Path = REPO_ROOT) -> tuple[str, ...]:
-    """Return tracked worktree changes and untracked files."""
+    """Return existing tracked worktree changes and untracked files."""
 
     tracked = _git_lines(repo_root, "diff", "--name-only", "HEAD", "--")
     untracked = _git_lines(repo_root, "ls-files", "--others", "--exclude-standard")
-    return tuple(sorted(set(tracked) | set(untracked)))
+    return tuple(
+        path
+        for path in sorted(set(tracked) | set(untracked))
+        if (repo_root / path).is_file()
+    )
 
 
 def _git_lines(repo_root: Path, *args: str) -> list[str]:
@@ -158,6 +162,8 @@ def scope_python_files(scope: VerificationScope, paths: Iterable[str]) -> tuple[
     for path in paths:
         normalized = path.replace("\\", "/")
         if not normalized.endswith(".py"):
+            continue
+        if not (REPO_ROOT / normalized).is_file():
             continue
         if any(fnmatch.fnmatch(normalized, pattern) for pattern in scope.include):
             selected.append(normalized)

@@ -251,6 +251,14 @@ Changing that list is a shared-GUI API change: update component smoke tests,
 keep imports side-effect free, and record the decision in the active component
 layer plan.
 
+`PostProcessingRequiredDialog` is the shared downstream-tool recovery prompt.
+It explains the stale reason, states that existing processed workbooks are
+reused and EEG preprocessing is not rerun, and offers **Run Post-processing**
+or **Not Now**. Tools report the affected project identity and reason; the Main
+App shell verifies that identity against the active project and owns the call
+to the existing post-processing workflow. Tool pages must not start their own
+post-processing workers.
+
 `ActionRow` is now used by the main shell, Settings, Plot Generator, Ratio
 Calculator, Stats, and focused dialogs.
 When migrating more action rows, preserve button labels, order, variants,

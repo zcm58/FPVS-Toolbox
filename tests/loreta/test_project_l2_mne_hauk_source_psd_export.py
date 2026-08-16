@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -32,7 +33,10 @@ from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_source_psd_export import (
     DEFAULT_PROJECT_HAUK_SOURCE_PSD_MANIFEST_NAME,
     ProjectL2MNEHaukSourcePsdExportError,
+    ProjectSourceConditionOmission,
+    build_project_hauk_source_psd_input_plan,
     default_project_l2_mne_hauk_source_psd_output_dir,
+    log_project_source_condition_omission_summary,
     write_project_l2_mne_hauk_source_psd_payloads,
 )
 from Tools.LORETA_Visualizer.source_producers.project_time_domain_inputs import (
@@ -439,6 +443,80 @@ def test_project_source_psd_export_applies_shared_project_exclusions(
     assert result.included_participants == ("P01",)
     assert result.excluded_subjects == ("P02",)
     assert [record.participant_id for record in result.project_inputs.records] == ["P01"]
+
+
+def test_source_input_plan_applies_saved_project_participant_and_condition_exclusions(
+    tmp_path: Path,
+) -> None:
+    project = _project_with_ledger(
+        tmp_path,
+        participants=("P01", "P02", "P03"),
+        event_map={"Condition A": 21, "Condition B": 22},
+    )
+    project.preprocessing["manual_excluded_participants"] = ["p03"]
+    project.preprocessing["manual_excluded_participant_conditions"] = {
+        "p02": ["condition b"],
+    }
+
+    plan = build_project_hauk_source_psd_input_plan(
+        project,
+        root=project.project_root,
+        include_flagged_subjects=False,
+    )
+
+    assert plan.participants == ("P01", "P02")
+    assert plan.participant_selection.excluded_subjects == ("P03",)
+    assert [
+        (item.participant_id, item.condition_id)
+        for item in plan.expected_inputs
+    ] == [
+        ("P01", "21"),
+        ("P01", "22"),
+        ("P02", "21"),
+    ]
+    assert [item.to_metadata() for item in plan.source_condition_omissions] == [
+        {
+            "participant_id": "P02",
+            "group_id": None,
+            "condition_id": "22",
+            "condition_label": "Condition B",
+            "reason_code": "excluded_participant_condition",
+            "detail": "Excluded by the project's saved participant-condition QC decision.",
+            "source_derivative_status": "",
+            "scope": "source_condition",
+        }
+    ]
+
+
+def test_source_condition_omission_logging_is_bounded_but_keeps_debug_details(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    omissions = tuple(
+        ProjectSourceConditionOmission(
+            participant_id=f"P{index}",
+            group_id=None,
+            condition_id="22",
+            condition_label="Condition B",
+            reason_code="missing_canonical_condition_output",
+            detail=f"Missing derivative {index}",
+        )
+        for index in range(1, 4)
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=export_module.__name__):
+        log_project_source_condition_omission_summary(
+            export_module.logger,
+            event_name="project_l2_mne_hauk_source_condition_omission_summary",
+            omissions=omissions,
+        )
+
+    warning_records = [record for record in caplog.records if record.levelno == logging.WARNING]
+    debug_records = [record for record in caplog.records if record.levelno == logging.DEBUG]
+    assert len(warning_records) == 1
+    assert "omission_count=3" in warning_records[0].getMessage()
+    assert 'reason_counts={"missing_canonical_condition_output":3}' in warning_records[0].getMessage()
+    assert len(debug_records) == 3
+    assert all("_detail participant=P" in record.getMessage() for record in debug_records)
 
 
 def test_project_source_psd_export_validates_canonical_group_manifest_folder(

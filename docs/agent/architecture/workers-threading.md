@@ -111,6 +111,11 @@ Common long-running work:
   Settings therefore resumes the full frequency-domain post-processing path so
   frequency QC and neutral FullFFT provenance are refreshed before selection;
   it still does not reload or preprocess raw EEG.
+- Downstream tools may emit a post-processing-required request containing an
+  actionable stale reason and canonical project root. The Main App validates
+  that root, presents the shared recovery dialog, and delegates acceptance to
+  the existing post-processing activity workflow. This route reuses processed
+  workbooks and never starts EEG preprocessing or a tool-local rebuild thread.
 
 Rules:
 

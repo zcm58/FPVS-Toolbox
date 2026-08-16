@@ -12,16 +12,12 @@ from Main_App.gui.open_paths import open_path_in_file_manager
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
 )
+from Tools.Plot_Generator.generation_lifecycle import PlotGeneratorLifecycleMixin
 from Tools.Plot_Generator.generation_outcome import (
-    format_completion_summary,
-    format_no_plots_message,
-    normalize_worker_outcome,
+    managed_analysis_matches_active_project,
 )
 from Tools.Plot_Generator.selection_state import ALL_CONDITIONS_OPTION
-from Tools.Plot_Generator.spectral_qc_alerts import (
-    build_spectral_qc_alert_message,
-    whole_participant_exclusion_candidates,
-)
+from Tools.Plot_Generator.spectral_qc_alerts import whole_participant_exclusion_candidates
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +38,7 @@ def _thread_class():
     return getattr(gui_module, "QThread", QThread)
 
 
-class PlotGeneratorWorkflowMixin:
+class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
     """QThread generation workflow helpers for PlotGeneratorWindow."""
 
     def _append_log(self, text: str) -> None:
@@ -71,22 +67,9 @@ class PlotGeneratorWorkflowMixin:
             value = int(100 * processed / total) if total else 0
         self._animate_progress_to(value)
 
-    def _cancel_generation(self) -> None:
-        if self._worker:
-            self._worker.stop()
-        if self._thread:
-            self._thread.quit()
-        self._conditions_queue.clear()
-        self._total_conditions = 0
-        self._current_condition = 0
-        self._spectral_qc_flags.clear()
-        self._spectral_qc_report_paths.clear()
-        self._warning_items.clear()
-        self.cancel_btn.setEnabled(False)
-        self.gen_btn.setEnabled(True)
-        self._append_log("Generation cancelled.")
-
     def _start_next_condition(self) -> None:
+        if getattr(self, "_cancel_requested", False):
+            return
         if not self._conditions_queue:
             self._finish_all()
             return
@@ -124,13 +107,13 @@ class PlotGeneratorWorkflowMixin:
 
         cond_out = Path(out_dir)
         if self._all_conditions:
-            cond_out = cond_out / f"{condition} Plots"
             title = condition
             self.title_edit.setText(title)
         else:
             title = self.title_edit.text()
 
         self._thread = _thread_class()()
+        self._worker_outcome_received = False
         self._worker = _worker_class()(
             folder,
             condition,
@@ -166,105 +149,36 @@ class PlotGeneratorWorkflowMixin:
         self._thread.finished.connect(self._generation_finished)
         self._thread.start()
 
-    def _on_worker_finished(self, payload: dict) -> None:
-        outcome = normalize_worker_outcome(payload)
-        self._generated_paths.extend(outcome.generated_paths)
-        self._failed_items.extend(outcome.failed_items)
-        self._warning_items.extend(outcome.warning_items)
-        self._spectral_qc_report_paths.extend(outcome.qc_report_paths)
-        self._spectral_qc_flags.extend(outcome.spectral_qc_flags)
-        for path in outcome.qc_report_paths:
-            self._append_log(f"Unexpected SNR peak report: {path}")
-        if outcome.spectral_qc_flags:
-            self._append_log(
-                "Unexpected SNR peak scan flagged "
-                f"{len(outcome.spectral_qc_flags)} participant-electrode pair(s)."
-            )
-        logger.info(
-            "SNR worker finished.",
-            extra={
-                "operation": "snr_plot_generate",
-                "project_root": str(self._project_root) if self._project_root else None,
-                "condition": payload.get("condition"),
-                "generated_count": len(outcome.generated_paths),
-                "qc_report_count": len(outcome.qc_report_paths),
-                "spectral_qc_flag_count": len(outcome.spectral_qc_flags),
-                "failed_count": len(outcome.failed_items),
-                "warning_count": len(outcome.warning_items),
-            },
-        )
-
-    def _finish_all(self) -> None:
-        self.gen_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
-        self._animate_progress_to(100)
-        self._total_conditions = 0
-        self._current_condition = 0
-
-        generated_count = len(self._generated_paths)
-        failed_count = len(self._failed_items)
-        warning_count = len(self._warning_items)
-        spectral_qc_message = build_spectral_qc_alert_message(
-            self._spectral_qc_flags,
-            self._spectral_qc_report_paths,
-        )
-
-        if generated_count > 0:
-            summary = format_completion_summary(
-                generated_count=generated_count,
-                warning_count=warning_count,
-                failed_count=failed_count,
-            )
-            self._append_log(summary)
-            if failed_count > 0 or warning_count > 0:
-                logger.warning(
-                    "SNR plot generation completed with warnings or partial failures.",
-                    extra={
-                        "operation": "snr_plot_generate",
-                        "project_root": str(self._project_root) if self._project_root else None,
-                        "generated_count": generated_count,
-                        "failed_count": failed_count,
-                        "warning_count": warning_count,
-                    },
-                )
-            if spectral_qc_message:
-                QMessageBox.warning(
-                    self,
-                    "Unexpected SNR Peaks",
-                    spectral_qc_message,
-                )
-                self._offer_spectral_qc_participant_exclusions()
-            resp = QMessageBox.question(
-                self,
-                "Finished",
-                f"{summary}\n\nView plots?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            if resp == QMessageBox.Yes:
-                self._open_output_folder()
-        else:
-            self._append_log(
-                format_no_plots_message(warning_count=warning_count)
-            )
-            logger.warning(
-                "SNR plot generation produced no plot files.",
-                extra={
-                    "operation": "snr_plot_generate",
-                    "project_root": str(self._project_root) if self._project_root else None,
-                    "failed_count": failed_count,
-                    "warning_count": warning_count,
-                },
-            )
-
-        self._generated_paths.clear()
-        self._failed_items.clear()
-        self._warning_items.clear()
-        self._spectral_qc_flags.clear()
-        self._spectral_qc_report_paths.clear()
-
     def _offer_spectral_qc_participant_exclusions(self) -> None:
         candidates = whole_participant_exclusion_candidates(self._spectral_qc_flags)
         if not candidates or self._project is None:
+            return
+        identities = tuple(
+            getattr(self, "_spectral_qc_analysis_identities", ())
+        )
+        active_project_root = getattr(self._project, "project_root", None)
+        if not identities or not all(
+            managed_analysis_matches_active_project(
+                analysis_source_kind=source_kind,
+                analysis_project_root=analysis_root,
+                active_project_root=active_project_root,
+            )
+            for source_kind, analysis_root in identities
+        ):
+            logger.info(
+                "Suppressed SNR participant-exclusion prompt because the "
+                "analysis source was not the active managed project.",
+                extra={
+                    "operation": "snr_plot_qc_exclusion_prompt",
+                    "project_root": (
+                        str(active_project_root) if active_project_root else None
+                    ),
+                    "cached_gui_project_root": (
+                        str(self._project_root) if self._project_root else None
+                    ),
+                    "analysis_identities": list(identities),
+                },
+            )
             return
         candidate_pids = [str(item["pid"]) for item in candidates if item.get("pid")]
         current = normalize_manual_excluded_participants(
@@ -280,15 +194,16 @@ class PlotGeneratorWorkflowMixin:
         prompt = (
             f"Exclude {label} from future processing?\n\n"
             "This updates the project's manual participant exclusion list. "
-            "Raw BDF files are not altered. Reprocess the dataset for this "
-            "change to affect the processed Excel files and future plots."
+            "Raw BDF files and processed Excel workbooks are not altered. "
+            "Post-processing must be rerun so downstream tools use the "
+            "updated cohort."
         )
         response = QMessageBox.question(
             self,
             "Exclude Participant From Dataset?",
             prompt,
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
+            QMessageBox.No,
         )
         if response != QMessageBox.Yes:
             return
@@ -306,20 +221,38 @@ class PlotGeneratorWorkflowMixin:
                 f"Could not save participant exclusions: {exc}",
             )
             return
+        reason = (
+            "Manual participant exclusions changed after the current "
+            "frequency-domain outputs were created."
+        )
+        try:
+            from Main_App.processing.frequency_domain_qc import (
+                mark_frequency_domain_outputs_stale,
+            )
+
+            mark_frequency_domain_outputs_stale(
+                self._project.project_root,
+                reason=reason,
+            )
+        except Exception:  # pragma: no cover - defensive stale-marker path
+            logger.exception(
+                "Saved SNR participant exclusions but could not mark "
+                "frequency-domain outputs stale."
+            )
         self._append_log(
             "Added manual participant exclusion(s): " + ", ".join(new_pids)
         )
-        QMessageBox.information(
-            self,
-            "Participant Exclusion Saved",
-            (
-                f"Added {label} to manual participant exclusions.\n\n"
-                "Reprocess the dataset before relying on affected figures or analyses. "
-                "The raw BDF files were not altered."
-            ),
+        self._post_processing_required_request = (
+            reason,
+            str(self._project.project_root),
         )
 
     def _generate(self) -> None:
+        if self._thread is not None or self._worker is not None:
+            self._append_log(
+                "Plot generation is already active; wait for it to finish before starting another run."
+            )
+            return
         log_context = {
             "operation": "snr_plot_generate",
             "project_root": str(self._project_root) if self._project_root else None,
@@ -378,12 +311,17 @@ class PlotGeneratorWorkflowMixin:
 
             self.gen_btn.setEnabled(False)
             self.cancel_btn.setEnabled(True)
+            self._cancel_requested = False
+            self._worker_reported_cancelled = False
+            self._worker_outcome_received = False
+            self._set_generation_navigation_locked(True)
             self.log.clear()
+            self._conditions_queue.clear()
             self._generated_paths.clear()
             self._failed_items.clear()
             self._warning_items.clear()
             self._spectral_qc_flags.clear()
-            self._spectral_qc_report_paths.clear()
+            self._spectral_qc_analysis_identities.clear()
             self._animate_progress_to(0)
             if self.overlay_check.isChecked():
                 cond_a = self.condition_combo.currentText()
@@ -392,17 +330,20 @@ class PlotGeneratorWorkflowMixin:
                     QMessageBox.critical(self, "Error", "Select two different conditions.")
                     self.gen_btn.setEnabled(True)
                     self.cancel_btn.setEnabled(False)
+                    self._set_generation_navigation_locked(False)
                     return
                 roi_payload = self._worker_roi_selection()
                 if roi_payload is None:
                     self.gen_btn.setEnabled(True)
                     self.cancel_btn.setEnabled(False)
+                    self._set_generation_navigation_locked(False)
                     return
                 roi_map_for_worker, selected_roi = roi_payload
                 self._append_log(
                     f"Generating overlay '{cond_a}' vs '{cond_b}' for ROI selection '{selected_roi}'."
                 )
                 self._thread = _thread_class()()
+                self._worker_outcome_received = False
                 self._worker = _worker_class()(
                     folder,
                     cond_a,
@@ -438,7 +379,7 @@ class PlotGeneratorWorkflowMixin:
                 self._worker.finished.connect(self._thread.quit)
                 self._worker.finished.connect(self._worker.deleteLater)
                 self._thread.finished.connect(self._thread.deleteLater)
-                self._thread.finished.connect(self._finish_all)
+                self._thread.finished.connect(self._generation_finished)
                 self._thread.start()
             else:
                 self._all_conditions = (
@@ -477,6 +418,7 @@ class PlotGeneratorWorkflowMixin:
             )
             self.gen_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
+            self._set_generation_navigation_locked(False)
             return
 
     def _open_output_folder(self) -> None:
@@ -484,11 +426,3 @@ class PlotGeneratorWorkflowMixin:
         if not folder:
             return
         open_path_in_file_manager(folder)
-
-    def _generation_finished(self) -> None:
-        self._thread = None
-        self._worker = None
-        if self._conditions_queue:
-            self._start_next_condition()
-            return
-        self._finish_all()

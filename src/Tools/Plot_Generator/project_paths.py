@@ -8,6 +8,14 @@ from Main_App.projects import DatasetIndexError, load_project_manifest_for_datas
 from Main_App.projects.project import EXCEL_SUBFOLDER_NAME, SNR_SUBFOLDER_NAME
 
 
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+    except ValueError:
+        return False
+    return True
+
+
 def _auto_detect_project_dir() -> Path:
     """Return the nearest ancestor folder containing ``project.json``."""
     path = Path.cwd()

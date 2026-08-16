@@ -20,7 +20,9 @@ from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     SOURCE_TOPOGRAPHY_METRIC_BCA,
     SOURCE_TOPOGRAPHY_METRIC_FFT_AMPLITUDE,
     _read_selected_harmonics,
+    _subject_in_ids,
     build_l2_mne_conditions_from_project,
+    project_source_participant_selection,
 )
 
 
@@ -58,6 +60,32 @@ def test_project_input_assembler_can_include_flagged_subjects(tmp_path) -> None:
     assert condition_a.metadata["included_subject_count"] == 2
     assert condition_a.metadata["include_flagged_subjects"] is True
     assert condition_a.metadata["flagged_subjects_included"] == ["P2"]
+
+
+def test_project_source_participant_selection_includes_saved_manual_exclusions(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "preprocessing": {
+                    "manual_excluded_participants": ["P12", "p20"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    selection = project_source_participant_selection(project_root)
+
+    assert selection.excluded_subjects == ("P12", "p20")
+
+
+def test_source_participant_exclusion_matching_normalizes_both_id_sides() -> None:
+    assert _subject_in_ids("P03", {"p03"})
+    assert _subject_in_ids("SCP003", {"P3"})
 
 
 def test_project_input_assembler_can_use_fft_amplitude_metric(tmp_path) -> None:

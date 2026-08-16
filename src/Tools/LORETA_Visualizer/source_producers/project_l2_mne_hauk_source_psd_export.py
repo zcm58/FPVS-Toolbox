@@ -12,6 +12,8 @@ and neighboring-bin behavior remains owned by :mod:`hauk_source_psd`.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import hashlib
 import json
 import logging
@@ -28,6 +30,7 @@ import numpy as np
 
 from Main_App.processing.harmonic_selection_qc import load_processing_harmonic_selection
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION, load_ledger
+from Main_App.projects import normalize_manual_excluded_participant_conditions
 from Main_App.projects.grouping import (
     GroupConfigurationError,
     ProjectGroupContext,
@@ -278,6 +281,40 @@ class _ValidationConditionSummary:
     flagged_subjects: tuple[str, ...]
 
 
+def log_project_source_condition_omission_summary(
+    target_logger: logging.Logger,
+    *,
+    event_name: str,
+    omissions: Sequence[ProjectSourceConditionOmission],
+) -> None:
+    """Log one bounded warning plus debug-level per-omission provenance."""
+
+    omission_rows = tuple(omissions)
+    if not omission_rows:
+        return
+    reason_counts = Counter(item.reason_code for item in omission_rows)
+    condition_counts = Counter(item.condition_label for item in omission_rows)
+    target_logger.warning(
+        "%s omission_count=%s participant_count=%s condition_count=%s reason_counts=%s condition_counts=%s "
+        "details=source_validation_report",
+        event_name,
+        len(omission_rows),
+        len({item.participant_id.casefold() for item in omission_rows}),
+        len(condition_counts),
+        json.dumps(dict(sorted(reason_counts.items())), separators=(",", ":")),
+        json.dumps(dict(sorted(condition_counts.items())), separators=(",", ":")),
+    )
+    for item in omission_rows:
+        target_logger.debug(
+            "%s_detail participant=%s condition=%s reason=%s detail=%s",
+            event_name,
+            item.participant_id,
+            item.condition_id,
+            item.reason_code,
+            item.detail,
+        )
+
+
 def default_project_l2_mne_hauk_source_psd_output_dir(project_root: str | Path) -> Path:
     """Return the canonical project-local Option-1 output directory."""
 
@@ -334,14 +371,11 @@ def write_project_l2_mne_hauk_source_psd_payloads(
                 f"{len(omitted_participants)} participant(s)."
             ),
         )
-        for item in input_plan.source_condition_omissions:
-            logger.warning(
-                "project_l2_mne_hauk_source_condition_omitted participant=%s condition=%s reason=%s detail=%s",
-                item.participant_id,
-                item.condition_id,
-                item.reason_code,
-                item.detail,
-            )
+        log_project_source_condition_omission_summary(
+            logger,
+            event_name="project_l2_mne_hauk_source_condition_omission_summary",
+            omissions=input_plan.source_condition_omissions,
+        )
     if input_plan.source_ineligible_participants:
         skipped_ids = ", ".join(item.participant_id for item in input_plan.source_ineligible_participants)
         _emit_progress(
@@ -381,14 +415,11 @@ def write_project_l2_mne_hauk_source_psd_payloads(
                 "that did not match the unique modal sample-count contract."
             ),
         )
-        for item in sampling_omissions:
-            logger.warning(
-                "project_l2_mne_hauk_source_condition_omitted participant=%s condition=%s reason=%s detail=%s",
-                item.participant_id,
-                item.condition_id,
-                item.reason_code,
-                item.detail,
-            )
+        log_project_source_condition_omission_summary(
+            logger,
+            event_name="project_l2_mne_hauk_source_condition_omission_summary",
+            omissions=sampling_omissions,
+        )
     _emit_progress(
         progress_callback,
         (f"Validated {len(project_inputs.records)} participant-condition time-domain derivative(s)."),
@@ -719,8 +750,32 @@ def _build_project_input_plan(
     selection = project_source_participant_selection(
         root,
         include_flagged_subjects=include_flagged_subjects,
+        project_preprocessing=(
+            getattr(project, "preprocessing", None)
+            if isinstance(getattr(project, "preprocessing", None), Mapping)
+            else None
+        ),
     )
-    excluded = set(selection.excluded_subjects)
+    canonical_excluded = {
+        participant_id.casefold(): participant_id
+        for participant_id in selection.excluded_subjects
+    }
+    excluded = set(canonical_excluded)
+    project_preprocessing = getattr(project, "preprocessing", None)
+    try:
+        manual_condition_exclusions = normalize_manual_excluded_participant_conditions(
+            project_preprocessing.get("manual_excluded_participant_conditions")
+            if isinstance(project_preprocessing, Mapping)
+            else None
+        )
+    except ValueError as exc:
+        raise ProjectL2MNEHaukSourcePsdExportError(
+            f"Project participant-condition exclusions are invalid: {exc}"
+        ) from exc
+    manual_condition_exclusions_by_participant = {
+        participant_id.casefold(): {label.casefold() for label in labels}
+        for participant_id, labels in manual_condition_exclusions.items()
+    }
     ledger = load_ledger(root)
     entries = ledger.get("entries")
     if not isinstance(entries, Mapping):
@@ -736,7 +791,10 @@ def _build_project_input_plan(
         if not isinstance(entry_value, Mapping):
             continue
         participant_id = str(entry_value.get("participant_id") or ledger_key).strip()
-        if not participant_id or participant_id in excluded:
+        if not participant_id:
+            continue
+        if participant_id.casefold() in excluded:
+            canonical_excluded[participant_id.casefold()] = participant_id
             continue
         status = str(entry_value.get("status") or "").strip().casefold()
         if status == "excluded":
@@ -770,6 +828,15 @@ def _build_project_input_plan(
             participant_id=participant_id,
         )
         missing_condition_labels = tuple(condition.label for condition in missing_conditions)
+        manually_excluded_condition_labels = manual_condition_exclusions_by_participant.get(
+            participant_id.casefold(),
+            set(),
+        )
+        manually_excluded_conditions = tuple(
+            condition
+            for condition in conditions
+            if condition.label.casefold() in manually_excluded_condition_labels
+        )
         completeness = str(entry_value.get("condition_completeness") or "complete").casefold()
         source_derivative_status = str(entry_value.get("source_derivative_status") or "").strip()
         source_derivative_status_key = source_derivative_status.casefold()
@@ -801,6 +868,30 @@ def _build_project_input_plan(
                 )
             )
             continue
+        unavailable_condition_ids = {
+            condition.condition_id
+            for condition in (*missing_conditions, *manually_excluded_conditions)
+        }
+        if len(unavailable_condition_ids) == len(conditions):
+            unavailable_labels = tuple(
+                condition.label
+                for condition in conditions
+                if condition.condition_id in unavailable_condition_ids
+            )
+            source_ineligible.append(
+                ProjectSourceIneligibleParticipant(
+                    participant_id=participant_id,
+                    group_id=group_id,
+                    reason_code="no_available_source_conditions",
+                    detail=(
+                        "No canonical source condition remains after processing-ledger "
+                        "availability and saved project participant-condition exclusions."
+                    ),
+                    missing_condition_labels=unavailable_labels,
+                    source_derivative_status=source_derivative_status,
+                )
+            )
+            continue
         if source_derivative_status_key and source_derivative_status_key != "complete" and not missing_conditions:
             source_warning = str(entry_value.get("source_derivative_warning") or "").strip()
             detail = source_warning or (
@@ -827,8 +918,14 @@ def _build_project_input_plan(
                 "Reprocess the project before source-map generation."
             )
         missing_condition_ids = {condition.condition_id for condition in missing_conditions}
+        manual_condition_ids = {
+            condition.condition_id for condition in manually_excluded_conditions
+        }
         available_condition_ids = tuple(
-            condition.condition_id for condition in conditions if condition.condition_id not in missing_condition_ids
+            condition.condition_id
+            for condition in conditions
+            if condition.condition_id
+            not in (missing_condition_ids | manual_condition_ids)
         )
         source_warning = str(entry_value.get("source_derivative_warning") or "").strip()
         for condition in missing_conditions:
@@ -841,6 +938,22 @@ def _build_project_input_plan(
                     reason_code="missing_canonical_condition_output",
                     detail=source_warning
                     or (f"Processing ledger reports no completed output for canonical condition {condition.label!r}."),
+                    source_derivative_status=source_derivative_status,
+                )
+            )
+        for condition in manually_excluded_conditions:
+            if condition.condition_id in missing_condition_ids:
+                continue
+            source_condition_omissions.append(
+                ProjectSourceConditionOmission(
+                    participant_id=participant_id,
+                    group_id=group_id,
+                    condition_id=condition.condition_id,
+                    condition_label=condition.label,
+                    reason_code="excluded_participant_condition",
+                    detail=(
+                        "Excluded by the project's saved participant-condition QC decision."
+                    ),
                     source_derivative_status=source_derivative_status,
                 )
             )
@@ -860,11 +973,14 @@ def _build_project_input_plan(
         raise ProjectL2MNEHaukSourcePsdExportError(
             "No completed, source-eligible participants remain after project exclusions." + suffix
         )
-    if ledger_excluded:
-        selection = ProjectSourceParticipantSelection(
-            excluded_subjects=tuple(sorted({*selection.excluded_subjects, *ledger_excluded})),
-            flagged_subjects=selection.flagged_subjects,
-        )
+    for participant_id in ledger_excluded:
+        canonical_excluded[participant_id.casefold()] = participant_id
+    selection = ProjectSourceParticipantSelection(
+        excluded_subjects=tuple(
+            sorted(canonical_excluded.values(), key=str.casefold)
+        ),
+        flagged_subjects=selection.flagged_subjects,
+    )
 
     fingerprints = {str(item.ledger_entry.get("processing_fingerprint") or "").strip() for item in included}
     versions = {str(item.ledger_entry.get("processing_fingerprint_version") or "").strip() for item in included}
@@ -1665,6 +1781,7 @@ __all__ = [
     "build_project_hauk_source_psd_input_plan",
     "default_project_l2_mne_hauk_source_psd_output_dir",
     "enrich_project_hauk_source_psd_provenance",
+    "log_project_source_condition_omission_summary",
     "reconcile_project_hauk_source_psd_sampling_contract",
     "resolve_project_hauk_source_psd_harmonics",
     "write_project_l2_mne_hauk_source_psd_payloads",

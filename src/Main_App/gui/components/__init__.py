@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from .actions import ActionRow, make_action_row
 from .messages import confirm, show_error, show_info, show_warning
+from .post_processing import (
+    PostProcessingRequiredDialog,
+    show_post_processing_required,
+)
 from .surfaces import AppDialog, SurfaceSize, configure_window_surface
 from .tool_info import (
     ToolInfoContent,
@@ -38,6 +42,7 @@ __all__ = (
     "BusySpinner",
     "CardHeader",
     "PathPickerRow",
+    "PostProcessingRequiredDialog",
     "SectionCard",
     "StatusBanner",
     "SubsectionHeaderLabel",
@@ -59,6 +64,7 @@ __all__ = (
     "matplotlib_font_kwargs",
     "show_error",
     "show_info",
+    "show_post_processing_required",
     "show_tool_info",
     "show_warning",
 )
