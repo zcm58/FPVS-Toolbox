@@ -39,6 +39,7 @@ from Tools.Publication_Maps.gui import (
     SCALP_MAPS_TOP_ROW_MIN_HEIGHT,
     PublicationMapsWindow,
 )
+from Tools.Publication_Maps.generation_outcome import PublicationMapsWorkerOutcome
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Sensitivity_Analysis.gui import SensitivityAnalysisWindow
 from Tools.Stats import StatsWindow
@@ -1126,7 +1127,16 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
 
     monkeypatch.setattr("Tools.Publication_Maps.gui.confirm", fake_confirm)
     monkeypatch.setattr(page, "_open_output_folder", lambda: opened.append(True))
-    page._last_generated_figure_count = 2
+    page._pending_outcome = PublicationMapsWorkerOutcome.success(
+        (
+            SimpleNamespace(
+                group_label=None,
+                diagnostics=(),
+                source_workbook_path=None,
+                figure_paths=(Path("map.png"), Path("map.pdf")),
+            ),
+        )
+    )
     page._cleanup_worker()
 
     assert opened == [True]
