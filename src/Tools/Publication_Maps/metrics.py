@@ -182,7 +182,7 @@ def build_publication_map_result(
                 cancel_check=cancel_check,
             )
         )
-    _verify_workbook_identities(workbooks, cancel_check=cancel_check)
+    verify_publication_workbooks_unchanged(workbooks, cancel_check=cancel_check)
     long_df = pd.DataFrame(long_rows, columns=LONG_COLUMNS)
     if long_df.empty:
         raise PublicationMapInputError("No exact electrode values were available from the requested workbooks.")
@@ -297,11 +297,13 @@ def _capture_workbook_identity(
     )
 
 
-def _verify_workbook_identities(
+def verify_publication_workbooks_unchanged(
     workbooks: tuple[WorkbookEntry, ...],
     *,
-    cancel_check: Callable[[], None] | None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> None:
+    """Reject source workbooks changed since their analysis-time snapshot."""
+
     for workbook in workbooks:
         current = _capture_workbook_identity(
             workbook,

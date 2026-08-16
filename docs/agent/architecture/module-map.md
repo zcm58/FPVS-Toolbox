@@ -82,8 +82,8 @@ Current `Legacy_App` runtime couplings:
   on manual assumptions, not observed power or model-fit validation, and has no
   file, project, export, or Stats-pipeline integration.
 - `src/Tools/Publication_Maps/`: canonical dataset/group selection,
-  publication-oriented scalp-map source workbooks and figures, finite-sensor
-  rendering, and cooperative transactional generation.
+  publication-oriented scalp-map PNG/PDF figures, finite-sensor rendering, and
+  cooperative transactional generation.
 - `src/Tools/LORETA_Visualizer/`: embedded 3D LORETA/source-visualization
   viewer. This is a new source-localization visualization branch, not a
   continuation of the removed `Tools.SourceLocalization` implementation.

@@ -19,17 +19,21 @@ group outputs), select one or more conditions, confirm metric and color-scale
 options, and run the export. The project&apos;s canonical processed-Excel root is
 selected automatically and cannot be narrowed to a subgroup folder. When two
 conditions are selected, the paired condition figure option creates
-side-by-side maps for easier visual comparison. If processing-time harmonic
+side-by-side maps. In an exactly-two-group project, choose All groups and one
+condition to export a descriptive side-by-side group comparison. Each group is
+aggregated independently; the figure is not a between-group statistical test.
+If processing-time harmonic
 selection is missing or stale, the Post-processing Required dialog can launch
 the shared rebuild workflow; EEG preprocessing is not repeated.
 </p>
 
 <h3>Output Notes</h3>
 <p>
-The tool writes matching high-resolution PNG and PDF figure assets plus a
-source workbook. Multi-group projects write each group into its own named
-output folder and never pool groups implicitly. Fixed color ranges are useful
-when comparing conditions across the same manuscript figure set.
+The tool writes matching high-resolution PNG and PDF figure assets only.
+Ordinary multi-group runs write each group into its own named output folder.
+Two-group comparison mode writes one combined figure at the selected base
+output. Groups are never pooled implicitly. Fixed color ranges are useful when
+comparing conditions or groups.
 </p>
 """
 

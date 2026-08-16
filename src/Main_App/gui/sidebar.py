@@ -46,10 +46,10 @@ DEFAULT_TOOL_SPECS = (
         "open_free_harmonic_clustering",
     ),
     ("btn_graphs", "SNR Plots", "chart", "open_plot_generator"),
-    ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),
 )
 
 BETA_TOOL_SPECS = (
+    ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),
     # Navigation text is shortened for the fixed-width sidebar. The page,
     # accessible name, tooltip, documentation, and exports use the full title.
     ("btn_data", "Data Screening", "stats", "open_stats_analyzer"),

@@ -28,9 +28,6 @@ from Tools.Publication_Maps.metrics import build_publication_map_result
 from Tools.Publication_Maps.models import (
     ColorBounds,
     DEFAULT_Z_SCORE_THRESHOLD,
-    GRAND_AVERAGE_SHEET,
-    LONG_VALUES_SHEET,
-    PARAMETERS_SHEET,
     PublicationMapInputError,
     PublicationMapRequest,
     PublicationMapResult,
@@ -48,7 +45,6 @@ from Tools.Publication_Maps.rendering import (
     _style_colorbar,
     colorbar_label_for_metric,
     colormap_for_metric,
-    export_source_workbook,
     render_publication_figures,
 )
 from Tools.Publication_Maps.scalp_io import InsufficientSensorCoverageError
@@ -258,7 +254,7 @@ def test_bca_maps_require_processing_time_harmonic_selection(tmp_path: Path) -> 
         build_publication_map_result(request)
 
 
-def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
+def test_worker_exports_only_nonblank_png_and_pdf_figures(tmp_path: Path) -> None:
     project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
     output_root = project_root / "4 - Scalp Maps"
     request = PublicationMapRequest(
@@ -267,89 +263,25 @@ def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
         conditions=("Faces",),
         project_root=project_root,
     )
-    result = build_publication_map_result(request)
+    worker = PublicationMapsWorker(request)
+    finished: list[object] = []
+    worker.finished.connect(finished.append)
 
-    workbook_path = export_source_workbook(result, request)
-    figures = render_publication_figures(result, request)
+    worker.run()
 
-    assert workbook_path.exists()
-    assert workbook_path.stat().st_size > 0
+    assert len(finished) == 1
+    assert finished[0].status is PublicationMapsOutcomeStatus.SUCCESS
+    figures = finished[0].results[0].figure_paths
     assert figures
     assert all(path.exists() and path.stat().st_size > 0 for path in figures)
+    assert {path.suffix for path in figures} == {".pdf", ".png"}
+    assert not list(output_root.rglob("*.xlsx"))
     pdf = next(path for path in figures if path.suffix == ".pdf")
     assert pdf.read_bytes().startswith(b"%PDF")
     assert not list(output_root.rglob("*.svg"))
     png = next(path for path in figures if path.suffix == ".png")
     with Image.open(png) as image:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
-
-
-def test_source_workbook_includes_bca_and_snr_when_both_selected(tmp_path: Path) -> None:
-    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
-    output_root = project_root / "4 - Scalp Maps"
-    request = PublicationMapRequest(
-        input_root=excel_root,
-        output_root=output_root,
-        conditions=("Faces",),
-        project_root=project_root,
-        metrics=(PublicationMetric.BCA, PublicationMetric.SNR),
-        color_bounds={
-            PublicationMetric.BCA: ColorBounds(auto_scale=False, vmin=0.0, vmax=0.4),
-            PublicationMetric.SNR: ColorBounds(auto_scale=False, vmin=1.0, vmax=1.5),
-        },
-    )
-    result = build_publication_map_result(request)
-
-    workbook_path = export_source_workbook(result, request)
-
-    long_values = pd.read_excel(workbook_path, sheet_name=LONG_VALUES_SHEET)
-    grand_values = pd.read_excel(workbook_path, sheet_name=GRAND_AVERAGE_SHEET)
-    params = pd.read_excel(workbook_path, sheet_name=PARAMETERS_SHEET)
-    params_by_key = dict(zip(params["key"], params["value"]))
-    assert set(long_values["metric"]) == {
-        PublicationMetric.BCA.value,
-        PublicationMetric.SNR.value,
-    }
-    assert set(long_values["source_sheet"]) == {"BCA (uV)", "SNR"}
-    assert set(grand_values["metric"]) == {
-        PublicationMetric.BCA.value,
-        PublicationMetric.SNR.value,
-    }
-    assert params_by_key["metrics"] == "bca; snr"
-    assert params_by_key["harmonic_source"] == "processing_time_project_selection"
-    assert params_by_key["base_frequency_hz"] == pytest.approx(6.0)
-    assert params_by_key["bca_range_max"] == pytest.approx(0.4)
-    assert params_by_key["snr_range_min"] == pytest.approx(1.0)
-    assert params_by_key["snr_range_max"] == pytest.approx(1.5)
-
-
-def test_source_workbook_includes_z_score_threshold_when_selected(tmp_path: Path) -> None:
-    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
-    output_root = project_root / "4 - Scalp Maps"
-    request = PublicationMapRequest(
-        input_root=excel_root,
-        output_root=output_root,
-        conditions=("Faces",),
-        project_root=project_root,
-        metrics=(PublicationMetric.Z_SCORE,),
-        color_bounds={
-            PublicationMetric.Z_SCORE: ColorBounds(vmin=DEFAULT_Z_SCORE_THRESHOLD),
-        },
-    )
-    result = build_publication_map_result(request)
-
-    workbook_path = export_source_workbook(result, request)
-
-    long_values = pd.read_excel(workbook_path, sheet_name=LONG_VALUES_SHEET)
-    grand_values = pd.read_excel(workbook_path, sheet_name=GRAND_AVERAGE_SHEET)
-    params = pd.read_excel(workbook_path, sheet_name=PARAMETERS_SHEET)
-    params_by_key = dict(zip(params["key"], params["value"]))
-    assert set(long_values["metric"]) == {PublicationMetric.Z_SCORE.value}
-    assert set(long_values["source_sheet"]) == {"Z Score"}
-    assert set(grand_values["metric"]) == {PublicationMetric.Z_SCORE.value}
-    assert params_by_key["metrics"] == PublicationMetric.Z_SCORE.value
-    assert bool(params_by_key["z_score_auto_scale"])
-    assert params_by_key["z_score_range_min"] == pytest.approx(DEFAULT_Z_SCORE_THRESHOLD)
 
 
 def test_fast_metric_reader_preserves_publication_map_values(
@@ -751,20 +683,6 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
         calls.append("build")
         return result
 
-    def fake_export(
-        seen_result: PublicationMapResult,
-        seen_request: PublicationMapRequest,
-        *,
-        cancel_check,
-        transaction,
-    ) -> Path:
-        assert seen_result is result
-        assert seen_request is request
-        assert transaction is not None
-        cancel_check()
-        calls.append("export")
-        return seen_request.output_root / "Publication_Scalp_Maps_Source_Data.xlsx"
-
     def fake_render(
         seen_result: PublicationMapResult,
         seen_request: PublicationMapRequest,
@@ -778,6 +696,11 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
         cancel_check()
         calls.append("render")
         return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.pdf"]
+
+    def fake_verify(seen_workbooks, *, cancel_check) -> None:
+        assert seen_workbooks == result.included_workbooks
+        cancel_check()
+        calls.append("verify")
 
     class FakeTransaction:
         def __init__(self, seen_request: PublicationMapRequest) -> None:
@@ -800,8 +723,11 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
         "Tools.Publication_Maps.worker.build_publication_map_result",
         fake_build,
     )
-    monkeypatch.setattr("Tools.Publication_Maps.worker.export_source_workbook", fake_export)
     monkeypatch.setattr("Tools.Publication_Maps.worker.render_publication_figures", fake_render)
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.verify_publication_workbooks_unchanged",
+        fake_verify,
+    )
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.PublicationArtifactTransaction",
         FakeTransaction,
@@ -819,14 +745,13 @@ def test_worker_emits_progress_messages_and_finished_without_widgets(
 
     worker.run()
 
-    assert calls == ["build", "render", "export", "commit"]
-    assert progress == [5, 55, 80, 95, 100]
+    assert calls == ["build", "render", "verify", "commit"]
+    assert progress == [5, 55, 95, 100]
     assert messages == [
         "[Ungrouped dataset] Reading indexed workbooks...",
         "[Ungrouped dataset] Rendering scalp maps...",
-        "[Ungrouped dataset] Writing source-data workbook...",
-        "[Ungrouped dataset] Output staged.",
-        "Publishing the complete Scalp Maps output set...",
+        "[Ungrouped dataset] Figure output staged.",
+        "Publishing the complete Scalp Maps figure set...",
     ]
     assert errors == []
     assert len(finished) == 1
@@ -880,10 +805,6 @@ def test_worker_commit_wins_when_cancel_arrives_after_publication(
         cancel_check()
         return result
 
-    def fake_export(_result, _request, *, cancel_check, transaction):
-        cancel_check()
-        assert transaction is not None
-
     def fake_render(_result, _request, *, cancel_check, transaction):
         cancel_check()
         assert transaction is not None
@@ -911,10 +832,6 @@ def test_worker_commit_wins_when_cancel_arrives_after_publication(
         fake_build,
     )
     monkeypatch.setattr(
-        "Tools.Publication_Maps.worker.export_source_workbook",
-        fake_export,
-    )
-    monkeypatch.setattr(
         "Tools.Publication_Maps.worker.render_publication_figures",
         fake_render,
     )
@@ -935,7 +852,7 @@ def test_worker_commit_wins_when_cancel_arrives_after_publication(
     assert finished[0].results == (result,)
 
 
-def test_worker_does_not_publish_source_only_when_no_figure_is_renderable(
+def test_worker_does_not_publish_when_no_figure_is_renderable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -961,9 +878,6 @@ def test_worker_does_not_publish_source_only_when_no_figure_is_renderable(
         calls.append("render")
         return []
 
-    def unexpected_export(*_args, **_kwargs):
-        pytest.fail("Source export must not run when no figure is renderable.")
-
     class FakeTransaction:
         def __init__(self, _request) -> None:
             pass
@@ -979,7 +893,7 @@ def test_worker_does_not_publish_source_only_when_no_figure_is_renderable(
             return None
 
         def commit(self, **_kwargs) -> None:
-            pytest.fail("A source-only transaction must not be committed.")
+            pytest.fail("A figureless transaction must not be committed.")
 
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.build_publication_map_result",
@@ -988,10 +902,6 @@ def test_worker_does_not_publish_source_only_when_no_figure_is_renderable(
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.render_publication_figures",
         fake_render,
-    )
-    monkeypatch.setattr(
-        "Tools.Publication_Maps.worker.export_source_workbook",
-        unexpected_export,
     )
     monkeypatch.setattr(
         "Tools.Publication_Maps.worker.PublicationArtifactTransaction",

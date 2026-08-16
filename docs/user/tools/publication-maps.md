@@ -4,6 +4,11 @@ Scalp Maps exports grand-average sensor-space topographies from processed FPVS
 workbooks. It supports baseline-corrected amplitude (BCA), signal-to-noise ratio
 (SNR), and summed-harmonic z-score maps.
 
+Scalp Maps is currently a beta tool. Enable **Beta Tools** in
+**Settings > Advanced**, close and reopen FPVS Toolbox, then choose **Scalp
+Maps** from the Beta Tools section. The shared beta notice appears before the
+tool first opens in each app session.
+
 ## When To Use It
 
 Use Scalp Maps after the selected conditions have been processed and the
@@ -15,8 +20,11 @@ project results folder unless you choose another location.
 
 Select one or more processed conditions, the metrics to draw, and the output
 folder. In a multi-group project, select one group or choose all groups to
-create a separate output set for each group. Groups are never pooled into one
-map. Scalp Maps loads the project-wide significant-harmonic list that FPVS
+create a separate output set for each group. In a project with exactly two
+canonical groups, you can instead select one condition and export a descriptive
+side-by-side group comparison. Each group is averaged independently; groups are
+never pooled into one map. Scalp Maps loads the project-wide
+significant-harmonic list that FPVS
 Toolbox saved when processing completed. Selecting fewer conditions or applying
 display exclusions does not recalculate or replace that list.
 
@@ -53,32 +61,31 @@ index, not from filenames or folder names.
 
 ## Figure Options
 
-You can export individual condition maps or a paired condition figure. In paired
-mode, selected metrics are arranged as rows with the two conditions as columns,
-and the conditions share a color scale for each metric.
+You can export individual condition maps, a paired condition figure, or—when
+the project has exactly two canonical groups—a two-group comparison for one
+condition. In either comparison mode, selected metrics are arranged as rows,
+the conditions or groups are columns, and both columns share a color scale for
+each metric. The group comparison is descriptive: it is not a between-group
+statistical test or a difference map.
 
 BCA and SNR can use fixed or automatic color limits. The initial fixed ranges
 are 0.0–0.4 µV for BCA and 1.0–1.5 for SNR. Z-score maps use a configurable
 lower display threshold of 1.64 by default; values below the display threshold
 are white.
 
-Rendered BCA maps clip negative values to the low end of the color scale, but
-the signed values remain in the source-data workbook.
+Rendered BCA maps clip negative values to the low end of the color scale.
 
 ## Outputs
 
-The tool writes matching 600-DPI `.png` and `.pdf` figures and
-`Publication_Scalp_Maps_Source_Data.xlsx`. For multi-group projects, each group
-gets its own canonical output folder. The source workbook contains long-form
-participant values, grand-average plotted values, group and cohort identity,
-included and excluded participants, selected harmonic profile/list/fingerprint,
-QC provenance, toolbox version, contributing-file hashes, and diagnostics.
-Keep it with the figures so the plotted values and harmonic policy remain
-auditable.
+The tool writes matching 600-DPI `.png` and `.pdf` figures only. Ordinary
+multi-group runs give each group its own canonical output folder. Two-group
+comparison mode instead writes the comparison figure directly in the selected
+`4 - Scalp Maps` folder. Scalp Maps does not create source-data workbooks or
+other auxiliary output files.
 
 Generation is transactional: cancelling or encountering an error does not
-publish a partial set of figures/source data. The Generate action and project
-navigation remain locked until the active worker has actually stopped.
+publish a partial figure pair. The Generate action and project navigation
+remain locked until the active worker has actually stopped.
 
 Scalp topographies interpolate measurements across electrodes. Missing or
 non-finite sensors are omitted rather than converted to zero, and a map is

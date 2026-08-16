@@ -34,7 +34,7 @@ environment.
 | `project-io` | Project settings, enumeration/scanning, result paths, manifest contracts, shared exact XLSX reading | File dialogs and visible project workflows |
 | `processing` | Order/fingerprint, QC calibration, persistence, FFT crop, runner/export contracts | Processing-window wiring and Qt workers |
 | `plot-generator` | Excel/config helpers, aggregation, FFT/SNR behavior, rendering and export contracts | Plot Generator page/layout/workflow smoke |
-| `publication-maps` | Source workbook, processing-time harmonics, BCA/SNR rendering, paired outputs, colorbars | Embedded Scalp Maps page behavior |
+| `publication-maps` | Processing-time harmonics, BCA/SNR rendering, figure-only paired/group outputs, colorbars | Embedded Scalp Maps page behavior |
 | `ratio-calculator` | Ratio calculations, ROI behavior, plots and exports | Ratio Calculator page/workflow smoke |
 | `sequence-figure` | Renderer behavior and high-DPI outputs | Embedded Sequence Figure wiring |
 | `sensitivity-analysis` | Paired-test/RM-ANOVA power math plus mixed-model simulation, search, cancellation, uncertainty, and validation | Embedded page wiring, background worker, controls, results, reset, information tabs, and clipping smoke |

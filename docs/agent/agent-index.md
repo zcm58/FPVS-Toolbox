@@ -39,7 +39,7 @@ shell-specific setup is needed.
 | Free Harmonic Clustering, FullFFT tensor reads, cluster permutations | `project-path-audit` plus focused backend tests | `src/Tools/Free_Harmonic_Clustering/AGENTS.md`; `src/Tools/Free_Harmonic_Clustering/ARCHITECTURE.md` |
 | Powered FHC automatic-domain validation | `project-path-audit` plus the manual resumable runner | `docs/agent/quality/free-harmonic-clustering-null-calibration.md` |
 | LORETA Visualizer, source visualization, or source-localization-adjacent rendering | `legacy-boundary-review` plus focused tool tests | `src/Tools/LORETA_Visualizer/AGENTS.md`; `src/Tools/LORETA_Visualizer/ARCHITECTURE.md` |
-| Publication scalp maps and source-data exports | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
+| Publication scalp-map PNG/PDF figures | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
 | FPVS sequence illustration figures, manual stimulus image slots, and high-DPI export | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Sequence_Figure/AGENTS.md` |
 | Publication-ready table PNG/SVG exports under a project root | `publication-table-export` + `project-path-audit` | `.agents/skills/publication-table-export/SKILL.md`; `docs/agent/architecture/statistics-tools.md` |
 | GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; Qt execution is CI-only unless the user approves a safe visible environment |

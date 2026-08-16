@@ -1,9 +1,9 @@
-"""Rendering and workbook export for publication scalp maps."""
+"""Publication scalp-map figure rendering."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -22,12 +22,8 @@ from Main_App.exports.figure_style import (
     figure_text_kwargs,
 )
 from Tools.Publication_Maps.colormaps import scalp_colormap
+from Tools.Publication_Maps.excel_inputs import load_publication_dataset_index
 from Tools.Publication_Maps.models import (
-    DIAGNOSTICS_SHEET,
-    GRAND_AVERAGE_SHEET,
-    LONG_VALUES_SHEET,
-    PARAMETERS_SHEET,
-    SOURCE_WORKBOOK_NAME,
     ColorBounds,
     DEFAULT_Z_SCORE_THRESHOLD,
     Diagnostic,
@@ -36,18 +32,8 @@ from Tools.Publication_Maps.models import (
     PublicationMapResult,
     PublicationMetric,
 )
-from Tools.Publication_Maps.output_contract import (
-    PublicationArtifactTransaction,
-    request_output_root,
-)
+from Tools.Publication_Maps.output_contract import PublicationArtifactTransaction
 from Tools.Publication_Maps.scalp_io import align_render_values
-from Tools.Publication_Maps.source_provenance import (
-    COHORT_SHEET,
-    PROVENANCE_SHEET,
-    SENSOR_COVERAGE_SHEET,
-    SOURCE_FILES_SHEET,
-    build_source_workbook_frames,
-)
 
 apply_matplotlib_figure_style()
 
@@ -75,172 +61,6 @@ COMBINED_PAIRED_METRIC_ORDER = (
 BCA_COLORBAR_LABEL = "Baseline-corrected amplitude (µV)"
 
 
-def export_source_workbook(
-    result: PublicationMapResult,
-    request: PublicationMapRequest,
-    *,
-    cancel_check: Callable[[], None] | None = None,
-    transaction: PublicationArtifactTransaction | None = None,
-) -> Path:
-    """Stage a complete, auditable source workbook for atomic publication."""
-
-    effective_request = _request_with_result_group(request, result)
-    owns_transaction = transaction is None
-    active_transaction = transaction or PublicationArtifactTransaction(effective_request)
-    try:
-        active_transaction.ensure_request_target(effective_request)
-        _checkpoint(cancel_check)
-        frames = build_source_workbook_frames(
-            result,
-            effective_request,
-            cancel_check=cancel_check,
-        )
-        diagnostics_df = pd.DataFrame([diag.to_row() for diag in result.diagnostics])
-        requested_metrics = _request_metrics(effective_request)
-        metric_params = _metric_parameter_rows(effective_request, requested_metrics)
-        final_root = request_output_root(effective_request)
-        workbook_path = final_root / SOURCE_WORKBOOK_NAME
-        staged_path = active_transaction.stage_path(workbook_path)
-        params_df = _source_parameter_frame(
-            result,
-            effective_request,
-            requested_metrics=requested_metrics,
-            metric_params=metric_params,
-            output_root=final_root,
-            source_file_count=len(frames.source_files),
-            cohort=frames.cohort,
-        )
-        with pd.ExcelWriter(staged_path) as writer:
-            _write_source_sheet(
-                writer,
-                frames.long_values,
-                sheet_name=LONG_VALUES_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                frames.grand_average_values,
-                sheet_name=GRAND_AVERAGE_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                frames.cohort,
-                sheet_name=COHORT_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                frames.source_files,
-                sheet_name=SOURCE_FILES_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                frames.provenance,
-                sheet_name=PROVENANCE_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                frames.sensor_coverage,
-                sheet_name=SENSOR_COVERAGE_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                diagnostics_df,
-                sheet_name=DIAGNOSTICS_SHEET,
-                cancel_check=cancel_check,
-            )
-            _write_source_sheet(
-                writer,
-                params_df,
-                sheet_name=PARAMETERS_SHEET,
-                cancel_check=cancel_check,
-            )
-        _checkpoint(cancel_check)
-        result.source_workbook_path = workbook_path
-        if owns_transaction:
-            active_transaction.commit(cancel_check=cancel_check)
-        return workbook_path
-    except Exception:  # Transaction boundary: discard staging for any writer/cancel failure.
-        if owns_transaction:
-            active_transaction.abort()
-        raise
-
-
-def _source_parameter_frame(
-    result: PublicationMapResult,
-    request: PublicationMapRequest,
-    *,
-    requested_metrics: tuple[PublicationMetric, ...],
-    metric_params: list[dict[str, object]],
-    output_root: Path,
-    source_file_count: int,
-    cohort: pd.DataFrame,
-) -> pd.DataFrame:
-    included = cohort[cohort["disposition"].eq("included")] if not cohort.empty else cohort
-    participant_n = int(included["participant_id"].replace("", np.nan).nunique()) if not included.empty else 0
-    selection_metadata = result.selection_metadata
-    return pd.DataFrame(
-        [
-            {"key": "input_root", "value": str(request.input_root)},
-            {"key": "output_root", "value": str(output_root)},
-            {"key": "group_id", "value": getattr(request, "group_id", "") or ""},
-            {"key": "group_label", "value": getattr(request, "group_label", "") or ""},
-            {"key": "group_folder", "value": getattr(request, "group_folder", "") or ""},
-            {"key": "included_participant_n", "value": participant_n},
-            {"key": "source_file_count", "value": int(source_file_count)},
-            {"key": "conditions", "value": "; ".join(request.conditions)},
-            {
-                "key": "metrics",
-                "value": "; ".join(metric.value for metric in requested_metrics),
-            },
-            {"key": "harmonic_source", "value": "processing_time_project_selection"},
-            {
-                "key": "harmonic_selection_profile",
-                "value": selection_metadata.get("harmonic_selection_profile", ""),
-            },
-            {
-                "key": "harmonic_selection_profile_version",
-                "value": selection_metadata.get("harmonic_selection_profile_version", ""),
-            },
-            {
-                "key": "selection_fingerprint",
-                "value": selection_metadata.get("selection_fingerprint", ""),
-            },
-            {
-                "key": "selected_harmonics_hz",
-                "value": "; ".join(f"{freq:g}" for freq in result.selected_harmonics_hz),
-            },
-            {
-                "key": "base_frequency_hz",
-                "value": selection_metadata.get("base_frequency_hz", ""),
-            },
-            *metric_params,
-            {"key": "export_paired_figures", "value": request.export_paired_figures},
-            {"key": "paired_conditions", "value": "; ".join(request.paired_conditions)},
-            {
-                "key": "selection_cache_source",
-                "value": selection_metadata.get("selection_cache_source", ""),
-            },
-        ]
-    )
-
-
-def _write_source_sheet(
-    writer: pd.ExcelWriter,
-    frame: pd.DataFrame,
-    *,
-    sheet_name: str,
-    cancel_check: Callable[[], None] | None,
-) -> None:
-    _checkpoint(cancel_check)
-    frame.to_excel(writer, sheet_name=sheet_name, index=False)
-    _checkpoint(cancel_check)
-
-
 def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric, ...]:
     metrics: list[PublicationMetric] = []
     for metric in request.metrics:
@@ -248,6 +68,262 @@ def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric,
         if normalized not in metrics:
             metrics.append(normalized)
     return tuple(metrics) or (PublicationMetric.BCA,)
+
+
+def validate_group_comparison_requests(
+    requests: Sequence[PublicationMapRequest],
+) -> bool:
+    """Validate the exact two-group, one-condition comparison contract."""
+
+    normalized = tuple(requests)
+    enabled = tuple(
+        bool(request.export_group_comparison_figure) for request in normalized
+    )
+    comparison_ids_present = any(
+        bool(request.group_comparison_ids) for request in normalized
+    )
+    if not any(enabled):
+        if comparison_ids_present:
+            raise ValueError(
+                "Scalp Maps group comparison IDs require comparison export to be enabled."
+            )
+        return False
+    if len(normalized) != 2 or not all(enabled):
+        raise ValueError(
+            "Scalp Maps group comparison requires exactly two enabled group requests."
+        )
+    baseline = replace(
+        normalized[0],
+        group_id=None,
+        group_label=None,
+        group_folder=None,
+    )
+    if any(
+        replace(
+            request,
+            group_id=None,
+            group_label=None,
+            group_folder=None,
+        )
+        != baseline
+        for request in normalized[1:]
+    ):
+        raise ValueError(
+            "Scalp Maps group comparison requests may differ only by canonical group."
+        )
+    if any(
+        request.export_paired_figures or request.paired_conditions
+        for request in normalized
+    ):
+        raise ValueError(
+            "Group comparison cannot be combined with paired-condition figures."
+        )
+    conditions = tuple(tuple(request.conditions) for request in normalized)
+    if any(len(condition_set) != 1 for condition_set in conditions):
+        raise ValueError(
+            "Scalp Maps group comparison requires exactly one selected condition."
+        )
+    if conditions[0] != conditions[1]:
+        raise ValueError(
+            "Scalp Maps group comparison requests must use the same condition."
+        )
+
+    request_ids = tuple(str(request.group_id or "").strip() for request in normalized)
+    if any(not group_id for group_id in request_ids):
+        raise ValueError("Scalp Maps group comparison requires canonical group IDs.")
+    if len({group_id.casefold() for group_id in request_ids}) != 2:
+        raise ValueError(
+            "Scalp Maps group comparison requires two distinct canonical group IDs."
+        )
+    comparison_ids = tuple(
+        str(group_id).strip() for group_id in normalized[0].group_comparison_ids
+    )
+    if len(comparison_ids) != 2 or tuple(
+        group_id.casefold() for group_id in comparison_ids
+    ) != tuple(group_id.casefold() for group_id in request_ids):
+        raise ValueError(
+            "Scalp Maps group comparison IDs must match the ordered canonical group requests."
+        )
+    if any(
+        tuple(
+            str(group_id).strip().casefold()
+            for group_id in request.group_comparison_ids
+        )
+        != tuple(group_id.casefold() for group_id in comparison_ids)
+        for request in normalized[1:]
+    ):
+        raise ValueError(
+            "Scalp Maps group comparison requests must use the same ordered group IDs."
+        )
+    if any(not str(request.group_label or "").strip() for request in normalized):
+        raise ValueError("Scalp Maps group comparison requires canonical group labels.")
+    if any(not str(request.group_folder or "").strip() for request in normalized):
+        raise ValueError(
+            "Scalp Maps group comparison requires canonical group output folders."
+        )
+    if any(
+        Path(request.output_root).expanduser().resolve(strict=False)
+        != Path(normalized[0].output_root).expanduser().resolve(strict=False)
+        for request in normalized[1:]
+    ):
+        raise ValueError(
+            "Scalp Maps group comparison requests must share one base output folder."
+        )
+    if not normalized[0].export_png and not normalized[0].export_pdf:
+        raise ValueError("Scalp Maps group comparison requires PNG and/or PDF export.")
+    return True
+
+
+def validate_group_comparison_project_groups(
+    requests: Sequence[PublicationMapRequest],
+) -> None:
+    """Require the request pair to equal the project's full canonical group set."""
+
+    normalized = tuple(requests)
+    validate_group_comparison_requests(normalized)
+    try:
+        index = load_publication_dataset_index(
+            normalized[0].input_root,
+            project_root=normalized[0].project_root,
+        )
+    except Exception as exc:
+        raise PublicationMapInputError(
+            f"Unable to validate Scalp Maps comparison groups: {exc}"
+        ) from exc
+    canonical_ids = tuple(group.group_id for group in index.ordered_groups)
+    requested_ids = tuple(
+        str(group_id).strip() for group_id in normalized[0].group_comparison_ids
+    )
+    if len(canonical_ids) != 2 or tuple(
+        group_id.casefold() for group_id in canonical_ids
+    ) != tuple(group_id.casefold() for group_id in requested_ids):
+        raise PublicationMapInputError(
+            "The side-by-side group figure is available only when the project "
+            "has exactly two canonical groups, in canonical order. Project "
+            f"groups: {', '.join(canonical_ids) or '(none)'}; requested: "
+            f"{', '.join(requested_ids)}."
+        )
+
+
+def _group_comparison_identity(
+    requests: Sequence[PublicationMapRequest],
+) -> tuple[str, str, str]:
+    normalized = tuple(requests)
+    validate_group_comparison_requests(normalized)
+    condition = str(normalized[0].conditions[0])
+    first_id, second_id = (
+        str(group_id).strip() for group_id in normalized[0].group_comparison_ids
+    )
+    return condition, first_id, second_id
+
+
+def _validate_group_comparison_results(
+    results: Sequence[PublicationMapResult],
+    requests: Sequence[PublicationMapRequest],
+) -> None:
+    normalized_results = tuple(results)
+    normalized_requests = tuple(requests)
+    validate_group_comparison_requests(normalized_requests)
+    if len(normalized_results) != 2:
+        raise ValueError(
+            "Scalp Maps group comparison requires exactly two completed group results."
+        )
+    condition = normalized_requests[0].conditions[0]
+    expected_metrics = {
+        metric.value for metric in _request_metrics(normalized_requests[0])
+    }
+    harmonic_sets = {
+        tuple(result.selected_harmonics_hz) for result in normalized_results
+    }
+    selection_fingerprints = {
+        str(result.selection_metadata.get("selection_fingerprint", ""))
+        for result in normalized_results
+    }
+    qc_fingerprints = {
+        str(result.qc_provenance.get("applied_exclusions_sha256", ""))
+        for result in normalized_results
+    }
+    if (
+        len(harmonic_sets) != 1
+        or not next(iter(harmonic_sets), ())
+        or len(selection_fingerprints) != 1
+        or not next(iter(selection_fingerprints), "")
+    ):
+        raise PublicationMapInputError(
+            "Group comparison results used different saved harmonic selections. Rerun the complete comparison batch."
+        )
+    if len(qc_fingerprints) != 1 or not next(iter(qc_fingerprints), ""):
+        raise PublicationMapInputError(
+            "Group comparison results used different QC exclusion snapshots. Rerun the complete comparison batch."
+        )
+    for result, request in zip(
+        normalized_results,
+        normalized_requests,
+        strict=True,
+    ):
+        _request_with_result_group(request, result)
+        request_id = str(request.group_id or "")
+        result_id = str(result.group_id or "")
+        if result_id.casefold() != request_id.casefold():
+            raise PublicationMapInputError(
+                "Scalp Maps comparison result group identity does not match its "
+                f"canonical request: {result_id!r} != {request_id!r}."
+            )
+        grand = result.grand_average_values
+        if grand.empty:
+            raise PublicationMapInputError(
+                f"No renderable values are available for group {request_id}."
+            )
+        conditions = {str(value) for value in grand["condition"].dropna().unique()}
+        if conditions != {condition}:
+            raise PublicationMapInputError(
+                "Group comparison results must contain exactly the selected "
+                f"condition {condition!r}; found {sorted(conditions)!r}."
+            )
+        metrics = {str(value) for value in grand["metric"].dropna().unique()}
+        if not expected_metrics.issubset(metrics):
+            missing = sorted(expected_metrics - metrics)
+            raise PublicationMapInputError(
+                f"Group {request_id} is missing comparison metric(s): "
+                + ", ".join(missing)
+            )
+        if "group_id" in grand.columns:
+            frame_ids = {
+                str(value)
+                for value in grand["group_id"].dropna().unique()
+                if str(value).strip()
+            }
+            if {value.casefold() for value in frame_ids} != {request_id.casefold()}:
+                raise PublicationMapInputError(
+                    "Scalp Maps comparison data contain a mismatched or pooled "
+                    f"group identity for {request_id}: {sorted(frame_ids)!r}."
+                )
+
+
+def _group_comparison_stem(
+    *,
+    condition: str,
+    first_id: str,
+    second_id: str,
+    metric_stem: str,
+) -> str:
+    return sanitize_filename_stem(
+        f"{condition}_{first_id}_and_{second_id}_{metric_stem}_group_comparison"
+    )
+
+
+def _group_comparison_titles(
+    requests: Sequence[PublicationMapRequest],
+) -> tuple[str, str]:
+    first, second = tuple(requests)
+    first_label = str(first.group_label or "").strip()
+    second_label = str(second.group_label or "").strip()
+    if first_label.casefold() == second_label.casefold():
+        return (
+            f"{first_label} ({first.group_id})",
+            f"{second_label} ({second.group_id})",
+        )
+    return first_label, second_label
 
 
 def _request_with_result_group(
@@ -274,32 +350,6 @@ def _request_with_result_group(
         if request_value in (None, "") and result_value not in (None, ""):
             updates[name] = result_value
     return replace(request, **updates) if updates else request
-
-
-def _metric_parameter_rows(
-    request: PublicationMapRequest,
-    metrics: tuple[PublicationMetric, ...],
-) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for metric in metrics:
-        bounds = request.color_bounds.get(metric, ColorBounds())
-        prefix = metric.value
-        rows.extend(
-            [
-                {"key": f"{prefix}_auto_scale", "value": bounds.auto_scale},
-                {
-                    "key": f"{prefix}_range_min",
-                    "value": "" if bounds.vmin is None else bounds.vmin,
-                },
-                {
-                    "key": f"{prefix}_range_max",
-                    "value": "" if bounds.vmax is None else bounds.vmax,
-                },
-                {"key": f"{prefix}_low_color", "value": bounds.low_color},
-                {"key": f"{prefix}_high_color", "value": bounds.high_color},
-            ]
-        )
-    return rows
 
 
 def render_publication_figures(
@@ -339,6 +389,176 @@ def render_publication_figures(
         if owns_transaction:
             active_transaction.abort()
         raise
+
+
+def render_group_comparison_figures(
+    results: Sequence[PublicationMapResult],
+    requests: Sequence[PublicationMapRequest],
+    *,
+    cancel_check: Callable[[], None] | None = None,
+    transaction: PublicationArtifactTransaction | None = None,
+    _project_groups_validated: bool = False,
+) -> list[Path]:
+    """Render one condition across two independent canonical group results."""
+
+    normalized_results = tuple(results)
+    normalized_requests = tuple(requests)
+    _validate_group_comparison_results(
+        normalized_results,
+        normalized_requests,
+    )
+    if not _project_groups_validated:
+        validate_group_comparison_project_groups(normalized_requests)
+    owns_transaction = transaction is None
+    active_transaction = transaction or PublicationArtifactTransaction(
+        normalized_requests[0]
+    )
+    try:
+        for request in normalized_requests:
+            active_transaction.ensure_request_target(request)
+        condition, first_id, second_id = _group_comparison_identity(normalized_requests)
+        first_result, second_result = normalized_results
+        first_request, second_request = normalized_requests
+        first_title, second_title = _group_comparison_titles(normalized_requests)
+        metrics = _request_metrics(first_request)
+        first_grand = first_result.grand_average_values
+        second_grand = second_result.grand_average_values
+        base_output = Path(first_request.output_root).expanduser().resolve(strict=False)
+        rendered: list[Path] = []
+
+        if PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
+            ordered_metrics = tuple(
+                metric for metric in COMBINED_PAIRED_METRIC_ORDER if metric in metrics
+            )
+            values_by_metric = {
+                metric: (
+                    _comparison_metric_group(
+                        first_grand,
+                        condition=condition,
+                        group_id=first_id,
+                        metric=metric,
+                    ),
+                    _comparison_metric_group(
+                        second_grand,
+                        condition=condition,
+                        group_id=second_id,
+                        metric=metric,
+                    ),
+                )
+                for metric in ordered_metrics
+            }
+            metric_stem = "_".join(metric.value for metric in ordered_metrics)
+            stem = _group_comparison_stem(
+                condition=condition,
+                first_id=first_id,
+                second_id=second_id,
+                metric_stem=metric_stem,
+            )
+            for suffix, enabled in (
+                (".png", first_request.export_png),
+                (".pdf", first_request.export_pdf),
+            ):
+                if not enabled:
+                    continue
+                _checkpoint(cancel_check)
+                final_path = base_output / f"{stem}{suffix}"
+                staged_path = active_transaction.stage_path(final_path)
+                _render_combined_paired_topomap(
+                    values_by_metric,
+                    metrics=ordered_metrics,
+                    first_title=first_title,
+                    second_title=second_title,
+                    output_path=staged_path,
+                    bounds_by_metric=first_request.color_bounds,
+                    dpi=first_request.png_dpi,
+                    cancel_check=cancel_check,
+                    figure_title=condition,
+                )
+                rendered.append(final_path)
+        else:
+            for metric in metrics:
+                first_values = _comparison_metric_group(
+                    first_grand,
+                    condition=condition,
+                    group_id=first_id,
+                    metric=metric,
+                )
+                second_values = _comparison_metric_group(
+                    second_grand,
+                    condition=condition,
+                    group_id=second_id,
+                    metric=metric,
+                )
+                stem = _group_comparison_stem(
+                    condition=condition,
+                    first_id=first_id,
+                    second_id=second_id,
+                    metric_stem=metric.value,
+                )
+                bounds = first_request.color_bounds.get(metric, ColorBounds())
+                for suffix, enabled in (
+                    (".png", first_request.export_png),
+                    (".pdf", first_request.export_pdf),
+                ):
+                    if not enabled:
+                        continue
+                    _checkpoint(cancel_check)
+                    final_path = base_output / f"{stem}{suffix}"
+                    staged_path = active_transaction.stage_path(final_path)
+                    _render_paired_topomap(
+                        first_values,
+                        second_values,
+                        metric=metric,
+                        first_title=first_title,
+                        second_title=second_title,
+                        output_path=staged_path,
+                        bounds=bounds,
+                        dpi=first_request.png_dpi,
+                        cancel_check=cancel_check,
+                        figure_title=condition,
+                    )
+                    rendered.append(final_path)
+        _checkpoint(cancel_check)
+        if not rendered:
+            raise PublicationMapInputError(
+                "No two-group comparison figures were rendered."
+            )
+        if owns_transaction:
+            active_transaction.commit(cancel_check=cancel_check)
+        return rendered
+    except Exception:
+        if owns_transaction:
+            active_transaction.abort()
+        raise
+
+
+def _comparison_metric_group(
+    grand: pd.DataFrame,
+    *,
+    condition: str,
+    group_id: str,
+    metric: PublicationMetric,
+) -> pd.DataFrame:
+    selected = grand[
+        (grand["condition"] == condition)
+        & (grand["metric"] == metric.value)
+        & (grand["is_montage_electrode"] == True)  # noqa: E712
+    ]
+    if selected.empty:
+        raise PublicationMapInputError(
+            f"Group {group_id} has no renderable {metric.display_name} values for condition {condition}."
+        )
+    if "group_id" in selected.columns:
+        selected_ids = {
+            str(value).casefold()
+            for value in selected["group_id"].dropna().unique()
+            if str(value).strip()
+        }
+        if selected_ids != {group_id.casefold()}:
+            raise PublicationMapInputError(
+                f"Comparison values for group {group_id} contain mismatched or pooled canonical group IDs."
+            )
+    return selected
 
 
 def _render_publication_figures_staged(
@@ -705,6 +925,7 @@ def _render_paired_topomap(
     bounds: ColorBounds,
     dpi: int,
     cancel_check: Callable[[], None] | None,
+    figure_title: str | None = None,
 ) -> None:
     _checkpoint(cancel_check)
     fig, axes = plt.subplots(1, 2, figsize=PAIRED_MAP_FIGSIZE, dpi=dpi)
@@ -734,6 +955,13 @@ def _render_paired_topomap(
         )
         axes[0].set_title(first_title, pad=8, **_paired_condition_title_kwargs())
         axes[1].set_title(second_title, pad=8, **_paired_condition_title_kwargs())
+        if figure_title:
+            fig.suptitle(
+                str(figure_title),
+                y=0.98,
+                **figure_text_kwargs("condition_label"),
+            )
+            fig.subplots_adjust(top=0.78)
         if first_missing:
             _add_missing_note(axes[0], first_missing)
         if second_missing:
@@ -761,11 +989,21 @@ def _render_combined_paired_topomap(
     bounds_by_metric: dict[PublicationMetric, ColorBounds],
     dpi: int,
     cancel_check: Callable[[], None] | None,
+    figure_title: str | None = None,
 ) -> None:
     _checkpoint(cancel_check)
     fig = plt.figure(figsize=_combined_paired_figsize(metrics), dpi=dpi)
-    layout = _combined_paired_layout_rects(metrics=metrics)
+    layout = _combined_paired_layout_rects(
+        metrics=metrics,
+        reserve_figure_title=bool(figure_title),
+    )
     try:
+        if figure_title:
+            fig.suptitle(
+                str(figure_title),
+                y=0.985,
+                **figure_text_kwargs("condition_label"),
+            )
         for row_idx, metric in enumerate(metrics):
             _checkpoint(cancel_check)
             first_values, second_values = values_by_metric[metric]
@@ -827,10 +1065,20 @@ def _combined_paired_layout_rects(
         PublicationMetric.BCA,
         PublicationMetric.SNR,
     ),
+    reserve_figure_title: bool = False,
 ) -> dict[PublicationMetric, dict[str, tuple[float, float, float, float]]]:
     figure_size = _combined_paired_figsize(metrics)
     map_height = COMBINED_PAIRED_MAP_WIDTH * (figure_size[0] / figure_size[1])
-    if metrics == (PublicationMetric.BCA, PublicationMetric.SNR):
+    if reserve_figure_title:
+        top = 0.87
+        bottom = 0.065
+        gap = (top - bottom - (len(metrics) * map_height)) / max(len(metrics) - 1, 1)
+        gap = max(gap, 0.012)
+        rows = {
+            metric: top - map_height - index * (map_height + gap)
+            for index, metric in enumerate(metrics)
+        }
+    elif metrics == (PublicationMetric.BCA, PublicationMetric.SNR):
         rows = {
             PublicationMetric.BCA: COMBINED_PAIRED_TOP_ROW_BOTTOM,
             PublicationMetric.SNR: COMBINED_PAIRED_BOTTOM_ROW_BOTTOM,

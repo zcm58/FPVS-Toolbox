@@ -13,11 +13,6 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-LONG_VALUES_SHEET = "Long_Values"
-GRAND_AVERAGE_SHEET = "Grand_Average"
-DIAGNOSTICS_SHEET = "Diagnostics"
-PARAMETERS_SHEET = "Parameters"
-SOURCE_WORKBOOK_NAME = "Publication_Scalp_Maps_Source_Data.xlsx"
 DEFAULT_BCA_LOW_COLOR = "#2166ac"
 DEFAULT_BCA_LOW_MID_COLOR = "#67a9cf"
 DEFAULT_BCA_MID_COLOR = "#1a9850"
@@ -85,6 +80,8 @@ class PublicationMapRequest:
     export_pdf: bool = True
     export_paired_figures: bool = False
     paired_conditions: tuple[str, ...] = ()
+    export_group_comparison_figure: bool = False
+    group_comparison_ids: tuple[str, ...] = ()
     png_dpi: int = DEFAULT_FIGURE_DPI
     project_root: Path | None = None
     group_id: str | None = None
@@ -165,7 +162,6 @@ class PublicationMapResult:
     grand_average_values: pd.DataFrame
     diagnostics: list[Diagnostic] = field(default_factory=list)
     figure_paths: list[Path] = field(default_factory=list)
-    source_workbook_path: Path | None = None
     selected_harmonics_hz: tuple[float, ...] = ()
     selection_metadata: dict[str, object] = field(default_factory=dict)
     group_id: str | None = None

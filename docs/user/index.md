@@ -54,10 +54,10 @@ data collection.
 ## Tool Pages
 
 The **Workspace Tools** section of the app sidebar shows these default tools:
-Free Harmonic Clustering Analysis, SNR Plots, and Scalp Maps.
+Free Harmonic Clustering Analysis and SNR Plots.
 
-Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence
-Figure, Ratio Calculator, and Individual Detectability are beta tools.
+Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer,
+Sequence Figure, Ratio Calculator, and Individual Detectability are beta tools.
 To show their separate **Beta Tools** sidebar subsection, open
 **Settings > Advanced**, enable **Beta Tools**, then close and reopen FPVS
 Toolbox. Before each beta tool opens for the first time in an app session, the

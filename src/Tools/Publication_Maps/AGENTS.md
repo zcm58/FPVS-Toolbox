@@ -3,6 +3,10 @@ current implementation renders condition-level grand-average BCA, SNR, and
 z-score scalp maps using the significant-harmonic list saved at processing
 completion.
 
+Scalp Maps is an embedded beta tool. Expose it only through the Main App's
+central `BETA_TOOL_SPECS` registry so the shared visibility gate and
+once-per-session beta acknowledgement apply automatically.
+
 Rules:
 
 - Included harmonics must come from the cache-only
@@ -16,6 +20,13 @@ Rules:
 - Resolve exactly one canonical `group_id` before participant aggregation. An
   all-groups GUI action must run each canonical group separately and publish to
   that group's validated output folder; it must never pool groups implicitly.
+- An exactly-two-group comparison is the narrow exception to separate figure
+  publication, not to separate aggregation: build each canonical group result
+  independently, then display one selected condition side by side with shared
+  per-metric color limits. Never pool the groups, calculate a difference map,
+  or describe the comparison figure as a statistical test. Comparison mode is
+  mutually exclusive with paired-condition mode and publishes only the
+  combined PNG/PDF figure pair at the selected base output root.
 - Apply the shared participant, participant-condition, and frequency-domain
   exclusions before aggregation. Preserve dataset-index duplicate preference
   and diagnostics, and reject empty, unassigned, or ambiguous requested
@@ -25,12 +36,11 @@ Rules:
 - Z-score maps read the `Z Score` sheet, use the exact selected
   `"{freq:.4f}_Hz"` columns, and combine selected harmonics as
   `sum(z) / sqrt(K)` before the condition grand average.
-- Keep workbook reading, metric aggregation, source-data export, and rendering
+- Keep workbook reading, metric aggregation, and rendering
   in GUI-free modules. `gui.py` may gather settings and launch workers, but
   workers must not touch widgets.
-- Preserve signed BCA values in exported source data. Rendered BCA values may
-  clip negative values to the low color, and the source workbook must make that
-  visible.
+- Preserve signed BCA values through aggregation. Rendered BCA values may clip
+  negative values to the low color.
 - An unreadable active workbook, missing requested sheet, missing Electrode
   column, or missing exact selected harmonic column is fatal for the requested
   output. Do not publish a silently reduced participant cohort.
@@ -38,21 +48,25 @@ Rules:
   with numerical zero. Render only finite defined sensors, require the
   documented minimum non-collinear coverage, and exclude missing sensors from
   interpolation and color scaling.
-- Source-data workbooks must identify the canonical group and cohort, selected
-  harmonics/profile/fingerprint, applied exclusions and diagnostics, toolbox
-  version, and contributing workbook identities/hashes. Grouped outputs must
+- The active Scalp Maps GUI/worker publishes figure files only. Do not create
+  XLSX, CSV, JSON, or other auxiliary output artifacts. Grouped figures must
   not overwrite one another.
 - Generation is cooperative and transactional. Cancellation must be checked
-  through discovery, reading, aggregation, source export, and rendering; it
-  must produce a distinct cancelled outcome and must not publish a partial
-  artifact set or a normal completion result. Keep the worker/thread and host
-  navigation locked until the worker actually returns.
-- Visible figure titles should be condition names only. Selected harmonics,
-  subject counts, and cache/source provenance belong in exports and diagnostics.
+  through discovery, reading, aggregation, and rendering; it must produce a
+  distinct cancelled outcome and must not publish a partial figure set or a
+  normal completion result. Keep the worker/thread and host navigation locked
+  until the worker actually returns.
+- Visible figure titles should be condition names only. In two-group comparison
+  mode, the selected condition is the overall title and canonical group labels
+  are the two column headers. Do not add selected harmonics, subject counts, or
+  cache/source provenance to visible figure titles.
 - Single-condition and paired-condition figures should fit a standard US letter
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
   and Condition B combo boxes populated from the checked condition list.
+- Two-group comparison figures are available only when the managed project has
+  exactly two canonical groups, **All groups** is selected, and exactly one
+  condition is checked. The two canonical group labels are the figure columns.
 - When BCA and SNR are selected, paired-condition export should render one
   combined figure: BCA on the first row, SNR on the second row, and, when
   selected, Z Score on the third row, with condition titles only above the first
@@ -60,6 +74,9 @@ Rules:
 - Paired-condition export is paired-only and is the GUI default: when it is
   enabled, render only the combined paired `.png` and `.pdf`, not individual
   condition figures.
+- Two-group comparison export is likewise comparison-only: render only the
+  combined comparison `.png` and `.pdf`, not the ordinary per-group artifact
+  sets for that run.
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:

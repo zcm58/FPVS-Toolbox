@@ -41,9 +41,13 @@ Primary paths:
   processing-time significant-harmonic selection from project metadata; it must
   not calculate or silently replace that list. It discovers processed inputs
   through `Main_App.projects.dataset_index`, selects exactly one canonical group
-  before aggregation, and treats an all-groups action as separate group-scoped
-  runs. It then aggregates exact selected metric columns per electrode before
-  condition-level averaging and transactional PNG/PDF/source-data export.
+  before aggregation, and treats an ordinary all-groups action as separate
+  group-scoped runs. Exactly-two-group comparison mode still aggregates those
+  groups independently, then places one selected condition side by side with a
+  shared per-metric scale and no difference statistic. It then aggregates exact
+  selected metric columns per electrode before condition-level averaging and
+  transactional PNG/PDF figure export. It does not write auxiliary source-data
+  workbooks.
   Requested input failures are fatal rather than partial-cohort success, and
   missing montage sensors are omitted rather than converted to zero.
   Its GUI reads base frequency and BCA upper-limit values from Settings and

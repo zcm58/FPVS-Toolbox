@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QMainWindow, QWidget
 
 from Main_App.gui import main_window as main_window_module
@@ -59,8 +60,9 @@ def _managed_multigroup_index(tmp_path) -> ProjectDatasetIndex:
     )
 
 
-def _build_page(qtbot, monkeypatch, tmp_path):
-    dataset_index = _managed_multigroup_index(tmp_path)
+def _build_page(qtbot, monkeypatch, tmp_path, *, dataset_index=None):
+    if dataset_index is None:
+        dataset_index = _managed_multigroup_index(tmp_path)
     monkeypatch.setattr(
         publication_maps_gui,
         "load_project_dataset_index",
@@ -84,6 +86,32 @@ def _build_page(qtbot, monkeypatch, tmp_path):
     return host, page
 
 
+def _without_group_condition(
+    index: ProjectDatasetIndex,
+    *,
+    group_id: str,
+    condition: str,
+) -> ProjectDatasetIndex:
+    return ProjectDatasetIndex(
+        project_root=index.project_root,
+        excel_root=index.excel_root,
+        scan_root=index.scan_root,
+        manifest=index.manifest,
+        groups=index.groups,
+        participants=index.participants,
+        workbooks=tuple(
+            record
+            for record in index.workbooks
+            if not (
+                record.group_id == group_id
+                and record.condition == condition
+            )
+        ),
+        excluded_workbooks=index.excluded_workbooks,
+        diagnostics=index.diagnostics,
+    )
+
+
 @pytest.mark.qt
 def test_all_groups_builds_separate_canonical_requests(
     qtbot,
@@ -99,7 +127,171 @@ def test_all_groups_builds_separate_canonical_requests(
     assert [request.group_label for request in requests] == ["Clinical", "Control"]
     assert [request.group_folder for request in requests] == ["Clinical", "Control"]
     assert len({request.output_root for request in requests}) == 1
+    assert all(request.export_group_comparison_figure is False for request in requests)
+    assert all(request.group_comparison_ids == () for request in requests)
     assert page.status_label.isVisible()
+
+
+@pytest.mark.qt
+def test_single_condition_two_group_comparison_builds_explicit_batch_requests(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    host, page = _build_page(qtbot, monkeypatch, tmp_path)
+
+    assert page.group_combo.currentData() == publication_maps_gui.ALL_GROUPS_VALUE
+    assert page.group_comparison_check.isEnabled() is False
+    assert "statistical test" in page.group_comparison_check.toolTip()
+
+    page._set_all_conditions(False)
+    page.conditions_list.item(0).setCheckState(Qt.Checked)
+
+    assert page.group_comparison_check.isEnabled() is True
+    page.group_comparison_check.setChecked(True)
+
+    assert page.paired_figures_check.isChecked() is False
+    assert page.group_comparison_widget.isVisible() is True
+    assert page.group_combo.currentText() == "All groups (comparison)"
+    assert "comparison-only" in page.group_combo.toolTip()
+    assert page.group_comparison_a_label.text() == "Clinical"
+    assert page.group_comparison_b_label.text() == "Control"
+    assert "Only the descriptive" in page.status_label.text()
+
+    requests = page._collect_requests()
+
+    assert [request.group_id for request in requests] == ["clinical", "control"]
+    assert all(request.conditions == ("Faces",) for request in requests)
+    assert all(request.export_group_comparison_figure for request in requests)
+    assert all(
+        request.group_comparison_ids == ("clinical", "control")
+        for request in requests
+    )
+    assert all(request.export_paired_figures is False for request in requests)
+
+    page._refresh_conditions()
+    assert page.group_comparison_check.isChecked() is True
+    assert page.group_combo.currentText() == "All groups (comparison)"
+    assert "Only the descriptive" in page.status_label.text()
+
+    page.output_root_edit.setText(str(tmp_path / "alternate-output"))
+    assert "Only the descriptive" in page.status_label.text()
+
+    page.group_comparison_check.setChecked(False)
+    assert page.group_combo.currentText() == publication_maps_gui.ALL_GROUPS_LABEL
+    page.group_comparison_check.setChecked(True)
+
+    page._set_busy_state(True)
+    assert page.group_comparison_check.isEnabled() is False
+    assert host.menuBar().isEnabled() is False
+    page._set_busy_state(False)
+    assert page.group_comparison_check.isEnabled() is True
+    assert host.menuBar().isEnabled() is True
+
+    page.group_combo.setCurrentIndex(page.group_combo.findData("clinical"))
+    assert page.group_comparison_check.isChecked() is False
+    assert page.group_comparison_check.isEnabled() is False
+    all_groups_index = page.group_combo.findData(
+        publication_maps_gui.ALL_GROUPS_VALUE
+    )
+    assert page.group_combo.itemText(all_groups_index) == publication_maps_gui.ALL_GROUPS_LABEL
+
+
+@pytest.mark.qt
+def test_group_comparison_requires_condition_records_in_both_groups(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    dataset_index = _without_group_condition(
+        _managed_multigroup_index(tmp_path),
+        group_id="clinical",
+        condition="Objects",
+    )
+    _host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=dataset_index,
+    )
+    page._set_all_conditions(False)
+    items = {
+        str(page.conditions_list.item(index).data(Qt.UserRole)): (
+            page.conditions_list.item(index)
+        )
+        for index in range(page.conditions_list.count())
+    }
+
+    items["Objects"].setCheckState(Qt.Checked)
+
+    assert page.group_comparison_check.isEnabled() is False
+    assert page._group_comparison_available() is False
+    assert "active workbooks in both groups" in page.group_comparison_check.toolTip()
+
+    items["Objects"].setCheckState(Qt.Unchecked)
+    items["Faces"].setCheckState(Qt.Checked)
+
+    assert page.group_comparison_check.isEnabled() is True
+    assert page._group_comparison_available() is True
+
+
+@pytest.mark.qt
+@pytest.mark.parametrize(("width", "height"), [(1040, 920), (1280, 900)])
+def test_scalp_maps_scroll_surface_keeps_bottom_controls_reachable(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+    width: int,
+    height: int,
+) -> None:
+    host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    host.resize(width, height)
+    page._set_all_conditions(False)
+    page.conditions_list.item(0).setCheckState(Qt.Checked)
+    page.group_comparison_check.setChecked(True)
+
+    assert page.content_scroll.widget() is page.scroll_content
+    assert page.content_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+
+    for widget in (page.group_comparison_widget, page.log_box):
+        page.content_scroll.ensureWidgetVisible(widget, 12, 12)
+        qtbot.waitUntil(lambda widget=widget: not widget.visibleRegion().isEmpty())
+
+
+@pytest.mark.qt
+def test_comparison_success_logs_and_counts_only_figure_artifacts(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        publication_maps_gui,
+        "confirm",
+        lambda *_args, **_kwargs: False,
+    )
+    results = tuple(
+        SimpleNamespace(
+            group_label=label,
+            diagnostics=(),
+            figure_paths=(),
+        )
+        for label in ("Clinical", "Control")
+    )
+    figure_paths = (
+        Path("comparison.png"),
+        Path("comparison.pdf"),
+    )
+
+    page._handle_worker_outcome(
+        PublicationMapsWorkerOutcome.success(
+            results,
+            batch_figure_paths=figure_paths,
+        )
+    )
+
+    assert "Comparison figure: comparison.png" in page.log_box.toPlainText()
+    assert "2 comparison figure file(s)" in page.status_label.text()
 
 
 @pytest.mark.qt

@@ -62,13 +62,21 @@ canonical processed-workbook index and exact project Excel root, resolve one
 group before aggregation, and route All groups to separate group folders.
 Active workbook/schema/value failures are fatal rather than silently reducing
 the cohort. Missing sensors are omitted instead of zero-filled, with minimum
-coverage enforced. Source workbooks carry exact cohort, harmonic, QC, toolbox,
-and contributing-file identities. Multi-group publication is transactional and
+coverage enforced. Multi-group figure publication is transactional and
 cancellation is cooperative through worker exit; stale processing uses the
 shared recovery dialog. The focused Scalp Maps gate passed 73 tests, project
 I/O passed 83, and Stats passed 384. Repo precommit reached 1,713 passing tests
 and three skips; its four Windows sandbox-only named-pipe/memmap ACL failures
 all passed on an exact normal-ACL rerun.
+
+Scalp Maps comparison follow-up on 2026-08-16: exactly-two-group projects can
+now render one selected condition with the two canonical groups as side-by-side
+columns. Group means remain independent, color limits are shared per metric,
+and the comparison is explicitly descriptive rather than a difference test.
+Comparison mode publishes only its combined PNG/PDF figure pair at the base
+Scalp Maps output. The embedded page now uses a vertically resizable scroll
+surface so its Conditions/Settings and Output/Run cards cannot overlap at the
+supported 1280 x 900 layout.
 
 Baseline: `v2.1.2`. At the 2026-08-16 audit, `main` was 217 commits and 633
 changed files beyond that tag, while `src/config.py` still reported `2.1.2`.
@@ -77,22 +85,21 @@ That scope warrants a major release rather than a patch release.
 ## Release Thesis
 
 Version 3 is a consolidation release. Its core promise is trustworthy FPVS
-processing plus three default tools:
+processing plus two default tools:
 
 - Free Harmonic Clustering;
-- SNR Plots; and
-- Scalp Maps.
+- SNR Plots.
 
-The following tools remain opt-in beta surfaces: Standard FPVS Screening,
-Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator,
-and Individual Detectability. They must open safely from the packaged app, but
-finishing or promoting them is not a v3.0.0 requirement.
+The following tools remain opt-in beta surfaces: Scalp Maps, Standard FPVS
+Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio
+Calculator, and Individual Detectability. They must open safely from the
+packaged app, but finishing or promoting them is not a v3.0.0 requirement.
 
 "Default" is a support tier, not a universal scientific-validation claim.
 Free Harmonic Clustering has a reviewed powered null-calibration receipt. SNR
-Plots and Scalp Maps are descriptive visualization/export tools whose release
-bar is correct cohort selection, faithful plotted values, complete provenance,
-and reliable output behavior.
+Plots is a descriptive visualization/export tool whose release bar is faithful
+plotted values and reliable output behavior. Scalp Maps retains its completed
+correctness work while remaining explicitly beta.
 
 General study-specific inference remains export-first. The Toolbox owns FPVS
 processing, QC, canonical identities, harmonic provenance, domain-specific
@@ -136,7 +143,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Keep `PROJECT_SCHEMA_VERSION` independent from the app-version bump;
       change it only if the manifest schema actually changes.
 
-### 2. Correct the three default tools
+### 2. Correct the two default tools and stabilize Scalp Maps beta
 
 #### Free Harmonic Clustering
 
@@ -185,9 +192,8 @@ threshold/p-value rules, or relevant numerical dependencies change.
       must create separate group outputs; it must never pool groups implicitly.
 - [x] Apply shared participant-condition exclusions, duplicate preference, and
       dataset diagnostics. Hard-fail empty, unassigned, or ambiguous cohorts.
-- [x] Add group ID/label, participant N, included/excluded identities, harmonic
-      profile/list/fingerprint, QC provenance, toolbox version, and file hashes
-      to source-data output.
+- [x] Keep Scalp Maps output intentionally figures-only: write matching PNG/PDF
+      files without source-data workbooks or other auxiliary artifacts.
 - [x] Treat an unreadable active workbook, missing requested sheet, or missing
       exact harmonic column as a fatal requested-output error unless a future
       explicit partial-cohort mode is designed and visibly labelled.
@@ -196,8 +202,8 @@ threshold/p-value rules, or relevant numerical dependencies change.
       coverage; missing data must not affect interpolation or color scaling as
       if it were measured zero.
 - [x] Make cancellation explicit and cooperative through reading, aggregation,
-      source export, and rendering. A cancelled run must not emit a normal
-      completion result.
+      rendering, and atomic figure publication. A cancelled run must not emit
+      a normal completion result.
 - [x] Add focused and CI-only GUI coverage for single/multi-group selection,
       one-bad-workbook failure, sensor coverage, busy/navigation state,
       cancellation, and completion/error status.
@@ -243,10 +249,10 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Upgrade in place from v2.1.2 and confirm projects, settings, logs, and
       generated outputs are preserved.
 - [ ] Create/open a project, process a small representative dataset, inspect QC,
-      and generate FHC, SNR Plots, and Scalp Maps outputs.
+      and generate FHC and SNR Plots outputs.
 - [ ] Enable Beta Tools and open each beta surface far enough to catch missing
-      frozen imports/plugins; confirm the shared beta notice appears once per
-      tool per session.
+      frozen imports/plugins; run a representative Scalp Maps export and confirm
+      the shared beta notice appears once per tool per session.
 - [ ] Verify About, title bar, update dialog, installer metadata, and artifact
       name all report the intended version.
 - [ ] Exercise installer `/RELAUNCH=1`, then uninstall and verify user data is
@@ -271,7 +277,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Split maintenance hotspots only behind characterization tests. Start with
       GUI orchestration and export sheet builders; do not refactor FHC numerical
       kernels merely to reduce line counts before release.
-- [ ] Tighten broad exception handling only along the three default-tool paths,
+- [ ] Tighten broad exception handling only along the two default-tool paths,
       preserving intentional best-effort boundaries and adding path/operation
       context to logs.
 
@@ -282,7 +288,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Consider renaming `Quick Tools` to `Core Tools` or `Supported Tools`.
       Avoid the scientifically broad label `Validated Tools` unless the scope
       of validation is stated for every entry.
-- [ ] Give all three default tools the same header, About/help affordance,
+- [ ] Give both default tools the same header, About/help affordance,
       status/progress placement, Run/Cancel behavior, completion summary, and
       output-location action.
 - [ ] Replace generic stable-tool labels such as `Browse...`, `Open...`,
@@ -325,9 +331,9 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - Free Harmonic Clustering as a default tool with paired/independent cluster
   permutation workflows and reviewed powered null-calibration evidence.
 - Embedded PySide6 tool workflows with centralized default/beta navigation.
-- A new opt-in beta suite: Standard FPVS Screening, Sensitivity Analysis,
-  LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual
-  Detectability.
+- A new opt-in beta suite: Scalp Maps, Standard FPVS Screening, Sensitivity
+  Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and
+  Individual Detectability.
 
 ### Minor feature inventory over v2.1.2
 

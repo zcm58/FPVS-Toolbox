@@ -12,7 +12,7 @@ FPVS Toolbox warns that the tool is in beta and its features may change.
 | --- | --- | --- |
 | [Free Harmonic Clustering Analysis](free-harmonic-clustering.md) | Default | Compare the relative electrode x harmonic response distribution for one paired-condition or independent-group contrast. |
 | [SNR Plots](snr-plot-generator.md) | Default | Create ROI-level SNR spectra for conditions or project groups. |
-| [Scalp Maps](publication-maps.md) | Default | Export sensor-space BCA, SNR, and z-score topographies. |
+| [Scalp Maps](publication-maps.md) | Beta | Export sensor-space BCA, SNR, and z-score topographies. |
 | [Standard FPVS Screening](statistics.md) | Beta | Run the locked LMM-first single- or two-group Summed BCA screen with plain-language and detailed reports. |
 | [Sensitivity Analysis](sensitivity-analysis.md) | Beta | Estimate the minimum detectable effect from manually entered design assumptions. |
 | [LORETA Visualizer](loreta-visualizer.md) | Beta | Inspect beta template-space estimates of FPVS response patterns. |

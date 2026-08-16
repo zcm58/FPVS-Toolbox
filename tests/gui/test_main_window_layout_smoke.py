@@ -48,14 +48,13 @@ from Tools.Stats import StatsWindow
 DEFAULT_TOOL_ROLES = [
     "btn_free_harmonic_clustering",
     "btn_graphs",
-    "btn_publication_maps",
 ]
 DEFAULT_TOOL_LABELS = [
     "Free Harmonic Clustering",
     "SNR Plots",
-    "Scalp Maps",
 ]
 BETA_TOOL_ROLES = [
+    "btn_publication_maps",
     "btn_data",
     "btn_sensitivity_analysis",
     "btn_loreta_visualizer",
@@ -64,6 +63,7 @@ BETA_TOOL_ROLES = [
     "btn_individual_detectability",
 ]
 BETA_TOOL_LABELS = [
+    "Scalp Maps",
     "Data Screening",
     "Sensitivity Analysis",
     "LORETA Visualizer",
@@ -72,6 +72,7 @@ BETA_TOOL_LABELS = [
     "Individual Detectability",
 ]
 BETA_TOOL_ACCESSIBLE_NAMES = [
+    "Scalp Maps",
     "Standard FPVS Screening",
     "Sensitivity Analysis",
     "LORETA Visualizer",
@@ -949,11 +950,12 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
+    warning_keys: list[str] = []
     monkeypatch.setattr(
         win,
         "_acknowledge_beta_tool_warning",
-        lambda key: pytest.fail(f"Stable tool requested beta warning: {key}"),
+        warning_keys.append,
     )
     project_root = tmp_path / "project"
     excel_dir = project_root / "1 - Excel Data Files"
@@ -983,6 +985,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     qtbot.mouseClick(_sidebar_button(win, "btn_publication_maps"), Qt.LeftButton)
     qtbot.wait(20)
 
+    assert warning_keys == ["btn_publication_maps"]
     assert isinstance(win.workspace_stack.currentWidget(), PublicationMapsWindow)
     assert win.workspace_stack.currentWidget().objectName() == "embedded_publication_maps_page"
     assert win._publication_maps_page.parent() is win.workspace_stack
@@ -1132,7 +1135,6 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
             SimpleNamespace(
                 group_label=None,
                 diagnostics=(),
-                source_workbook_path=None,
                 figure_paths=(Path("map.png"), Path("map.pdf")),
             ),
         )
@@ -1312,6 +1314,7 @@ def test_snr_page_routes_post_processing_request_to_main_window(
 @pytest.mark.parametrize(
     ("role", "opener_name"),
     [
+        ("btn_publication_maps", "open_publication_maps"),
         ("btn_data", "open_stats_analyzer"),
         ("btn_sensitivity_analysis", "open_sensitivity_analysis"),
         ("btn_loreta_visualizer", "open_loreta_visualizer"),

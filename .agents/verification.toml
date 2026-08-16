@@ -15,7 +15,7 @@ manual_smoke = []
 audits = ["gui"]
 tests = []
 include = ["src/Main_App/gui/**", "src/Tools/**/gui*.py", "tests/gui/**"]
-manual_smoke = ["Launch the Main App with Beta Tools disabled and verify only Free Harmonic Clustering, SNR Plots, and Scalp Maps appear under Quick Tools. Enable Beta Tools, restart, and verify Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the three stable tools show no beta warning."]
+manual_smoke = ["Launch the Main App with Beta Tools disabled and verify only Free Harmonic Clustering and SNR Plots appear under Quick Tools. Enable Beta Tools, restart, and verify Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning."]
 
 [scopes.updates]
 audits = ["gui", "paths"]
@@ -122,7 +122,7 @@ tests = [
   "tests/publication_maps/test_xlsx_metric_reader.py",
 ]
 include = ["src/Tools/Publication_Maps/**", "tests/publication_maps/**"]
-manual_smoke = ["Open a managed multi-group project, launch Scalp Maps, verify the canonical Excel input is read-only, select All groups, and confirm each group publishes to its own folder. Start another run and cancel it; verify navigation remains locked until the worker exits and no partial workbook or figure pair is published. Confirm a stale harmonic selection offers the shared post-processing recovery action, an unreadable active workbook fails without a partial cohort, and missing sensors are reported rather than rendered as zero."]
+manual_smoke = ["Enable Beta Tools, restart, acknowledge the shared beta notice, then open Scalp Maps in a managed exactly-two-group project at both 1040 x 920 and 1280 x 900. Verify the Conditions/Settings and Output/Run cards never overlap and can scroll vertically when needed. Verify the canonical Excel input is read-only. With All groups and one condition selected, enable the two-group comparison and confirm only one side-by-side comparison PNG/PDF pair is published at the base output, with no XLSX or other auxiliary artifact; confirm group labels are the columns, each metric shares one scale, and no pooling/difference statistic is claimed. Disable comparison and confirm ordinary All groups still publishes each group to its own folder. Start another run and cancel it; verify navigation remains locked until the worker exits and no partial figure pair is published. Confirm a stale harmonic selection offers the shared post-processing recovery action, an unreadable active workbook fails without a partial cohort, and missing sensors are reported rather than rendered as zero."]
 
 [scopes.ratio-calculator]
 audits = ["gui", "paths"]

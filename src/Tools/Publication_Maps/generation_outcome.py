@@ -30,6 +30,7 @@ class PublicationMapsWorkerOutcome:
 
     status: PublicationMapsOutcomeStatus
     results: tuple[PublicationMapResult, ...] = ()
+    batch_figure_paths: tuple[Path, ...] = ()
     message: str = ""
     project_root: str | None = None
 
@@ -37,8 +38,14 @@ class PublicationMapsWorkerOutcome:
     def success(
         cls,
         results: tuple[PublicationMapResult, ...],
+        *,
+        batch_figure_paths: tuple[Path, ...] = (),
     ) -> PublicationMapsWorkerOutcome:
-        return cls(status=PublicationMapsOutcomeStatus.SUCCESS, results=results)
+        return cls(
+            status=PublicationMapsOutcomeStatus.SUCCESS,
+            results=results,
+            batch_figure_paths=batch_figure_paths,
+        )
 
     @classmethod
     def cancelled(cls) -> PublicationMapsWorkerOutcome:

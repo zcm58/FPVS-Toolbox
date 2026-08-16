@@ -13,7 +13,10 @@ from Tools.Publication_Maps.generation_outcome import (
     PublicationMapGenerationCancelled,
     PublicationMapsWorkerOutcome,
 )
-from Tools.Publication_Maps.metrics import build_publication_map_result
+from Tools.Publication_Maps.metrics import (
+    build_publication_map_result,
+    verify_publication_workbooks_unchanged,
+)
 from Tools.Publication_Maps.models import (
     PublicationMapInputError,
     PublicationMapRequest,
@@ -24,8 +27,10 @@ from Tools.Publication_Maps.output_contract import (
     request_output_root,
 )
 from Tools.Publication_Maps.rendering import (
-    export_source_workbook,
+    render_group_comparison_figures,
     render_publication_figures,
+    validate_group_comparison_project_groups,
+    validate_group_comparison_requests,
 )
 from Tools.Stats.analysis.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
@@ -93,6 +98,7 @@ class PublicationMapsWorker(QObject):
             raise ValueError(
                 "Scalp Maps group requests require unique output directories."
             )
+        self._group_comparison_enabled = validate_group_comparison_requests(normalized)
         self.requests = normalized
         self.request = normalized[0]
         self.outcome: PublicationMapsWorkerOutcome | None = None
@@ -102,8 +108,12 @@ class PublicationMapsWorker(QObject):
     def run(self) -> None:
         outcome: PublicationMapsWorkerOutcome
         results: list[PublicationMapResult] = []
+        batch_figure_paths = ()
         try:
             self._cancellation_checkpoint()
+            if self._group_comparison_enabled:
+                validate_group_comparison_project_groups(self.requests)
+                self._cancellation_checkpoint()
             with PublicationArtifactTransaction(self.request) as transaction:
                 for index, request in enumerate(self.requests):
                     self._cancellation_checkpoint()
@@ -116,6 +126,14 @@ class PublicationMapsWorker(QObject):
                         cancel_check=self._cancellation_checkpoint,
                     )
                     self._cancellation_checkpoint()
+
+                    if self._group_comparison_enabled:
+                        results.append(result)
+                        self._emit_phase_progress(index, 70)
+                        self.message.emit(
+                            f"[{group_label}] Comparison data staged in memory."
+                        )
+                        continue
 
                     self._emit_phase_progress(index, 55)
                     self.message.emit(f"[{group_label}] Rendering scalp maps...")
@@ -132,26 +150,46 @@ class PublicationMapsWorker(QObject):
                             f"{group_label}."
                         )
 
-                    self._emit_phase_progress(index, 80)
-                    self.message.emit(
-                        f"[{group_label}] Writing source-data workbook..."
-                    )
-                    export_source_workbook(
-                        result,
-                        request,
-                        cancel_check=self._cancellation_checkpoint,
-                        transaction=transaction,
-                    )
-                    self._cancellation_checkpoint()
                     results.append(result)
                     self._emit_phase_progress(index, 95)
-                    self.message.emit(f"[{group_label}] Output staged.")
+                    self.message.emit(f"[{group_label}] Figure output staged.")
 
-                self.message.emit("Publishing the complete Scalp Maps output set...")
+                if self._group_comparison_enabled:
+                    self._cancellation_checkpoint()
+                    self.progress.emit(90)
+                    self.message.emit(
+                        "Rendering descriptive side-by-side group figure..."
+                    )
+                    batch_figure_paths = tuple(
+                        render_group_comparison_figures(
+                            tuple(results),
+                            self.requests,
+                            cancel_check=self._cancellation_checkpoint,
+                            transaction=transaction,
+                            _project_groups_validated=True,
+                        )
+                    )
+                    if not batch_figure_paths:
+                        raise PublicationMapInputError(
+                            "No two-group comparison figures were produced."
+                        )
+                    self._cancellation_checkpoint()
+                    self.progress.emit(96)
+                    self.message.emit("Comparison figure output staged.")
+
+                for result, request in zip(results, self.requests, strict=True):
+                    verify_publication_workbooks_unchanged(
+                        result.included_workbooks,
+                        cancel_check=self._cancellation_checkpoint,
+                    )
+                self.message.emit("Publishing the complete Scalp Maps figure set...")
                 transaction.commit(cancel_check=self._cancellation_checkpoint)
 
             self.progress.emit(100)
-            outcome = PublicationMapsWorkerOutcome.success(tuple(results))
+            outcome = PublicationMapsWorkerOutcome.success(
+                tuple(results),
+                batch_figure_paths=batch_figure_paths,
+            )
         except PublicationMapGenerationCancelled:
             logger.info(
                 "Scalp Maps generation cancelled before atomic publication.",

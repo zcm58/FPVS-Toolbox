@@ -19,11 +19,13 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStyle,
     QVBoxLayout,
@@ -71,6 +73,14 @@ SCALP_MAPS_TOP_ROW_MIN_HEIGHT = 340
 SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT = 240
 ALL_GROUPS_VALUE = "__all_canonical_groups__"
 ALL_GROUPS_LABEL = "All groups (separate outputs)"
+ALL_GROUPS_COMPARISON_LABEL = "All groups (comparison)"
+ALL_GROUPS_TOOLTIP = (
+    "Choose one canonical project group, or generate a separate output set "
+    "for every group."
+)
+ALL_GROUPS_COMPARISON_TOOLTIP = (
+    "Both canonical groups are selected for one descriptive comparison-only output."
+)
 
 
 class PublicationMapsWindow(QWidget):
@@ -113,7 +123,21 @@ class PublicationMapsWindow(QWidget):
         self._conditions: tuple[str, ...] = ()
         self._condition_counts: dict[str, int] = {}
 
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.content_scroll = QScrollArea(self)
+        self.content_scroll.setObjectName("publication_maps_scroll_area")
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setFrameStyle(0)
+        self.content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self.scroll_content = QWidget(self.content_scroll)
+        self.scroll_content.setObjectName("publication_maps_scroll_content")
+        self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        layout = QVBoxLayout(self.scroll_content)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
@@ -136,6 +160,9 @@ class PublicationMapsWindow(QWidget):
         body.addWidget(self._build_settings_group(), 0, 1)
         body.addWidget(self._build_output_group(), 1, 0)
         body.addWidget(self._build_run_group(), 1, 1)
+
+        self.content_scroll.setWidget(self.scroll_content)
+        outer_layout.addWidget(self.content_scroll)
 
         self._apply_button_icons()
         self._set_default_paths()
@@ -195,10 +222,7 @@ class PublicationMapsWindow(QWidget):
 
         self.group_combo = QComboBox(group)
         self.group_combo.setObjectName("publication_maps_group_combo")
-        self.group_combo.setToolTip(
-            "Choose one canonical project group, or generate a separate output "
-            "set for every group."
-        )
+        self.group_combo.setToolTip(ALL_GROUPS_TOOLTIP)
         self.group_combo.currentIndexChanged.connect(
             lambda _index: self._on_group_selection_changed()
         )
@@ -428,9 +452,7 @@ class PublicationMapsWindow(QWidget):
         self.paired_figures_check.setToolTip(
             "When at least two conditions are selected, export only the paired side-by-side scalp-map figure."
         )
-        self.paired_figures_check.toggled.connect(
-            lambda _checked: self._update_paired_controls_state()
-        )
+        self.paired_figures_check.toggled.connect(self._on_paired_figures_toggled)
 
         self.paired_conditions_widget = QWidget(group)
         paired_layout = QVBoxLayout(self.paired_conditions_widget)
@@ -468,14 +490,86 @@ class PublicationMapsWindow(QWidget):
         paired_selectors.addWidget(paired_b_container, 1)
         paired_layout.addLayout(paired_selectors)
 
+        self.group_comparison_check = QCheckBox(
+            "Export two-group comparison figure only",
+            group,
+        )
+        self.group_comparison_check.setObjectName(
+            "publication_maps_group_comparison_check"
+        )
+        self.group_comparison_check.setToolTip(
+            "Available when All groups is selected, the project has exactly two "
+            "canonical groups, and exactly one condition with active workbooks in "
+            "both groups is checked. Exports a descriptive side-by-side figure "
+            "only; this is not a statistical test or difference map, and values "
+            "are never pooled."
+        )
+        self.group_comparison_check.toggled.connect(
+            self._on_group_comparison_toggled
+        )
+
+        self.group_comparison_hint = QLabel(
+            "For projects with exactly two canonical groups, choose All groups "
+            "and one condition represented in both groups. This mode exports only "
+            "the descriptive comparison figure.",
+            group,
+        )
+        self.group_comparison_hint.setObjectName(
+            "publication_maps_group_comparison_hint"
+        )
+        self.group_comparison_hint.setProperty("caption", True)
+        self.group_comparison_hint.setWordWrap(True)
+
+        self.group_comparison_widget = QWidget(group)
+        self.group_comparison_widget.setObjectName(
+            "publication_maps_group_comparison_groups"
+        )
+        comparison_groups_layout = QHBoxLayout(self.group_comparison_widget)
+        comparison_groups_layout.setContentsMargins(0, 0, 0, 0)
+        comparison_groups_layout.setSpacing(8)
+
+        comparison_a_container = QWidget(self.group_comparison_widget)
+        comparison_a_layout = QVBoxLayout(comparison_a_container)
+        comparison_a_layout.setContentsMargins(0, 0, 0, 0)
+        comparison_a_layout.setSpacing(4)
+        comparison_a_layout.addWidget(
+            SubsectionHeaderLabel("Group A", comparison_a_container)
+        )
+        self.group_comparison_a_label = QLabel("—", comparison_a_container)
+        self.group_comparison_a_label.setObjectName(
+            "publication_maps_group_comparison_a_label"
+        )
+        comparison_a_layout.addWidget(self.group_comparison_a_label)
+
+        comparison_b_container = QWidget(self.group_comparison_widget)
+        comparison_b_layout = QVBoxLayout(comparison_b_container)
+        comparison_b_layout.setContentsMargins(0, 0, 0, 0)
+        comparison_b_layout.setSpacing(4)
+        comparison_b_layout.addWidget(
+            SubsectionHeaderLabel("Group B", comparison_b_container)
+        )
+        self.group_comparison_b_label = QLabel("—", comparison_b_container)
+        self.group_comparison_b_label.setObjectName(
+            "publication_maps_group_comparison_b_label"
+        )
+        comparison_b_layout.addWidget(self.group_comparison_b_label)
+
+        comparison_groups_layout.addWidget(comparison_a_container, 1)
+        comparison_groups_layout.addWidget(comparison_b_container, 1)
+
         formats = ActionRow(group, alignment=Qt.AlignLeft, spacing=12)
         formats.row_layout.addWidget(self.export_png_check)
         formats.row_layout.addWidget(self.export_pdf_check)
         group.content_layout.addWidget(formats)
         group.content_layout.addWidget(self.paired_figures_check)
         group.content_layout.addWidget(self.paired_conditions_widget)
+        group.content_layout.addWidget(self.group_comparison_check)
+        group.content_layout.addWidget(self.group_comparison_hint)
+        group.content_layout.addWidget(self.group_comparison_widget)
         self.paired_figures_check.setChecked(True)
         self.paired_conditions_widget.setVisible(False)
+        self.group_comparison_check.setEnabled(False)
+        self.group_comparison_widget.setVisible(False)
         return group
 
     def _build_run_group(self) -> SectionCard:
@@ -587,6 +681,8 @@ class PublicationMapsWindow(QWidget):
             self.group_combo.addItem("Refresh to load groups", None)
         finally:
             self.group_combo.blockSignals(False)
+            self._sync_group_comparison_labels()
+            self._update_all_groups_display_label()
         self.conditions_list.clear()
         self.status_label.set_text(
             "Project data path changed. Refresh project data before running."
@@ -668,6 +764,20 @@ class PublicationMapsWindow(QWidget):
             self.status_label.set_text(output_root_error)
             self.status_label.set_variant("error")
             return
+        if (
+            hasattr(self, "group_comparison_check")
+            and self.group_comparison_check.isChecked()
+            and self._group_comparison_valid()
+        ):
+            condition = self._selected_conditions()[0]
+            self.status_label.set_text(
+                f"Two-group comparison ready for {condition}: "
+                f"{self.group_comparison_a_label.text()} vs "
+                f"{self.group_comparison_b_label.text()}. Only the descriptive "
+                "comparison figure will be generated."
+            )
+            self.status_label.set_variant("info")
+            return
         workbook_count = len(self._scoped_records())
         group_count = len(self._request_groups())
         self.status_label.set_text(
@@ -706,6 +816,8 @@ class PublicationMapsWindow(QWidget):
             )
         finally:
             self.group_combo.blockSignals(False)
+            self._sync_group_comparison_labels()
+            self._update_all_groups_display_label()
 
     def _on_group_selection_changed(self) -> None:
         if self._dataset_index is None:
@@ -815,6 +927,8 @@ class PublicationMapsWindow(QWidget):
                 self.paired_figures_check.setChecked(False)
             self.paired_figures_check.setEnabled(len(selected_conditions) >= 2 and not self._busy)
             self._update_paired_controls_state()
+        if hasattr(self, "group_comparison_check"):
+            self._update_group_comparison_controls_state()
 
     def _update_run_state(self) -> None:
         self._refresh_analysis_setting_labels()
@@ -826,6 +940,7 @@ class PublicationMapsWindow(QWidget):
         ready = ready and bool(self._selected_conditions())
         ready = ready and bool(self._selected_metrics())
         ready = ready and self._paired_conditions_valid()
+        ready = ready and self._group_comparison_valid()
         ready = ready and self._output_root_validation_error() is None
         self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
 
@@ -896,6 +1011,143 @@ class PublicationMapsWindow(QWidget):
         self.paired_conditions_widget.setVisible(checked)
         self.paired_condition_a_combo.setEnabled(enabled)
         self.paired_condition_b_combo.setEnabled(enabled)
+
+    def _on_paired_figures_toggled(self, checked: bool) -> None:
+        if checked and self.group_comparison_check.isChecked():
+            self.group_comparison_check.setChecked(False)
+        self._update_paired_controls_state()
+        self._update_group_comparison_controls_state()
+        if hasattr(self, "run_btn"):
+            self._update_run_state()
+
+    def _sync_group_comparison_labels(self) -> None:
+        if not hasattr(self, "group_comparison_a_label"):
+            return
+        groups = (
+            self._dataset_index.ordered_groups
+            if self._dataset_index is not None
+            else ()
+        )
+        if len(groups) != 2:
+            for label in (
+                self.group_comparison_a_label,
+                self.group_comparison_b_label,
+            ):
+                label.setText("—")
+                label.setToolTip("")
+            return
+
+        label_counts: dict[str, int] = {}
+        for group in groups:
+            key = group.label.casefold()
+            label_counts[key] = label_counts.get(key, 0) + 1
+        for label_widget, group in zip(
+            (
+                self.group_comparison_a_label,
+                self.group_comparison_b_label,
+            ),
+            groups,
+        ):
+            display = group.label
+            if label_counts[group.label.casefold()] > 1:
+                display = f"{group.label} ({group.group_id})"
+            label_widget.setText(display)
+            label_widget.setToolTip(f"Canonical group ID: {group.group_id}")
+
+    def _update_all_groups_display_label(self) -> None:
+        if not hasattr(self, "group_combo"):
+            return
+        all_groups_index = self.group_combo.findData(ALL_GROUPS_VALUE)
+        if all_groups_index < 0:
+            self.group_combo.setToolTip(ALL_GROUPS_TOOLTIP)
+            return
+        comparison_enabled = bool(
+            hasattr(self, "group_comparison_check")
+            and self.group_comparison_check.isChecked()
+        )
+        self.group_combo.setItemText(
+            all_groups_index,
+            (
+                ALL_GROUPS_COMPARISON_LABEL
+                if comparison_enabled
+                else ALL_GROUPS_LABEL
+            ),
+        )
+        self.group_combo.setToolTip(
+            ALL_GROUPS_COMPARISON_TOOLTIP
+            if comparison_enabled
+            else ALL_GROUPS_TOOLTIP
+        )
+
+    def _group_comparison_available(self) -> bool:
+        if self._dataset_index is None:
+            return False
+        return bool(
+            len(self._dataset_index.ordered_groups) == 2
+            and self.group_combo.currentData() == ALL_GROUPS_VALUE
+            and len(self._selected_conditions()) == 1
+            and self._selected_condition_covers_comparison_groups()
+            and not self.paired_figures_check.isChecked()
+        )
+
+    def _selected_condition_covers_comparison_groups(self) -> bool:
+        dataset_index = self._dataset_index
+        selected_conditions = self._selected_conditions()
+        if dataset_index is None or len(selected_conditions) != 1:
+            return False
+        groups = dataset_index.ordered_groups
+        if len(groups) != 2:
+            return False
+        condition = selected_conditions[0]
+        return all(
+            bool(
+                dataset_index.select(
+                    conditions=(condition,),
+                    group_ids=(group.group_id,),
+                )
+            )
+            for group in groups
+        )
+
+    def _update_group_comparison_controls_state(self) -> None:
+        if not hasattr(self, "group_comparison_check"):
+            return
+        self._sync_group_comparison_labels()
+        available = self._group_comparison_available()
+        if self.group_comparison_check.isChecked() and not available:
+            self.group_comparison_check.setChecked(False)
+        checked = self.group_comparison_check.isChecked()
+        self.group_comparison_check.setEnabled(available and not self._busy)
+        self.group_comparison_widget.setVisible(checked)
+
+    def _on_group_comparison_toggled(self, checked: bool) -> None:
+        if checked and not self._group_comparison_available():
+            self.group_comparison_check.setChecked(False)
+            return
+        if checked and self.paired_figures_check.isChecked():
+            self.paired_figures_check.setChecked(False)
+        self._update_all_groups_display_label()
+        self.group_comparison_widget.setVisible(checked)
+        if self._dataset_index is not None:
+            self._set_ready_status()
+        self._update_paired_controls_state()
+        self._update_run_state()
+
+    def _group_comparison_valid(self) -> bool:
+        if not hasattr(self, "group_comparison_check"):
+            return True
+        if not self.group_comparison_check.isChecked():
+            return True
+        groups = self._request_groups()
+        group_ids = tuple(
+            group.group_id for group in groups if group is not None
+        )
+        return bool(
+            self._group_comparison_available()
+            and len(groups) == 2
+            and len(group_ids) == 2
+            and len(set(group_id.casefold() for group_id in group_ids)) == 2
+        )
 
     def _selected_paired_conditions(self) -> tuple[str, ...]:
         if not hasattr(self, "paired_condition_a_combo"):
@@ -1019,6 +1271,7 @@ class PublicationMapsWindow(QWidget):
             self.paired_figures_check,
             self.paired_condition_a_combo,
             self.paired_condition_b_combo,
+            self.group_comparison_check,
         )
 
     def _embedded_host(self) -> QWidget | None:
@@ -1063,6 +1316,7 @@ class PublicationMapsWindow(QWidget):
         self.cancel_btn.setEnabled(busy)
         self._toggle_metric_range_controls()
         self._update_paired_controls_state()
+        self._update_group_comparison_controls_state()
 
         if not busy:
             self._update_run_state()
@@ -1103,6 +1357,20 @@ class PublicationMapsWindow(QWidget):
             and len(selected_conditions) >= 2
             and self._paired_conditions_valid()
         )
+        comparison_enabled = (
+            self.group_comparison_check.isChecked()
+            and self._group_comparison_valid()
+        )
+        groups = self._request_groups()
+        comparison_group_ids = (
+            tuple(
+                group.group_id
+                for group in groups
+                if group is not None
+            )
+            if comparison_enabled
+            else ()
+        )
         return tuple(
             PublicationMapRequest(
                 input_root=Path(self.input_root_edit.text().strip()),
@@ -1116,12 +1384,14 @@ class PublicationMapsWindow(QWidget):
                 paired_conditions=(
                     self._selected_paired_conditions() if paired_enabled else ()
                 ),
+                export_group_comparison_figure=comparison_enabled,
+                group_comparison_ids=comparison_group_ids,
                 project_root=self._project_root,
                 group_id=None if group is None else group.group_id,
                 group_label=None if group is None else group.label,
                 group_folder=None if group is None else group.folder_name,
             )
-            for group in self._request_groups()
+            for group in groups
         )
 
     def _start_run(self) -> None:
@@ -1155,6 +1425,16 @@ class PublicationMapsWindow(QWidget):
         if self.paired_figures_check.isChecked() and not self._paired_conditions_valid():
             self._show_validation_error(
                 "Select two different checked conditions for the paired scalp-map figure.",
+            )
+            return
+        if (
+            self.group_comparison_check.isChecked()
+            and not self._group_comparison_valid()
+        ):
+            self._show_validation_error(
+                "A two-group comparison requires All groups, exactly two canonical "
+                "groups, and exactly one checked condition with active workbooks "
+                "in both groups."
             )
             return
         requests = self._collect_requests()
@@ -1319,12 +1599,6 @@ class PublicationMapsWindow(QWidget):
                     f"{diagnostic.message}{detail}".strip(),
                     update_status=False,
                 )
-            source_path = getattr(result, "source_workbook_path", None)
-            if source_path:
-                self._append_log(
-                    f"{group_prefix}Source workbook: {source_path}",
-                    update_status=False,
-                )
             figure_paths = list(getattr(result, "figure_paths", []))
             self._last_generated_figure_count += len(figure_paths)
             for path in figure_paths:
@@ -1332,6 +1606,16 @@ class PublicationMapsWindow(QWidget):
                     f"{group_prefix}Figure: {path}",
                     update_status=False,
                 )
+
+        batch_figure_paths = tuple(
+            getattr(outcome, "batch_figure_paths", ()) or ()
+        )
+        self._last_generated_figure_count += len(batch_figure_paths)
+        for path in batch_figure_paths:
+            self._append_log(
+                f"Comparison figure: {path}",
+                update_status=False,
+            )
 
         self.progress.setValue(100)
         if self._last_generated_figure_count <= 0:
@@ -1342,10 +1626,16 @@ class PublicationMapsWindow(QWidget):
             show_error(self, "Scalp Maps error", message)
             return
         group_count = len(outcome.results)
-        self.status_label.set_text(
-            f"Complete: {self._last_generated_figure_count} figure file(s) "
-            f"for {group_count} group output(s)."
-        )
+        if batch_figure_paths:
+            self.status_label.set_text(
+                f"Complete: {self._last_generated_figure_count} comparison figure "
+                f"file(s) for {group_count} canonical groups."
+            )
+        else:
+            self.status_label.set_text(
+                f"Complete: {self._last_generated_figure_count} figure file(s) "
+                f"for {group_count} group output(s)."
+            )
         self.status_label.set_variant("success")
         self._prompt_open_output_folder()
 
