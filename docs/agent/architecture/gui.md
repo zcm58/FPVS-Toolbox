@@ -163,10 +163,10 @@ method committed and its dependent outputs marked stale or failed. Project
 switching must not retain another project's method, activity-page state, or
 worker state.
 
-The sidebar's default tool list is Standard FPVS Screening, Sensitivity Analysis,
-SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence Figure, in that order.
-Free Harmonic Clustering Analysis, Ratio Calculator, and Individual Detectability
-are beta tools: they remain
+The sidebar's default tool list is Free Harmonic Clustering Analysis,
+Sensitivity Analysis, SNR Plots, Scalp Maps, LORETA Visualizer, and Sequence
+Figure, in that order. Standard FPVS Screening, Ratio Calculator, and Individual
+Detectability are beta tools: they remain
 embedded workspace pages, but the sidebar appends them beneath a visible
 **Beta Tools** subsection only when the global Settings option
 `tools.enable_beta_tools` is enabled and the app has been restarted.

@@ -3,16 +3,16 @@
 ## Scope
 
 This package owns the clean-room Free Harmonic Clustering Analysis backend and
-its thin embedded beta GUI. Numerical preparation, inference, and export modules
+its thin embedded GUI. Numerical preparation, inference, and export modules
 remain GUI-neutral. The GUI gathers active-project context, prepares and reviews
 one contrast, then delegates long work to signal-driven workers.
 
 ## Non-Negotiables
 
 - The public tool title is `Free Harmonic Clustering Analysis`.
-- Expose the GUI only through the Main App's Beta Tools route. Keep the page
-  project-bound and discard its current-session state when the active project
-  changes.
+- Expose the GUI through the Main App's default Quick Tools route without
+  requiring Beta Tools. Keep the page project-bound and discard its current-
+  session state when the active project changes.
 - Do not copy, translate, import, or redistribute the authors' restrictively
   licensed MATLAB code or `.mat` layout.
 - Read scientific inputs only from original `FullFFT Amplitude (uV)` condition

@@ -2,7 +2,8 @@
 
 The Stats package implements a locked, first-round FPVS screening workflow.
 Active code imports from `Tools.Stats.<area>`; `Tools.Stats.StatsWindow` remains
-the public GUI entry point.
+the public GUI entry point. The Main App currently exposes the GUI through the
+optional **Beta Tools** section.
 
 Standard screening is intentionally narrower than a general statistical
 workbench. It uses finite available Summed BCA observations without imputation,

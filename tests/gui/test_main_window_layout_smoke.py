@@ -45,7 +45,7 @@ from Tools.Stats import StatsWindow
 
 
 DEFAULT_TOOL_ROLES = [
-    "btn_data",
+    "btn_free_harmonic_clustering",
     "btn_sensitivity_analysis",
     "btn_graphs",
     "btn_publication_maps",
@@ -53,7 +53,7 @@ DEFAULT_TOOL_ROLES = [
     "btn_sequence_figure",
 ]
 DEFAULT_TOOL_LABELS = [
-    "Data Screening",
+    "Free Harmonic Clustering",
     "Sensitivity Analysis",
     "SNR Plots",
     "Scalp Maps",
@@ -61,12 +61,12 @@ DEFAULT_TOOL_LABELS = [
     "Sequence Figure",
 ]
 BETA_TOOL_ROLES = [
-    "btn_free_harmonic_clustering",
+    "btn_data",
     "btn_ratio",
     "btn_individual_detectability",
 ]
 BETA_TOOL_LABELS = [
-    "Free Harmonic Clustering",
+    "Data Screening",
     "Ratio Calculator",
     "Individual Detectability",
 ]
@@ -134,6 +134,13 @@ def test_sidebar_default_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert [button.text_lbl.text() for button in buttons] == DEFAULT_TOOL_LABELS
     assert win.sidebar_beta_tools_divider is None
     assert win.sidebar_beta_tools_label is None
+    free_harmonic_button = _sidebar_button(win, "btn_free_harmonic_clustering")
+    assert free_harmonic_button.toolTip() == "Free Harmonic Clustering Analysis"
+    assert free_harmonic_button.accessibleName() == "Free Harmonic Clustering Analysis"
+    assert not any(
+        widget.property("role") == "btn_data"
+        for widget in win.sidebar.findChildren(QWidget)
+    )
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -154,6 +161,9 @@ def test_sidebar_beta_tool_order(tmp_path: Path, qtbot, monkeypatch) -> None:
     label_index = tools_layout.indexOf(win.sidebar_beta_tools_label)
     assert divider_index < label_index
     assert label_index > len(DEFAULT_TOOL_ROLES) - 1
+    stats_button = _sidebar_button(win, "btn_data")
+    assert stats_button.toolTip() == "Standard FPVS Screening (Beta)"
+    assert stats_button.accessibleName() == "Standard FPVS Screening"
     _assert_utilities_anchored_at_bottom(win)
 
 
@@ -730,7 +740,7 @@ def test_sidebar_stats_embeds_in_main_workspace(
     qtbot,
     monkeypatch,
 ) -> None:
-    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win = _build_window(tmp_path, qtbot, monkeypatch, enable_beta_tools=True)
     project_root = tmp_path / "project"
     project_root.mkdir()
     win.currentProject = SimpleNamespace(
@@ -767,6 +777,40 @@ def test_sidebar_stats_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_free_harmonic_clustering_is_available_without_beta_tools(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+    page = QWidget(win.workspace_stack)
+    page.setObjectName("embedded_free_harmonic_clustering_page")
+    win.workspace_stack.addWidget(page)
+    monkeypatch.setattr(
+        win,
+        "_frequency_domain_outputs_ready_for_tool",
+        lambda title: title == "Free Harmonic Clustering Analysis",
+    )
+    monkeypatch.setattr(win, "_ensure_free_harmonic_clustering_page", lambda: page)
+
+    qtbot.mouseClick(
+        _sidebar_button(win, "btn_free_harmonic_clustering"),
+        Qt.LeftButton,
+    )
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is page
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_free_harmonic_clustering"]
 
 
 def test_sidebar_sensitivity_analysis_embeds_without_project_data(

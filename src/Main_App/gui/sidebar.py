@@ -38,7 +38,12 @@ CENTERED_TEXT_TRAILING_SPACER_PX = (
 DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
 
 DEFAULT_TOOL_SPECS = (
-    ("btn_data", "Data Screening", "stats", "open_stats_analyzer"),
+    (
+        "btn_free_harmonic_clustering",
+        "Free Harmonic Clustering",
+        "harmonic",
+        "open_free_harmonic_clustering",
+    ),
     ("btn_sensitivity_analysis", "Sensitivity Analysis", "sensitivity", "open_sensitivity_analysis"),
     ("btn_graphs", "SNR Plots", "chart", "open_plot_generator"),
     ("btn_publication_maps", "Scalp Maps", "scalp", "open_publication_maps"),
@@ -49,12 +54,7 @@ DEFAULT_TOOL_SPECS = (
 BETA_TOOL_SPECS = (
     # Navigation text is shortened for the fixed-width sidebar. The page,
     # accessible name, tooltip, documentation, and exports use the full title.
-    (
-        "btn_free_harmonic_clustering",
-        "Free Harmonic Clustering",
-        "harmonic",
-        "open_free_harmonic_clustering",
-    ),
+    ("btn_data", "Data Screening", "stats", "open_stats_analyzer"),
     ("btn_ratio", "Ratio Calculator", "ratio", "open_ratio_calculator"),
     ("btn_individual_detectability", "Individual Detectability", "detectability", "open_individual_detectability"),
 )
@@ -216,13 +216,16 @@ def _make_divider(parent: QWidget, object_name: str = "sidebar_divider") -> QFra
 
 def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
     for role, text, icon_kind, slot_name in DEFAULT_TOOL_SPECS:
-        make_button(
+        button = make_button(
             layout,
             role,
             text,
             sidebar_icon(icon_kind, ICON_PX),
             getattr(host, slot_name),
         )
+        if role == "btn_free_harmonic_clustering":
+            button.setToolTip("Free Harmonic Clustering Analysis")
+            button.setAccessibleName("Free Harmonic Clustering Analysis")
 
     host.sidebar_beta_tools_divider = None
     host.sidebar_beta_tools_label = None
@@ -251,9 +254,9 @@ def _add_tool_buttons(layout: QVBoxLayout, host) -> None:
             sidebar_icon(icon_kind, ICON_PX),
             getattr(host, slot_name),
         )
-        if role == "btn_free_harmonic_clustering":
-            button.setToolTip("Free Harmonic Clustering Analysis (Beta)")
-            button.setAccessibleName("Free Harmonic Clustering Analysis")
+        if role == "btn_data":
+            button.setToolTip("Standard FPVS Screening (Beta)")
+            button.setAccessibleName("Standard FPVS Screening")
 
 
 def init_sidebar(self) -> None:

@@ -4,7 +4,7 @@
 
 This is a sibling analysis tool under `src/Tools`, separate from Standard FPVS
 Screening. Its numerical backend remains headless and widget-free. A thin
-project-bound PySide6 beta surface under `gui/` gathers active-project context,
+project-bound PySide6 surface under `gui/` gathers active-project context,
 shows preparation and current-session results, and delegates preparation and
 permutation work to workers. Neither layer changes preprocessing, workbook
 schemas, harmonic-selection caches, project metadata, ledgers, QC state, or
@@ -173,7 +173,8 @@ family, and whole-participant exchangeability.
 
 ## Embedded GUI Contract
 
-- The page is visible only when Beta Tools are enabled.
+- The page is part of the default Quick Tools list and does not depend on the
+  Beta Tools setting.
 - Setup resolves one contrast and displays the A-minus-B direction. Successful
   preparation unlocks Review and Run, which freezes and displays concise cohort,
   exclusion, harmonic, source-coverage, and participant x sensor x harmonic

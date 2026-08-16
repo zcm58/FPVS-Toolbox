@@ -167,7 +167,7 @@ tests = [
   "tests/stats/workers/test_multigroup_workers.py",
 ]
 include = ["src/Tools/Stats/**", "tests/stats/**"]
-manual_smoke = ["Open Standard FPVS Screening from the Main App and exercise the changed GUI/pipeline controls in a visible session when applicable."]
+manual_smoke = ["With Beta Tools enabled, open Standard FPVS Screening from the Main App and exercise the changed GUI/pipeline controls in a visible session when applicable."]
 
 [scopes.free-harmonic-clustering]
 audits = ["gui", "paths"]
@@ -183,7 +183,7 @@ include = [
   "tests/gui/test_main_window_layout_smoke.py",
   "tests/gui/test_project_context_reset.py",
 ]
-manual_smoke = ["With Beta Tools enabled, open Free Harmonic Clustering Analysis in a visible 1280x900 Main App session. Verify Setup, Review and Run, Results, Significant, and All clusters have no page-level scrollbar; Prepare unlocks Review and Run; Run unlocks Results; context-appropriate actions remain visible; and long review values expose full tooltips. Open the generated results folder and verify project metadata/source workbooks remain unchanged. The v1 release gate additionally requires reproducing the canonical ACR Neutral Happy n=18 versus n=16 H1 C1/Cz/CPz result with raw tail p approximately .0043."]
+manual_smoke = ["Open Free Harmonic Clustering Analysis from the default Quick Tools list in a visible 1280x900 Main App session. Verify Setup, Review and Run, Results, Significant, and All clusters have no page-level scrollbar; Prepare unlocks Review and Run; Run unlocks Results; context-appropriate actions remain visible; and long review values expose full tooltips. Open the generated results folder and verify project metadata/source workbooks remain unchanged. The v1 release gate additionally requires reproducing the canonical ACR Neutral Happy n=18 versus n=16 H1 C1/Cz/CPz result with raw tail p approximately .0043."]
 
 [scopes.loreta]
 audits = ["source-localization", "source-localization-refs", "gui", "paths"]

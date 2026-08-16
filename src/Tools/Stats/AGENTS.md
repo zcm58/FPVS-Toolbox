@@ -7,6 +7,10 @@ workbook provides a detailed audit trail; study-specific covariates, random
 slopes, longitudinal structure, more than two groups, and other confirmatory
 questions require a planned custom analysis.
 
+The Main App exposes this surface through the optional **Beta Tools** section.
+That product classification must not change the locked calculations, exports,
+or the stable `Tools.Stats.StatsWindow` import surface.
+
 ## Locked Standard Screening Contract
 
 - Summed BCA is the dependent variable.

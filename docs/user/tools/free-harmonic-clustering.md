@@ -1,6 +1,6 @@
 # Free Harmonic Clustering Analysis
 
-Free Harmonic Clustering Analysis is a beta, project-bound analysis for
+Free Harmonic Clustering Analysis is a project-bound analysis for
 comparing how an FPVS oddball response is distributed across both electrodes
 and harmonics. Unlike a summed-harmonic analysis, it retains each participant's
 electrode x harmonic array and uses connected cluster mass for permutation
@@ -15,9 +15,9 @@ matrix.
 
 ## Before You Start
 
-Enable **Beta Tools** in Settings, then choose the abbreviated **Free Harmonic
-Clustering** entry in the Workspace Tools sidebar to open **Free Harmonic
-Clustering Analysis**. The active project must contain:
+Choose the abbreviated **Free Harmonic Clustering** entry in the default Quick
+Tools list to open **Free Harmonic Clustering Analysis**. The active project
+must contain:
 
 - valid base and oddball frequency metadata;
 - current neutral FullFFT provenance in `project.json` that matches the

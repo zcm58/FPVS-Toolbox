@@ -159,7 +159,7 @@ class FreeHarmonicClusteringPage(QWidget):
         heading_layout = QVBoxLayout(heading_text)
         heading_layout.setContentsMargins(0, 0, 0, 0)
         heading_layout.setSpacing(3)
-        eyebrow = QLabel("BETA ANALYSIS TOOL", heading_text)
+        eyebrow = QLabel("CLUSTER ANALYSIS TOOL", heading_text)
         eyebrow.setProperty("eyebrow", True)
         heading_layout.addWidget(eyebrow)
         title = QLabel("Free Harmonic Clustering Analysis", heading_text)

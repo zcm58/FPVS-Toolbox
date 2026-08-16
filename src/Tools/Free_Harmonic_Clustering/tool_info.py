@@ -45,7 +45,7 @@ results folder containing a polished Excel workbook and reproducibility files.
 METHOD_HTML = """
 <h2>Hermann-Compatible Profile</h2>
 <p>
-This beta is an independent clean-room implementation of the two-dimensional
+This is an independent clean-room implementation of the two-dimensional
 sensor &times; harmonic procedure described by Hermann et al. It mirrors the
 published method and public implementation where the available information is
 sufficient, but it is not a copy and is not claimed to reproduce unpublished

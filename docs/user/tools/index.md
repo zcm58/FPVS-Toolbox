@@ -9,12 +9,12 @@ FPVS Toolbox.
 
 | Tool | Sidebar status | Purpose |
 | --- | --- | --- |
-| [Standard FPVS Screening](statistics.md) | Default | Run the locked LMM-first single- or two-group Summed BCA screen with plain-language and detailed reports. |
+| [Free Harmonic Clustering Analysis](free-harmonic-clustering.md) | Default | Compare the relative electrode x harmonic response distribution for one paired-condition or independent-group contrast. |
 | [Sensitivity Analysis](sensitivity-analysis.md) | Default | Estimate the minimum detectable effect from manually entered design assumptions. |
 | [SNR Plots](snr-plot-generator.md) | Default | Create ROI-level SNR spectra for conditions or project groups. |
 | [Scalp Maps](publication-maps.md) | Default | Export sensor-space BCA, SNR, and z-score topographies. |
 | [LORETA Visualizer](loreta-visualizer.md) | Default | Inspect beta template-space estimates of FPVS response patterns. |
 | [Sequence Figure](sequence-figure.md) | Default | Create a five-image FPVS stimulus-sequence diagram. |
-| [Free Harmonic Clustering Analysis](free-harmonic-clustering.md) | Beta | Compare the relative electrode x harmonic response distribution for one paired-condition or independent-group contrast. |
+| [Standard FPVS Screening](statistics.md) | Beta | Run the locked LMM-first single- or two-group Summed BCA screen with plain-language and detailed reports. |
 | [Ratio Calculator](ratio-calculator.md) | Beta | Explore paired condition A/B ratios for BCA, SNR, and z-score summaries. |
 | [Individual Detectability](individual-level-detectability.md) | Beta | Create participant-level summed-harmonic z-score and SNR panels. |

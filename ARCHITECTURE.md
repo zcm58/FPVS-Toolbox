@@ -58,7 +58,7 @@ Primary areas:
 - `src/Tools/Sensitivity_Analysis/`: embedded, input-only idealized design-sensitivity calculator. Its widget-free backends estimate minimum detectable standardized effects for paired/one-sample t-tests, balanced one-way repeated-measures ANOVA, and the supported FPVS random-intercept linear mixed model. Mixed-model sensitivity uses cancellable Monte Carlo simulation in a Qt worker, mirrors the current `condition * ROI` fixed structure, and reports Monte Carlo uncertainty plus fit diagnostics under the simulated assumptions. It is not observed power or model-fit validation and does not read project data, persist settings, write files, or join the Stats pipeline.
 - `src/Tools/Free_Harmonic_Clustering/`: clean-room Free Harmonic Clustering
   Analysis tool. Its numerical preparation, inference, and export modules stay
-  GUI-neutral; a thin project-bound PySide6 beta page owns setup, preparation
+  GUI-neutral; a thin project-bound PySide6 workspace page owns setup, preparation
   review, current-session results, and worker orchestration. It reads original managed
   `FullFFT Amplitude (uV)` condition workbooks through the canonical project
   dataset index, recomputes the paper-specific SNR/z preparation, preserves the

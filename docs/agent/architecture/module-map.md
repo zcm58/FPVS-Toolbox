@@ -41,7 +41,7 @@ Current `Legacy_App` runtime couplings:
 ## Tools
 
 - `src/Tools/Free_Harmonic_Clustering/`: clean-room Free Harmonic Clustering
-  Analysis backend plus a thin embedded beta GUI. It uses canonical
+  Analysis backend plus a thin embedded default GUI. It uses canonical
   managed-project identities,
   selected-column FullFFT ingestion, paper-specific SNR/z and participant L2
   normalization, complete same-sensor harmonic adjacency, and paired or
@@ -50,6 +50,7 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines,
   reporting, I/O, and shared helpers grouped by function. Removed
   `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.
+  The Main App exposes this UI through its optional Beta Tools section.
 - `src/Tools/Plot_Generator/`: embedded SNR plot generation. The Main App
   imports the compatibility facade in `plot_generator.py`; `gui.py` owns the
   page implementation, `generation_workflow.py` owns QThread launch/cancel and

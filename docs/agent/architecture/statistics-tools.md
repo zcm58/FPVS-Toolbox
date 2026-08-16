@@ -6,7 +6,8 @@ Primary paths:
 
 - `src/Tools/Free_Harmonic_Clustering/`: independent analysis package for the
   Hermann-style sensor x harmonic cluster-permutation method. Its numerical
-  backend remains GUI-neutral and its thin PySide6 page is an embedded beta tool.
+  backend remains GUI-neutral and its thin PySide6 page is a default embedded
+  workspace tool.
   It reads original FullFFT condition workbooks, not Stats-ready Summed BCA,
   validates processing-owned neutral FullFFT provenance rather than a Stats
   harmonic cache, and does not alter or consume the standard Stats profile,
@@ -15,7 +16,8 @@ Primary paths:
   run on a complete BioSemi64 tensor.
 - `src/Tools/Stats/`: active single- and multi-group statistics GUI, controller,
   workers, analysis helpers, QC helpers, reporting, I/O, and shared helpers
-  grouped by function. The root contains only package/docs files.
+  grouped by function. Its GUI is exposed through the optional Beta Tools
+  section. The root contains only package/docs files.
 - `src/Tools/Stats/data/shared_rois.py` and `src/Tools/Stats/data/roi_resolver.py`: shared ROI helpers.
 - Removed CustomTkinter Stats UI source is not part of the active tree; use Git history for reference if needed.
 - `src/Tools/Plot_Generator/`: plot generation GUI, QThread launch workflow,

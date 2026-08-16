@@ -152,6 +152,11 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     page = _page(qtbot, tmp_path)
 
     assert page.project_root == tmp_path.resolve()
+    header_text = {
+        label.text() for label in page.findChildren(QtWidgets.QLabel)
+    }
+    assert "CLUSTER ANALYSIS TOOL" in header_text
+    assert "BETA ANALYSIS TOOL" not in header_text
     assert [
         page.tabs.tabText(index) for index in range(page.tabs.count())
     ] == ["1. Setup", "2. Review and Run", "3. Results"]

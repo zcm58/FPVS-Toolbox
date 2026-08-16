@@ -6,6 +6,11 @@ round of statistical checks. It is designed to answer a small set of common
 FPVS questions consistently. It is not the final project-specific statistical
 model for every study.
 
+Standard FPVS Screening is currently available under **Beta Tools**. Enable
+Beta Tools in **Settings > Advanced**, then close and reopen FPVS Toolbox. The
+beta placement reflects the screen's intentionally bounded publication role;
+it does not change the locked calculations or workbook outputs described here.
+
 Use a planned custom analysis when the scientific question requires covariates,
 random slopes, longitudinal or nested structure, more than two groups,
 equivalence testing, a different response scale, or another specialized

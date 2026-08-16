@@ -214,7 +214,7 @@ class FreeHarmonicBackendAdapter:
         except ImportError as exc:
             raise BackendCapabilityError(
                 "This build does not include the project-analysis inspection "
-                "API required by the Free Harmonic Clustering beta."
+                "API required by Free Harmonic Clustering Analysis."
             ) from exc
 
         raw = inspect_project_analysis_options(

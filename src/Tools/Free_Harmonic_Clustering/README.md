@@ -1,7 +1,7 @@
 # Free Harmonic Clustering Analysis
 
 This package contains FPVS Toolbox's clean-room Free Harmonic Clustering
-Analysis backend and embedded beta GUI. It reads original managed-project
+Analysis backend and embedded GUI. It reads original managed-project
 `FullFFT Amplitude (uV)` workbooks and preserves participant x sensor x
 harmonic structure through cluster-level permutation inference.
 
@@ -25,10 +25,10 @@ environment.
 - Each run analyzes one ordered A-minus-B contrast. Separate condition runs do
   not receive an automatic correction across conditions.
 
-## Embedded beta workflow
+## Embedded workflow
 
-Enable Beta Tools in FPVS Toolbox Settings, then open **Free Harmonic
-Clustering Analysis** from the Workspace Tools sidebar. The page dynamically
+Open **Free Harmonic Clustering Analysis** from the default Quick Tools list in
+the Workspace Tools sidebar. The page dynamically
 reads project conditions, groups, exclusions, base and oddball frequencies,
 and FullFFT availability. It does not offer local metadata or participant
 overrides.

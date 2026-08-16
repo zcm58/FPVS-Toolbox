@@ -268,7 +268,7 @@ not make the Toolbox an exact reproduction of any one published pipeline.
 
 ## Free Harmonic Clustering Analysis
 
-Use this checklist for the embedded Free Harmonic Clustering Analysis beta. It
+Use this checklist for embedded Free Harmonic Clustering Analysis. It
 is a clean-room implementation of the sensor x harmonic method described by
 [Hermann et al.](https://doi.org/10.1111/psyp.70361) and informed by their
 [public implementation](https://github.com/oliver-hermann1/FPVS_Multiharmonic),

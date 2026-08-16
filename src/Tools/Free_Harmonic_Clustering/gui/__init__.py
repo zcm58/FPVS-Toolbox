@@ -1,4 +1,4 @@
-"""Lazy public surface for the embedded Free Harmonic Clustering beta."""
+"""Lazy public surface for embedded Free Harmonic Clustering Analysis."""
 
 from __future__ import annotations
 
