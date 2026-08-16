@@ -87,6 +87,9 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import BusySpinner as ImportedBusySpinner
     from Main_App.gui.components import CardHeader as ImportedCardHeader
     from Main_App.gui.components import PathPickerRow as ImportedPathPickerRow
+    from Main_App.gui.components import (
+        PostProcessingRequiredDialog as ImportedPostProcessingRequiredDialog,
+    )
     from Main_App.gui.components import SectionCard as ImportedSectionCard
     from Main_App.gui.components import StatusBanner as ImportedStatusBanner
     from Main_App.gui.components import SubsectionHeaderLabel as ImportedSubsectionHeaderLabel
@@ -108,6 +111,9 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import matplotlib_font_kwargs as imported_matplotlib_font_kwargs
     from Main_App.gui.components import show_error as imported_show_error
     from Main_App.gui.components import show_info as imported_show_info
+    from Main_App.gui.components import (
+        show_post_processing_required as imported_show_post_processing_required,
+    )
     from Main_App.gui.components import show_tool_info as imported_show_tool_info
     from Main_App.gui.components import show_warning as imported_show_warning
 
@@ -118,6 +124,7 @@ def test_component_consumer_import_style_remains_available() -> None:
         "BusySpinner": ImportedBusySpinner,
         "CardHeader": ImportedCardHeader,
         "PathPickerRow": ImportedPathPickerRow,
+        "PostProcessingRequiredDialog": ImportedPostProcessingRequiredDialog,
         "SectionCard": ImportedSectionCard,
         "StatusBanner": ImportedStatusBanner,
         "SubsectionHeaderLabel": ImportedSubsectionHeaderLabel,
@@ -139,6 +146,7 @@ def test_component_consumer_import_style_remains_available() -> None:
         "matplotlib_font_kwargs": imported_matplotlib_font_kwargs,
         "show_error": imported_show_error,
         "show_info": imported_show_info,
+        "show_post_processing_required": imported_show_post_processing_required,
         "show_tool_info": imported_show_tool_info,
         "show_warning": imported_show_warning,
     }
