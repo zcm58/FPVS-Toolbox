@@ -762,6 +762,10 @@ class PublicationMapsWindow(QWidget):
                 self.conditions_list.addItem(item)
         finally:
             self.conditions_list.blockSignals(False)
+        if not had_conditions and len(self._selected_conditions()) >= 2:
+            # Construction briefly has no indexed conditions and disables the
+            # paired default. Restore it when the first canonical cohort loads.
+            self.paired_figures_check.setChecked(True)
         self._sync_paired_condition_selectors()
         self._update_condition_summary()
 
