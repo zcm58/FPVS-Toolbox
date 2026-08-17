@@ -117,16 +117,7 @@ def init_ui(self) -> None:
     title.setMinimumHeight(84)
     title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    subtitle = QLabel(
-        "Create a new FPVS project or open an existing one.",
-        center_content,
-    )
-    subtitle.setObjectName("landing_subtitle")
-    subtitle.setAlignment(Qt.AlignCenter)
-    subtitle.setWordWrap(True)
-
     center_layout.addWidget(title)
-    center_layout.addWidget(subtitle)
 
     self.btn_create_project = make_action_button(
         "New Project",

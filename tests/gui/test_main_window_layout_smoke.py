@@ -200,7 +200,8 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     labels = {label.text() for label in win.landing_page.findChildren(QLabel)}
     assert "FPVS Toolbox" not in labels
     assert "Welcome to FPVS Toolbox!" in labels
-    assert "Create a new FPVS project or open an existing one." in labels
+    assert "Create a new FPVS project or open an existing one." not in labels
+    assert win.findChild(QLabel, "landing_subtitle") is None
     title = next(
         label
         for label in win.landing_page.findChildren(QLabel)
