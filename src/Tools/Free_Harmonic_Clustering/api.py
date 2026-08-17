@@ -143,7 +143,7 @@ def inspect_project_analysis_options(
     compatibility_message = (
         "Neutral processed-project FullFFT provenance matched and the "
         "representative FullFFT header was inspected successfully. Exact grid "
-        "compatibility for the selected cohort is validated during Prepare Analysis."
+        "compatibility for the selected cohort is validated during Run Analysis."
     )
     diagnostics = tuple(
         f"{diagnostic.code}: {diagnostic.message}"

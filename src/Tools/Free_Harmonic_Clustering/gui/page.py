@@ -114,6 +114,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._worker: object | None = None
         self._completion_callback: Callable[[object], None] | None = None
         self._active_stage: str | None = None
+        self._continue_to_permutations = False
         self._pending_context: tuple[Path, ProjectFrequencySnapshot | None, str | None] | None = None
         self._pending_post_processing_reason: str | None = None
         self._updating_controls = False
@@ -185,7 +186,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.results_tab = QWidget(self.tabs)
         self.results_tab.setObjectName("free_harmonic_results_tab")
         self.tabs.addTab(self.setup_tab, "1. Setup")
-        self.tabs.addTab(self.review_tab, "2. Review and Run")
+        self.tabs.addTab(self.review_tab, "2. Review")
         self.tabs.addTab(self.results_tab, "3. Results")
         self.tabs.setTabEnabled(self.tabs.indexOf(self.review_tab), False)
         self.tabs.setTabEnabled(self.tabs.indexOf(self.results_tab), False)
@@ -393,18 +394,12 @@ class FreeHarmonicClusteringPage(QWidget):
         self.progress_bar.setTextVisible(True)
         self.progress_bar.hide()
         footer_layout.addWidget(self.progress_bar)
-        self.prepare_button = make_action_button(
-            "Prepare Analysis",
+        self.run_analysis_button = make_action_button(
+            "Run Analysis",
             variant="primary",
             parent=footer,
         )
-        self.prepare_button.setObjectName("free_harmonic_prepare_button")
-        self.run_button = make_action_button(
-            "Run Permutations",
-            variant="primary",
-            parent=footer,
-        )
-        self.run_button.setObjectName("free_harmonic_run_button")
+        self.run_analysis_button.setObjectName("free_harmonic_run_analysis_button")
         self.cancel_button = make_action_button(
             "Cancel",
             variant="tertiary",
@@ -423,8 +418,7 @@ class FreeHarmonicClusteringPage(QWidget):
             (
                 self.setup_open_results_button,
                 self.cancel_button,
-                self.prepare_button,
-                self.run_button,
+                self.run_analysis_button,
             ),
             parent=footer,
         )
@@ -585,8 +579,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self.fixed_highest_combo,
         ):
             combo.currentIndexChanged.connect(self._on_setup_changed)
-        self.prepare_button.clicked.connect(self._prepare_analysis)
-        self.run_button.clicked.connect(self._run_permutations)
+        self.run_analysis_button.clicked.connect(self._run_analysis)
         self.cancel_button.clicked.connect(self.cancel_active_work)
         self.setup_open_results_button.clicked.connect(self._open_results_folder)
         self.open_results_button.clicked.connect(self._open_results_folder)
@@ -661,6 +654,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._options = None
         self._inspection_failed = False
         self._pending_post_processing_reason = None
+        self._continue_to_permutations = False
         self._clear_prepared_and_results()
         self._clear_choice_controls()
         self._update_results_folder_button()
@@ -701,15 +695,15 @@ class FreeHarmonicClusteringPage(QWidget):
         elif value.diagnostics:
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
-                "Project inputs loaded with dataset diagnostics. Select Prepare "
-                "Analysis, then review Excluded/incomplete in 2. Review and Run "
-                "before starting permutations."
+                "Project inputs loaded with dataset diagnostics. Select Run "
+                "Analysis; the frozen Excluded/incomplete review will open before "
+                "permutations continue automatically."
             )
         else:
             self.workflow_status.set_variant("info")
             self.workflow_status.set_text(
-                "Project inputs loaded. Select Prepare Analysis to verify the "
-                "cohort and open 2. Review and Run."
+                "Project inputs loaded. Select Run Analysis once to prepare the "
+                "cohort, open Review, and continue through permutations."
             )
         self._update_buttons()
 
@@ -812,7 +806,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self._clear_prepared_and_results()
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
-                "Setup changed. Prepare the analysis again before running permutations."
+                "Setup changed. Run the analysis again to use the new choices."
             )
         self._update_direction_label()
         self._update_buttons()
@@ -940,7 +934,7 @@ class FreeHarmonicClusteringPage(QWidget):
         return None
 
     @Slot()
-    def _prepare_analysis(self) -> None:
+    def _run_analysis(self) -> None:
         error = self._setup_error()
         if error:
             self._show_error(error)
@@ -949,6 +943,7 @@ class FreeHarmonicClusteringPage(QWidget):
         assert self._frequency_snapshot is not None
         setup = self._current_setup()
         self._clear_prepared_and_results()
+        self._continue_to_permutations = True
         worker = PreparationWorker(
             self._backend,
             self._project_root,
@@ -970,15 +965,15 @@ class FreeHarmonicClusteringPage(QWidget):
         self.tabs.setCurrentWidget(self.review_tab)
         self.workflow_status.set_variant("success")
         self.workflow_status.set_text(
-            "Preparation complete. Review the frozen cohort and harmonics, then "
-            "run permutations. Workbooks will not be read again."
+            "Preparation complete. The frozen cohort and harmonics are shown here; "
+            "permutations will start automatically."
         )
         self._update_buttons()
 
     @Slot()
     def _run_permutations(self) -> None:
         if self._prepared is None:
-            self._show_error("Prepare the analysis before running permutations.")
+            self._show_error("Run the analysis to prepare data before permutations.")
             return
         worker = PermutationWorker(self._backend, self._prepared)
         self._start_operation(
@@ -989,6 +984,7 @@ class FreeHarmonicClusteringPage(QWidget):
         )
 
     def _on_run_completed(self, value: object) -> None:
+        self._continue_to_permutations = False
         if not isinstance(value, RunOutcome):
             self._show_error("Permutation analysis returned an invalid result.")
             return
@@ -1067,6 +1063,7 @@ class FreeHarmonicClusteringPage(QWidget):
 
     @Slot(str)
     def _on_operation_failed(self, message: str) -> None:
+        self._continue_to_permutations = False
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
@@ -1076,6 +1073,7 @@ class FreeHarmonicClusteringPage(QWidget):
     def _on_post_processing_required(self, reason: str) -> None:
         if self._retired:
             return
+        self._continue_to_permutations = False
         self._inspection_failed = True
         self._options = None
         self._clear_prepared_and_results()
@@ -1092,6 +1090,7 @@ class FreeHarmonicClusteringPage(QWidget):
 
     @Slot()
     def _on_operation_cancelled(self) -> None:
+        self._continue_to_permutations = False
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
@@ -1117,21 +1116,38 @@ class FreeHarmonicClusteringPage(QWidget):
         self._worker = None
         self._completion_callback = None
         self._active_stage = None
-        self.progress_bar.hide()
         if self._retired:
+            self._continue_to_permutations = False
+            self.progress_bar.hide()
             return
         if self._pending_context is not None:
+            self._continue_to_permutations = False
+            self.progress_bar.hide()
             context = self._pending_context
             self._pending_context = None
             self._apply_new_context(*context)
             return
-        self._update_buttons()
         if post_processing_reason:
+            self._continue_to_permutations = False
+            self.progress_bar.hide()
+            self._update_buttons()
             self.post_processing_required.emit(
                 "Free Harmonic Clustering Analysis",
                 post_processing_reason,
                 str(self._project_root),
             )
+            return
+        if (
+            finished_stage == "preparation"
+            and self._continue_to_permutations
+            and self._prepared is not None
+        ):
+            self._continue_to_permutations = False
+            self._run_permutations()
+            return
+        self._continue_to_permutations = False
+        self.progress_bar.hide()
+        self._update_buttons()
 
     @Slot()
     def cancel_active_work(self) -> None:
@@ -1139,6 +1155,8 @@ class FreeHarmonicClusteringPage(QWidget):
 
         worker = self._worker
         if worker is not None and hasattr(worker, "cancel"):
+            if self._active_stage == "preparation":
+                self._continue_to_permutations = False
             worker.cancel()
             if not self._retired:
                 self.workflow_status.set_variant("warning")
@@ -1151,6 +1169,7 @@ class FreeHarmonicClusteringPage(QWidget):
         if self._retired:
             return
         self._retired = True
+        self._continue_to_permutations = False
         self._pending_context = None
         self._pending_post_processing_reason = None
         self.cancel_active_work()
@@ -1548,16 +1567,16 @@ class FreeHarmonicClusteringPage(QWidget):
     def _update_action_visibility(self, _index: int = -1) -> None:
         current = self.tabs.currentWidget()
         busy = self._thread is not None
-        self.prepare_button.setVisible(current is self.setup_tab and not busy)
-        self.run_button.setVisible(current is self.review_tab and not busy)
+        self.run_analysis_button.setVisible(
+            current in (self.setup_tab, self.review_tab) and not busy
+        )
         self.setup_open_results_button.setVisible(current is not self.results_tab)
         self.workflow_actions.setVisible(current is not self.results_tab or busy)
 
     def _update_buttons(self) -> None:
         busy = self._thread is not None
         error = self._setup_error()
-        self.prepare_button.setEnabled(not busy and error is None)
-        self.run_button.setEnabled(not busy and self._prepared is not None)
+        self.run_analysis_button.setEnabled(not busy and error is None)
         self.cancel_button.setVisible(busy)
         self.cancel_button.setEnabled(busy)
         self.design_combo.setEnabled(not busy and self._options is not None)

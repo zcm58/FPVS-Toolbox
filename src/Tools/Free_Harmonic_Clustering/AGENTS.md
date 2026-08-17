@@ -127,10 +127,11 @@ the page implementation.
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a
   post-processing worker itself.
-- Use the numbered Setup, Review and Run, and Results tabs as a gated workflow.
-  Review and Run unlocks only after preparation freezes and displays the cohort,
-  exclusions, harmonic selection, direction, and prepared array shape; Results
-  unlocks only after permutations complete.
+- Use the numbered Setup, Review, and Results tabs as a gated workflow. One
+  **Run Analysis** action automatically chains preparation, the frozen Review,
+  permutations, and Results. Review unlocks after preparation freezes and
+  displays the cohort, exclusions, harmonic selection, direction, and prepared
+  array shape; Results unlocks only after permutations complete.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result
   tables may scroll internally when their data exceeds the available viewport.
 - Results shows the current session's latest run only, with separate

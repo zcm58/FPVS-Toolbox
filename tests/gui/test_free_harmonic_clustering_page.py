@@ -166,7 +166,7 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert "BETA ANALYSIS TOOL" not in header_text
     assert [
         page.tabs.tabText(index) for index in range(page.tabs.count())
-    ] == ["1. Setup", "2. Review and Run", "3. Results"]
+    ] == ["1. Setup", "2. Review", "3. Results"]
     assert page.tabs.currentWidget() is page.setup_tab
     assert not page.tabs.isTabEnabled(page.tabs.indexOf(page.review_tab))
     assert not page.tabs.isTabEnabled(page.tabs.indexOf(page.results_tab))
@@ -192,8 +192,7 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
         page.workflow_status,
         page.progress_bar,
         page.workflow_actions,
-        page.prepare_button,
-        page.run_button,
+        page.run_analysis_button,
         page.cancel_button,
         page.setup_open_results_button,
     ):
@@ -203,8 +202,8 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert page.harmonic_mode_combo.currentText() == "Hermann automatic selection"
     assert page.paired_condition_a_combo.count() == 3
     assert page.paired_group_filter_combo.itemData(0) is None
-    assert "Prepare Analysis" in page.workflow_status.text()
-    assert "2. Review and Run" in page.workflow_status.text()
+    assert "Run Analysis" in page.workflow_status.text()
+    assert "open Review" in page.workflow_status.text()
     assert page.setup_open_results_button.isEnabled()
     assert not page.open_results_button.isEnabled()
     for combo in (
@@ -256,7 +255,7 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     )
     assert "positive clusters indicate" in page.direction_label.text()
     assert page._setup_error() is None
-    assert page.prepare_button.isEnabled()
+    assert page.run_analysis_button.isEnabled()
 
     page._active_stage = "inspection"
     page._on_operation_cancelled()
@@ -350,9 +349,9 @@ def test_diagnostics_status_points_to_exclusion_review(
         diagnostics=("Two project-QC exclusions are active.",),
     )
 
-    assert "Prepare Analysis" in page.workflow_status.text()
+    assert "Run Analysis" in page.workflow_status.text()
     assert "Excluded/incomplete" in page.workflow_status.text()
-    assert "2. Review and Run" in page.workflow_status.text()
+    assert "continue automatically" in page.workflow_status.text()
 
 
 def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
@@ -418,7 +417,7 @@ def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
     assert page.independent_group_a_combo.count() == 2
     assert page.fixed_highest_combo.count() == 5
     assert not page.progress_bar.isVisible()
-    assert page.prepare_button.isEnabled()
+    assert page.run_analysis_button.isEnabled()
     assert "Project inputs loaded" in page.workflow_status.text()
 
 
@@ -445,7 +444,7 @@ def test_paired_condition_guard_invalidates_prepared_state(
     assert "Setup changed" in page.workflow_status.text()
 
 
-def test_valid_independent_setup_enables_and_dispatches_preparation(
+def test_valid_independent_setup_enables_one_click_analysis(
     qtbot,
     tmp_path: Path,
     monkeypatch,
@@ -469,7 +468,7 @@ def test_valid_independent_setup_enables_and_dispatches_preparation(
     assert setup.group_ids == ("anxious", "non_anxious")
     assert setup.harmonic_mode is GuiHarmonicMode.AUTOMATIC
     assert page._setup_error() is None
-    assert page.prepare_button.isEnabled()
+    assert page.run_analysis_button.isEnabled()
 
     started_stages: list[str] = []
 
@@ -482,9 +481,42 @@ def test_valid_independent_setup_enables_and_dispatches_preparation(
         started_stages.append(stage)
 
     monkeypatch.setattr(page, "_start_operation", _record_start)
-    qtbot.mouseClick(page.prepare_button, QtCore.Qt.LeftButton)
+    qtbot.mouseClick(page.run_analysis_button, QtCore.Qt.LeftButton)
 
     assert started_stages == ["preparation"]
+    assert page._continue_to_permutations
+
+
+def test_successful_preparation_automatically_starts_permutations(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    page = _page(qtbot, tmp_path)
+    prepared = _prepared(tmp_path)
+    permutation_starts: list[bool] = []
+    monkeypatch.setattr(
+        page,
+        "_run_permutations",
+        lambda: permutation_starts.append(True),
+    )
+    page._active_stage = "preparation"
+    page._continue_to_permutations = True
+
+    page._on_preparation_completed(prepared)
+    page._on_operation_thread_finished()
+
+    assert page.tabs.currentWidget() is page.review_tab
+    assert permutation_starts == [True]
+    assert not page._continue_to_permutations
+
+    page._active_stage = "preparation"
+    page._continue_to_permutations = True
+    page._on_operation_cancelled()
+    page._on_operation_thread_finished()
+
+    assert permutation_starts == [True]
+    assert not page._continue_to_permutations
 
 
 def test_preparation_and_results_use_locked_current_session_presentation(
@@ -501,9 +533,9 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     assert page.tabs.isTabEnabled(review_index)
     assert not page.tabs.isTabEnabled(results_index)
     assert page.tabs.currentWidget() is page.review_tab
-    assert page.run_button.isEnabled()
-    assert page.run_button.isVisible()
-    assert not page.prepare_button.isVisible()
+    assert page.run_analysis_button.isEnabled()
+    assert page.run_analysis_button.isVisible()
+    assert page.run_analysis_button.text() == "Run Analysis"
     assert "P20" in page.review_exclusions_label.text()
     assert "P10 / Neutral Happy" in page.review_exclusions_label.text()
     assert "Strict z > 3.29" in page.review_selection_audit_label.text()
@@ -559,7 +591,7 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     assert page.tabs.isTabEnabled(results_index)
     assert page.tabs.currentWidget() is page.results_tab
     assert page.results_tabs.currentWidget() is page.significant_results_tab
-    assert not page.run_button.isVisible()
+    assert not page.run_analysis_button.isVisible()
     assert not page.workflow_actions.isVisible()
     assert page.significant_table.rowCount() == 1
     assert page.all_clusters_table.rowCount() == 2
@@ -607,7 +639,7 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     assert not page.tabs.isTabEnabled(review_index)
     assert not page.tabs.isTabEnabled(results_index)
     assert page.tabs.currentWidget() is page.setup_tab
-    assert not page.prepare_button.isEnabled()
+    assert not page.run_analysis_button.isEnabled()
     assert "Project Settings" in page.workflow_status.text()
 
 

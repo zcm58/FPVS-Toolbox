@@ -57,7 +57,7 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 - `gui/workers.py`: cancellable signal-driven preparation and permutation
   workers; workers do not touch widgets.
 - `gui/page.py`: embedded `FreeHarmonicClusteringPage` with scroll-free,
-  numbered Setup, Review and Run, and Results task tabs plus a compact persistent
+  numbered Setup, Review, and Results task tabs plus a compact persistent
   status/action footer.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
@@ -176,12 +176,14 @@ family, and whole-participant exchangeability.
 
 - The page is part of the default Quick Tools list and does not depend on the
   Beta Tools setting.
-- Setup resolves one contrast and displays the A-minus-B direction. Successful
-  preparation unlocks Review and Run, which freezes and displays concise cohort,
-  exclusion, harmonic, source-coverage, and participant x sensor x harmonic
-  summaries; full long-list values remain available in tooltips and exports.
-- Prepared arrays remain in memory so Run Permutations does not reread source
-  workbooks.
+- Setup resolves one contrast and displays the A-minus-B direction. One **Run
+  Analysis** action automatically prepares the analysis, unlocks Review, starts
+  permutations, and opens Results when complete. Review displays concise
+  cohort, exclusion, harmonic, source-coverage, and participant x sensor x
+  harmonic summaries; full long-list values remain available in tooltips and
+  exports.
+- Prepared arrays remain in memory while the automatic permutation phase runs,
+  so source workbooks are not read a second time.
 - Results is disabled before completion and shows only the current session's
   latest run. Its Significant and All clusters views are bounded within the tab;
   only their data tables may scroll. Significant clusters appear first by

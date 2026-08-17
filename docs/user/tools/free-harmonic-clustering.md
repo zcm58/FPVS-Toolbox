@@ -83,11 +83,12 @@ frequency, base frequency, FullFFT grid, and available upper frequency. Every
 oddball harmonic that coincides with a base-rate harmonic is excluded. No
 particular base rate, oddball rate, or upper frequency is hard-coded.
 
-## Prepare, Review, Then Run
+## Run and Review
 
-Define the comparison in **1. Setup**, then select **Prepare Analysis** in the
-persistent action strip. Successful preparation unlocks and opens **2. Review
-and Run**. That review shows:
+Define the comparison in **1. Setup**, then select **Run Analysis** once in the
+persistent action strip. The tool prepares the data, unlocks and opens **2.
+Review**, automatically continues through permutations, and opens **3. Results**
+when complete. The review shows:
 
 - the design and A minus B direction;
 - included participants, group sizes, exclusions, incomplete pairs, and final
@@ -100,8 +101,8 @@ and Run**. That review shows:
 Long participant, exclusion, or selection lists are shortened in the visible
 cards so the page remains readable without a page scrollbar. Hover over a
 shortened value for the full list; the completed workbook also records the full
-cohort and method provenance. Select **Run Permutations** from this tab to unlock
-**3. Results**.
+cohort and method provenance. No second action is required while the analysis
+continues.
 
 Preparation builds the numerical arrays once and reuses them for the
 permutation run, avoiding a second workbook read. Condition workbooks are read

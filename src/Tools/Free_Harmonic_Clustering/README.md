@@ -38,12 +38,12 @@ overrides.
 2. Use the default Hermann automatic harmonic selection, or choose the highest
    fixed oddball harmonic. Both modes fill through and exclude all dynamically
    identified base-rate overlaps.
-3. Select **Prepare Analysis** and review the frozen cohort, exclusions,
-   harmonic domain, source coverage, and participant x sensor x harmonic shape
-   in the newly unlocked **2. Review and Run** tab.
-4. Select **Run Permutations**. The prepared arrays remain in memory, so source
-   workbooks are not read again, and completion unlocks **3. Results**.
-5. Review the **Significant** view first, then **All clusters**. Use **Open
+3. Select **Run Analysis** once. The frozen cohort, exclusions, harmonic
+   domain, source coverage, and participant x sensor x harmonic shape appear in
+   **2. Review**, then permutations continue automatically without rereading
+   source workbooks.
+4. When **3. Results** opens, review the **Significant** view first, then **All
+   clusters**. Use **Open
    Results Folder** for the polished Excel workbook and complete provenance.
 
 The GUI exposes the locked Hermann-compatible profile rather than advanced
