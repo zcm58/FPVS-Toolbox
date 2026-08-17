@@ -427,8 +427,7 @@ class PlotGeneratorUiSectionsMixin:
         right_layout = QVBoxLayout(right_column)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
-        right_layout.addWidget(self.advanced_box)
-        right_layout.addStretch(1)
+        right_layout.addWidget(self.advanced_box, 1)
 
         content_widget = QWidget()
         content_widget.setObjectName("snr_plot_content_columns")
