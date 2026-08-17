@@ -112,11 +112,16 @@ class PlotGeneratorUiSectionsMixin:
         )
         self.input_folder_btn.setFixedWidth(picker_button_width)
         self.output_folder_btn.setFixedWidth(picker_button_width)
+        picker_button_style = "QPushButton { text-align: left; padding-left: 10px; }"
+        self.input_folder_btn.setStyleSheet(picker_button_style)
+        self.output_folder_btn.setStyleSheet(picker_button_style)
 
         file_layout.addLayout(file_grid)
 
         self.params_box = SectionCard("Plot Parameters")
-        self.params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
+        self.params_box.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        )
         params_layout = self.params_box.content_layout
         params_layout.setSpacing(8)
 
@@ -278,6 +283,26 @@ class PlotGeneratorUiSectionsMixin:
         self.legend_b_peaks_label = QLabel("B-Peaks label:")
         legend_form.addWidget(self.legend_b_peaks_label, 1, 2)
         legend_form.addWidget(self.legend_b_peaks_edit, 1, 3)
+        legend_labels = (
+            self.legend_condition_a_label,
+            self.legend_condition_b_label,
+            self.legend_a_peaks_label,
+            self.legend_b_peaks_label,
+        )
+        legend_label_width = max(
+            label.fontMetrics().horizontalAdvance(text)
+            for label in legend_labels
+            for text in (
+                "Condition A label:",
+                "Condition B label:",
+                "First group label:",
+                "Second group label:",
+                "A-Peaks label:",
+                "B-Peaks label:",
+            )
+        )
+        for label in legend_labels:
+            label.setFixedWidth(legend_label_width)
         legend_form.setColumnStretch(1, 1)
         legend_form.setColumnStretch(3, 1)
 
@@ -416,9 +441,8 @@ class PlotGeneratorUiSectionsMixin:
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
-        left_layout.addWidget(self.params_box)
+        left_layout.addWidget(self.params_box, 1)
         left_layout.addWidget(self.group_box)
-        left_layout.addStretch(1)
 
         right_column = QWidget()
         right_column.setSizePolicy(

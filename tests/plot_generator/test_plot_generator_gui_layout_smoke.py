@@ -64,6 +64,8 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert output_picker is not None
     assert input_picker.width() == output_picker.width()
     assert window.input_folder_btn.width() == window.output_folder_btn.width()
+    assert window.input_folder_btn.styleSheet() == window.output_folder_btn.styleSheet()
+    assert "text-align: left" in window.input_folder_btn.styleSheet()
     assert window.folder_edit.width() == window.out_edit.width()
     assert window.folder_edit.mapTo(window, QPoint(0, 0)).x() == window.out_edit.mapTo(
         window, QPoint(0, 0)
@@ -126,6 +128,9 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     params_top = window.params_box.mapTo(window, QPoint(0, 0)).y()
     advanced_top = window.advanced_box.mapTo(window, QPoint(0, 0)).y()
     assert abs(params_top - advanced_top) <= 2
+    params_bottom = params_top + window.params_box.height()
+    advanced_bottom = advanced_top + window.advanced_box.height()
+    assert abs(params_bottom - advanced_bottom) <= 2
     input_output_card = window.findChild(SectionCard, "snr_input_output_card")
     assert input_output_card is not None
     file_left = input_output_card.mapTo(window, QPoint(0, 0)).x()
@@ -140,6 +145,16 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
     assert legend_top > columns_bottom
     assert not window.group_box.isVisible()
+    legend_label_widths = {
+        label.width()
+        for label in (
+            window.legend_condition_a_label,
+            window.legend_condition_b_label,
+            window.legend_a_peaks_label,
+            window.legend_b_peaks_label,
+        )
+    }
+    assert len(legend_label_widths) == 1
     assert action_row.geometry().bottom() <= window.height()
 
     initial_visible = window.condition_b_label.isVisible()

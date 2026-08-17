@@ -301,10 +301,6 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 and self.condition_combo.currentText()
                 == self.condition_b_combo.currentText()
             ):
-                self._set_workflow_status(
-                    "Choose two different conditions for an overlay.",
-                    "warning",
-                )
                 return
 
             overlay_groups = self._group_overlay_enabled()

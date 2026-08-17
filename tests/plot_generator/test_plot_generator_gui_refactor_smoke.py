@@ -29,8 +29,7 @@ def test_condition_changes_do_not_require_removed_scalp_titles(qtbot, tmp_path):
     win.condition_combo.setCurrentText("CondB")
     qtbot.wait(50)
     assert not win.gen_btn.isEnabled()
-    assert "two different conditions" in win.workflow_status.text()
-    assert not win.workflow_status.isHidden()
+    assert win.workflow_status.isHidden()
     assert win.progress_bar.isHidden()
 
     win.condition_b_combo.setCurrentText("CondA")

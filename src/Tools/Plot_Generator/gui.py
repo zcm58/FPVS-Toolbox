@@ -341,8 +341,6 @@ class PlotGeneratorWindow(
             status = "Choose a second condition for the overlay."
         elif self.overlay_check.isChecked() and condition_a == condition_b:
             required = False
-            status = "Choose two different conditions for the overlay."
-            variant = "warning"
         elif self._group_overlay_enabled() and not self._selected_groups():
             required = False
             status = "Select at least one project group to plot."
