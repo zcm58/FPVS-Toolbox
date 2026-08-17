@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel, QScrollArea
+from PySide6.QtWidgets import QLabel, QScrollArea, QWidget
 
 from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
@@ -126,6 +126,19 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     params_top = window.params_box.mapTo(window, QPoint(0, 0)).y()
     advanced_top = window.advanced_box.mapTo(window, QPoint(0, 0)).y()
     assert abs(params_top - advanced_top) <= 2
+    input_output_card = window.findChild(SectionCard, "snr_input_output_card")
+    assert input_output_card is not None
+    file_left = input_output_card.mapTo(window, QPoint(0, 0)).x()
+    legend_left = window.legend_group.mapTo(window, QPoint(0, 0)).x()
+    assert abs(legend_left - file_left) <= 2
+    assert abs(window.legend_group.width() - input_output_card.width()) <= 2
+    left_layout = window.params_box.parentWidget().layout()
+    assert left_layout.indexOf(window.params_box) < left_layout.indexOf(window.group_box)
+    columns = window.findChild(QWidget, "snr_plot_content_columns")
+    assert columns is not None
+    columns_bottom = columns.mapTo(window, QPoint(0, 0)).y() + columns.height()
+    legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
+    assert legend_top > columns_bottom
     assert not window.group_box.isVisible()
     assert action_row.geometry().bottom() <= window.height()
 

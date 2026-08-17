@@ -50,6 +50,7 @@ class PlotGeneratorUiSectionsMixin:
         root_layout.setSpacing(8)
         build_snr_tool_header(self, root_layout)
         file_box = SectionCard("Input and Output")
+        file_box.setObjectName("snr_input_output_card")
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         file_layout = file_box.content_layout
         file_layout.setSpacing(6)
@@ -416,7 +417,6 @@ class PlotGeneratorUiSectionsMixin:
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
         left_layout.addWidget(self.params_box)
-        left_layout.addWidget(self.legend_group)
         left_layout.addWidget(self.group_box)
         left_layout.addStretch(1)
 
@@ -431,13 +431,19 @@ class PlotGeneratorUiSectionsMixin:
         right_layout.addStretch(1)
 
         content_widget = QWidget()
+        content_widget.setObjectName("snr_plot_content_columns")
+        content_widget.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        )
         content_layout = QHBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(10)
         content_layout.addWidget(left_column, 1)
         content_layout.addWidget(right_column, 1)
         root_layout.addWidget(file_box)
-        root_layout.addWidget(content_widget, 1)
+        root_layout.addWidget(content_widget)
+        root_layout.addWidget(self.legend_group)
+        root_layout.addStretch(1)
 
         build_generation_action_row(self, root_layout)
 
