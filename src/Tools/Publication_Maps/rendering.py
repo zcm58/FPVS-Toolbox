@@ -526,7 +526,7 @@ def render_group_comparison_figures(
         if owns_transaction:
             active_transaction.commit(cancel_check=cancel_check)
         return rendered
-    except Exception:
+    except Exception:  # Transaction boundary: discard staging for any render/cancel failure.
         if owns_transaction:
             active_transaction.abort()
         raise
