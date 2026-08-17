@@ -12,6 +12,10 @@ QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
 from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
 from Main_App.gui import main_window as main_window_module  # noqa: E402
+from Main_App.processing.full_fft_provenance import (  # noqa: E402
+    FullFftProvenanceError,
+    FullFftProvenanceMissingError,
+)
 import Main_App.gui.update_manager as update_manager  # noqa: E402
 from Tools.Free_Harmonic_Clustering.gui import (  # noqa: E402
     FreeHarmonicClusteringPage,
@@ -20,6 +24,7 @@ from Tools.Free_Harmonic_Clustering.gui import (  # noqa: E402
     has_active_operations,
 )
 from Tools.Free_Harmonic_Clustering.gui.models import (  # noqa: E402
+    FreeHarmonicInputError,
     GuiAnalysisDesign,
     GuiHarmonicMode,
     GroupChoice,
@@ -155,7 +160,9 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     header_text = {
         label.text() for label in page.findChildren(QtWidgets.QLabel)
     }
-    assert "CLUSTER ANALYSIS TOOL" in header_text
+    assert "Free Harmonic Clustering Analysis" in header_text
+    assert "CLUSTER ANALYSIS TOOL" not in header_text
+    assert not any(text.startswith("Compare one ordered") for text in header_text)
     assert "BETA ANALYSIS TOOL" not in header_text
     assert [
         page.tabs.tabText(index) for index in range(page.tabs.count())
@@ -254,6 +261,83 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     page._active_stage = "inspection"
     page._on_operation_cancelled()
     assert page._inspection_failed
+
+
+def test_provenance_failure_requests_shared_post_processing_without_error_banner(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    page = _page(qtbot, tmp_path)
+    requests: list[tuple[str, str, str]] = []
+    page.post_processing_required.connect(
+        lambda *args: requests.append(tuple(str(value) for value in args))
+    )
+    reason = (
+        "Neutral FullFFT provenance is missing. Rerun post-processing; "
+        "EEG preprocessing is not required."
+    )
+
+    page._active_stage = "inspection"
+    page._on_post_processing_required(reason)
+
+    assert page._inspection_failed
+    assert page._options is None
+    assert page.workflow_status.isHidden()
+    assert requests == []
+
+    page._on_operation_thread_finished()
+
+    assert requests == [
+        (
+            "Free Harmonic Clustering Analysis",
+            reason,
+            str(tmp_path.resolve()),
+        )
+    ]
+    assert page.workflow_status.isHidden()
+
+    page._active_stage = "inspection"
+    page._on_operation_failed("The project index could not be read.")
+    assert page.workflow_status.isVisible()
+    assert page.workflow_status.text() == "The project index could not be read."
+
+
+def test_worker_preserves_typed_post_processing_failure() -> None:
+    class MissingProvenanceWorker(_CancellableWorker):
+        def _execute(self) -> object:
+            try:
+                raise FullFftProvenanceMissingError("missing provenance")
+            except FullFftProvenanceMissingError as exc:
+                raise FreeHarmonicInputError("Rerun post-processing.") from exc
+
+    worker = MissingProvenanceWorker()
+    requests: list[str] = []
+    failures: list[str] = []
+    worker.post_processing_required.connect(requests.append)
+    worker.failed.connect(failures.append)
+
+    worker.run()
+
+    assert requests == ["Rerun post-processing."]
+    assert failures == []
+
+    class InvalidProvenanceWorker(_CancellableWorker):
+        def _execute(self) -> object:
+            try:
+                raise FullFftProvenanceError("invalid project state")
+            except FullFftProvenanceError as exc:
+                raise FreeHarmonicInputError("Invalid FullFFT state.") from exc
+
+    invalid_worker = InvalidProvenanceWorker()
+    invalid_requests: list[str] = []
+    invalid_failures: list[str] = []
+    invalid_worker.post_processing_required.connect(invalid_requests.append)
+    invalid_worker.failed.connect(invalid_failures.append)
+
+    invalid_worker.run()
+
+    assert invalid_requests == []
+    assert invalid_failures == ["Invalid FullFFT state."]
 
 
 def test_diagnostics_status_points_to_exclusion_review(

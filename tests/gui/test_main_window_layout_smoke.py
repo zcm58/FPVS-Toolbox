@@ -9,7 +9,7 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -1282,6 +1282,68 @@ def test_shared_post_processing_remedy_rejects_different_project(
     assert launches == []
 
 
+def test_fhc_post_processing_remedy_refreshes_current_page(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    import Main_App.processing.full_fft_provenance as full_fft_provenance
+
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+    refreshes: list[dict[str, object]] = []
+    win._free_harmonic_clustering_page = SimpleNamespace(
+        project_root=project_root,
+        refresh_project_context=lambda **kwargs: refreshes.append(kwargs),
+    )
+    frequency_snapshot = object()
+    monkeypatch.setattr(
+        win,
+        "_free_harmonic_frequency_snapshot",
+        lambda: frequency_snapshot,
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "show_post_processing_required",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda root: SimpleNamespace(project_root=root),
+    )
+    callbacks: list[object] = []
+
+    def resume_post_processing(_host, *, on_finished=None) -> None:
+        callbacks.append(on_finished)
+
+    monkeypatch.setattr(
+        main_window_module.processing_workflows,
+        "resume_post_processing",
+        resume_post_processing,
+    )
+
+    started = win.request_post_processing_rebuild(
+        "Free Harmonic Clustering Analysis",
+        "The saved analysis files are out of date.",
+        str(project_root),
+    )
+
+    assert started is True
+    assert len(callbacks) == 1
+    callback = callbacks[0]
+    assert callable(callback)
+    callback()
+    assert refreshes == [
+        {
+            "project_root": project_root.resolve(),
+            "frequency_snapshot": frequency_snapshot,
+        }
+    ]
+
+
 def test_snr_page_routes_post_processing_request_to_main_window(
     tmp_path: Path,
     qtbot,
@@ -1307,6 +1369,65 @@ def test_snr_page_routes_post_processing_request_to_main_window(
             "SNR Plots",
             "The active workbook cohort changed.",
             str(tmp_path / "project"),
+        )
+    ]
+
+
+def test_fhc_page_routes_post_processing_request_to_main_window(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    from Tools.Free_Harmonic_Clustering import gui as free_harmonic_gui
+
+    class FakeFreeHarmonicPage(QWidget):
+        post_processing_required = Signal(str, str, str)
+
+        def __init__(
+            self,
+            project_root,
+            _frequency_snapshot=None,
+            *,
+            parent=None,
+            **_kwargs,
+        ):
+            super().__init__(parent)
+            self.project_root = Path(project_root).resolve()
+
+        def shutdown(self) -> None:
+            return None
+
+        def refresh_project_context(self, **_kwargs) -> bool:
+            return False
+
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(project_root=project_root)
+    requests: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        free_harmonic_gui,
+        "FreeHarmonicClusteringPage",
+        FakeFreeHarmonicPage,
+    )
+    monkeypatch.setattr(
+        win,
+        "request_post_processing_rebuild",
+        lambda *args: requests.append(args) or True,
+    )
+
+    page = win._ensure_free_harmonic_clustering_page()
+    page.post_processing_required.emit(
+        "Free Harmonic Clustering Analysis",
+        "The saved analysis files are out of date.",
+        str(project_root),
+    )
+
+    assert requests == [
+        (
+            "Free Harmonic Clustering Analysis",
+            "The saved analysis files are out of date.",
+            str(project_root),
         )
     ]
 

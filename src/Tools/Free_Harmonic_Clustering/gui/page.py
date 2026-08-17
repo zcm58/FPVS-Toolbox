@@ -8,7 +8,7 @@ from typing import Any
 
 import logging
 
-from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Slot
+from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -79,6 +79,8 @@ def _join_or_none(values: object, *, limit: int | None = None) -> str:
 class FreeHarmonicClusteringPage(QWidget):
     """Project-bound, source-immutable analysis workspace page."""
 
+    post_processing_required = Signal(str, str, str)
+
     def __init__(
         self,
         project_root: str | Path,
@@ -113,6 +115,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._completion_callback: Callable[[object], None] | None = None
         self._active_stage: str | None = None
         self._pending_context: tuple[Path, ProjectFrequencySnapshot | None, str | None] | None = None
+        self._pending_post_processing_reason: str | None = None
         self._updating_controls = False
         self._retired = False
         self._inspection_failed = False
@@ -159,20 +162,10 @@ class FreeHarmonicClusteringPage(QWidget):
         heading_layout = QVBoxLayout(heading_text)
         heading_layout.setContentsMargins(0, 0, 0, 0)
         heading_layout.setSpacing(3)
-        eyebrow = QLabel("CLUSTER ANALYSIS TOOL", heading_text)
-        eyebrow.setProperty("eyebrow", True)
-        heading_layout.addWidget(eyebrow)
         title = QLabel("Free Harmonic Clustering Analysis", heading_text)
         title.setProperty("toolTitle", True)
         apply_font_role(title, "tool_title")
         heading_layout.addWidget(title)
-        subtitle = QLabel(
-            "Compare one ordered two-level contrast while preserving the "
-            "electrode x harmonic response structure.",
-            heading_text,
-        )
-        subtitle.setWordWrap(True)
-        heading_layout.addWidget(subtitle)
         header_layout.addWidget(heading_text, 1)
         self.about_button = make_info_button(
             parent=header,
@@ -667,6 +660,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._frequency_error = frequency_error
         self._options = None
         self._inspection_failed = False
+        self._pending_post_processing_reason = None
         self._clear_prepared_and_results()
         self._clear_choice_controls()
         self._update_results_folder_button()
@@ -1029,6 +1023,9 @@ class FreeHarmonicClusteringPage(QWidget):
         worker.progress.connect(self._on_operation_progress)  # type: ignore[attr-defined]
         worker.completed.connect(self._on_operation_completed)  # type: ignore[attr-defined]
         worker.failed.connect(self._on_operation_failed)  # type: ignore[attr-defined]
+        worker.post_processing_required.connect(  # type: ignore[attr-defined]
+            self._on_post_processing_required
+        )
         worker.cancelled.connect(self._on_operation_cancelled)  # type: ignore[attr-defined]
         worker.finished.connect(thread.quit)  # type: ignore[attr-defined]
         worker.finished.connect(worker.deleteLater)  # type: ignore[attr-defined]
@@ -1042,9 +1039,11 @@ class FreeHarmonicClusteringPage(QWidget):
         self._worker = worker
         self._completion_callback = on_completed
         self._active_stage = stage
+        self._pending_post_processing_reason = None
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
         self.progress_bar.show()
+        self.workflow_status.show()
         self.workflow_status.set_variant("info")
         self.workflow_status.set_text(message)
         self._update_buttons()
@@ -1073,11 +1072,30 @@ class FreeHarmonicClusteringPage(QWidget):
                 self._inspection_failed = True
             self._show_error(message or "The analysis operation failed.")
 
+    @Slot(str)
+    def _on_post_processing_required(self, reason: str) -> None:
+        if self._retired:
+            return
+        self._inspection_failed = True
+        self._options = None
+        self._clear_prepared_and_results()
+        self._clear_choice_controls()
+        self._pending_post_processing_reason = str(reason)
+        self.workflow_status.hide()
+        logger.warning(
+            "free_harmonic_post_processing_rebuild_requested",
+            extra={
+                "project_root": str(self._project_root),
+                "reason": str(reason),
+            },
+        )
+
     @Slot()
     def _on_operation_cancelled(self) -> None:
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
+            self.workflow_status.show()
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
                 "Operation cancelled. No completed result bundle was created."
@@ -1086,6 +1104,8 @@ class FreeHarmonicClusteringPage(QWidget):
     @Slot()
     def _on_operation_thread_finished(self) -> None:
         finished_stage = self._active_stage or "unknown"
+        post_processing_reason = self._pending_post_processing_reason
+        self._pending_post_processing_reason = None
         logger.info(
             "free_harmonic_gui_operation_thread_finished",
             extra={
@@ -1106,6 +1126,12 @@ class FreeHarmonicClusteringPage(QWidget):
             self._apply_new_context(*context)
             return
         self._update_buttons()
+        if post_processing_reason:
+            self.post_processing_required.emit(
+                "Free Harmonic Clustering Analysis",
+                post_processing_reason,
+                str(self._project_root),
+            )
 
     @Slot()
     def cancel_active_work(self) -> None:
@@ -1126,6 +1152,7 @@ class FreeHarmonicClusteringPage(QWidget):
             return
         self._retired = True
         self._pending_context = None
+        self._pending_post_processing_reason = None
         self.cancel_active_work()
         self.setEnabled(False)
 
@@ -1500,6 +1527,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self.tabs.setCurrentWidget(self.setup_tab)
 
     def _show_frequency_or_ready_status(self) -> None:
+        self.workflow_status.show()
         if self._frequency_snapshot is None:
             detail = f" ({self._frequency_error})" if self._frequency_error else ""
             self.workflow_status.set_variant("error")
@@ -1512,6 +1540,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self.workflow_status.set_text("Ready to load project inputs.")
 
     def _show_error(self, message: str) -> None:
+        self.workflow_status.show()
         self.workflow_status.set_variant("error")
         self.workflow_status.set_text(str(message))
 

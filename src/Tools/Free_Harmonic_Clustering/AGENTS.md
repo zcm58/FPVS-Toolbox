@@ -123,6 +123,10 @@ the page implementation.
 
 - Use the shared `SectionCard`, `StatusBanner`, `ActionRow`, and tabbed
   `ToolInfoContent` patterns. Do not nest cards.
+- Route missing or stale FullFFT provenance through the Main App's shared
+  **Post-processing Required** dialog. The page emits the affected project and
+  reason; it must not show the raw provenance failure in its footer or launch a
+  post-processing worker itself.
 - Use the numbered Setup, Review and Run, and Results tabs as a gated workflow.
   Review and Run unlocks only after preparation freezes and displays the cohort,
   exclusions, harmonic selection, direction, and prepared array shape; Results

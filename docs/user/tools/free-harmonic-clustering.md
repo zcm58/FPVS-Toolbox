@@ -35,9 +35,10 @@ group, condition, or participant overrides. Both the setup inspection and the
 direct preparation API validate the same processing-owned neutral record:
 project-relative source workbooks, exact FullFFT grid/resolution, base and
 oddball rates, cohort/QC identity, and processing/export identity. Missing,
-stale, or conflicting provenance blocks setup; restore the processed rates or
-rerun post-processing. EEG preprocessing is not required merely to rebuild
-this record.
+stale, or conflicting provenance opens the shared **Post-processing Required**
+dialog. Choose **Run Post-processing** to refresh the downstream files from the
+existing processed EEG data; EEG preprocessing is not rerun. After the neutral
+record is current, the FHC setup reloads automatically.
 
 The neutral record contains no standard Stats profile or selected Summed-BCA
 harmonic list. Free Harmonic Clustering always performs its own Hermann

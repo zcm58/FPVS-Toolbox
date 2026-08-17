@@ -867,7 +867,11 @@ def _set_resume_post_processing_pending(host: Any, pending: bool) -> None:
             button.setEnabled(True)
 
 
-def resume_post_processing(host: Any) -> None:
+def resume_post_processing(
+    host: Any,
+    *,
+    on_finished: Callable[[], None] | None = None,
+) -> None:
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Load a project before resuming post-processing.")
         return
@@ -894,6 +898,11 @@ def resume_post_processing(host: Any) -> None:
             logger.debug("resume_post_processing_controls_unlock_failed", exc_info=True)
         _set_resume_post_processing_pending(host, False)
         host.log("Post-processing resume finished.", level=logging.INFO)
+        if on_finished is not None:
+            try:
+                on_finished()
+            except Exception:
+                logger.exception("post_processing_resume_callback_failed")
 
     if not _start_post_processing_pipeline_after_processing(host, on_finished=_finish_resume):
         _finish_resume()

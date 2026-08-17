@@ -29,8 +29,8 @@ class PostProcessingRequiredDialog(AppDialog):
         self.setObjectName("post_processing_required_dialog")
 
         banner = StatusBanner(
-            f"{tool_name} cannot continue because the project's downstream "
-            "analysis state is no longer current.",
+            f"{tool_name} cannot continue because the project's saved analysis "
+            "files are out of date.",
             self,
             variant="warning",
         )
@@ -38,11 +38,10 @@ class PostProcessingRequiredDialog(AppDialog):
         self.root_layout.addWidget(banner)
 
         explanation = QLabel(
-            "Run post-processing to refresh the saved FullFFT provenance and "
-            "other cohort-dependent outputs. Existing processed workbooks are "
-            "reused; EEG preprocessing is not rerun. Harmonic selection, "
-            "analysis-ready exports, and enabled source-map outputs may also be "
-            "refreshed.",
+            "This tool is trying to use files from an older or incomplete "
+            "post-processing run. Run post-processing again to refresh the "
+            "downstream analysis files. Existing processed EEG data are reused; "
+            "EEG preprocessing is not rerun.",
             self,
         )
         explanation.setObjectName("post_processing_required_explanation")

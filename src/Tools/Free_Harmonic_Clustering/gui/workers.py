@@ -10,11 +10,32 @@ import logging
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from Main_App.processing.full_fft_provenance import (
+    FullFftProvenanceMissingError,
+    FullFftProvenanceStaleError,
+)
+
 from .backend_adapter import FreeHarmonicBackend
 from .models import AnalysisSetup, ProjectAnalysisOptions, ProjectFrequencySnapshot
 
 
 logger = logging.getLogger(__name__)
+
+
+def _requires_post_processing(error: BaseException) -> bool:
+    """Return whether an error was caused by stale/missing FullFFT provenance."""
+
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(
+            current,
+            (FullFftProvenanceMissingError, FullFftProvenanceStaleError),
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class _CancellableWorker(QObject):
@@ -23,6 +44,7 @@ class _CancellableWorker(QObject):
     progress = Signal(int, int, str)
     completed = Signal(object)
     failed = Signal(str)
+    post_processing_required = Signal(str)
     cancelled = Signal()
     finished = Signal()
 
@@ -61,6 +83,14 @@ class _CancellableWorker(QObject):
             }:
                 outcome = "cancelled"
                 self.cancelled.emit()
+            elif _requires_post_processing(exc):
+                outcome = "post_processing_required"
+                logger.warning(
+                    "free_harmonic_gui_post_processing_required",
+                    exc_info=True,
+                    extra={"worker": worker_type},
+                )
+                self.post_processing_required.emit(str(exc))
             else:
                 logger.exception(
                     "free_harmonic_gui_worker_failed",

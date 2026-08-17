@@ -599,6 +599,9 @@ class MainWindow(QMainWindow):
                 frequency_snapshot=self._free_harmonic_frequency_snapshot(),
                 parent=self.workspace_stack,
             )
+            page.post_processing_required.connect(
+                self.request_post_processing_rebuild
+            )
             page.setObjectName("embedded_free_harmonic_clustering_page")
             self.workspace_stack.addWidget(page)
             self._free_harmonic_clustering_page = page
@@ -872,8 +875,50 @@ class MainWindow(QMainWindow):
             reason=reason,
         ):
             return False
-        processing_workflows.resume_post_processing(self)
+        if tool_name == "Free Harmonic Clustering Analysis":
+            processing_workflows.resume_post_processing(
+                self,
+                on_finished=lambda: self._refresh_free_harmonic_after_post_processing(
+                    project_root
+                ),
+            )
+        else:
+            processing_workflows.resume_post_processing(self)
         return True
+
+    def _refresh_free_harmonic_after_post_processing(
+        self,
+        project_root: str,
+    ) -> None:
+        """Retry a blocked FHC inspection after its neutral record is current."""
+
+        page = getattr(self, "_free_harmonic_clustering_page", None)
+        if page is None or getattr(page, "project_root", None) is None:
+            return
+        try:
+            requested_root = Path(project_root).resolve(strict=False)
+            page_root = Path(page.project_root).resolve(strict=False)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return
+        if requested_root != page_root:
+            return
+        from Main_App.processing.full_fft_provenance import (
+            FullFftProvenanceError,
+            require_current_project_full_fft_provenance,
+        )
+
+        try:
+            require_current_project_full_fft_provenance(requested_root)
+        except FullFftProvenanceError:
+            logger.warning(
+                "free_harmonic_post_processing_refresh_not_current",
+                exc_info=True,
+            )
+            return
+        page.refresh_project_context(
+            project_root=requested_root,
+            frequency_snapshot=self._free_harmonic_frequency_snapshot(),
+        )
 
     def show_about_dialog(self) -> None:
         tool_workflows.show_about_dialog(self, FPVS_TOOLBOX_VERSION)

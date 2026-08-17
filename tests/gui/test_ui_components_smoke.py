@@ -524,6 +524,10 @@ def test_post_processing_required_dialog_explains_scope_and_actions(qtbot) -> No
         QLabel,
         "post_processing_required_explanation",
     ).text()
+    assert "older or incomplete" in dialog.findChild(
+        QLabel,
+        "post_processing_required_explanation",
+    ).text()
     assert dialog.run_button.text() == "Run Post-processing"
     assert dialog.run_button.isDefault()
     assert dialog.cancel_button.text() == "Not Now"
