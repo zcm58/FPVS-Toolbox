@@ -30,10 +30,6 @@ def build_generation_action_row(owner, root_layout) -> None:
     owner.progress_bar.hide()
     root_layout.addWidget(owner.progress_bar)
 
-    owner.save_defaults_btn = make_action_button("Save Folder Defaults")
-    owner.save_defaults_btn.setObjectName("snr_save_folder_defaults")
-    owner.save_defaults_btn.setToolTip("Save the current input and output folders")
-    owner.save_defaults_btn.clicked.connect(owner._save_defaults)
     owner.load_defaults_btn = make_action_button("Restore Plot Defaults")
     owner.load_defaults_btn.setObjectName("snr_restore_plot_defaults")
     owner.load_defaults_btn.setToolTip("Restore the saved plot settings")
@@ -64,7 +60,6 @@ def build_generation_action_row(owner, root_layout) -> None:
     actions_widget = ActionRow(owner, alignment=Qt.AlignLeft, spacing=12)
     actions_widget.setObjectName("plot_generator_bottom_actions")
     actions_widget.row_layout.setContentsMargins(8, 8, 8, 8)
-    actions_widget.add_button(owner.save_defaults_btn)
     actions_widget.add_button(owner.load_defaults_btn)
     actions_widget.add_button(owner.open_output_btn)
     actions_widget.add_button(owner.view_log_btn)

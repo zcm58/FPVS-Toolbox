@@ -288,15 +288,6 @@ class PlotGeneratorWindow(
             if not self._persist_project_plot_settings(include_paths=False):
                 self.plot_mgr.save()
 
-    def _save_defaults(self) -> None:
-        if self._persist_project_plot_settings(include_paths=True):
-            QMessageBox.information(self, "Defaults", "Project plot defaults saved.")
-            return
-        self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
-        self.plot_mgr.set("paths", "output_folder", self.out_edit.text())
-        self.plot_mgr.save()
-        QMessageBox.information(self, "Defaults", "Default folders saved.")
-
     def _load_defaults(self) -> None:
         self._defaults = self._orig_defaults.copy()
         self.folder_edit.setText(self._defaults["input_folder"])

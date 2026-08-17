@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from PySide6.QtWidgets import QMessageBox
-
 from Main_App.Shared import settings_paths
 from Main_App.Shared.settings_manager import SettingsManager
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
@@ -118,14 +116,12 @@ def test_plot_generator_project_settings_roundtrip(tmp_path, monkeypatch, qtbot)
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
-
     window = PlotGeneratorWindow(project_dir=str(project_root))
     qtbot.addWidget(window)
     window.folder_edit.setText(str(excel_dir))
     window.out_edit.setText(str(snr_dir))
 
-    window._save_defaults()
+    assert window._persist_project_plot_settings(include_paths=True)
 
     saved = json.loads((project_root / "project.json").read_text(encoding="utf-8"))
     plot_settings = saved["tools"]["snr_plot"]["plot_settings"]

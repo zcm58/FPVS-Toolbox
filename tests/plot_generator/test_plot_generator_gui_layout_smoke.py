@@ -75,7 +75,6 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     )
     assert window.open_output_btn.text() == "Open Plot Folder"
     assert window.view_log_btn.text() == "View Log"
-    assert window.save_defaults_btn.text() == "Save Folder Defaults"
     assert window.load_defaults_btn.text() == "Restore Plot Defaults"
     assert window.gen_btn.text() == "Generate SNR Plots"
     assert window.title_edit.objectName() == "plot_generator_internal_figure_name"
@@ -109,7 +108,6 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.cancel_btn.property("danger") is True
     action_row = window.findChild(ActionRow, "plot_generator_bottom_actions")
     assert action_row is not None
-    assert action_row.row_layout.indexOf(window.save_defaults_btn) >= 0
     assert action_row.row_layout.indexOf(window.load_defaults_btn) >= 0
     assert action_row.row_layout.indexOf(window.open_output_btn) >= 0
     assert action_row.row_layout.indexOf(window.view_log_btn) >= 0
