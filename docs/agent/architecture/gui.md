@@ -202,6 +202,14 @@ or rounded outer frame around the child cards. The SNR Plot tool is the current
 reference pattern for embedded tool layout: dedicated subsection cards sit
 directly on the workspace background with normal spacing between them.
 
+New or substantially revised embedded tool pages must fit the supported
+1280x900 workspace without a page-level `QScrollArea`. If one coherent surface
+cannot fit without clipping, split the workflow into purpose-based tabs or
+progressive pages and keep each page visually flat. Scrolling remains
+appropriate inside content-native widgets such as tables, log/text viewers,
+and focused dialogs; this rule prevents the tool page itself from becoming a
+long document.
+
 Before adding a new card-like wrapper, ask whether it communicates a distinct
 top-level group. If it only exists to hold other cards or to make a tab page
 look enclosed, use an unframed `QWidget` plus layout spacing instead.

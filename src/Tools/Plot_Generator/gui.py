@@ -328,7 +328,7 @@ class PlotGeneratorWindow(
         condition_a = self.condition_combo.currentText().strip()
         condition_b = self.condition_b_combo.currentText().strip()
         required = bool(input_folder and output_folder and condition_a)
-        status = "Ready to generate matching PNG and PDF SNR plots."
+        status = ""
         variant = "info"
         if not input_folder:
             status = "Choose the processed Excel folder."
@@ -350,4 +350,7 @@ class PlotGeneratorWindow(
         self.gen_btn.setEnabled(required)
         self.open_output_btn.setEnabled(bool(output_folder))
         if getattr(self, "_thread", None) is None and getattr(self, "_worker", None) is None:
-            self._set_workflow_status(status, variant)
+            if variant == "warning":
+                self._set_workflow_status(status, variant)
+            else:
+                self.workflow_status.hide()

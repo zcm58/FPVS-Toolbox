@@ -25,6 +25,8 @@ directly to the selected plot folder as a matching 600-DPI PNG and PDF pair.
 <p>
 SNR Plots creates figures only. It does not create source-data spreadsheets,
 spectral-QC workbooks, JSON manifests, or per-run subfolders.
+Detailed run messages and workbook warnings are available through
+<b>View Log</b>.
 </p>
 
 <h3>Comparison Modes</h3>

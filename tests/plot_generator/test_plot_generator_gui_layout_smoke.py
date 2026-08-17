@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QScrollArea
 
 from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
@@ -28,6 +28,7 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.roi_combo is not None
     assert window.gen_btn is not None
     assert not hasattr(window, "log_toggle_btn")
+    assert window.findChildren(QScrollArea) == []
     assert isinstance(window.folder_edit.parentWidget(), PathPickerRow)
     assert isinstance(window.out_edit.parentWidget(), PathPickerRow)
     section_titles = [
@@ -36,7 +37,8 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert "Progress" not in section_titles
     assert "Input and Output" in section_titles
     assert "Legend labels (optional)" in section_titles
-    assert len(window.findChildren(SectionCard)) >= 6
+    assert "Log Output" not in section_titles
+    assert len(window.findChildren(SectionCard)) >= 5
     assert window.params_box.header.title_label.font().bold()
     header_font = window.params_box.header.title_label.font()
     header_spec = FONT_ROLES["subsection_header"]
@@ -44,21 +46,33 @@ def test_plot_generator_gui_layout_smoke(qtbot):
         header_font.pointSize() == header_spec.point_size
         or header_font.pixelSize() == header_spec.css_size_px
     )
-    legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
-    legend_field_top = window.legend_condition_a_edit.mapTo(window, QPoint(0, 0)).y()
-    assert 80 <= legend_field_top - legend_top <= 120
     assert window.findChild(QLabel, "snr_plots_title").text() == "SNR Plots"
+    assert window.findChild(QLabel, "snr_plots_eyebrow") is None
+    assert window.findChild(QLabel, "snr_plots_subtitle") is None
     assert window.findChild(StatusBanner, "snr_plot_workflow_status") is window.workflow_status
-    status_y = window.workflow_status.mapTo(window, QPoint(0, 0)).y()
-    progress_y = window.progress_bar.mapTo(window, QPoint(0, 0)).y()
-    assert status_y < progress_y
+    assert window.workflow_status.isHidden()
+    assert window.progress_bar.isHidden()
     assert window.progress_bar.height() >= 18
     assert window.progress_bar.isTextVisible()
     assert window.folder_edit.width() >= 220
     assert window.out_edit.width() >= 220
     assert window.input_folder_btn.text() == "Choose Excel Folder"
     assert window.output_folder_btn.text() == "Choose Plot Folder"
+    input_picker = window.findChild(PathPickerRow, "snr_input_folder_picker")
+    output_picker = window.findChild(PathPickerRow, "snr_output_folder_picker")
+    assert input_picker is not None
+    assert output_picker is not None
+    assert input_picker.width() == output_picker.width()
+    assert window.input_folder_btn.width() == window.output_folder_btn.width()
+    assert window.folder_edit.width() == window.out_edit.width()
+    assert window.folder_edit.mapTo(window, QPoint(0, 0)).x() == window.out_edit.mapTo(
+        window, QPoint(0, 0)
+    ).x()
+    assert window.input_folder_btn.mapTo(window, QPoint(0, 0)).x() == (
+        window.output_folder_btn.mapTo(window, QPoint(0, 0)).x()
+    )
     assert window.open_output_btn.text() == "Open Plot Folder"
+    assert window.view_log_btn.text() == "View Log"
     assert window.save_defaults_btn.text() == "Save Folder Defaults"
     assert window.load_defaults_btn.text() == "Restore Plot Defaults"
     assert window.gen_btn.text() == "Generate SNR Plots"
@@ -96,6 +110,7 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert action_row.row_layout.indexOf(window.save_defaults_btn) >= 0
     assert action_row.row_layout.indexOf(window.load_defaults_btn) >= 0
     assert action_row.row_layout.indexOf(window.open_output_btn) >= 0
+    assert action_row.row_layout.indexOf(window.view_log_btn) >= 0
     assert action_row.row_layout.indexOf(window.gen_btn) >= 0
     assert action_row.row_layout.indexOf(window.cancel_btn) >= 0
     assert window.log.property("logSurface") is True
@@ -105,26 +120,13 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.roi_combo.accessibleName() == "Region of interest to plot"
     assert window.progress_bar.accessibleName() == "SNR plot generation progress"
     assert window.log.accessibleName() == "SNR plot generation log"
-    assert window.log_body.isVisible() is True
+    assert window.view_log_btn.accessibleName() == "View SNR plot generation log"
+    assert window.generation_log_dialog.isHidden()
     assert window.advanced_box.height() >= 250
-    assert window.console_box.height() <= 180
-    assert 95 <= window.log.height() <= 120
-    assert window.console_box.y() > window.advanced_box.y() + 240
     params_top = window.params_box.mapTo(window, QPoint(0, 0)).y()
     advanced_top = window.advanced_box.mapTo(window, QPoint(0, 0)).y()
-    legend_bottom = (
-        window.legend_group.mapTo(window, QPoint(0, 0)).y()
-        + window.legend_group.height()
-    )
-    console_bottom = (
-        window.console_box.mapTo(window, QPoint(0, 0)).y()
-        + window.console_box.height()
-    )
     assert abs(params_top - advanced_top) <= 2
-    assert abs(window.params_box.height() - window.legend_group.height()) <= 4
-    assert abs(legend_bottom - console_bottom) <= 4
     assert not window.group_box.isVisible()
-    assert window.workflow_status.geometry().right() <= window.width()
     assert action_row.geometry().bottom() <= window.height()
 
     initial_visible = window.condition_b_label.isVisible()
@@ -145,14 +147,26 @@ def test_plot_generator_gui_layout_smoke(qtbot):
         assert window.legend_condition_b_edit.isVisible()
         assert window.legend_b_peaks_label.isVisible()
         assert window.legend_b_peaks_edit.isVisible()
-        assert window.legend_condition_a_label.y() < window.legend_condition_a_edit.y()
-        assert window.legend_condition_b_label.y() < window.legend_condition_b_edit.y()
-        assert window.legend_a_peaks_label.y() < window.legend_a_peaks_edit.y()
-        assert window.legend_b_peaks_label.y() < window.legend_b_peaks_edit.y()
-        assert window.legend_condition_a_edit.width() >= 220
-        assert window.legend_condition_b_edit.width() >= 220
+        assert abs(
+            window.legend_condition_a_label.geometry().center().y()
+            - window.legend_condition_a_edit.geometry().center().y()
+        ) <= 4
+        assert abs(
+            window.legend_a_peaks_label.geometry().center().y()
+            - window.legend_a_peaks_edit.geometry().center().y()
+        ) <= 4
+        assert window.legend_condition_a_edit.width() >= 80
+        assert window.legend_condition_b_edit.width() >= 80
         assert window.legend_condition_b_edit.height() >= 20
         assert window.legend_b_peaks_edit.height() >= 20
+        for field in (
+            window.legend_condition_a_edit,
+            window.legend_condition_b_edit,
+            window.legend_a_peaks_edit,
+            window.legend_b_peaks_edit,
+        ):
+            field_right = field.mapTo(window.legend_group, QPoint(0, 0)).x() + field.width()
+            assert field_right <= window.legend_group.width()
 
     window.overlay_check.setChecked(not window.overlay_check.isChecked())
     qtbot.wait(50)

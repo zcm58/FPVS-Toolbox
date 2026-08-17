@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStyle,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -24,7 +23,6 @@ from Main_App.gui.components import (
     SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
-    fixed_width_font,
     make_action_button,
     make_form_layout,
 )
@@ -33,6 +31,7 @@ from Tools.Plot_Generator.gui_settings import (
     _LEGEND_DEFAULT_A_PEAKS,
     _LEGEND_DEFAULT_B_PEAKS,
 )
+from Tools.Plot_Generator.log_dialog import SNRGenerationLogDialog
 from Tools.Plot_Generator.ui_actions import build_generation_action_row
 from Tools.Plot_Generator.ui_header import build_snr_tool_header
 
@@ -106,10 +105,17 @@ class PlotGeneratorUiSectionsMixin:
         file_grid.addWidget(output_picker, 1, 1)
         file_grid.setColumnStretch(1, 1)
 
+        picker_button_width = max(
+            self.input_folder_btn.sizeHint().width(),
+            self.output_folder_btn.sizeHint().width(),
+        )
+        self.input_folder_btn.setFixedWidth(picker_button_width)
+        self.output_folder_btn.setFixedWidth(picker_button_width)
+
         file_layout.addLayout(file_grid)
 
         self.params_box = SectionCard("Plot Parameters")
-        self.params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+        self.params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         params_layout = self.params_box.content_layout
         params_layout.setSpacing(8)
 
@@ -207,9 +213,9 @@ class PlotGeneratorUiSectionsMixin:
         params_layout.addWidget(self.overlay_row)
 
         self.legend_group = SectionCard("Legend labels (optional)")
-        self.legend_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+        self.legend_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         legend_layout = self.legend_group.content_layout
-        legend_layout.setSpacing(10)
+        legend_layout.setSpacing(6)
         self.legend_custom_check = QCheckBox("Custom legend labels")
         self.legend_custom_check.setChecked(True)
         self.legend_custom_check.toggled.connect(self._toggle_custom_legend_labels)
@@ -222,7 +228,7 @@ class PlotGeneratorUiSectionsMixin:
         legend_form = QGridLayout()
         legend_form.setContentsMargins(0, 0, 0, 0)
         legend_form.setHorizontalSpacing(12)
-        legend_form.setVerticalSpacing(8)
+        legend_form.setVerticalSpacing(6)
 
         self.legend_condition_a_edit = QLineEdit()
         self.legend_condition_a_edit.setPlaceholderText("Condition A label")
@@ -234,7 +240,7 @@ class PlotGeneratorUiSectionsMixin:
         )
         self.legend_condition_a_label = QLabel("Condition A label:")
         legend_form.addWidget(self.legend_condition_a_label, 0, 0)
-        legend_form.addWidget(self.legend_condition_a_edit, 1, 0)
+        legend_form.addWidget(self.legend_condition_a_edit, 0, 1)
 
         self.legend_condition_b_edit = QLineEdit()
         self.legend_condition_b_edit.setPlaceholderText("Condition B label")
@@ -245,8 +251,8 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._on_legend_condition_label_edited("condition_b_label")
         )
         self.legend_condition_b_label = QLabel("Condition B label:")
-        legend_form.addWidget(self.legend_condition_b_label, 0, 1)
-        legend_form.addWidget(self.legend_condition_b_edit, 1, 1)
+        legend_form.addWidget(self.legend_condition_b_label, 0, 2)
+        legend_form.addWidget(self.legend_condition_b_edit, 0, 3)
 
         self.legend_a_peaks_edit = QLineEdit()
         self.legend_a_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_A_PEAKS)
@@ -257,8 +263,8 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._mark_legend_manual_override("a_peaks_label")
         )
         self.legend_a_peaks_label = QLabel("A-Peaks label:")
-        legend_form.addWidget(self.legend_a_peaks_label, 2, 0)
-        legend_form.addWidget(self.legend_a_peaks_edit, 3, 0)
+        legend_form.addWidget(self.legend_a_peaks_label, 1, 0)
+        legend_form.addWidget(self.legend_a_peaks_edit, 1, 1)
 
         self.legend_b_peaks_edit = QLineEdit()
         self.legend_b_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_B_PEAKS)
@@ -269,17 +275,16 @@ class PlotGeneratorUiSectionsMixin:
             lambda _text: self._mark_legend_manual_override("b_peaks_label")
         )
         self.legend_b_peaks_label = QLabel("B-Peaks label:")
-        legend_form.addWidget(self.legend_b_peaks_label, 2, 1)
-        legend_form.addWidget(self.legend_b_peaks_edit, 3, 1)
-        legend_form.setColumnStretch(0, 1)
+        legend_form.addWidget(self.legend_b_peaks_label, 1, 2)
+        legend_form.addWidget(self.legend_b_peaks_edit, 1, 3)
         legend_form.setColumnStretch(1, 1)
+        legend_form.setColumnStretch(3, 1)
 
         self.legend_reset_btn = make_action_button("Reset to defaults")
         self.legend_reset_btn.clicked.connect(self._reset_legend_defaults)
         legend_header.addWidget(self.legend_reset_btn)
         legend_layout.addLayout(legend_header)
         legend_layout.addLayout(legend_form)
-        legend_layout.addStretch(1)
 
         self._legend_fields = {
             "condition_a_label": self.legend_condition_a_edit,
@@ -398,34 +403,10 @@ class PlotGeneratorUiSectionsMixin:
         )
         advanced_layout.addWidget(self.spectral_qc_check)
 
-        self.console_box = SectionCard("Log Output")
-        self.console_box.setMaximumHeight(180)
-        console_layout = self.console_box.content_layout
-        console_layout.setSpacing(6)
-
-        clear_btn = make_action_button("", compact=True)
-        clear_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
-        clear_btn.setFixedSize(22, 22)
-        clear_btn.setToolTip("Clear Log")
-        clear_btn.setAccessibleName("Clear generation log")
-        clear_btn.clicked.connect(lambda: self.log.clear())
-        self.console_box.header.add_action_widget(clear_btn)
-
-        self.log_body = QWidget()
-        log_body_layout = QVBoxLayout(self.log_body)
-        log_body_layout.setContentsMargins(0, 0, 0, 0)
-        log_body_layout.setSpacing(0)
-
-        self.log = QTextEdit()
+        self.generation_log_dialog = SNRGenerationLogDialog("", self)
+        self.log = self.generation_log_dialog.viewer
         self.log.setProperty("logSurface", True)
-        self.log.setReadOnly(True)
         self.log.setAccessibleName("SNR plot generation log")
-        self.log.setMinimumHeight(95)
-        self.log.setMaximumHeight(120)
-        self.log.setFont(fixed_width_font())
-        log_body_layout.addWidget(self.log)
-
-        console_layout.addWidget(self.log_body)
 
         left_column = QWidget()
         left_column.setSizePolicy(
@@ -434,9 +415,10 @@ class PlotGeneratorUiSectionsMixin:
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
-        left_layout.addWidget(self.params_box, 1)
-        left_layout.addWidget(self.legend_group, 1)
+        left_layout.addWidget(self.params_box)
+        left_layout.addWidget(self.legend_group)
         left_layout.addWidget(self.group_box)
+        left_layout.addStretch(1)
 
         right_column = QWidget()
         right_column.setSizePolicy(
@@ -445,8 +427,8 @@ class PlotGeneratorUiSectionsMixin:
         right_layout = QVBoxLayout(right_column)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
-        right_layout.addWidget(self.advanced_box, 1)
-        right_layout.addWidget(self.console_box, 1)
+        right_layout.addWidget(self.advanced_box)
+        right_layout.addStretch(1)
 
         content_widget = QWidget()
         content_layout = QHBoxLayout(content_widget)

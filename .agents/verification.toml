@@ -111,7 +111,7 @@ tests = [
   "tests/plot_generator/test_plot_generator_worker_config.py",
 ]
 include = ["src/Tools/Plot_Generator/**", "tests/plot_generator/**"]
-manual_smoke = ["At 1280 x 900, open SNR Plots and verify the header, About action, Input and Output card, inline status/progress, specific folder/default/generation actions, keyboard focus, and no clipping. Generate one plot and confirm Ready -> Generating -> Complete without a routine success modal; use Open Plot Folder and confirm only matching PNG/PDF files are written directly to 2 - SNR Plots. Start another run, cancel it, and confirm the warning status and navigation lock remain until the worker exits. In a multi-group project, confirm the required one-condition group overlay still works."]
+manual_smoke = ["At 1280 x 900, open SNR Plots and verify the page has no page-level scrollbar; only the SNR Plots title and About action appear in the header; the two folder fields/buttons align; legend controls do not clip; and status/progress are hidden while idle. Open View Log and confirm the full log appears in a focused modal. Generate one plot and confirm status/progress appear while running, progress hides on completion, no routine success modal appears, and Open Plot Folder reaches matching PNG/PDF files written directly to 2 - SNR Plots. Start another run, cancel it, and confirm progress/navigation remain active until the worker exits, then progress hides while the warning remains. In a multi-group project, confirm the required one-condition group overlay still works."]
 
 [scopes.publication-maps]
 audits = ["gui", "paths"]

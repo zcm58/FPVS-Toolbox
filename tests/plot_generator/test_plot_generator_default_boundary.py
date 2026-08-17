@@ -61,13 +61,21 @@ def test_snr_user_copy_matches_figures_only_output_contract() -> None:
     info_text = (tool_root / "tool_info.py").read_text(encoding="utf-8")
     ui_text = (tool_root / "ui_sections.py").read_text(encoding="utf-8")
     actions_text = (tool_root / "ui_actions.py").read_text(encoding="utf-8")
+    header_text = (tool_root / "ui_header.py").read_text(encoding="utf-8")
 
-    for stale_claim in ("source CSV", "run manifest", "Write a report"):
-        assert stale_claim not in info_text + ui_text
+    for stale_claim in (
+        "source CSV",
+        "run manifest",
+        "Write a report",
+        "PUBLICATION FIGURE TOOL",
+        "Generate publication-ready ROI spectra",
+    ):
+        assert stale_claim not in info_text + ui_text + header_text
     for specific_action in (
         "Choose Excel Folder",
         "Choose Plot Folder",
         "Open Plot Folder",
+        "View Log",
         "Generate SNR Plots",
     ):
         assert specific_action in ui_text + actions_text

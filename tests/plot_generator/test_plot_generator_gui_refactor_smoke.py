@@ -23,35 +23,36 @@ def test_condition_changes_do_not_require_removed_scalp_titles(qtbot, tmp_path):
     win.condition_b_combo.setCurrentText("CondB")
     win._check_required()
     assert win.gen_btn.isEnabled()
+    assert win.workflow_status.isHidden()
+    assert win.progress_bar.isHidden()
 
     win.condition_combo.setCurrentText("CondB")
     qtbot.wait(50)
     assert not win.gen_btn.isEnabled()
     assert "two different conditions" in win.workflow_status.text()
+    assert win.workflow_status.isVisible()
+    assert win.progress_bar.isHidden()
 
     win.condition_b_combo.setCurrentText("CondA")
     qtbot.wait(50)
     assert win.gen_btn.isEnabled()
+    assert win.workflow_status.isHidden()
 
 
 @pytest.mark.usefixtures("qtbot")
-def test_log_output_is_fixed_height(qtbot):
+def test_idle_status_and_progress_do_not_consume_page_rows(qtbot):
     win = PlotGeneratorWindow()
     qtbot.addWidget(win)
     win.show()
     qtbot.waitExposed(win)
 
-    height_before = win.height()
-    assert not hasattr(win, "log_toggle_btn")
-    assert win.log_body.isVisible() is True
-    assert win.advanced_box.minimumHeight() >= 250
-    assert win.advanced_box.height() >= win.advanced_box.minimumHeight()
-    assert win.console_box.height() <= 180
-    assert 95 <= win.log.height() <= 120
+    assert win.workflow_status.isHidden()
+    assert win.progress_bar.isHidden()
+    assert not hasattr(win, "console_box")
 
-    win.log.append("Fixed log output")
-    qtbot.wait(100)
-    height_after = win.height()
+    win._set_workflow_status("Action is required.", "warning")
+    assert win.workflow_status.isVisible()
+    assert win.progress_bar.isHidden()
 
-    assert "Fixed log output" in win.log.toPlainText()
-    assert height_after <= height_before + 10
+    win._check_required()
+    assert win.workflow_status.isHidden()

@@ -185,8 +185,10 @@ threshold/p-value rules, or relevant numerical dependencies change.
       participant counts.
 - [x] Streamline the default-tool surface with a compact SNR header, corrected
       figures-only About copy, specific folder and generation actions, inline
-      Ready/Running/Complete feedback, and accessible control names. Keep hard
-      failures and scientific/exclusion decisions modal.
+      running/completion feedback, a focused on-demand generation log, and
+      accessible control names. The idle page has no status/progress rows or
+      page-level scrolling. Keep hard failures and scientific/exclusion
+      decisions modal.
 
 #### Scalp Maps
 

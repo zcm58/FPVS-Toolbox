@@ -8,15 +8,16 @@ from Main_App.gui.components import ActionRow, StatusBanner, make_action_button
 
 
 def build_generation_action_row(owner, root_layout) -> None:
-    """Create inline status, progress, and generation controls."""
+    """Create on-demand status, progress, and generation controls."""
 
     owner.workflow_status = StatusBanner(
-        "Choose the processed Excel folder, plot output folder, and a condition.",
+        "",
         owner,
         variant="info",
     )
     owner.workflow_status.setObjectName("snr_plot_workflow_status")
     owner.workflow_status.setAccessibleName("SNR plot generation status")
+    owner.workflow_status.hide()
     root_layout.addWidget(owner.workflow_status)
 
     owner.progress_bar = QProgressBar(owner)
@@ -26,6 +27,7 @@ def build_generation_action_row(owner, root_layout) -> None:
     owner.progress_bar.setTextVisible(True)
     owner.progress_bar.setFixedHeight(18)
     owner.progress_bar.setAccessibleName("SNR plot generation progress")
+    owner.progress_bar.hide()
     root_layout.addWidget(owner.progress_bar)
 
     owner.save_defaults_btn = make_action_button("Save Folder Defaults")
@@ -40,6 +42,11 @@ def build_generation_action_row(owner, root_layout) -> None:
     owner.open_output_btn.setObjectName("snr_open_plot_folder")
     owner.open_output_btn.setToolTip("Open the selected plot output folder")
     owner.open_output_btn.clicked.connect(owner._open_output_folder)
+    owner.view_log_btn = make_action_button("View Log")
+    owner.view_log_btn.setObjectName("snr_view_generation_log")
+    owner.view_log_btn.setToolTip("Open the full SNR plot generation log")
+    owner.view_log_btn.setAccessibleName("View SNR plot generation log")
+    owner.view_log_btn.clicked.connect(owner._show_generation_log)
     owner.gen_btn = make_action_button("Generate SNR Plots", variant="primary")
     owner.gen_btn.setObjectName("snr_generate_plots")
     owner.gen_btn.setToolTip("Generate matching PNG and PDF SNR plots")
@@ -60,6 +67,7 @@ def build_generation_action_row(owner, root_layout) -> None:
     actions_widget.add_button(owner.save_defaults_btn)
     actions_widget.add_button(owner.load_defaults_btn)
     actions_widget.add_button(owner.open_output_btn)
+    actions_widget.add_button(owner.view_log_btn)
     actions_widget.row_layout.addStretch(1)
     actions_widget.add_button(owner.gen_btn)
     actions_widget.add_button(owner.cancel_btn)

@@ -296,6 +296,17 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 QMessageBox.critical(self, "Error", "Invalid axis limits.")
                 return
 
+            if (
+                self.overlay_check.isChecked()
+                and self.condition_combo.currentText()
+                == self.condition_b_combo.currentText()
+            ):
+                self._set_workflow_status(
+                    "Choose two different conditions for an overlay.",
+                    "warning",
+                )
+                return
+
             overlay_groups = self._group_overlay_enabled()
             selected_groups = self._selected_groups() if overlay_groups else []
             if overlay_groups and not selected_groups:
@@ -328,6 +339,8 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             self._worker_reported_cancelled = False
             self._worker_outcome_received = False
             self._set_generation_navigation_locked(True)
+            self.progress_bar.setValue(0)
+            self.progress_bar.show()
             self._set_workflow_status("Preparing SNR plot generation...", "info")
             self.log.clear()
             self._conditions_queue.clear()
@@ -340,15 +353,6 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             if self.overlay_check.isChecked():
                 cond_a = self.condition_combo.currentText()
                 cond_b = self.condition_b_combo.currentText()
-                if cond_a == cond_b:
-                    self._set_workflow_status(
-                        "Choose two different conditions for an overlay.",
-                        "warning",
-                    )
-                    self.gen_btn.setEnabled(True)
-                    self.cancel_btn.setEnabled(False)
-                    self._set_generation_navigation_locked(False)
-                    return
                 self._set_workflow_status(
                     f"Generating condition overlay: {cond_a} vs {cond_b}",
                     "info",
@@ -357,6 +361,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 if roi_payload is None:
                     self.gen_btn.setEnabled(True)
                     self.cancel_btn.setEnabled(False)
+                    self.progress_bar.hide()
                     self._set_generation_navigation_locked(False)
                     return
                 roi_map_for_worker, selected_roi = roi_payload
@@ -443,8 +448,14 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             )
             self.gen_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
+            self.progress_bar.hide()
             self._set_generation_navigation_locked(False)
             return
+
+    def _show_generation_log(self) -> None:
+        """Open the complete generation log in its focused modal dialog."""
+
+        self.generation_log_dialog.exec()
 
     def _open_output_folder(self) -> None:
         folder = self.out_edit.text()

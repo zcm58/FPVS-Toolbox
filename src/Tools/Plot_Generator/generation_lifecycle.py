@@ -28,6 +28,7 @@ def update_workflow_status(owner, text: str, variant: str = "info") -> None:
     banner.set_text(text)
     banner.set_variant(variant)
     banner.setAccessibleDescription(text)
+    banner.show()
 
 
 class PlotGeneratorLifecycleMixin:
@@ -141,6 +142,7 @@ class PlotGeneratorLifecycleMixin:
         self.gen_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self._animate_progress_to(100)
+        self.progress_bar.hide()
         self._total_conditions = 0
         self._current_condition = 0
 
@@ -244,6 +246,7 @@ class PlotGeneratorLifecycleMixin:
         self._current_condition = 0
         self.gen_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self.progress_bar.hide()
         self._set_generation_navigation_locked(False)
         generated_count = len(self._generated_paths)
         if generated_count:

@@ -1,31 +1,36 @@
-import sys
-import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QPushButton
+
+from Tools.Plot_Generator.gui import PlotGeneratorWindow
 
 
-@pytest.fixture(scope="session")
-def app():
-    return QApplication.instance() or QApplication(sys.argv)
+def test_generation_log_opens_in_focused_modal(qtbot, monkeypatch) -> None:
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
 
+    assert not hasattr(window, "console_box")
+    assert not hasattr(window, "log_body")
+    assert window.log is window.generation_log_dialog.viewer
+    assert window.generation_log_dialog.isHidden()
+    assert window.generation_log_dialog.isModal()
 
-def test_log_panel_is_always_visible(app, qtbot):
-    from Tools.Plot_Generator.gui import PlotGeneratorWindow
+    window._append_log("First detail")
+    window._append_log("Second detail")
+    opened_with: list[str] = []
+    monkeypatch.setattr(
+        type(window.generation_log_dialog),
+        "exec",
+        lambda _dialog: opened_with.append(window.log.toPlainText()) or 0,
+    )
 
-    w = PlotGeneratorWindow()
-    qtbot.addWidget(w)
-    w.show()
-    qtbot.waitExposed(w)
+    window.view_log_btn.click()
 
-    height_before = w.height()
-    assert not hasattr(w, "log_toggle_btn")
-    assert w.log_body.isVisible() is True
-    assert w.advanced_box.minimumHeight() >= 250
-    assert w.advanced_box.height() >= w.advanced_box.minimumHeight()
-    assert w.console_box.height() <= 180
-    assert 95 <= w.log.height() <= 120
-
-    w.log.append("Always visible")
-    qtbot.wait(50)
-
-    assert "Always visible" in w.log.toPlainText()
-    assert w.height() <= height_before + 10
+    assert opened_with == ["First detail\nSecond detail"]
+    clear_button = window.generation_log_dialog.findChild(
+        QPushButton,
+        "snr_generation_log_clear",
+    )
+    assert clear_button is not None
+    clear_button.click()
+    assert window.log.toPlainText() == ""

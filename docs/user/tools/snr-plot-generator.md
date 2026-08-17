@@ -94,10 +94,11 @@ spreadsheet, QC workbook, or JSON manifest. Ordinary figures use
 `<condition> - <ROI>_group_overlay`, so they remain distinct from ordinary
 figures.
 
-The inline status area reports whether the setup is ready, a run is active, or
-generation completed. Successful runs do not interrupt the workflow with a
-confirmation dialog; choose **Open Plot Folder** when you are ready to review
-the figures.
+The compact page hides status and progress while idle. They appear while a run
+is active; progress hides again when the run ends, while completion or warning
+status remains available. Choose **View Log** for full generation details and
+**Open Plot Folder** to review the figures. Successful runs do not interrupt
+the workflow with a confirmation dialog.
 
 When spectral QC is enabled, missing or insufficient evidence is surfaced as a
 warning rather than silently presented as a completed QC pass. Spectral-QC

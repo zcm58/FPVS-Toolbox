@@ -17,7 +17,7 @@ Current ownership map:
   worker outcomes, and completion/thread-exit handling.
 - `generation_outcome.py`: pure worker-payload normalization and
   completion-summary formatting used by the GUI workflow.
-- `ui_sections.py`, `ui_actions.py`, `ui_header.py`, `settings_dialog.py`, `gui_settings.py`,
+- `ui_sections.py`, `ui_actions.py`, `ui_header.py`, `log_dialog.py`, `settings_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
   GUI, settings, selection, and thin shared-project adapters.
 - `worker.py`: `_Worker` QObject shell, signals, stop state, timing, run
@@ -118,6 +118,9 @@ v2.1 project contract:
 - Publication output is figures only: write matching PNG and PDF files directly
   to the selected output folder. Do not create per-run subfolders, plotted-
   source spreadsheets, spectral-QC workbooks, or JSON manifests.
+- Keep the embedded SNR page free of page-level scrolling. Use the compact
+  title-only header, hide idle status/progress rows, and keep detailed run
+  messages in the focused generation-log dialog opened by **View Log**.
 - Spectral QC is report-only. If no cells can be evaluated because participant
   or shared-electrode coverage is insufficient, record the evidence as
   unavailable with a reason; never present zero evaluated cells as a completed

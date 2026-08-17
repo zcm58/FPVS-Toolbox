@@ -46,6 +46,8 @@ def test_finish_all_reports_success_inline_without_modal(qtbot, monkeypatch, tmp
     assert window.workflow_status.property("statusVariant") == "success"
     assert "Generated 1 figure file" in window.workflow_status.text()
     assert "Open Plot Folder" in window.workflow_status.text()
+    assert not window.workflow_status.isHidden()
+    assert window.progress_bar.isHidden()
 
 
 def test_late_cancel_after_saved_figure_reports_warning(qtbot, tmp_path):
@@ -63,4 +65,6 @@ def test_late_cancel_after_saved_figure_reports_warning(qtbot, tmp_path):
 
     assert window.workflow_status.property("statusVariant") == "warning"
     assert "after these files were saved" in window.workflow_status.text()
+    assert not window.workflow_status.isHidden()
+    assert window.progress_bar.isHidden()
     assert window._late_cancel_after_commit is False

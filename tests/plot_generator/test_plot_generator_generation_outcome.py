@@ -32,6 +32,8 @@ def test_finish_all_uses_generated_paths(qtbot, monkeypatch) -> None:
     assert "1 warning" in window.log.toPlainText()
     assert window.workflow_status.property("statusVariant") == "warning"
     assert "1 warning" in window.workflow_status.text()
+    assert not window.workflow_status.isHidden()
+    assert window.progress_bar.isHidden()
 
 
 def test_finish_all_reports_no_plots_when_generated_paths_empty(qtbot, monkeypatch) -> None:
@@ -49,6 +51,8 @@ def test_finish_all_reports_no_plots_when_generated_paths_empty(qtbot, monkeypat
 
     assert "No plots were generated" in window.log.toPlainText()
     assert window.workflow_status.property("statusVariant") == "error"
+    assert not window.workflow_status.isHidden()
+    assert window.progress_bar.isHidden()
 
 
 def test_worker_timing_summary_emits_without_mutating_results(tmp_path, monkeypatch) -> None:
