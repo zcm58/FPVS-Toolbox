@@ -21,7 +21,7 @@ managed project root
   -> one streamed XML read per participant-condition workbook
   -> raw amplitude tensor and paper SNR/z preparation
   -> retained non-base harmonic domain and participant L2 normalization
-  -> GUI preparation review and explicit run confirmation
+  -> one GUI action chaining preparation and inference
   -> paired sign flips or independent group-label permutations
   -> free-harmonic/spatial connected components and cluster-mass inference
   -> atomic project-local Excel workbook, manifest, tables, and compressed arrays
@@ -56,9 +56,8 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 - `gui/models.py`: GUI-only prepared/result view models.
 - `gui/workers.py`: cancellable signal-driven preparation and permutation
   workers; workers do not touch widgets.
-- `gui/page.py`: embedded `FreeHarmonicClusteringPage` with scroll-free,
-  numbered Setup, Review, and Results task tabs plus a compact persistent
-  status/action footer.
+- `gui/page.py`: embedded `FreeHarmonicClusteringPage` with one scroll-free
+  setup/results workspace plus a compact persistent status/action footer.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
 ## Contrast Modes
@@ -177,18 +176,16 @@ family, and whole-participant exchangeability.
 - The page is part of the default Quick Tools list and does not depend on the
   Beta Tools setting.
 - Setup resolves one contrast and displays the A-minus-B direction. One **Run
-  Analysis** action automatically prepares the analysis, unlocks Review, starts
-  permutations, and opens Results when complete. Review displays concise
-  cohort, exclusion, harmonic, source-coverage, and participant x sensor x
-  harmonic summaries; full long-list values remain available in tooltips and
-  exports.
+  Analysis** action automatically prepares the analysis and starts
+  permutations. A concise Results section appears beneath Setup when complete;
+  detailed cohort, exclusion, harmonic, source-coverage, and participant x
+  sensor x harmonic provenance remains in the exported workbook.
 - Prepared arrays remain in memory while the automatic permutation phase runs,
   so source workbooks are not read a second time.
-- Results is disabled before completion and shows only the current session's
-  latest run. Its Significant and All clusters views are bounded within the tab;
-  only their data tables may scroll. Significant clusters appear first by
-  ascending raw sign-specific p-value. Version 1 has no plots or run-history
-  browser.
+- Results is hidden before completion and shows the current session's
+  significant clusters in one bounded table ordered by ascending raw
+  sign-specific p-value. Technical run metadata and the full cluster table stay
+  in the exported workbook. Version 1 has no plots or run-history browser.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
   information dialog explains fixed-domain fill-through and base-overlap
   exclusion.

@@ -10,10 +10,9 @@ PUBLIC_REPOSITORY_URL = "https://github.com/oliver-hermann1/FPVS_Multiharmonic"
 OVERVIEW_HTML = """
 <h2>What This Analysis Tests</h2>
 <p>
-Free Harmonic Clustering Analysis compares the <b>relative distribution</b> of
-an FPVS oddball response across electrodes and retained oddball harmonics. It
-preserves the electrode &times; harmonic structure that is lost when harmonic
-responses are first collapsed into one summed value.
+Free Harmonic Clustering Analysis, first defined by Hermann et al. (2026), compares the <b>relative distribution</b> of
+an FPVS oddball response across electrodes and retained oddball harmonics rather than collapsing the harmonic structure
+by summing BCA values across harmonics.
 </p>
 
 <h3>Supported Designs</h3>
@@ -31,9 +30,10 @@ select them in the opposite order to reverse the contrast.
 <h3>Project-Bound Workflow</h3>
 <p>
 The tool obtains conditions, groups, participant exclusions, base and oddball
-frequencies, and processed workbooks from the active project. It first prepares
-and displays the frozen cohort, harmonic domain, and data shape. Permutations
-run only after that review.
+frequencies, and processed workbooks from the active project. One action
+prepares the frozen cohort and harmonic domain, runs the permutations, and then
+shows a concise result. Full preparation and method details remain in the
+exported workbook.
 </p>
 <p>
 The analysis never changes project metadata, QC decisions, source workbooks,
@@ -115,12 +115,13 @@ reproducible.
 INTERPRETATION_HTML = """
 <h2>Reading the Results</h2>
 <p>
-Read <b>Significant Results</b> first. The primary p-value is the raw,
-sign-specific Monte Carlo cluster p-value, evaluated at <b>.025 per direction</b>
+The workspace shows significant clusters from the current run. The primary
+p-value is the raw, sign-specific Monte Carlo cluster p-value, evaluated at
+<b>.025 per direction</b>
 for a two-tailed family alpha of .05. The doubled p-value is a secondary
-two-sided presentation of the same result; it is not an additional test. The
-Monte Carlo interval describes uncertainty from a finite number of random
-assignments.
+two-sided presentation of the same result in the exported workbook; it is not
+an additional test. The workbook also records the Monte Carlo interval and
+other technical run details.
 </p>
 <p>
 A positive cluster means that the normalized response is relatively stronger
@@ -179,8 +180,8 @@ harmonic that coincides with a base-rate harmonic is excluded automatically,
 including an overlap below the selected upper end.
 </p>
 <p>
-Review the included and excluded frequencies in the preparation summary before
-running permutations. Before reading the FFT data, the tool verifies the
+The completed workbook records the included and excluded frequencies. Before
+reading the FFT data, the tool verifies the
 current base and oddball rates against saved provenance for the exact processed
 workbook. Missing, stale, or conflicting provenance—or unavailable FFT
 bins—stops preparation instead of substituting a hard-coded frequency or nearby

@@ -4,8 +4,9 @@
 
 This package owns the clean-room Free Harmonic Clustering Analysis backend and
 its thin embedded GUI. Numerical preparation, inference, and export modules
-remain GUI-neutral. The GUI gathers active-project context, prepares and reviews
-one contrast, then delegates long work to signal-driven workers.
+remain GUI-neutral. The GUI gathers active-project context, runs one contrast,
+and presents a concise current-session result while delegating long work to
+signal-driven workers.
 
 ## Non-Negotiables
 
@@ -127,16 +128,18 @@ the page implementation.
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a
   post-processing worker itself.
-- Use the numbered Setup, Review, and Results tabs as a gated workflow. One
-  **Run Analysis** action automatically chains preparation, the frozen Review,
-  permutations, and Results. Review unlocks after preparation freezes and
-  displays the cohort, exclusions, harmonic selection, direction, and prepared
-  array shape; Results unlocks only after permutations complete.
+- Use one tab-free workspace. One **Run Analysis** action automatically chains
+  preparation and permutations; a concise Results section appears beneath the
+  setup controls only after completion. Detailed cohort, harmonic-selection,
+  method, and run provenance remains in the exported workbook rather than a
+  dense intermediate GUI review.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result
   tables may scroll internally when their data exceeds the available viewport.
-- Results shows the current session's latest run only, with separate
-  Significant and All clusters views and significant clusters ordered by
-  ascending raw tail p. Past runs remain available through Open Results Folder.
+- Results shows the current session's significant clusters ordered by ascending
+  raw tail p. It does not print assignment count, degrees of freedom,
+  cluster-forming threshold, or seed in the main GUI. Full cluster and method
+  details remain in the exported workbook; past runs remain available through
+  Open Results Folder.
 - The primary human-readable artifact is a polished
   `Free_Harmonic_Clustering_Results.xlsx` workbook. Retain machine-readable
   CSV, compressed-array, and manifest artifacts alongside it.

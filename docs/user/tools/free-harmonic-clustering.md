@@ -83,26 +83,16 @@ frequency, base frequency, FullFFT grid, and available upper frequency. Every
 oddball harmonic that coincides with a base-rate harmonic is excluded. No
 particular base rate, oddball rate, or upper frequency is hard-coded.
 
-## Run and Review
+## Run the Analysis
 
-Define the comparison in **1. Setup**, then select **Run Analysis** once in the
-persistent action strip. The tool prepares the data, unlocks and opens **2.
-Review**, automatically continues through permutations, and opens **3. Results**
-when complete. The review shows:
+Define one comparison, then select **Run Analysis** once. The tool prepares the
+data and continues through the permutations without another confirmation. A
+concise result appears beneath the setup controls when the run completes.
 
-- the design and A minus B direction;
-- included participants, group sizes, exclusions, incomplete pairs, and final
-  sample size;
-- detected and retained harmonics plus the automatic z-score audit or
-  fixed-domain provenance;
-- the prepared data shape: participants x electrodes x harmonics; and
-- sensor and source-workbook validation.
-
-Long participant, exclusion, or selection lists are shortened in the visible
-cards so the page remains readable without a page scrollbar. Hover over a
-shortened value for the full list; the completed workbook also records the full
-cohort and method provenance. No second action is required while the analysis
-continues.
+The main workspace intentionally omits dense preparation and technical run
+summaries. The completed workbook records the full cohort, exclusions,
+incomplete pairs, harmonic-selection audit, prepared data shape, source
+validation, assignment count, threshold, seed, and other method provenance.
 
 Preparation builds the numerical arrays once and reuses them for the
 permutation run, avoiding a second workbook read. Condition workbooks are read
@@ -134,14 +124,15 @@ preserving group sizes. Sensors and harmonics are never shuffled separately.
 
 ## Reading Results
 
-The Results tab opens on **Significant**, which places clusters meeting the
-Hermann-compatible threshold first, ordered by the raw sign-specific p-value.
-Use **All clusters** for the complete current-session table. The task pages do
-not use page-level scrolling; result tables scroll internally only when their
-data exceed the available viewport. The primary cluster p-value is evaluated at
-`.025` per direction for a two-tailed family alpha of `.05`. The doubled p-value
-is included as a secondary two-sided presentation, not as a second test. A Monte
-Carlo interval records uncertainty from the finite number of assignments.
+The main workspace reports whether significant clusters were found and shows
+only those clusters, ordered by the raw sign-specific p-value. The page does not
+use workflow tabs or page-level scrolling; the result table scrolls internally
+only when its data exceed the available viewport. Use **Open Results Folder**
+for the complete cluster table and technical run details. The primary cluster
+p-value is evaluated at `.025` per direction for a two-tailed family alpha of
+`.05`. The doubled p-value is included in the workbook as a secondary two-sided
+presentation, not as a second test. A Monte Carlo interval records uncertainty
+from the finite number of assignments.
 
 A positive cluster means that the L2-normalized response is relatively stronger
 for A than B over the connected electrode x harmonic cells. A negative cluster
@@ -189,8 +180,8 @@ contrast family, and valid whole-participant exchangeability. Do not report the
 24 x 199 smoke as calibrated evidence or generalize the powered result beyond
 its documented regimes.
 
-Version 1 has no result plots and no historical-run browser. The Results tab
-shows the current session's latest run. Use **Open Results Folder** to review
+Version 1 has no result plots and no historical-run browser. The workspace
+shows the current session's latest result. Use **Open Results Folder** to review
 earlier additive runs.
 
 ## Outputs

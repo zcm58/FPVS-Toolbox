@@ -12,16 +12,13 @@ from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
-    QGridLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QProgressBar,
     QSizePolicy,
     QStackedWidget,
-    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -66,14 +63,6 @@ _FREQUENCY_UNSET = object()
 
 def _frequency_text(value: float) -> str:
     return f"{float(value):g} Hz"
-
-
-def _join_or_none(values: object, *, limit: int | None = None) -> str:
-    items = tuple(str(value) for value in values or ())
-    if limit is not None and len(items) > limit:
-        visible = ", ".join(items[:limit])
-        return f"{visible}, ... (+{len(items) - limit} more)"
-    return ", ".join(items) if items else "None"
 
 
 class FreeHarmonicClusteringPage(QWidget):
@@ -177,42 +166,52 @@ class FreeHarmonicClusteringPage(QWidget):
         header_layout.addWidget(self.about_button, 0, Qt.AlignTop)
         root_layout.addWidget(header)
 
-        self.tabs = QTabWidget(self)
-        self.tabs.setObjectName("free_harmonic_main_tabs")
-        self.setup_tab = QWidget(self.tabs)
-        self.setup_tab.setObjectName("free_harmonic_setup_tab")
-        self.review_tab = QWidget(self.tabs)
-        self.review_tab.setObjectName("free_harmonic_review_tab")
-        self.results_tab = QWidget(self.tabs)
-        self.results_tab.setObjectName("free_harmonic_results_tab")
-        self.tabs.addTab(self.setup_tab, "1. Setup")
-        self.tabs.addTab(self.review_tab, "2. Review")
-        self.tabs.addTab(self.results_tab, "3. Results")
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.review_tab), False)
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.results_tab), False)
-        root_layout.addWidget(self.tabs, 1)
+        self.workspace = QWidget(self)
+        self.workspace.setObjectName("free_harmonic_workspace")
+        workspace_layout = QVBoxLayout(self.workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
+        self.setup_panel = QWidget(self.workspace)
+        self.setup_panel.setObjectName("free_harmonic_setup_panel")
+        self.setup_panel.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Maximum,
+        )
+        self.results_panel = QWidget(self.workspace)
+        self.results_panel.setObjectName("free_harmonic_results_panel")
+        workspace_layout.addWidget(self.setup_panel, 0)
+        workspace_layout.addWidget(self.results_panel, 1)
+        root_layout.addWidget(self.workspace, 1)
 
-        self._build_setup_tab()
-        self._build_review_tab()
-        self._build_results_tab()
+        self._build_setup_panel()
+        self._build_results_panel()
         self._build_workflow_footer(root_layout)
 
-    def _build_setup_tab(self) -> None:
-        content = self.setup_tab
+    def _build_setup_panel(self) -> None:
+        content = self.setup_panel
         layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 16, 24, 16)
         layout.setSpacing(14)
 
-        setup_card = SectionCard(
-            "Analysis setup",
-            content,
-            object_name="free_harmonic_setup_card",
-        )
-        layout.addWidget(setup_card, 1)
-        form = make_form_layout()
-        setup_card.content_layout.addLayout(form)
+        cards_layout = QHBoxLayout()
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setSpacing(14)
+        layout.addLayout(cards_layout)
 
-        self.design_combo = QComboBox(setup_card.content)
+        self.comparison_card = SectionCard(
+            "Comparison",
+            content,
+            object_name="free_harmonic_comparison_card",
+        )
+        self.comparison_card.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Preferred,
+        )
+        cards_layout.addWidget(self.comparison_card, 1)
+        comparison_form = make_form_layout()
+        self.comparison_card.content_layout.addLayout(comparison_form)
+
+        self.design_combo = QComboBox(self.comparison_card.content)
         self.design_combo.setObjectName("free_harmonic_design_combo")
         self.design_combo.addItem(
             "Paired Conditions",
@@ -222,12 +221,12 @@ class FreeHarmonicClusteringPage(QWidget):
             "Independent Groups",
             GuiAnalysisDesign.INDEPENDENT_GROUPS.value,
         )
-        form.addRow("Analysis mode:", self.design_combo)
+        comparison_form.addRow("Analysis mode:", self.design_combo)
 
-        self.design_stack = QStackedWidget(setup_card.content)
+        self.design_stack = QStackedWidget(self.comparison_card.content)
         self.design_stack.setObjectName("free_harmonic_design_stack")
         self.design_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        form.addRow(self.design_stack)
+        comparison_form.addRow(self.design_stack)
         paired_panel = QWidget(self.design_stack)
         paired_form = make_form_layout()
         paired_panel.setLayout(paired_form)
@@ -283,13 +282,29 @@ class FreeHarmonicClusteringPage(QWidget):
             )
             combo.setMinimumContentsLength(24)
 
-        self.direction_label = QLabel("Contrast: A - B", setup_card.content)
+        self.direction_label = QLabel(
+            "Contrast: A - B",
+            self.comparison_card.content,
+        )
         self.direction_label.setObjectName("free_harmonic_direction_label")
         self.direction_label.setWordWrap(True)
         self.direction_label.setProperty("caption", True)
-        form.addRow(self.direction_label)
+        comparison_form.addRow(self.direction_label)
 
-        self.harmonic_mode_combo = QComboBox(setup_card.content)
+        self.harmonics_card = SectionCard(
+            "Harmonics",
+            content,
+            object_name="free_harmonic_harmonics_card",
+        )
+        self.harmonics_card.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Preferred,
+        )
+        cards_layout.addWidget(self.harmonics_card, 1)
+        harmonics_form = make_form_layout()
+        self.harmonics_card.content_layout.addLayout(harmonics_form)
+
+        self.harmonic_mode_combo = QComboBox(self.harmonics_card.content)
         self.harmonic_mode_combo.setObjectName("free_harmonic_mode_combo")
         self.harmonic_mode_combo.addItem(
             "Hermann automatic selection",
@@ -299,9 +314,9 @@ class FreeHarmonicClusteringPage(QWidget):
             "Fixed harmonic list",
             GuiHarmonicMode.FIXED_HIGHEST.value,
         )
-        form.addRow("Harmonic domain:", self.harmonic_mode_combo)
+        harmonics_form.addRow("Harmonic domain:", self.harmonic_mode_combo)
 
-        fixed_row = QWidget(setup_card.content)
+        fixed_row = QWidget(self.harmonics_card.content)
         fixed_layout = QHBoxLayout(fixed_row)
         fixed_layout.setContentsMargins(0, 0, 0, 0)
         fixed_layout.setSpacing(6)
@@ -314,66 +329,37 @@ class FreeHarmonicClusteringPage(QWidget):
             object_name="free_harmonic_selection_info_button",
         )
         fixed_layout.addWidget(self.harmonic_info_button)
-        self.fixed_highest_label = QLabel("Highest included harmonic:", setup_card.content)
-        form.addRow(self.fixed_highest_label, fixed_row)
-
-    def _build_review_tab(self) -> None:
-        layout = QGridLayout(self.review_tab)
-        layout.setContentsMargins(24, 16, 24, 16)
-        layout.setHorizontalSpacing(14)
-        layout.setVerticalSpacing(14)
-        layout.setColumnStretch(0, 1)
-        layout.setColumnStretch(1, 1)
-        layout.setRowStretch(0, 1)
-
-        cohort_card = SectionCard(
-            "Contrast and cohort",
-            self.review_tab,
-            object_name="free_harmonic_preparation_card",
+        self.fixed_highest_label = QLabel(
+            "Highest harmonic:",
+            self.harmonics_card.content,
         )
-        layout.addWidget(cohort_card, 0, 0)
-        cohort_form = make_form_layout()
-        cohort_card.content_layout.addLayout(cohort_form)
-        self.review_design_label = QLabel("Not prepared", cohort_card.content)
-        self.review_direction_label = QLabel("Not prepared", cohort_card.content)
-        self.review_cohort_label = QLabel("Not prepared", cohort_card.content)
-        self.review_participants_label = QLabel("Not prepared", cohort_card.content)
-        self.review_exclusions_label = QLabel("Not prepared", cohort_card.content)
-        cohort_form.addRow("Design:", self.review_design_label)
-        cohort_form.addRow("Direction:", self.review_direction_label)
-        cohort_form.addRow("Cohort:", self.review_cohort_label)
-        cohort_form.addRow("Included IDs:", self.review_participants_label)
-        cohort_form.addRow("Excluded/incomplete:", self.review_exclusions_label)
+        harmonics_form.addRow(self.fixed_highest_label, fixed_row)
 
-        inputs_card = SectionCard(
-            "Harmonics and inputs",
-            self.review_tab,
-            object_name="free_harmonic_inputs_review_card",
-        )
-        layout.addWidget(inputs_card, 0, 1)
-        inputs_form = make_form_layout()
-        inputs_card.content_layout.addLayout(inputs_form)
-        self.review_harmonics_label = QLabel("Not prepared", inputs_card.content)
-        self.review_selection_audit_label = QLabel("Not prepared", inputs_card.content)
-        self.review_source_coverage_label = QLabel("Not prepared", inputs_card.content)
-        self.review_shape_label = QLabel("Not prepared", inputs_card.content)
-        inputs_form.addRow("Harmonics:", self.review_harmonics_label)
-        inputs_form.addRow("Selection audit:", self.review_selection_audit_label)
-        inputs_form.addRow("Source coverage:", self.review_source_coverage_label)
-        inputs_form.addRow("Data shape:", self.review_shape_label)
-
-        for widget in (
-            self.review_design_label,
-            self.review_direction_label,
-            self.review_cohort_label,
-            self.review_participants_label,
-            self.review_exclusions_label,
-            self.review_harmonics_label,
-            self.review_selection_audit_label,
-            self.review_source_coverage_label,
-            self.review_shape_label,
+        for combo in (
+            self.harmonic_mode_combo,
+            self.fixed_highest_combo,
         ):
-            widget.setWordWrap(True)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            combo.setSizeAdjustPolicy(
+                QComboBox.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(24)
+
+        aligned_fields = (
+            (comparison_form, self.design_combo),
+            (paired_form, self.paired_condition_a_combo),
+            (paired_form, self.paired_condition_b_combo),
+            (paired_form, self.paired_group_filter_combo),
+            (independent_form, self.independent_condition_combo),
+            (independent_form, self.independent_group_a_combo),
+            (independent_form, self.independent_group_b_combo),
+            (harmonics_form, self.harmonic_mode_combo),
+            (harmonics_form, fixed_row),
+        )
+        for form_layout, field in aligned_fields:
+            label = form_layout.labelForField(field)
+            if label is not None:
+                label.setFixedWidth(120)
 
     def _build_workflow_footer(self, root_layout: QVBoxLayout) -> None:
         footer = QWidget(self)
@@ -406,17 +392,15 @@ class FreeHarmonicClusteringPage(QWidget):
             parent=footer,
         )
         self.cancel_button.setObjectName("free_harmonic_cancel_button")
-        self.setup_open_results_button = make_action_button(
+        self.open_results_button = make_action_button(
             "Open Results Folder",
             variant="secondary",
             parent=footer,
         )
-        self.setup_open_results_button.setObjectName(
-            "free_harmonic_setup_open_results_button"
-        )
+        self.open_results_button.setObjectName("free_harmonic_open_results_button")
         self.workflow_actions = make_action_row(
             (
-                self.setup_open_results_button,
+                self.open_results_button,
                 self.cancel_button,
                 self.run_analysis_button,
             ),
@@ -426,113 +410,44 @@ class FreeHarmonicClusteringPage(QWidget):
         footer_layout.addWidget(self.workflow_actions)
         root_layout.addWidget(footer)
 
-    def _build_results_tab(self) -> None:
-        layout = QVBoxLayout(self.results_tab)
-        layout.setContentsMargins(24, 16, 24, 16)
+    def _build_results_panel(self) -> None:
+        layout = QVBoxLayout(self.results_panel)
+        layout.setContentsMargins(24, 0, 24, 16)
         layout.setSpacing(14)
-        run_summary = QWidget(self.results_tab)
-        run_summary.setObjectName("free_harmonic_current_run_card")
-        run_summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        run_layout = QVBoxLayout(run_summary)
-        run_layout.setContentsMargins(0, 0, 0, 0)
-        run_layout.setSpacing(6)
-        layout.addWidget(run_summary)
+        results_card = SectionCard(
+            "Results",
+            self.results_panel,
+            object_name="free_harmonic_results_card",
+        )
+        results_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(results_card)
+        layout.addStretch(1)
         self.result_status = StatusBanner(
-            "Results appear after a successful permutation run.",
-            run_summary,
+            "No result has been run.",
+            results_card.content,
             variant="info",
         )
         self.result_status.setObjectName("free_harmonic_result_status")
-        run_layout.addWidget(self.result_status)
-        summary_row = QHBoxLayout()
-        summary_row.setContentsMargins(0, 0, 0, 0)
-        summary_row.setSpacing(12)
-        self.result_run_summary = QLabel("No current-session result.", run_summary)
-        self.result_run_summary.setObjectName("free_harmonic_result_run_summary")
-        self.result_run_summary.setWordWrap(True)
-        summary_row.addWidget(self.result_run_summary, 1)
-        self.open_results_button = make_action_button(
-            "Open Results Folder",
-            variant="secondary",
-            parent=run_summary,
-        )
-        self.open_results_button.setObjectName("free_harmonic_open_results_button")
-        summary_row.addWidget(self.open_results_button, 0, Qt.AlignBottom)
-        run_layout.addLayout(summary_row)
-
-        self.results_tabs = QTabWidget(self.results_tab)
-        self.results_tabs.setObjectName("free_harmonic_results_tabs")
-        self.results_tabs.setDocumentMode(True)
-        self.significant_results_tab = QWidget(self.results_tabs)
-        self.significant_results_tab.setObjectName(
-            "free_harmonic_significant_results_tab"
-        )
-        self.all_clusters_tab = QWidget(self.results_tabs)
-        self.all_clusters_tab.setObjectName("free_harmonic_all_clusters_tab")
-        self.results_tabs.addTab(self.significant_results_tab, "Significant")
-        self.results_tabs.addTab(self.all_clusters_tab, "All clusters")
-        layout.addWidget(self.results_tabs, 1)
-
-        significant_layout = QVBoxLayout(self.significant_results_tab)
-        significant_layout.setContentsMargins(0, 12, 0, 0)
-        significant_card = SectionCard(
-            "Significant Results",
-            self.significant_results_tab,
-            object_name="free_harmonic_significant_card",
-        )
-        significant_layout.addWidget(significant_card, 1)
-        self.significant_status = StatusBanner(
-            "No result has been run.",
-            significant_card.content,
-            variant="info",
-        )
-        self.significant_status.setObjectName("free_harmonic_significant_status")
-        significant_card.content_layout.addWidget(self.significant_status)
+        results_card.content_layout.addWidget(self.result_status)
         self.significant_table = self._new_result_table(
-            significant_card.content,
+            results_card.content,
             "free_harmonic_significant_table",
-            ("Direction", "Electrodes", "Harmonics", "Mass", "Raw tail p"),
-        )
-        self.significant_table.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Expanding,
-        )
-        self.significant_table.hide()
-        significant_card.content_layout.addWidget(self.significant_table)
-
-        all_layout = QVBoxLayout(self.all_clusters_tab)
-        all_layout.setContentsMargins(0, 12, 0, 0)
-        all_card = SectionCard(
-            "All clusters",
-            self.all_clusters_tab,
-            object_name="free_harmonic_all_clusters_card",
-        )
-        all_layout.addWidget(all_card, 1)
-        self.significant_only_check = QCheckBox("Significant only", all_card)
-        self.significant_only_check.setObjectName("free_harmonic_significant_only")
-        all_card.header.add_action_widget(self.significant_only_check)
-        self.all_clusters_table = self._new_result_table(
-            all_card.content,
-            "free_harmonic_all_clusters_table",
             (
-                "Cluster",
                 "Direction",
                 "Electrodes",
                 "Harmonics",
-                "Mass",
-                "Raw tail p",
-                "Doubled p",
-                "Monte Carlo interval",
-                "Effect size",
-                "Significant",
+                "Cluster mass",
+                "Cluster p",
             ),
         )
-        self.all_clusters_table.setMinimumHeight(160)
-        self.all_clusters_table.setSizePolicy(
+        self.significant_table.setMinimumHeight(160)
+        self.significant_table.setSizePolicy(
             QSizePolicy.Expanding,
-            QSizePolicy.Expanding,
+            QSizePolicy.Preferred,
         )
-        all_card.content_layout.addWidget(self.all_clusters_table)
+        self.significant_table.hide()
+        results_card.content_layout.addWidget(self.significant_table)
+        self.results_panel.hide()
 
     @staticmethod
     def _new_result_table(
@@ -581,10 +496,7 @@ class FreeHarmonicClusteringPage(QWidget):
             combo.currentIndexChanged.connect(self._on_setup_changed)
         self.run_analysis_button.clicked.connect(self._run_analysis)
         self.cancel_button.clicked.connect(self.cancel_active_work)
-        self.setup_open_results_button.clicked.connect(self._open_results_folder)
         self.open_results_button.clicked.connect(self._open_results_folder)
-        self.significant_only_check.toggled.connect(self._apply_cluster_filter)
-        self.tabs.currentChanged.connect(self._update_action_visibility)
 
     # ---------------------------------------------------------- project state
     def refresh_project_context(
@@ -696,14 +608,14 @@ class FreeHarmonicClusteringPage(QWidget):
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
                 "Project inputs loaded with dataset diagnostics. Select Run "
-                "Analysis; the frozen Excluded/incomplete review will open before "
-                "permutations continue automatically."
+                "Analysis to continue. Exact cohort and input details will be "
+                "recorded in the completed results workbook."
             )
         else:
             self.workflow_status.set_variant("info")
             self.workflow_status.set_text(
-                "Project inputs loaded. Select Run Analysis once to prepare the "
-                "cohort, open Review, and continue through permutations."
+                "Project inputs loaded. Select Run Analysis once to complete the "
+                "analysis and show the results below."
             )
         self._update_buttons()
 
@@ -960,13 +872,9 @@ class FreeHarmonicClusteringPage(QWidget):
 
     def _on_preparation_completed(self, prepared: object) -> None:
         self._prepared = prepared
-        self._populate_preparation_review(prepared)
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.review_tab), True)
-        self.tabs.setCurrentWidget(self.review_tab)
         self.workflow_status.set_variant("success")
         self.workflow_status.set_text(
-            "Preparation complete. The frozen cohort and harmonics are shown here; "
-            "permutations will start automatically."
+            "Preparation complete. Starting cluster permutations..."
         )
         self._update_buttons()
 
@@ -990,15 +898,9 @@ class FreeHarmonicClusteringPage(QWidget):
             return
         self._run_outcome = value
         self._populate_results(value)
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.results_tab), True)
-        self.tabs.setCurrentWidget(self.results_tab)
-        self.results_tabs.setCurrentWidget(self.significant_results_tab)
+        self.results_panel.show()
         self._update_results_folder_button()
-        self.workflow_status.set_variant("success")
-        self.workflow_status.set_text(
-            "Analysis complete. The current-session result and exported workbook "
-            "are ready."
-        )
+        self.workflow_status.hide()
         self._update_buttons()
 
     # -------------------------------------------------------------- workers
@@ -1180,237 +1082,45 @@ class FreeHarmonicClusteringPage(QWidget):
         super().closeEvent(event)
 
     # ------------------------------------------------------------ summaries
-    def _populate_preparation_review(self, prepared: object) -> None:
-        request = getattr(prepared, "request")
-        design_value = str(getattr(getattr(request, "design", ""), "value", getattr(request, "design", "")))
-        design = (
-            "Paired Conditions"
-            if design_value == GuiAnalysisDesign.PAIRED_CONDITIONS.value
-            else "Independent Groups"
-        )
-        arm_a = str(getattr(prepared, "arm_a_label", "A"))
-        arm_b = str(getattr(prepared, "arm_b_label", "B"))
-        participants_a = tuple(getattr(prepared, "participant_ids_a", ()))
-        participants_b = tuple(getattr(prepared, "participant_ids_b", ()))
-        sensors = tuple(getattr(prepared, "sensor_names", ()))
-        orders = tuple(int(value) for value in getattr(prepared, "harmonic_orders", ()))
-        frequencies = tuple(float(value) for value in getattr(prepared, "harmonics_hz", ()))
-        provenance = getattr(prepared, "provenance", None)
-
-        self.review_design_label.setText(design)
-        self.review_direction_label.setText(
-            f"{arm_a} - {arm_b}; positive clusters indicate {arm_a} > {arm_b}."
-        )
-        if design_value == GuiAnalysisDesign.PAIRED_CONDITIONS.value:
-            cohort = f"{len(participants_a)} complete paired participants"
-            included = _join_or_none(participants_a, limit=8)
-            included_full = _join_or_none(participants_a)
-            shape = f"{len(participants_a)} participants x {len(sensors)} electrodes x {len(orders)} harmonics"
-        else:
-            cohort = f"{arm_a}: n = {len(participants_a)}; {arm_b}: n = {len(participants_b)}"
-            included = (
-                f"{arm_a}: {_join_or_none(participants_a, limit=6)}\n"
-                f"{arm_b}: {_join_or_none(participants_b, limit=6)}"
-            )
-            included_full = (
-                f"{arm_a}: {_join_or_none(participants_a)}\n"
-                f"{arm_b}: {_join_or_none(participants_b)}"
-            )
-            shape = (
-                f"{len(participants_a)} + {len(participants_b)} participants; "
-                f"{len(sensors)} electrodes x {len(orders)} harmonics per participant"
-            )
-        self.review_cohort_label.setText(cohort)
-        self.review_participants_label.setText(included)
-        self.review_participants_label.setToolTip(
-            included_full if included_full != included else ""
-        )
-        exclusions = []
-        full_exclusions = []
-        for label, field_name in (
-            ("ledger", "ledger_excluded_participants"),
-            ("manual", "manual_excluded_participants"),
-            ("frequency QC", "frequency_qc_excluded_participants"),
-            ("incomplete pairs", "incomplete_pair_participants"),
-        ):
-            values = tuple(getattr(provenance, field_name, ())) if provenance else ()
-            if values:
-                visible_values = (
-                    _join_or_none(values)
-                    if len(values) <= 3
-                    else f"{len(values)} participants"
-                )
-                exclusions.append(f"{label}: {visible_values}")
-                full_exclusions.append(f"{label}: {_join_or_none(values)}")
-        participant_condition_exclusions = (
-            tuple(getattr(provenance, "participant_condition_exclusions", ()))
-            if provenance
-            else ()
-        )
-        if participant_condition_exclusions:
-            records = tuple(
-                f"{getattr(record, 'participant_id', '?')} / "
-                f"{getattr(record, 'condition', '?')} "
-                f"({getattr(record, 'reason', 'excluded')})"
-                for record in participant_condition_exclusions
-            )
-            visible_records = (
-                _join_or_none(records)
-                if len(records) <= 2
-                else f"{len(records)} records"
-            )
-            exclusions.append(f"participant-condition: {visible_records}")
-            full_exclusions.append(
-                f"participant-condition: {_join_or_none(records)}"
-            )
-        self.review_exclusions_label.setText("; ".join(exclusions) or "None")
-        full_exclusions_text = "; ".join(full_exclusions) or "None"
-        self.review_exclusions_label.setToolTip(
-            full_exclusions_text
-            if full_exclusions_text != self.review_exclusions_label.text()
-            else ""
-        )
-        harmonic_items = tuple(
-            f"H{order} ({_frequency_text(frequency)})"
-            for order, frequency in zip(orders, frequencies, strict=True)
-        )
-        mode = getattr(getattr(prepared, "method", None), "harmonic_selection_mode", "automatic")
-        mode_text = str(getattr(mode, "value", mode)).replace("_", " ")
-        harmonic_text = f"{_join_or_none(harmonic_items, limit=8)} ({mode_text} domain)"
-        full_harmonic_text = f"{_join_or_none(harmonic_items)} ({mode_text} domain)"
-        self.review_harmonics_label.setText(harmonic_text)
-        self.review_harmonics_label.setToolTip(
-            full_harmonic_text if full_harmonic_text != harmonic_text else ""
-        )
-        selection_audit = self._selection_audit_text(prepared, limit=6)
-        full_selection_audit = self._selection_audit_text(prepared)
-        self.review_selection_audit_label.setText(selection_audit)
-        self.review_selection_audit_label.setToolTip(
-            full_selection_audit if full_selection_audit != selection_audit else ""
-        )
-        workbook_count = int(getattr(provenance, "workbook_count", 0)) if provenance else 0
-        source_sheet = str(getattr(provenance, "source_sheet", "FullFFT Amplitude (uV)"))
-        selected_columns = int(
-            getattr(provenance, "selected_frequency_column_count", 0)
-        ) if provenance else 0
-        self.review_source_coverage_label.setText(
-            f"{workbook_count} managed workbook(s), {source_sheet}; "
-            f"{selected_columns} deduplicated frequency columns."
-        )
-        self.review_shape_label.setText(shape)
-
-    @staticmethod
-    def _selection_audit_text(
-        prepared: object,
-        *,
-        limit: int | None = None,
-    ) -> str:
-        selection = getattr(prepared, "selection", None)
-        if selection is None:
-            return "Unavailable"
-        orders = tuple(int(value) for value in getattr(selection, "candidate_orders", ()))
-        arm_a_z = tuple(float(value) for value in getattr(selection, "arm_a_z", ()))
-        arm_b_z = tuple(float(value) for value in getattr(selection, "arm_b_z", ()))
-        detected_a = tuple(bool(value) for value in getattr(selection, "detected_arm_a", ()))
-        detected_b = tuple(bool(value) for value in getattr(selection, "detected_arm_b", ()))
-
-        def detected_text(z_values: tuple[float, ...], flags: tuple[bool, ...]) -> str:
-            rows = [
-                f"H{order} (z={z_value:.2f})"
-                for order, z_value, detected in zip(
-                    orders,
-                    z_values,
-                    flags,
-                    strict=False,
-                )
-                if detected
-            ]
-            return _join_or_none(rows, limit=limit) if rows else "none"
-
-        method = getattr(prepared, "method", None)
-        mode = getattr(method, "harmonic_selection_mode", "automatic")
-        mode_value = str(getattr(mode, "value", mode))
-        if mode_value == GuiHarmonicMode.FIXED_HIGHEST.value:
-            ceiling = getattr(method, "fixed_highest_harmonic_order", None)
-            return (
-                f"Fixed ceiling H{ceiling}; z values are audit-only. "
-                f"Automatic-threshold detections -- A: {detected_text(arm_a_z, detected_a)}; "
-                f"B: {detected_text(arm_b_z, detected_b)}."
-            )
-        threshold = float(getattr(selection, "z_threshold", 3.29))
-        highest = getattr(selection, "highest_detected_order", None)
-        return (
-            f"Strict z > {threshold:g}; A: {detected_text(arm_a_z, detected_a)}; "
-            f"B: {detected_text(arm_b_z, detected_b)}; highest detected: H{highest}."
-        )
-
     def _populate_results(self, outcome: RunOutcome) -> None:
         result = outcome.result
         clusters = self._sorted_clusters(result)
-        significant = tuple(cluster for cluster in clusters if bool(getattr(cluster, "significant", False)))
+        significant = tuple(
+            cluster
+            for cluster in clusters
+            if bool(getattr(cluster, "significant", False))
+        )
         unstable = any(
             bool(getattr(cluster, "confidence_interval_straddles_alpha", False))
             for cluster in clusters
         )
         if significant:
-            self.significant_status.set_variant("warning" if unstable else "success")
-            self.significant_status.set_text(
-                f"{len(significant)} cluster(s) met the Hermann-compatible "
-                "per-direction threshold (raw tail p <= .025)."
+            self.result_status.set_variant("warning" if unstable else "success")
+            cluster_word = "cluster" if len(significant) == 1 else "clusters"
+            self.result_status.set_text(
+                f"{len(significant)} significant {cluster_word} found."
                 + (
-                    " At least one Monte Carlo interval crosses .025; the "
-                    "decision is unstable and more permutations are recommended."
+                    " At least one result is close to the decision threshold; "
+                    "interpret it cautiously."
                     if unstable
                     else ""
                 )
             )
             self.significant_table.show()
             self._fill_significant_table(significant)
-            self.result_status.set_variant("warning" if unstable else "success")
-            self.result_status.set_text(
-                "Significant clusters are listed first by ascending raw tail p."
-                + (
-                    " A Monte Carlo interval crosses the decision threshold; "
-                    "more permutations are recommended."
-                    if unstable
-                    else ""
-                )
-            )
         else:
-            self.significant_status.set_variant("warning" if unstable else "info")
-            self.significant_status.set_text(
-                "No clusters met the Hermann-compatible cluster-level threshold."
-                + (
-                    " A Monte Carlo interval crosses .025; the decision is "
-                    "unstable and more permutations are recommended."
-                    if unstable
-                    else ""
-                )
-            )
             self.significant_table.hide()
             self.significant_table.setRowCount(0)
             self.result_status.set_variant("warning" if unstable else "info")
             self.result_status.set_text(
-                "Analysis completed with no significant clusters."
+                "No significant clusters were found."
                 + (
-                    " A Monte Carlo interval crosses the decision threshold; "
-                    "more permutations are recommended."
+                    " At least one result is close to the decision threshold; "
+                    "interpret it cautiously."
                     if unstable
                     else ""
                 )
             )
-        self._fill_all_clusters_table(clusters)
-        permutations = int(getattr(result, "permutations_evaluated", 0))
-        degrees = int(getattr(result, "degrees_of_freedom", 0))
-        threshold = float(getattr(result, "cluster_forming_threshold", float("nan")))
-        seed = int(getattr(result, "seed", 0))
-        output = Path(getattr(outcome.receipt, "output_directory", ""))
-        self.result_run_summary.setText(
-            f"Permutations: {permutations:,}; df = {degrees}; cluster-forming "
-            f"|t| threshold = {threshold:.4g}; seed = {seed}.\n"
-            f"Exported run: {output.name or 'completed result bundle'}"
-        )
-        self.result_run_summary.setToolTip(str(output))
 
     @staticmethod
     def _sorted_clusters(result: object) -> tuple[object, ...]:
@@ -1442,22 +1152,12 @@ class FreeHarmonicClusteringPage(QWidget):
         arm_a = str(getattr(self._prepared, "arm_a_label", "A"))
         arm_b = str(getattr(self._prepared, "arm_b_label", "B"))
         direction = f"{arm_a} > {arm_b}" if sign == "positive" else f"{arm_b} > {arm_a}"
-        effect = getattr(cluster, "effect_size", None)
-        effect_kind = getattr(cluster, "effect_size_kind", None)
         return {
-            "cluster": str(getattr(cluster, "cluster_id", "")),
             "direction": direction,
             "sensors": sensors,
             "harmonics": harmonics,
             "mass": f"{float(getattr(cluster, 'mass', 0.0)):.4f}",
             "raw_p": f"{float(getattr(cluster, 'p_value', 1.0)):.4f}",
-            "doubled_p": f"{float(getattr(cluster, 'adjusted_two_sided_p_value', 1.0)):.4f}",
-            "interval": (
-                f"[{float(getattr(cluster, 'p_ci_low', 0.0)):.4f}, "
-                f"{float(getattr(cluster, 'p_ci_high', 1.0)):.4f}]"
-            ),
-            "effect": "" if effect is None else f"{str(effect_kind or 'effect')} = {float(effect):.3f}",
-            "significant": "Yes" if bool(getattr(cluster, "significant", False)) else "No",
         }
 
     def _fill_significant_table(self, clusters: tuple[object, ...]) -> None:
@@ -1466,44 +1166,6 @@ class FreeHarmonicClusteringPage(QWidget):
             display = self._cluster_display(cluster)
             for column, key in enumerate(("direction", "sensors", "harmonics", "mass", "raw_p")):
                 self.significant_table.setItem(row, column, QTableWidgetItem(display[key]))
-
-    def _fill_all_clusters_table(self, clusters: tuple[object, ...]) -> None:
-        self.all_clusters_table.setRowCount(len(clusters))
-        keys = (
-            "cluster",
-            "direction",
-            "sensors",
-            "harmonics",
-            "mass",
-            "raw_p",
-            "doubled_p",
-            "interval",
-            "effect",
-            "significant",
-        )
-        for row, cluster in enumerate(clusters):
-            display = self._cluster_display(cluster)
-            significant = bool(getattr(cluster, "significant", False))
-            for column, key in enumerate(keys):
-                item = QTableWidgetItem(display[key])
-                item.setData(Qt.UserRole, significant)
-                if significant:
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-                self.all_clusters_table.setItem(row, column, item)
-        self._apply_cluster_filter()
-
-    @Slot()
-    def _apply_cluster_filter(self) -> None:
-        significant_only = self.significant_only_check.isChecked()
-        for row in range(self.all_clusters_table.rowCount()):
-            item = self.all_clusters_table.item(row, 0)
-            significant = bool(item.data(Qt.UserRole)) if item is not None else False
-            self.all_clusters_table.setRowHidden(
-                row,
-                significant_only and not significant,
-            )
 
     # -------------------------------------------------------------- utilities
     def _reset_session_views(self) -> None:
@@ -1516,34 +1178,11 @@ class FreeHarmonicClusteringPage(QWidget):
     def _clear_prepared_and_results(self) -> None:
         self._prepared = None
         self._run_outcome = None
-        for label in (
-            self.review_design_label,
-            self.review_direction_label,
-            self.review_cohort_label,
-            self.review_participants_label,
-            self.review_exclusions_label,
-            self.review_harmonics_label,
-            self.review_selection_audit_label,
-            self.review_source_coverage_label,
-            self.review_shape_label,
-        ):
-            label.setText("Not prepared")
-            label.setToolTip("")
         self.significant_table.setRowCount(0)
         self.significant_table.hide()
-        self.all_clusters_table.setRowCount(0)
-        self.significant_only_check.setChecked(False)
-        self.result_run_summary.setText("No current-session result.")
-        self.result_run_summary.setToolTip("")
         self.result_status.set_variant("info")
-        self.result_status.set_text("Results appear after a successful permutation run.")
-        self.significant_status.set_variant("info")
-        self.significant_status.set_text("No result has been run.")
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.review_tab), False)
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.results_tab), False)
-        self.results_tabs.setCurrentWidget(self.significant_results_tab)
-        if self.tabs.currentWidget() is not self.setup_tab:
-            self.tabs.setCurrentWidget(self.setup_tab)
+        self.result_status.set_text("No result has been run.")
+        self.results_panel.hide()
 
     def _show_frequency_or_ready_status(self) -> None:
         self.workflow_status.show()
@@ -1563,22 +1202,14 @@ class FreeHarmonicClusteringPage(QWidget):
         self.workflow_status.set_variant("error")
         self.workflow_status.set_text(str(message))
 
-    @Slot(int)
-    def _update_action_visibility(self, _index: int = -1) -> None:
-        current = self.tabs.currentWidget()
-        busy = self._thread is not None
-        self.run_analysis_button.setVisible(
-            current in (self.setup_tab, self.review_tab) and not busy
-        )
-        self.setup_open_results_button.setVisible(current is not self.results_tab)
-        self.workflow_actions.setVisible(current is not self.results_tab or busy)
-
     def _update_buttons(self) -> None:
         busy = self._thread is not None
         error = self._setup_error()
         self.run_analysis_button.setEnabled(not busy and error is None)
+        self.run_analysis_button.setVisible(not busy)
         self.cancel_button.setVisible(busy)
         self.cancel_button.setEnabled(busy)
+        self.workflow_actions.setVisible(True)
         self.design_combo.setEnabled(not busy and self._options is not None)
         self.harmonic_mode_combo.setEnabled(not busy and self._options is not None)
         self.design_stack.setEnabled(not busy and self._options is not None)
@@ -1586,7 +1217,6 @@ class FreeHarmonicClusteringPage(QWidget):
         self.fixed_highest_combo.setEnabled(
             not busy and fixed and self._options is not None and self.fixed_highest_combo.count() > 0
         )
-        self._update_action_visibility()
 
     def _results_parent(self) -> Path:
         return self._backend.results_parent(self._project_root)
@@ -1597,14 +1227,13 @@ class FreeHarmonicClusteringPage(QWidget):
         except OSError:
             exists = False
         self.open_results_button.setEnabled(exists)
-        self.setup_open_results_button.setEnabled(exists)
 
     @Slot()
     def _open_results_folder(self) -> None:
         parent = self._results_parent()
         if not parent.is_dir():
             self.open_results_button.setEnabled(False)
-            self.setup_open_results_button.setEnabled(False)
+            self.workflow_status.show()
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
                 "No Free Harmonic Clustering results folder exists yet."

@@ -34,17 +34,15 @@ and FullFFT availability. It does not offer local metadata or participant
 overrides.
 
 1. Choose Paired Conditions or Independent Groups and define one A-minus-B
-   contrast in **1. Setup**.
+   contrast in the setup controls.
 2. Use the default Hermann automatic harmonic selection, or choose the highest
    fixed oddball harmonic. Both modes fill through and exclude all dynamically
    identified base-rate overlaps.
-3. Select **Run Analysis** once. The frozen cohort, exclusions, harmonic
-   domain, source coverage, and participant x sensor x harmonic shape appear in
-   **2. Review**, then permutations continue automatically without rereading
-   source workbooks.
-4. When **3. Results** opens, review the **Significant** view first, then **All
-   clusters**. Use **Open
-   Results Folder** for the polished Excel workbook and complete provenance.
+3. Select **Run Analysis** once. Preparation and permutations continue
+   automatically without rereading source workbooks.
+4. Review the concise significant-cluster results that appear beneath Setup.
+   Use **Open Results Folder** for the polished Excel workbook, all clusters,
+   and complete provenance.
 
 The GUI exposes the locked Hermann-compatible profile rather than advanced
 method controls. Version 1 runs 10,000 assignments, uses a two-sided node-entry
@@ -53,11 +51,11 @@ FieldTrip-style BioSemi64 spatial reconstruction, and separate signed nulls.
 Raw sign-specific cluster p-values are judged at `.025`; doubled p-values are
 secondary two-sided presentations.
 
-The embedded task tabs do not use page-level scrolling; result tables scroll
-internally only when their rows or columns exceed the available viewport. The
-Results tab shows the current session's latest run only. Plots, an all-condition
-batch, a historical-run browser, and clipboard/manuscript helpers are deferred
-beyond version 1.
+The embedded workspace has no workflow tabs or page-level scrolling; the
+significant-cluster table scrolls internally only when needed. It shows the
+current session's latest result without printing technical run metadata in the
+main GUI. Plots, an all-condition batch, a historical-run browser, and
+clipboard/manuscript helpers are deferred beyond version 1.
 
 ## Headless use
 
@@ -134,8 +132,8 @@ The additional visible release gate is an end-to-end GUI reproduction of the
 canonical ACR Neutral Happy comparison: 18 anxious versus 16 non-anxious
 participants, retained H1/H2, a positive H1 C1/Cz/CPz cluster, and raw
 sign-specific p approximately `.0043`. Version 1 is not accepted until project
-discovery, preparation, GUI review, permutation inference, and export reproduce
-that result.
+discovery, preparation, GUI result presentation, permutation inference, and
+export reproduce that result.
 
 See the [user guide](../../../docs/user/tools/free-harmonic-clustering.md) and
 [methods/reporting

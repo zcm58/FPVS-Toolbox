@@ -155,6 +155,8 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     tmp_path: Path,
 ) -> None:
     page = _page(qtbot, tmp_path)
+    page.resize(1280, 900)
+    QtWidgets.QApplication.processEvents()
 
     assert page.project_root == tmp_path.resolve()
     header_text = {
@@ -164,48 +166,70 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert "CLUSTER ANALYSIS TOOL" not in header_text
     assert not any(text.startswith("Compare one ordered") for text in header_text)
     assert "BETA ANALYSIS TOOL" not in header_text
-    assert [
-        page.tabs.tabText(index) for index in range(page.tabs.count())
-    ] == ["1. Setup", "2. Review", "3. Results"]
-    assert page.tabs.currentWidget() is page.setup_tab
-    assert not page.tabs.isTabEnabled(page.tabs.indexOf(page.review_tab))
-    assert not page.tabs.isTabEnabled(page.tabs.indexOf(page.results_tab))
-    assert [
-        page.results_tabs.tabText(index)
-        for index in range(page.results_tabs.count())
-    ] == ["Significant", "All clusters"]
-    assert page.results_tabs.currentWidget() is page.significant_results_tab
+    assert page.findChildren(QtWidgets.QTabWidget) == []
     assert page.findChildren(QtWidgets.QScrollArea) == []
+    assert page.setup_panel.isVisible()
+    assert page.results_panel.isHidden()
+    comparison_card = page.findChild(
+        QtWidgets.QWidget,
+        "free_harmonic_comparison_card",
+    )
+    harmonics_card = page.findChild(
+        QtWidgets.QWidget,
+        "free_harmonic_harmonics_card",
+    )
+    assert comparison_card is page.comparison_card
+    assert harmonics_card is page.harmonics_card
+    assert not comparison_card.isAncestorOf(harmonics_card)
+    assert not harmonics_card.isAncestorOf(comparison_card)
+    assert comparison_card.geometry().top() == harmonics_card.geometry().top()
+    assert comparison_card.geometry().bottom() == harmonics_card.geometry().bottom()
+    assert abs(comparison_card.width() - harmonics_card.width()) <= 1
+    assert comparison_card.height() < page.workspace.height() * 0.75
+    comparison_field_x = {
+        widget.mapTo(comparison_card, QtCore.QPoint(0, 0)).x()
+        for widget in (
+            page.design_combo,
+            page.paired_condition_a_combo,
+            page.paired_condition_b_combo,
+            page.paired_group_filter_combo,
+        )
+    }
+    assert len(comparison_field_x) == 1
+    assert (
+        page.harmonic_mode_combo.mapTo(harmonics_card, QtCore.QPoint(0, 0)).x()
+        == page.design_combo.mapTo(comparison_card, QtCore.QPoint(0, 0)).x()
+    )
     for removed_object_name in (
         "free_harmonic_beta_banner",
         "free_harmonic_profile_card",
         "free_harmonic_discovery_note",
         "free_harmonic_swap_button",
+        "free_harmonic_setup_card",
+        "free_harmonic_main_tabs",
+        "free_harmonic_review_tab",
+        "free_harmonic_results_tabs",
+        "free_harmonic_result_run_summary",
     ):
         assert page.findChild(QtWidgets.QWidget, removed_object_name) is None
-    assert page.setup_tab.isAncestorOf(page.design_combo)
-    assert page.review_tab.isAncestorOf(page.review_design_label)
-    assert page.results_tab.isAncestorOf(page.results_tabs)
-    assert page.significant_results_tab.isAncestorOf(page.significant_table)
-    assert page.all_clusters_tab.isAncestorOf(page.all_clusters_table)
+    assert page.setup_panel.isAncestorOf(page.design_combo)
+    assert page.results_panel.isAncestorOf(page.significant_table)
     for widget in (
         page.workflow_status,
         page.progress_bar,
         page.workflow_actions,
         page.run_analysis_button,
         page.cancel_button,
-        page.setup_open_results_button,
+        page.open_results_button,
     ):
         assert page.isAncestorOf(widget)
-        assert not page.tabs.isAncestorOf(widget)
     assert page.design_combo.currentText() == "Paired Conditions"
     assert page.harmonic_mode_combo.currentText() == "Hermann automatic selection"
     assert page.paired_condition_a_combo.count() == 3
     assert page.paired_group_filter_combo.itemData(0) is None
     assert "Run Analysis" in page.workflow_status.text()
-    assert "open Review" in page.workflow_status.text()
-    assert page.setup_open_results_button.isEnabled()
-    assert not page.open_results_button.isEnabled()
+    assert "show the results below" in page.workflow_status.text()
+    assert page.open_results_button.isEnabled()
     for combo in (
         page.paired_condition_a_combo,
         page.paired_condition_b_combo,
@@ -350,8 +374,8 @@ def test_diagnostics_status_points_to_exclusion_review(
     )
 
     assert "Run Analysis" in page.workflow_status.text()
-    assert "Excluded/incomplete" in page.workflow_status.text()
-    assert "continue automatically" in page.workflow_status.text()
+    assert "cohort and input details" in page.workflow_status.text()
+    assert "results workbook" in page.workflow_status.text()
 
 
 def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
@@ -440,7 +464,8 @@ def test_paired_condition_guard_invalidates_prepared_state(
         != page.paired_condition_b_combo.currentData()
     )
     assert page._prepared is None
-    assert page.tabs.currentWidget() is page.setup_tab
+    assert page.setup_panel.isVisible()
+    assert page.results_panel.isHidden()
     assert "Setup changed" in page.workflow_status.text()
 
 
@@ -506,7 +531,8 @@ def test_successful_preparation_automatically_starts_permutations(
     page._on_preparation_completed(prepared)
     page._on_operation_thread_finished()
 
-    assert page.tabs.currentWidget() is page.review_tab
+    assert page.setup_panel.isVisible()
+    assert page.results_panel.isHidden()
     assert permutation_starts == [True]
     assert not page._continue_to_permutations
 
@@ -519,7 +545,7 @@ def test_successful_preparation_automatically_starts_permutations(
     assert not page._continue_to_permutations
 
 
-def test_preparation_and_results_use_locked_current_session_presentation(
+def test_results_appear_in_compact_single_screen_without_run_metadata(
     qtbot,
     tmp_path: Path,
     monkeypatch,
@@ -528,20 +554,11 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     prepared = _prepared(tmp_path)
     page._on_preparation_completed(prepared)
 
-    review_index = page.tabs.indexOf(page.review_tab)
-    results_index = page.tabs.indexOf(page.results_tab)
-    assert page.tabs.isTabEnabled(review_index)
-    assert not page.tabs.isTabEnabled(results_index)
-    assert page.tabs.currentWidget() is page.review_tab
+    assert page.setup_panel.isVisible()
+    assert page.results_panel.isHidden()
     assert page.run_analysis_button.isEnabled()
     assert page.run_analysis_button.isVisible()
     assert page.run_analysis_button.text() == "Run Analysis"
-    assert "P20" in page.review_exclusions_label.text()
-    assert "P10 / Neutral Happy" in page.review_exclusions_label.text()
-    assert "Strict z > 3.29" in page.review_selection_audit_label.text()
-    assert "H2 (z=3.80)" in page.review_selection_audit_label.text()
-    assert "4 managed workbook" in page.review_source_coverage_label.text()
-    assert "2 + 2 participants" in page.review_shape_label.text()
 
     significant = SimpleNamespace(
         cluster_id=1,
@@ -587,29 +604,27 @@ def test_preparation_and_results_use_locked_current_session_presentation(
     )
     page._on_run_completed(outcome)
 
-    assert page.tabs.isTabEnabled(review_index)
-    assert page.tabs.isTabEnabled(results_index)
-    assert page.tabs.currentWidget() is page.results_tab
-    assert page.results_tabs.currentWidget() is page.significant_results_tab
-    assert not page.run_analysis_button.isVisible()
-    assert not page.workflow_actions.isVisible()
+    assert page.setup_panel.isVisible()
+    assert page.results_panel.isVisible()
+    assert page.run_analysis_button.isVisible()
+    assert page.workflow_actions.isVisible()
     assert page.significant_table.rowCount() == 1
-    assert page.all_clusters_table.rowCount() == 2
-    assert page.all_clusters_table.item(0, 5).text() == "0.0043"
-    assert page.all_clusters_table.item(0, 9).text() == "Yes"
-    assert page.all_clusters_table.item(1, 9).text() == "No"
-    assert "more permutations are recommended" in page.result_status.text()
-    assert "p <= .025" in page.significant_status.text()
-    page.results_tabs.setCurrentWidget(page.all_clusters_tab)
-    qtbot.waitUntil(page.all_clusters_table.isVisible)
-    assert not page.significant_table.isVisible()
+    assert page.significant_table.item(0, 4).text() == "0.0043"
+    assert "1 significant cluster found" in page.result_status.text()
+    assert "interpret it cautiously" in page.result_status.text()
+    visible_text = " ".join(
+        label.text() for label in page.findChildren(QtWidgets.QLabel)
+    )
+    assert "Permutations:" not in visible_text
+    assert "cluster-forming" not in visible_text
+    assert "seed =" not in visible_text
+    assert "df =" not in visible_text
 
     assert not page.refresh_project_context(
         project_root=tmp_path,
         frequency_snapshot=ProjectFrequencySnapshot(1.2, 6.0),
     )
-    assert page.tabs.isTabEnabled(review_index)
-    assert page.tabs.isTabEnabled(results_index)
+    assert page.results_panel.isVisible()
     assert not page.has_active_work
 
     page._inspection_failed = True
@@ -636,9 +651,8 @@ def test_preparation_and_results_use_locked_current_session_presentation(
         project_root=tmp_path,
         frequency_snapshot=None,
     )
-    assert not page.tabs.isTabEnabled(review_index)
-    assert not page.tabs.isTabEnabled(results_index)
-    assert page.tabs.currentWidget() is page.setup_tab
+    assert page.results_panel.isHidden()
+    assert page.setup_panel.isVisible()
     assert not page.run_analysis_button.isEnabled()
     assert "Project Settings" in page.workflow_status.text()
 
