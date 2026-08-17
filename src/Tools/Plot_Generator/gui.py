@@ -323,13 +323,31 @@ class PlotGeneratorWindow(
                 self.plot_mgr.save()
 
     def _check_required(self) -> None:
-        required = bool(
-            self.folder_edit.text()
-            and self.out_edit.text()
-            and self.condition_combo.currentText()
-        )
-        if self.overlay_check.isChecked():
-            required = required and bool(self.condition_b_combo.currentText())
-        if self._group_overlay_enabled() and not self._selected_groups():
+        input_folder = self.folder_edit.text().strip()
+        output_folder = self.out_edit.text().strip()
+        condition_a = self.condition_combo.currentText().strip()
+        condition_b = self.condition_b_combo.currentText().strip()
+        required = bool(input_folder and output_folder and condition_a)
+        status = "Ready to generate matching PNG and PDF SNR plots."
+        variant = "info"
+        if not input_folder:
+            status = "Choose the processed Excel folder."
+        elif not output_folder:
+            status = "Choose the plot output folder."
+        elif not condition_a:
+            status = "Choose a condition to plot."
+        elif self.overlay_check.isChecked() and not condition_b:
             required = False
+            status = "Choose a second condition for the overlay."
+        elif self.overlay_check.isChecked() and condition_a == condition_b:
+            required = False
+            status = "Choose two different conditions for the overlay."
+            variant = "warning"
+        elif self._group_overlay_enabled() and not self._selected_groups():
+            required = False
+            status = "Select at least one project group to plot."
+            variant = "warning"
         self.gen_btn.setEnabled(required)
+        self.open_output_btn.setEnabled(bool(output_folder))
+        if getattr(self, "_thread", None) is None and getattr(self, "_worker", None) is None:
+            self._set_workflow_status(status, variant)

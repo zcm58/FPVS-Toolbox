@@ -251,6 +251,7 @@ class PlotGeneratorSelectionMixin:
         checkbox.toggled.connect(self._on_group_check_toggled)
         color_btn = QPushButton()
         color_btn.setFixedSize(20, 20)
+        color_btn.setAccessibleName(f"Choose line color for {group_name}")
         color_btn.clicked.connect(lambda: self._choose_group_color(group_name))
         layout.addWidget(checkbox, 1)
         layout.addWidget(color_btn)
@@ -274,6 +275,7 @@ class PlotGeneratorSelectionMixin:
             button.setStyleSheet(f"background-color: {color};")
             button.setEnabled(overlay_enabled and editable)
             button.setToolTip(f"{role}: {group_name}")
+            button.setAccessibleDescription(f"{role} for group {group_name}")
 
     def _update_multigroup_mode_controls(self) -> None:
         multi_group = bool(self._has_multi_groups)

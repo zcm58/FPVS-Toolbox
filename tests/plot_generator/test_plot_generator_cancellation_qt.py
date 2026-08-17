@@ -126,6 +126,8 @@ def test_cancel_waits_for_worker_exit_and_suppresses_queued_condition(
         window._cancel_generation()
 
         assert worker.stop_requested.is_set()
+        assert window.workflow_status.property("statusVariant") == "warning"
+        assert "Stopping SNR plot generation" in window.workflow_status.text()
         assert window.gen_btn.isEnabled() is False
         assert window.cancel_btn.isEnabled() is False
         assert window._thread is not None
@@ -146,6 +148,8 @@ def test_cancel_waits_for_worker_exit_and_suppresses_queued_condition(
         assert questions == []
         assert "Cancellation requested" in window.log.toPlainText()
         assert "Generation cancelled." in window.log.toPlainText()
+        assert window.workflow_status.property("statusVariant") == "warning"
+        assert "No new figure files were saved" in window.workflow_status.text()
     finally:
         worker.allow_finish.set()
         if window._thread is not None:

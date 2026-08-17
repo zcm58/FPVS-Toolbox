@@ -19,8 +19,22 @@ from Tools.Plot_Generator.spectral_qc_alerts import (
 logger = logging.getLogger(__name__)
 
 
+def update_workflow_status(owner, text: str, variant: str = "info") -> None:
+    """Update the optional inline workflow status without assuming a full GUI."""
+
+    banner = getattr(owner, "workflow_status", None)
+    if banner is None:
+        return
+    banner.set_text(text)
+    banner.set_variant(variant)
+    banner.setAccessibleDescription(text)
+
+
 class PlotGeneratorLifecycleMixin:
     """Own cancellation and completion while a generation thread is active."""
+
+    def _set_workflow_status(self, text: str, variant: str = "info") -> None:
+        update_workflow_status(self, text, variant)
 
     def _set_generation_navigation_locked(self, locked: bool) -> None:
         """Keep embedded Main App navigation stable while a worker is active."""
@@ -57,6 +71,11 @@ class PlotGeneratorLifecycleMixin:
                     exc_info=True,
                 )
         self.cancel_btn.setEnabled(False)
+        update_workflow_status(
+            self,
+            "Stopping SNR plot generation after the current operation...",
+            "warning",
+        )
         self._append_log(
             "Cancellation requested; waiting for the current plot operation to stop."
         )
@@ -131,6 +150,9 @@ class PlotGeneratorLifecycleMixin:
         spectral_qc_message = build_spectral_qc_alert_message(
             self._spectral_qc_flags,
         )
+        late_cancel_after_commit = bool(
+            getattr(self, "_late_cancel_after_commit", False)
+        )
 
         if generated_count > 0:
             summary = format_completion_summary(
@@ -139,6 +161,23 @@ class PlotGeneratorLifecycleMixin:
                 failed_count=failed_count,
             )
             self._append_log(summary)
+            needs_review = bool(
+                failed_count
+                or warning_count
+                or spectral_qc_message
+                or late_cancel_after_commit
+            )
+            if late_cancel_after_commit:
+                status_suffix = " Cancellation arrived after these files were saved."
+            elif spectral_qc_message:
+                status_suffix = " Spectral QC findings need review."
+            else:
+                status_suffix = " Use Open Plot Folder to review the files."
+            update_workflow_status(
+                self,
+                summary + status_suffix,
+                "warning" if needs_review else "success",
+            )
             if failed_count > 0 or warning_count > 0:
                 logger.warning(
                     "SNR plot generation completed with warnings or partial failures.",
@@ -159,16 +198,10 @@ class PlotGeneratorLifecycleMixin:
                     spectral_qc_message,
                 )
                 self._offer_spectral_qc_participant_exclusions()
-            response = QMessageBox.question(
-                self,
-                "Finished",
-                f"{summary}\n\nView plots?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            if response == QMessageBox.Yes:
-                self._open_output_folder()
         else:
-            self._append_log(format_no_plots_message(warning_count=warning_count))
+            no_plots_message = format_no_plots_message(warning_count=warning_count)
+            self._append_log(no_plots_message)
+            update_workflow_status(self, no_plots_message, "error")
             logger.warning(
                 "SNR plot generation produced no plot files.",
                 extra={
@@ -192,6 +225,7 @@ class PlotGeneratorLifecycleMixin:
         self._cancel_requested = False
         self._worker_reported_cancelled = False
         self._worker_outcome_received = False
+        self._late_cancel_after_commit = False
         if post_processing_request is not None:
             reason, project_root = post_processing_request
             self.post_processing_required.emit(
@@ -213,12 +247,15 @@ class PlotGeneratorLifecycleMixin:
         self._set_generation_navigation_locked(False)
         generated_count = len(self._generated_paths)
         if generated_count:
-            self._append_log(
+            message = (
                 "Generation cancelled. "
                 f"{generated_count} completed figure file(s) were kept."
             )
+            self._append_log(message)
         else:
+            message = "Generation cancelled. No new figure files were saved."
             self._append_log("Generation cancelled.")
+        update_workflow_status(self, message, "warning")
         self._generated_paths.clear()
         self._failed_items.clear()
         self._warning_items.clear()
@@ -229,6 +266,7 @@ class PlotGeneratorLifecycleMixin:
         self._cancel_requested = False
         self._worker_reported_cancelled = False
         self._worker_outcome_received = False
+        self._late_cancel_after_commit = False
 
     def _generation_finished(self) -> None:
         self._thread = None
@@ -242,6 +280,7 @@ class PlotGeneratorLifecycleMixin:
             return
         if getattr(self, "_cancel_requested", False):
             self._conditions_queue.clear()
+            self._late_cancel_after_commit = True
             self._append_log(
                 "Cancellation arrived after a figure pair was already saved; "
                 "the completed files were kept."

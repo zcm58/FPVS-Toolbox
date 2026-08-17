@@ -1,15 +1,22 @@
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QLabel, QPushButton
+from PySide6.QtWidgets import QLabel
 
 from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.settings_dialog import _SettingsDialog
-from Main_App.gui.components import ActionRow, PathPickerRow, SectionCard, SubsectionHeaderLabel
+from Main_App.gui.components import (
+    ActionRow,
+    PathPickerRow,
+    SectionCard,
+    StatusBanner,
+    SubsectionHeaderLabel,
+)
 
 
 def test_plot_generator_gui_layout_smoke(qtbot):
     window = PlotGeneratorWindow()
     qtbot.addWidget(window)
+    window.resize(1280, 900)
     window.show()
     qtbot.waitExposed(window)
 
@@ -27,7 +34,7 @@ def test_plot_generator_gui_layout_smoke(qtbot):
         card.header.title_label.text() for card in window.findChildren(SectionCard)
     ]
     assert "Progress" not in section_titles
-    assert "File I/O" in section_titles
+    assert "Input and Output" in section_titles
     assert "Legend labels (optional)" in section_titles
     assert len(window.findChildren(SectionCard)) >= 6
     assert window.params_box.header.title_label.font().bold()
@@ -40,25 +47,21 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
     legend_field_top = window.legend_condition_a_edit.mapTo(window, QPoint(0, 0)).y()
     assert 80 <= legend_field_top - legend_top <= 120
-    progress_origin = window.progress_bar.mapTo(window, QPoint(0, 0))
-    assert progress_origin.y() > window.height() - 80
-    reset_right = window.load_defaults_btn.mapTo(
-        window, window.load_defaults_btn.rect().topRight()
-    ).x()
-    generate_left = window.gen_btn.mapTo(window, window.gen_btn.rect().topLeft()).x()
-    assert progress_origin.x() > reset_right
-    assert progress_origin.x() + window.progress_bar.width() < generate_left
-    assert 8 <= window.progress_bar.height() <= 12
+    assert window.findChild(QLabel, "snr_plots_title").text() == "SNR Plots"
+    assert window.findChild(StatusBanner, "snr_plot_workflow_status") is window.workflow_status
+    status_y = window.workflow_status.mapTo(window, QPoint(0, 0)).y()
+    progress_y = window.progress_bar.mapTo(window, QPoint(0, 0)).y()
+    assert status_y < progress_y
+    assert window.progress_bar.height() >= 18
+    assert window.progress_bar.isTextVisible()
     assert window.folder_edit.width() >= 220
     assert window.out_edit.width() >= 220
-    output_picker = window.out_edit.parentWidget()
-    output_browse_button = output_picker.button
-    output_open_button = next(
-        button
-        for button in output_picker.findChildren(QPushButton)
-        if button.text() == "Open..."
-    )
-    assert output_browse_button.size() == output_open_button.size()
+    assert window.input_folder_btn.text() == "Choose Excel Folder"
+    assert window.output_folder_btn.text() == "Choose Plot Folder"
+    assert window.open_output_btn.text() == "Open Plot Folder"
+    assert window.save_defaults_btn.text() == "Save Folder Defaults"
+    assert window.load_defaults_btn.text() == "Restore Plot Defaults"
+    assert window.gen_btn.text() == "Generate SNR Plots"
     assert window.title_edit.objectName() == "plot_generator_internal_figure_name"
     assert not window.title_edit.isVisible()
     advanced_labels = [label.text() for label in window.advanced_box.findChildren(QLabel)]
@@ -92,9 +95,16 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert action_row is not None
     assert action_row.row_layout.indexOf(window.save_defaults_btn) >= 0
     assert action_row.row_layout.indexOf(window.load_defaults_btn) >= 0
+    assert action_row.row_layout.indexOf(window.open_output_btn) >= 0
     assert action_row.row_layout.indexOf(window.gen_btn) >= 0
     assert action_row.row_layout.indexOf(window.cancel_btn) >= 0
     assert window.log.property("logSurface") is True
+    assert window.folder_edit.accessibleName() == "Processed Excel folder"
+    assert window.out_edit.accessibleName() == "Plot output folder"
+    assert window.condition_combo.accessibleName() == "Condition to plot"
+    assert window.roi_combo.accessibleName() == "Region of interest to plot"
+    assert window.progress_bar.accessibleName() == "SNR plot generation progress"
+    assert window.log.accessibleName() == "SNR plot generation log"
     assert window.log_body.isVisible() is True
     assert window.advanced_box.height() >= 250
     assert window.console_box.height() <= 180
@@ -114,6 +124,8 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert abs(window.params_box.height() - window.legend_group.height()) <= 4
     assert abs(legend_bottom - console_bottom) <= 4
     assert not window.group_box.isVisible()
+    assert window.workflow_status.geometry().right() <= window.width()
+    assert action_row.geometry().bottom() <= window.height()
 
     initial_visible = window.condition_b_label.isVisible()
     initial_width = window.width()

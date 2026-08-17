@@ -54,3 +54,20 @@ def test_snr_worker_import_does_not_load_beta_stats_package() -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_snr_user_copy_matches_figures_only_output_contract() -> None:
+    tool_root = Path(__file__).resolve().parents[2] / "src" / "Tools" / "Plot_Generator"
+    info_text = (tool_root / "tool_info.py").read_text(encoding="utf-8")
+    ui_text = (tool_root / "ui_sections.py").read_text(encoding="utf-8")
+    actions_text = (tool_root / "ui_actions.py").read_text(encoding="utf-8")
+
+    for stale_claim in ("source CSV", "run manifest", "Write a report"):
+        assert stale_claim not in info_text + ui_text
+    for specific_action in (
+        "Choose Excel Folder",
+        "Choose Plot Folder",
+        "Open Plot Folder",
+        "Generate SNR Plots",
+    ):
+        assert specific_action in ui_text + actions_text

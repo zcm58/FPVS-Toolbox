@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QStyle,
@@ -28,16 +27,14 @@ from Main_App.gui.components import (
     fixed_width_font,
     make_action_button,
     make_form_layout,
-    make_info_button,
-    show_tool_info,
 )
 from Main_App.processing.roi_settings import ALL_ROIS_OPTION
 from Tools.Plot_Generator.gui_settings import (
     _LEGEND_DEFAULT_A_PEAKS,
     _LEGEND_DEFAULT_B_PEAKS,
 )
-from Tools.Plot_Generator.tool_info import SNR_PLOTS_TOOL_INFO
 from Tools.Plot_Generator.ui_actions import build_generation_action_row
+from Tools.Plot_Generator.ui_header import build_snr_tool_header
 
 
 class PlotGeneratorUiSectionsMixin:
@@ -46,22 +43,14 @@ class PlotGeneratorUiSectionsMixin:
     def _build_ui(self) -> None:
         configure_window_surface(
             self,
-            size=SurfaceSize(width=1180, height=680, min_width=980, min_height=600),
+            size=SurfaceSize(width=1180, height=760, min_width=980, min_height=680),
         )
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)
         root_layout.setSpacing(8)
-        file_box = SectionCard("File I/O")
-        self.snr_plots_info_btn = make_info_button(
-            parent=file_box,
-            tooltip="About SNR Plots",
-            object_name="snr_plots_tool_info_btn",
-        )
-        self.snr_plots_info_btn.clicked.connect(
-            lambda: show_tool_info(self, SNR_PLOTS_TOOL_INFO)
-        )
-        file_box.header.add_action_widget(self.snr_plots_info_btn)
+        build_snr_tool_header(self, root_layout)
+        file_box = SectionCard("Input and Output")
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         file_layout = file_box.content_layout
         file_layout.setSpacing(6)
@@ -71,48 +60,48 @@ class PlotGeneratorUiSectionsMixin:
         file_grid.setVerticalSpacing(8)
 
         input_picker = PathPickerRow(
-            "Browse...",
+            "Choose Excel Folder",
             placeholder="Select the folder containing your Excel sheets",
         )
+        input_picker.setObjectName("snr_input_folder_picker")
         self.folder_edit = input_picker.line_edit
+        self.folder_edit.setObjectName("snr_input_folder")
+        self.folder_edit.setAccessibleName("Processed Excel folder")
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
         self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
         self.folder_edit.setMinimumWidth(220)
         input_picker.setMinimumWidth(0)
-        browse = input_picker.button
-        browse.setToolTip(
-            "Select the FOLDER that contains your results excel files"
-        )
-        browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
-        browse.clicked.connect(self._select_folder)
+        self.input_folder_btn = input_picker.button
+        self.input_folder_btn.setAccessibleName("Choose processed Excel folder")
+        self.input_folder_btn.setToolTip("Choose the folder containing processed Excel workbooks")
+        self.input_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        self.input_folder_btn.clicked.connect(self._select_folder)
         self.folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        excel_label = QLabel("Excel Files Folder:")
+        excel_label = QLabel("Processed Excel Folder:")
+        excel_label.setBuddy(self.folder_edit)
         file_grid.addWidget(excel_label, 0, 0)
         file_grid.addWidget(input_picker, 0, 1)
 
         output_picker = PathPickerRow(
-            "Browse...",
+            "Choose Plot Folder",
             placeholder="Folder where plots will be saved",
         )
+        output_picker.setObjectName("snr_output_folder_picker")
         self.out_edit = output_picker.line_edit
+        self.out_edit.setObjectName("snr_output_folder")
+        self.out_edit.setAccessibleName("Plot output folder")
         self.out_edit.setText(self._defaults.get("output_folder", ""))
         self.out_edit.setToolTip("Folder where plots will be saved")
         self.out_edit.setMinimumWidth(220)
         output_picker.setMinimumWidth(0)
-        browse_out = output_picker.button
-        browse_out.setToolTip("Browse for output folder")
-        browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
-        browse_out.clicked.connect(self._select_output)
-        open_out = make_action_button("Open...")
-        open_out.setToolTip("Open save directory")
-        open_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
-        open_out.clicked.connect(self._open_output_folder)
-        output_action_size = browse_out.sizeHint().expandedTo(open_out.sizeHint())
-        browse_out.setFixedSize(output_action_size)
-        open_out.setFixedSize(output_action_size)
-        output_picker.row_layout.addWidget(open_out, 0)
+        self.output_folder_btn = output_picker.button
+        self.output_folder_btn.setAccessibleName("Choose plot output folder")
+        self.output_folder_btn.setToolTip("Choose where PNG and PDF plots will be saved")
+        self.output_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        self.output_folder_btn.clicked.connect(self._select_output)
         self.out_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        save_label = QLabel("Save Plots To:")
+        save_label = QLabel("Plot Output Folder:")
+        save_label.setBuddy(self.out_edit)
         file_grid.addWidget(save_label, 1, 0)
         file_grid.addWidget(output_picker, 1, 1)
         file_grid.setColumnStretch(1, 1)
@@ -125,25 +114,30 @@ class PlotGeneratorUiSectionsMixin:
         params_layout.setSpacing(8)
 
         self.condition_combo = QComboBox()
+        self.condition_combo.setAccessibleName("Condition to plot")
         self.condition_combo.setToolTip("Select the condition to plot")
         self.condition_combo.currentTextChanged.connect(self._update_chart_title_state)
 
         self.color_a_btn = QPushButton()
+        self.color_a_btn.setAccessibleName("Choose Condition A line color")
         self.color_a_btn.setFixedSize(20, 20)
         self.color_a_btn.setStyleSheet(f"background-color: {self.stem_color};")
         self.color_a_btn.setToolTip("Color for Condition A")
         self.color_a_btn.clicked.connect(lambda: self._choose_color("a"))
 
         self.condition_b_combo = QComboBox()
+        self.condition_b_combo.setAccessibleName("Second condition to compare")
         self.condition_b_combo.setToolTip("Select second condition")
 
         self.color_b_btn = QPushButton()
+        self.color_b_btn.setAccessibleName("Choose Condition B line color")
         self.color_b_btn.setFixedSize(20, 20)
         self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
         self.color_b_btn.setToolTip("Color for Condition B")
         self.color_b_btn.clicked.connect(lambda: self._choose_color("b"))
 
         self.roi_combo = QComboBox()
+        self.roi_combo.setAccessibleName("Region of interest to plot")
         self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
         self.roi_combo.setToolTip("Select the region of interest")
 
@@ -302,9 +296,11 @@ class PlotGeneratorUiSectionsMixin:
         group_layout = self.group_box.content_layout
         group_layout.setSpacing(6)
         self.group_overlay_check = QCheckBox("Overlay groups on plots")
+        self.group_overlay_check.setAccessibleName("Overlay project groups")
         self.group_overlay_check.toggled.connect(self._on_group_overlay_toggled)
         group_layout.addWidget(self.group_overlay_check)
         self.group_list = QListWidget()
+        self.group_list.setAccessibleName("Project groups to include")
         self.group_list.setSelectionMode(QListWidget.NoSelection)
         self.group_list.setMinimumHeight(58)
         self.group_list.setMaximumHeight(80)
@@ -398,15 +394,9 @@ class PlotGeneratorUiSectionsMixin:
             bool(self._defaults.get("spectral_qc_enabled", True))
         )
         self.spectral_qc_check.setToolTip(
-            "Write a report when strong SNR peaks appear at non-base, non-oddball, non-harmonic frequencies. Plot values are not changed."
+            "Flag strong SNR peaks at non-base, non-oddball, non-harmonic frequencies in the completion feedback. Plot values are not changed."
         )
         advanced_layout.addWidget(self.spectral_qc_check)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(10)
-        self.progress_bar.setMinimumWidth(360)
-        self.progress_bar.setMaximumWidth(520)
 
         self.console_box = SectionCard("Log Output")
         self.console_box.setMaximumHeight(180)
@@ -417,6 +407,7 @@ class PlotGeneratorUiSectionsMixin:
         clear_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         clear_btn.setFixedSize(22, 22)
         clear_btn.setToolTip("Clear Log")
+        clear_btn.setAccessibleName("Clear generation log")
         clear_btn.clicked.connect(lambda: self.log.clear())
         self.console_box.header.add_action_widget(clear_btn)
 
@@ -428,6 +419,7 @@ class PlotGeneratorUiSectionsMixin:
         self.log = QTextEdit()
         self.log.setProperty("logSurface", True)
         self.log.setReadOnly(True)
+        self.log.setAccessibleName("SNR plot generation log")
         self.log.setMinimumHeight(95)
         self.log.setMaximumHeight(120)
         self.log.setFont(fixed_width_font())

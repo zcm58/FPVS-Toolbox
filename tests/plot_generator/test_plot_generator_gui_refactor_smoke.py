@@ -26,7 +26,8 @@ def test_condition_changes_do_not_require_removed_scalp_titles(qtbot, tmp_path):
 
     win.condition_combo.setCurrentText("CondB")
     qtbot.wait(50)
-    assert win.gen_btn.isEnabled()
+    assert not win.gen_btn.isEnabled()
+    assert "two different conditions" in win.workflow_status.text()
 
     win.condition_b_combo.setCurrentText("CondA")
     qtbot.wait(50)

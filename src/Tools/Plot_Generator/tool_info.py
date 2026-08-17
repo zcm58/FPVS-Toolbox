@@ -9,9 +9,8 @@ SNR_PLOTS_TOOL_INFO_HTML = """
 <p>
 SNR Plots reads the FullSNR sheets created during processing and generates
 participant-averaged spectra for the selected regions of interest. You can edit
-titles, legend labels, colors, and axis ranges. Every figure is exported as a
-matching 600-DPI PNG and PDF alongside plotted source data and an auditable run
-manifest.
+legend labels, colors, axis labels, and axis ranges. Every figure is exported
+directly to the selected plot folder as a matching 600-DPI PNG and PDF pair.
 </p>
 
 <h3>Typical Workflow</h3>
@@ -19,8 +18,14 @@ manifest.
   <li>Confirm the processed Excel root and output folder.</li>
   <li>Select a condition and one or all ROIs.</li>
   <li>Optionally adjust labels, colors, axis ranges, and spectral QC.</li>
-  <li>Generate and review the PNG/PDF pairs, source CSV, and run manifest.</li>
+  <li>Select <b>Generate SNR Plots</b>, then review the PNG/PDF pairs in the
+  plot folder.</li>
 </ol>
+
+<p>
+SNR Plots creates figures only. It does not create source-data spreadsheets,
+spectral-QC workbooks, JSON manifests, or per-run subfolders.
+</p>
 
 <h3>Comparison Modes</h3>
 <p>

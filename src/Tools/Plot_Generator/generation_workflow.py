@@ -94,6 +94,10 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             ) = params
         condition = self._conditions_queue.pop(0)
         self._current_condition += 1
+        self._set_workflow_status(
+            f"Generating {self._current_condition} of {self._total_conditions}: {condition}",
+            "info",
+        )
 
         roi_payload = self._worker_roi_selection()
         if roi_payload is None:
@@ -263,16 +267,25 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
         try:
             folder = self.folder_edit.text()
             if not folder:
-                QMessageBox.critical(self, "Error", "Select a folder first.")
+                self._set_workflow_status(
+                    "Choose the processed Excel folder before generating plots.",
+                    "warning",
+                )
                 return
 
             out_dir = self.out_edit.text()
             if not out_dir:
-                QMessageBox.critical(self, "Error", "Select an output folder first.")
+                self._set_workflow_status(
+                    "Choose the plot output folder before generating plots.",
+                    "warning",
+                )
                 return
 
             if not self.condition_combo.currentText():
-                QMessageBox.critical(self, "Error", "No condition selected.")
+                self._set_workflow_status(
+                    "Choose a condition before generating plots.",
+                    "warning",
+                )
                 return
             try:
                 x_min = self.xmin_spin.value()
@@ -286,10 +299,9 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             overlay_groups = self._group_overlay_enabled()
             selected_groups = self._selected_groups() if overlay_groups else []
             if overlay_groups and not selected_groups:
-                QMessageBox.warning(
-                    self,
-                    "Group Overlay",
-                    "Select at least one group before plotting.",
+                self._set_workflow_status(
+                    "Select at least one project group before generating plots.",
+                    "warning",
                 )
                 self.gen_btn.setEnabled(True)
                 self.cancel_btn.setEnabled(False)
@@ -312,9 +324,11 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             self.gen_btn.setEnabled(False)
             self.cancel_btn.setEnabled(True)
             self._cancel_requested = False
+            self._late_cancel_after_commit = False
             self._worker_reported_cancelled = False
             self._worker_outcome_received = False
             self._set_generation_navigation_locked(True)
+            self._set_workflow_status("Preparing SNR plot generation...", "info")
             self.log.clear()
             self._conditions_queue.clear()
             self._generated_paths.clear()
@@ -327,11 +341,18 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 cond_a = self.condition_combo.currentText()
                 cond_b = self.condition_b_combo.currentText()
                 if cond_a == cond_b:
-                    QMessageBox.critical(self, "Error", "Select two different conditions.")
+                    self._set_workflow_status(
+                        "Choose two different conditions for an overlay.",
+                        "warning",
+                    )
                     self.gen_btn.setEnabled(True)
                     self.cancel_btn.setEnabled(False)
                     self._set_generation_navigation_locked(False)
                     return
+                self._set_workflow_status(
+                    f"Generating condition overlay: {cond_a} vs {cond_b}",
+                    "info",
+                )
                 roi_payload = self._worker_roi_selection()
                 if roi_payload is None:
                     self.gen_btn.setEnabled(True)
@@ -411,6 +432,10 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 self._start_next_condition()
         except Exception as exc:
             self._append_log("SNR plot generation failed. See logs for details.")
+            self._set_workflow_status(
+                "SNR plot generation failed. Review the generation log for details.",
+                "error",
+            )
             logger.error(
                 "SNR plot generation failed.",
                 exc_info=exc,

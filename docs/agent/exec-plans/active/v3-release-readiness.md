@@ -183,6 +183,10 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [x] Add focused regression coverage for mismatched grids, cancellation,
       direct figure output, spectral-QC behavior, PDF/PNG figure dimensions, and
       participant counts.
+- [x] Streamline the default-tool surface with a compact SNR header, corrected
+      figures-only About copy, specific folder and generation actions, inline
+      Ready/Running/Complete feedback, and accessible control names. Keep hard
+      failures and scientific/exclusion decisions modal.
 
 #### Scalp Maps
 
@@ -291,7 +295,7 @@ threshold/p-value rules, or relevant numerical dependencies change.
 - [ ] Give both default tools the same header, About/help affordance,
       status/progress placement, Run/Cancel behavior, completion summary, and
       output-location action.
-- [ ] Replace generic stable-tool labels such as `Browse...`, `Open...`,
+- [x] Replace generic stable-tool labels such as `Browse...`, `Open...`,
       `Generate`, and `Reset to Default settings` with specific action verbs.
 - [ ] Move locally correctable input errors to inline `StatusBanner` feedback;
       retain modal dialogs for destructive decisions and hard failures.

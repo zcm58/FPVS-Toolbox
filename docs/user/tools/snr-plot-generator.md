@@ -78,8 +78,9 @@ all-participant curve.
 
 ## Figure Options
 
-You can set the title, legend labels, axis labels, axis limits, colors, and the
-frequency range read from each workbook. Optional spectral quality-control
+You can set legend labels, axis labels, axis limits, colors, and the frequency
+range read from each workbook. Figure filenames and titles follow the selected
+condition and ROI. Optional spectral quality-control
 checks can flag suspicious electrode-level spectra in the completion warning
 without silently changing the plotted source values.
 
@@ -92,6 +93,11 @@ spreadsheet, QC workbook, or JSON manifest. Ordinary figures use
 `<condition> - <ROI>`. Group overlays use
 `<condition> - <ROI>_group_overlay`, so they remain distinct from ordinary
 figures.
+
+The inline status area reports whether the setup is ready, a run is active, or
+generation completed. Successful runs do not interrupt the workflow with a
+confirmation dialog; choose **Open Plot Folder** when you are ready to review
+the figures.
 
 When spectral QC is enabled, missing or insufficient evidence is surfaced as a
 warning rather than silently presented as a completed QC pass. Spectral-QC
@@ -123,13 +129,14 @@ itself an inferential significance test.
 ## Basic Steps
 
 1. Open **SNR Plots** after processing the project.
-2. Confirm the Excel input and figure output folders.
+2. Confirm the **Processed Excel Folder** and **Plot Output Folder**.
 3. Select the condition and ROI scope.
 4. For a single-group project, optionally enable a two-condition overlay.
 5. For a multi-group project, select the groups to include; group overlay is
    required and enabled automatically.
 6. Adjust labels, ranges, colors, and optional spectral QC.
-7. Generate and review the matching PNG/PDF figures in `2 - SNR Plots`.
+7. Select **Generate SNR Plots**, then use **Open Plot Folder** to review the
+   matching PNG/PDF figures in `2 - SNR Plots`.
 
 ## References
 

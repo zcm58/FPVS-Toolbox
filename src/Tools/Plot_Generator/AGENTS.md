@@ -17,7 +17,7 @@ Current ownership map:
   worker outcomes, and completion/thread-exit handling.
 - `generation_outcome.py`: pure worker-payload normalization and
   completion-summary formatting used by the GUI workflow.
-- `ui_sections.py`, `ui_actions.py`, `settings_dialog.py`, `gui_settings.py`,
+- `ui_sections.py`, `ui_actions.py`, `ui_header.py`, `settings_dialog.py`, `gui_settings.py`,
   `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
   GUI, settings, selection, and thin shared-project adapters.
 - `worker.py`: `_Worker` QObject shell, signals, stop state, timing, run
