@@ -78,6 +78,11 @@ Scalp Maps output. The embedded page now uses a vertically resizable scroll
 surface so its Conditions/Settings and Output/Run cards cannot overlap at the
 supported 1280 x 900 layout.
 
+Main processing-page GUI cleanup on 2026-08-17: the persistent processing log
+now opens from a focused **View Log** modal instead of consuming the bottom of
+the home workspace. The Conditions editor expands into the recovered height,
+and the Start Processing action remains anchored below it.
+
 Baseline: `v2.1.2`. At the 2026-08-16 audit, `main` was 217 commits and 633
 changed files beyond that tag, while `src/config.py` still reported `2.1.2`.
 That scope warrants a major release rather than a patch release.

@@ -85,6 +85,9 @@ Primary paths:
   embedded processing activity-page helpers used by `MainWindow` compatibility
   wrappers. GUI log formatting and backend/IDE routing policy are delegated to
   `Main_App.diagnostics.log_router`.
+- `src/Main_App/gui/processing_log_dialog.py`: focused modal viewer for the
+  persistent Main App processing log. The home page keeps only a **View Log**
+  action so the Conditions editor can use the full remaining height.
 - `src/Main_App/updates/`: non-GUI updater backend. It owns GitHub Release
   selection, typed update contracts, installer downloads, and installer launch.
   This package must not import Qt widgets or create windows.

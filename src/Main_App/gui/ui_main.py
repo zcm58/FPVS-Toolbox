@@ -16,10 +16,8 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
     QStackedWidget,
     QTableWidget,
-    QTextEdit,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -27,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.header_bar import HeaderBar
 from Main_App.gui.menu_bar import build_menu_bar
+from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
     EVENT_ID_COLUMN_WIDTH,
@@ -43,7 +42,6 @@ from Main_App.gui.components import (
     SectionCard,
     SubsectionHeaderLabel,
     apply_font_role,
-    fixed_width_font,
     make_action_button,
     make_form_layout,
 )
@@ -192,13 +190,7 @@ def init_ui(self) -> None:
     self.workspace_stack.setObjectName("workspace_stack")
     main_layout.addWidget(self.workspace_stack, 1)
 
-    splitter = QSplitter(Qt.Vertical, self.workspace_stack)
-    splitter.setObjectName("main_page_splitter")
-    splitter.setChildrenCollapsible(False)
-    splitter.setHandleWidth(8)
-    self.main_page_splitter = splitter
-
-    setup_panel = QWidget(splitter)
+    setup_panel = QWidget(self.workspace_stack)
     setup_panel.setObjectName("setup_panel")
     setup_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     setup_layout = QVBoxLayout(setup_panel)
@@ -350,9 +342,20 @@ def init_ui(self) -> None:
     setup_layout.addWidget(grp_event, 1)
 
     # Start Row
-    run_panel = ActionRow(setup_panel, alignment=Qt.AlignLeft, spacing=10)
+    run_panel = ActionRow(setup_panel, alignment=Qt.AlignRight, spacing=10)
     run_panel.setObjectName("run_panel")
     self.run_panel = run_panel
+
+    self.processing_log_dialog = ProcessingLogDialog(self)
+    self.text_log = self.processing_log_dialog.viewer
+    self.btn_view_log = make_action_button(
+        "View Log",
+        variant="secondary",
+        parent=run_panel,
+    )
+    self.btn_view_log.setObjectName("processing_view_log_button")
+    self.btn_view_log.setAccessibleName("View processing log")
+    self.btn_view_log.clicked.connect(self.processing_log_dialog.open)
 
     self.btn_start = make_action_button(
         "Start Processing",
@@ -365,6 +368,7 @@ def init_ui(self) -> None:
     btn_h = max(38, self.btn_start.sizeHint().height())
     self.btn_start.setFixedHeight(btn_h)
 
+    run_panel.add_button(self.btn_view_log)
     run_panel.add_button(self.btn_start)
     setup_layout.addWidget(run_panel)
 
@@ -375,30 +379,11 @@ def init_ui(self) -> None:
     else:
         self.add_event_row()
 
-    # Log pane
-    grp_log = SectionCard("Log", splitter, object_name="log_group")
-    grp_log.setProperty("diagnosticsCard", True)
-    grp_log.header.setObjectName("log_card_header")
-    lay_log = grp_log.content_layout
-    lay_log.setSpacing(10)
-
-    self.text_log = QTextEdit(grp_log)
-    self.text_log.setObjectName("log_surface")
-    self.text_log.setReadOnly(True)
-    self.text_log.setFont(fixed_width_font())
-    lay_log.addWidget(self.text_log)
-
-    splitter.addWidget(setup_panel)
-    splitter.addWidget(grp_log)
-    splitter.setStretchFactor(0, 5)
-    splitter.setStretchFactor(1, 2)
-    splitter.setSizes([620, 220])
-
     # Finalize
-    self.workspace_stack.addWidget(splitter)
+    self.workspace_stack.addWidget(setup_panel)
     self.page1_container = container
     self.page1_right = container
-    self.homeWidget = splitter
+    self.homeWidget = setup_panel
 
     processing_page = QWidget(self.workspace_stack)
     processing_page.setObjectName("processing_page")

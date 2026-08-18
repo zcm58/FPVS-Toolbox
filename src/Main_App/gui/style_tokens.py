@@ -400,21 +400,6 @@ def build_main_page_stylesheet() -> str:
             border-color: {BORDER_SOFT_COLOR};
         }}
 
-        #log_surface {{
-            background: {LOG_BG};
-            border-color: transparent;
-        }}
-
-        #main_page_splitter::handle:vertical {{
-            height: 8px;
-            margin: 3px 0;
-            background: transparent;
-        }}
-
-        #main_page_splitter::handle:vertical:hover {{
-            background: {BORDER_SOFT_COLOR};
-            border-radius: 3px;
-        }}
     """
 
 

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QSplitter,
     QStackedWidget,
     QStatusBar,
     QWidget,
@@ -28,6 +27,7 @@ from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
+from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
@@ -232,19 +232,19 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     qtbot.wait(20)
 
     assert not win.menuBar().isHidden()
-    splitter = win.findChild(QSplitter, "main_page_splitter")
-    assert splitter is not None
     workspace_stack = win.findChild(QStackedWidget, "workspace_stack")
     assert workspace_stack is not None
     assert workspace_stack.currentWidget() is win.homeWidget
-    assert splitter.orientation() == Qt.Vertical
-    assert splitter.widget(0) is not None
-    assert splitter.widget(1) is not None
-    assert splitter.widget(1).isAncestorOf(win.text_log)
+    assert win.homeWidget.objectName() == "setup_panel"
+    assert win.findChild(QWidget, "main_page_splitter") is None
+    assert isinstance(win.processing_log_dialog, ProcessingLogDialog)
+    assert win.text_log is win.processing_log_dialog.viewer
+    assert not win.homeWidget.isAncestorOf(win.text_log)
 
     assert win.btn_start.text() == "Start Processing"
     run_panel = win.findChild(ActionRow, "run_panel")
     assert run_panel is not None
+    assert run_panel.row_layout.indexOf(win.btn_view_log) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.progress_bar) < 0
     assert win.findChild(QWidget, "processing_page") is win.processing_page
@@ -280,13 +280,18 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert condition_header.font().bold()
     assert trigger_header.font().bold()
     assert event_map_header.layout().indexOf(win.btn_add_row) < event_map_header.layout().indexOf(trigger_header)
-    assert win.findChild(QWidget, "log_group") is not None
+    assert win.findChild(QWidget, "log_group") is None
+    assert win.btn_view_log.text() == "View Log"
+    assert win.btn_view_log.accessibleName() == "View processing log"
     assert not hasattr(win, "btn_detect")
     assert win.btn_select_input_file.text() == "Select EEG File..."
     assert win.btn_select_input_folder.text() == "Select Data Folder..."
     assert win.btn_add_row.text() == "+ Add Condition"
     event_map_group = win.findChild(QWidget, "event_map_group")
     assert event_map_group is not None
+    assert event_map_group.geometry().bottom() < run_panel.geometry().top()
+    assert abs(run_panel.geometry().bottom() - (win.homeWidget.height() - 1)) <= 1
+    assert event_map_group.height() > win.findChild(QWidget, "processing_group").height()
     assert not event_map_group.header.isVisible()
     event_map_titles = [
         label
@@ -370,6 +375,30 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
             break
     assert "Relevant Publications" not in help_actions
     assert any(text.startswith("About") for text in help_actions)
+
+
+def test_processing_log_opens_in_focused_modal(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    win.text_log.append("Visible processing detail")
+
+    qtbot.mouseClick(win.btn_view_log, Qt.LeftButton)
+    qtbot.waitUntil(win.processing_log_dialog.isVisible)
+
+    assert win.processing_log_dialog.isModal()
+    assert "Visible processing detail" in win.text_log.toPlainText()
+    clear_button = win.processing_log_dialog.findChild(
+        QPushButton,
+        "processing_log_clear",
+    )
+    assert clear_button is not None
+    qtbot.mouseClick(clear_button, Qt.LeftButton)
+    assert win.text_log.toPlainText() == ""
+    win.processing_log_dialog.reject()
 
 
 def test_processing_activity_page_locks_navigation_and_reuses_start_button(
