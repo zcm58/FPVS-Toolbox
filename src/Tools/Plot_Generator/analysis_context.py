@@ -15,7 +15,11 @@ from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceStaleError,
     require_current_project_full_fft_provenance,
 )
-from Main_App.projects import ProjectDatasetIndex
+from Main_App.projects import (
+    DatasetIndexError,
+    ProjectDatasetIndex,
+    load_project_dataset_index,
+)
 
 
 _LEGACY_WARNING = (
@@ -39,6 +43,34 @@ class SNRAnalysisContext:
     @property
     def is_managed(self) -> bool:
         return self.project_root is not None
+
+
+def load_or_reuse_dataset_index(
+    dataset_source: str | Path,
+    prepared_index: ProjectDatasetIndex | None,
+) -> ProjectDatasetIndex:
+    """Load an input index or validate a worker-supplied batch snapshot."""
+
+    if prepared_index is None:
+        try:
+            return load_project_dataset_index(dataset_source)
+        except DatasetIndexError as exc:
+            raise RuntimeError(
+                f"Unable to index processed workbooks under {dataset_source}: {exc}"
+            ) from exc
+
+    requested = Path(dataset_source).expanduser().resolve(strict=False)
+    indexed_sources = {
+        prepared_index.project_root.resolve(strict=False),
+        prepared_index.excel_root.resolve(strict=False),
+        prepared_index.scan_root.resolve(strict=False),
+    }
+    if requested not in indexed_sources:
+        raise RuntimeError(
+            "Prepared workbook index does not belong to the selected "
+            f"processed-workbook folder: {dataset_source}"
+        )
+    return prepared_index
 
 
 def _positive_rate(value: object, *, fallback: float) -> float:
@@ -177,6 +209,7 @@ def resolve_snr_analysis_context(
 
 __all__ = [
     "SNRAnalysisContext",
+    "load_or_reuse_dataset_index",
     "resolve_snr_analysis_context",
     "revalidate_snr_analysis_context",
 ]

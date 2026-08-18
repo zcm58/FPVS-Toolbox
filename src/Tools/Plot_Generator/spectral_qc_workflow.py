@@ -12,8 +12,10 @@ import zipfile
 import pandas as pd
 
 from Tools.Plot_Generator.full_snr_reader import (
+    XlsxWorkbookReadSession,
     _read_full_snr_sheet_read_only,
 )
+from Tools.Plot_Generator.source_identity import SourceWorkbookSnapshot
 from Tools.Plot_Generator.spectral_qc import (
     SPECTRAL_QC_METHOD_VERSION,
     SpectralQcResult,
@@ -34,6 +36,7 @@ class PlotSpectralQcWorkflowMixin:
         excel_path: Path,
         *,
         included_electrodes_upper: set[str] | None,
+        workbook_session: XlsxWorkbookReadSession | None = None,
     ) -> tuple[pd.DataFrame, List[float], List[str]]:
         return self._timed_call(
             "excel_load",
@@ -43,6 +46,7 @@ class PlotSpectralQcWorkflowMixin:
                 x_max=self.x_max,
                 timing_details=self._timing_details,
                 included_electrodes_upper=included_electrodes_upper,
+                workbook_session=workbook_session,
             ),
         )
 
@@ -51,6 +55,7 @@ class PlotSpectralQcWorkflowMixin:
         excel_path: Path,
         *,
         included_electrodes_upper: set[str] | None,
+        workbook_session: XlsxWorkbookReadSession | None = None,
     ) -> tuple[pd.DataFrame, List[float], List[str]]:
         return self._timed_call(
             "excel_load",
@@ -60,8 +65,52 @@ class PlotSpectralQcWorkflowMixin:
                 x_max=self.x_max,
                 timing_details=self._timing_details,
                 included_electrodes_upper=included_electrodes_upper,
+                workbook_session=workbook_session,
             ),
         )
+
+    def _read_workbook_sheets(
+        self,
+        excel_path: Path,
+        *,
+        snapshot: SourceWorkbookSnapshot,
+        included_electrodes_upper: set[str],
+    ) -> tuple[
+        tuple[pd.DataFrame, List[float], List[str]],
+        tuple[pd.DataFrame, List[float], List[str]] | None,
+        str | None,
+    ]:
+        """Read required SNR and optional QC sheets from one archive session."""
+
+        fft_input = None
+        qc_unavailable_reason = None
+        with XlsxWorkbookReadSession(snapshot.content) as session:
+            snr_input = self._read_full_snr_direct(
+                excel_path,
+                included_electrodes_upper=(
+                    None if self.spectral_qc_enabled else included_electrodes_upper
+                ),
+                workbook_session=session,
+            )
+            if self.spectral_qc_enabled and not self._cancellation_checkpoint():
+                try:
+                    fft_input = self._read_full_fft_direct(
+                        excel_path,
+                        included_electrodes_upper=None,
+                        workbook_session=session,
+                    )
+                except (
+                    OSError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    zipfile.BadZipFile,
+                    ElementTree.ParseError,
+                ) as exc:
+                    qc_unavailable_reason = (
+                        f"spectral-QC evidence read/conversion failed: {exc}"
+                    )
+        return snr_input, fft_input, qc_unavailable_reason
 
     def _note_spectral_qc_unavailable(
         self,
@@ -90,20 +139,29 @@ class PlotSpectralQcWorkflowMixin:
         *,
         ordered_freqs: Sequence[float],
         excluded_electrodes: Sequence[str],
+        snr_input: tuple[pd.DataFrame, Sequence[float], Sequence[str]] | None = None,
+        fft_input: tuple[pd.DataFrame, Sequence[float], Sequence[str]] | None = None,
+        unavailable_reason: str | None = None,
     ) -> tuple[dict[str, list[float]], dict[str, list[float]], str | None]:
         """Return optional QC evidence without failing valid ROI plotting."""
 
+        if unavailable_reason is not None:
+            return {}, {}, unavailable_reason
         try:
-            snr_frame, snr_freqs, snr_cols = self._read_full_snr_direct(
-                excel_path,
-                included_electrodes_upper=None,
-            )
+            if snr_input is None:
+                snr_input = self._read_full_snr_direct(
+                    excel_path,
+                    included_electrodes_upper=None,
+                )
+            snr_frame, snr_freqs, snr_cols = snr_input
             if self._cancellation_checkpoint():
                 return {}, {}, None
-            fft_frame, fft_freqs, fft_cols = self._read_full_fft_direct(
-                excel_path,
-                included_electrodes_upper=None,
-            )
+            if fft_input is None:
+                fft_input = self._read_full_fft_direct(
+                    excel_path,
+                    included_electrodes_upper=None,
+                )
+            fft_frame, fft_freqs, fft_cols = fft_input
             if not snr_cols or not fft_cols or list(snr_freqs) != list(ordered_freqs):
                 return {}, {}, "spectral-QC sheets or frequency grids were unavailable"
             snr_by_electrode = electrode_snr_data(snr_frame, snr_cols)

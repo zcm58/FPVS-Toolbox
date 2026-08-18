@@ -1,3 +1,9 @@
+from pathlib import Path
+
+import pytest
+
+from Main_App.projects import ProjectDatasetIndex
+from Tools.Plot_Generator import analysis_context
 from Tools.Plot_Generator.worker import _Worker
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 
@@ -39,6 +45,7 @@ def test_worker_config_defaults_match_worker_constructor(tmp_path) -> None:
     assert config.legend_b_peaks is None
     assert config.project_root is None
     assert config.spectral_qc_enabled is True
+    assert config.prepared_dataset_index is None
 
 
 def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, monkeypatch) -> None:
@@ -78,3 +85,73 @@ def test_worker_keeps_public_constructor_and_stores_config_payload(tmp_path, mon
     assert worker.multi_group_mode is True
     assert worker.legend_custom_enabled is True
     assert worker.spectral_qc_enabled is False
+
+
+def _empty_index(root: Path) -> ProjectDatasetIndex:
+    return ProjectDatasetIndex(
+        project_root=root,
+        excel_root=root,
+        scan_root=root,
+        manifest=None,
+        groups={},
+        participants={},
+        workbooks=(),
+        excluded_workbooks=(),
+        diagnostics=(),
+    )
+
+
+def test_worker_reuses_prepared_dataset_index_without_rescanning(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    index = _empty_index(tmp_path.resolve())
+    worker = _Worker(
+        **_config_kwargs(tmp_path),
+        spectral_qc_enabled=False,
+        prepared_dataset_index=index,
+    )
+    configured: list[ProjectDatasetIndex] = []
+    monkeypatch.setattr(
+        analysis_context,
+        "load_project_dataset_index",
+        lambda _folder: (_ for _ in ()).throw(
+            AssertionError("prepared index must avoid a second scan")
+        ),
+    )
+    monkeypatch.setattr(
+        worker,
+        "_configure_analysis_context",
+        lambda value: configured.append(value),
+    )
+
+    loaded = worker._load_dataset_index()
+
+    assert loaded is index
+    assert worker._dataset_index is index
+    assert worker._dataset_index_loaded is True
+    assert configured == [index]
+    monkeypatch.setattr(worker, "_run", lambda: None)
+    payloads: list[dict] = []
+    worker.finished.connect(payloads.append)
+
+    worker.run()
+
+    assert payloads[0]["_prepared_dataset_index"] is index
+
+
+def test_worker_rejects_prepared_index_from_another_input_folder(
+    tmp_path,
+) -> None:
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    worker = _Worker(
+        **_config_kwargs(selected),
+        spectral_qc_enabled=False,
+        prepared_dataset_index=_empty_index(other.resolve()),
+    )
+
+    with pytest.raises(RuntimeError, match="does not belong to the selected"):
+        worker._load_dataset_index()

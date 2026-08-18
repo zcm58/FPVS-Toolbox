@@ -141,6 +141,9 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 str(self._project_root) if self._project_root else None
             ),
             spectral_qc_enabled=self.spectral_qc_check.isChecked(),
+            prepared_dataset_index=(
+                self._batch_dataset_index if self._all_conditions else None
+            ),
             **group_kwargs,
         )
         self._worker.moveToThread(self._thread)
@@ -345,6 +348,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             self._warning_items.clear()
             self._spectral_qc_flags.clear()
             self._spectral_qc_analysis_identities.clear()
+            self._batch_dataset_index = None
             self._animate_progress_to(0)
             if self.overlay_check.isChecked():
                 cond_a = self.condition_combo.currentText()

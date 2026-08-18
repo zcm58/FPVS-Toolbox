@@ -17,7 +17,12 @@ from PySide6.QtWidgets import QColorDialog
 
 from Main_App import SettingsManager
 from Main_App.processing.roi_settings import load_rois_from_settings
-from Main_App.projects import EXCEL_SUBFOLDER_NAME, Project, SNR_SUBFOLDER_NAME
+from Main_App.projects import (
+    EXCEL_SUBFOLDER_NAME,
+    Project,
+    ProjectDatasetIndex,
+    SNR_SUBFOLDER_NAME,
+)
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
@@ -204,6 +209,7 @@ class PlotGeneratorWindow(
             tuple[str | None, str | None]
         ] = []
         self._post_processing_required_request: tuple[str, str] | None = None
+        self._batch_dataset_index: ProjectDatasetIndex | None = None
         self._gen_params: (
             tuple[
                 str,

@@ -38,6 +38,7 @@ plt.rcParams.update(
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
 _GROUP_MARKERS = ("o", "^", "s", "D", "P", "X", "v", "<", ">")
+_PNG_COMPRESSION_LEVEL = 1
 
 # Compatibility re-export for tests and older callers of the private helper.
 _safe_figure_stem = safe_figure_stem
@@ -79,6 +80,56 @@ def _label_with_sample_size(label: str, sample_size: int | None) -> str:
     return f"{label} (n={sample_size})" if sample_size is not None else label
 
 
+def _closest_frequency_indices(
+    frequencies: np.ndarray,
+    targets: List[float],
+) -> np.ndarray:
+    """Resolve marker positions once for every figure in one render batch."""
+
+    if frequencies.size == 0 or not targets:
+        return np.asarray([], dtype=int)
+    return np.asarray(
+        [int(np.abs(frequencies - target).argmin()) for target in targets],
+        dtype=int,
+    )
+
+
+def _add_reference_lines(
+    ax,
+    *,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    tick_start: int,
+    tick_end: int,
+) -> None:
+    """Draw the existing integer reference grid with two collections."""
+
+    vertical = list(range(max(1, tick_start), tick_end))
+    if vertical:
+        ax.vlines(
+            vertical,
+            y_min,
+            y_max,
+            color="lightgray",
+            linestyle="--",
+            linewidth=0.5,
+            zorder=0,
+        )
+    horizontal = list(range(math.ceil(y_min), math.floor(y_max) + 1))
+    if horizontal:
+        ax.hlines(
+            horizontal,
+            x_min,
+            x_max,
+            color="lightgray",
+            linestyle="--",
+            linewidth=0.5,
+            zorder=0,
+        )
+
+
 class PlotRenderingMixin:
     """Worker-state helpers for PNG/PDF line and overlay plot rendering."""
 
@@ -96,6 +147,8 @@ class PlotRenderingMixin:
         if self._cancellation_checkpoint():
             return
         odd_freqs = self._visible_oddball_frequencies(freqs)
+        freq_array = np.asarray(freqs, dtype=float)
+        oddball_indices = _closest_frequency_indices(freq_array, odd_freqs)
 
         group_curves = group_curves or {}
         use_group_overlay = bool(group_curves)
@@ -180,8 +233,8 @@ class PlotRenderingMixin:
                     f"Plotted {len(amps)} SNR values for ROI {roi}", 0, 0
                 )
 
-            if odd_freqs:
-                freq_array = np.array(freqs)
+            if oddball_indices.size:
+                marker_frequencies = freq_array[oddball_indices]
                 if use_group_overlay and group_curves:
                     for group_idx, group_name in enumerate(self.selected_groups or group_curves.keys()):
                         vals = group_curves.get(group_name, {}).get(roi)
@@ -200,35 +253,29 @@ class PlotRenderingMixin:
                             if group_idx == 1
                             else "_nolegend_"
                         )
-                        for odd_idx, odd in enumerate(odd_freqs):
-                            closest = int(np.abs(freq_array - odd).argmin())
-                            label = peak_label if odd_idx == 0 else "_nolegend_"
-                            ax.scatter(
-                                freq_array[closest],
-                                vals[closest],
-                                marker=_group_marker(group_idx),
-                                facecolor=color,
-                                edgecolor="black",
-                                zorder=4,
-                                label=label,
-                            )
-                else:
-                    for idx, odd in enumerate(odd_freqs):
-                        closest = int(np.abs(freq_array - odd).argmin())
-                        label = (
-                            self._resolve_legend_label(self.legend_a_peaks, _DEFAULT_A_PEAKS)
-                            if idx == 0
-                            else "_nolegend_"
-                        )
+                        values = np.asarray(vals, dtype=float)[oddball_indices]
                         ax.scatter(
-                            freq_array[closest],
-                            amps[closest],
-                            marker="o",
-                            facecolor=self.stem_color,
+                            marker_frequencies,
+                            values,
+                            marker=_group_marker(group_idx),
+                            facecolor=color,
                             edgecolor="black",
                             zorder=4,
-                            label=label,
+                            label=peak_label,
                         )
+                else:
+                    ax.scatter(
+                        marker_frequencies,
+                        np.asarray(amps, dtype=float)[oddball_indices],
+                        marker="o",
+                        facecolor=self.stem_color,
+                        edgecolor="black",
+                        zorder=4,
+                        label=self._resolve_legend_label(
+                            self.legend_a_peaks,
+                            _DEFAULT_A_PEAKS,
+                        ),
+                    )
                 group_marker_count = (
                     sum(
                         1
@@ -249,22 +296,15 @@ class PlotRenderingMixin:
             ax.set_xticks(range(tick_start, tick_end))
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
-            for fx in range(max(1, tick_start), tick_end):
-                ax.axvline(
-                    fx,
-                    color="lightgray",
-                    linestyle="--",
-                    linewidth=0.5,
-                    zorder=0,
-                )
-            for y in range(math.ceil(self.y_min), math.floor(self.y_max) + 1):
-                ax.axhline(
-                    y,
-                    color="lightgray",
-                    linestyle="--",
-                    linewidth=0.5,
-                    zorder=0,
-                )
+            _add_reference_lines(
+                ax,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                y_min=self.y_min,
+                y_max=self.y_max,
+                tick_start=tick_start,
+                tick_end=tick_end,
+            )
             if not self.use_matlab_style:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
@@ -288,17 +328,18 @@ class PlotRenderingMixin:
                 suffix=GROUP_OVERLAY_SUFFIX if use_group_overlay else "",
             )
             fname = f"{figure_stem}.png"
-            save_kwargs = {
-                "dpi": FIGURE_EXPORT_DPI,
-            }
             out_path = self.out_dir / fname
             pdf_path = out_path.with_suffix(".pdf")
             out_path.parent.mkdir(parents=True, exist_ok=True)
             self._mark_timing("plot_render", render_started)
             save_started = time.perf_counter()
             try:
-                fig.savefig(out_path, **save_kwargs)
-                fig.savefig(pdf_path, format="pdf", **save_kwargs)
+                fig.savefig(
+                    out_path,
+                    dpi=FIGURE_EXPORT_DPI,
+                    pil_kwargs={"compress_level": _PNG_COMPRESSION_LEVEL},
+                )
+                fig.savefig(pdf_path, format="pdf", dpi=FIGURE_EXPORT_DPI)
             finally:
                 self._mark_timing("file_save", save_started)
                 plt.close(fig)
@@ -317,6 +358,8 @@ class PlotRenderingMixin:
         if self._cancellation_checkpoint():
             return
         odd_freqs = self._visible_oddball_frequencies(freqs)
+        freq_array = np.asarray(freqs, dtype=float)
+        oddball_indices = _closest_frequency_indices(freq_array, odd_freqs)
 
         for roi in data_a:
             if self._cancellation_checkpoint():
@@ -355,46 +398,34 @@ class PlotRenderingMixin:
                 ),
             )
 
-            if odd_freqs:
-                freq_array = np.array(freqs)
-                for idx, odd in enumerate(odd_freqs):
-                    closest = int(np.abs(freq_array - odd).argmin())
-                    val_a = data_a[roi][closest]
-                    val_b = data_b[roi][closest] if roi in data_b and data_b[roi] else None
-
-                    label_a = (
-                        self._resolve_legend_label(
-                            self.legend_a_peaks, _DEFAULT_A_PEAKS
-                        )
-                        if idx == 0
-                        else "_nolegend_"
-                    )
+            if oddball_indices.size:
+                marker_frequencies = freq_array[oddball_indices]
+                ax.scatter(
+                    marker_frequencies,
+                    np.asarray(data_a[roi], dtype=float)[oddball_indices],
+                    marker="o",
+                    facecolor=self.stem_color,
+                    edgecolor="black",
+                    zorder=4,
+                    label=self._resolve_legend_label(
+                        self.legend_a_peaks,
+                        _DEFAULT_A_PEAKS,
+                    ),
+                )
+                values_b = data_b.get(roi, [])
+                if values_b:
                     ax.scatter(
-                        freq_array[closest],
-                        val_a,
-                        marker="o",
-                        facecolor=self.stem_color,
+                        marker_frequencies,
+                        np.asarray(values_b, dtype=float)[oddball_indices],
+                        marker="^",
+                        facecolor=self.stem_color_b,
                         edgecolor="black",
                         zorder=4,
-                        label=label_a,
+                        label=self._resolve_legend_label(
+                            self.legend_b_peaks,
+                            _DEFAULT_B_PEAKS,
+                        ),
                     )
-                    if val_b is not None:
-                        label_b = (
-                            self._resolve_legend_label(
-                                self.legend_b_peaks, _DEFAULT_B_PEAKS
-                            )
-                            if idx == 0
-                            else "_nolegend_"
-                        )
-                        ax.scatter(
-                            freq_array[closest],
-                            val_b,
-                            marker="^",
-                            facecolor=self.stem_color_b,
-                            edgecolor="black",
-                            zorder=4,
-                            label=label_b,
-                        )
 
             tick_start = math.ceil(self.x_min)
             tick_end = math.floor(self.x_max) + 1
@@ -402,22 +433,15 @@ class PlotRenderingMixin:
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
 
-            for fx in range(max(1, tick_start), tick_end):
-                ax.axvline(
-                    fx,
-                    color="lightgray",
-                    linestyle="--",
-                    linewidth=0.5,
-                    zorder=0,
-                )
-            for y in range(math.ceil(self.y_min), math.floor(self.y_max) + 1):
-                ax.axhline(
-                    y,
-                    color="lightgray",
-                    linestyle="--",
-                    linewidth=0.5,
-                    zorder=0,
-                )
+            _add_reference_lines(
+                ax,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                y_min=self.y_min,
+                y_max=self.y_max,
+                tick_start=tick_start,
+                tick_end=tick_end,
+            )
 
             if not self.use_matlab_style:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
@@ -452,6 +476,7 @@ class PlotRenderingMixin:
                 fig.savefig(
                     out_path,
                     dpi=FIGURE_EXPORT_DPI,
+                    pil_kwargs={"compress_level": _PNG_COMPRESSION_LEVEL},
                 )
                 fig.savefig(
                     pdf_path,

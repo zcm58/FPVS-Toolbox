@@ -26,19 +26,20 @@ Current ownership map:
 - `worker_config.py`: `_Worker` constructor payload dataclass.
 - `excel_inputs.py`: thin shared participant-identity adapter plus
   frequency-column helpers.
-- `full_snr_reader.py`: direct `.xlsx` XML reader for the FullSNR fast path,
-  including selected-frequency parsing, selected-ROI electrode
-  filtering, and FullSNR load subtimings.
-- `data_collection.py`: shared dataset-index consumption, FullSNR-only source
-  data collection, and required-sheet failure handling.
+- `full_snr_reader.py`: direct `.xlsx` XML reader and shared workbook session
+  for the FullSNR/FullFFT fast paths, including selected-frequency parsing,
+  selected-ROI electrode filtering, and load subtimings.
+- `data_collection.py`: shared dataset-index consumption, source-data
+  collection, and required-sheet failure handling.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
   unknown-subject warnings.
 - `analysis_context.py`: managed-project versus legacy-folder resolution,
-  frozen processing rates, and the active-workbook provenance boundary.
+  validated batch-index reuse, frozen processing rates, and the active-workbook
+  provenance boundary.
 - `source_data.py` and `output_interface.py`: in-memory contributor/sample-size
   bookkeeping plus managed analysis-context checks for direct figure output.
-- `source_identity.py`: stable read-time source-workbook fingerprints and
-  publication-time verification of the exact contributing bytes.
+- `source_identity.py`: immutable read-time source-workbook snapshots,
+  fingerprints, and verification of the exact contributing bytes.
 - `spectral_qc.py`: post-processing, report-only electrode-level spectral
   artifact flagging and FullFFT evidence assembly for SNR plots.
 - `spectral_qc_workflow.py`: worker-side spectral-QC orchestration and audit
@@ -100,6 +101,11 @@ v2.1 project contract:
   dataset index and revalidate the originally captured rates, cohort, source,
   frequency-QC, and processing/export identities when publishing provenance-
   bearing artifacts.
+- An **All Conditions** run may pass the immutable dataset index built by its
+  first worker to later sequential workers. Index construction must remain on
+  the worker thread, every worker must still configure its own analysis
+  context, and publication-time provenance revalidation must rebuild current
+  project state rather than trusting the reused index.
 - A managed-provenance failure must return the affected canonical project root
   and actionable stale reason to the embedded page. The page emits the shared
   post-processing-required request; only the Main App shell may show the shared

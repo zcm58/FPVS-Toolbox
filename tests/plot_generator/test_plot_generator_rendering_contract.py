@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 import pytest
+from matplotlib.collections import PathCollection
 from PIL import Image
 
 from Main_App.exports.figure_style import (
@@ -118,6 +119,63 @@ def test_real_png_and_pdf_exports_keep_exact_publication_dimensions(
     assert match is not None
     assert float(match.group(1)) == pytest.approx(468.0)
     assert float(match.group(2)) == pytest.approx(259.2)
+
+
+def test_png_uses_fast_lossless_compression_without_changing_pdf_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Path, dict[str, object]]] = []
+
+    def capture_save(_figure, path, *_args, **kwargs) -> None:
+        calls.append((Path(path), kwargs))
+
+    monkeypatch.setattr("matplotlib.figure.Figure.savefig", capture_save)
+    harness = _RenderHarness(tmp_path)
+
+    harness._plot([1.0, 2.0], {"Occipital": [1.5, 2.5]})
+
+    png_kwargs = next(kwargs for path, kwargs in calls if path.suffix == ".png")
+    pdf_kwargs = next(kwargs for path, kwargs in calls if path.suffix == ".pdf")
+    assert png_kwargs["pil_kwargs"] == {"compress_level": 1}
+    assert "pil_kwargs" not in pdf_kwargs
+
+
+def test_oddball_markers_are_batched_per_curve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    figures = []
+
+    def capture_save(figure, _path, *_args, **_kwargs) -> None:
+        if figure not in figures:
+            figures.append(figure)
+
+    monkeypatch.setattr("matplotlib.figure.Figure.savefig", capture_save)
+    harness = _RenderHarness(tmp_path)
+    harness._visible_oddball_frequencies = lambda _freqs: [1.0, 2.0]
+
+    harness._plot([1.0, 2.0], {"Occipital": [1.5, 2.5]})
+    harness._plot_overlay(
+        [1.0, 2.0],
+        {"Occipital": [1.5, 2.5]},
+        {"Occipital": [1.2, 2.2]},
+    )
+
+    single_markers = [
+        item
+        for item in figures[0].axes[0].collections
+        if isinstance(item, PathCollection)
+    ]
+    overlay_markers = [
+        item
+        for item in figures[1].axes[0].collections
+        if isinstance(item, PathCollection)
+    ]
+    assert len(single_markers) == 1
+    assert len(single_markers[0].get_offsets()) == 2
+    assert len(overlay_markers) == 2
+    assert all(len(item.get_offsets()) == 2 for item in overlay_markers)
 
 
 def test_sanitized_figure_stem_collisions_get_unique_hashed_names(

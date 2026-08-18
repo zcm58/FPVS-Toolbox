@@ -6,6 +6,7 @@ import logging
 from PySide6.QtWidgets import QMessageBox
 
 from Main_App.gui import shell_status
+from Main_App.projects import ProjectDatasetIndex
 from Tools.Plot_Generator.generation_outcome import (
     format_completion_summary,
     format_no_plots_message,
@@ -97,6 +98,12 @@ class PlotGeneratorLifecycleMixin:
 
     def _on_worker_finished(self, payload: dict) -> None:
         outcome = normalize_worker_outcome(payload)
+        prepared_index = payload.get("_prepared_dataset_index")
+        if (
+            getattr(self, "_all_conditions", False)
+            and isinstance(prepared_index, ProjectDatasetIndex)
+        ):
+            self._batch_dataset_index = prepared_index
         self._worker_outcome_received = True
         self._worker_reported_cancelled = outcome.cancelled
         self._generated_paths.extend(outcome.generated_paths)
@@ -222,6 +229,7 @@ class PlotGeneratorLifecycleMixin:
         self._warning_items.clear()
         self._spectral_qc_flags.clear()
         self._spectral_qc_analysis_identities.clear()
+        self._batch_dataset_index = None
         self._post_processing_required_request = None
         self._gen_params = None
         self._cancel_requested = False
@@ -264,6 +272,7 @@ class PlotGeneratorLifecycleMixin:
         self._warning_items.clear()
         self._spectral_qc_flags.clear()
         self._spectral_qc_analysis_identities.clear()
+        self._batch_dataset_index = None
         self._post_processing_required_request = None
         self._gen_params = None
         self._cancel_requested = False

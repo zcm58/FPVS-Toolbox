@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from Main_App.processing.full_fft_provenance import FullFftProvenanceStaleError
+from Main_App.projects import ProjectDatasetIndex
 from Tools.Plot_Generator.analysis_context import SNRAnalysisContext
 from Tools.Plot_Generator.generation_outcome import (
     managed_analysis_matches_active_project,
@@ -34,6 +35,20 @@ def _worker(tmp_path: Path, **kwargs) -> _Worker:
         out_dir=str(tmp_path / "plots"),
         spectral_qc_enabled=False,
         **kwargs,
+    )
+
+
+def _empty_dataset_index(root: Path) -> ProjectDatasetIndex:
+    return ProjectDatasetIndex(
+        project_root=root,
+        excel_root=root,
+        scan_root=root,
+        manifest=None,
+        groups={},
+        participants={},
+        workbooks=(),
+        excluded_workbooks=(),
+        diagnostics=(),
     )
 
 
@@ -300,6 +315,33 @@ def test_shutdown_requests_cancel_and_retains_active_lifecycle() -> None:
     host._worker = None
     assert host.has_active_generation() is False
     assert host.shutdown() is False
+
+
+def test_all_conditions_worker_outcome_retains_prepared_dataset_index(
+    tmp_path,
+) -> None:
+    index = _empty_dataset_index(tmp_path.resolve())
+    host = SimpleNamespace(
+        _all_conditions=True,
+        _batch_dataset_index=None,
+        _worker_outcome_received=False,
+        _worker_reported_cancelled=False,
+        _generated_paths=[],
+        _failed_items=[],
+        _warning_items=[],
+        _spectral_qc_flags=[],
+        _spectral_qc_analysis_identities=[],
+        _post_processing_required_request=None,
+        _project_root=None,
+        _append_log=lambda _message: None,
+    )
+
+    PlotGeneratorWorkflowMixin._on_worker_finished(
+        host,
+        {"_prepared_dataset_index": index},
+    )
+
+    assert host._batch_dataset_index is index
 
 
 def test_late_gui_cancel_trusts_committed_worker_outcome() -> None:

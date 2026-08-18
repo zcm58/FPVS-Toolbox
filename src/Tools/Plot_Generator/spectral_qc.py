@@ -3,27 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 import math
 from pathlib import Path
 import time
 from typing import List, Mapping, Sequence
 from xml.etree import ElementTree
-import zipfile
 
 import numpy as np
 import pandas as pd
 
 from Tools.Plot_Generator.full_snr_reader import (
-    _OFFICE_REL_NS,
-    _RELATIONSHIP_TAG,
     _ROW_TAG,
-    _SHEET_TAG,
+    XlsxWorkbookReadSession,
     _add_timing_detail,
-    _load_shared_strings,
     _row_values_by_column,
     _selected_row_values,
-    _xlsx_member_path,
 )
 
 FULLFFT_SHEET_NAME = "FullFFT Amplitude (uV)"
@@ -119,24 +115,6 @@ def summarize_spectral_qc_records(
     )
 
 
-def _worksheet_member(archive: zipfile.ZipFile, sheet_name: str) -> str:
-    workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
-    rels_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
-    rel_targets = {
-        rel.attrib.get("Id"): rel.attrib.get("Target")
-        for rel in rels_root.iter(_RELATIONSHIP_TAG)
-    }
-    for sheet in workbook_root.iter(_SHEET_TAG):
-        if sheet.attrib.get("name") != sheet_name:
-            continue
-        rel_id = sheet.attrib.get(f"{{{_OFFICE_REL_NS}}}id")
-        target = rel_targets.get(rel_id)
-        if not target:
-            break
-        return _xlsx_member_path("xl/workbook.xml", target)
-    raise ValueError(f"Worksheet named '{sheet_name}' not found")
-
-
 def _frequency_columns(
     header: Sequence[object | None],
     *,
@@ -174,16 +152,20 @@ def read_full_fft_sheet_read_only(
     x_max: float,
     timing_details: dict[str, float] | None = None,
     included_electrodes_upper: set[str] | None = None,
+    workbook_session: XlsxWorkbookReadSession | None = None,
 ) -> tuple[pd.DataFrame, List[float], List[str]]:
     """Read selected FullFFT columns without using Pandas' Excel engine."""
 
     started = time.perf_counter()
-    with zipfile.ZipFile(excel_path) as archive:
-        sheet_member = _worksheet_member(archive, FULLFFT_SHEET_NAME)
+    session = workbook_session or XlsxWorkbookReadSession(excel_path)
+    context = session if workbook_session is None else nullcontext(session)
+    with context:
+        archive = session.archive
+        sheet_member = session.worksheet_member(FULLFFT_SHEET_NAME)
         _add_timing_detail(timing_details, "fullfft_workbook_open", started)
 
         started = time.perf_counter()
-        shared_strings = _load_shared_strings(archive)
+        shared_strings = session.shared_strings
         _add_timing_detail(timing_details, "fullfft_shared_strings", started)
 
         started = time.perf_counter()

@@ -53,6 +53,9 @@ def test_all_conditions_titles(tmp_path, monkeypatch):
         def __init__(self, *args, **kwargs):
             captured["title"] = args[4]
             captured["out_dir"] = args[11]
+            captured["prepared_dataset_index"] = kwargs.get(
+                "prepared_dataset_index"
+            )
             self.progress = _DummySignal()
             self.finished = _DummySignal()
 
@@ -71,6 +74,8 @@ def test_all_conditions_titles(tmp_path, monkeypatch):
     win._conditions_queue = ["Fruit vs Veg"]
     win._gen_params = (str(tmp_path), str(tmp_path), 0.0, 1.0, 0.0, 1.0)
     win._all_conditions = True
+    prepared_dataset_index = object()
+    win._batch_dataset_index = prepared_dataset_index
     win._total_conditions = 1
     win._current_condition = 0
 
@@ -78,6 +83,7 @@ def test_all_conditions_titles(tmp_path, monkeypatch):
 
     assert captured.get("title") == "Fruit vs Veg"
     assert captured.get("out_dir") == str(tmp_path)
+    assert captured.get("prepared_dataset_index") is prepared_dataset_index
     assert win.title_edit.text() == "Fruit vs Veg"
 
     app.quit()

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Sequence
 
+from Main_App.projects import ProjectDatasetIndex
+
 
 @dataclass(frozen=True)
 class PlotWorkerConfig:
@@ -39,3 +41,4 @@ class PlotWorkerConfig:
     legend_b_peaks: str | None = None
     project_root: str | None = None
     spectral_qc_enabled: bool = True
+    prepared_dataset_index: ProjectDatasetIndex | None = None

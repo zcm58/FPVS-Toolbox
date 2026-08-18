@@ -10,7 +10,7 @@ import pytest
 from Main_App.processing.full_fft_provenance import (
     write_project_full_fft_provenance,
 )
-from Tools.Plot_Generator import data_collection
+from Tools.Plot_Generator import analysis_context
 from Tools.Plot_Generator.generation_outcome import (
     format_completion_summary,
     format_no_plots_message,
@@ -94,7 +94,7 @@ def test_worker_rejects_manifest_without_participant_group_assignments(
         participant_group_label_map=lambda **_kwargs: {},
     )
     monkeypatch.setattr(
-        data_collection,
+        analysis_context,
         "load_project_dataset_index",
         lambda _source: index,
     )

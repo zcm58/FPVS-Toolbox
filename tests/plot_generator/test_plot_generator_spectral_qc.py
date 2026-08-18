@@ -13,6 +13,7 @@ from Tools.Plot_Generator.spectral_qc import (
     flag_spectral_qc_electrode_outliers,
     interpolate_fullfft_electrode_data,
 )
+from Tools.Plot_Generator.source_identity import capture_stable_source_snapshot
 
 
 def _import_module():
@@ -23,8 +24,8 @@ def _import_module():
     return module
 
 
-def _write_workbook(path, *, bad_ft7=False):
-    ft7_snr_1hz = 50.0 if bad_ft7 else 1.0
+def _write_workbook(path, *, bad_ft7=False, malformed_ft7=False):
+    ft7_snr_1hz = "invalid" if malformed_ft7 else (50.0 if bad_ft7 else 1.0)
     ft7_snr_12hz = 50.0 if bad_ft7 else 2.0
     ft7_fft_1hz = 100.0 if bad_ft7 else 0.5
     ft7_fft_12hz = 100.0 if bad_ft7 else 0.5
@@ -123,6 +124,111 @@ def test_spectral_qc_flags_off_harmonic_electrodes_without_changing_plot_values(
     assert (out_dir / "qc-test.png").is_file()
     assert (out_dir / "qc-test.pdf").is_file()
     assert not list(out_dir.glob("SNR_Plot_Run_*"))
+
+
+def test_spectral_qc_reuses_full_snr_and_one_workbook_session(
+    tmp_path,
+    monkeypatch,
+):
+    module = _import_module()
+    workbook = tmp_path / "P01_Cond_Results.xlsx"
+    _write_workbook(workbook)
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Posterior": ["Cz", "Pz"]},
+        selected_roi="Posterior",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=1.2,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path / "plots"),
+        spectral_qc_enabled=True,
+    )
+    original_snr_read = worker._read_full_snr_direct
+    original_fft_read = worker._read_full_fft_direct
+    reader_sessions = []
+    snr_read_count = 0
+
+    def traced_snr_read(*args, **kwargs):
+        nonlocal snr_read_count
+        snr_read_count += 1
+        reader_sessions.append(kwargs["workbook_session"])
+        return original_snr_read(*args, **kwargs)
+
+    def traced_fft_read(*args, **kwargs):
+        reader_sessions.append(kwargs["workbook_session"])
+        return original_fft_read(*args, **kwargs)
+
+    monkeypatch.setattr(worker, "_read_full_snr_direct", traced_snr_read)
+    monkeypatch.setattr(worker, "_read_full_fft_direct", traced_fft_read)
+    snapshot = capture_stable_source_snapshot(workbook)
+
+    snr_input, fft_input, read_error = worker._read_workbook_sheets(
+        workbook,
+        snapshot=snapshot,
+        included_electrodes_upper={"CZ", "PZ"},
+    )
+    snr_evidence, fft_evidence, reason = worker._assemble_spectral_qc_evidence(
+        workbook,
+        ordered_freqs=snr_input[1],
+        excluded_electrodes=(),
+        snr_input=snr_input,
+        fft_input=fft_input,
+        unavailable_reason=read_error,
+    )
+
+    assert snr_read_count == 1
+    assert reader_sessions[0] is reader_sessions[1]
+    assert reason is None
+    assert set(snr_evidence) == {"CZ", "PZ", "FT7"}
+    assert set(fft_evidence) == {"CZ", "PZ", "FT7"}
+
+
+def test_malformed_unselected_qc_electrode_does_not_block_roi_plot_data(
+    tmp_path,
+    monkeypatch,
+):
+    module = _import_module()
+    condition_dir = tmp_path / "Cond"
+    condition_dir.mkdir()
+    workbook = condition_dir / "P01_Cond_Results.xlsx"
+    _write_workbook(workbook, malformed_ft7=True)
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"Posterior": ["Cz", "Pz"]},
+        selected_roi="Posterior",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=1.2,
+        y_min=0.0,
+        y_max=5.0,
+        out_dir=str(tmp_path / "plots"),
+        spectral_qc_enabled=True,
+    )
+    monkeypatch.setattr(
+        worker,
+        "_read_analysis_float",
+        lambda _option, fallback: fallback,
+    )
+
+    frequencies, subject_data = worker._collect_data(
+        "Cond",
+        excel_files=[workbook],
+    )
+
+    assert frequencies == [1.0, 1.2]
+    assert subject_data["P01"]["Posterior"] == pytest.approx([1.0, 2.0])
+    assert any(
+        item["code"] == "spectral_qc_input_unavailable"
+        for item in worker.warning_items
+    )
 
 
 def test_spectral_qc_inner_scan_honors_cooperative_cancellation():

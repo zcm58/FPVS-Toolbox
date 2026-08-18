@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from Tools.Plot_Generator import data_collection
+from Tools.Plot_Generator import analysis_context, data_collection
 from Tools.Plot_Generator.source_identity import sha256_file
 from Tools.Plot_Generator.worker import _Worker
 
@@ -323,7 +323,7 @@ def test_dataset_index_diagnostics_are_exportable_run_warnings(
         project_root=tmp_path,
     )
     monkeypatch.setattr(
-        data_collection,
+        analysis_context,
         "load_project_dataset_index",
         lambda _source: index,
     )
@@ -362,7 +362,7 @@ def test_dataset_index_exclusions_are_manifest_dispositions_without_reads(
         project_root=tmp_path,
     )
     monkeypatch.setattr(
-        data_collection,
+        analysis_context,
         "load_project_dataset_index",
         lambda _source: index,
     )
@@ -434,7 +434,7 @@ def test_dataset_index_refuses_pooled_mode_before_analysis_or_workbook_reads(
         },
     )
     monkeypatch.setattr(
-        data_collection,
+        analysis_context,
         "load_project_dataset_index",
         lambda _source: index,
     )

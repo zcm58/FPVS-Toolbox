@@ -6,19 +6,15 @@ from typing import Dict, Iterable, List, Sequence
 
 import numpy as np
 
-from Main_App.projects import DatasetIndexError, ProjectDatasetIndex
-from Main_App.projects import WorkbookRecord, load_project_dataset_index
+from Main_App.projects import ProjectDatasetIndex, WorkbookRecord
 from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
+from Tools.Plot_Generator.analysis_context import load_or_reuse_dataset_index
 from Tools.Plot_Generator.excel_inputs import (
     _frequency_grids_match,
     _infer_subject_id_from_path,
 )
 from Tools.Plot_Generator.project_paths import _is_relative_to
-from Tools.Plot_Generator.source_identity import (
-    SNRPublicationCancelled, SNRPublicationError,
-    capture_stable_source_identity,
-    verify_source_identity_after_read,
-)
+from Tools.Plot_Generator import source_identity
 from Tools.Plot_Generator.spectral_qc_workflow import PlotSpectralQcWorkflowMixin
 
 
@@ -26,18 +22,15 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
     """Worker-state helpers for Excel discovery and FullSNR data collection."""
 
     def _load_dataset_index(self) -> ProjectDatasetIndex:
-        """Load the shared read-only workbook index once in the worker thread."""
+        """Initialize the read-only index in the worker, reusing a batch snapshot."""
         if self._cancellation_checkpoint():
             raise RuntimeError("SNR plot generation was cancelled")
         if getattr(self, "_dataset_index_loaded", False):
             return self._dataset_index
-        dataset_source = self.folder
-        try:
-            index = load_project_dataset_index(dataset_source)
-        except DatasetIndexError as exc:
-            raise RuntimeError(
-                f"Unable to index processed workbooks under {dataset_source}: {exc}"
-            ) from exc
+        index = load_or_reuse_dataset_index(
+            self.folder,
+            getattr(self, "_prepared_dataset_index", None),
+        )
         if self._cancellation_checkpoint():
             raise RuntimeError("SNR plot generation was cancelled")
         for diagnostic in index.diagnostics:
@@ -283,14 +276,16 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
                 overall_total,
             )
             try:
-                workbook_identity_before_read = capture_stable_source_identity(
+                workbook_snapshot = source_identity.capture_stable_source_snapshot(
                     excel_path,
                     cancellation_checkpoint=self._cancellation_checkpoint,
                 )
-                df, ordered_freqs, ordered_cols = self._read_full_snr_direct(
+                snr_input, fft_input, qc_read_error = self._read_workbook_sheets(
                     excel_path,
+                    snapshot=workbook_snapshot,
                     included_electrodes_upper=read_electrodes,
                 )
+                df, ordered_freqs, ordered_cols = snr_input
             except Exception as exc:
                 if self._cancellation_checkpoint():
                     raise
@@ -360,8 +355,10 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
                 processed_files += 1
                 continue
 
-            electrode_upper = df["Electrode"].astype(str).str.upper().to_numpy()
-            snr_values = df[ordered_cols].to_numpy(dtype=float, copy=False)
+            electrode_upper = df["Electrode"].astype(str).str.upper()
+            plot_frame = df.loc[electrode_upper.isin(read_electrodes)]
+            plot_electrode_upper = electrode_upper.loc[plot_frame.index].to_numpy()
+            snr_values = plot_frame[ordered_cols].to_numpy(dtype=float, copy=False)
             for roi in roi_names:
                 chans = roi_channels_upper.get(roi, set())
                 if not chans:
@@ -371,7 +368,7 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
                         error="No electrodes configured for ROI",
                     )
                     continue
-                roi_mask = np.isin(electrode_upper, roi_channel_arrays[roi])
+                roi_mask = np.isin(plot_electrode_upper, roi_channel_arrays[roi])
                 if not roi_mask.any():
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
                     self._record_failure(
@@ -420,6 +417,9 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
                         excel_path,
                         ordered_freqs=ordered_freqs,
                         excluded_electrodes=tuple(excluded_electrodes),
+                        snr_input=snr_input,
+                        fft_input=fft_input,
+                        unavailable_reason=qc_read_error,
                     )
                 )
                 if self._cancellation_checkpoint():
@@ -441,14 +441,14 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
                     )
 
             try:
-                read_identity = verify_source_identity_after_read(
+                read_identity = source_identity.verify_source_snapshot_after_read(
                     excel_path,
-                    before_read=workbook_identity_before_read,
+                    snapshot=workbook_snapshot,
                     cancellation_checkpoint=self._cancellation_checkpoint,
                 )
-            except SNRPublicationCancelled:
+            except source_identity.SNRPublicationCancelled:
                 raise
-            except (OSError, SNRPublicationError):
+            except (OSError, source_identity.SNRPublicationError):
                 self._track_input_workbook(
                     excel_path,
                     condition=condition,

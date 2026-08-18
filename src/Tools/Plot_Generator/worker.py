@@ -9,6 +9,7 @@ from typing import Dict, List, Sequence
 
 from Main_App import SettingsManager
 from Main_App.processing.full_fft_provenance import FullFftProvenanceError
+from Main_App.projects import ProjectDatasetIndex
 
 from PySide6.QtCore import QObject, Signal
 
@@ -76,6 +77,7 @@ class _Worker(
         legend_b_peaks: str | None = None,
         project_root: str | None = None,
         spectral_qc_enabled: bool = True,
+        prepared_dataset_index: ProjectDatasetIndex | None = None,
     ) -> None:
         super().__init__()
         self.config = PlotWorkerConfig(
@@ -108,6 +110,7 @@ class _Worker(
             legend_b_peaks=legend_b_peaks,
             project_root=project_root,
             spectral_qc_enabled=spectral_qc_enabled,
+            prepared_dataset_index=prepared_dataset_index,
         )
         self.folder = self.config.folder
         self.condition = self.config.condition
@@ -169,6 +172,7 @@ class _Worker(
         self.legend_b_peaks = self.config.legend_b_peaks
         self.project_root = self.config.project_root
         self.spectral_qc_enabled = self.config.spectral_qc_enabled
+        self._prepared_dataset_index = self.config.prepared_dataset_index
         self._dataset_index_loaded = False
         self._workbook_records_by_path = {}
         self.generated_paths: list[str] = []
@@ -228,27 +232,29 @@ class _Worker(
                 self._emit(f"SNR plot generation failed: {exc}", 0, 0)
         finally:
             self._emit_timing_summary()
-            self.finished.emit(
-                {
-                    "condition": self.condition,
-                    "overlay": self.overlay,
-                    "generated_paths": list(self.generated_paths),
-                    "spectral_qc_flags": list(self.spectral_qc_flags),
-                    "failed_items": list(self.failed_items),
-                    "warning_items": list(self.warning_items),
-                    "cancelled": (
-                        self._stop_requested and not self._completed_figure_saved
-                    ),
-                    "analysis_source_kind": self._analysis_source_kind,
-                    "analysis_project_root": (
-                        str(self._analysis_project_root)
-                        if self._analysis_project_root is not None else None
-                    ),
-                    "post_processing_required_reason": (
-                        self._post_processing_required_reason
-                    ),
-                }
-            )
+            payload = {
+                "condition": self.condition,
+                "overlay": self.overlay,
+                "generated_paths": list(self.generated_paths),
+                "spectral_qc_flags": list(self.spectral_qc_flags),
+                "failed_items": list(self.failed_items),
+                "warning_items": list(self.warning_items),
+                "cancelled": (
+                    self._stop_requested and not self._completed_figure_saved
+                ),
+                "analysis_source_kind": self._analysis_source_kind,
+                "analysis_project_root": (
+                    str(self._analysis_project_root)
+                    if self._analysis_project_root is not None
+                    else None
+                ),
+                "post_processing_required_reason": (
+                    self._post_processing_required_reason
+                ),
+            }
+            if self._dataset_index_loaded:
+                payload["_prepared_dataset_index"] = self._dataset_index
+            self.finished.emit(payload)
 
     def stop(self) -> None:
         self._stop_requested = True

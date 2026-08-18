@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 from pathlib import Path
 import re
@@ -28,6 +28,14 @@ class SourceFileIdentity:
     sha256: str
     size_bytes: int
     stat_signature: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceWorkbookSnapshot:
+    """Immutable workbook bytes paired with their stable source identity."""
+
+    content: bytes = field(repr=False)
+    identity: SourceFileIdentity
 
 
 def source_stat_signature(path: str | Path) -> tuple[int, int, int, int]:
@@ -97,6 +105,96 @@ def capture_stable_source_identity(
         size_bytes=after_hash[2],
         stat_signature=after_hash,
     )
+
+
+def capture_stable_source_snapshot(
+    path: str | Path,
+    *,
+    cancellation_checkpoint: Callable[[], bool] | None = None,
+) -> SourceWorkbookSnapshot:
+    """Read and hash one stable, immutable copy of a source workbook."""
+
+    source = Path(path)
+    before_read = source_stat_signature(source)
+    digest = hashlib.sha256()
+    chunks: list[bytes] = []
+    with source.open("rb") as handle:
+        while True:
+            if cancellation_checkpoint is not None and cancellation_checkpoint():
+                raise SNRPublicationCancelled(
+                    "SNR output publication was cancelled while reading inputs."
+                )
+            chunk = handle.read(_HASH_CHUNK_BYTES)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            digest.update(chunk)
+    after_read = source_stat_signature(source)
+    if after_read != before_read:
+        raise SNRPublicationError(
+            f"Source workbook changed while SNR data were being read: "
+            f"{source.name}. Restart generation after workbook writes have finished."
+        )
+    content = b"".join(chunks)
+    return SourceWorkbookSnapshot(
+        content=content,
+        identity=SourceFileIdentity(
+            sha256=digest.hexdigest(),
+            size_bytes=after_read[2],
+            stat_signature=after_read,
+        ),
+    )
+
+
+def verify_source_snapshot_after_read(
+    path: str | Path,
+    *,
+    snapshot: SourceWorkbookSnapshot,
+    cancellation_checkpoint: Callable[[], bool] | None = None,
+) -> SourceFileIdentity:
+    """Require the live workbook to still equal the exact captured bytes.
+
+    This intentionally compares bytes instead of calculating a second digest.
+    The full comparison preserves detection of same-size edits whose mtime was
+    restored while keeping hashing to the single snapshot-read pass.
+    """
+
+    source = Path(path)
+    expected_signature = snapshot.identity.stat_signature
+    if source_stat_signature(source) != expected_signature:
+        raise SNRPublicationError(
+            f"Source workbook changed while SNR data were being read: "
+            f"{source.name}. Restart generation after workbook writes have finished."
+        )
+
+    content = memoryview(snapshot.content)
+    offset = 0
+    matches = True
+    with source.open("rb") as handle:
+        while True:
+            if cancellation_checkpoint is not None and cancellation_checkpoint():
+                raise SNRPublicationCancelled(
+                    "SNR output publication was cancelled while verifying inputs."
+                )
+            chunk = handle.read(_HASH_CHUNK_BYTES)
+            if not chunk:
+                break
+            end = offset + len(chunk)
+            if end > len(content) or chunk != content[offset:end]:
+                matches = False
+                break
+            offset = end
+
+    if (
+        not matches
+        or offset != len(content)
+        or source_stat_signature(source) != expected_signature
+    ):
+        raise SNRPublicationError(
+            f"Source workbook changed while SNR data were being read: "
+            f"{source.name}. Restart generation after workbook writes have finished."
+        )
+    return snapshot.identity
 
 
 def verify_source_identity(
@@ -177,9 +275,12 @@ __all__ = [
     "SNRPublicationCancelled",
     "SNRPublicationError",
     "SourceFileIdentity",
+    "SourceWorkbookSnapshot",
     "capture_stable_source_identity",
+    "capture_stable_source_snapshot",
     "sha256_file",
     "source_stat_signature",
     "verify_source_identity",
     "verify_source_identity_after_read",
+    "verify_source_snapshot_after_read",
 ]

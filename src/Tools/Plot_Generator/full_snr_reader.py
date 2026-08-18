@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from io import BytesIO
 import posixpath
 from pathlib import Path
 import time
-from typing import List, Sequence
+from typing import BinaryIO, List, Sequence
 from xml.etree import ElementTree
 import zipfile
 
@@ -45,21 +47,82 @@ def _xlsx_member_path(source_member: str, target: str) -> str:
 
 
 def _full_snr_sheet_member(archive: zipfile.ZipFile) -> str:
+    return _worksheet_member(archive, _FULLSNR_SHEET)
+
+
+def _worksheet_members(archive: zipfile.ZipFile) -> dict[str, str]:
     workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
     rels_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
     rel_targets = {
         rel.attrib.get("Id"): rel.attrib.get("Target")
         for rel in rels_root.iter(_RELATIONSHIP_TAG)
     }
+    members: dict[str, str] = {}
     for sheet in workbook_root.iter(_SHEET_TAG):
-        if sheet.attrib.get("name") != _FULLSNR_SHEET:
-            continue
+        name = sheet.attrib.get("name")
         rel_id = sheet.attrib.get(f"{{{_OFFICE_REL_NS}}}id")
         target = rel_targets.get(rel_id)
-        if not target:
-            break
-        return _xlsx_member_path("xl/workbook.xml", target)
-    raise ValueError(_MISSING_FULLSNR_MESSAGE)
+        if name and target:
+            members[name] = _xlsx_member_path("xl/workbook.xml", target)
+    return members
+
+
+def _worksheet_member(archive: zipfile.ZipFile, sheet_name: str) -> str:
+    try:
+        return _worksheet_members(archive)[sheet_name]
+    except KeyError as exc:
+        raise ValueError(f"Worksheet named '{sheet_name}' not found") from exc
+
+
+class XlsxWorkbookReadSession:
+    """One lazily opened XLSX archive with shared workbook metadata."""
+
+    def __init__(self, source: str | Path | bytes) -> None:
+        self._source = source
+        self._stream: BinaryIO | None = None
+        self._archive: zipfile.ZipFile | None = None
+        self._shared_strings: list[str] | None = None
+        self._sheet_members: dict[str, str] | None = None
+
+    def __enter__(self) -> XlsxWorkbookReadSession:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    @property
+    def archive(self) -> zipfile.ZipFile:
+        if self._archive is None:
+            source: str | Path | BinaryIO
+            if isinstance(self._source, bytes):
+                self._stream = BytesIO(self._source)
+                source = self._stream
+            else:
+                source = self._source
+            self._archive = zipfile.ZipFile(source)
+        return self._archive
+
+    @property
+    def shared_strings(self) -> list[str]:
+        if self._shared_strings is None:
+            self._shared_strings = _load_shared_strings(self.archive)
+        return self._shared_strings
+
+    def worksheet_member(self, sheet_name: str) -> str:
+        if self._sheet_members is None:
+            self._sheet_members = _worksheet_members(self.archive)
+        try:
+            return self._sheet_members[sheet_name]
+        except KeyError as exc:
+            raise ValueError(f"Worksheet named '{sheet_name}' not found") from exc
+
+    def close(self) -> None:
+        if self._archive is not None:
+            self._archive.close()
+            self._archive = None
+        if self._stream is not None:
+            self._stream.close()
+            self._stream = None
 
 
 def _load_shared_strings(archive: zipfile.ZipFile) -> list[str]:
@@ -166,14 +229,18 @@ def _read_full_snr_sheet_read_only(
     x_max: float,
     timing_details: dict[str, float] | None = None,
     included_electrodes_upper: set[str] | None = None,
+    workbook_session: XlsxWorkbookReadSession | None = None,
 ) -> tuple[pd.DataFrame, List[float], List[str]]:
     started = time.perf_counter()
-    with zipfile.ZipFile(excel_path) as archive:
-        sheet_member = _full_snr_sheet_member(archive)
+    session = workbook_session or XlsxWorkbookReadSession(excel_path)
+    context = session if workbook_session is None else nullcontext(session)
+    with context:
+        archive = session.archive
+        sheet_member = session.worksheet_member(_FULLSNR_SHEET)
         _add_timing_detail(timing_details, "fullsnr_workbook_open", started)
 
         started = time.perf_counter()
-        shared_strings = _load_shared_strings(archive)
+        shared_strings = session.shared_strings
         _add_timing_detail(timing_details, "fullsnr_shared_strings", started)
 
         started = time.perf_counter()

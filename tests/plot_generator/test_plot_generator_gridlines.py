@@ -48,15 +48,21 @@ def test_gridlines_added(tmp_path, monkeypatch):
     fig = captured.get("fig")
     assert fig is not None
     ax = fig.axes[0]
+    segments = [
+        segment
+        for collection in ax.collections
+        if hasattr(collection, "get_segments")
+        for segment in collection.get_segments()
+    ]
     v_lines = {
-        line.get_xdata()[0]
-        for line in ax.lines
-        if line.get_color() == "lightgray" and line.get_xdata()[0] == line.get_xdata()[1]
+        float(segment[0][0])
+        for segment in segments
+        if segment[0][0] == segment[1][0]
     }
     h_lines = {
-        line.get_ydata()[0]
-        for line in ax.lines
-        if line.get_color() == "lightgray" and line.get_ydata()[0] == line.get_ydata()[1]
+        float(segment[0][1])
+        for segment in segments
+        if segment[0][1] == segment[1][1]
     }
     assert v_lines == {1.0, 2.0, 3.0}
     assert h_lines == {0.0, 1.0, 2.0, 3.0}
