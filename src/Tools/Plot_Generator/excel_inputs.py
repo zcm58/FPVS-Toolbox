@@ -22,33 +22,6 @@ def _infer_subject_id_from_path(
     )
 
 
-def _frequency_pairs_from_columns(columns: Iterable[object]) -> list[tuple[float, str]]:
-    freq_pairs: list[tuple[float, str]] = []
-    for col in columns:
-        if isinstance(col, str) and col.endswith("_Hz"):
-            try:
-                freq_pairs.append((float(col.split("_")[0]), col))
-            except ValueError:
-                continue
-    freq_pairs.sort(key=lambda item: item[0])
-    return freq_pairs
-
-
-def _select_frequency_pairs(
-    freq_pairs: Sequence[tuple[float, str]],
-    *,
-    x_min: float,
-    x_max: float,
-) -> tuple[list[float], list[str]]:
-    tolerance = 1e-3
-    selected = [
-        (freq, col)
-        for freq, col in freq_pairs
-        if (x_min - tolerance) <= freq <= (x_max + tolerance)
-    ]
-    return [freq for freq, _ in selected], [col for _, col in selected]
-
-
 def _frequency_grids_match(
     reference: Sequence[float],
     candidate: Sequence[float],

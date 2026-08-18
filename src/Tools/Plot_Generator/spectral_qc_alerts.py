@@ -36,13 +36,6 @@ def _format_uv(value: object) -> str:
     return f"{value_float:.2f} uV"
 
 
-def _format_snr(value: object) -> str:
-    value_float = _numeric(value)
-    if value_float is None:
-        return "unknown"
-    return f"{value_float:.2f}"
-
-
 def _format_electrode_list(electrodes: object, *, limit: int = 4) -> str:
     if not isinstance(electrodes, list):
         return "unknown electrode"

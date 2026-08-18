@@ -107,10 +107,6 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
             )
         return index
 
-    def _count_excel_files(self, condition: str) -> int:
-        """Return the number of Excel files for a condition."""
-        return len(self._list_excel_files(condition))
-
     def _list_excel_files(self, condition: str) -> list[Path]:
         """Return shared indexed workbook paths for one condition."""
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from PySide6.QtCore import QPropertyAnimation, QThread, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
-    QLabel,
     QMessageBox,
     QWidget,
 )
@@ -17,9 +16,8 @@ from PySide6.QtWidgets import QColorDialog
 
 
 from Main_App import SettingsManager
-from Main_App.gui.components import apply_font_role
 from Main_App.processing.roi_settings import load_rois_from_settings
-from Main_App.projects.project import Project
+from Main_App.projects import EXCEL_SUBFOLDER_NAME, Project, SNR_SUBFOLDER_NAME
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
@@ -27,14 +25,11 @@ from Tools.Plot_Generator.gui_settings import (
 )
 from Tools.Plot_Generator.generation_workflow import PlotGeneratorWorkflowMixin
 from Tools.Plot_Generator.ui_sections import PlotGeneratorUiSectionsMixin
-from Tools.Plot_Generator.settings_dialog import _SettingsDialog
 from Tools.Plot_Generator.selection_state import (
     ALL_CONDITIONS_OPTION,  # noqa: F401 - re-exported by plot_generator.py
     PlotGeneratorSelectionMixin,
 )
 from Tools.Plot_Generator.project_paths import (
-    EXCEL_SUBFOLDER_NAME,
-    SNR_SUBFOLDER_NAME,
     _auto_detect_project_dir,
     _load_manifest,
     _resolve_project_subfolder,
@@ -224,11 +219,6 @@ class PlotGeneratorWindow(
         ) = None
         self._ui_initializing = False
 
-    def _bold_label(self, text: str) -> QLabel:
-        label = QLabel(text)
-        apply_font_role(label, "caption")
-        return label
-
     def _update_legend_group_visibility(self) -> None:
         self.legend_group.setVisible(True)
         group_overlay = self._group_overlay_enabled()
@@ -303,15 +293,6 @@ class PlotGeneratorWindow(
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
-
-    def _open_settings(self) -> None:
-        dlg = _SettingsDialog(self, self.stem_color, self.stem_color_b)
-        if dlg.exec():
-            self.stem_color, self.stem_color_b = dlg.selected_colors()
-            self.plot_mgr.set_stem_color(self.stem_color)
-            self.plot_mgr.set_second_color(self.stem_color_b)
-            if not self._persist_project_plot_settings(include_paths=False):
-                self.plot_mgr.save()
 
     def _check_required(self) -> None:
         input_folder = self.folder_edit.text().strip()

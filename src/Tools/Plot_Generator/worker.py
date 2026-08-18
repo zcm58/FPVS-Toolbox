@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 from typing import Dict, List, Sequence
 
-import pandas as pd
 from Main_App import SettingsManager
 from Main_App.processing.full_fft_provenance import FullFftProvenanceError
 
@@ -17,9 +16,7 @@ from Tools.Plot_Generator.aggregation import PlotAggregationMixin
 from Tools.Plot_Generator.data_collection import PlotDataCollectionMixin
 from Tools.Plot_Generator.excel_inputs import (
     _frequency_grids_match,
-    _frequency_pairs_from_columns,
     _infer_subject_id_from_path,
-    _select_frequency_pairs,
 )
 from Tools.Plot_Generator.rendering import PlotRenderingMixin, matplotlib, plt
 from Tools.Plot_Generator.output_interface import PlotOutputInterfaceMixin
@@ -29,9 +26,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_ODDBALL_FREQ = 1.2
 __all__ = [
     "_Worker",
-    "_frequency_pairs_from_columns",
     "_infer_subject_id_from_path",
-    "_select_frequency_pairs",
     "matplotlib",
     "plt",
 ]
@@ -118,7 +113,6 @@ class _Worker(
         self.condition = self.config.condition
         self.roi_map = self.config.roi_map
         self.selected_roi = self.config.selected_roi
-        self.metric = "SNR"
         self.title = self.config.title
         self.xlabel = self.config.xlabel
         self.ylabel = self.config.ylabel
@@ -283,9 +277,6 @@ class _Worker(
             return callback()
         finally:
             self._mark_timing(phase, started)
-
-    def _read_excel_timed(self, *args, **kwargs) -> pd.DataFrame:
-        return self._timed_call("excel_load", lambda: pd.read_excel(*args, **kwargs))
 
     def _emit_timing_summary(self) -> None:
         total = sum(self._timings.values())

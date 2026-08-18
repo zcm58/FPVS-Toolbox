@@ -3,7 +3,6 @@ from PySide6.QtWidgets import QLabel, QScrollArea, QWidget
 
 from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
-from Tools.Plot_Generator.settings_dialog import _SettingsDialog
 from Main_App.gui.components import (
     ActionRow,
     PathPickerRow,
@@ -201,20 +200,3 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     window.log.append("Smoke log line")
     qtbot.wait(10)
     assert "Smoke log line" in window.log.toPlainText()
-
-
-def test_plot_generator_settings_dialog_uses_shared_action_row(qtbot):
-    parent = PlotGeneratorWindow()
-    qtbot.addWidget(parent)
-    dialog = _SettingsDialog(parent, "#112233", "#445566")
-    qtbot.addWidget(dialog)
-
-    action_row = dialog.findChild(ActionRow, "plot_generator_settings_actions")
-    assert action_row is not None
-    labels = [
-        item.widget().text()
-        for idx in range(action_row.row_layout.count())
-        if (item := action_row.row_layout.itemAt(idx)).widget() is not None
-    ]
-    assert "OK" in labels
-    assert "Cancel" in labels

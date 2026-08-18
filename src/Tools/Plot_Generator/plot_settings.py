@@ -4,7 +4,6 @@ from pathlib import Path
 
 from Main_App.Shared.settings_paths import app_plot_settings_file, legacy_plot_settings_file
 
-INI_NAME = "plot_settings.ini"
 logger = logging.getLogger(__name__)
 
 
@@ -56,15 +55,6 @@ class PlotSettingsManager:
 
     def get(self, section: str, option: str, fallback: str = "") -> str:
         return self.config.get(section, option, fallback=fallback)
-
-    def get_bool(self, section: str, option: str, fallback: bool = False) -> bool:
-        return self.config.getboolean(section, option, fallback=fallback)
-
-    def get_float(self, section: str, option: str, fallback: float = 0.0) -> float:
-        try:
-            return self.config.getfloat(section, option, fallback=fallback)
-        except ValueError:
-            return fallback
 
     def get_stem_color(self) -> str:
         """Return the stored stem plot line color."""

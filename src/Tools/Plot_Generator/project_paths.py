@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from Main_App.projects import DatasetIndexError, load_project_manifest_for_dataset_path
-from Main_App.projects.project import EXCEL_SUBFOLDER_NAME, SNR_SUBFOLDER_NAME
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -68,36 +66,3 @@ def _resolve_project_subfolder(
     if candidate.is_absolute():
         return candidate.resolve()
     return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
-
-
-def _project_paths(
-    parent: Any | None,
-    project_dir: str | Path | None,
-) -> tuple[str | None, str | None]:
-    """Return Excel and SNR plot folders for the given or detected project."""
-    if project_dir and Path(project_dir).is_dir():
-        root = Path(project_dir)
-    else:
-        proj = getattr(parent, "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
-            root = Path(proj.project_root)
-        else:
-            root = _auto_detect_project_dir()
-
-    results_folder, subfolders = _load_manifest(root)
-    if results_folder is not None or subfolders:
-        try:
-            excel_path = _resolve_project_subfolder(
-                root, results_folder, subfolders, "excel", EXCEL_SUBFOLDER_NAME
-            )
-            snr_path = _resolve_project_subfolder(
-                root, results_folder, subfolders, "snr", SNR_SUBFOLDER_NAME
-            )
-            return str(excel_path), str(snr_path)
-        except (OSError, RuntimeError, ValueError):
-            pass
-    fallback_root = root if isinstance(root, Path) else Path(root)
-    return (
-        str((fallback_root / EXCEL_SUBFOLDER_NAME).resolve()),
-        str((fallback_root / SNR_SUBFOLDER_NAME).resolve()),
-    )
