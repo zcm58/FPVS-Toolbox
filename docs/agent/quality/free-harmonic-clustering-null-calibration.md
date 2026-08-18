@@ -1,6 +1,6 @@
 # Free Harmonic Clustering Automatic-Domain Null Calibration
 
-Status: protocol frozen; powered execution complete; reviewed PASS on 2026-08-15
+Status: protocol frozen; powered execution complete; reviewed PASS revalidated on 2026-08-18
 
 Protocol: `fhc_automatic_unconditional_null_v1`
 
@@ -39,10 +39,12 @@ It runs only through
 
 ## Reviewed Powered Result
 
-The 2026-08-15 run completed all 4,000 scheduled replicates and its overall,
-powered-null, and determinism assessments all have status `pass`. There were no
-missing, duplicate, unexpected, or invalid task rows, no execution errors, and
-no no-selection outcomes.
+The 2026-08-18 performance-refactor revalidation completed all 4,000 scheduled
+replicates and exactly reproduced the previously reviewed ordered scientific
+results and determinism fingerprints. Its overall, powered-null, and
+determinism assessments all have status `pass`. There were no missing,
+duplicate, unexpected, or invalid task rows, no execution errors, and no
+no-selection outcomes.
 
 The two design-level decisions were:
 
@@ -77,7 +79,7 @@ both tails.
 ### Reviewed Artifact And Execution Identity
 
 The completed receipt has SHA-256
-`89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd`.
+`710beea7455e9987ddcaa68570872a1f88db1c21fe451726b27608825d2a9a4f`.
 Its canonical ordered scientific-results fingerprint is
 `1e5444baec5faabc18a286167de82208a811f83e5aab3eb9bf92bdaac803d448`.
 The serial, resumed, and parallel non-official determinism checks all produced
@@ -87,25 +89,25 @@ The reviewed local output also had these raw byte hashes:
 
 | Output | SHA-256 |
 | --- | --- |
-| `protocol.json` | `9163f76a0fff73d1b87067b7861e1bafb581e4f2b7e98ae8d456b92c6f5bad5a` |
-| `receipt.json` | `89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd` |
-| `results.jsonl` | `6afd766f082224c22b17de6db8dc405e0515c87d7857c23620ad72b8c5d52cc2` |
+| `protocol.json` | `6dd8420978d7cdb4dd7c63f6b34e4c4aadce0c7992b8359ec1c60ec0aea526c3` |
+| `receipt.json` | `710beea7455e9987ddcaa68570872a1f88db1c21fe451726b27608825d2a9a4f` |
+| `results.jsonl` | `a35677c9bd6f6a51ffdda98c9ba107ead56524e9f25ba86a7cf29230cc90d6c5` |
 
 The raw checkpoint hash includes elapsed timings. The receipt's ordered-results
 fingerprint excludes elapsed time and is the scientific identity intended to
 match across serial, resumed, and parallel execution.
 
 The run used toolbox commit
-`770811911f2d7e07bd3db8af735150ecb38181b3`, Python `3.13.9`, NumPy `2.3.1`,
+`753d44a8e6f28ac342a04cb3c95132022d3b793d`, Python `3.13.9`, NumPy `2.3.1`,
 SciPy `1.16.0`, platform `Windows-11-10.0.26200-SP0`, and 32 workers. The
 reviewed scientific source hashes were:
 
 | Source | SHA-256 |
 | --- | --- |
-| `scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py` | `f25b5a997814c74b492d9dfec17fa845c0ce1ecde74ecbd9aa501a76cdeb5cf0` |
-| `src/Tools/Free_Harmonic_Clustering/analysis.py` | `9f35425e4438ba6070922f1291370a1f1dcb8e13459722e71681ba0f04c44346` |
+| `scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py` | `0e66e587beae8347a7783edcf9c4fddc0cd0662df6d54440a192861313daa904` |
+| `src/Tools/Free_Harmonic_Clustering/analysis.py` | `d22e0cdabc4c4fed384420081238cdef7cad6b0a88302e35a844b20f0324b961` |
 | `src/Tools/Free_Harmonic_Clustering/models.py` | `bb793ccad27fb9872e33406d1ba525a17fdd1ca9db69a0bf71e352bae6f4d213` |
-| `src/Tools/Free_Harmonic_Clustering/null_calibration.py` | `454d4243812311d32e234fe2d9e5720b94cadd508494dea9011f0b8999eba68a` |
+| `src/Tools/Free_Harmonic_Clustering/null_calibration.py` | `e7bf7eb7e87dc1873af8733f8073bcab7a194a618ea8574c07588281cc4c1dce` |
 | `src/Tools/Free_Harmonic_Clustering/preparation.py` | `a41151267d89f88320cfb30e40c2ec3ec065947991fee9f2294d284dbd3535cc` |
 
 The recorded protocol fingerprint remains

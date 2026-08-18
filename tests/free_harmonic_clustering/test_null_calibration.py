@@ -111,7 +111,7 @@ def test_pending_receipt_template_matches_the_frozen_protocol() -> None:
 def test_completed_receipt_records_the_reviewed_powered_pass() -> None:
     normalized_bytes = COMPLETED_RECEIPT_PATH.read_bytes().replace(b"\r\n", b"\n")
     assert hashlib.sha256(normalized_bytes).hexdigest() == (
-        "89702d36d82abaf33f18347bffe2bee9f4d7f7c31509b2af75c8e4198c91c7dd"
+        "710beea7455e9987ddcaa68570872a1f88db1c21fe451726b27608825d2a9a4f"
     )
     committed = json.loads(normalized_bytes)
 
@@ -215,23 +215,23 @@ def test_completed_receipt_records_the_reviewed_powered_pass() -> None:
         "python": "3.13.9",
         "scientific_source_sha256": {
             "scripts/manual_diagnostics/run_free_harmonic_clustering_null_calibration.py": (
-                "f25b5a997814c74b492d9dfec17fa845c0ce1ecde74ecbd9aa501a76cdeb5cf0"
+                "0e66e587beae8347a7783edcf9c4fddc0cd0662df6d54440a192861313daa904"
             ),
             "src/Tools/Free_Harmonic_Clustering/analysis.py": (
-                "9f35425e4438ba6070922f1291370a1f1dcb8e13459722e71681ba0f04c44346"
+                "d22e0cdabc4c4fed384420081238cdef7cad6b0a88302e35a844b20f0324b961"
             ),
             "src/Tools/Free_Harmonic_Clustering/models.py": (
                 "bb793ccad27fb9872e33406d1ba525a17fdd1ca9db69a0bf71e352bae6f4d213"
             ),
             "src/Tools/Free_Harmonic_Clustering/null_calibration.py": (
-                "454d4243812311d32e234fe2d9e5720b94cadd508494dea9011f0b8999eba68a"
+                "e7bf7eb7e87dc1873af8733f8073bcab7a194a618ea8574c07588281cc4c1dce"
             ),
             "src/Tools/Free_Harmonic_Clustering/preparation.py": (
                 "a41151267d89f88320cfb30e40c2ec3ec065947991fee9f2294d284dbd3535cc"
             ),
         },
         "scipy": "1.16.0",
-        "toolbox_commit": "770811911f2d7e07bd3db8af735150ecb38181b3",
+        "toolbox_commit": "753d44a8e6f28ac342a04cb3c95132022d3b793d",
         "workers": 32,
     }
 
