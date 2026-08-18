@@ -19,6 +19,7 @@ from Main_App.projects.preprocessing_settings import (
 from Main_App.projects.project import PROJECT_SCHEMA_VERSION
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
+    HARMONIC_PROFILE_FIXED_ID,
     HARMONIC_PROFILE_LEGACY_ID,
     LOCKED_ODDBALL_FREQUENCY_HZ,
 )
@@ -30,6 +31,12 @@ CACHE_MAX_ENTRIES = 8
 CACHE_MANIFEST_PATH = ("tools", "stats", "group_significant_harmonics_cache")
 GROUP_HARMONIC_METHOD_VERSION = (
     "group_significant_harmonics_roi_union_through_highest_gap_guard_common_grid_v4"
+)
+REPEATED_SESSION_POOLING_METHOD_VERSION = (
+    "participant_first_equal_group_session_condition_local_z_v1"
+)
+REPEATED_SESSION_RECORDING_IDENTITY_VERSION = (
+    "recording_participant_session_source_identity_v1"
 )
 PREPROCESSING_ORDER_VERSION_LABEL = "filter_then_optional_fft_multinotch_then_downsample_v2"
 PROCESSING_FINGERPRINT_VERSION_LABEL = "processing_fingerprint_v8_fft_multinotch"
@@ -50,15 +57,35 @@ class WorkbookFingerprint:
     path: str
     size_bytes: int | None
     mtime_ns: int | None
+    recording_id: str | None = None
+    participant_id: str | None = None
+    session_id: str | None = None
+    source_id: str | None = None
+    group_id: str | None = None
+    visit_index: int | None = None
+    days_from_baseline: float | None = None
 
     def to_manifest(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "subject": self.subject,
             "condition": self.condition,
             "path": self.path,
             "size_bytes": self.size_bytes,
             "mtime_ns": self.mtime_ns,
         }
+        if self.recording_id is not None:
+            payload.update(
+                {
+                    "recording_id": self.recording_id,
+                    "participant_id": self.participant_id,
+                    "session_id": self.session_id,
+                    "source_id": self.source_id,
+                    "group_id": self.group_id,
+                    "visit_index": self.visit_index,
+                    "days_from_baseline": self.days_from_baseline,
+                }
+            )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -95,6 +122,8 @@ def build_group_harmonic_cache_request(
     max_freq_hz: float | None,
     settings: DVPolicySettings,
     rois: Mapping[str, Sequence[object]] | None = None,
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    declared_session_ids: Sequence[object] | None = None,
 ) -> GroupHarmonicCacheRequest | None:
     """Build the exact manifest-cache request for the current Stats selection."""
 
@@ -117,6 +146,11 @@ def build_group_harmonic_cache_request(
             [str(condition) for condition in conditions]
         )
     )
+    normalized_recordings = _normalize_recording_assignments(
+        recording_assignments,
+        subject_key,
+    )
+    repeated_session = bool(normalized_recordings)
     processing_signature = build_project_processing_signature(manifest)
     processing_signature_hash = _hash_payload(processing_signature)
     workbooks = [
@@ -125,11 +159,15 @@ def build_group_harmonic_cache_request(
             subject=subject,
             condition=condition,
             file_path=(subject_data.get(subject, {}) or {}).get(condition),
+            recording_assignment=normalized_recordings.get(subject),
         ).to_manifest()
         for subject in subject_key
         for condition in condition_key
     ]
-    method_version = _method_version_for_settings(settings)
+    method_version = _method_version_for_settings(
+        settings,
+        repeated_session=repeated_session,
+    )
     selection_inputs: dict[str, object] = {
         "subjects": list(subject_key),
         "conditions": list(condition_key),
@@ -139,6 +177,14 @@ def build_group_harmonic_cache_request(
             else []
         ),
     }
+    if repeated_session:
+        selection_inputs.update(
+            _repeated_session_selection_inputs(
+                manifest,
+                normalized_recordings,
+                declared_session_ids=declared_session_ids,
+            )
+        )
     stats_settings: dict[str, object] = {
         "base_frequency_hz": float(base_frequency_hz),
         "oddball_frequency_hz": float(LOCKED_ODDBALL_FREQUENCY_HZ),
@@ -148,7 +194,10 @@ def build_group_harmonic_cache_request(
         "summation_method": str(settings.group_significant_summation_method),
     }
     if settings.harmonic_selection_profile != HARMONIC_PROFILE_LEGACY_ID:
-        selection_inputs.update(_manifest_group_selection_inputs(manifest, subject_key))
+        if not repeated_session:
+            selection_inputs.update(
+                _manifest_group_selection_inputs(manifest, subject_key)
+            )
         stats_settings.update(
             {
                 "harmonic_selection_profile": settings.harmonic_selection_profile,
@@ -161,6 +210,13 @@ def build_group_harmonic_cache_request(
                 ),
             }
         )
+        if repeated_session and settings.harmonic_selection_profile != HARMONIC_PROFILE_FIXED_ID:
+            stats_settings["pooling_method"] = (
+                REPEATED_SESSION_POOLING_METHOD_VERSION
+            )
+            stats_settings["repeated_session_pooling_version"] = (
+                REPEATED_SESSION_POOLING_METHOD_VERSION
+            )
     fingerprint: dict[str, object] = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "method_version": method_version,
@@ -220,7 +276,7 @@ def _frequency_domain_qc_signature(manifest: Mapping[str, object]) -> dict[str, 
     state = tools.get("frequency_domain_qc")
     if not isinstance(state, Mapping):
         return {}
-    return {
+    signature: dict[str, object] = {
         "method_version": str(state.get("method_version") or ""),
         "thresholds": _json_safe(state.get("thresholds") or {}),
         "auto_participant_electrode_exclusions": _json_safe(
@@ -233,6 +289,14 @@ def _frequency_domain_qc_signature(manifest: Mapping[str, object]) -> dict[str, 
             state.get("manual_participant_exclusions") or []
         ),
     }
+    for key in (
+        "auto_recording_electrode_exclusions",
+        "auto_recording_exclusions",
+        "manual_recording_exclusions",
+    ):
+        if key in state:
+            signature[key] = _json_safe(state.get(key) or [])
+    return signature
 
 
 def project_processing_signature_hash(project_root: str | Path | None) -> str | None:
@@ -384,9 +448,18 @@ def _workbook_fingerprint(
     subject: str,
     condition: str,
     file_path: str | None,
+    recording_assignment: Mapping[str, object] | None = None,
 ) -> WorkbookFingerprint:
+    identity = _workbook_recording_identity(subject, recording_assignment)
     if not file_path:
-        return WorkbookFingerprint(str(subject), str(condition), "", None, None)
+        return WorkbookFingerprint(
+            str(subject),
+            str(condition),
+            "",
+            None,
+            None,
+            **identity,
+        )
     path = Path(file_path)
     try:
         resolved = path.resolve(strict=False)
@@ -396,14 +469,51 @@ def _workbook_fingerprint(
     try:
         stat = path.stat()
     except OSError:
-        return WorkbookFingerprint(str(subject), str(condition), path_value, None, None)
+        return WorkbookFingerprint(
+            str(subject),
+            str(condition),
+            path_value,
+            None,
+            None,
+            **identity,
+        )
     return WorkbookFingerprint(
         str(subject),
         str(condition),
         path_value,
         int(stat.st_size),
         int(stat.st_mtime_ns),
+        **identity,
     )
+
+
+def _workbook_recording_identity(
+    subject: str,
+    recording_assignment: Mapping[str, object] | None,
+) -> dict[str, object]:
+    if recording_assignment is None:
+        return {}
+    visit_index = recording_assignment.get("visit_index")
+    try:
+        normalized_visit = int(visit_index) if visit_index is not None else None
+    except (TypeError, ValueError):
+        normalized_visit = None
+    days_from_baseline = recording_assignment.get("days_from_baseline")
+    try:
+        normalized_days = (
+            float(days_from_baseline) if days_from_baseline is not None else None
+        )
+    except (TypeError, ValueError):
+        normalized_days = None
+    return {
+        "recording_id": str(recording_assignment.get("recording_id") or subject),
+        "participant_id": str(recording_assignment.get("participant_id") or ""),
+        "session_id": str(recording_assignment.get("session_id") or ""),
+        "source_id": str(recording_assignment.get("source_id") or ""),
+        "group_id": str(recording_assignment.get("group_id") or ""),
+        "visit_index": normalized_visit,
+        "days_from_baseline": normalized_days,
+    }
 
 
 def _normalize_rois(rois: Mapping[str, Sequence[object]] | None) -> list[dict[str, object]]:
@@ -425,14 +535,143 @@ def _normalize_rois(rois: Mapping[str, Sequence[object]] | None) -> list[dict[st
     return normalized
 
 
-def _method_version_for_settings(settings: DVPolicySettings) -> str:
+def _method_version_for_settings(
+    settings: DVPolicySettings,
+    *,
+    repeated_session: bool = False,
+) -> str:
     if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID:
-        return GROUP_HARMONIC_METHOD_VERSION
-    return (
+        method_version = GROUP_HARMONIC_METHOD_VERSION
+        return (
+            f"{method_version}_{REPEATED_SESSION_RECORDING_IDENTITY_VERSION}"
+            if repeated_session
+            else method_version
+        )
+    method_version = (
         "group_significant_harmonic_profiles_"
         f"{settings.harmonic_selection_profile}_v"
         f"{settings.harmonic_selection_profile_version}"
     )
+    if repeated_session:
+        repeated_version = (
+            REPEATED_SESSION_RECORDING_IDENTITY_VERSION
+            if settings.harmonic_selection_profile == HARMONIC_PROFILE_FIXED_ID
+            else REPEATED_SESSION_POOLING_METHOD_VERSION
+        )
+        return f"{method_version}_{repeated_version}"
+    return method_version
+
+
+def _normalize_recording_assignments(
+    value: Mapping[str, Mapping[str, object]] | None,
+    recording_ids: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    if not isinstance(value, Mapping) or not value:
+        return {}
+    lookup = {
+        str(recording_id).strip().casefold(): row
+        for recording_id, row in value.items()
+        if str(recording_id).strip() and isinstance(row, Mapping)
+    }
+    normalized: dict[str, dict[str, object]] = {}
+    missing: list[str] = []
+    for recording_id in recording_ids:
+        row = lookup.get(str(recording_id).casefold())
+        if row is None:
+            missing.append(str(recording_id))
+            continue
+        participant_id = str(row.get("participant_id") or "").strip()
+        session_id = str(row.get("session_id") or "").strip()
+        source_id = str(row.get("source_id") or "").strip()
+        group_id = str(row.get("group_id") or "").strip()
+        if not participant_id or not session_id or not source_id or not group_id:
+            missing.append(str(recording_id))
+            continue
+        visit_index = row.get("visit_index")
+        try:
+            normalized_visit = int(visit_index) if visit_index is not None else None
+        except (TypeError, ValueError):
+            normalized_visit = None
+        days_from_baseline = row.get("days_from_baseline")
+        try:
+            normalized_days = (
+                float(days_from_baseline) if days_from_baseline is not None else None
+            )
+        except (TypeError, ValueError):
+            normalized_days = None
+        normalized[str(recording_id)] = {
+            "recording_id": str(recording_id),
+            "participant_id": participant_id,
+            "session_id": session_id,
+            "source_id": source_id,
+            "group_id": group_id,
+            "visit_index": normalized_visit,
+            "days_from_baseline": normalized_days,
+        }
+    if missing:
+        raise ValueError(
+            "Repeated-session harmonic cache identity requires participant, group, "
+            "session, and source assignments for every recording. Missing: "
+            + ", ".join(sorted(set(missing), key=str.casefold))
+        )
+    return normalized
+
+
+def _repeated_session_selection_inputs(
+    manifest: Mapping[str, object],
+    recording_assignments: Mapping[str, Mapping[str, object]],
+    *,
+    declared_session_ids: Sequence[object] | None,
+) -> dict[str, object]:
+    raw_groups = manifest.get("groups")
+    declared_groups = (
+        sorted((str(group_id) for group_id in raw_groups), key=str.casefold)
+        if isinstance(raw_groups, Mapping) and raw_groups
+        else sorted(
+            {
+                str(row.get("group_id") or "")
+                for row in recording_assignments.values()
+                if str(row.get("group_id") or "")
+            },
+            key=str.casefold,
+        )
+    )
+    if declared_session_ids is None:
+        raw_sessions = manifest.get("sessions")
+        sessions = (
+            [str(session_id) for session_id in raw_sessions]
+            if isinstance(raw_sessions, Mapping)
+            else []
+        )
+    else:
+        sessions = [str(session_id) for session_id in declared_session_ids]
+    sessions = [
+        str(value)
+        for value in _canonical_ordered_items(
+            [session_id for session_id in sessions if session_id]
+        )
+    ]
+    assignments = [
+        dict(recording_assignments[recording_id])
+        for recording_id in sorted(recording_assignments, key=str.casefold)
+    ]
+    participant_assignments = {
+        str(row["participant_id"]): str(row["group_id"])
+        for row in assignments
+    }
+    return {
+        "identity_level": "recording",
+        "declared_group_ids": declared_groups,
+        "declared_session_ids": sessions,
+        "participant_group_assignments": [
+            {"participant_id": participant_id, "group_id": group_id}
+            for participant_id, group_id in sorted(
+                participant_assignments.items(),
+                key=lambda item: item[0].casefold(),
+            )
+        ],
+        "recording_assignments": assignments,
+    }
 
 
 def _manifest_group_selection_inputs(
@@ -603,6 +842,15 @@ def _fingerprint_with_canonical_input_order(
     if isinstance(selection_inputs, Mapping):
         normalized_inputs = copy.deepcopy(dict(selection_inputs))
         for key in ("subjects", "conditions"):
+            values = normalized_inputs.get(key)
+            if isinstance(values, (list, tuple)):
+                normalized_inputs[key] = _canonical_ordered_items(values)
+        for key in (
+            "declared_group_ids",
+            "declared_session_ids",
+            "participant_group_assignments",
+            "recording_assignments",
+        ):
             values = normalized_inputs.get(key)
             if isinstance(values, (list, tuple)):
                 normalized_inputs[key] = _canonical_ordered_items(values)

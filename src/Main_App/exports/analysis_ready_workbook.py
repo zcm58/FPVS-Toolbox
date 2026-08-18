@@ -33,6 +33,8 @@ from Main_App.projects import (
     load_project_dataset_index,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
+    normalize_manual_excluded_recording_conditions,
+    normalize_manual_excluded_recordings,
 )
 from Tools.Stats.io.harmonic_selection_export import (
     HARMONIC_SELECTION_QC_WORKBOOK_NAME,
@@ -117,6 +119,28 @@ _QC_FLAG_COLUMNS = [
     "Current Toolbox Exclusion",
     "QC Notes",
 ]
+_REPEATED_IDENTITY_COLUMNS = [
+    "PID",
+    "Recording ID",
+    "Session ID",
+    "Session",
+    "Visit Index",
+    "Days From Baseline",
+    "Group ID",
+    "Group",
+    "Condition",
+]
+
+
+def _session_columns(legacy_columns: Sequence[str]) -> list[str]:
+    return [
+        *_REPEATED_IDENTITY_COLUMNS,
+        *[
+            column
+            for column in legacy_columns
+            if column not in {"PID", "Group", "Condition"}
+        ],
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,11 +171,18 @@ class AnalysisReadyWorkbookResult:
 class _ExclusionContext:
     manual_participants: frozenset[str]
     manual_participant_conditions: frozenset[tuple[str, str]]
+    manual_recordings: frozenset[str]
+    manual_recording_conditions: frozenset[tuple[str, str]]
     frequency_auto_participants: frozenset[str]
     frequency_manual_participants: frozenset[str]
+    frequency_auto_recordings: frozenset[str]
+    frequency_manual_recordings: frozenset[str]
     auto_electrodes_by_participant: Mapping[str, frozenset[str]]
+    auto_electrodes_by_recording: Mapping[str, frozenset[str]]
     notes_by_participant: Mapping[tuple[str, str], str]
+    notes_by_recording: Mapping[tuple[str, str], str]
     auto_electrode_notes: Mapping[tuple[str, str], str]
+    auto_recording_electrode_notes: Mapping[tuple[str, str], str]
 
 
 def default_analysis_ready_workbook_path(project_root: str | Path) -> Path:
@@ -225,6 +256,13 @@ def write_analysis_ready_workbook(
     issue_flag_rows: list[dict[str, object]] = []
 
     for record in records:
+        starts = (
+            len(roi_rows),
+            len(electrode_rows),
+            len(whole_scalp_rows),
+            len(rms_harmonic_scale_rows),
+            len(issue_flag_rows),
+        )
         _append_record_rows(
             record=record,
             rois=rois,
@@ -236,8 +274,28 @@ def write_analysis_ready_workbook(
             rms_harmonic_scale_rows=rms_harmonic_scale_rows,
             issue_flag_rows=issue_flag_rows,
         )
+        if record.recording_id is not None:
+            identity = _record_session_identity(record)
+            for rows, start in zip(
+                (
+                    roi_rows,
+                    electrode_rows,
+                    whole_scalp_rows,
+                    rms_harmonic_scale_rows,
+                    issue_flag_rows,
+                ),
+                starts,
+            ):
+                for row in rows[start:]:
+                    row.update(identity)
 
-    roi_long = pd.DataFrame(roi_rows, columns=_ROI_LONG_COLUMNS)
+    repeated_session = index.is_repeated_session
+    roi_long_columns = (
+        _session_columns(_ROI_LONG_COLUMNS)
+        if repeated_session
+        else _ROI_LONG_COLUMNS
+    )
+    roi_long = pd.DataFrame(roi_rows, columns=roi_long_columns)
     if roi_long.empty or not np.isfinite(pd.to_numeric(roi_long["Raw Summed BCA"], errors="coerce")).any():
         raise RuntimeError(
             "Analysis-ready export requires at least one finite ROI-level "
@@ -268,17 +326,32 @@ def write_analysis_ready_workbook(
         ),
         ELECTRODE_LONG_SHEET: pd.DataFrame(
             electrode_rows,
-            columns=_ELECTRODE_LONG_COLUMNS,
+            columns=(
+                _session_columns(_ELECTRODE_LONG_COLUMNS)
+                if repeated_session
+                else _ELECTRODE_LONG_COLUMNS
+            ),
         ),
         WHOLE_SCALP_SHEET: pd.DataFrame(
             whole_scalp_rows,
-            columns=_WHOLE_SCALP_COLUMNS,
+            columns=(
+                _session_columns(_WHOLE_SCALP_COLUMNS)
+                if repeated_session
+                else _WHOLE_SCALP_COLUMNS
+            ),
         ),
         RMS_HARMONIC_SCALES_SHEET: pd.DataFrame(
             rms_harmonic_scale_rows,
-            columns=_RMS_HARMONIC_SCALE_COLUMNS,
+            columns=(
+                _session_columns(_RMS_HARMONIC_SCALE_COLUMNS)
+                if repeated_session
+                else _RMS_HARMONIC_SCALE_COLUMNS
+            ),
         ),
-        QC_FLAGS_SHEET: _finalize_qc_flags([*metadata_flag_rows, *issue_flag_rows]),
+        QC_FLAGS_SHEET: _finalize_qc_flags(
+            [*metadata_flag_rows, *issue_flag_rows],
+            repeated_session=repeated_session,
+        ),
         ROI_DEFINITIONS_SHEET: _build_roi_definitions_frame(rois),
         SELECTION_SUMMARY_SHEET: _clean_selection_summary_frame(selection_frames),
         HARMONIC_SELECTION_SHEET: _clean_harmonic_selection_frame(selection_frames),
@@ -287,6 +360,7 @@ def write_analysis_ready_workbook(
             selected_harmonics=selected_harmonics,
             workbook_count=len(records),
             roi_count=len(rois),
+            repeated_session=repeated_session,
         ),
     }
 
@@ -334,14 +408,16 @@ def _full_audit_records(index: ProjectDatasetIndex) -> list[Any]:
         combined,
         key=lambda record: (
             _natural_key(record.participant_id),
+            record.visit_index if record.visit_index is not None else 0,
             record.condition.casefold(),
             str(record.path).casefold(),
         ),
     )
     unique: dict[tuple[str, str], Any] = {}
     for record in ordered:
+        identity = record.recording_id or record.participant_id
         unique.setdefault(
-            (record.participant_id.casefold(), record.condition.casefold()),
+            (identity.casefold(), record.condition.casefold()),
             record,
         )
     records = list(unique.values())
@@ -353,6 +429,24 @@ def _full_audit_records(index: ProjectDatasetIndex) -> list[Any]:
         if missing:
             raise RuntimeError("Canonical group labels are missing for observed participant(s): " + ", ".join(missing))
     return records
+
+
+def _record_session_identity(record: Any) -> dict[str, object]:
+    return {
+        "PID": str(record.participant_id),
+        "Recording ID": str(record.recording_id or ""),
+        "Session ID": str(record.session_id or ""),
+        "Session": str(record.session_label or ""),
+        "Visit Index": record.visit_index if record.visit_index is not None else "",
+        "Days From Baseline": (
+            record.days_from_baseline
+            if record.days_from_baseline is not None
+            else ""
+        ),
+        "Group ID": str(record.group_id or ""),
+        "Group": str(record.group_label or _SINGLE_GROUP_LABEL),
+        "Condition": str(record.condition),
+    }
 
 
 def _load_active_rois() -> dict[str, list[str]]:
@@ -475,15 +569,22 @@ def _append_record_rows(
     condition = str(record.condition)
     pid_key = pid.casefold()
     condition_key = condition.casefold()
+    recording_key = str(record.recording_id or "").casefold()
     base_notes, base_excluded = _record_exclusion_notes(
         exclusion_context,
         pid_key=pid_key,
         condition_key=condition_key,
+        recording_key=recording_key,
     )
-    auto_electrodes = exclusion_context.auto_electrodes_by_participant.get(
+    participant_auto_electrodes = exclusion_context.auto_electrodes_by_participant.get(
         pid_key,
         frozenset(),
     )
+    recording_auto_electrodes = exclusion_context.auto_electrodes_by_recording.get(
+        recording_key,
+        frozenset(),
+    )
+    auto_electrodes = participant_auto_electrodes | recording_auto_electrodes
 
     try:
         frame = read_xlsx_sheet_selected_columns(
@@ -614,10 +715,18 @@ def _append_record_rows(
         electrode_excluded = base_excluded
         if electrode_key in auto_electrodes:
             electrode_excluded = True
+        if electrode_key in participant_auto_electrodes:
             electrode_notes.append(
                 exclusion_context.auto_electrode_notes.get(
                     (pid_key, electrode_key),
                     "Automatic frequency-domain electrode exclusion.",
+                )
+            )
+        if electrode_key in recording_auto_electrodes:
+            electrode_notes.append(
+                exclusion_context.auto_recording_electrode_notes.get(
+                    (recording_key, electrode_key),
+                    "Automatic frequency-domain recording-electrode exclusion.",
                 )
             )
         missing_columns = electrode_row.get("Missing Selected Harmonics", "")
@@ -837,21 +946,42 @@ def _build_exclusion_context(
     manual_conditions_display = normalize_manual_excluded_participant_conditions(
         preprocessing.get("manual_excluded_participant_conditions")
     )
+    manual_recordings_display = normalize_manual_excluded_recordings(
+        preprocessing.get("manual_excluded_recordings")
+    )
+    manual_recording_conditions_display = (
+        normalize_manual_excluded_recording_conditions(
+            preprocessing.get("manual_excluded_recording_conditions")
+        )
+    )
     manual_participants = frozenset(pid.casefold() for pid in manual_participants_display)
     manual_participant_conditions = frozenset(
         (pid.casefold(), condition.casefold())
         for pid, conditions in manual_conditions_display.items()
         for condition in conditions
     )
-    manual_participant_conditions = frozenset(
-        set(manual_participant_conditions)
-        | {(record.participant_id.casefold(), record.condition.casefold()) for record in index.excluded_workbooks}
+    manual_recordings = frozenset(
+        recording_id.casefold() for recording_id in manual_recordings_display
+    )
+    manual_recording_conditions = frozenset(
+        (recording_id.casefold(), condition.casefold())
+        for recording_id, conditions in manual_recording_conditions_display.items()
+        for condition in conditions
     )
 
     state = load_frequency_domain_qc_state(index.project_root)
     auto_participant_entries = _mapping_entries(state.get("auto_participant_exclusions"))
     manual_frequency_entries = _mapping_entries(state.get("manual_participant_exclusions"))
     auto_electrode_entries = _mapping_entries(state.get("auto_participant_electrode_exclusions"))
+    auto_recording_entries = _mapping_entries(
+        state.get("auto_recording_exclusions")
+    )
+    manual_frequency_recording_entries = _mapping_entries(
+        state.get("manual_recording_exclusions")
+    )
+    auto_recording_electrode_entries = _mapping_entries(
+        state.get("auto_recording_electrode_exclusions")
+    )
     frequency_auto_participants = frozenset(
         _pid_key(entry.get("participant_id"))
         for entry in auto_participant_entries
@@ -861,6 +991,16 @@ def _build_exclusion_context(
         _pid_key(entry.get("participant_id"))
         for entry in manual_frequency_entries
         if _pid_key(entry.get("participant_id"))
+    )
+    frequency_auto_recordings = frozenset(
+        _pid_key(entry.get("recording_id"))
+        for entry in auto_recording_entries
+        if _pid_key(entry.get("recording_id"))
+    )
+    frequency_manual_recordings = frozenset(
+        _pid_key(entry.get("recording_id"))
+        for entry in manual_frequency_recording_entries
+        if _pid_key(entry.get("recording_id"))
     )
     auto_electrodes: dict[str, set[str]] = {}
     auto_electrode_notes: dict[tuple[str, str], str] = {}
@@ -872,6 +1012,20 @@ def _build_exclusion_context(
         auto_electrodes.setdefault(pid_key, set()).add(electrode)
         reason = str(entry.get("reason") or "Automatic frequency-domain electrode exclusion.")
         auto_electrode_notes[(pid_key, electrode)] = reason
+
+    auto_recording_electrodes: dict[str, set[str]] = {}
+    auto_recording_electrode_notes: dict[tuple[str, str], str] = {}
+    for entry in auto_recording_electrode_entries:
+        recording_key = _pid_key(entry.get("recording_id"))
+        electrode = str(entry.get("electrode") or "").strip().upper()
+        if not recording_key or not electrode:
+            continue
+        auto_recording_electrodes.setdefault(recording_key, set()).add(electrode)
+        reason = str(
+            entry.get("reason")
+            or "Automatic frequency-domain recording-electrode exclusion."
+        )
+        auto_recording_electrode_notes[(recording_key, electrode)] = reason
 
     participant_notes: dict[tuple[str, str], str] = {}
     for entry in [*auto_participant_entries, *manual_frequency_entries]:
@@ -886,14 +1040,44 @@ def _build_exclusion_context(
         reason = str(entry.get("reason") or "").strip()
         participant_notes[(pid_key, source)] = f"{source}: {reason}" if reason else source
 
+    recording_notes: dict[tuple[str, str], str] = {}
+    for entries, source in (
+        (
+            auto_recording_entries,
+            "Automatic frequency-domain recording exclusion",
+        ),
+        (
+            manual_frequency_recording_entries,
+            "Manual frequency-domain recording exclusion",
+        ),
+    ):
+        for entry in entries:
+            recording_key = _pid_key(entry.get("recording_id"))
+            if not recording_key:
+                continue
+            reason = str(entry.get("reason") or "").strip()
+            recording_notes[(recording_key, source)] = (
+                f"{source}: {reason}" if reason else source
+            )
+
     context = _ExclusionContext(
         manual_participants=manual_participants,
         manual_participant_conditions=manual_participant_conditions,
+        manual_recordings=manual_recordings,
+        manual_recording_conditions=manual_recording_conditions,
         frequency_auto_participants=frequency_auto_participants,
         frequency_manual_participants=frequency_manual_participants,
+        frequency_auto_recordings=frequency_auto_recordings,
+        frequency_manual_recordings=frequency_manual_recordings,
         auto_electrodes_by_participant={pid: frozenset(electrodes) for pid, electrodes in auto_electrodes.items()},
+        auto_electrodes_by_recording={
+            recording_id: frozenset(electrodes)
+            for recording_id, electrodes in auto_recording_electrodes.items()
+        },
         notes_by_participant=participant_notes,
+        notes_by_recording=recording_notes,
         auto_electrode_notes=auto_electrode_notes,
+        auto_recording_electrode_notes=auto_recording_electrode_notes,
     )
     group_by_pid = _group_label_lookup(index, records)
     flags: list[dict[str, object]] = []
@@ -919,25 +1103,91 @@ def _build_exclusion_context(
                 current_exclusion=True,
                 notes="Participant-condition is currently excluded by preprocessing settings.",
             )
+    records_by_recording = {
+        str(record.recording_id).casefold(): record
+        for record in records
+        if record.recording_id
+    }
+    for raw_recording_id in manual_recordings_display:
+        record = records_by_recording.get(raw_recording_id.casefold())
+        if record is None:
+            continue
+        _append_flag(
+            flags,
+            pid=record.participant_id,
+            group=str(record.group_label or ""),
+            flag_type="Manual preprocessing recording exclusion",
+            flag_scope="Recording",
+            current_exclusion=True,
+            notes="Recording is currently excluded by preprocessing settings.",
+        )
+        flags[-1].update(_record_session_identity(record))
+        flags[-1]["Condition"] = ""
+    for raw_recording_id, conditions in manual_recording_conditions_display.items():
+        record = records_by_recording.get(raw_recording_id.casefold())
+        if record is None:
+            continue
+        for condition in conditions:
+            _append_flag(
+                flags,
+                pid=record.participant_id,
+                group=str(record.group_label or ""),
+                condition=condition,
+                flag_type="Manual preprocessing recording-condition exclusion",
+                flag_scope="Recording-condition",
+                current_exclusion=True,
+                notes=(
+                    "Recording-condition is currently excluded by "
+                    "preprocessing settings."
+                ),
+            )
+            flags[-1].update(_record_session_identity(record))
+            flags[-1]["Condition"] = condition
+    configured_participant_pairs = {
+        (pid.casefold(), condition.casefold())
+        for pid, conditions in manual_conditions_display.items()
+        for condition in conditions
+    }
+    configured_recording_pairs = {
+        (recording_id.casefold(), condition.casefold())
+        for recording_id, conditions in manual_recording_conditions_display.items()
+        for condition in conditions
+    }
     for record in index.excluded_workbooks:
-        key = (record.participant_id.casefold(), record.condition.casefold())
-        configured = {
-            (pid.casefold(), condition.casefold())
-            for pid, conditions in manual_conditions_display.items()
-            for condition in conditions
-        }
-        if key in configured:
+        participant_key = (
+            record.participant_id.casefold(),
+            record.condition.casefold(),
+        )
+        recording_key = (
+            str(record.recording_id or "").casefold(),
+            record.condition.casefold(),
+        )
+        if (
+            participant_key in configured_participant_pairs
+            or recording_key[0] in manual_recordings
+            or recording_key in configured_recording_pairs
+        ):
             continue
         _append_flag(
             flags,
             pid=record.participant_id,
             group=str(record.group_label or ""),
             condition=record.condition,
-            flag_type="Current participant-condition exclusion",
-            flag_scope="Participant-condition",
+            flag_type=(
+                "Current recording-condition exclusion"
+                if record.recording_id
+                else "Current participant-condition exclusion"
+            ),
+            flag_scope=(
+                "Recording-condition"
+                if record.recording_id
+                else "Participant-condition"
+            ),
             current_exclusion=True,
             notes="Canonical dataset index marks this observed workbook as excluded.",
         )
+        if record.recording_id:
+            flags[-1].update(_record_session_identity(record))
     for entry in auto_participant_entries:
         pid = str(entry.get("participant_id") or "").strip()
         if not pid:
@@ -983,6 +1233,64 @@ def _build_exclusion_context(
             current_exclusion=True,
             notes=str(entry.get("reason") or "Automatic frequency-domain QC exclusion.") + trigger_note,
         )
+    for entries, flag_type, default_note in (
+        (
+            auto_recording_entries,
+            "Automatic frequency-domain recording exclusion",
+            "Automatic frequency-domain recording exclusion.",
+        ),
+        (
+            manual_frequency_recording_entries,
+            "Manual frequency-domain recording exclusion",
+            "Manual frequency-domain recording exclusion.",
+        ),
+    ):
+        for entry in entries:
+            recording_id = str(entry.get("recording_id") or "").strip()
+            record = records_by_recording.get(recording_id.casefold())
+            if not recording_id or record is None:
+                continue
+            _append_flag(
+                flags,
+                pid=record.participant_id,
+                group=str(record.group_label or ""),
+                flag_type=flag_type,
+                flag_scope="Recording",
+                current_exclusion=True,
+                notes=str(entry.get("reason") or default_note),
+            )
+            flags[-1].update(_record_session_identity(record))
+            flags[-1]["Condition"] = ""
+    for entry in auto_recording_electrode_entries:
+        recording_id = str(entry.get("recording_id") or "").strip()
+        electrode = str(entry.get("electrode") or "").strip().upper()
+        record = records_by_recording.get(recording_id.casefold())
+        if not recording_id or not electrode or record is None:
+            continue
+        triggering = entry.get("triggering_conditions")
+        trigger_note = ""
+        if isinstance(triggering, (list, tuple, set)) and triggering:
+            trigger_note = "; triggering conditions: " + ", ".join(
+                map(str, triggering)
+            )
+        _append_flag(
+            flags,
+            pid=record.participant_id,
+            group=str(record.group_label or ""),
+            electrode=electrode,
+            flag_type="Automatic frequency-domain recording-electrode exclusion",
+            flag_scope="Recording-electrode",
+            current_exclusion=True,
+            notes=(
+                str(
+                    entry.get("reason")
+                    or "Automatic frequency-domain recording-electrode exclusion."
+                )
+                + trigger_note
+            ),
+        )
+        flags[-1].update(_record_session_identity(record))
+        flags[-1]["Condition"] = ""
     return context, flags
 
 
@@ -991,12 +1299,17 @@ def _record_exclusion_notes(
     *,
     pid_key: str,
     condition_key: str,
+    recording_key: str = "",
 ) -> tuple[list[str], bool]:
     notes: list[str] = []
     if pid_key in context.manual_participants:
         notes.append("Manual preprocessing participant exclusion.")
     if (pid_key, condition_key) in context.manual_participant_conditions:
         notes.append("Manual preprocessing participant-condition exclusion.")
+    if recording_key in context.manual_recordings:
+        notes.append("Manual preprocessing recording exclusion.")
+    if (recording_key, condition_key) in context.manual_recording_conditions:
+        notes.append("Manual preprocessing recording-condition exclusion.")
     if pid_key in context.frequency_auto_participants:
         notes.append(
             context.notes_by_participant.get(
@@ -1009,6 +1322,20 @@ def _record_exclusion_notes(
             context.notes_by_participant.get(
                 (pid_key, "Manual frequency-domain participant exclusion"),
                 "Manual frequency-domain participant exclusion.",
+            )
+        )
+    if recording_key in context.frequency_auto_recordings:
+        notes.append(
+            context.notes_by_recording.get(
+                (recording_key, "Automatic frequency-domain recording exclusion"),
+                "Automatic frequency-domain recording exclusion.",
+            )
+        )
+    if recording_key in context.frequency_manual_recordings:
+        notes.append(
+            context.notes_by_recording.get(
+                (recording_key, "Manual frequency-domain recording exclusion"),
+                "Manual frequency-domain recording exclusion.",
             )
         )
     return notes, bool(notes)
@@ -1104,17 +1431,39 @@ def _build_wide_frame(
     conditions: Sequence[str],
     rois: Sequence[str],
 ) -> pd.DataFrame:
-    base = roi_long.loc[:, ["PID", "Group"]].drop_duplicates().copy()
+    identity_columns = (
+        [
+            "PID",
+            "Recording ID",
+            "Session ID",
+            "Session",
+            "Visit Index",
+            "Days From Baseline",
+            "Group ID",
+            "Group",
+        ]
+        if "Recording ID" in roi_long.columns
+        else ["PID", "Group"]
+    )
+    base = roi_long.loc[:, identity_columns].drop_duplicates().copy()
     base["_Sort"] = base["PID"].map(_natural_key)
-    base = base.sort_values("_Sort", kind="stable").drop(columns="_Sort")
+    sort_columns = ["_Sort"]
+    if "Visit Index" in base.columns:
+        sort_columns.append("Visit Index")
+    base = base.sort_values(sort_columns, kind="stable").drop(columns="_Sort")
     for condition in conditions:
         for roi in rois:
             column = f"{condition} | {roi}"
             values = roi_long.loc[
                 roi_long["Condition"].eq(condition) & roi_long["ROI"].eq(roi),
-                ["PID", "Group", value_column],
+                [*identity_columns, value_column],
             ].rename(columns={value_column: column})
-            base = base.merge(values, on=["PID", "Group"], how="left", sort=False)
+            base = base.merge(
+                values,
+                on=identity_columns,
+                how="left",
+                sort=False,
+            )
     return base
 
 
@@ -1185,8 +1534,17 @@ def _build_analysis_notes_frame(
     selected_harmonics: Sequence[float],
     workbook_count: int,
     roi_count: int,
+    repeated_session: bool = False,
 ) -> pd.DataFrame:
     frequencies = ", ".join(f"{frequency:g}" for frequency in selected_harmonics)
+    observed_grain = (
+        "recording-condition" if repeated_session else "participant-condition"
+    )
+    roi_grain = (
+        "participant-recording-session-condition"
+        if repeated_session
+        else "participant-condition"
+    )
     rows = [
         (
             "Purpose",
@@ -1194,11 +1552,11 @@ def _build_analysis_notes_frame(
         ),
         (
             "Data scope",
-            f"All {workbook_count} observed canonical participant-condition workbooks were included; current Toolbox exclusions were flagged, not removed.",
+            f"All {workbook_count} observed canonical {observed_grain} workbooks were included; current Toolbox exclusions were flagged, not removed.",
         ),
         (
             "ROI Long grain",
-            f"One row per observed participant-condition workbook and each of {roi_count} active Settings ROIs. Unobserved conditions are absent in long format and blank in wide format.",
+            f"One row per observed {roi_grain} workbook and each of {roi_count} active Settings ROIs. Unobserved conditions are absent in long format and blank in wide format.",
         ),
         (
             "Raw Summed BCA",
@@ -1245,6 +1603,15 @@ def _build_analysis_notes_frame(
             "Review QC Flags before modeling. Missing values were left blank and were not imputed.",
         ),
     ]
+    if repeated_session:
+        rows.append(
+            (
+                "Session/phase-at-visit interpretation",
+                "Session and visit identity are retained on every observation. "
+                "When phase is always aligned with visit order, phase cannot be "
+                "separated from elapsed time, repetition, practice, or habituation.",
+            )
+        )
     return pd.DataFrame(rows, columns=["Note", "Explanation"])
 
 
@@ -1330,11 +1697,23 @@ def _format_workbook(workbook: Any) -> None:
             worksheet.column_dimensions[get_column_letter(column_number)].width = width
 
 
-def _finalize_qc_flags(rows: Sequence[dict[str, object]]) -> pd.DataFrame:
+def _finalize_qc_flags(
+    rows: Sequence[dict[str, object]],
+    *,
+    repeated_session: bool = False,
+) -> pd.DataFrame:
+    columns = (
+        _session_columns(_QC_FLAG_COLUMNS)
+        if repeated_session
+        else _QC_FLAG_COLUMNS
+    )
     if not rows:
-        return pd.DataFrame(columns=_QC_FLAG_COLUMNS)
-    frame = pd.DataFrame(rows, columns=_QC_FLAG_COLUMNS).drop_duplicates()
-    sort_columns = ["PID", "Condition", "ROI", "Electrode", "Flag Type"]
+        return pd.DataFrame(columns=columns)
+    frame = pd.DataFrame(rows, columns=columns).drop_duplicates()
+    sort_columns = ["PID"]
+    if repeated_session:
+        sort_columns.extend(["Visit Index", "Recording ID"])
+    sort_columns.extend(["Condition", "ROI", "Electrode", "Flag Type"])
     return frame.sort_values(sort_columns, kind="stable", na_position="last").reset_index(drop=True)
 
 

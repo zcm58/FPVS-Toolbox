@@ -12,6 +12,7 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGraphicsOpacityEffect,
+    QHeaderView,
     QSizePolicy,
     QTableWidgetItem,
     QToolBar,
@@ -225,8 +226,14 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
 
     table.setColumnCount(2)
     table.setHorizontalHeaderLabels(["Status", "File"])
+    table.setWordWrap(True)
     table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     table.setSelectionMode(QAbstractItemView.NoSelection)
+    header = table.horizontalHeader()
+    header.setStretchLastSection(True)
+    header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    header.setSectionResizeMode(1, QHeaderView.Stretch)
+    table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
     progress_bar = getattr(host, "progress_bar", None)
     if progress_bar is not None:
         progress_animation = getattr(host, "_progress_anim", None)
@@ -252,6 +259,8 @@ def prepare_processing_activity(host: Any, files: list[Path]) -> None:
 
     table.resizeRowsToContents()
     table.scrollToTop()
+    horizontal_scroll = table.horizontalScrollBar()
+    horizontal_scroll.setValue(horizontal_scroll.minimum())
     _set_processing_summary(host, 0)
     current_label = getattr(host, "processing_current_file_label", None)
     if current_label is not None:

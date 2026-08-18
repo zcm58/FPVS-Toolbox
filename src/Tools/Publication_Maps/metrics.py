@@ -143,6 +143,7 @@ def build_publication_map_result(
             group_id=request.group_id,
             group_label=request.group_label,
             group_folder=request.group_folder,
+            session_ids=request.session_ids or None,
         )
     except DatasetIndexError as exc:
         raise PublicationMapCohortError(str(exc)) from exc

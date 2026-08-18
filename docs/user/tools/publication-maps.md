@@ -68,6 +68,26 @@ the conditions or groups are columns, and both columns share a color scale for
 each metric. The group comparison is descriptive: it is not a between-group
 statistical test or a difference map.
 
+For a project with canonical repeated-session metadata, the **Compare**
+selector adds two safe workflows:
+
+- **Condition (one session)** runs the existing condition, paired-condition,
+  and group options within one explicitly selected visit.
+- **Session comparison** selects one task condition and two sessions. It
+  creates a group-column × session-row grid for the project's two stable
+  groups, with one shared color scale across all four maps for each metric.
+
+Every panel title includes the canonical session label, visit index, and
+participant `n`. The optional paired-difference row is calculated as
+comparison minus reference within each participant before averaging and reports
+`paired n`; its diverging color scale is shared across groups. Missing
+`recording_id`, `session_id`, `group_id`, or visit metadata blocks the run, and
+Scalp Maps never guesses identity from paths or filenames.
+
+When all participants completed the phases in one fixed order, phase cannot be
+separated from visit order, elapsed time, retest, or drift. The session grid is
+descriptive and carries this caveat both in the page and the exported figure.
+
 BCA and SNR can use fixed or automatic color limits. The initial fixed ranges
 are 0.0–0.4 µV for BCA and 1.0–1.5 for SNR. Z-score maps use a configurable
 lower display threshold of 1.64 by default; values below the display threshold
@@ -82,6 +102,10 @@ multi-group runs give each group its own canonical output folder. Two-group
 comparison mode instead writes the comparison figure directly in the selected
 `4 - Scalp Maps` folder. Scalp Maps does not create source-data workbooks or
 other auxiliary output files.
+
+Repeated-session grids are also written directly in the selected base folder,
+using a `_session_grid` filename suffix. Their complete PNG/PDF set is staged
+and published transactionally with the same cancellation guarantees.
 
 Generation is transactional: cancelling or encountering an error does not
 publish a partial figure pair. The Generate action and project navigation

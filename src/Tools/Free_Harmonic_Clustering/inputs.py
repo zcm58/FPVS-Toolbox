@@ -515,6 +515,12 @@ def prepare_project_contrast(
         raise FreeHarmonicInputError(
             "The dataset index resolved to a different active project root."
         )
+    if index.is_repeated_session:
+        raise FreeHarmonicInputError(
+            "Free Harmonic Clustering is not yet recording-aware and is disabled "
+            "for repeated-session projects. This protective gate prevents visits "
+            "from being collapsed or treated as independent participants."
+        )
     try:
         full_fft_provenance = validate_project_full_fft_provenance(
             project_root,

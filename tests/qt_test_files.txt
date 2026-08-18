@@ -39,6 +39,7 @@ tests/processing/test_single_file_process_mode.py
 tests/processing/test_worker_integration.py
 tests/project_io/test_open_existing_project_dialog.py
 tests/project_io/test_project_settings_roundtrip.py
+tests/project_io/test_repeated_session_project_setup_qt.py
 tests/publication_maps/test_publication_maps_lifecycle_qt.py
 tests/ratio_calculator/test_ratio_calculator_removed_smoke.py
 tests/ratio_calculator/test_ratio_calculator_roi_dynamic.py

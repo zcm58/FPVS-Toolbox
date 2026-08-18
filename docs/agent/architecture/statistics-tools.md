@@ -230,6 +230,24 @@ Rules:
   dataset or choose a fixed/preregistered domain. Equal group weighting is the
   declared common-selector estimand, not a claim that it is universally
   preferable to population weighting.
+- Adaptive non-Legacy repeated-session projects use the separately versioned
+  `participant_first_equal_group_session_condition_local_z_v1` selector
+  estimand. Workbooks and frequency-domain QC are keyed by `recording_id`,
+  while `participant_id` remains the pairing identity. Within every declared
+  stable-group x session x task-condition cell, multiple recording observations
+  are averaged within participant first, participants are averaged within the
+  cell, and declared groups are weighted equally. Local Z is calculated
+  separately for every session x task-condition spectrum and those cell Z
+  scores are weighted equally to produce one common harmonic list for all
+  recordings, groups, sessions, task conditions, electrodes, and ROIs. An
+  individual missing visit remains missing and is audited; an entirely empty
+  declared group x session x task-condition cell blocks adaptive selection
+  rather than being fabricated or silently renormalized. Fixed/preregistered
+  selection reads every available recording but performs no adaptive pooling.
+  Repeated cache/provenance identity includes recording-to-participant,
+  stable-group, session, source, and visit assignments plus every source
+  workbook fingerprint. The single-session v2.1 pooling and fingerprints are
+  unchanged.
 - Non-legacy adaptive profiles select over all retained scalp electrodes by
   default or one nonempty frozen a-priori electrode mask stored with project
   state and provenance. They cannot derive their mask from mutable Stats ROIs.
@@ -308,6 +326,32 @@ Rules:
   only when the selected Excel folder belongs to that manifest-defined Excel
   subfolder. When rebinding, clear project-bound scan/results/export state so
   stale subjects, conditions, groups, and output paths do not survive.
+- Repeated-session v2.2 projects never enter that participant-only folder scan.
+  `ui/repeated_session_dialog.py` loads the canonical full-audit `ROI Long`
+  sheet through `io/repeated_session_project.py` in a background task and
+  requires canonical participant, recording, group, session, and visit fields.
+  The GUI reports manifest-level recording-pair coverage and requires explicit
+  Condition x ROI outcome selection before running inference.
+- `analysis/repeated_session_contracts.py` and
+  `analysis/repeated_session_analysis.py` own repeated-session inference v1.
+  It requires exactly two stable groups and two ordered sessions. Within each
+  declared outcome, one participant delta is visit 2 minus visit 1. The primary
+  estimand is Group A minus Group B in those deltas, tested two-sided with
+  Welch inference, a confidence interval, and Hedges g. One Holm family spans
+  all declared outcomes; non-estimable declared tests conservatively remain in
+  the family. Secondary two-sided one-sample tests of paired deltas use one
+  separate Holm family across both groups and outcomes and report Cohen's dz.
+- Repeated inference is complete-pair per declared outcome with no imputation,
+  no cross-outcome complete-case deletion, and no model or test fallback.
+  Participant-session, outcome-pair, delta, coverage, method, schema, and long-
+  data frames are exported atomically to
+  `Repeated_Session_Change_Analysis.xlsx`. Optional
+  `days_from_baseline` is provenance only and is not a covariate.
+- If phase and visit order are aligned, every repeated result and GUI surface
+  must use `session/phase-at-visit` wording and disclose that phase cannot be
+  isolated from order, elapsed time, repetition, practice, or habituation. Do
+  not add a default saturated Group x Session x Condition x ROI screen or
+  silently promote legacy cross-phase results.
 - Standard FPVS Screening is a locked first-round workflow, not a general
   statistical model builder and not a substitute for a study-specific final
   analysis. Covariates, random slopes, longitudinal or nested structure, more

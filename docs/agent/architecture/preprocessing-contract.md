@@ -275,8 +275,18 @@ the canonical `group_id` from `RawFileInfo`. The GUI resolves that ID through
 `ProjectGroupContext` and shows the configured group label in live scan status,
 empty-recording review, removed-electrode review, hard-exclusion review and
 details, and remaining review flags. A missing or unknown grouped assignment is
-an error; folder names are not a membership fallback. Participant exclusions
-and removed-electrode maps remain keyed by project-wide unique participant ID.
+an error; folder names are not a membership fallback. In v2.1, participant
+exclusions and removed-electrode maps remain keyed by project-wide unique
+participant ID.
+
+For repeated-session v2.2 projects, every preflight and processing observation
+also carries canonical `recording_id`, `session_id`, session label,
+`visit_index`, source, and stable group identity. Caches, candidate maps,
+accepted/rejected electrode provenance, hard exclusions, remaining review
+flags, condition-crop decisions, ledger rows, and QC exports key per-file state
+by recording ID so a second visit cannot overwrite the first. Participant ID
+remains the person/pairing identity. Declared sessions without a recording are
+shown as missing coverage and are never fabricated.
 
 The project preprocessing setting `removed_electrode_detection_mode` defaults
 to `auto` and is exposed in Settings > Advanced > Processing QC as Off,
@@ -314,6 +324,16 @@ fraction, hemisphere failure, and connected bad-channel clusters. When the mode
 is Off, broad low-variance hard-exclusion checks still run, but isolated
 low-variance channels are not auto-marked for interpolation and the local
 cluster warning/exclusion rule is not applied.
+
+Repeated projects may additionally store
+`manual_removed_electrodes_by_recording`. An explicit recording row overrides
+the participant-level compatibility fallback for that recording only. Likewise
+`manual_excluded_recordings` and
+`manual_excluded_recording_conditions` are distinct from participant-wide and
+participant-condition scopes. GUI review tables must show participant,
+recording, session/phase-at-visit, visit index, group, and scope; excluding one
+recording must leave its sibling visit active unless the participant-wide scope
+was explicitly chosen.
 
 During embedded preflight QC, the removed-electrode review keeps provenance
 separate from the final compatibility map. It stores the original FPVS
@@ -391,6 +411,10 @@ included in the final processed dataset. It also includes an exclusion reason
 column for excluded or failed participants.
 This export is generated from the current per-file results plus the processing
 ledger so incremental runs can include participants completed in earlier runs.
+
+For repeated projects, the summary has one row per recording and adds
+Recording ID, Session ID and label, Visit Index, and Group. The v2.1 sheet name
+and participant-only column shape remain unchanged for legacy projects.
 
 Future calibration changes that can alter which raw files or channels enter the
 processed dataset must update focused tests and bump the preprocessing cache and

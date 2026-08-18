@@ -10,10 +10,33 @@ _PROJECT_NAMES = {
     "DEFAULTS",
     "EXCEL_SUBFOLDER_NAME",
     "PROJECT_SCHEMA_VERSION",
+    "REPEATED_SESSION_PROJECT_SCHEMA_VERSION",
     "SNR_SUBFOLDER_NAME",
     "STATS_SUBFOLDER_NAME",
     "_LEGACY_BANDPASS_WARNED",
 }
+_RECORDING_NAMES = {
+    "ProjectRecordingContext",
+    "RecordingConfigurationError",
+    "RecordingInfo",
+    "RecordingSourceInfo",
+    "SessionInfo",
+    "load_project_recording_context",
+    "normalize_project_recording_sources",
+    "normalize_project_recordings",
+    "normalize_project_sessions",
+    "project_recording_context",
+}
+_RECORDING_PREFLIGHT_NAMES = {
+    "RecordingPreflightCancelled",
+    "RecordingPreflightIssue",
+    "RecordingPreflightReport",
+    "RecordingPreflightRow",
+    "derive_filename_token_rules",
+    "preflight_repeated_recording_sources",
+}
+_RAW_IDENTITY_NAMES = {"infer_raw_participant_id"}
+_SESSION_COMPATIBILITY_NAMES = {"repeated_session_tool_block_reason"}
 _GROUPING_NAMES = {
     "GroupConfigurationError",
     "GroupInfo",
@@ -52,9 +75,13 @@ _PREPROCESSING_NAMES = {
     "SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE",
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
+    "REPEATED_SESSION_PREPROCESSING_KEYS",
+    "is_recording_condition_excluded",
     "is_participant_condition_excluded",
     "normalize_manual_excluded_participant_conditions",
     "normalize_manual_excluded_participants",
+    "normalize_manual_excluded_recording_conditions",
+    "normalize_manual_excluded_recordings",
     "normalize_preprocessing_settings",
     "new_project_preprocessing_settings",
 }
@@ -65,6 +92,10 @@ __all__ = sorted(
     | _GROUPING_NAMES
     | _PROJECT_NAMES
     | _PREPROCESSING_NAMES
+    | _RAW_IDENTITY_NAMES
+    | _RECORDING_NAMES
+    | _RECORDING_PREFLIGHT_NAMES
+    | _SESSION_COMPATIBILITY_NAMES
 )
 
 
@@ -85,6 +116,26 @@ def __getattr__(name: str) -> Any:
         project = importlib.import_module("Main_App.projects.project")
 
         return getattr(project, name)
+    if name in _RECORDING_NAMES:
+        recordings = importlib.import_module("Main_App.projects.recordings")
+
+        return getattr(recordings, name)
+    if name in _RECORDING_PREFLIGHT_NAMES:
+        recording_preflight = importlib.import_module(
+            "Main_App.projects.recording_preflight"
+        )
+
+        return getattr(recording_preflight, name)
+    if name in _RAW_IDENTITY_NAMES:
+        raw_identity = importlib.import_module("Main_App.projects.raw_identity")
+
+        return getattr(raw_identity, name)
+    if name in _SESSION_COMPATIBILITY_NAMES:
+        session_compatibility = importlib.import_module(
+            "Main_App.projects.session_compatibility"
+        )
+
+        return getattr(session_compatibility, name)
     if name in _PREPROCESSING_NAMES:
         preprocessing_settings = importlib.import_module("Main_App.projects.preprocessing_settings")
 

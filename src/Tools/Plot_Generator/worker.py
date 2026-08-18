@@ -21,6 +21,8 @@ from Tools.Plot_Generator.excel_inputs import (
 )
 from Tools.Plot_Generator.rendering import PlotRenderingMixin, matplotlib, plt
 from Tools.Plot_Generator.output_interface import PlotOutputInterfaceMixin
+from Tools.Plot_Generator.session_rendering import SessionPlotRenderingMixin
+from Tools.Plot_Generator.session_workflow import SessionPlotWorkflowMixin
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,8 @@ class _Worker(
     PlotDataCollectionMixin,
     PlotAggregationMixin,
     PlotRenderingMixin,
+    SessionPlotWorkflowMixin,
+    SessionPlotRenderingMixin,
     PlotOutputInterfaceMixin,
 ):
     """Worker to process Excel files and generate plots."""
@@ -78,6 +82,9 @@ class _Worker(
         project_root: str | None = None,
         spectral_qc_enabled: bool = True,
         prepared_dataset_index: ProjectDatasetIndex | None = None,
+        workbook_session_ids: Sequence[str] | None = None,
+        session_comparison_ids: Sequence[str] | None = None,
+        session_group_ids: Sequence[str] | None = None,
     ) -> None:
         super().__init__()
         self.config = PlotWorkerConfig(
@@ -111,6 +118,9 @@ class _Worker(
             project_root=project_root,
             spectral_qc_enabled=spectral_qc_enabled,
             prepared_dataset_index=prepared_dataset_index,
+            workbook_session_ids=workbook_session_ids,
+            session_comparison_ids=session_comparison_ids,
+            session_group_ids=session_group_ids,
         )
         self.folder = self.config.folder
         self.condition = self.config.condition
@@ -173,6 +183,9 @@ class _Worker(
         self.project_root = self.config.project_root
         self.spectral_qc_enabled = self.config.spectral_qc_enabled
         self._prepared_dataset_index = self.config.prepared_dataset_index
+        self.workbook_session_ids = tuple(self.config.workbook_session_ids or ())
+        self.session_comparison_ids = tuple(self.config.session_comparison_ids or ())
+        self.session_group_ids = tuple(self.config.session_group_ids or ())
         self._dataset_index_loaded = False
         self._workbook_records_by_path = {}
         self.generated_paths: list[str] = []
@@ -387,6 +400,9 @@ class _Worker(
 
     def _run(self) -> None:
         if self._cancellation_checkpoint():
+            return
+        if self.session_comparison_ids:
+            self._run_session_comparison()
             return
         group_mode_error = self._group_mode_configuration_error()
         if group_mode_error is not None:

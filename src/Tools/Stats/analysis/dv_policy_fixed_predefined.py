@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -412,6 +412,7 @@ def _prepare_fixed_predefined_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
     project_root: str | Path | None = None,
     use_accepted_processing_selection: bool = False,
+    electrode_exclusions_by_subject: Mapping[str, frozenset[str]] | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
@@ -421,11 +422,16 @@ def _prepare_fixed_predefined_bca_data(
     if not rois_map:
         log_func("No ROIs defined or available.")
         return None
-    electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
-    if project_root not in (None, ""):
+    resolved_electrode_exclusions: dict[str, frozenset[str]] = {
+        str(subject).upper(): frozenset(
+            str(electrode).upper() for electrode in electrodes
+        )
+        for subject, electrodes in (electrode_exclusions_by_subject or {}).items()
+    }
+    if project_root not in (None, "") and not resolved_electrode_exclusions:
         from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 
-        electrode_exclusions_by_subject = (
+        resolved_electrode_exclusions = (
             active_frequency_domain_exclusions(
                 project_root
             ).auto_excluded_electrodes_by_participant
@@ -520,7 +526,7 @@ def _prepare_fixed_predefined_bca_data(
                     log_func=log_func,
                     harmonic_freqs=list(selection.included_frequencies_hz),
                     provenance_enabled=provenance_map is not None,
-                    excluded_electrodes_upper=electrode_exclusions_by_subject.get(
+                    excluded_electrodes_upper=resolved_electrode_exclusions.get(
                         str(pid).upper(),
                         frozenset(),
                     ),

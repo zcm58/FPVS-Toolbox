@@ -12,6 +12,67 @@ logger = logging.getLogger(__name__)
 
 
 class StatsWindowActionsMixin:
+    def _is_repeated_session_project(self) -> bool:
+        return bool(getattr(self, "_project_is_repeated_session", False))
+
+    def _sync_repeated_session_project_ui(self) -> None:
+        """Switch between the legacy screen and the separate paired workflow."""
+
+        repeated = self._is_repeated_session_project()
+        self.setWindowTitle(
+            "Repeated Session FPVS Analysis"
+            if repeated
+            else "Standard FPVS Screening"
+        )
+        if hasattr(self, "file_input_label"):
+            self.file_input_label.setText(
+                "Full-audit workbook:" if repeated else "Excel Files Folder:"
+            )
+        if hasattr(self, "browse_folder_btn"):
+            self.browse_folder_btn.setEnabled(not repeated)
+            self.browse_folder_btn.setToolTip(
+                (
+                    "Repeated-session analysis uses the canonical project full-audit "
+                    "workbook. Re-run post-processing to rebuild it."
+                )
+                if repeated
+                else "Choose the folder that contains FPVS results."
+            )
+        for name in ("conditions_group", "manual_exclusion_group"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(not repeated)
+        if hasattr(self, "setup_tabs"):
+            self.setup_tabs.setTabEnabled(1, not repeated)
+            if repeated:
+                self.setup_tabs.setCurrentIndex(0)
+        if hasattr(self, "single_advanced_btn"):
+            self.single_advanced_btn.setVisible(not repeated)
+        if hasattr(self, "stats_ready_export_btn"):
+            self.stats_ready_export_btn.setVisible(not repeated)
+        if hasattr(self, "output_header_label"):
+            self.output_header_label.setText(
+                "Repeated-Session Results"
+                if repeated
+                else "Screening Results"
+            )
+        if hasattr(self, "analysis_design_note"):
+            self.analysis_design_note.setText(
+                (
+                    "The paired workflow keeps one stable group per participant and "
+                    "one canonical recording per session. It uses complete observed "
+                    "pairs per declared outcome, with no imputation or fallback test."
+                )
+                if repeated
+                else (
+                    "Standard screening uses each finite selected observation without "
+                    "imputation. Balanced data also receive a secondary ANOVA "
+                    "compatibility check."
+                )
+            )
+        self._sync_analysis_mode_ui()
+        self._refresh_analysis_design_summary()
+
     def _set_status(self, txt: str) -> None:
         """Handle the set status step for the Stats workflow."""
         if hasattr(self, "lbl_status"):
@@ -132,6 +193,27 @@ class StatsWindowActionsMixin:
 
     def _sync_analysis_mode_ui(self, *_args) -> None:
         """Update the locked project mode without offering a pooled override."""
+
+        if self._is_repeated_session_project():
+            mode_value = getattr(self, "analysis_mode_value", None)
+            if mode_value is not None:
+                mode_value.setText("Repeated Sessions")
+                mode_value.setToolTip(
+                    "Birth-control group is between participants; session/phase-at-visit "
+                    "is repeated within participants."
+                )
+            primary = getattr(self, "analyze_single_btn", None)
+            if primary is not None:
+                primary.setText("Open Repeated-Session Analysis")
+                primary.setToolTip(
+                    "Select prespecified Condition × ROI outcomes, review pair "
+                    "coverage, and run the versioned participant-change analysis."
+                )
+            for name in ("group_pair_combo", "group_pair_label"):
+                widget = getattr(self, name, None)
+                if widget is not None:
+                    widget.setVisible(False)
+            return
 
         is_multi = self._native_pipeline_id() is PipelineId.MULTI
         mode_text = "Multi-Group" if is_multi else "Single Group"
@@ -389,6 +471,55 @@ class StatsWindowActionsMixin:
                 label.setToolTip(text)
 
     def _refresh_analysis_design_summary(self, *_args) -> None:
+        if self._is_repeated_session_project():
+            try:
+                from Main_App.projects import load_project_recording_context
+
+                context = load_project_recording_context(self._project_path)
+                groups = tuple(
+                    sorted(
+                        context.groups,
+                        key=lambda row: (row.label.casefold(), row.group_id),
+                    )
+                )
+                sessions = tuple(
+                    sorted(
+                        context.sessions,
+                        key=lambda row: (
+                            row.visit_index,
+                            row.label.casefold(),
+                            row.session_id.casefold(),
+                        ),
+                    )
+                )
+                if len(groups) != 2 or len(sessions) != 2:
+                    raise ValueError(
+                        "inference v1 requires exactly two stable groups and two "
+                        "ordered sessions"
+                    )
+                if tuple(session.visit_index for session in sessions) != (1, 2):
+                    raise ValueError("session visit indices must be 1 and 2")
+                group_text = (
+                    f"{groups[0].label} [{groups[0].group_id}] vs "
+                    f"{groups[1].label} [{groups[1].group_id}]"
+                )
+                coverage_text = (
+                    f"Ordered within-participant contrast: "
+                    f"{sessions[1].label} (visit 2) minus "
+                    f"{sessions[0].label} (visit 1). Open the paired "
+                    "workflow for recording- and outcome-level coverage."
+                )
+            except Exception as exc:  # noqa: BLE001
+                group_text = "Repeated project metadata requires review."
+                coverage_text = f"Repeated-session design validation failed: {exc}"
+            self.update_analysis_design_summary(
+                mode_text="Repeated Sessions",
+                profile_text="Complete-pair change analysis v1",
+                group_text=group_text,
+                coverage_text=coverage_text,
+            )
+            return
+
         selected_conditions = self._get_selected_conditions()
         self._preliminary_coverage = build_preliminary_workbook_coverage(
             self.subjects,
@@ -632,6 +763,10 @@ class StatsWindowActionsMixin:
     def _on_primary_analysis_clicked(self) -> None:
         """Run the manifest-locked native single- or multi-group pipeline."""
 
+        if self._is_repeated_session_project():
+            self._open_repeated_session_analysis()
+            return
+
         self._refresh_analysis_design_summary()
         if self._native_pipeline_id() is PipelineId.MULTI:
             if self._unassigned_group_participants:
@@ -671,6 +806,24 @@ class StatsWindowActionsMixin:
         else:
             self._controller.run_single_group_analysis()
 
+    def _open_repeated_session_analysis(self) -> None:
+        """Open the dedicated paired workflow without invoking legacy scanning."""
+
+        from Tools.Stats.ui.repeated_session_dialog import (
+            RepeatedSessionAnalysisDialog,
+        )
+
+        dialog = RepeatedSessionAnalysisDialog(
+            self._project_path,
+            self,
+            thread_pool=self.pool,
+        )
+        dialog.exec()
+        path = dialog.last_result_path
+        if path is not None:
+            self._set_last_export_path(str(path))
+            self._set_status(f"Repeated-session analysis workbook: {path}")
+
     def _on_cancel_analysis_clicked(self) -> None:
         """Delegate cancellation to the pipeline/controller implementation."""
 
@@ -708,6 +861,10 @@ class StatsWindowActionsMixin:
 
     def on_single_advanced_clicked(self) -> None:
         """Open individual actions appropriate to the locked project mode."""
+
+        if self._is_repeated_session_project():
+            self._open_repeated_session_analysis()
+            return
 
         if self._native_pipeline_id() is PipelineId.MULTI:
             self._open_advanced_dialog(
@@ -848,6 +1005,14 @@ class StatsWindowActionsMixin:
 
     def on_browse_folder(self) -> None:
         """Handle the on browse folder step for the Stats workflow."""
+        if self._is_repeated_session_project():
+            QMessageBox.information(
+                self,
+                "Canonical Full-Audit Workbook",
+                "Repeated-session analysis reads the project-owned full-audit "
+                "workbook. Re-run post-processing if it is missing or stale.",
+            )
+            return
         start_dir = self.le_folder.text() or self.project_dir
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
         if folder:
@@ -856,6 +1021,19 @@ class StatsWindowActionsMixin:
 
     def _scan_button_clicked(self) -> None:
         """Handle the scan button clicked step for the Stats workflow."""
+        if self._is_repeated_session_project():
+            from Main_App.exports.analysis_ready_workbook import (
+                default_analysis_ready_workbook_path,
+            )
+
+            self._set_data_folder_path(
+                str(default_analysis_ready_workbook_path(self._project_path))
+            )
+            self._set_status(
+                "Repeated-session projects use the canonical full-audit workbook; "
+                "open the paired workflow to validate recording and outcome coverage."
+            )
+            return
         if not self._scan_guard.start():
             return
         try:
@@ -925,6 +1103,25 @@ class StatsWindowActionsMixin:
         ``1 - Excel Data Files`` under the project root). If it doesn't exist,
         do nothing (user can Browse).
         """
+        if self._is_repeated_session_project():
+            from Main_App.exports.analysis_ready_workbook import (
+                default_analysis_ready_workbook_path,
+            )
+
+            target = default_analysis_ready_workbook_path(self._project_path)
+            self._set_data_folder_path(str(target))
+            self._set_status(
+                (
+                    "Repeated-session full-audit workbook is ready. Open the paired "
+                    "analysis workflow."
+                    if target.is_file()
+                    else (
+                        "Run project post-processing to create the session-aware "
+                        f"full-audit workbook: {target}"
+                    )
+                )
+            )
+            return
         target = self._preferred_stats_folder()
         if target.exists() and target.is_dir():
             self._set_data_folder_path(str(target))

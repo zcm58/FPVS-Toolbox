@@ -32,7 +32,17 @@ LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
 PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v9_source_ready_time_domain"
 _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
-    {"manual_excluded_participant_conditions"}
+    {
+        "manual_excluded_participant_conditions",
+        "manual_excluded_recording_conditions",
+    }
+)
+_REPEATED_SESSION_PREPROCESSING_KEYS = frozenset(
+    {
+        "manual_removed_electrodes_by_recording",
+        "manual_excluded_recordings",
+        "manual_excluded_recording_conditions",
+    }
 )
 _FINGERPRINT_V9_EPOCH_DEFAULTS = {
     "epoch_start_s": -1.0,
@@ -79,6 +89,17 @@ class ProcessingInputState:
     status: str
     reason: str
     expected_outputs: tuple[Path, ...]
+
+    @property
+    def processing_id(self) -> str:
+        """Return the ledger key for this raw recording.
+
+        Legacy projects intentionally keep their participant-keyed entries;
+        repeated-session projects use the canonical recording ID so a second
+        visit cannot overwrite the first.
+        """
+
+        return self.info.processing_id
 
     @property
     def should_run_incremental(self) -> bool:
@@ -378,7 +399,7 @@ def _expected_excel_paths(
     paths: list[Path] = []
     for label in condition_labels:
         condition_folder = _condition_folder_name(label)
-        file_name = f"{info.subject_id}_{condition_folder}_Results.xlsx"
+        file_name = f"{info.output_stem}_{condition_folder}_Results.xlsx"
         output_folder = resolve_output_directory(root, condition_folder)
         if group_folder:
             output_folder = resolve_group_output_directory(output_folder, group_folder)
@@ -412,16 +433,44 @@ def raw_file_metadata(file_path: Path) -> dict[str, Any]:
     }
 
 
+def _recording_identity_payload(info: RawFileInfo) -> dict[str, Any]:
+    """Return legacy-compatible participant identity plus optional visit data."""
+
+    payload: dict[str, Any] = {"participant_id": info.subject_id}
+    if info.recording_id:
+        payload["recording_id"] = info.recording_id
+    if info.session_id:
+        payload["session_id"] = info.session_id
+    if info.session_label:
+        payload["session_label"] = info.session_label
+    if info.visit_index is not None:
+        payload["visit_index"] = int(info.visit_index)
+    if info.source_id:
+        payload["source_id"] = info.source_id
+    if info.days_from_baseline is not None:
+        payload["days_from_baseline"] = float(info.days_from_baseline)
+    return payload
+
+
 def build_processing_fingerprint(
     project: Any,
     settings: Mapping[str, Any],
     event_map: Mapping[str, int],
 ) -> str:
     project_preprocessing = getattr(project, "preprocessing", {}) or {}
+    repeated_session_project = bool(
+        getattr(project, "sessions", {})
+        or getattr(project, "recording_sources", {})
+        or getattr(project, "recordings", {})
+    )
     fingerprint_settings = {
         key: value
         for key, value in settings.items()
         if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
+        and (
+            repeated_session_project
+            or key not in _REPEATED_SESSION_PREPROCESSING_KEYS
+        )
     }
     compatibility = getattr(
         project,
@@ -449,6 +498,10 @@ def build_processing_fingerprint(
         key: value
         for key, value in project_preprocessing.items()
         if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
+        and (
+            repeated_session_project
+            or key not in _REPEATED_SESSION_PREPROCESSING_KEYS
+        )
     }
     # Reconstruct only the retired fields in the temporary hash payload. Active
     # project preprocessing remains clean while existing v9 ledger/sidecar
@@ -477,6 +530,12 @@ def build_processing_fingerprint(
         "project_subfolders": getattr(project, "subfolders", {}) or {},
         "project_groups": getattr(project, "groups", {}) or {},
     }
+    if repeated_session_project:
+        payload["project_recording_design"] = {
+            "sessions": getattr(project, "sessions", {}) or {},
+            "recording_sources": getattr(project, "recording_sources", {}) or {},
+            "recordings": getattr(project, "recordings", {}) or {},
+        }
     encoded = _canonical_json(payload).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -533,8 +592,9 @@ def classify_processing_inputs(
     states: list[ProcessingInputState] = []
     for info in files:
         participant_id = info.subject_id
+        processing_id = info.processing_id
         expected_outputs = _expected_excel_paths(project, info, condition_labels)
-        entry = entries.get(participant_id)
+        entry = entries.get(processing_id)
         raw_meta = raw_file_metadata(info.path)
         if not isinstance(entry, Mapping):
             states.append(
@@ -719,7 +779,7 @@ def _state_still_matches_ledger(
     entries = ledger.get("entries", {})
     if not isinstance(entries, Mapping):
         return False
-    entry = entries.get(state.participant_id)
+    entry = entries.get(state.processing_id)
     if not isinstance(entry, Mapping):
         return False
 
@@ -835,7 +895,7 @@ def refresh_skipped_ledger_fingerprints(project: Any, plan: ProcessingPlan) -> i
             state_path = state.info.path
         if state_path in run_files:
             continue
-        entry = entries.get(state.participant_id)
+        entry = entries.get(state.processing_id)
         if not isinstance(entry, dict):
             continue
         updates = {
@@ -1039,8 +1099,8 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
     for state in plan.states:
         if state.info.path.resolve() not in run_files:
             continue
-        entry = entries.get(state.participant_id)
-        derivative_targets[state.participant_id] = _recorded_source_derivative_paths(
+        entry = entries.get(state.processing_id)
+        derivative_targets[state.processing_id] = _recorded_source_derivative_paths(
             project_root,
             entry if isinstance(entry, Mapping) else None,
         )
@@ -1055,7 +1115,7 @@ def clean_participant_outputs(project: Any, plan: ProcessingPlan) -> list[Path]:
         deleted.extend(
             _delete_recorded_source_derivative_targets(
                 project_root,
-                derivative_targets.get(state.participant_id, ()),
+                derivative_targets.get(state.processing_id, ()),
             )
         )
     return deleted
@@ -1178,8 +1238,8 @@ def record_processing_results(
             audit.get("interpolated_channels")
         ) or list(kurtosis_bad_channels)
         n_rejected = _int_or_default(audit.get("n_rejected"), len(kurtosis_bad_channels))
-        entries[state.participant_id] = {
-            "participant_id": state.participant_id,
+        entries[state.processing_id] = {
+            **_recording_identity_payload(state.info),
             "group_id": state.info.group,
             **raw_meta,
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
@@ -1217,7 +1277,7 @@ def record_processing_results(
             continue
         excluded_result = excluded_by_path.get(raw_path)
         if excluded_result is not None:
-            previous_entry = entries.get(state.participant_id)
+            previous_entry = entries.get(state.processing_id)
             removed_outputs = _remove_expected_outputs_for_state(
                 project,
                 state,
@@ -1246,8 +1306,8 @@ def record_processing_results(
                 qc_payload.get("n_bad_channels"),
                 len(raw_qc_bad_channels),
             )
-            entries[state.participant_id] = {
-                "participant_id": state.participant_id,
+            entries[state.processing_id] = {
+                **_recording_identity_payload(state.info),
                 "group_id": state.info.group,
                 **raw_file_metadata(state.info.path),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
@@ -1313,8 +1373,8 @@ def record_processing_results(
                 str(label)
                 for label in no_output_failure.get("missing_condition_labels", [])
             ]
-            entries[state.participant_id] = {
-                "participant_id": state.participant_id,
+            entries[state.processing_id] = {
+                **_recording_identity_payload(state.info),
                 "group_id": state.info.group,
                 **raw_file_metadata(state.info.path),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
@@ -1345,15 +1405,15 @@ def record_processing_results(
                 **_source_derivative_result_payload(result),
             }
             continue
-        previous_entry = entries.get(state.participant_id)
+        previous_entry = entries.get(state.processing_id)
         removed_outputs = _remove_expected_outputs_for_state(
             project,
             state,
             previous_entry if isinstance(previous_entry, Mapping) else None,
         )
         failed_result = results_by_path.get(raw_path)
-        entries[state.participant_id] = {
-            "participant_id": state.participant_id,
+        entries[state.processing_id] = {
+            **_recording_identity_payload(state.info),
             "group_id": state.info.group,
             **raw_file_metadata(state.info.path),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,

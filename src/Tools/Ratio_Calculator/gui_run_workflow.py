@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import show_error, show_info, show_warning
 from Main_App.gui.open_paths import open_path_in_file_manager
+from Main_App.projects import repeated_session_tool_block_reason
 
 from .worker import RatioCalculatorWorker
 
@@ -50,6 +51,23 @@ class RatioRunWorkflowMixin:
     def _start_run(self) -> None:
         if self._thread and self._thread.isRunning():
             show_info(self, "Running", "Ratio calculations are already running.")
+            return
+
+        try:
+            repeated_block = repeated_session_tool_block_reason(
+                self._project_root,
+                tool_name="Ratio Calculator",
+            )
+        except Exception as exc:  # noqa: BLE001
+            show_error(
+                self,
+                "Project Metadata Error",
+                f"Cannot validate repeated-session compatibility: {exc}",
+            )
+            return
+        if repeated_block:
+            show_error(self, "Repeated Sessions Not Supported", repeated_block)
+            self._set_status_message(repeated_block)
             return
 
         input_a = self.input_a_edit.text().strip()

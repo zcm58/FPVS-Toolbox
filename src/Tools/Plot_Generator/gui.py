@@ -39,6 +39,13 @@ from Tools.Plot_Generator.project_paths import (
     _load_manifest,
     _resolve_project_subfolder,
 )
+from Tools.Plot_Generator.session_selection import (
+    PlotGeneratorSessionSelectionMixin,
+)
+from Tools.Plot_Generator.session_controls import (
+    RepeatedSessionControlError,
+    RepeatedSessionControlState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +53,7 @@ logger = logging.getLogger(__name__)
 class PlotGeneratorWindow(
     PlotGeneratorWorkflowMixin,
     PlotGeneratorUiSectionsMixin,
+    PlotGeneratorSessionSelectionMixin,
     PlotGeneratorSelectionMixin,
     PlotGeneratorSettingsMixin,
     QWidget,
@@ -185,6 +193,10 @@ class PlotGeneratorWindow(
         self._subject_groups_map: dict[str, str] = {}
         self._available_groups: list[str] = []
         self._has_multi_groups = False
+        self._group_ids_by_label: dict[str, str] = {}
+        self._repeated_session_state = RepeatedSessionControlState(repeated=False)
+        self._session_control_error = ""
+        self._session_controls_initialized = False
 
         self._build_ui()
         self._update_selector_columns(self.overlay_check.isChecked())
@@ -226,7 +238,9 @@ class PlotGeneratorWindow(
         self._ui_initializing = False
 
     def _update_legend_group_visibility(self) -> None:
-        self.legend_group.setVisible(True)
+        self.legend_group.setVisible(
+            not getattr(self, "_session_comparison_active", lambda: False)()
+        )
         group_overlay = self._group_overlay_enabled()
         show_b = self.overlay_check.isChecked() or group_overlay
         if group_overlay:
@@ -323,6 +337,17 @@ class PlotGeneratorWindow(
             required = False
             status = "Select at least one project group to plot."
             variant = "warning"
+        elif self._session_control_error:
+            required = False
+            status = self._session_control_error
+            variant = "warning"
+        elif self._repeated_session_state.repeated:
+            try:
+                self._session_worker_kwargs()
+            except RepeatedSessionControlError as exc:
+                required = False
+                status = str(exc)
+                variant = "warning"
         self.gen_btn.setEnabled(required)
         self.open_output_btn.setEnabled(bool(output_folder))
         if getattr(self, "_thread", None) is None and getattr(self, "_worker", None) is None:

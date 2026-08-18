@@ -265,6 +265,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             "project_root": str(self._project_root) if self._project_root else None,
             "compare_two_conditions": self.overlay_check.isChecked(),
             "custom_labels_enabled": self.legend_custom_check.isChecked(),
+            "session_mode": self._session_mode(),
         }
         logger.info("SNR plot generation started.", extra=log_context)
         try:
@@ -327,6 +328,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 self.cancel_btn.setEnabled(False)
                 return
             group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
+            group_kwargs.update(self._session_worker_kwargs())
             legend_payload = self._legend_settings_payload()
             if self._project is not None:
                 self._persist_project_plot_settings(include_paths=True)

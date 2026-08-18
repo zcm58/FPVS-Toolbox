@@ -30,10 +30,12 @@ from Tools.Stats.analysis.harmonic_pooling import (
     HarmonicPoolingCell,
     normalize_group_structure,
     pool_group_condition_spectra,
+    pool_group_session_condition_spectra,
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
 from Tools.Stats.data.group_harmonic_cache import (
     GROUP_HARMONIC_METHOD_VERSION,
+    REPEATED_SESSION_POOLING_METHOD_VERSION,
     GroupHarmonicCacheRequest,
     build_group_harmonic_cache_request,
     lookup_cached_group_harmonic_selection,
@@ -165,6 +167,9 @@ class GroupSignificantHarmonicSelection:
     selection_cache_source: str = "computed_this_run"
     selection_cache_saved_at: str | None = None
     selection_cache_key: str | None = None
+    declared_session_ids: tuple[str, ...] = ()
+    analysis_condition_ids: tuple[str, ...] = ()
+    recording_assignments: tuple[dict[str, object], ...] = ()
 
     def to_metadata(self) -> dict[str, object]:
         harmonic_domain = _canonical_harmonic_frequency_list(self.harmonic_domain_hz)
@@ -188,6 +193,7 @@ class GroupSignificantHarmonicSelection:
             detected_freqs=detected_harmonics,
             summation_method=self.summation_method,
         )
+        repeated_session = bool(self.declared_session_ids)
         metadata: dict[str, object] = {
             "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
             "harmonic_policy_label": GROUP_SIGNIFICANT_POLICY_LABEL,
@@ -204,7 +210,11 @@ class GroupSignificantHarmonicSelection:
             "selection_amplitude_summary": (
                 "grand_average_raw_amplitude_spectrum"
                 if self.method_profile_id == HARMONIC_PROFILE_LEGACY_ID
-                else "participant_cell_means_then_equal_group_condition_spectra"
+                else (
+                    "participant_cell_means_then_equal_group_session_condition_spectra"
+                    if repeated_session
+                    else "participant_cell_means_then_equal_group_condition_spectra"
+                )
             ),
             "selection_scope": self.selection_scope,
             "selection_conditions": list(self.selection_conditions),
@@ -259,7 +269,11 @@ class GroupSignificantHarmonicSelection:
             "z_score_source": (
                 "computed_from_grand_averaged_amplitude_spectrum"
                 if self.method_profile_id == HARMONIC_PROFILE_LEGACY_ID
-                else "condition_local_z_then_equal_weight_condition_z_mean"
+                else (
+                    "session_condition_local_z_then_equal_weight_cell_z_mean"
+                    if repeated_session
+                    else "condition_local_z_then_equal_weight_condition_z_mean"
+                )
             ),
             "noise_window_bins": int(self.noise_window_bins),
             "base_frequency_hz": float(self.base_frequency_hz),
@@ -333,6 +347,27 @@ class GroupSignificantHarmonicSelection:
             "source_workbook_fingerprints": list(self.source_workbook_fingerprints),
             "methods_summary": _methods_summary(self),
         }
+        if repeated_session:
+            metadata.update(
+                {
+                    "selection_identity_level": "recording",
+                    "declared_session_ids": list(self.declared_session_ids),
+                    "analysis_session_condition_ids": list(
+                        self.analysis_condition_ids
+                    ),
+                    "recording_assignments": [
+                        dict(row) for row in self.recording_assignments
+                    ],
+                    "selection_recordings": [
+                        str(row.get("recording_id") or "")
+                        for row in self.recording_assignments
+                    ],
+                    "repeated_session_pooling_version": (
+                        REPEATED_SESSION_POOLING_METHOD_VERSION
+                    ),
+                    "applied_uniformly_across_sessions": True,
+                }
+            )
         from Tools.Stats.analysis.canonical_harmonics import (
             compute_selection_fingerprint,
         )
@@ -380,6 +415,8 @@ class GroupSignificantSelectionCacheKey:
     group_assignments: tuple[tuple[str, str], ...]
     declared_group_ids: tuple[str, ...]
     project_processing_signature_hash: str | None = None
+    recording_assignments: tuple[tuple[object, ...], ...] = ()
+    declared_session_ids: tuple[str, ...] = ()
 
 
 def clear_group_significant_selection_cache() -> None:
@@ -514,6 +551,8 @@ def _group_significant_selection_cache_key(
     participant_group_ids: Mapping[str, str] | None = None,
     declared_group_ids: Sequence[str] | None = None,
     project_processing_signature_hash: str | None = None,
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    declared_session_ids: Sequence[str] | None = None,
 ) -> GroupSignificantSelectionCacheKey:
     subject_key = tuple(str(subject) for subject in subjects)
     condition_key = tuple(str(condition) for condition in conditions)
@@ -568,6 +607,26 @@ def _group_significant_selection_cache_key(
         ),
         declared_group_ids=tuple(str(group_id) for group_id in (declared_group_ids or ())),
         project_processing_signature_hash=project_processing_signature_hash,
+        recording_assignments=tuple(
+            sorted(
+                (
+                    (
+                        str(recording_id),
+                        str(row.get("participant_id") or ""),
+                        str(row.get("group_id") or ""),
+                        str(row.get("session_id") or ""),
+                        str(row.get("source_id") or ""),
+                        _metadata_optional_int(row.get("visit_index")),
+                        _metadata_optional_float(row.get("days_from_baseline")),
+                    )
+                    for recording_id, row in (recording_assignments or {}).items()
+                ),
+                key=lambda item: item[0].casefold(),
+            )
+        ),
+        declared_session_ids=tuple(
+            str(session_id) for session_id in (declared_session_ids or ())
+        ),
     )
 
 
@@ -814,6 +873,17 @@ def group_significant_selection_from_metadata(
             if metadata.get("selection_cache_key") not in (None, "")
             else None
         ),
+        declared_session_ids=tuple(
+            _metadata_string_list(metadata.get("declared_session_ids"))
+        ),
+        analysis_condition_ids=tuple(
+            _metadata_string_list(metadata.get("analysis_session_condition_ids"))
+        ),
+        recording_assignments=tuple(
+            dict(item)
+            for item in _metadata_sequence(metadata.get("recording_assignments"))
+            if isinstance(item, dict)
+        ),
     )
 
 
@@ -990,6 +1060,21 @@ def _pooling_cells_from_metadata(value: object) -> tuple[HarmonicPoolingCell, ..
                 effective_participant_weight=_metadata_float(
                     raw_cell.get("effective_participant_weight"), default=0.0
                 ),
+                session_id=(
+                    str(raw_cell.get("session_id"))
+                    if raw_cell.get("session_id") not in (None, "")
+                    else None
+                ),
+                recording_ids=tuple(
+                    _metadata_string_list(raw_cell.get("recording_ids"))
+                ),
+                session_weight=_metadata_optional_float(
+                    raw_cell.get("session_weight")
+                ),
+                task_condition_weight=_metadata_optional_float(
+                    raw_cell.get("task_condition_weight")
+                ),
+                cell_weight=_metadata_optional_float(raw_cell.get("cell_weight")),
             )
         )
     return tuple(cells)
@@ -1047,37 +1132,81 @@ def build_group_significant_harmonic_selection(
     force_recalculate: bool = False,
     participant_group_ids: Mapping[str, str] | None = None,
     declared_group_ids: Sequence[str] | None = None,
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    declared_session_ids: Sequence[str] | None = None,
+    electrode_exclusions_by_subject: Mapping[str, frozenset[str]] | None = None,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
-    electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
+    repeated_session = bool(recording_assignments)
+    resolved_electrode_exclusions: dict[str, frozenset[str]] = {
+        str(subject).upper(): frozenset(
+            str(electrode).upper() for electrode in electrodes
+        )
+        for subject, electrodes in (electrode_exclusions_by_subject or {}).items()
+    }
     if project_root not in (None, ""):
         from Main_App.processing.frequency_domain_qc import (
             active_frequency_domain_exclusions,
+            filter_frequency_domain_recordings,
             filter_frequency_domain_subjects,
         )
 
-        subjects, subject_data, frequency_excluded = filter_frequency_domain_subjects(
-            project_root,
-            subjects,
-            subject_data,
-        )
+        if repeated_session:
+            recording_participants = {
+                str(recording_id): str(row.get("participant_id") or "")
+                for recording_id, row in (recording_assignments or {}).items()
+            }
+            subjects, subject_data, frequency_excluded = (
+                filter_frequency_domain_recordings(
+                    project_root,
+                    subjects,
+                    subject_data,
+                    recording_participant_ids=recording_participants,
+                )
+            )
+        else:
+            subjects, subject_data, frequency_excluded = (
+                filter_frequency_domain_subjects(
+                    project_root,
+                    subjects,
+                    subject_data,
+                )
+            )
         if frequency_excluded:
             log_func(
-                "Frequency-domain participant exclusions applied before group "
+                "Frequency-domain "
+                + ("recording" if repeated_session else "participant")
+                + " exclusions applied before group "
                 "harmonic selection: " + ", ".join(frequency_excluded)
             )
-        electrode_exclusions_by_subject = (
-            active_frequency_domain_exclusions(
-                project_root
-            ).auto_excluded_electrodes_by_participant
+        if not resolved_electrode_exclusions:
+            exclusions = active_frequency_domain_exclusions(project_root)
+            resolved_electrode_exclusions = dict(
+                exclusions.auto_excluded_electrodes_by_recording
+                if repeated_session
+                else exclusions.auto_excluded_electrodes_by_participant
+            )
+    if repeated_session and settings.harmonic_selection_profile != HARMONIC_PROFILE_LEGACY_ID:
+        selected_participants = tuple(
+            dict.fromkeys(
+                str((recording_assignments or {})[recording_id].get("participant_id") or "")
+                for recording_id in subjects
+                if recording_id in (recording_assignments or {})
+            )
         )
-    resolved_group_ids, resolved_declared_groups = _resolve_profile_group_structure(
-        subjects=subjects,
-        settings=settings,
-        project_root=project_root,
-        participant_group_ids=participant_group_ids,
-        declared_group_ids=declared_group_ids,
-    )
+        resolved_group_ids, resolved_declared_groups = normalize_group_structure(
+            subjects=selected_participants,
+            participant_group_ids=participant_group_ids,
+            declared_group_ids=declared_group_ids,
+        )
+    else:
+        resolved_group_ids, resolved_declared_groups = _resolve_profile_group_structure(
+            subjects=subjects,
+            settings=settings,
+            project_root=project_root,
+            participant_group_ids=participant_group_ids,
+            declared_group_ids=declared_group_ids,
+        )
     cache_request = build_group_harmonic_cache_request(
         project_root=project_root,
         subjects=subjects,
@@ -1087,6 +1216,8 @@ def build_group_significant_harmonic_selection(
         base_frequency_hz=base_frequency_hz,
         max_freq_hz=max_freq,
         settings=settings,
+        recording_assignments=recording_assignments,
+        declared_session_ids=declared_session_ids,
     )
     _log_project_cache_warnings(cache_request, log_func)
     cache_key = _group_significant_selection_cache_key(
@@ -1099,6 +1230,8 @@ def build_group_significant_harmonic_selection(
         settings=settings,
         participant_group_ids=resolved_group_ids,
         declared_group_ids=resolved_declared_groups,
+        recording_assignments=recording_assignments,
+        declared_session_ids=declared_session_ids,
         project_processing_signature_hash=(
             cache_request.project_processing_signature_hash
             if cache_request is not None
@@ -1202,6 +1335,7 @@ def build_group_significant_harmonic_selection(
     )
     balanced_pool: BalancedHarmonicPool | None = None
     condition_spectra: dict[str, pd.Series] = {}
+    analysis_conditions = list(conditions)
     used_electrodes: set[str] = set()
     if settings.harmonic_selection_profile == HARMONIC_PROFILE_LEGACY_ID:
         grand_average, columns, bin_indices, spectra_count, electrode_count = (
@@ -1214,7 +1348,7 @@ def build_group_significant_harmonic_selection(
                 log_func=log_func,
                 frequency_columns=required.frequency_columns,
                 required_indices=required.required_indices,
-                excluded_electrodes_by_subject=electrode_exclusions_by_subject,
+                excluded_electrodes_by_subject=resolved_electrode_exclusions,
                 selection_electrodes=(
                     settings.group_significant_selection_electrodes
                 ),
@@ -1240,11 +1374,16 @@ def build_group_significant_harmonic_selection(
             log_func=log_func,
             frequency_columns=required.frequency_columns,
             required_indices=required.required_indices,
-            excluded_electrodes_by_subject=electrode_exclusions_by_subject,
+            excluded_electrodes_by_subject=resolved_electrode_exclusions,
+            recording_assignments=recording_assignments,
+            declared_session_ids=declared_session_ids,
         )
         condition_spectra = dict(balanced_pool.condition_spectra)
+        analysis_conditions = list(
+            balanced_pool.analysis_condition_ids or tuple(conditions)
+        )
         grand_average = pd.concat(
-            [condition_spectra[condition] for condition in conditions],
+            [condition_spectra[condition] for condition in analysis_conditions],
             axis=1,
         ).mean(axis=1, skipna=True).sort_index()
         spectra_count = balanced_pool.workbook_count
@@ -1268,7 +1407,7 @@ def build_group_significant_harmonic_selection(
             )
             if np.isfinite(value)
         }
-        for condition in conditions
+        for condition in analysis_conditions
         if str(condition) in condition_spectra
     }
     selected_bin_indices = set(bin_indices)
@@ -1289,7 +1428,7 @@ def build_group_significant_harmonic_selection(
     detected_indices: list[int] = []
     z_by_harmonic: dict[float, float] = {}
     condition_z_by_harmonic: dict[str, dict[float, float | None]] = {
-        str(condition): {} for condition in conditions
+        str(condition): {} for condition in analysis_conditions
     }
     excluded_base: list[float] = []
     seen_indices: set[int] = set()
@@ -1362,7 +1501,7 @@ def build_group_significant_harmonic_selection(
         noise_std = noise_stats.std_uv
         condition_z_scores: list[tuple[str, float | None]] = []
         if condition_amplitudes_by_bin:
-            for condition in conditions:
+            for condition in analysis_conditions:
                 condition_key = str(condition)
                 condition_amplitudes = condition_amplitudes_by_bin.get(
                     condition_key,
@@ -1392,7 +1531,7 @@ def build_group_significant_harmonic_selection(
             ]
             z_value = (
                 float(np.mean(finite_condition_z))
-                if len(finite_condition_z) == len(conditions)
+                if len(finite_condition_z) == len(analysis_conditions)
                 else np.nan
             )
         else:
@@ -1674,6 +1813,33 @@ def build_group_significant_harmonic_selection(
         subject_data=subject_data,
         cache_request=cache_request,
     )
+    active_recording_assignments = tuple(
+        {
+            "recording_id": str(recording_id),
+            "participant_id": str(row.get("participant_id") or ""),
+            "group_id": str(row.get("group_id") or ""),
+            "session_id": str(row.get("session_id") or ""),
+            "source_id": str(row.get("source_id") or ""),
+            "visit_index": _metadata_optional_int(row.get("visit_index")),
+            "days_from_baseline": _metadata_optional_float(
+                row.get("days_from_baseline")
+            ),
+        }
+        for recording_id in subjects
+        for row in ((recording_assignments or {}).get(recording_id),)
+        if isinstance(row, Mapping)
+    )
+    selection_subjects = (
+        list(
+            dict.fromkeys(
+                str(row.get("participant_id") or "")
+                for row in active_recording_assignments
+                if str(row.get("participant_id") or "")
+            )
+        )
+        if repeated_session
+        else list(subjects)
+    )
     profile = settings.profile
     selection = GroupSignificantHarmonicSelection(
         harmonic_domain_hz=harmonic_domain,
@@ -1692,7 +1858,7 @@ def build_group_significant_harmonic_selection(
         summation_method=str(settings.group_significant_summation_method),
         selection_scope=_selection_scope_label(settings.group_significant_electrode_scope),
         selection_conditions=list(conditions),
-        selection_subjects=list(subjects),
+        selection_subjects=selection_subjects,
         selection_spectra_count=int(spectra_count),
         selection_electrode_count=int(electrode_count),
         frequency_resolution_hz=frequency_resolution,
@@ -1705,7 +1871,12 @@ def build_group_significant_harmonic_selection(
         method_profile_label=profile.label,
         method_citation=profile.citation,
         same_sample_adaptive=profile.same_sample,
-        pooling_method=profile.pooling_method,
+        pooling_method=(
+            REPEATED_SESSION_POOLING_METHOD_VERSION
+            if repeated_session
+            and settings.harmonic_selection_profile != HARMONIC_PROFILE_LEGACY_ID
+            else profile.pooling_method
+        ),
         pooling_cells=(balanced_pool.cells if balanced_pool is not None else ()),
         declared_group_ids=(
             balanced_pool.declared_group_ids if balanced_pool is not None else ()
@@ -1717,6 +1888,17 @@ def build_group_significant_harmonic_selection(
         stopping_harmonics_hz=tuple(stopping_harmonics),
         cutoff_harmonic_hz=cutoff_harmonic,
         source_workbook_fingerprints=source_fingerprints,
+        declared_session_ids=(
+            balanced_pool.declared_session_ids
+            if balanced_pool is not None
+            else tuple(str(value) for value in (declared_session_ids or ()))
+        ),
+        analysis_condition_ids=(
+            balanced_pool.analysis_condition_ids
+            if balanced_pool is not None and balanced_pool.is_repeated_session
+            else ()
+        ),
+        recording_assignments=active_recording_assignments,
     )
     selection = replace(
         selection,
@@ -2321,6 +2503,8 @@ def _build_balanced_condition_amplitudes(
     frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
     excluded_electrodes_by_subject: Mapping[str, frozenset[str]] | None = None,
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    declared_session_ids: Sequence[str] | None = None,
 ) -> tuple[BalancedHarmonicPool, list[str], list[int], int, set[str]]:
     """Read participant spectra and apply the declared balanced estimand."""
 
@@ -2374,13 +2558,31 @@ def _build_balanced_condition_amplitudes(
                 f"electrodes={n_electrodes}, elapsed={perf_counter() - started:.2f}s)."
             )
 
-    pool = pool_group_condition_spectra(
-        spectra=spectra,
-        subjects=subjects,
-        conditions=conditions,
-        participant_group_ids=participant_group_ids,
-        declared_group_ids=declared_group_ids,
-    )
+    if recording_assignments:
+        pool = pool_group_session_condition_spectra(
+            spectra=spectra,
+            recording_ids=subjects,
+            conditions=conditions,
+            recording_participant_ids={
+                str(recording_id): str(row.get("participant_id") or "")
+                for recording_id, row in recording_assignments.items()
+            },
+            recording_session_ids={
+                str(recording_id): str(row.get("session_id") or "")
+                for recording_id, row in recording_assignments.items()
+            },
+            participant_group_ids=participant_group_ids,
+            declared_group_ids=declared_group_ids,
+            declared_session_ids=tuple(declared_session_ids or ()),
+        )
+    else:
+        pool = pool_group_condition_spectra(
+            spectra=spectra,
+            subjects=subjects,
+            conditions=conditions,
+            participant_group_ids=participant_group_ids,
+            declared_group_ids=declared_group_ids,
+        )
     if not pool.condition_spectra:
         raise RuntimeError("Balanced harmonic selection found no usable condition spectra.")
     first_spectrum = next(iter(pool.condition_spectra.values()))
@@ -2390,7 +2592,9 @@ def _build_balanced_condition_amplitudes(
     log_func(
         "[PERF] Balanced FullFFT pooling finished: "
         f"{pool.workbook_count} participant-condition spectra, "
-        f"{len(pool.cells)} complete group x condition cells in "
+        f"{len(pool.cells)} complete group x "
+        + ("session x " if pool.is_repeated_session else "")
+        + "condition cells in "
         f"{perf_counter() - started:.2f}s (read phase {read_elapsed:.2f}s)."
     )
     return pool, columns, bin_indices, electrode_count, used_electrodes
@@ -3407,12 +3611,21 @@ def _methods_summary(selection: GroupSignificantHarmonicSelection) -> str:
             f"Only z-significant oddball harmonics were included in the Summed BCA ({included} Hz)."
         )
     if selection.pooling_cells:
-        selection_text = (
-            "Participants were averaged within each declared group x condition "
-            "cell, group spectra were weighted equally within condition, local "
-            "Z-scores were calculated separately by condition, and condition "
-            "Z-scores were weighted equally"
-        )
+        if selection.declared_session_ids:
+            selection_text = (
+                "Recordings were averaged within participant inside each declared "
+                "group x session x task-condition cell, participants were averaged "
+                "within cell, groups were weighted equally, local Z-scores were "
+                "calculated separately by session and task condition, and all "
+                "session-condition Z-scores were weighted equally"
+            )
+        else:
+            selection_text = (
+                "Participants were averaged within each declared group x condition "
+                "cell, group spectra were weighted equally within condition, local "
+                "Z-scores were calculated separately by condition, and condition "
+                "Z-scores were weighted equally"
+            )
     else:
         selection_text = "Available participant-condition spectra were averaged equally"
     return (

@@ -245,6 +245,35 @@ def _independent_request(root: Path) -> ProjectContrastRequest:
     )
 
 
+def test_repeated_session_project_is_blocked_before_provenance_or_workbook_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "Repeated"
+    root.mkdir()
+    (root / "project.json").write_text("{}", encoding="utf-8")
+    index = SimpleNamespace(
+        project_root=root,
+        is_repeated_session=True,
+    )
+    monkeypatch.setattr(inputs, "load_project_dataset_index", lambda _root: index)
+
+    def unexpected_provenance(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("provenance must not run for an unsupported design")
+
+    monkeypatch.setattr(
+        inputs,
+        "validate_project_full_fft_provenance",
+        unexpected_provenance,
+    )
+
+    with pytest.raises(FreeHarmonicInputError, match="not yet recording-aware"):
+        inputs.prepare_project_contrast(
+            _independent_request(root),
+            FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+        )
+
+
 def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

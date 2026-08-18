@@ -8,7 +8,7 @@ generated output folders.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
@@ -36,9 +36,17 @@ from .dataset_scan import (
     workbook_candidate_score,
     workbook_location,
 )
-from .grouping import GroupInfo, ParticipantInfo, load_project_group_context
+from .grouping import GroupInfo, ParticipantInfo
 from .preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
+    normalize_manual_excluded_recording_conditions,
+    normalize_manual_excluded_recordings,
+)
+from .recordings import (
+    RecordingInfo,
+    RecordingSourceInfo,
+    SessionInfo,
+    load_project_recording_context,
 )
 
 
@@ -53,6 +61,11 @@ class WorkbookRecord:
     group_label: str | None
     observed_layout: str
     observed_group_folder: str | None
+    recording_id: str | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    visit_index: int | None = None
+    days_from_baseline: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +90,15 @@ class ProjectDatasetIndex:
     workbooks: tuple[WorkbookRecord, ...]
     excluded_workbooks: tuple[WorkbookRecord, ...]
     diagnostics: tuple[DatasetDiagnostic, ...]
+    sessions: Mapping[str, SessionInfo] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    recording_sources: Mapping[str, RecordingSourceInfo] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    recordings: Mapping[str, RecordingInfo] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     @property
     def has_group_metadata(self) -> bool:
@@ -87,6 +109,10 @@ class ProjectDatasetIndex:
         return len(self.groups) > 1
 
     @property
+    def is_repeated_session(self) -> bool:
+        return bool(self.sessions or self.recording_sources or self.recordings)
+
+    @property
     def conditions(self) -> tuple[str, ...]:
         return tuple(sorted({record.condition for record in self.workbooks}))
 
@@ -95,9 +121,39 @@ class ProjectDatasetIndex:
         return tuple(sorted({record.participant_id for record in self.workbooks}))
 
     @property
+    def recording_ids(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    record.recording_id
+                    for record in self.workbooks
+                    if record.recording_id is not None
+                },
+                key=str.casefold,
+            )
+        )
+
+    @property
+    def session_ids(self) -> tuple[str, ...]:
+        return tuple(session.session_id for session in self.ordered_sessions)
+
+    @property
     def ordered_groups(self) -> tuple[GroupInfo, ...]:
         return tuple(
             sorted(self.groups.values(), key=lambda row: (row.label.casefold(), row.group_id))
+        )
+
+    @property
+    def ordered_sessions(self) -> tuple[SessionInfo, ...]:
+        return tuple(
+            sorted(
+                self.sessions.values(),
+                key=lambda row: (
+                    row.visit_index,
+                    row.label.casefold(),
+                    row.session_id.casefold(),
+                ),
+            )
         )
 
     def select(
@@ -106,13 +162,25 @@ class ProjectDatasetIndex:
         conditions: Iterable[str] | None = None,
         group_ids: Iterable[str] | None = None,
         participant_ids: Iterable[str] | None = None,
+        recording_ids: Iterable[str] | None = None,
+        session_ids: Iterable[str] | None = None,
+        visit_indices: Iterable[int] | None = None,
         require_nonempty_groups: bool = False,
+        require_nonempty_recordings: bool = False,
+        require_nonempty_sessions: bool = False,
     ) -> tuple[WorkbookRecord, ...]:
         """Return records filtered by stable canonical identities."""
 
         condition_keys = casefold_set(conditions)
         group_keys = casefold_set(group_ids)
         participant_keys = casefold_set(participant_ids)
+        recording_keys = casefold_set(recording_ids)
+        session_keys = casefold_set(session_ids)
+        visit_keys = (
+            None
+            if visit_indices is None
+            else {int(visit_index) for visit_index in visit_indices}
+        )
         selected = tuple(
             record
             for record in self.workbooks
@@ -127,6 +195,27 @@ class ProjectDatasetIndex:
             and (
                 participant_keys is None
                 or record.participant_id.casefold() in participant_keys
+            )
+            and (
+                recording_keys is None
+                or (
+                    record.recording_id is not None
+                    and record.recording_id.casefold() in recording_keys
+                )
+            )
+            and (
+                session_keys is None
+                or (
+                    record.session_id is not None
+                    and record.session_id.casefold() in session_keys
+                )
+            )
+            and (
+                visit_keys is None
+                or (
+                    record.visit_index is not None
+                    and record.visit_index in visit_keys
+                )
             )
         )
         if require_nonempty_groups and group_keys:
@@ -150,6 +239,55 @@ class ProjectDatasetIndex:
                     "No indexed workbooks matched canonical project group(s): "
                     f"{', '.join(empty)}."
                 )
+        if require_nonempty_recordings and recording_keys:
+            self.require_recording_assignments()
+            known_recordings = {
+                recording_id.casefold(): recording_id
+                for recording_id in self.recordings
+            }
+            unknown = sorted(recording_keys - known_recordings.keys())
+            if unknown:
+                raise DatasetIndexError(
+                    "Unknown canonical project recording_id(s): "
+                    + ", ".join(unknown)
+                    + "."
+                )
+            present = {
+                record.recording_id.casefold()
+                for record in selected
+                if record.recording_id is not None
+            }
+            empty = sorted(
+                known_recordings[key] for key in recording_keys - present
+            )
+            if empty:
+                raise DatasetIndexError(
+                    "No indexed workbooks matched canonical project recording(s): "
+                    f"{', '.join(empty)}."
+                )
+        if require_nonempty_sessions and session_keys:
+            self.require_session_assignments()
+            known_sessions = {
+                session_id.casefold(): session_id for session_id in self.sessions
+            }
+            unknown = sorted(session_keys - known_sessions.keys())
+            if unknown:
+                raise DatasetIndexError(
+                    "Unknown canonical project session_id(s): "
+                    + ", ".join(unknown)
+                    + "."
+                )
+            present = {
+                record.session_id.casefold()
+                for record in selected
+                if record.session_id is not None
+            }
+            empty = sorted(known_sessions[key] for key in session_keys - present)
+            if empty:
+                raise DatasetIndexError(
+                    "No indexed workbooks matched canonical project session(s): "
+                    f"{', '.join(empty)}."
+                )
         return selected
 
     def subject_data(
@@ -159,6 +297,12 @@ class ProjectDatasetIndex:
     ) -> dict[str, dict[str, str]]:
         """Return the compatibility ``participant -> condition -> path`` shape."""
 
+        if self.is_repeated_session:
+            raise DatasetIndexError(
+                "The legacy participant/condition subject_data view cannot represent "
+                "multiple recordings without overwriting a visit. Use recording_data(), "
+                "select(), or a session partition for repeated-session projects."
+            )
         if require_group_assignment:
             self.require_group_assignments()
         result: dict[str, dict[str, str]] = {}
@@ -166,6 +310,24 @@ class ProjectDatasetIndex:
             result.setdefault(record.participant_id, {})[record.condition] = str(
                 record.path
             )
+        return result
+
+    def recording_data(
+        self,
+        *,
+        require_group_assignment: bool = False,
+    ) -> dict[str, dict[str, str]]:
+        """Return ``recording -> condition -> path`` without collapsing visits."""
+
+        if require_group_assignment:
+            self.require_group_assignments()
+        if self.is_repeated_session:
+            self.require_recording_assignments()
+            self.require_session_assignments()
+        result: dict[str, dict[str, str]] = {}
+        for record in self.workbooks:
+            recording_id = record.recording_id or record.participant_id
+            result.setdefault(recording_id, {})[record.condition] = str(record.path)
         return result
 
     def require_group_assignments(self) -> None:
@@ -186,6 +348,139 @@ class ProjectDatasetIndex:
                 "participants without a canonical group assignment: "
                 + ", ".join(unassigned)
             )
+
+    def require_recording_assignments(self) -> None:
+        """Raise when repeated-session inputs lack canonical recording IDs."""
+
+        if not self.is_repeated_session:
+            return
+        unassigned = sorted(
+            {
+                record.path.name
+                for record in self.workbooks
+                if record.recording_id is None
+            }
+            | {
+                path.name
+                for diagnostic in self.diagnostics
+                if diagnostic.code == "unresolved_recording"
+                for path in diagnostic.paths
+            },
+            key=str.casefold,
+        )
+        if unassigned:
+            raise DatasetIndexError(
+                "Repeated-session workbook identity is incomplete in project.json: "
+                "workbooks without a canonical recording assignment: "
+                + ", ".join(unassigned)
+            )
+
+    def require_session_assignments(self) -> None:
+        """Raise when repeated-session workbooks lack canonical session IDs."""
+
+        if not self.is_repeated_session:
+            return
+        unassigned = sorted(
+            {
+                record.path.name
+                for record in self.workbooks
+                if record.session_id is None
+            }
+            | {
+                path.name
+                for diagnostic in self.diagnostics
+                if diagnostic.code == "unresolved_recording"
+                for path in diagnostic.paths
+            },
+            key=str.casefold,
+        )
+        if unassigned:
+            raise DatasetIndexError(
+                "Repeated-session workbook identity is incomplete in project.json: "
+                "workbooks without a canonical session assignment: "
+                + ", ".join(unassigned)
+            )
+
+    def partition_by_session(
+        self,
+        *,
+        conditions: Iterable[str] | None = None,
+        group_ids: Iterable[str] | None = None,
+        participant_ids: Iterable[str] | None = None,
+        recording_ids: Iterable[str] | None = None,
+        require_nonempty_sessions: bool = False,
+    ) -> tuple[tuple[SessionInfo | None, tuple[WorkbookRecord, ...]], ...]:
+        """Partition records by canonical session without folder inference."""
+
+        if not self.sessions:
+            return (
+                (
+                    None,
+                    self.select(
+                        conditions=conditions,
+                        group_ids=group_ids,
+                        participant_ids=participant_ids,
+                        recording_ids=recording_ids,
+                    ),
+                ),
+            )
+        self.require_session_assignments()
+        return tuple(
+            (
+                session,
+                self.select(
+                    conditions=conditions,
+                    group_ids=group_ids,
+                    participant_ids=participant_ids,
+                    recording_ids=recording_ids,
+                    session_ids=(session.session_id,),
+                    require_nonempty_sessions=require_nonempty_sessions,
+                ),
+            )
+            for session in self.ordered_sessions
+        )
+
+    def partition_by_group_and_session(
+        self,
+        *,
+        conditions: Iterable[str] | None = None,
+        participant_ids: Iterable[str] | None = None,
+        recording_ids: Iterable[str] | None = None,
+        require_nonempty_cells: bool = False,
+    ) -> tuple[
+        tuple[GroupInfo | None, SessionInfo | None, tuple[WorkbookRecord, ...]],
+        ...,
+    ]:
+        """Partition records into canonical group/session cells."""
+
+        group_rows: tuple[GroupInfo | None, ...] = self.ordered_groups or (None,)
+        session_rows: tuple[SessionInfo | None, ...] = self.ordered_sessions or (None,)
+        if self.has_group_metadata:
+            self.require_group_assignments()
+        if self.is_repeated_session:
+            self.require_recording_assignments()
+            self.require_session_assignments()
+        cells = []
+        for group in group_rows:
+            for session in session_rows:
+                records = self.select(
+                    conditions=conditions,
+                    group_ids=None if group is None else (group.group_id,),
+                    participant_ids=participant_ids,
+                    recording_ids=recording_ids,
+                    session_ids=None if session is None else (session.session_id,),
+                )
+                if require_nonempty_cells and not records:
+                    group_text = "ungrouped" if group is None else group.group_id
+                    session_text = (
+                        "single-session" if session is None else session.session_id
+                    )
+                    raise DatasetIndexError(
+                        "No indexed workbooks matched canonical group/session cell "
+                        f"'{group_text}/{session_text}'."
+                    )
+                cells.append((group, session, records))
+        return tuple(cells)
 
     def partition_by_group(
         self,
@@ -292,6 +587,9 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             scan_root = excel_root
         groups: dict[str, GroupInfo] = {}
         participants: dict[str, ParticipantInfo] = {}
+        sessions: dict[str, SessionInfo] = {}
+        recording_sources: dict[str, RecordingSourceInfo] = {}
+        recordings: dict[str, RecordingInfo] = {}
         manifest_view: Mapping[str, Any] | None = None
     else:
         excel_root = resolve_project_excel_root(project_root, manifest)
@@ -307,15 +605,22 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         else:
             scan_root = requested
         try:
-            context = load_project_group_context(project_root)
+            context = load_project_recording_context(project_root)
         except (OSError, ValueError) as exc:
             raise DatasetIndexError(
-                f"Unable to load canonical project group metadata: {exc}"
+                f"Unable to load canonical project recording metadata: {exc}"
             ) from exc
         groups = {group.group_id: group for group in context.groups}
         participants = {
             participant.participant_id: participant
             for participant in context.participants
+        }
+        sessions = {session.session_id: session for session in context.sessions}
+        recording_sources = {
+            source.source_id: source for source in context.sources
+        }
+        recordings = {
+            recording.recording_id: recording for recording in context.recordings
         }
         manifest_view = MappingProxyType(dict(manifest))
 
@@ -365,6 +670,9 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
 
     selected: dict[tuple[str, str], tuple[WorkbookRecord, tuple[int, int, str]]] = {}
     duplicate_paths: dict[tuple[str, str], list[Path]] = {}
+    repeated_session_project = bool(
+        sessions or recording_sources or recordings
+    )
     participant_lookup = {
         participant_id.casefold(): participant_id
         for participant_id in participants
@@ -396,39 +704,68 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
                     paths=(path,),
                 )
             )
-        participant_id = infer_workbook_participant_id(
-            path,
-            known_participant_ids=participants,
-            require_leading_legacy_match=manifest_view is not None,
-            generated_condition=condition if manifest_view is not None else None,
-        )
-        if participant_id is None:
-            diagnostics.append(
-                DatasetDiagnostic(
-                    code="unresolved_participant",
-                    message=f"Unable to determine a participant for {path.name}.",
-                    paths=(path,),
-                )
+        recording: RecordingInfo | None = None
+        session: SessionInfo | None = None
+        if repeated_session_project:
+            recording_id = _generated_recording_id(
+                path,
+                condition=condition,
+                known_recording_ids=recordings,
             )
-            continue
-        canonical_id = participant_lookup.get(participant_id.casefold(), participant_id)
-        participant = participants.get(canonical_id)
-        group = (
-            groups.get(participant.group_id)
-            if participant is not None and participant.group_id is not None
-            else None
-        )
-        if manifest_view is not None and participant is None:
-            diagnostics.append(
-                DatasetDiagnostic(
-                    code="unassigned_participant",
-                    message=(
-                        f"Workbook participant '{participant_id}' is not registered "
-                        "in project.json; no group was assigned."
-                    ),
-                    paths=(path,),
+            if recording_id is None:
+                diagnostics.append(
+                    DatasetDiagnostic(
+                        code="unresolved_recording",
+                        message=(
+                            f"Unable to match {path.name} to a canonical recording_id "
+                            "in project.json."
+                        ),
+                        paths=(path,),
+                    )
                 )
+                continue
+            recording = recordings[recording_id]
+            canonical_id = recording.participant_id
+            participant = participants[canonical_id]
+            source = recording_sources[recording.source_id]
+            group = groups[source.group_id]
+            session = sessions[recording.session_id]
+        else:
+            participant_id = infer_workbook_participant_id(
+                path,
+                known_participant_ids=participants,
+                require_leading_legacy_match=manifest_view is not None,
+                generated_condition=condition if manifest_view is not None else None,
             )
+            if participant_id is None:
+                diagnostics.append(
+                    DatasetDiagnostic(
+                        code="unresolved_participant",
+                        message=f"Unable to determine a participant for {path.name}.",
+                        paths=(path,),
+                    )
+                )
+                continue
+            canonical_id = participant_lookup.get(
+                participant_id.casefold(), participant_id
+            )
+            participant = participants.get(canonical_id)
+            group = (
+                groups.get(participant.group_id)
+                if participant is not None and participant.group_id is not None
+                else None
+            )
+            if manifest_view is not None and participant is None:
+                diagnostics.append(
+                    DatasetDiagnostic(
+                        code="unassigned_participant",
+                        message=(
+                            f"Workbook participant '{participant_id}' is not "
+                            "registered in project.json; no group was assigned."
+                        ),
+                        paths=(path,),
+                    )
+                )
         if group is not None and observed_group is not None:
             if observed_group.casefold() != group.folder_name.casefold():
                 diagnostics.append(
@@ -462,6 +799,13 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             group_label=None if group is None else group.label,
             observed_layout=layout,
             observed_group_folder=observed_group,
+            recording_id=None if recording is None else recording.recording_id,
+            session_id=None if session is None else session.session_id,
+            session_label=None if session is None else session.label,
+            visit_index=None if recording is None else recording.visit_index,
+            days_from_baseline=(
+                None if recording is None else recording.days_from_baseline
+            ),
         )
         score = workbook_candidate_score(
             record.path,
@@ -469,7 +813,10 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             observed_group_folder=record.observed_group_folder,
             expected_group_folder=None if group is None else group.folder_name,
         )
-        key = (canonical_id.casefold(), condition.casefold())
+        identity_id = (
+            recording.recording_id if recording is not None else canonical_id
+        )
+        key = (identity_id.casefold(), condition.casefold())
         existing = selected.get(key)
         if existing is None or score >= existing[1]:
             selected[key] = (record, score)
@@ -479,11 +826,17 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
     for key, paths in duplicate_paths.items():
         chosen = selected[key][0]
         unique_paths = tuple(dict.fromkeys(path.resolve(strict=False) for path in paths))
+        duplicate_code = (
+            "duplicate_recording_condition_workbook"
+            if chosen.recording_id is not None
+            else "duplicate_participant_condition_workbook"
+        )
+        identity = chosen.recording_id or chosen.participant_id
         diagnostics.append(
             DatasetDiagnostic(
-                code="duplicate_participant_condition_workbook",
+                code=duplicate_code,
                 message=(
-                    f"Multiple workbooks were found for {chosen.participant_id} / "
+                    f"Multiple workbooks were found for {identity} / "
                     f"{chosen.condition}; selected {chosen.path.name}."
                 ),
                 paths=unique_paths,
@@ -497,11 +850,15 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
                 row.condition.casefold(),
                 row.group_label.casefold() if row.group_label else "",
                 row.participant_id.casefold(),
+                row.visit_index if row.visit_index is not None else 0,
+                row.recording_id.casefold() if row.recording_id else "",
                 str(row.path),
             ),
         )
     )
     excluded_pairs: set[tuple[str, str]] = set()
+    excluded_recording_ids: set[str] = set()
+    excluded_recording_pairs: set[tuple[str, str]] = set()
     if manifest_view is not None:
         preprocessing = manifest_view.get("preprocessing")
         raw_exclusions = None
@@ -530,32 +887,93 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
             for participant_id, conditions in normalized_exclusions.items()
             for condition in conditions
         }
+        if isinstance(preprocessing, Mapping):
+            try:
+                excluded_recording_ids = {
+                    recording_id.casefold()
+                    for recording_id in normalize_manual_excluded_recordings(
+                        preprocessing.get("manual_excluded_recordings")
+                    )
+                }
+                normalized_recording_conditions = (
+                    normalize_manual_excluded_recording_conditions(
+                        preprocessing.get(
+                            "manual_excluded_recording_conditions"
+                        )
+                    )
+                )
+            except ValueError as exc:
+                raise DatasetIndexError(
+                    "Invalid recording-scoped preprocessing exclusion in "
+                    f"project.json for {project_root}: {exc}"
+                ) from exc
+            excluded_recording_pairs = {
+                (recording_id.casefold(), condition.casefold())
+                for recording_id, conditions in normalized_recording_conditions.items()
+                for condition in conditions
+            }
+
+    def _record_is_excluded(record: WorkbookRecord) -> bool:
+        participant_condition = (
+            record.participant_id.casefold(),
+            record.condition.casefold(),
+        )
+        if participant_condition in excluded_pairs:
+            return True
+        if record.recording_id is None:
+            return False
+        recording_key = record.recording_id.casefold()
+        return recording_key in excluded_recording_ids or (
+            recording_key,
+            record.condition.casefold(),
+        ) in excluded_recording_pairs
 
     records = tuple(
         record
         for record in all_records
-        if (record.participant_id.casefold(), record.condition.casefold())
-        not in excluded_pairs
+        if not _record_is_excluded(record)
     )
     excluded_records = tuple(
         record
         for record in all_records
-        if (record.participant_id.casefold(), record.condition.casefold())
-        in excluded_pairs
+        if _record_is_excluded(record)
     )
     for record in excluded_records:
-        key = (record.participant_id.casefold(), record.condition.casefold())
+        identity = record.recording_id or record.participant_id
+        key = (identity.casefold(), record.condition.casefold())
         paths = duplicate_paths.get(key, [record.path])
         unique_paths = tuple(
             dict.fromkeys(Path(path).resolve(strict=False) for path in paths)
         )
+        participant_condition = (
+            record.participant_id.casefold(),
+            record.condition.casefold(),
+        )
+        recording_key = (
+            record.recording_id.casefold() if record.recording_id else None
+        )
+        if participant_condition in excluded_pairs:
+            code = "excluded_participant_condition"
+            message = (
+                f"Excluded {record.participant_id} / {record.condition} from "
+                "downstream workbook analyses by project QC decision."
+            )
+        elif recording_key in excluded_recording_ids:
+            code = "excluded_recording"
+            message = (
+                f"Excluded recording {record.recording_id} from downstream "
+                "workbook analyses by project QC decision."
+            )
+        else:
+            code = "excluded_recording_condition"
+            message = (
+                f"Excluded {record.recording_id} / {record.condition} from "
+                "downstream workbook analyses by project QC decision."
+            )
         diagnostics.append(
             DatasetDiagnostic(
-                code="excluded_participant_condition",
-                message=(
-                    f"Excluded {record.participant_id} / {record.condition} from "
-                    "downstream workbook analyses by project QC decision."
-                ),
+                code=code,
+                message=message,
                 paths=unique_paths,
             )
         )
@@ -569,7 +987,35 @@ def load_project_dataset_index(dataset_path: str | Path) -> ProjectDatasetIndex:
         workbooks=records,
         excluded_workbooks=excluded_records,
         diagnostics=tuple(diagnostics),
+        sessions=MappingProxyType(sessions),
+        recording_sources=MappingProxyType(recording_sources),
+        recordings=MappingProxyType(recordings),
     )
+
+
+def _generated_recording_id(
+    workbook_path: str | Path,
+    *,
+    condition: str,
+    known_recording_ids: Mapping[str, RecordingInfo],
+) -> str | None:
+    """Match only an exact manifest recording ID in a generated filename."""
+
+    stem = Path(workbook_path).stem.strip()
+    generated_suffix = f"_{str(condition).strip()}_Results"
+    if (
+        not stem
+        or not condition
+        or not stem.casefold().endswith(generated_suffix.casefold())
+        or len(stem) <= len(generated_suffix)
+    ):
+        return None
+    observed_id = stem[: -len(generated_suffix)].strip()
+    lookup = {
+        recording_id.casefold(): recording_id
+        for recording_id in known_recording_ids
+    }
+    return lookup.get(observed_id.casefold())
 
 
 def _participant_group_map(

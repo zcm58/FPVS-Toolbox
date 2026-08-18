@@ -23,12 +23,16 @@ from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import (
     ProjectDatasetIndex,
     load_project_dataset_index,
+    normalize_manual_excluded_recordings,
     normalize_preprocessing_settings,
 )
 
 
 FULL_FFT_PROVENANCE_SCHEMA_VERSION = 1
 FULL_FFT_PROVENANCE_METHOD_VERSION = "project_full_fft_provenance_v1"
+REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION = (
+    "project_full_fft_provenance_recording_session_v1"
+)
 FULL_FFT_PROVENANCE_MANIFEST_PATH = (
     "tools",
     "processing",
@@ -175,8 +179,25 @@ def _manual_excluded_participants(index: ProjectDatasetIndex) -> set[str]:
     }
 
 
+def _manual_excluded_recordings(index: ProjectDatasetIndex) -> set[str]:
+    if not index.is_repeated_session:
+        return set()
+    manifest = index.manifest if isinstance(index.manifest, Mapping) else {}
+    raw = manifest.get("preprocessing")
+    preprocessing = raw if isinstance(raw, Mapping) else {}
+    return {
+        str(value).strip().casefold()
+        for value in normalize_manual_excluded_recordings(
+            preprocessing.get("manual_excluded_recordings")
+        )
+        if str(value).strip()
+    }
+
+
 def _completed_ledger_state(
     project_root: Path,
+    *,
+    repeated_session: bool = False,
 ) -> tuple[set[str], tuple[dict[str, object], ...], bool]:
     ledger = load_ledger(project_root)
     entries = ledger.get("entries") if isinstance(ledger, Mapping) else None
@@ -184,17 +205,18 @@ def _completed_ledger_state(
         return set(), (), False
     completed_rows: list[dict[str, object]] = []
     completed_keys: set[str] = set()
-    for participant_id, entry in entries.items():
+    for processing_id, entry in entries.items():
         if not isinstance(entry, Mapping):
             continue
         if str(entry.get("status") or "").strip().casefold() != "completed":
             continue
-        participant = str(participant_id).strip()
-        if not participant:
+        participant = str(entry.get("participant_id") or processing_id).strip()
+        recording_id = str(entry.get("recording_id") or processing_id).strip()
+        identity = recording_id if repeated_session else participant
+        if not identity:
             continue
-        completed_keys.add(participant.casefold())
-        completed_rows.append(
-            {
+        completed_keys.add(identity.casefold())
+        row: dict[str, object] = {
                 "participant_id": participant,
                 "processing_fingerprint_version": str(
                     entry.get("processing_fingerprint_version") or ""
@@ -206,9 +228,20 @@ def _completed_ledger_state(
                     entry.get("condition_completeness") or ""
                 ),
             }
-        )
+        if repeated_session:
+            row.update(
+                {
+                    "recording_id": recording_id,
+                    "session_id": str(entry.get("session_id") or ""),
+                    "source_id": str(entry.get("source_id") or ""),
+                    "visit_index": entry.get("visit_index"),
+                    "days_from_baseline": entry.get("days_from_baseline"),
+                }
+            )
+        completed_rows.append(row)
     completed_rows.sort(
         key=lambda row: (
+            str(row.get("recording_id") or "").casefold(),
             str(row["participant_id"]).casefold(),
             str(row["participant_id"]),
         )
@@ -229,10 +262,13 @@ def _source_snapshot(
             "FullFFT provenance requires a managed project.json manifest."
         )
 
+    repeated_session = index.is_repeated_session
     completed, processing_rows, ledger_filter_applied = _completed_ledger_state(
-        project_root
+        project_root,
+        repeated_session=repeated_session,
     )
     manual_excluded = _manual_excluded_participants(index)
+    manual_excluded_recordings = _manual_excluded_recordings(index)
     frequency_qc = active_frequency_domain_exclusions(project_root)
     if frequency_qc.downstream_outputs_stale:
         raise FullFftProvenanceStaleError(
@@ -244,15 +280,37 @@ def _source_snapshot(
         for value in frequency_qc.excluded_participants
         if str(value).strip()
     }
+    frequency_excluded_recordings = {
+        str(value).strip().casefold()
+        for value in frequency_qc.excluded_recordings
+        if str(value).strip()
+    }
     active_records = tuple(
         record
         for record in index.workbooks
         if (
             not ledger_filter_applied
-            or record.participant_id.casefold() in completed
+            or (
+                (
+                    str(record.recording_id or "").casefold()
+                    if repeated_session
+                    else record.participant_id.casefold()
+                )
+                in completed
+            )
         )
         and record.participant_id.casefold() not in manual_excluded
         and record.participant_id.casefold() not in frequency_excluded
+        and (
+            not repeated_session
+            or str(record.recording_id or "").casefold()
+            not in manual_excluded_recordings
+        )
+        and (
+            not repeated_session
+            or str(record.recording_id or "").casefold()
+            not in frequency_excluded_recordings
+        )
     )
     if not active_records:
         raise FullFftProvenanceError(
@@ -263,8 +321,7 @@ def _source_snapshot(
     for record in active_records:
         resolved, relative = _manifest_relative_path(project_root, record.path)
         stat = resolved.stat()
-        source_rows.append(
-            {
+        row: dict[str, object] = {
                 "participant_id": str(record.participant_id),
                 "condition": str(record.condition),
                 "group_id": (
@@ -279,12 +336,29 @@ def _source_snapshot(
                 "size_bytes": int(stat.st_size),
                 "mtime_ns": int(stat.st_mtime_ns),
             }
-        )
+        if repeated_session:
+            row.update(
+                {
+                    "recording_id": str(record.recording_id or ""),
+                    "session_id": str(record.session_id or ""),
+                    "session_label": str(record.session_label or ""),
+                    "visit_index": record.visit_index,
+                    "days_from_baseline": record.days_from_baseline,
+                    "source_id": str(
+                        index.recordings[str(record.recording_id)].source_id
+                        if record.recording_id in index.recordings
+                        else ""
+                    ),
+                }
+            )
+        source_rows.append(row)
     source_rows.sort(
         key=lambda row: (
             str(row["condition"]).casefold(),
             str(row.get("group_id") or "").casefold(),
             str(row["participant_id"]).casefold(),
+            str(row.get("session_id") or "").casefold(),
+            str(row.get("recording_id") or "").casefold(),
             str(row["path"]).casefold(),
             str(row["path"]),
         )
@@ -305,26 +379,67 @@ def _source_snapshot(
             if str(participant).strip() and electrodes
         },
     }
+    if repeated_session:
+        frequency_qc_payload.update(
+            {
+                "excluded_recordings": sorted(frequency_excluded_recordings),
+                "recording_electrode_exclusions": {
+                    str(recording_id).strip().casefold(): sorted(
+                        str(electrode).strip().upper()
+                        for electrode in electrodes
+                        if str(electrode).strip()
+                    )
+                    for recording_id, electrodes in sorted(
+                        frequency_qc.auto_excluded_electrodes_by_recording.items(),
+                        key=lambda row: str(row[0]).casefold(),
+                    )
+                    if str(recording_id).strip() and electrodes
+                },
+            }
+        )
+    cohort_keys = [
+        "participant_id",
+        "condition",
+        "group_id",
+        "group_label",
+        "path",
+    ]
+    if repeated_session:
+        cohort_keys.extend(
+            [
+                "recording_id",
+                "session_id",
+                "session_label",
+                "visit_index",
+                "days_from_baseline",
+                "source_id",
+            ]
+        )
     cohort_rows = [
         {
             key: row[key]
-            for key in (
-                "participant_id",
-                "condition",
-                "group_id",
-                "group_label",
-                "path",
-            )
+            for key in cohort_keys
         }
         for row in source_rows
     ]
     cohort_payload = {
         "active_workbooks": cohort_rows,
         "ledger_filter_applied": ledger_filter_applied,
-        "completed_participants": sorted(completed),
         "manual_excluded_participants": sorted(manual_excluded),
         "frequency_qc": frequency_qc_payload,
     }
+    if repeated_session:
+        cohort_payload.update(
+            {
+                "identity_scope": "recording",
+                "completed_recordings": sorted(completed),
+                "manual_excluded_recordings": sorted(
+                    manual_excluded_recordings
+                ),
+            }
+        )
+    else:
+        cohort_payload["completed_participants"] = sorted(completed)
     return _SourceSnapshot(
         source_rows=tuple(source_rows),
         source_paths=tuple(str(row["path"]) for row in source_rows),
@@ -573,7 +688,10 @@ def _record_from_metadata(
             "The saved neutral FullFFT provenance schema is unsupported. Rerun "
             "post-processing in the current Toolbox version."
         )
-    if method_version != FULL_FFT_PROVENANCE_METHOD_VERSION:
+    if method_version not in {
+        FULL_FFT_PROVENANCE_METHOD_VERSION,
+        REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION,
+    }:
         raise FullFftProvenanceStaleError(
             "The saved neutral FullFFT provenance method is unsupported. Rerun "
             "post-processing in the current Toolbox version."
@@ -649,7 +767,11 @@ def write_project_full_fft_provenance(
         )
     metadata: dict[str, object] = {
         "schema_version": FULL_FFT_PROVENANCE_SCHEMA_VERSION,
-        "method_version": FULL_FFT_PROVENANCE_METHOD_VERSION,
+        "method_version": (
+            REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION
+            if index.is_repeated_session
+            else FULL_FFT_PROVENANCE_METHOD_VERSION
+        ),
         "status": "current",
         "saved_at": datetime.now(UTC).isoformat(),
         "source_sheet": FULL_FFT_SHEET_NAME,
@@ -820,6 +942,7 @@ __all__ = [
     "FULL_FFT_PROVENANCE_MANIFEST_PATH",
     "FULL_FFT_PROVENANCE_METHOD_VERSION",
     "FULL_FFT_PROVENANCE_SCHEMA_VERSION",
+    "REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION",
     "FULL_FFT_SHEET_NAME",
     "FullFftProvenance",
     "FullFftProvenanceError",

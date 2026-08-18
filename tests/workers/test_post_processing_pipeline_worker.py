@@ -29,6 +29,20 @@ class _Project:
     project_root: Path
 
 
+def _repeated_project(project_root: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        project_root=project_root,
+        groups={},
+        participants={},
+        sessions={
+            "visit_1": {"label": "Visit 1", "visit_index": 1},
+            "visit_2": {"label": "Visit 2", "visit_index": 2},
+        },
+        recording_sources={},
+        recordings={},
+    )
+
+
 class _RecordingWorker(PostProcessingPipelineWorker):
     def __init__(self, project: _Project) -> None:
         super().__init__(project)
@@ -132,6 +146,15 @@ class _CohortWarningWorker(_RecordingWorker):
             "P09 was omitted from every source condition.",
             result.path,
             warning=True,
+        )
+
+
+class _RepeatedSessionRecordingWorker(_RecordingWorker):
+    def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
+        self.calls.append(f"stats:{project_root.name}")
+        return PostProcessingPipelineWorker._run_stats_ready_export(
+            self,
+            project_root,
         )
 
 
@@ -427,6 +450,105 @@ def test_pipeline_reports_success_with_source_cohort_warnings(tmp_path) -> None:
         5,
         "Post-processing is complete with source-cohort warnings.",
     )
+
+
+def test_repeated_session_pipeline_successfully_skips_participant_keyed_loreta(
+    tmp_path: Path,
+) -> None:
+    worker = _RepeatedSessionRecordingWorker(_repeated_project(tmp_path))
+    progress: list[str] = []
+    phase_progress: list[tuple[str, int, int, str]] = []
+    finished: list[dict] = []
+    worker.progress.connect(progress.append)
+    worker.phase_progress.connect(
+        lambda phase_id, completed, total, message: phase_progress.append(
+            (phase_id, completed, total, message)
+        )
+    )
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert finished[0]["ok"] is True
+    assert finished[0]["has_warnings"] is False
+    assert worker.calls == [
+        "qc",
+        f"sync:{tmp_path.name}",
+        f"full_fft:{tmp_path.name}",
+        "harmonics",
+        f"stats:{tmp_path.name}",
+        f"audit:{tmp_path.name}",
+        f"source:{tmp_path.name}",
+    ]
+    steps = {step["name"]: step for step in finished[0]["steps"]}
+    assert steps["stats_ready_summed_bca"]["ok"] is True
+    assert "Skipped the legacy LORETA Stats-ready workbook" in steps[
+        "stats_ready_summed_bca"
+    ]["message"]
+    for mode in ("l2_mne_source_psd", "eloreta_volume_source_psd"):
+        assert steps[mode]["ok"] is True
+        assert "not recording-aware" in steps[mode]["message"]
+    assert any("legacy LORETA Stats-ready workbook" in message for message in progress)
+    assert any("Automatic LORETA project-source generation" in message for message in progress)
+    source_phase_messages = [
+        message
+        for phase_id, _completed, _total, message in phase_progress
+        if phase_id in {"l2_mne_source_maps", "eloreta_source_maps"}
+    ]
+    assert source_phase_messages
+    assert all("not recording-aware" in message for message in source_phase_messages)
+
+
+def test_repeated_session_loreta_skips_preserve_existing_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Tools.LORETA_Visualizer import stats_ready_workbook
+
+    worker = PostProcessingPipelineWorker(_repeated_project(tmp_path))
+    stats_target = canonical_artifact_path(tmp_path, "stats_ready_summed_bca")
+    stats_target.parent.mkdir(parents=True)
+    stats_target.write_text("legacy stats", encoding="utf-8")
+    source_targets = {
+        mode: canonical_artifact_path(tmp_path, mode)
+        for mode in ("l2_mne_source_psd", "eloreta_volume_source_psd")
+    }
+    for mode, target in source_targets.items():
+        target.mkdir(parents=True)
+        (target / "existing.json").write_text(mode, encoding="utf-8")
+    worker._artifact_targets.update(  # noqa: SLF001
+        {"stats_ready_summed_bca": stats_target, **source_targets}
+    )
+
+    def _unexpected_call(*_args, **_kwargs):
+        raise AssertionError("Participant-keyed LORETA code must not run.")
+
+    monkeypatch.setattr(
+        stats_ready_workbook,
+        "write_loreta_stats_ready_workbook",
+        _unexpected_call,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_load_source_psd_export_api",
+        _unexpected_call,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_load_eloreta_source_psd_export_api",
+        _unexpected_call,
+    )
+
+    stats_result = worker._run_stats_ready_export(tmp_path)  # noqa: SLF001
+    source_results = worker._run_source_maps(tmp_path)  # noqa: SLF001
+
+    assert stats_result.ok is True
+    assert stats_result.path == ""
+    assert all(result.ok and not result.path for result in source_results)
+    assert stats_target.read_text(encoding="utf-8") == "legacy stats"
+    for mode, target in source_targets.items():
+        assert (target / "existing.json").read_text(encoding="utf-8") == mode
+    assert worker._artifact_targets == {}  # noqa: SLF001
 
 
 def test_post_processing_pipeline_runs_steps_in_order(tmp_path) -> None:

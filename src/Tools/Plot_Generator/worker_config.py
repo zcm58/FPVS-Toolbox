@@ -42,3 +42,6 @@ class PlotWorkerConfig:
     project_root: str | None = None
     spectral_qc_enabled: bool = True
     prepared_dataset_index: ProjectDatasetIndex | None = None
+    workbook_session_ids: Sequence[str] | None = None
+    session_comparison_ids: Sequence[str] | None = None
+    session_group_ids: Sequence[str] | None = None

@@ -65,7 +65,7 @@ def test_source_psd_modes_are_the_fourth_and_fifth_phases_with_time_domain_statu
     assert any("Hauk-informed time-domain source-space maps" in message for message in status_text)
 
 
-def test_stats_and_source_exports_are_unconditional_sibling_steps() -> None:
+def test_stats_audit_and_source_steps_keep_their_pipeline_order() -> None:
     tree = _worker_tree()
     run_method = _class_method(tree, "run")
     try_node = next(node for node in run_method.body if isinstance(node, ast.Try))
@@ -87,6 +87,23 @@ def test_stats_and_source_exports_are_unconditional_sibling_steps() -> None:
     source_index = statement_call_index("_run_source_maps")
 
     assert stats_index < audit_index < source_index
+
+
+def test_participant_keyed_loreta_steps_have_a_canonical_repeated_session_gate() -> None:
+    tree = _worker_tree()
+    gate_method = _class_method(tree, "_is_repeated_session_project")
+    stats_method = _class_method(tree, "_run_stats_ready_export")
+    source_method = _class_method(tree, "_run_source_maps")
+
+    gate_source = ast.unparse(gate_method)
+    stats_source = ast.unparse(stats_method)
+    source_source = ast.unparse(source_method)
+    assert "from Main_App.projects import project_recording_context" in gate_source
+    assert "project_recording_context(self._project).is_repeated_session" in gate_source
+    assert "if self._is_repeated_session_project()" in stats_source
+    assert "if self._is_repeated_session_project()" in source_source
+    assert "_REPEATED_SESSION_STATS_READY_SKIP_MESSAGE" in stats_source
+    assert "_REPEATED_SESSION_SOURCE_SKIP_MESSAGE" in source_source
 
 
 def test_post_processing_run_bounds_xlsx_cache_with_exit_stack() -> None:

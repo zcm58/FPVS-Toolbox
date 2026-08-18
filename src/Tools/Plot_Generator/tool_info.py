@@ -45,6 +45,16 @@ remain separate from ordinary single-condition figures. The first two groups
 use the editable colors and labels; additional groups receive automatic,
 distinct colors, markers, and project labels.
 </p>
+<p>
+Repeated-session projects explicitly choose either one session for the normal
+condition workflow or two sessions for a descriptive session comparison.
+Session figures stack stable groups vertically at the normal SNR plot width,
+overlay both sessions within each group, and label each phase with its visit
+index and participant n. Missing canonical recording/session identity blocks the run.
+When all participants completed phases in one fixed order, phase remains
+confounded with visit order and elapsed time; the page and figure state this
+interpretation limit.
+</p>
 
 """
 

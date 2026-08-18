@@ -14,6 +14,11 @@ from Main_App.exports.figure_style import (
     FIGURE_STANDARD_LANDSCAPE_HEIGHT_IN,
 )
 from Tools.Plot_Generator.rendering import PlotRenderingMixin, _safe_figure_stem
+from Tools.Plot_Generator.session_aggregation import (
+    SessionSNRAggregation,
+    SessionSNRCell,
+)
+from Tools.Plot_Generator.session_rendering import SessionPlotRenderingMixin
 
 
 class _RenderHarness(PlotRenderingMixin):
@@ -62,6 +67,163 @@ class _RenderHarness(PlotRenderingMixin):
 
     def _record_figure_pair(self, *, png_path, pdf_path):
         self.saved.extend((png_path, pdf_path))
+
+
+class _SessionRenderHarness(SessionPlotRenderingMixin):
+    title = "Faces"
+    xlabel = "Frequency (Hz)"
+    ylabel = "SNR"
+    x_min = 1.0
+    x_max = 2.0
+    y_min = 0.0
+    y_max = 5.0
+    stem_color = "red"
+    stem_color_b = "blue"
+    use_matlab_style = False
+
+    def __init__(self, out_dir: Path) -> None:
+        self.out_dir = out_dir
+        self.saved: list[Path] = []
+
+    def _cancellation_checkpoint(self) -> bool:
+        return False
+
+    def _visible_oddball_frequencies(self, _freqs):
+        return []
+
+    def _mark_timing(self, *_args, **_kwargs) -> None:
+        return None
+
+    def _record_figure_pair(self, *, png_path, pdf_path) -> None:
+        self.saved.extend((png_path, pdf_path))
+
+    def _emit(self, *_args, **_kwargs) -> None:
+        return None
+
+
+def _session_cell(
+    *,
+    group_id: str,
+    group_label: str,
+    session_id: str,
+    session_label: str,
+    visit_index: int,
+    values: tuple[float, float],
+) -> SessionSNRCell:
+    return SessionSNRCell(
+        condition="Faces",
+        group_id=group_id,
+        group_label=group_label,
+        session_id=session_id,
+        session_label=session_label,
+        visit_index=visit_index,
+        roi="Occipital",
+        plotted_values=values,
+        participant_n_by_frequency=(2, 2),
+        participant_ids=("P01", "P02"),
+        recording_ids=(f"P01_{session_id}", f"P02_{session_id}"),
+    )
+
+
+def test_session_figure_stacks_normal_width_group_panels_without_differences(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    figures = []
+
+    def capture_save(figure, _path, *_args, **_kwargs) -> None:
+        if figure not in figures:
+            figures.append(figure)
+
+    monkeypatch.setattr("matplotlib.figure.Figure.savefig", capture_save)
+    aggregation = SessionSNRAggregation(
+        condition="Faces",
+        frequency_count=2,
+        group_ids=("birth_control", "control"),
+        session_ids=("luteal", "follicular"),
+        cells=(
+            _session_cell(
+                group_id="birth_control",
+                group_label="BC Group",
+                session_id="luteal",
+                session_label="Luteal Phase",
+                visit_index=1,
+                values=(1.5, 2.0),
+            ),
+            _session_cell(
+                group_id="birth_control",
+                group_label="BC Group",
+                session_id="follicular",
+                session_label="Follicular Phase",
+                visit_index=2,
+                values=(1.7, 2.2),
+            ),
+            _session_cell(
+                group_id="control",
+                group_label="Control Group",
+                session_id="luteal",
+                session_label="Luteal Phase",
+                visit_index=1,
+                values=(1.4, 1.8),
+            ),
+            _session_cell(
+                group_id="control",
+                group_label="Control Group",
+                session_id="follicular",
+                session_label="Follicular Phase",
+                visit_index=2,
+                values=(1.6, 2.1),
+            ),
+        ),
+        paired_differences=(),
+        reference_session_id="luteal",
+        comparison_session_id="follicular",
+    )
+    harness = _SessionRenderHarness(tmp_path)
+
+    harness._plot_session_comparison([1.0, 2.0], aggregation)
+
+    assert len(figures) == 1
+    figure = figures[0]
+    assert tuple(figure.get_size_inches()) == pytest.approx(
+        (
+            FIGURE_JOURNAL_TEXT_WIDTH_IN,
+            FIGURE_STANDARD_LANDSCAPE_HEIGHT_IN * 2,
+        )
+    )
+    assert len(figure.axes) == 2
+    upper, lower = figure.axes
+    assert [axis.get_title() for axis in figure.axes] == [
+        "BC Group",
+        "Control Group",
+    ]
+    assert upper.get_position().y0 > lower.get_position().y0
+    assert upper.get_position().x0 == pytest.approx(lower.get_position().x0)
+    assert upper.get_position().width == pytest.approx(lower.get_position().width)
+    assert all(axis.get_xlabel() == "Frequency (Hz)" for axis in figure.axes)
+    assert all(axis.get_ylabel() == "SNR" for axis in figure.axes)
+    assert all(
+        axis.get_legend_handles_labels()[1]
+        == [
+            "Luteal Phase (Visit 1, n=2)",
+            "Follicular Phase (Visit 2, n=2)",
+        ]
+        for axis in figure.axes
+    )
+    figure_text = " ".join(
+        [text.get_text() for text in figure.texts]
+        + [axis.get_ylabel() for axis in figure.axes]
+        + [
+            label
+            for axis in figure.axes
+            for label in axis.get_legend_handles_labels()[1]
+        ]
+    ).casefold()
+    assert "difference" not in figure_text
+    assert [path.name for path in harness.saved] == [
+        "Faces - Occipital_session_comparison.png",
+        "Faces - Occipital_session_comparison.pdf",
+    ]
 
 
 def test_single_and_overlay_figures_use_shared_width_and_show_participant_n(

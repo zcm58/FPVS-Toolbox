@@ -43,10 +43,25 @@ class FullFftGridObservation:
     frequency_column_count: int
     issue: str | None
     already_excluded: bool
+    recording_id: str | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    visit_index: int | None = None
 
     @property
     def pair_key(self) -> tuple[str, str]:
+        identity = self.recording_id or self.participant_id
+        return identity.casefold(), self.condition.casefold()
+
+    @property
+    def participant_pair_key(self) -> tuple[str, str]:
         return self.participant_id.casefold(), self.condition.casefold()
+
+    @property
+    def recording_pair_key(self) -> tuple[str, str] | None:
+        if not self.recording_id:
+            return None
+        return self.recording_id.casefold(), self.condition.casefold()
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +119,8 @@ class FullFftGridAudit:
     def is_compatible_with_exclusions(
         self,
         exclusions: Mapping[str, Sequence[str]],
+        *,
+        recording_exclusions: Mapping[str, Sequence[str]] | None = None,
     ) -> bool:
         """Return whether a proposed cohort has one valid FullFFT grid."""
 
@@ -113,10 +130,20 @@ class FullFftGridAudit:
             for condition in conditions
             if str(participant).strip() and str(condition).strip()
         }
+        excluded_recording_pairs = {
+            (str(recording).strip().casefold(), str(condition).strip().casefold())
+            for recording, conditions in (recording_exclusions or {}).items()
+            for condition in conditions
+            if str(recording).strip() and str(condition).strip()
+        }
         active = tuple(
             observation
             for observation in self.observations
-            if observation.pair_key not in excluded_pairs
+            if observation.participant_pair_key not in excluded_pairs
+            and (
+                observation.recording_pair_key is None
+                or observation.recording_pair_key not in excluded_recording_pairs
+            )
         )
         if not active or any(observation.issue is not None for observation in active):
             return False
@@ -154,6 +181,8 @@ def audit_project_full_fft_grids(
             key=lambda record: (
                 record.group_label.casefold() if record.group_label else "",
                 record.participant_id.casefold(),
+                record.visit_index if record.visit_index is not None else 0,
+                record.recording_id.casefold() if record.recording_id else "",
                 record.condition.casefold(),
                 str(record.path),
             ),
@@ -183,16 +212,16 @@ def _harmonic_active_workbook_paths(
 ) -> set[Path]:
     """Mirror the participant-level cohort filters used by harmonic selection."""
 
-    completed_participants: set[str] = set()
+    completed_identities: set[str] = set()
     ledger = load_ledger(project_root)
     entries = ledger.get("entries") if isinstance(ledger, Mapping) else None
     if isinstance(entries, Mapping):
-        completed_participants = {
-            str(participant_id).strip().casefold()
-            for participant_id, entry in entries.items()
+        completed_identities = {
+            str(identity).strip().casefold()
+            for identity, entry in entries.items()
             if isinstance(entry, Mapping)
             and str(entry.get("status") or "") == "completed"
-            and str(participant_id).strip()
+            and str(identity).strip()
         }
     excluded_participants = {
         str(participant_id).strip().casefold()
@@ -205,8 +234,9 @@ def _harmonic_active_workbook_paths(
         record.path.resolve(strict=False)
         for record in records
         if (
-            not completed_participants
-            or record.participant_id.casefold() in completed_participants
+            not completed_identities
+            or (record.recording_id or record.participant_id).casefold()
+            in completed_identities
         )
         and record.participant_id.casefold() not in excluded_participants
     }
@@ -277,6 +307,10 @@ def _inspect_workbook_grid(
         frequency_column_count=frequency_column_count,
         issue=issue,
         already_excluded=already_excluded,
+        recording_id=record.recording_id,
+        session_id=record.session_id,
+        session_label=record.session_label,
+        visit_index=record.visit_index,
     )
 
 

@@ -20,6 +20,21 @@ To use the tool, you should already have:
 - a current saved significant-oddball-harmonic selection; and
 - condition and harmonic settings that match the experiment you ran.
 
+### Repeated-session projects
+
+Automatic LORETA project-source generation is not currently available for a
+repeated-session project. The current LORETA project-source inputs are keyed by
+participant and cannot safely distinguish two recordings from the same person.
+FPVS Toolbox therefore reports the legacy LORETA Stats-ready workbook and both
+automatic LORETA source-map builds as successful, non-applicable skips. This
+does not block the recording-aware full-audit workbook, repeated-session Stats,
+SNR plots, or scalp maps, and any recording-aware source-ready derivatives are
+left unchanged.
+
+Single-session LORETA generation is unchanged. Do not combine repeated visits
+under one participant key as a workaround; wait for a recording-aware LORETA
+project-source contract.
+
 If valid source-ready FIFs already exist, changing the current source method or
 orientation does not require reprocessing the EEG. Use Source Map Options to
 rebuild the maps from those existing derivatives. Legacy amplitude-derived maps

@@ -77,6 +77,10 @@ class HeaderOnlyPreflight:
     participant_id: str
     info: BdfPreflightInfo
     group_id: str | None = None
+    recording_id: str | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    visit_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,16 @@ class PreflightQcFileResult:
     raw_spectral_qc: Mapping[str, object] | None
     group_id: str | None = None
     condition_qc: Mapping[str, object] | None = None
+    recording_id: str | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    visit_index: int | None = None
+
+    @property
+    def identity_id(self) -> str:
+        """Return the recording key, with the legacy participant fallback."""
+
+        return self.recording_id or self.participant_id
 
     @property
     def auto_removed_electrodes(self) -> tuple[str, ...]:
@@ -185,7 +199,7 @@ class PreflightQcScan:
             )
             if not channels:
                 continue
-            suggestions[result.participant_id] = channels
+            suggestions[result.identity_id] = channels
         return suggestions
 
     @property
@@ -227,10 +241,25 @@ class PreflightConditionCropObservation:
     duration_s: float | None
     issue: str | None
     already_excluded: bool = False
+    recording_id: str | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    visit_index: int | None = None
 
     @property
     def pair_key(self) -> tuple[str, str]:
+        identity = self.recording_id or self.participant_id
+        return identity.casefold(), self.condition_label.casefold()
+
+    @property
+    def participant_pair_key(self) -> tuple[str, str]:
         return self.participant_id.casefold(), self.condition_label.casefold()
+
+    @property
+    def recording_pair_key(self) -> tuple[str, str] | None:
+        if not self.recording_id:
+            return None
+        return self.recording_id.casefold(), self.condition_label.casefold()
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +344,8 @@ class PreflightConditionCropGridAudit:
     def is_compatible_with_exclusions(
         self,
         exclusions: Mapping[str, Sequence[str]],
+        *,
+        recording_exclusions: Mapping[str, Sequence[str]] | None = None,
     ) -> bool:
         excluded_pairs = {
             (str(participant).strip().casefold(), str(condition).strip().casefold())
@@ -322,10 +353,20 @@ class PreflightConditionCropGridAudit:
             for condition in conditions
             if str(participant).strip() and str(condition).strip()
         }
+        excluded_recording_pairs = {
+            (str(recording).strip().casefold(), str(condition).strip().casefold())
+            for recording, conditions in (recording_exclusions or {}).items()
+            for condition in conditions
+            if str(recording).strip() and str(condition).strip()
+        }
         active = tuple(
             observation
             for observation in self.observations
-            if observation.pair_key not in excluded_pairs
+            if observation.participant_pair_key not in excluded_pairs
+            and (
+                observation.recording_pair_key is None
+                or observation.recording_pair_key not in excluded_recording_pairs
+            )
         )
         if not active or any(observation.issue is not None for observation in active):
             return False
@@ -346,6 +387,8 @@ def build_preflight_condition_crop_grid_audit(
     *,
     excluded_participant_conditions: Mapping[str, Sequence[str]] | None = None,
     excluded_participants: Sequence[str] = (),
+    excluded_recording_conditions: Mapping[str, Sequence[str]] | None = None,
+    excluded_recordings: Sequence[str] = (),
 ) -> PreflightConditionCropGridAudit:
     """Compare valid raw crop plans without changing locked crop arithmetic."""
 
@@ -362,14 +405,28 @@ def build_preflight_condition_crop_grid_audit(
         for condition in conditions
         if str(participant).strip() and str(condition).strip()
     }
+    excluded_recording_keys = {
+        str(recording).strip().casefold()
+        for recording in excluded_recordings
+        if str(recording).strip()
+    }
+    excluded_recording_pair_keys = {
+        (str(recording).strip().casefold(), str(condition).strip().casefold())
+        for recording, conditions in (excluded_recording_conditions or {}).items()
+        for condition in conditions
+        if str(recording).strip() and str(condition).strip()
+    }
     observations: list[PreflightConditionCropObservation] = []
     for result in scan.results:
         if result.participant_id.casefold() in excluded_participant_keys:
+            continue
+        if result.recording_id and result.recording_id.casefold() in excluded_recording_keys:
             continue
         observations.extend(
             _condition_crop_observations(
                 result,
                 excluded_pair_keys=excluded_pair_keys,
+                excluded_recording_pair_keys=excluded_recording_pair_keys,
             )
         )
     current_pairs = {observation.pair_key for observation in observations}
@@ -377,6 +434,11 @@ def build_preflight_condition_crop_grid_audit(
         if (
             project_observation.participant_id.casefold()
             in excluded_participant_keys
+            or (
+                project_observation.recording_id is not None
+                and project_observation.recording_id.casefold()
+                in excluded_recording_keys
+            )
             or project_observation.pair_key in current_pairs
         ):
             continue
@@ -392,14 +454,25 @@ def build_preflight_condition_crop_grid_audit(
                 duration_s=project_observation.duration_s,
                 issue=project_observation.issue,
                 already_excluded=(
-                    project_observation.pair_key in excluded_pair_keys
+                    project_observation.participant_pair_key in excluded_pair_keys
+                    or (
+                        project_observation.recording_pair_key is not None
+                        and project_observation.recording_pair_key
+                        in excluded_recording_pair_keys
+                    )
                 ),
+                recording_id=project_observation.recording_id,
+                session_id=project_observation.session_id,
+                session_label=project_observation.session_label,
+                visit_index=project_observation.visit_index,
             )
         )
     observations.sort(
         key=lambda observation: (
             str(observation.group_id or "").casefold(),
             observation.participant_id.casefold(),
+            observation.visit_index or 0,
+            str(observation.recording_id or "").casefold(),
             observation.condition_id,
             observation.condition_label.casefold(),
         )
@@ -432,6 +505,7 @@ def _condition_crop_observations(
     result: PreflightQcFileResult,
     *,
     excluded_pair_keys: set[tuple[str, str]],
+    excluded_recording_pair_keys: set[tuple[str, str]],
 ) -> list[PreflightConditionCropObservation]:
     condition_qc = result.condition_qc or {}
     event_plan = condition_qc.get("event_plan")
@@ -499,9 +573,14 @@ def _condition_crop_observations(
                 else:
                     cycles = rounded_cycles
 
-        pair_key = (
+        participant_pair_key = (
             result.participant_id.casefold(),
             condition_label.casefold(),
+        )
+        recording_pair_key = (
+            (result.recording_id.casefold(), condition_label.casefold())
+            if result.recording_id
+            else None
         )
         observations.append(
             PreflightConditionCropObservation(
@@ -514,7 +593,17 @@ def _condition_crop_observations(
                 oddball_cycles=cycles,
                 duration_s=duration_s,
                 issue=issue,
-                already_excluded=pair_key in excluded_pair_keys,
+                already_excluded=(
+                    participant_pair_key in excluded_pair_keys
+                    or (
+                        recording_pair_key is not None
+                        and recording_pair_key in excluded_recording_pair_keys
+                    )
+                ),
+                recording_id=result.recording_id,
+                session_id=result.session_id,
+                session_label=result.session_label,
+                visit_index=result.visit_index,
             )
         )
     return observations
@@ -542,6 +631,12 @@ def scan_recording_not_started_files(
                 participant_id=str(info.subject_id),
                 info=preflight,
                 group_id=str(info.group).strip() if info.group else None,
+                recording_id=str(info.recording_id).strip() if info.recording_id else None,
+                session_id=str(info.session_id).strip() if info.session_id else None,
+                session_label=(
+                    str(info.session_label).strip() if info.session_label else None
+                ),
+                visit_index=info.visit_index,
             )
         )
     return tuple(flagged)
@@ -833,13 +928,20 @@ def _preflight_cache_method() -> dict[str, object]:
     }
 
 
-def _preflight_file_identity(file_path: Path) -> dict[str, object]:
+def _preflight_file_identity(
+    file_path: Path,
+    *,
+    recording_id: str | None = None,
+) -> dict[str, object]:
     stat = file_path.stat()
-    return {
+    payload: dict[str, object] = {
         "resolved_path": str(file_path.resolve()),
         "size": int(stat.st_size),
         "mtime_ns": int(stat.st_mtime_ns),
     }
+    if recording_id:
+        payload["recording_id"] = recording_id
+    return payload
 
 
 def _cached_preflight_result(
@@ -849,6 +951,10 @@ def _cached_preflight_result(
     participant_id: str,
     group_id: str | None,
     timings_ms: Mapping[str, float],
+    recording_id: str | None = None,
+    session_id: str | None = None,
+    session_label: str | None = None,
+    visit_index: int | None = None,
 ) -> PreflightQcFileResult | None:
     raw_channel_qc = cached.get("raw_channel_qc")
     raw_spectral_qc = cached.get("raw_spectral_qc")
@@ -868,6 +974,10 @@ def _cached_preflight_result(
         raw_spectral_qc=dict(raw_spectral_qc),
         group_id=group_id,
         condition_qc=condition_payload,
+        recording_id=recording_id,
+        session_id=session_id,
+        session_label=session_label,
+        visit_index=visit_index,
     )
 
 
@@ -972,6 +1082,10 @@ def _scan_one_preflight_file_v2(
     file_path = Path(info.path)
     participant_id = str(info.subject_id)
     group_id = str(info.group).strip() if info.group else None
+    recording_id = str(info.recording_id).strip() if info.recording_id else None
+    session_id = str(info.session_id).strip() if info.session_id else None
+    session_label = str(info.session_label).strip() if info.session_label else None
+    visit_index = info.visit_index
     timings_ms: dict[str, float] = {}
 
     def _cancelled() -> bool:
@@ -1037,7 +1151,10 @@ def _scan_one_preflight_file_v2(
         if not event_plan.spans:
             raise RuntimeError("Preflight QC v3 planned no relevant condition intervals.")
 
-        file_identity = _preflight_file_identity(file_path)
+        file_identity = _preflight_file_identity(
+            file_path,
+            recording_id=recording_id,
+        )
         cache_settings = _preflight_cache_settings(qc_settings)
         cache_method = _preflight_cache_method()
         event_plan_payload = event_plan.to_payload()
@@ -1057,6 +1174,10 @@ def _scan_one_preflight_file_v2(
                 participant_id=participant_id,
                 group_id=group_id,
                 timings_ms=timings_ms,
+                recording_id=recording_id,
+                session_id=session_id,
+                session_label=session_label,
+                visit_index=visit_index,
             )
             if cached_result is not None:
                 if progress_detail:
@@ -1236,6 +1357,10 @@ def _scan_one_preflight_file_v2(
             raw_spectral_qc=raw_spectral_payload,
             group_id=group_id,
             condition_qc=condition_qc_payload,
+            recording_id=recording_id,
+            session_id=session_id,
+            session_label=session_label,
+            visit_index=visit_index,
         )
 
         if _cancelled():
@@ -1284,6 +1409,10 @@ def _scan_one_preflight_file(
     file_path = Path(info.path)
     participant_id = str(info.subject_id)
     group_id = str(info.group).strip() if info.group else None
+    recording_id = str(info.recording_id).strip() if info.recording_id else None
+    session_id = str(info.session_id).strip() if info.session_id else None
+    session_label = str(info.session_label).strip() if info.session_label else None
+    visit_index = info.visit_index
     if project_root is not None and event_map:
         try:
             return _scan_one_preflight_file_v2(
@@ -1326,6 +1455,10 @@ def _scan_one_preflight_file(
                     "method_version": PREFLIGHT_QC_METHOD_VERSION,
                     "cache_status": "error",
                 },
+                recording_id=recording_id,
+                session_id=session_id,
+                session_label=session_label,
+                visit_index=visit_index,
             )
 
     raw = None
@@ -1353,6 +1486,10 @@ def _scan_one_preflight_file(
             raw_channel_qc=_raw_channel_payload(raw_result),
             raw_spectral_qc=spectral_result.to_payload(),
             group_id=group_id,
+            recording_id=recording_id,
+            session_id=session_id,
+            session_label=session_label,
+            visit_index=visit_index,
         )
     except Exception as exc:
         logger.exception(
@@ -1367,6 +1504,10 @@ def _scan_one_preflight_file(
             raw_channel_qc=None,
             raw_spectral_qc=None,
             group_id=group_id,
+            recording_id=recording_id,
+            session_id=session_id,
+            session_label=session_label,
+            visit_index=visit_index,
         )
     finally:
         raw = None

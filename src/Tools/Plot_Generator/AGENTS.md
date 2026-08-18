@@ -49,8 +49,27 @@ Current ownership map:
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
   configuration; `render_naming.py` owns widget-free, collision-safe artifact
   stems.
+- `session_controls.py`: pure canonical session-selector state and the
+  fixed-order interpretation caveat; `session_selection.py` owns its GUI
+  binding and request validation.
+- `session_aggregation.py`, `session_workflow.py`, and `session_rendering.py`:
+  recording-keyed group/session aggregation, worker-thread collection, and
+  stable-group faceted session figures.
 
 v2.1 project contract:
+
+- Repeated-session projects must make the plotted dimension explicit. Ordinary
+  condition plotting selects exactly one canonical session; session comparison
+  selects one condition and two canonical sessions. Never pool repeat visits
+  in a participant-keyed dictionary.
+- Repeated-session curves join source data through canonical `recording_id` and
+  require stable `group_id`, `session_id`, session label, and `visit_index`.
+  Missing identity is a hard stop; do not infer it from workbook names or
+  folders.
+- Session figures stack stable groups vertically in one journal-width column
+  and overlay sessions within each group. Each group panel uses the normal SNR
+  figure width and height allocation. Show participant `n`, visit indices, and
+  the fixed-order phase/order/time confounding caveat in the GUI and figure.
 
 - `Main_App.projects.dataset_index` is the sole owner of processed-workbook
   discovery and participant/group identity. Plot Generator may keep thin

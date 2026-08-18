@@ -302,6 +302,166 @@ def test_full_audit_export_rejects_index_for_another_project(tmp_path: Path) -> 
         write_analysis_ready_workbook(tmp_path, dataset_index=wrong_index)
 
 
+def test_full_audit_repeated_session_export_keeps_both_recordings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "Repeated Project"
+    raw_root = root / "Raw" / "Control"
+    (raw_root / "Luteal").mkdir(parents=True)
+    (raw_root / "Follicular").mkdir(parents=True)
+    manifest = {
+        "schema_version": "2.2.0",
+        "results_folder": ".",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "groups": {
+            "control": {
+                "label": "Control",
+                "folder_name": "Control",
+                "raw_input_folder": str(raw_root),
+            }
+        },
+        "sessions": {
+            "luteal": {"label": "Luteal (Visit 1)", "visit_index": 1},
+            "follicular": {
+                "label": "Follicular (Visit 2)",
+                "visit_index": 2,
+            },
+        },
+        "recording_sources": {
+            "control_luteal": {
+                "group_id": "control",
+                "session_id": "luteal",
+                "raw_input_folder": str(raw_root / "Luteal"),
+            },
+            "control_follicular": {
+                "group_id": "control",
+                "session_id": "follicular",
+                "raw_input_folder": str(raw_root / "Follicular"),
+            },
+        },
+        "participants": {"P1": {"group_id": "control"}},
+        "preprocessing": {
+            "manual_excluded_recordings": ["P1__luteal"],
+        },
+        "tools": {
+            "frequency_domain_qc": {
+                "auto_recording_exclusions": [
+                    {
+                        "recording_id": "P1__luteal",
+                        "reason": "test automatic recording flag",
+                    }
+                ],
+                "manual_recording_exclusions": [
+                    {
+                        "recording_id": "P1__luteal",
+                        "reason": "test manual recording flag",
+                    }
+                ],
+                "auto_recording_electrode_exclusions": [
+                    {
+                        "recording_id": "P1__luteal",
+                        "electrode": "O1",
+                        "reason": "test recording electrode flag",
+                        "triggering_conditions": ["Condition A"],
+                    }
+                ],
+            }
+        },
+        "recordings": {
+            "P1__luteal": {
+                "participant_id": "P1",
+                "session_id": "luteal",
+                "source_id": "control_luteal",
+                "raw_file": str(raw_root / "Luteal" / "P1_L.bdf"),
+                "visit_index": 1,
+                "days_from_baseline": 0,
+            },
+            "P1__follicular": {
+                "participant_id": "P1",
+                "session_id": "follicular",
+                "source_id": "control_follicular",
+                "raw_file": str(raw_root / "Follicular" / "P1_F.bdf"),
+                "visit_index": 2,
+                "days_from_baseline": 14,
+            },
+        },
+    }
+    (root / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    _write_bca_workbook(
+        root,
+        pid="P1__luteal",
+        condition="Condition A",
+        group_folder="Control",
+        values=[("O1", 1.0, 2.0)],
+    )
+    _write_bca_workbook(
+        root,
+        pid="P1__follicular",
+        condition="Condition A",
+        group_folder="Control",
+        values=[("O1", 3.0, 4.0)],
+    )
+    monkeypatch.setattr(export_module, "_load_active_rois", lambda: {"Occipital": ["O1"]})
+
+    result = write_analysis_ready_workbook(
+        root,
+        selection_metadata=_selection_metadata(),
+    )
+
+    roi_long = pd.read_excel(result.path, sheet_name="ROI Long")
+    assert list(roi_long["Recording ID"]) == ["P1__luteal", "P1__follicular"]
+    assert list(roi_long["Session ID"]) == ["luteal", "follicular"]
+    assert list(roi_long["Visit Index"]) == [1, 2]
+    assert list(roi_long["Days From Baseline"]) == [0, 14]
+    assert set(roi_long["Group ID"]) == {"control"}
+    assert list(roi_long["Raw Summed BCA"]) == [3.0, 7.0]
+    assert list(roi_long["Current Toolbox Exclusion"]) == ["Yes", "No"]
+    assert "test automatic recording flag" in str(roi_long.iloc[0]["QC Notes"])
+    assert "test manual recording flag" in str(roi_long.iloc[0]["QC Notes"])
+    assert "frequency-domain recording" not in str(
+        roi_long.iloc[1]["QC Notes"]
+    ).casefold()
+    electrode_long = pd.read_excel(result.path, sheet_name="Electrode Long")
+    luteal_electrode = electrode_long.loc[
+        electrode_long["Recording ID"].eq("P1__luteal")
+        & electrode_long["Electrode"].eq("O1")
+    ].iloc[0]
+    follicular_electrode = electrode_long.loc[
+        electrode_long["Recording ID"].eq("P1__follicular")
+        & electrode_long["Electrode"].eq("O1")
+    ].iloc[0]
+    assert "test recording electrode flag" in luteal_electrode["QC Notes"]
+    assert "test recording electrode flag" not in str(
+        follicular_electrode["QC Notes"]
+    )
+    wide = pd.read_excel(result.path, sheet_name="Raw BCA Wide")
+    assert len(wide) == 2
+    assert set(wide["Recording ID"]) == {"P1__luteal", "P1__follicular"}
+    flags = pd.read_excel(result.path, sheet_name="QC Flags")
+    recording_flag = flags.loc[
+        flags["Flag Type"].eq("Manual preprocessing recording exclusion")
+    ].iloc[0]
+    assert recording_flag["Recording ID"] == "P1__luteal"
+    assert recording_flag["Session ID"] == "luteal"
+    frequency_recording_flags = flags.loc[
+        flags["Flag Type"].isin(
+            {
+                "Automatic frequency-domain recording exclusion",
+                "Manual frequency-domain recording exclusion",
+                "Automatic frequency-domain recording-electrode exclusion",
+            }
+        )
+    ]
+    assert set(frequency_recording_flags["Flag Type"]) == {
+        "Automatic frequency-domain recording exclusion",
+        "Manual frequency-domain recording exclusion",
+        "Automatic frequency-domain recording-electrode exclusion",
+    }
+    assert set(frequency_recording_flags["Recording ID"]) == {"P1__luteal"}
+    assert set(frequency_recording_flags["Session ID"]) == {"luteal"}
+
+
 def test_publication_rms_normalization_requires_complete_positive_harmonic_scales() -> None:
     frame = pd.DataFrame(
         {

@@ -49,12 +49,14 @@ from Main_App.processing.fft_multinotch import (
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     manual_removed_electrodes_for_pid,
+    normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
 )
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
 from Main_App.projects.grouping import validate_group_folder_name
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
+    normalize_manual_excluded_recordings,
 )
 from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
@@ -157,6 +159,52 @@ def _participant_id_for_file(file_path: Path, settings: Dict[str, object]) -> st
     return file_path.stem
 
 
+def _mapped_text_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+    setting_key: str,
+) -> str | None:
+    mapping = settings.get(setting_key)
+    if not isinstance(mapping, Mapping):
+        return None
+    file_key = str(file_path.resolve())
+    direct = mapping.get(file_key)
+    if direct is not None and str(direct).strip():
+        return str(direct).strip()
+    for raw_path, value in mapping.items():
+        try:
+            if Path(str(raw_path)).resolve() == file_path.resolve():
+                text = str(value).strip()
+                return text or None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _recording_id_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> str | None:
+    return _mapped_text_for_file(file_path, settings, "_fpvs_recording_id_by_file")
+
+
+def _session_id_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> str | None:
+    return _mapped_text_for_file(file_path, settings, "_fpvs_session_id_by_file")
+
+
+def _output_stem_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> str:
+    return (
+        _mapped_text_for_file(file_path, settings, "_fpvs_output_stem_by_file")
+        or _participant_id_for_file(file_path, dict(settings))
+    )
+
+
 def _group_id_for_file(
     file_path: Path,
     settings: Dict[str, object],
@@ -246,6 +294,15 @@ def _manual_removed_electrodes_for_file(
     )
     if mode != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
         return []
+    recording_id = _recording_id_for_file(file_path, settings)
+    recording_map = normalize_manual_removed_electrodes_map(
+        settings.get("manual_removed_electrodes_by_recording")
+    )
+    if recording_id:
+        recording_key = recording_id.casefold()
+        for candidate, electrodes in recording_map.items():
+            if candidate.casefold() == recording_key:
+                return list(electrodes)
     participant_id = _participant_id_for_file(file_path, settings)
     return list(
         manual_removed_electrodes_for_pid(
@@ -264,10 +321,30 @@ def _manual_excluded_participants(settings: Dict[str, object]) -> set[str]:
     }
 
 
+def _manual_excluded_recordings(settings: Dict[str, object]) -> set[str]:
+    return {
+        recording.casefold()
+        for recording in normalize_manual_excluded_recordings(
+            settings.get("manual_excluded_recordings")
+        )
+    }
+
+
 def _removed_electrode_review_for_file(
     file_path: Path,
     settings: Dict[str, object],
 ) -> dict[str, object]:
+    recording_id = _recording_id_for_file(file_path, settings)
+    recording_source = settings.get("_fpvs_removed_electrode_review_by_recording")
+    if recording_id and isinstance(recording_source, dict):
+        direct = recording_source.get(recording_id)
+        if isinstance(direct, dict):
+            return dict(direct)
+        recording_key = recording_id.casefold()
+        for raw_id, payload in recording_source.items():
+            if str(raw_id).casefold() == recording_key and isinstance(payload, dict):
+                return dict(payload)
+
     participant_id = _participant_id_for_file(file_path, settings)
     source = settings.get("_fpvs_removed_electrode_review_by_pid")
     if not isinstance(source, dict):
@@ -322,6 +399,16 @@ def _participant_is_manually_excluded(
     participant_id = _participant_id_for_file(file_path, settings)
     excluded = _manual_excluded_participants(settings)
     return participant_id.casefold() in excluded, participant_id
+
+
+def _recording_is_manually_excluded(
+    file_path: Path,
+    settings: Dict[str, object],
+) -> tuple[bool, str | None]:
+    recording_id = _recording_id_for_file(file_path, settings)
+    if not recording_id:
+        return False, None
+    return recording_id.casefold() in _manual_excluded_recordings(settings), recording_id
 
 
 def _preflight_recording_exclusion_paths(settings: Dict[str, object]) -> set[str]:
@@ -895,6 +982,37 @@ def _settings_for_file(
     """Return per-file settings with strict canonical group output routing."""
 
     file_settings = dict(settings)
+    file_settings["output_recording_stem"] = _output_stem_for_file(
+        file_path,
+        file_settings,
+    )
+    recording_id = _recording_id_for_file(file_path, file_settings)
+    session_id = _session_id_for_file(file_path, file_settings)
+    session_label = _mapped_text_for_file(
+        file_path,
+        file_settings,
+        "_fpvs_session_label_by_file",
+    )
+    visit_index = _mapped_text_for_file(
+        file_path,
+        file_settings,
+        "_fpvs_visit_index_by_file",
+    )
+    days_from_baseline = _mapped_text_for_file(
+        file_path,
+        file_settings,
+        "_fpvs_days_from_baseline_by_file",
+    )
+    if recording_id:
+        file_settings["_fpvs_recording_id"] = recording_id
+    if session_id:
+        file_settings["_fpvs_session_id"] = session_id
+    if session_label:
+        file_settings["_fpvs_session_label"] = session_label
+    if visit_index:
+        file_settings["_fpvs_visit_index"] = int(visit_index)
+    if days_from_baseline:
+        file_settings["_fpvs_days_from_baseline"] = float(days_from_baseline)
     grouped_project = bool(file_settings.get("_fpvs_grouped_project", False))
     output_group_by_file = file_settings.get("_fpvs_output_group_by_file")
     if output_group_by_file is None:
@@ -981,6 +1099,35 @@ def _run_full_pipeline_for_file(
             return _make_excluded_result(
                 file_path=file_path,
                 reason="manual_participant_exclusion",
+                message=message,
+                start_time=t0,
+            )
+
+        recording_excluded, recording_id = _recording_is_manually_excluded(
+            file_path,
+            settings,
+        )
+        if recording_excluded:
+            message = (
+                f"Recording {recording_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            logger.info(
+                "manual_recording_excluded file=%s recording_id=%s participant_id=%s",
+                file_path.name,
+                recording_id,
+                participant_id,
+            )
+            crop_logger.warning(
+                "file=%s stage=preflight excluded=true reason=manual_recording_exclusion "
+                "recording_id=%s participant_id=%s",
+                file_path.name,
+                recording_id,
+                participant_id,
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason="manual_recording_exclusion",
                 message=message,
                 start_time=t0,
             )
@@ -1651,6 +1798,8 @@ def _run_full_pipeline_for_file(
             source_result = write_source_ready_time_domain_derivatives(
                 project_root=project_root,
                 participant_id=_participant_id_for_file(file_path, settings),
+                recording_id=_recording_id_for_file(file_path, settings),
+                session_id=_session_id_for_file(file_path, settings),
                 group_id=_group_id_for_file(file_path, settings),
                 group_folder=(
                     str(settings.get("output_group_folder"))
@@ -1952,23 +2101,42 @@ def run_project_parallel(
             file_path,
             params.settings,
         )
-        if not manually_excluded:
+        recording_excluded, recording_id = _recording_is_manually_excluded(
+            file_path,
+            params.settings,
+        )
+        if not manually_excluded and not recording_excluded:
             active_files.append(file_path)
             continue
-        result = _make_excluded_result(
-            file_path=file_path,
-            reason="manual_participant_exclusion",
-            message=(
+        if manually_excluded:
+            reason = "manual_participant_exclusion"
+            message = (
                 f"Participant {participant_id} was manually excluded from processing. "
                 "The raw BDF file was not altered."
-            ),
+            )
+            log_event = "manual_participant_excluded_pre_submit"
+            log_identifier = participant_id
+        else:
+            reason = "manual_recording_exclusion"
+            message = (
+                f"Recording {recording_id} was manually excluded from processing. "
+                "The raw BDF file was not altered."
+            )
+            log_event = "manual_recording_excluded_pre_submit"
+            log_identifier = recording_id
+        result = _make_excluded_result(
+            file_path=file_path,
+            reason=reason,
+            message=message,
             stage="preflight",
         )
         excluded_results.append(result)
         completed += 1
         logger.info(
-            "manual_participant_excluded_pre_submit file=%s participant_id=%s",
+            "%s file=%s identifier=%s participant_id=%s",
+            log_event,
             file_path.name,
+            log_identifier,
             participant_id,
         )
         if progress_queue:

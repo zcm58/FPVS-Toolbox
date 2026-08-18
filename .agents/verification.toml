@@ -32,6 +32,8 @@ tests = [
   "tests/project_io/test_project_results_layout.py",
   "tests/project_io/test_project_scan_job.py",
   "tests/project_io/test_project_v2_group_schema.py",
+  "tests/project_io/test_repeated_recording_preflight.py",
+  "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",
 ]
 include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
@@ -107,11 +109,13 @@ tests = [
   "tests/plot_generator/test_plot_generator_project_input_policy.py",
   "tests/plot_generator/test_plot_generator_spectral_qc.py",
   "tests/plot_generator/test_plot_generator_rendering_contract.py",
+  "tests/plot_generator/test_plot_generator_session_aggregation.py",
+  "tests/plot_generator/test_plot_generator_session_controls.py",
   "tests/plot_generator/test_plot_generator_title_roi.py",
   "tests/plot_generator/test_plot_generator_worker_config.py",
 ]
 include = ["src/Tools/Plot_Generator/**", "tests/plot_generator/**"]
-manual_smoke = ["At 1280 x 900, open SNR Plots and verify the page has no page-level scrollbar; only the SNR Plots title and About action appear in the header; the two folder fields/buttons align; legend controls do not clip; and status/progress are hidden while idle. Open View Log and confirm the full log appears in a focused modal. Generate one plot and confirm status/progress appear while running, progress hides on completion, no routine success modal appears, and Open Plot Folder reaches matching PNG/PDF files written directly to 2 - SNR Plots. Start another run, cancel it, and confirm progress/navigation remain active until the worker exits, then progress hides while the warning remains. In a multi-group project, confirm the required one-condition group overlay still works."]
+manual_smoke = ["At 1280 x 900, open SNR Plots and verify the page has no page-level scrollbar; only the SNR Plots title and About action appear in the header; the two folder fields/buttons align; legend controls do not clip; and status/progress are hidden while idle. In a repeated-session two-group project, confirm Session comparison is the default, both selectors show canonical labels with Visit 1/2, the fixed-order caveat is visible, and no paired-difference option is shown. Generate a session comparison and confirm the exported figure contains exactly two vertically stacked, full-width group panels with both session curves and participant n, with no SNR-difference panels. Switch to Condition (one session) and confirm the existing condition/group workflow uses only the selected visit. Open View Log and confirm the full log appears in a focused modal. Generate one plot and confirm status/progress appear while running, progress hides on completion, no routine success modal appears, and Open Plot Folder reaches matching PNG/PDF files written directly to 2 - SNR Plots. Start another run, cancel it, and confirm progress/navigation remain active until the worker exits, then progress hides while the warning remains."]
 
 [scopes.publication-maps]
 audits = ["gui", "paths"]
@@ -119,10 +123,12 @@ tests = [
   "tests/publication_maps/test_bca_publication_maps.py",
   "tests/publication_maps/test_publication_maps_cohort.py",
   "tests/publication_maps/test_publication_output_contract.py",
+  "tests/publication_maps/test_publication_maps_session_panels.py",
+  "tests/publication_maps/test_publication_maps_session_workflow.py",
   "tests/publication_maps/test_xlsx_metric_reader.py",
 ]
 include = ["src/Tools/Publication_Maps/**", "tests/publication_maps/**"]
-manual_smoke = ["Enable Beta Tools, restart, acknowledge the shared beta notice, then open Scalp Maps in a managed exactly-two-group project at both 1040 x 920 and 1280 x 900. Verify the Conditions/Settings and Output/Run cards never overlap and can scroll vertically when needed. Verify the canonical Excel input is read-only. With All groups and one condition selected, enable the two-group comparison and confirm only one side-by-side comparison PNG/PDF pair is published at the base output, with no XLSX or other auxiliary artifact; confirm group labels are the columns, each metric shares one scale, and no pooling/difference statistic is claimed. Disable comparison and confirm ordinary All groups still publishes each group to its own folder. Start another run and cancel it; verify navigation remains locked until the worker exits and no partial figure pair is published. Confirm a stale harmonic selection offers the shared post-processing recovery action, an unreadable active workbook fails without a partial cohort, and missing sensors are reported rather than rendered as zero."]
+manual_smoke = ["Enable Beta Tools, restart, acknowledge the shared beta notice, then open Scalp Maps at 1280 x 900. Verify the flat Data & Maps and Output & Run tabs fit without a page-level scrollbar and the canonical Excel input is read-only. In a repeated-session project with exactly two stable groups, confirm Session comparison is the default, session labels include Visit 1/2, one task condition is selected, and the fixed-order caveat is visible. Generate the grid and confirm group columns x session rows share one scale per metric, titles show participant n, the optional comparison-minus-reference row shows paired n with a shared diverging scale, and only the transactional PNG/PDF set is published at the base output. Switch to Condition (one session) and confirm legacy condition/group options use only that visit. Also exercise the ordinary two-group comparison, cancellation, stale harmonic recovery, unreadable-workbook failure, and missing-sensor handling."]
 
 [scopes.ratio-calculator]
 audits = ["gui", "paths"]

@@ -16,6 +16,7 @@ from Main_App.processing.processing_ledger import (
 from Main_App.processing.qc_summary_export import (
     QC_SUMMARY_FILENAME,
     QC_SUMMARY_HEADERS,
+    RECORDING_QC_IDENTITY_HEADERS,
     DATA_QUALITY_REVIEW_FLAGS_FILENAME,
     QUALITY_CHECK_FOLDER,
     build_processing_qc_rows,
@@ -185,6 +186,132 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
     assert worksheet.column_dimensions["C"].width >= len(
         "Auto-Detected Removed Electrodes (Low SD)"
     )
+
+
+def test_repeated_session_qc_is_recording_keyed_and_exports_session_identity(
+    tmp_path: Path,
+) -> None:
+    project, legacy_infos = _project_with_raws(tmp_path)
+    legacy = legacy_infos[0]
+    info = RawFileInfo(
+        path=legacy.path,
+        subject_id="P01",
+        recording_id="P01__luteal",
+        session_id="luteal",
+        session_label="Luteal (Visit 1)",
+        visit_index=1,
+        source_id="control_luteal",
+    )
+    plan = classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    )
+    _write_expected_output_for_first_participant(plan)
+    results = [
+        {
+            "status": "ok",
+            "file": str(info.path),
+            "audit": {
+                "n_rejected": 1,
+                "raw_qc_bad_channels": ["P9"],
+                "interpolated_channels": ["P9"],
+            },
+        }
+    ]
+    record_processing_results(
+        project,
+        plan,
+        results,
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    rows = build_processing_qc_rows(project, plan, results)
+    assert rows[0]["PID"] == "P01"
+    assert rows[0]["Recording ID"] == "P01__luteal"
+    assert rows[0]["Session ID"] == "luteal"
+    assert rows[0]["Visit Index"] == 1
+    assert rows[0]["Electrodes Interpolated"] == "P9"
+
+    output_path = export_processing_qc_summary(project, plan, results)
+    workbook = load_workbook(output_path, read_only=True)
+    worksheet = workbook.active
+    expected_headers = RECORDING_QC_IDENTITY_HEADERS + QC_SUMMARY_HEADERS[1:]
+    assert worksheet.title == "Recording QC"
+    assert [cell.value for cell in worksheet[1]] == list(expected_headers)
+
+
+def test_repeated_review_flags_are_joined_by_recording_without_visit_leak(
+    tmp_path: Path,
+) -> None:
+    project, legacy_infos = _project_with_raws(tmp_path)
+    infos = [
+        RawFileInfo(
+            path=legacy_infos[0].path,
+            subject_id="P01",
+            recording_id="P01__luteal",
+            session_id="luteal",
+            session_label="Luteal (Visit 1)",
+            visit_index=1,
+            source_id="control_luteal",
+        ),
+        RawFileInfo(
+            path=legacy_infos[1].path,
+            subject_id="P01",
+            recording_id="P01__follicular",
+            session_id="follicular",
+            session_label="Follicular (Visit 2)",
+            visit_index=2,
+            source_id="control_follicular",
+        ),
+    ]
+    plan = classify_processing_inputs(
+        project,
+        infos,
+        _settings(),
+        project.event_map,
+    )
+    qc_dir = project.project_root / QUALITY_CHECK_FOLDER
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Review Flags"
+    worksheet.append(
+        (
+            "Participant",
+            "Recording",
+            "Session / phase-at-visit",
+            "Visit",
+            "Group",
+            "Source File",
+            "Flagged Item",
+        )
+    )
+    worksheet.append(
+        (
+            "P01",
+            "P01__luteal",
+            "Luteal (Visit 1)",
+            "1",
+            "Control",
+            legacy_infos[0].path.name,
+            "high-amplitude channel(s): F8, FC6",
+        )
+    )
+    workbook.save(qc_dir / DATA_QUALITY_REVIEW_FLAGS_FILENAME)
+
+    rows = build_processing_qc_rows(project, plan, [])
+    by_recording = {str(row["Recording ID"]): row for row in rows}
+
+    assert by_recording["P01__luteal"][
+        "Flagged Removed-Electrode Candidates (High Amplitude)"
+    ] == "F8, FC6"
+    assert by_recording["P01__follicular"][
+        "Flagged Removed-Electrode Candidates (High Amplitude)"
+    ] == "None"
 
 
 def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp_path: Path) -> None:

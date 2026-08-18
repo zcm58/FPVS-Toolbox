@@ -30,6 +30,13 @@ must contain:
 - the complete supported BioSemi64 sensor set on one shared FullFFT frequency
   grid.
 
+Free Harmonic Clustering is currently disabled for repeated-session v2.2
+projects. Its inference contract is participant-by-condition and does not yet
+carry canonical recording/session identity; the protective gate prevents two
+visits from being collapsed or treated as independent participants. Use the
+session-aware SNR, Scalp Maps, repeated-session Stats, or long-format export
+workflows for these projects.
+
 The tool reads these values dynamically. It does not provide local frequency,
 group, condition, or participant overrides. Both the setup inspection and the
 direct preparation API validate the same processing-owned neutral record:

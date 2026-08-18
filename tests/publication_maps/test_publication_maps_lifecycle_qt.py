@@ -6,10 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import QMainWindow, QWidget
+from PySide6.QtWidgets import QMainWindow, QScrollArea, QTabWidget, QWidget
 
 from Main_App.gui import main_window as main_window_module
-from Main_App.projects import GroupInfo, ProjectDatasetIndex, WorkbookRecord
+from Main_App.projects import (
+    GroupInfo,
+    ProjectDatasetIndex,
+    SessionInfo,
+    WorkbookRecord,
+)
 from Tools.Publication_Maps import gui as publication_maps_gui
 from Tools.Publication_Maps.generation_outcome import (
     PublicationMapsWorkerOutcome,
@@ -57,6 +62,49 @@ def _managed_multigroup_index(tmp_path) -> ProjectDatasetIndex:
         workbooks=workbooks,
         excluded_workbooks=(),
         diagnostics=(),
+    )
+
+
+def _managed_repeated_index(tmp_path) -> ProjectDatasetIndex:
+    base = _managed_multigroup_index(tmp_path)
+    sessions = {
+        "luteal": SessionInfo("luteal", "Luteal phase", 1),
+        "follicular": SessionInfo("follicular", "Follicular phase", 2),
+    }
+    records = tuple(
+        WorkbookRecord(
+            participant_id=record.participant_id,
+            condition=record.condition,
+            path=(
+                base.excel_root
+                / record.condition
+                / str(record.observed_group_folder)
+                / session.session_id
+                / f"{record.participant_id}.xlsx"
+            ),
+            group_id=record.group_id,
+            group_label=record.group_label,
+            observed_layout="condition_group_session",
+            observed_group_folder=record.observed_group_folder,
+            recording_id=f"{record.participant_id}_{session.session_id}",
+            session_id=session.session_id,
+            session_label=session.label,
+            visit_index=session.visit_index,
+        )
+        for record in base.workbooks
+        for session in sessions.values()
+    )
+    return ProjectDatasetIndex(
+        project_root=base.project_root,
+        excel_root=base.excel_root,
+        scan_root=base.scan_root,
+        manifest=base.manifest,
+        groups=base.groups,
+        participants=base.participants,
+        workbooks=records,
+        excluded_workbooks=(),
+        diagnostics=(),
+        sessions=sessions,
     )
 
 
@@ -236,26 +284,69 @@ def test_group_comparison_requires_condition_records_in_both_groups(
 
 
 @pytest.mark.qt
-@pytest.mark.parametrize(("width", "height"), [(1040, 920), (1280, 900)])
-def test_scalp_maps_scroll_surface_keeps_bottom_controls_reachable(
+def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     qtbot,
     monkeypatch,
     tmp_path,
-    width: int,
-    height: int,
 ) -> None:
     host, page = _build_page(qtbot, monkeypatch, tmp_path)
-    host.resize(width, height)
+    host.resize(1280, 900)
     page._set_all_conditions(False)
     page.conditions_list.item(0).setCheckState(Qt.Checked)
     page.group_comparison_check.setChecked(True)
 
-    assert page.content_scroll.widget() is page.scroll_content
-    assert page.content_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    assert isinstance(page.workflow_tabs, QTabWidget)
+    assert page.findChildren(QScrollArea) == []
+    page.workflow_tabs.setCurrentIndex(0)
+    qtbot.waitUntil(lambda: not page.conditions_list.visibleRegion().isEmpty())
+    page.workflow_tabs.setCurrentIndex(1)
+    qtbot.waitUntil(
+        lambda: not page.group_comparison_widget.visibleRegion().isEmpty()
+    )
+    qtbot.waitUntil(lambda: not page.log_box.visibleRegion().isEmpty())
 
-    for widget in (page.group_comparison_widget, page.log_box):
-        page.content_scroll.ensureWidgetVisible(widget, 12, 12)
-        qtbot.waitUntil(lambda widget=widget: not widget.visibleRegion().isEmpty())
+
+@pytest.mark.qt
+def test_repeated_project_builds_explicit_session_grid_requests(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    index = _managed_repeated_index(tmp_path)
+    _host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=index,
+    )
+
+    assert page.session_controls_widget.isVisible()
+    assert page.session_dimension_combo.currentData() == "session_comparison"
+    assert page.reference_session_combo.currentText() == "Luteal phase — Visit 1"
+    assert page.comparison_session_combo.currentText() == "Follicular phase — Visit 2"
+    assert "confounded with visit order" in page.session_caveat_label.text()
+    assert len(page._selected_conditions()) == 1
+    assert page.group_combo.currentData() == publication_maps_gui.ALL_GROUPS_VALUE
+    assert page.group_combo.isEnabled() is False
+    assert page.paired_figures_check.isChecked() is False
+    assert page.group_comparison_check.isChecked() is False
+
+    requests = page._collect_requests()
+    assert len(requests) == 2
+    assert all(request.session_ids == ("luteal", "follicular") for request in requests)
+    assert all(request.export_session_grid_figure for request in requests)
+    assert all(
+        request.session_comparison_ids == ("luteal", "follicular")
+        for request in requests
+    )
+    assert all(request.export_paired_session_difference for request in requests)
+
+    page.session_dimension_combo.setCurrentIndex(
+        page.session_dimension_combo.findData("condition")
+    )
+    condition_requests = page._collect_requests()
+    assert all(request.session_ids == ("luteal",) for request in condition_requests)
+    assert all(not request.export_session_grid_figure for request in condition_requests)
 
 
 @pytest.mark.qt

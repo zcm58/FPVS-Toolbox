@@ -34,9 +34,16 @@ _BOOL = "bool"
 _LINE_NOISE_FREQUENCY = "line_noise_frequency"
 _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
+_MANUAL_REMOVED_ELECTRODES_BY_RECORDING = (
+    "manual_removed_electrodes_by_recording"
+)
 _MANUAL_EXCLUDED_PARTICIPANTS = "manual_excluded_participants"
+_MANUAL_EXCLUDED_RECORDINGS = "manual_excluded_recordings"
 _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS = (
     "manual_excluded_participant_conditions"
+)
+_MANUAL_EXCLUDED_RECORDING_CONDITIONS = (
+    "manual_excluded_recording_conditions"
 )
 
 _GROUP_SIGNIFICANT_POLICY_NAME = "Group-level significant harmonics (Volfart/Retter/Rossion style)"
@@ -119,6 +126,15 @@ _FIELDS: tuple[_Field, ...] = (
         _MANUAL_REMOVED_ELECTRODES,
     ),
     _Field(
+        "manual_removed_electrodes_by_recording",
+        (
+            "manual_removed_electrodes_by_recording",
+            "recording_removed_electrodes",
+        ),
+        {},
+        _MANUAL_REMOVED_ELECTRODES_BY_RECORDING,
+    ),
+    _Field(
         "manual_excluded_participants",
         (
             "manual_excluded_participants",
@@ -130,6 +146,16 @@ _FIELDS: tuple[_Field, ...] = (
         _MANUAL_EXCLUDED_PARTICIPANTS,
     ),
     _Field(
+        "manual_excluded_recordings",
+        (
+            "manual_excluded_recordings",
+            "excluded_recordings",
+            "recording_exclusions",
+        ),
+        [],
+        _MANUAL_EXCLUDED_RECORDINGS,
+    ),
+    _Field(
         "manual_excluded_participant_conditions",
         (
             "manual_excluded_participant_conditions",
@@ -138,6 +164,16 @@ _FIELDS: tuple[_Field, ...] = (
         ),
         {},
         _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS,
+    ),
+    _Field(
+        "manual_excluded_recording_conditions",
+        (
+            "manual_excluded_recording_conditions",
+            "excluded_recording_conditions",
+            "recording_condition_exclusions",
+        ),
+        {},
+        _MANUAL_EXCLUDED_RECORDING_CONDITIONS,
     ),
     _Field(
         "max_parallel_workers_override",
@@ -222,7 +258,16 @@ _FIELDS: tuple[_Field, ...] = (
 )
 
 
-PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(field.name for field in _FIELDS)
+REPEATED_SESSION_PREPROCESSING_KEYS: tuple[str, ...] = (
+    "manual_removed_electrodes_by_recording",
+    "manual_excluded_recordings",
+    "manual_excluded_recording_conditions",
+)
+PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(
+    field.name
+    for field in _FIELDS
+    if field.name not in REPEATED_SESSION_PREPROCESSING_KEYS
+)
 PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in _FIELDS}
 
 
@@ -385,6 +430,12 @@ def normalize_manual_excluded_participants(value: Any) -> list[str]:
     return sorted(normalized, key=_participant_sort_key)
 
 
+def normalize_manual_excluded_recordings(value: Any) -> list[str]:
+    """Normalize canonical recording IDs excluded from processing."""
+
+    return normalize_manual_excluded_participants(value)
+
+
 def normalize_manual_excluded_participant_conditions(
     value: Any,
 ) -> dict[str, list[str]]:
@@ -457,6 +508,14 @@ def normalize_manual_excluded_participant_conditions(
     return normalized
 
 
+def normalize_manual_excluded_recording_conditions(
+    value: Any,
+) -> dict[str, list[str]]:
+    """Normalize recording-scoped condition exclusions for downstream tools."""
+
+    return normalize_manual_excluded_participant_conditions(value)
+
+
 def is_participant_condition_excluded(
     exclusions: Mapping[str, Iterable[str]] | None,
     participant_id: str,
@@ -473,6 +532,20 @@ def is_participant_condition_excluded(
         pid.casefold() == participant_key
         and any(label.casefold() == condition_key for label in labels)
         for pid, labels in normalized.items()
+    )
+
+
+def is_recording_condition_excluded(
+    exclusions: Mapping[str, Iterable[str]] | None,
+    recording_id: str,
+    condition: str,
+) -> bool:
+    """Return whether a recording-condition pair is excluded."""
+
+    return is_participant_condition_excluded(
+        normalize_manual_excluded_recording_conditions(exclusions),
+        recording_id,
+        condition,
     )
 
 
@@ -533,11 +606,19 @@ def normalize_preprocessing_settings(
             )
         elif field.type == _MANUAL_REMOVED_ELECTRODES:
             normalized[field.name] = normalize_manual_removed_electrodes_map(raw_value)
+        elif field.type == _MANUAL_REMOVED_ELECTRODES_BY_RECORDING:
+            normalized[field.name] = normalize_manual_removed_electrodes_map(raw_value)
         elif field.type == _MANUAL_EXCLUDED_PARTICIPANTS:
             normalized[field.name] = normalize_manual_excluded_participants(raw_value)
+        elif field.type == _MANUAL_EXCLUDED_RECORDINGS:
+            normalized[field.name] = normalize_manual_excluded_recordings(raw_value)
         elif field.type == _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS:
             normalized[field.name] = (
                 normalize_manual_excluded_participant_conditions(raw_value)
+            )
+        elif field.type == _MANUAL_EXCLUDED_RECORDING_CONDITIONS:
+            normalized[field.name] = (
+                normalize_manual_excluded_recording_conditions(raw_value)
             )
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
@@ -631,8 +712,12 @@ __all__ = [
     "new_project_preprocessing_settings",
     "normalize_preprocessing_settings",
     "normalize_manual_excluded_participants",
+    "normalize_manual_excluded_recordings",
     "normalize_manual_excluded_participant_conditions",
+    "normalize_manual_excluded_recording_conditions",
     "is_participant_condition_excluded",
+    "is_recording_condition_excluded",
     "PREPROCESSING_CANONICAL_KEYS",
+    "REPEATED_SESSION_PREPROCESSING_KEYS",
     "PREPROCESSING_DEFAULTS",
 ]

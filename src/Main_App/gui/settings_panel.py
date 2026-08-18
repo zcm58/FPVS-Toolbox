@@ -50,6 +50,7 @@ from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrode
 from Main_App.gui.participant_condition_exclusions_dialog import (
     ParticipantConditionExclusionsDialog,
 )
+from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
 from Main_App.processing.processing_ledger import load_ledger
@@ -66,6 +67,8 @@ from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_DEFAULTS,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
+    normalize_manual_excluded_recording_conditions,
+    normalize_manual_excluded_recordings,
     normalize_preprocessing_settings,
 )
 from Main_App.processing.removed_electrode_detection import (
@@ -976,13 +979,29 @@ class SettingsDialog(QDialog):
                     qc_preproc.get("manual_removed_electrodes", {})
                 )
             )
+            self._manual_removed_electrodes_by_recording = (
+                normalize_manual_removed_electrodes_map(
+                    qc_preproc.get("manual_removed_electrodes_by_recording", {})
+                )
+            )
             self._manual_excluded_participants = normalize_manual_excluded_participants(
                 qc_preproc.get("manual_excluded_participants", [])
+            )
+            self._manual_excluded_recordings = normalize_manual_excluded_recordings(
+                qc_preproc.get("manual_excluded_recordings", [])
             )
             self._manual_excluded_participant_conditions = (
                 normalize_manual_excluded_participant_conditions(
                     qc_preproc.get(
                         "manual_excluded_participant_conditions",
+                        {},
+                    )
+                )
+            )
+            self._manual_excluded_recording_conditions = (
+                normalize_manual_excluded_recording_conditions(
+                    qc_preproc.get(
+                        "manual_excluded_recording_conditions",
                         {},
                     )
                 )
@@ -1013,6 +1032,7 @@ class SettingsDialog(QDialog):
                     )
                 )
             )
+            self._manual_removed_electrodes_by_recording = {}
             self._manual_excluded_participants = normalize_manual_excluded_participants(
                 self.manager.get(
                     "preprocessing",
@@ -1020,7 +1040,13 @@ class SettingsDialog(QDialog):
                     "[]",
                 )
             )
+            self._manual_excluded_recordings = []
             self._manual_excluded_participant_conditions = {}
+            self._manual_excluded_recording_conditions = {}
+        recording_aware_qc = bool(
+            self.project is not None
+            and (getattr(self.project, "sessions", {}) or {})
+        )
         self.removed_electrode_detection_mode_combo = QComboBox(qc_group)
         self.removed_electrode_detection_mode_combo.setObjectName(
             "settings_removed_electrode_detection_mode"
@@ -1043,6 +1069,9 @@ class SettingsDialog(QDialog):
         self.removed_electrode_detection_mode_combo.setCurrentIndex(max(0, mode_index))
         self.removed_electrode_detection_mode_combo.setToolTip(
             "Choose whether raw-channel QC should mark high-confidence automatic "
+            "candidates or use manual participant/recording removed-electrode metadata."
+            if recording_aware_qc
+            else "Choose whether raw-channel QC should mark high-confidence automatic "
             "candidates or use manual participant-level removed-electrode metadata."
         )
 
@@ -1069,7 +1098,9 @@ class SettingsDialog(QDialog):
             "settings_manual_removed_electrodes_edit"
         )
         self.manual_removed_electrodes_button.setToolTip(
-            "Edit participant-level manually removed electrodes"
+            "Edit participant-wide fallbacks and recording-specific removed electrodes"
+            if recording_aware_qc
+            else "Edit participant-level manually removed electrodes"
         )
         self.manual_removed_electrodes_button.clicked.connect(
             self._edit_manual_removed_electrodes
@@ -1083,7 +1114,9 @@ class SettingsDialog(QDialog):
             "settings_manual_participant_exclusions_edit"
         )
         self.manual_participant_exclusions_button.setToolTip(
-            "Edit participants that should be skipped during processing"
+            "Edit participant-wide and single-recording processing exclusions"
+            if recording_aware_qc
+            else "Edit participants that should be skipped during processing"
         )
         self.manual_participant_exclusions_button.clicked.connect(
             self._edit_manual_participant_exclusions
@@ -1121,7 +1154,12 @@ class SettingsDialog(QDialog):
             removed_detection_row,
         )
         qc_form.addRow(
-            QLabel("Manual participant exclusions", qc_group),
+            QLabel(
+                "Manual participant / recording exclusions"
+                if recording_aware_qc
+                else "Manual participant exclusions",
+                qc_group,
+            ),
             self.manual_participant_exclusions_button,
         )
         qc_group.content_layout.addLayout(qc_form)
@@ -1525,6 +1563,9 @@ class SettingsDialog(QDialog):
             "manual_excluded_participant_conditions": copy.deepcopy(
                 self._manual_excluded_participant_conditions
             ),
+            "manual_excluded_recording_conditions": copy.deepcopy(
+                self._manual_excluded_recording_conditions
+            ),
         }
 
     def _clear_harmonic_settings_rollback(self) -> None:
@@ -1545,6 +1586,9 @@ class SettingsDialog(QDialog):
                     self._project_cache = copy.deepcopy(snapshot["project_cache"])
                     self._manual_excluded_participant_conditions = copy.deepcopy(
                         snapshot["manual_excluded_participant_conditions"]
+                    )
+                    self._manual_excluded_recording_conditions = copy.deepcopy(
+                        snapshot["manual_excluded_recording_conditions"]
                     )
                 except Exception as exc:  # pragma: no cover - disk I/O failure
                     restore_errors.append(f"project settings ({exc})")
@@ -1683,6 +1727,7 @@ class SettingsDialog(QDialog):
         self,
         exclusions: Dict[str, Any],
         *,
+        recording_exclusions: Dict[str, Any] | None = None,
         invalidate_outputs: bool = True,
     ) -> bool:
         if self.project is None:
@@ -1696,12 +1741,32 @@ class SettingsDialog(QDialog):
                 {},
             )
         )
-        if normalized_exclusions == current:
+        current_recordings = normalize_manual_excluded_recording_conditions(
+            self.project.preprocessing.get(
+                "manual_excluded_recording_conditions",
+                {},
+            )
+        )
+        normalized_recordings = (
+            current_recordings
+            if recording_exclusions is None
+            else normalize_manual_excluded_recording_conditions(
+                recording_exclusions
+            )
+        )
+        if (
+            normalized_exclusions == current
+            and normalized_recordings == current_recordings
+        ):
             self._manual_excluded_participant_conditions = normalized_exclusions
+            self._manual_excluded_recording_conditions = normalized_recordings
             return True
         updated_preproc = dict(self.project.preprocessing)
         updated_preproc["manual_excluded_participant_conditions"] = (
             normalized_exclusions
+        )
+        updated_preproc["manual_excluded_recording_conditions"] = (
+            normalized_recordings
         )
         try:
             normalized = self.project.update_preprocessing(updated_preproc)
@@ -1718,13 +1783,16 @@ class SettingsDialog(QDialog):
         self._manual_excluded_participant_conditions = dict(
             normalized.get("manual_excluded_participant_conditions") or {}
         )
+        self._manual_excluded_recording_conditions = dict(
+            normalized.get("manual_excluded_recording_conditions") or {}
+        )
         if not invalidate_outputs:
             return True
         invalidation_warnings: list[str] = []
         try:
             mark_frequency_domain_outputs_stale(
                 self.project.project_root,
-                reason="Participant-condition FFT crop exclusions changed.",
+                reason="Participant/recording-condition FFT crop exclusions changed.",
             )
         except (OSError, RuntimeError, ValueError) as exc:
             invalidation_warnings.append(
@@ -2060,22 +2128,48 @@ class SettingsDialog(QDialog):
                 )
                 or not recalculate_after
             )
+            recording_review = any(
+                str(getattr(observation, "recording_id", "") or "").strip()
+                for observation in (
+                    getattr(audit, "observations", ()) or candidates
+                )
+            )
             accepted = True
             current_exclusions = normalize_manual_excluded_participant_conditions(
                 self._manual_excluded_participant_conditions
             )
-            proposed_exclusions = current_exclusions
-            if should_open:
-                dialog = ParticipantConditionExclusionsDialog(
-                    audit,
-                    self._manual_excluded_participant_conditions,
-                    self,
+            current_recording_exclusions = (
+                normalize_manual_excluded_recording_conditions(
+                    self._manual_excluded_recording_conditions
                 )
+            )
+            proposed_exclusions = current_exclusions
+            proposed_recording_exclusions = current_recording_exclusions
+            if should_open:
+                if recording_review:
+                    dialog = ParticipantConditionExclusionsDialog(
+                        audit,
+                        self._manual_excluded_participant_conditions,
+                        self,
+                        excluded_recording_conditions=(
+                            self._manual_excluded_recording_conditions
+                        ),
+                    )
+                else:
+                    dialog = ParticipantConditionExclusionsDialog(
+                        audit,
+                        self._manual_excluded_participant_conditions,
+                        self,
+                    )
                 accepted = dialog.exec() == QDialog.Accepted
                 if accepted:
                     proposed_exclusions = (
                         dialog.excluded_participant_conditions()
                     )
+                    if recording_review:
+                        proposed_recording_exclusions = (
+                            dialog.excluded_recording_conditions()
+                        )
             if not accepted:
                 self._restore_harmonic_settings_after_cancel()
                 self._set_harmonic_recalculation_status(
@@ -2084,9 +2178,17 @@ class SettingsDialog(QDialog):
                 )
                 return
             if recalculate_after:
-                if not audit.is_compatible_with_exclusions(
-                    proposed_exclusions
-                ):
+                compatible = (
+                    audit.is_compatible_with_exclusions(
+                        proposed_exclusions,
+                        recording_exclusions=proposed_recording_exclusions,
+                    )
+                    if recording_review
+                    else audit.is_compatible_with_exclusions(
+                        proposed_exclusions
+                    )
+                )
+                if not compatible:
                     self._restore_harmonic_settings_after_cancel()
                     self._set_harmonic_recalculation_status(
                         "Harmonic recalculation is waiting for one compatible "
@@ -2105,9 +2207,18 @@ class SettingsDialog(QDialog):
             normalized_proposed = normalize_manual_excluded_participant_conditions(
                 proposed_exclusions
             )
-            exclusions_changed = normalized_proposed != current_exclusions
+            normalized_recording_proposed = (
+                normalize_manual_excluded_recording_conditions(
+                    proposed_recording_exclusions
+                )
+            )
+            exclusions_changed = (
+                normalized_proposed != current_exclusions
+                or normalized_recording_proposed != current_recording_exclusions
+            )
             if exclusions_changed and not self._save_participant_condition_exclusions(
                 normalized_proposed,
+                recording_exclusions=normalized_recording_proposed,
                 invalidate_outputs=True,
             ):
                 self._restore_harmonic_settings_after_cancel()
@@ -2477,23 +2588,60 @@ class SettingsDialog(QDialog):
             unique.append(pid)
         return unique
 
+    def _qc_recording_rows(self):
+        """Return declared visit coverage for recording-aware QC editors."""
+
+        if self.project is None or not (getattr(self.project, "sessions", {}) or {}):
+            return ()
+        try:
+            raw_file_infos = prepare_batch_file_infos(self.project)
+        except (OSError, RuntimeError, ValueError):
+            raw_file_infos = []
+        return project_recording_coverage_rows(self.project, raw_file_infos)
+
     def _edit_manual_removed_electrodes(self) -> None:
-        dialog = ManualRemovedElectrodesDialog(
-            self._manual_removed_electrode_participant_ids(),
-            self._manual_removed_electrodes_by_pid,
-            self,
-        )
+        recording_rows = self._qc_recording_rows()
+        if recording_rows:
+            dialog = ManualRemovedElectrodesDialog(
+                self._manual_removed_electrode_participant_ids(),
+                self._manual_removed_electrodes_by_pid,
+                self,
+                recording_rows=recording_rows,
+                manual_removed_electrodes_by_recording=(
+                    self._manual_removed_electrodes_by_recording
+                ),
+            )
+        else:
+            dialog = ManualRemovedElectrodesDialog(
+                self._manual_removed_electrode_participant_ids(),
+                self._manual_removed_electrodes_by_pid,
+                self,
+            )
         if dialog.exec() == QDialog.Accepted:
             self._manual_removed_electrodes_by_pid = dialog.manual_removed_electrodes()
+            self._manual_removed_electrodes_by_recording = (
+                dialog.manual_removed_electrodes_by_recording()
+            )
 
     def _edit_manual_participant_exclusions(self) -> None:
-        dialog = ManualParticipantExclusionsDialog(
-            self._manual_removed_electrode_participant_ids(),
-            self._manual_excluded_participants,
-            self,
-        )
+        recording_rows = self._qc_recording_rows()
+        if recording_rows:
+            dialog = ManualParticipantExclusionsDialog(
+                self._manual_removed_electrode_participant_ids(),
+                self._manual_excluded_participants,
+                self,
+                recording_rows=recording_rows,
+                excluded_recordings=self._manual_excluded_recordings,
+            )
+        else:
+            dialog = ManualParticipantExclusionsDialog(
+                self._manual_removed_electrode_participant_ids(),
+                self._manual_excluded_participants,
+                self,
+            )
         if dialog.exec() == QDialog.Accepted:
             self._manual_excluded_participants = dialog.excluded_participants()
+            self._manual_excluded_recordings = dialog.excluded_recordings()
 
     def _show_removed_electrode_detection_info(self) -> None:
         QMessageBox.information(
@@ -3032,11 +3180,20 @@ class SettingsDialog(QDialog):
             mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         )
         values["manual_removed_electrodes"] = dict(self._manual_removed_electrodes_by_pid)
+        values["manual_removed_electrodes_by_recording"] = dict(
+            self._manual_removed_electrodes_by_recording
+        )
         values["manual_excluded_participants"] = list(
             self._manual_excluded_participants
         )
+        values["manual_excluded_recordings"] = list(
+            self._manual_excluded_recordings
+        )
         values["manual_excluded_participant_conditions"] = dict(
             self._manual_excluded_participant_conditions
+        )
+        values["manual_excluded_recording_conditions"] = dict(
+            self._manual_excluded_recording_conditions
         )
         selected_profile = (
             self.harmonic_summation_method_combo.currentData()

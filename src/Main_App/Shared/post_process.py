@@ -451,8 +451,29 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
             folder_name_base = sanitized_condition_label
             filename_condition_part = sanitized_condition_label
-            # Original naming for FPVSApp might be different, adjust if needed
-            excel_filename = f"{pid}_{filename_condition_part}_Results.xlsx"
+            output_stem = pid
+            settings = getattr(app, "settings", None)
+            if isinstance(settings, dict):
+                configured_stem = str(
+                    settings.get("output_recording_stem") or ""
+                ).strip()
+                if configured_stem:
+                    if (
+                        configured_stem in {".", ".."}
+                        or Path(configured_stem).name != configured_stem
+                        or "/" in configured_stem
+                        or "\\" in configured_stem
+                    ):
+                        raise ValueError(
+                            "Repeated-session output identity must be one safe "
+                            "filename component."
+                        )
+                    output_stem = configured_stem
+            # Legacy projects keep the exact PID-based filename. Repeated-
+            # session projects supply a canonical participant__session stem.
+            excel_filename = (
+                f"{output_stem}_{filename_condition_part}_Results.xlsx"
+            )
 
         output_group_folder = None
         grouped_project = False

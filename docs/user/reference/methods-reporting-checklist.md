@@ -50,6 +50,18 @@ testing, or another specialized estimand.
   declared cells block adaptive selection rather than being silently
   renormalized. Explain that equal group weighting defines the common-selector
   estimand and gives members of a smaller group more influence.
+- For an adaptive non-Legacy repeated-session project, report that workbooks
+  and frequency-domain
+  exclusions were recording-scoped while participants remained the pairing
+  unit. Report recording-to-participant, stable-group, session, visit, and
+  source assignments; observed and missing visits; participant N within every
+  declared group x session x task-condition selector cell; equal group weights;
+  session- and task-condition-specific local Z calculations; and equal weighting
+  of all session x task-condition Z scores. State that one common harmonic list
+  was applied across sessions, that individual missing visits were not imputed,
+  and that an entirely empty declared cell blocked adaptive selection. For a
+  fixed/preregistered profile, state that every available recording was checked
+  against the same fixed domain without adaptive pooling.
 - For adaptive profiles, report strict `z > 1.64` and the neighboring-bin rule:
   +/-10 FFT bins, excluding target - 1, target, and target + 1, then removing
   one finite minimum and maximum before the mean and population SD. For the
@@ -265,6 +277,66 @@ provides an FPVS repeated-measures ANOVA/Greenhouse-Geisser/Holm precedent.
 frequency-domain guidance for a priori ROIs, multiplicity correction, and
 maximum-statistic resampling. These sources support the method family; they do
 not make the Toolbox an exact reproduction of any one published pipeline.
+
+## Repeated-Session Change Analysis
+
+Use this checklist when the native v1 repeated-session workflow is used rather
+than Standard FPVS Screening.
+
+### Design and identity
+
+- Report exactly two stable between-participant groups and exactly two ordered
+  within-participant sessions. Retain canonical participant, recording, group,
+  session, source, and visit IDs from `project.json`.
+- Report the session labels, visit indices, acquisition interval or
+  `days_from_baseline` when available, N recordings, N unique participants, N
+  complete pairs per group, every missing visit, duplicate/conflicting source
+  finding, and each recording- or recording-condition exclusion.
+- State that one participant may contribute at most one recording per session,
+  group is stable across sessions, and missing visits were not imputed.
+- If phase order was fixed, state explicitly that phase is perfectly
+  confounded with visit order, elapsed time, repetition, practice, and
+  habituation. Describe the estimand as session/phase-at-visit or, for example,
+  `session 2 (follicular) - session 1 (luteal)`. Do not claim an isolated
+  physiological phase effect.
+
+### Outcomes and inference
+
+- List every prespecified Condition x ROI outcome selected in the GUI before
+  the run. The primary family must include every declared outcome, including a
+  declared outcome that proved non-estimable.
+- Define the participant delta as visit 2 minus visit 1. Define the primary
+  estimand as Group A minus Group B in those participant deltas and report the
+  group order used for the sign.
+- Report the two-sided Welch test of participant deltas, complete-pair N per
+  group, mean and SD of group deltas, difference in change, SE, 95% CI, Welch
+  statistic and degrees of freedom, raw and Holm-adjusted p-values, family ID
+  and size, Hedges g, and inferential status code.
+- Label paired within-group changes as secondary. Report their two-sided
+  one-sample t-test of participant deltas, N, visit means, mean change, 95% CI,
+  Cohen's dz, and the separate Holm family spanning both groups and every
+  declared outcome.
+- State that inference was complete-pair separately by outcome, with no
+  imputation, no cross-outcome complete-case deletion, and no automatic
+  fallback. Do not replace this contract after seeing convergence or p-values
+  with a full four-way model or a legacy backup test.
+- Interpret a nonsignificant result as failure to establish a difference, not
+  proof of equivalence or no change. In an observational group comparison, do
+  not make causal or diagnostic claims.
+
+### Records to retain
+
+- `Repeated_Session_Change_Analysis.xlsx`, including primary, secondary,
+  participant deltas, participant-session audit, outcome-pair audit, pair
+  coverage, method metadata, canonical long data, and schema;
+- `Analysis_Ready_Summed_BCA_Full_Audit.xlsx`, retaining Recording ID, Session
+  ID and label, Visit Index, Days From Baseline, Group ID, QC flags, and
+  exclusion reasons;
+- `Quality Check/Harmonic_Selection_Summary.xlsx`, the one common harmonic
+  list and fingerprint used across both sessions, and recording-aware pooling
+  cell Ns/weights; and
+- the source preflight report or correction log for any identity conflict,
+  missing visit, filename/source mismatch, or renamed/reassigned raw file.
 
 ## Free Harmonic Clustering Analysis
 

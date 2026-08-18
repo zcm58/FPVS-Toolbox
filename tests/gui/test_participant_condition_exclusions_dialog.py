@@ -18,6 +18,10 @@ def _observation(
     condition: str,
     *,
     cycles: int,
+    recording_id: str | None = None,
+    session_id: str | None = None,
+    session_label: str | None = None,
+    visit_index: int | None = None,
 ) -> FullFftGridObservation:
     duration = cycles / 1.2
     return FullFftGridObservation(
@@ -32,6 +36,10 @@ def _observation(
         frequency_column_count=cycles * 10,
         issue=None,
         already_excluded=False,
+        recording_id=recording_id,
+        session_id=session_id,
+        session_label=session_label,
+        visit_index=visit_index,
     )
 
 
@@ -99,3 +107,37 @@ def test_participant_condition_exclusions_dialog_preserves_unobserved_entries(
     assert dialog.excluded_participant_conditions() == {
         "P9": ["Negative Valence"]
     }
+
+
+def test_recording_aware_condition_dialog_keeps_visit_scope_explicit(qtbot) -> None:
+    observation = _observation(
+        "P1",
+        "Faces",
+        cycles=21,
+        recording_id="P1__follicular",
+        session_id="follicular",
+        session_label="Follicular",
+        visit_index=2,
+    )
+    audit = FullFftGridAudit(
+        observations=(observation,),
+        reference_oddball_cycles=144,
+        reference_support=2,
+        reference_total=3,
+    )
+    dialog = ParticipantConditionExclusionsDialog(audit)
+    qtbot.addWidget(dialog)
+
+    assert dialog.table.horizontalHeaderItem(1).text() == "Recording"
+    assert dialog.table.horizontalHeaderItem(2).text() == "Session / phase-at-visit"
+    assert dialog.table.item(0, 10).checkState() == Qt.Checked
+    scope = dialog.table.cellWidget(0, 9)
+    assert scope.currentData() == "recording"
+    assert dialog.excluded_recording_conditions() == {
+        "P1__follicular": ["Faces"]
+    }
+    assert dialog.excluded_participant_conditions() == {}
+
+    scope.setCurrentIndex(scope.findData("participant"))
+    assert dialog.excluded_recording_conditions() == {}
+    assert dialog.excluded_participant_conditions() == {"P1": ["Faces"]}

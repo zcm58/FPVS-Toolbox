@@ -273,12 +273,14 @@ class StatsWindowUiMixin:
             "Selected folder that contains the FPVS result spreadsheets."
         )
         self.le_folder.setMinimumHeight(24)
-        btn_browse = make_action_button("Browse...")
-        btn_browse.setToolTip("Choose the folder that contains FPVS results.")
-        btn_browse.clicked.connect(self.on_browse_folder)
+        self.browse_folder_btn = make_action_button("Browse...")
+        self.browse_folder_btn.setToolTip(
+            "Choose the folder that contains FPVS results."
+        )
+        self.browse_folder_btn.clicked.connect(self.on_browse_folder)
         folder_actions = ActionRow(self, alignment=Qt.AlignLeft, spacing=6)
         folder_actions.setObjectName("stats_data_folder_actions")
-        folder_actions.add_button(btn_browse)
+        folder_actions.add_button(self.browse_folder_btn)
 
         self.spinner = BusySpinner(self)
         self.spinner.setFixedSize(18, 18)
@@ -636,9 +638,8 @@ class StatsWindowUiMixin:
         output_header_layout = QHBoxLayout(output_header_widget)
         output_header_layout.setContentsMargins(0, 0, 0, 0)
         output_header_layout.setSpacing(8)
-        output_header_layout.addWidget(
-            SubsectionHeaderLabel("Screening Results")
-        )
+        self.output_header_label = SubsectionHeaderLabel("Screening Results")
+        output_header_layout.addWidget(self.output_header_label)
         output_header_layout.addStretch(1)
 
         output_header = ActionRow(output_header_widget, alignment=Qt.AlignRight)
@@ -673,25 +674,28 @@ class StatsWindowUiMixin:
         setup_layout.setContentsMargins(0, 0, 0, 0)
         setup_layout.setSpacing(8)
 
-        file_box = SectionCard("File I/O")
-        file_box.setObjectName("stats_file_io_section")
-        file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
+        self.file_box = SectionCard("File I/O")
+        self.file_box.setObjectName("stats_file_io_section")
+        self.file_box.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        )
         self.stats_tool_info_btn = make_info_button(
-            parent=file_box,
+            parent=self.file_box,
             tooltip="About Standard FPVS Screening",
             object_name="stats_tool_info_btn",
         )
         self.stats_tool_info_btn.clicked.connect(
             lambda: show_tool_info(self, STATS_TOOL_INFO)
         )
-        file_box.header.add_action_widget(self.stats_tool_info_btn)
-        file_layout = file_box.content_layout
+        self.file_box.header.add_action_widget(self.stats_tool_info_btn)
+        file_layout = self.file_box.content_layout
         file_layout.setSpacing(6)
         file_grid = QGridLayout()
         file_grid.setContentsMargins(0, 0, 0, 0)
         file_grid.setHorizontalSpacing(10)
         file_grid.setVerticalSpacing(4)
-        file_grid.addWidget(QLabel("Excel Files Folder:"), 0, 0)
+        self.file_input_label = QLabel("Excel Files Folder:")
+        file_grid.addWidget(self.file_input_label, 0, 0)
         file_grid.addWidget(self.le_folder, 0, 1)
         file_grid.addWidget(folder_actions, 0, 2)
         file_grid.addWidget(self.spinner, 0, 3, alignment=Qt.AlignVCenter)
@@ -739,20 +743,20 @@ class StatsWindowUiMixin:
         analysis_design_form.addRow("Data coverage:", self.analysis_coverage_value)
         analysis_design_layout.addLayout(analysis_design_form)
 
-        analysis_design_note = QLabel(
+        self.analysis_design_note = QLabel(
             "Standard screening uses each finite selected observation without "
             "imputation. Balanced data also receive a secondary ANOVA "
             "compatibility check."
         )
-        analysis_design_note.setObjectName("stats_analysis_design_note")
-        analysis_design_note.setWordWrap(True)
-        analysis_design_layout.addWidget(analysis_design_note)
+        self.analysis_design_note.setObjectName("stats_analysis_design_note")
+        self.analysis_design_note.setWordWrap(True)
+        analysis_design_layout.addWidget(self.analysis_design_note)
 
         basic_page, basic_page_content, basic_layout = make_setup_scroll_page(
             "stats_basic_setup_page",
             "stats_basic_setup_content",
         )
-        basic_layout.addWidget(file_box)
+        basic_layout.addWidget(self.file_box)
         basic_layout.addWidget(self.analysis_design_group)
 
         basic_content = QWidget(basic_page_content)

@@ -32,6 +32,11 @@ from Tools.Publication_Maps.rendering import (
     validate_group_comparison_project_groups,
     validate_group_comparison_requests,
 )
+from Tools.Publication_Maps.session_rendering import render_session_grid_figures
+from Tools.Publication_Maps.session_workflow import (
+    validate_session_grid_project,
+    validate_session_grid_requests,
+)
 from Tools.Stats.analysis.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
 )
@@ -99,6 +104,7 @@ class PublicationMapsWorker(QObject):
                 "Scalp Maps group requests require unique output directories."
             )
         self._group_comparison_enabled = validate_group_comparison_requests(normalized)
+        self._session_grid_enabled = validate_session_grid_requests(normalized)
         self.requests = normalized
         self.request = normalized[0]
         self.outcome: PublicationMapsWorkerOutcome | None = None
@@ -114,6 +120,9 @@ class PublicationMapsWorker(QObject):
             if self._group_comparison_enabled:
                 validate_group_comparison_project_groups(self.requests)
                 self._cancellation_checkpoint()
+            if self._session_grid_enabled:
+                validate_session_grid_project(self.requests)
+                self._cancellation_checkpoint()
             with PublicationArtifactTransaction(self.request) as transaction:
                 for index, request in enumerate(self.requests):
                     self._cancellation_checkpoint()
@@ -127,11 +136,14 @@ class PublicationMapsWorker(QObject):
                     )
                     self._cancellation_checkpoint()
 
-                    if self._group_comparison_enabled:
+                    if self._group_comparison_enabled or self._session_grid_enabled:
                         results.append(result)
                         self._emit_phase_progress(index, 70)
+                        staging_label = (
+                            "Session-grid" if self._session_grid_enabled else "Comparison"
+                        )
                         self.message.emit(
-                            f"[{group_label}] Comparison data staged in memory."
+                            f"[{group_label}] {staging_label} data staged in memory."
                         )
                         continue
 
@@ -176,6 +188,28 @@ class PublicationMapsWorker(QObject):
                     self._cancellation_checkpoint()
                     self.progress.emit(96)
                     self.message.emit("Comparison figure output staged.")
+
+                if self._session_grid_enabled:
+                    self._cancellation_checkpoint()
+                    self.progress.emit(90)
+                    self.message.emit(
+                        "Rendering shared-limit group × session scalp-map grids..."
+                    )
+                    batch_figure_paths = tuple(
+                        render_session_grid_figures(
+                            tuple(results),
+                            self.requests,
+                            cancel_check=self._cancellation_checkpoint,
+                            transaction=transaction,
+                        )
+                    )
+                    if not batch_figure_paths:
+                        raise PublicationMapInputError(
+                            "No repeated-session scalp-map grids were produced."
+                        )
+                    self._cancellation_checkpoint()
+                    self.progress.emit(96)
+                    self.message.emit("Session-grid figure output staged.")
 
                 for result, request in zip(results, self.requests, strict=True):
                     verify_publication_workbooks_unchanged(

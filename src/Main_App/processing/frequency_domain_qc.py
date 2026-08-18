@@ -7,7 +7,7 @@ import json
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +18,7 @@ import pandas as pd
 from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
+    normalize_manual_excluded_recordings,
     normalize_preprocessing_settings,
 )
 
@@ -28,6 +29,9 @@ FREQUENCY_DOMAIN_QC_REPORT_NAME = "Frequency_Domain_QC_Review.txt"
 FREQUENCY_DOMAIN_QC_METADATA_PATH = ("tools", "frequency_domain_qc")
 FREQUENCY_DOMAIN_QC_SCHEMA_VERSION = 1
 FREQUENCY_DOMAIN_QC_METHOD_VERSION = "summed_bca_plausibility_v1"
+REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION = (
+    "summed_bca_plausibility_recording_v1"
+)
 
 WARNING_REASON_UNUSUAL_VALUES = "Unusual frequency-domain values"
 WARNING_REASON_NOISY_SPECTRUM = "Noisy spectrum"
@@ -71,6 +75,12 @@ class FrequencyDomainExclusions:
     manual_excluded_participants: frozenset[str]
     auto_excluded_electrodes_by_participant: dict[str, frozenset[str]]
     downstream_outputs_stale: bool
+    excluded_recordings: frozenset[str] = frozenset()
+    auto_excluded_recordings: frozenset[str] = frozenset()
+    manual_excluded_recordings: frozenset[str] = frozenset()
+    auto_excluded_electrodes_by_recording: dict[str, frozenset[str]] = field(
+        default_factory=dict
+    )
 
 
 def run_frequency_domain_qc_review(
@@ -95,15 +105,29 @@ def run_frequency_domain_qc_review(
         raise ValueError(
             "The supplied dataset index belongs to a different project root."
         )
-    subjects = list(dataset_index.participant_ids)
     conditions = list(dataset_index.conditions)
-    subject_data = dataset_index.subject_data(require_group_assignment=True)
+    repeated_session = dataset_index.is_repeated_session
+    recording_assignments: dict[str, dict[str, object]] = {}
+    if repeated_session:
+        subjects = list(dataset_index.recording_ids)
+        subject_data = dataset_index.recording_data(require_group_assignment=True)
+        recording_assignments = _recording_assignments_from_index(dataset_index)
+    else:
+        subjects = list(dataset_index.participant_ids)
+        subject_data = dataset_index.subject_data(require_group_assignment=True)
     subjects, subject_data = _filter_to_completed_subjects(
         project_root=project_root,
         subjects=subjects,
         subject_data=subject_data,
     )
-    subjects = _filter_preprocessing_manual_exclusions(project, subjects)
+    if repeated_session:
+        subjects = _filter_preprocessing_manual_recording_exclusions(
+            project,
+            subjects,
+            recording_assignments=recording_assignments,
+        )
+    else:
+        subjects = _filter_preprocessing_manual_exclusions(project, subjects)
     subject_data = {
         subject: dict(subject_data.get(subject, {}))
         for subject in subjects
@@ -127,6 +151,22 @@ def run_frequency_domain_qc_review(
         rois=rois,
         settings=settings,
         log_func=_log,
+        recording_assignments=(recording_assignments if repeated_session else None),
+        declared_session_ids=(
+            tuple(session.session_id for session in dataset_index.ordered_sessions)
+            if repeated_session
+            else None
+        ),
+        participant_group_ids=(
+            dataset_index.participant_group_id_map()
+            if repeated_session
+            else None
+        ),
+        declared_group_ids=(
+            tuple(group.group_id for group in dataset_index.ordered_groups)
+            if repeated_session
+            else None
+        ),
     )
     _log(
         "Frequency-domain QC is reviewing provisional summed BCA values "
@@ -139,8 +179,18 @@ def run_frequency_domain_qc_review(
         selected_harmonics=selected_harmonics,
         thresholds=thresholds,
         log_func=_log,
+        recording_assignments=(recording_assignments if repeated_session else None),
     )
-    summaries, auto_electrodes, auto_participants = _summarize_flags(flags, thresholds)
+    if repeated_session:
+        summaries, auto_electrodes, auto_participants = _summarize_recording_flags(
+            flags,
+            thresholds,
+        )
+    else:
+        summaries, auto_electrodes, auto_participants = _summarize_flags(
+            flags,
+            thresholds,
+        )
     analysis_fingerprint = _analysis_fingerprint(
         project_root=project_root,
         subjects=subjects,
@@ -149,16 +199,27 @@ def run_frequency_domain_qc_review(
         selected_harmonics=selected_harmonics,
         thresholds=thresholds,
         flags=flags,
+        recording_assignments=(recording_assignments if repeated_session else None),
     )
     state = load_frequency_domain_qc_state(project_root)
     current_auto_electrodes = _auto_electrode_entries_from_state(state)
     current_auto_participants = _auto_participant_entries_from_state(state)
     current_manual = _manual_entries_from_state(state)
+    current_auto_recording_electrodes = _auto_recording_electrode_entries_from_state(
+        state
+    )
+    current_auto_recordings = _auto_recording_entries_from_state(state)
+    current_manual_recordings = _manual_recording_entries_from_state(state)
     current_decision_fingerprint = _decision_fingerprint(
         analysis_fingerprint=analysis_fingerprint,
         auto_electrodes=current_auto_electrodes,
         auto_participants=current_auto_participants,
         manual_participants=current_manual,
+        auto_recording_electrodes=(
+            current_auto_recording_electrodes if repeated_session else None
+        ),
+        auto_recordings=(current_auto_recordings if repeated_session else None),
+        manual_recordings=(current_manual_recordings if repeated_session else None),
     )
     last_review = state.get("last_review")
     reviewed_decision_fingerprint = ""
@@ -176,9 +237,13 @@ def run_frequency_domain_qc_review(
         and reviewed_decision_fingerprint == current_decision_fingerprint
     )
     review_required = bool(pause_subjects and not review_reused)
-    report = {
+    report: dict[str, object] = {
         "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
-        "method_version": FREQUENCY_DOMAIN_QC_METHOD_VERSION,
+        "method_version": (
+            REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION
+            if repeated_session
+            else FREQUENCY_DOMAIN_QC_METHOD_VERSION
+        ),
         "project_root": str(project_root),
         "thresholds": thresholds.to_manifest(),
         "subjects": list(subjects),
@@ -198,6 +263,32 @@ def run_frequency_domain_qc_review(
         "review_subject_count": len(pause_subjects),
         "generated_at": _now_utc_iso(),
     }
+    if repeated_session:
+        report.update(
+            {
+                "identity_scope": "recording",
+                "subjects": sorted(
+                    {
+                        str(recording_assignments[recording_id]["participant_id"])
+                        for recording_id in subjects
+                    },
+                    key=str.casefold,
+                ),
+                "recordings": list(subjects),
+                "recording_assignments": [
+                    dict(recording_assignments[recording_id])
+                    for recording_id in subjects
+                ],
+                "recording_summaries": summaries,
+                "participant_summaries": [],
+                "auto_recording_electrode_exclusions": auto_electrodes,
+                "auto_recording_exclusions": auto_participants,
+                "manual_recording_exclusions": current_manual_recordings,
+                "auto_participant_electrode_exclusions": current_auto_electrodes,
+                "auto_participant_exclusions": current_auto_participants,
+                "review_recording_count": len(pause_subjects),
+            }
+        )
     return report
 
 
@@ -206,6 +297,7 @@ def apply_frequency_domain_qc_decision(
     report: Mapping[str, object],
     *,
     manual_participant_reasons: Mapping[str, str] | None = None,
+    manual_recording_reasons: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Persist a reviewed QC decision and write the human-readable report."""
 
@@ -214,11 +306,18 @@ def apply_frequency_domain_qc_decision(
     manifest = _read_manifest(manifest_path)
     state = _metadata_from_manifest(manifest)
     now = _now_utc_iso()
+    repeated_session = str(report.get("identity_scope") or "") == "recording"
     auto_electrodes = _normalize_auto_electrode_entries(
         report.get("auto_participant_electrode_exclusions")
     )
     auto_participants = _normalize_auto_participant_entries(
         report.get("auto_participant_exclusions")
+    )
+    auto_recording_electrodes = _normalize_auto_recording_electrode_entries(
+        report.get("auto_recording_electrode_exclusions")
+    )
+    auto_recordings = _normalize_auto_recording_entries(
+        report.get("auto_recording_exclusions")
     )
     existing_manual = _manual_entries_from_state(state)
     manual_by_pid = {entry["participant_id"]: dict(entry) for entry in existing_manual}
@@ -238,24 +337,58 @@ def apply_frequency_domain_qc_decision(
             "updated_at": now,
         }
     manual_entries = sorted(manual_by_pid.values(), key=lambda item: item["participant_id"])
+    existing_manual_recordings = _manual_recording_entries_from_state(state)
+    manual_by_recording = {
+        str(entry["recording_id"]): dict(entry)
+        for entry in existing_manual_recordings
+    }
+    for raw_recording_id, raw_reason in (manual_recording_reasons or {}).items():
+        recording_id = _normalize_recording_id(raw_recording_id)
+        if not recording_id:
+            continue
+        reason = str(raw_reason or WARNING_REASON_UNUSUAL_VALUES).strip()
+        if reason not in MANUAL_EXCLUSION_REASONS:
+            reason = WARNING_REASON_UNUSUAL_VALUES
+        previous = manual_by_recording.get(recording_id, {})
+        assignment = _report_recording_assignment(report, recording_id)
+        manual_by_recording[recording_id] = {
+            "recording_id": recording_id,
+            "participant_id": str(assignment.get("participant_id") or ""),
+            "session_id": str(assignment.get("session_id") or ""),
+            "reason": reason,
+            "source": "manual_qc_review",
+            "added_at": str(previous.get("added_at") or now),
+            "updated_at": now,
+        }
+    manual_recording_entries = sorted(
+        manual_by_recording.values(),
+        key=lambda item: str(item["recording_id"]).casefold(),
+    )
     analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
     decision_fingerprint = _decision_fingerprint(
         analysis_fingerprint=analysis_fingerprint,
         auto_electrodes=auto_electrodes,
         auto_participants=auto_participants,
         manual_participants=manual_entries,
+        auto_recording_electrodes=(
+            auto_recording_electrodes if repeated_session else None
+        ),
+        auto_recordings=(auto_recordings if repeated_session else None),
+        manual_recordings=(manual_recording_entries if repeated_session else None),
     )
     report_path = _write_frequency_domain_qc_text_report(
         root,
         report=report,
         manual_participants=manual_entries,
+        manual_recordings=manual_recording_entries,
         decision_fingerprint=decision_fingerprint,
         reviewed_at=now,
     )
-    state.update(
-        {
+    update: dict[str, object] = {
             "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
-            "method_version": FREQUENCY_DOMAIN_QC_METHOD_VERSION,
+            "method_version": str(
+                report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
+            ),
             "thresholds": DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS.to_manifest(),
             "auto_participant_electrode_exclusions": auto_electrodes,
             "auto_participant_exclusions": auto_participants,
@@ -269,7 +402,20 @@ def apply_frequency_domain_qc_decision(
                 "review_subject_count": int(report.get("review_subject_count") or 0),
             },
         }
-    )
+    if repeated_session:
+        update.update(
+            {
+                "auto_recording_electrode_exclusions": auto_recording_electrodes,
+                "auto_recording_exclusions": auto_recordings,
+                "manual_recording_exclusions": manual_recording_entries,
+            }
+        )
+        last_review = update.get("last_review")
+        if isinstance(last_review, dict):
+            last_review["review_recording_count"] = int(
+                report.get("review_recording_count") or 0
+            )
+    state.update(update)
     _set_metadata_in_manifest(manifest, state)
     _write_manifest_if_changed(manifest_path, manifest)
     return state
@@ -285,6 +431,7 @@ def sync_frequency_domain_qc_automatic_state(
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)
     state = _metadata_from_manifest(manifest)
+    repeated_session = str(report.get("identity_scope") or "") == "recording"
     previous_auto_electrodes = _auto_electrode_entries_from_state(state)
     previous_auto_participants = _auto_participant_entries_from_state(state)
     auto_electrodes = _normalize_auto_electrode_entries(
@@ -293,17 +440,32 @@ def sync_frequency_domain_qc_automatic_state(
     auto_participants = _normalize_auto_participant_entries(
         report.get("auto_participant_exclusions")
     )
-    automatic_state_changed = (
-        previous_auto_electrodes != auto_electrodes
-        or previous_auto_participants != auto_participants
+    previous_auto_recording_electrodes = (
+        _auto_recording_electrode_entries_from_state(state)
     )
-    state.update(
-        {
+    previous_auto_recordings = _auto_recording_entries_from_state(state)
+    auto_recording_electrodes = _normalize_auto_recording_electrode_entries(
+        report.get("auto_recording_electrode_exclusions")
+    )
+    auto_recordings = _normalize_auto_recording_entries(
+        report.get("auto_recording_exclusions")
+    )
+    if repeated_session:
+        automatic_state_changed = (
+            previous_auto_recording_electrodes != auto_recording_electrodes
+            or previous_auto_recordings != auto_recordings
+        )
+    else:
+        automatic_state_changed = (
+            previous_auto_electrodes != auto_electrodes
+            or previous_auto_participants != auto_participants
+        )
+    update: dict[str, object] = {
             "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
-            "method_version": FREQUENCY_DOMAIN_QC_METHOD_VERSION,
+            "method_version": str(
+                report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
+            ),
             "thresholds": DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS.to_manifest(),
-            "auto_participant_electrode_exclusions": auto_electrodes,
-            "auto_participant_exclusions": auto_participants,
             "last_automatic_qc": {
                 "reviewed_at": _now_utc_iso(),
                 "analysis_fingerprint": str(report.get("analysis_fingerprint") or ""),
@@ -311,7 +473,21 @@ def sync_frequency_domain_qc_automatic_state(
                 "review_reused": bool(report.get("review_reused")),
             },
         }
-    )
+    if repeated_session:
+        update.update(
+            {
+                "auto_recording_electrode_exclusions": auto_recording_electrodes,
+                "auto_recording_exclusions": auto_recordings,
+            }
+        )
+    else:
+        update.update(
+            {
+                "auto_participant_electrode_exclusions": auto_electrodes,
+                "auto_participant_exclusions": auto_participants,
+            }
+        )
+    state.update(update)
     if automatic_state_changed:
         state["downstream_outputs_stale"] = True
         state["stale_reason"] = "Automatic frequency-domain QC exclusions changed."
@@ -386,6 +562,26 @@ def active_frequency_domain_exclusions(
         electrode = _normalize_electrode(entry.get("electrode"))
         if pid and electrode:
             electrodes_by_pid[pid].add(electrode)
+    auto_recordings = {
+        _normalize_recording_id(entry.get("recording_id"))
+        for entry in _iter_mapping_entries(state.get("auto_recording_exclusions"))
+    }
+    manual_recordings = {
+        _normalize_recording_id(entry.get("recording_id"))
+        for entry in _iter_mapping_entries(state.get("manual_recording_exclusions"))
+    }
+    auto_recordings = {recording_id for recording_id in auto_recordings if recording_id}
+    manual_recordings = {
+        recording_id for recording_id in manual_recordings if recording_id
+    }
+    electrodes_by_recording: dict[str, set[str]] = defaultdict(set)
+    for entry in _iter_mapping_entries(
+        state.get("auto_recording_electrode_exclusions")
+    ):
+        recording_id = _normalize_recording_id(entry.get("recording_id"))
+        electrode = _normalize_electrode(entry.get("electrode"))
+        if recording_id and electrode:
+            electrodes_by_recording[recording_id].add(electrode)
     return FrequencyDomainExclusions(
         excluded_participants=frozenset(auto_participants | manual_participants),
         auto_excluded_participants=frozenset(auto_participants),
@@ -395,6 +591,13 @@ def active_frequency_domain_exclusions(
             for pid, electrodes in electrodes_by_pid.items()
         },
         downstream_outputs_stale=bool(state.get("downstream_outputs_stale", False)),
+        excluded_recordings=frozenset(auto_recordings | manual_recordings),
+        auto_excluded_recordings=frozenset(auto_recordings),
+        manual_excluded_recordings=frozenset(manual_recordings),
+        auto_excluded_electrodes_by_recording={
+            recording_id: frozenset(sorted(electrodes))
+            for recording_id, electrodes in electrodes_by_recording.items()
+        },
     )
 
 
@@ -415,6 +618,47 @@ def filter_frequency_domain_subjects(
     return filtered_subjects, filtered_data, removed
 
 
+def filter_frequency_domain_recordings(
+    project_root: str | Path | None,
+    recording_ids: Sequence[str],
+    recording_data: Mapping[str, Mapping[str, str]],
+    *,
+    recording_participant_ids: Mapping[str, str],
+) -> tuple[list[str], dict[str, dict[str, str]], list[str]]:
+    """Apply recording and participant exclusions without collapsing visits."""
+
+    exclusions = active_frequency_domain_exclusions(project_root)
+    excluded_recordings = {
+        recording_id.casefold() for recording_id in exclusions.excluded_recordings
+    }
+    excluded_participants = {
+        participant_id.casefold()
+        for participant_id in exclusions.excluded_participants
+    }
+    participant_lookup = {
+        str(recording_id).casefold(): str(participant_id)
+        for recording_id, participant_id in recording_participant_ids.items()
+    }
+    filtered_recordings = [
+        str(recording_id)
+        for recording_id in recording_ids
+        if str(recording_id).casefold() not in excluded_recordings
+        and participant_lookup.get(str(recording_id).casefold(), "").casefold()
+        not in excluded_participants
+    ]
+    filtered_data = {
+        recording_id: dict(recording_data.get(recording_id, {}))
+        for recording_id in filtered_recordings
+        if recording_data.get(recording_id)
+    }
+    removed = sorted(
+        str(recording_id)
+        for recording_id in recording_ids
+        if str(recording_id) not in filtered_recordings
+    )
+    return filtered_recordings, filtered_data, removed
+
+
 def frequency_domain_excluded_electrodes_for_subject(
     project_root: str | Path | None,
     participant_id: object,
@@ -422,6 +666,18 @@ def frequency_domain_excluded_electrodes_for_subject(
     exclusions = active_frequency_domain_exclusions(project_root)
     pid = _normalize_participant_id(participant_id)
     return exclusions.auto_excluded_electrodes_by_participant.get(pid, frozenset())
+
+
+def frequency_domain_excluded_electrodes_for_recording(
+    project_root: str | Path | None,
+    recording_id: object,
+) -> frozenset[str]:
+    exclusions = active_frequency_domain_exclusions(project_root)
+    normalized = _normalize_recording_id(recording_id)
+    return exclusions.auto_excluded_electrodes_by_recording.get(
+        normalized,
+        frozenset(),
+    )
 
 
 def clear_manual_frequency_domain_participant_exclusions(
@@ -453,6 +709,42 @@ def clear_manual_frequency_domain_participant_exclusions(
     state["manual_participant_exclusions"] = retained
     state["downstream_outputs_stale"] = True
     state["stale_reason"] = "Manual frequency-domain exclusions changed."
+    state["stale_at"] = _now_utc_iso()
+    state.pop("last_review", None)
+    _set_metadata_in_manifest(manifest, state)
+    _write_manifest_if_changed(manifest_path, manifest)
+    return cleared
+
+
+def clear_manual_frequency_domain_recording_exclusions(
+    project_root: str | Path,
+    recording_ids: Iterable[object],
+) -> list[str]:
+    root = Path(project_root).resolve()
+    manifest_path = root / "project.json"
+    manifest = _read_manifest(manifest_path)
+    state = _metadata_from_manifest(manifest)
+    to_clear = {
+        _normalize_recording_id(recording_id)
+        for recording_id in recording_ids
+        if _normalize_recording_id(recording_id)
+    }
+    if not to_clear:
+        return []
+    existing = _manual_recording_entries_from_state(state)
+    retained = [
+        entry for entry in existing if entry.get("recording_id") not in to_clear
+    ]
+    cleared = sorted(
+        str(entry["recording_id"])
+        for entry in existing
+        if entry.get("recording_id") in to_clear
+    )
+    if not cleared:
+        return []
+    state["manual_recording_exclusions"] = retained
+    state["downstream_outputs_stale"] = True
+    state["stale_reason"] = "Manual frequency-domain recording exclusions changed."
     state["stale_at"] = _now_utc_iso()
     state.pop("last_review", None)
     _set_metadata_in_manifest(manifest, state)
@@ -492,6 +784,10 @@ def _provisional_harmonics(
     rois: dict[str, list[str]],
     settings: Any,
     log_func: Callable[[str], None],
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    declared_session_ids: Sequence[str] | None = None,
+    participant_group_ids: Mapping[str, str] | None = None,
+    declared_group_ids: Sequence[str] | None = None,
 ) -> tuple[tuple[float, ...], dict[str, object]]:
     from Tools.Stats.analysis.dv_policy_fixed_predefined import (
         build_fixed_harmonic_selection,
@@ -512,6 +808,10 @@ def _provisional_harmonics(
             settings=settings,
             max_freq=_analysis_bca_upper_limit_hz(),
             project_root=project_root,
+            recording_assignments=recording_assignments,
+            declared_session_ids=declared_session_ids,
+            participant_group_ids=participant_group_ids,
+            declared_group_ids=declared_group_ids,
         )
         return (
             tuple(round(float(freq), 4) for freq in selection.selected_harmonics_hz),
@@ -546,6 +846,7 @@ def _collect_summed_bca_flags(
     selected_harmonics: Sequence[float],
     thresholds: FrequencyDomainQcThresholds,
     log_func: Callable[[str], None],
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     from Main_App.io import (
         MissingXlsxColumnsError,
@@ -597,8 +898,7 @@ def _collect_summed_bca_flags(
                     severity = "hard"
                 elif abs_value > thresholds.strong_warning_summed_bca_uv:
                     severity = "strong"
-                flags.append(
-                    {
+                flag: dict[str, object] = {
                         "participant_id": _normalize_participant_id(subject),
                         "condition": str(condition),
                         "electrode": _normalize_electrode(electrode),
@@ -607,11 +907,25 @@ def _collect_summed_bca_flags(
                         "severity": severity,
                         "workbook_path": str(file_path),
                     }
-                )
+                if recording_assignments is not None:
+                    assignment = recording_assignments.get(subject, {})
+                    flag.update(
+                        {
+                            "recording_id": _normalize_recording_id(subject),
+                            "participant_id": _normalize_participant_id(
+                                assignment.get("participant_id")
+                            ),
+                            "session_id": str(
+                                assignment.get("session_id") or ""
+                            ),
+                            "visit_index": assignment.get("visit_index"),
+                        }
+                    )
+                flags.append(flag)
     return sorted(
         flags,
         key=lambda item: (
-            str(item.get("participant_id") or ""),
+            str(item.get("recording_id") or item.get("participant_id") or ""),
             -float(item.get("abs_summed_bca_uv") or 0.0),
             str(item.get("condition") or ""),
             str(item.get("electrode") or ""),
@@ -696,6 +1010,127 @@ def _summarize_flags(
     return summaries, auto_electrodes, auto_participants
 
 
+def _summarize_recording_flags(
+    flags: Sequence[Mapping[str, object]],
+    thresholds: FrequencyDomainQcThresholds,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """Summarize repeated-session QC without promoting a visit to a person."""
+
+    by_recording: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    hard_by_recording_electrode: dict[
+        tuple[str, str], list[Mapping[str, object]]
+    ] = defaultdict(list)
+    for flag in flags:
+        recording_id = _normalize_recording_id(flag.get("recording_id"))
+        electrode = _normalize_electrode(flag.get("electrode"))
+        if not recording_id:
+            continue
+        by_recording[recording_id].append(flag)
+        if str(flag.get("severity") or "") == "hard" and electrode:
+            hard_by_recording_electrode[(recording_id, electrode)].append(flag)
+
+    auto_electrodes: list[dict[str, object]] = []
+    hard_electrodes_by_recording: dict[str, set[str]] = defaultdict(set)
+    for (recording_id, electrode), entries in sorted(
+        hard_by_recording_electrode.items()
+    ):
+        hard_electrodes_by_recording[recording_id].add(electrode)
+        max_entry = max(
+            entries,
+            key=lambda item: float(item.get("abs_summed_bca_uv") or 0.0),
+        )
+        auto_electrodes.append(
+            {
+                "recording_id": recording_id,
+                "participant_id": _normalize_participant_id(
+                    max_entry.get("participant_id")
+                ),
+                "session_id": str(max_entry.get("session_id") or ""),
+                "visit_index": max_entry.get("visit_index"),
+                "electrode": electrode,
+                "reason": "abs summed BCA exceeded hard electrode threshold",
+                "threshold_uv": float(thresholds.hard_electrode_summed_bca_uv),
+                "max_abs_summed_bca_uv": float(
+                    max_entry.get("abs_summed_bca_uv") or 0.0
+                ),
+                "triggering_conditions": sorted(
+                    {
+                        str(entry.get("condition") or "")
+                        for entry in entries
+                        if entry.get("condition")
+                    }
+                ),
+                "source": "automatic_frequency_domain_qc",
+            }
+        )
+
+    auto_recordings: list[dict[str, object]] = []
+    summaries: list[dict[str, object]] = []
+    for recording_id, entries in sorted(by_recording.items()):
+        warning_count = len(entries)
+        strong_count = sum(
+            1
+            for item in entries
+            if str(item.get("severity") or "") in {"strong", "hard"}
+        )
+        hard_electrode_count = len(
+            hard_electrodes_by_recording.get(recording_id, set())
+        )
+        max_entry = max(
+            entries,
+            key=lambda item: float(item.get("abs_summed_bca_uv") or 0.0),
+        )
+        auto_recording = hard_electrode_count > int(
+            thresholds.hard_participant_unique_electrodes
+        )
+        identity = {
+            "recording_id": recording_id,
+            "participant_id": _normalize_participant_id(
+                max_entry.get("participant_id")
+            ),
+            "session_id": str(max_entry.get("session_id") or ""),
+            "visit_index": max_entry.get("visit_index"),
+        }
+        if auto_recording:
+            auto_recordings.append(
+                {
+                    **identity,
+                    "reason": (
+                        "more than 10 unique electrodes exceeded hard electrode "
+                        "threshold in this recording"
+                    ),
+                    "hard_excluded_electrode_count": int(hard_electrode_count),
+                    "source": "automatic_frequency_domain_qc",
+                }
+            )
+        pause_reasons: list[str] = []
+        if auto_recording:
+            pause_reasons.append("automatic recording exclusion")
+        if hard_electrode_count:
+            pause_reasons.append("automatic recording-electrode exclusion")
+        if strong_count:
+            pause_reasons.append("strong warning")
+        if warning_count >= int(thresholds.repeated_warning_cells):
+            pause_reasons.append("repeated warning pattern")
+        summaries.append(
+            {
+                **identity,
+                "max_abs_summed_bca_uv": float(
+                    max_entry.get("abs_summed_bca_uv") or 0.0
+                ),
+                "max_condition": str(max_entry.get("condition") or ""),
+                "max_electrode": str(max_entry.get("electrode") or ""),
+                "warning_cell_count": int(warning_count),
+                "strong_or_hard_cell_count": int(strong_count),
+                "hard_excluded_electrode_count": int(hard_electrode_count),
+                "auto_recording_excluded": bool(auto_recording),
+                "pause_review": bool(pause_reasons),
+                "pause_reasons": pause_reasons,
+            }
+        )
+    return summaries, auto_electrodes, auto_recordings
+
+
 def _analysis_fingerprint(
     *,
     project_root: Path,
@@ -705,6 +1140,7 @@ def _analysis_fingerprint(
     selected_harmonics: Sequence[float],
     thresholds: FrequencyDomainQcThresholds,
     flags: Sequence[Mapping[str, object]],
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
 ) -> str:
     workbooks = []
     for subject in subjects:
@@ -720,17 +1156,37 @@ def _analysis_fingerprint(
             except OSError:
                 size = None
                 mtime = None
-            workbooks.append(
-                {
+            workbook: dict[str, object] = {
                     "subject": str(subject),
                     "condition": str(condition),
                     "path": _manifest_safe_path(project_root, path),
                     "size_bytes": size,
                     "mtime_ns": mtime,
                 }
-            )
+            if recording_assignments is not None:
+                assignment = recording_assignments.get(str(subject), {})
+                workbook.update(
+                    {
+                        "recording_id": str(subject),
+                        "participant_id": str(
+                            assignment.get("participant_id") or ""
+                        ),
+                        "group_id": str(assignment.get("group_id") or ""),
+                        "session_id": str(assignment.get("session_id") or ""),
+                        "source_id": str(assignment.get("source_id") or ""),
+                        "visit_index": assignment.get("visit_index"),
+                        "days_from_baseline": assignment.get(
+                            "days_from_baseline"
+                        ),
+                    }
+                )
+            workbooks.append(workbook)
     payload = {
-        "method_version": FREQUENCY_DOMAIN_QC_METHOD_VERSION,
+        "method_version": (
+            REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION
+            if recording_assignments is not None
+            else FREQUENCY_DOMAIN_QC_METHOD_VERSION
+        ),
         "thresholds": thresholds.to_manifest(),
         "subjects": list(map(str, subjects)),
         "conditions": list(map(str, conditions)),
@@ -747,6 +1203,52 @@ def _analysis_fingerprint(
             for flag in flags
         ],
     }
+    if recording_assignments is not None:
+        payload.update(
+            {
+                "identity_scope": "recording",
+                "recording_assignments": [
+                    {
+                        "recording_id": str(recording_id),
+                        **{
+                            key: row.get(key)
+                            for key in (
+                                "participant_id",
+                                "group_id",
+                                "session_id",
+                                "source_id",
+                                "visit_index",
+                                "days_from_baseline",
+                            )
+                        },
+                    }
+                    for recording_id, row in sorted(
+                        recording_assignments.items(),
+                        key=lambda item: str(item[0]).casefold(),
+                    )
+                    if recording_id in subjects
+                ],
+                "flags": [
+                    {
+                        "recording_id": _normalize_recording_id(
+                            flag.get("recording_id")
+                        ),
+                        "participant_id": _normalize_participant_id(
+                            flag.get("participant_id")
+                        ),
+                        "session_id": str(flag.get("session_id") or ""),
+                        "condition": str(flag.get("condition") or ""),
+                        "electrode": _normalize_electrode(flag.get("electrode")),
+                        "abs_summed_bca_uv": round(
+                            float(flag.get("abs_summed_bca_uv") or 0.0),
+                            6,
+                        ),
+                        "severity": str(flag.get("severity") or ""),
+                    }
+                    for flag in flags
+                ],
+            }
+        )
     return _hash_payload(payload)
 
 
@@ -756,6 +1258,9 @@ def _decision_fingerprint(
     auto_electrodes: Sequence[Mapping[str, object]],
     auto_participants: Sequence[Mapping[str, object]],
     manual_participants: Sequence[Mapping[str, object]],
+    auto_recording_electrodes: Sequence[Mapping[str, object]] | None = None,
+    auto_recordings: Sequence[Mapping[str, object]] | None = None,
+    manual_recordings: Sequence[Mapping[str, object]] | None = None,
 ) -> str:
     payload = {
         "analysis_fingerprint": str(analysis_fingerprint),
@@ -763,6 +1268,26 @@ def _decision_fingerprint(
         "auto_participants": _json_safe(_normalize_auto_participant_entries(auto_participants)),
         "manual_participants": _json_safe(_normalize_manual_entries(manual_participants)),
     }
+    if (
+        auto_recording_electrodes is not None
+        or auto_recordings is not None
+        or manual_recordings is not None
+    ):
+        payload.update(
+            {
+                "auto_recording_electrodes": _json_safe(
+                    _normalize_auto_recording_electrode_entries(
+                        auto_recording_electrodes
+                    )
+                ),
+                "auto_recordings": _json_safe(
+                    _normalize_auto_recording_entries(auto_recordings)
+                ),
+                "manual_recordings": _json_safe(
+                    _normalize_manual_recording_entries(manual_recordings)
+                ),
+            }
+        )
     return _hash_payload(payload)
 
 
@@ -771,6 +1296,7 @@ def _write_frequency_domain_qc_text_report(
     *,
     report: Mapping[str, object],
     manual_participants: Sequence[Mapping[str, object]],
+    manual_recordings: Sequence[Mapping[str, object]],
     decision_fingerprint: str,
     reviewed_at: str,
 ) -> Path:
@@ -874,6 +1400,77 @@ def _write_frequency_domain_qc_text_report(
             )
     else:
         lines.append("- No participant required review.")
+    if str(report.get("identity_scope") or "") == "recording":
+        lines.extend(["", "Automatic recording-electrode exclusions"])
+        recording_electrodes = _normalize_auto_recording_electrode_entries(
+            report.get("auto_recording_electrode_exclusions")
+        )
+        if recording_electrodes:
+            for entry in recording_electrodes:
+                lines.append(
+                    "- {recording_id} ({participant_id}, {session_id}) {electrode}: "
+                    "max abs summed BCA {value:.3f} uV".format(
+                        recording_id=entry["recording_id"],
+                        participant_id=entry.get("participant_id") or "",
+                        session_id=entry.get("session_id") or "",
+                        electrode=entry["electrode"],
+                        value=float(
+                            entry.get("max_abs_summed_bca_uv") or 0.0
+                        ),
+                    )
+                )
+        else:
+            lines.append("- None")
+        lines.extend(["", "Automatic recording exclusions"])
+        recording_exclusions = _normalize_auto_recording_entries(
+            report.get("auto_recording_exclusions")
+        )
+        if recording_exclusions:
+            for entry in recording_exclusions:
+                lines.append(
+                    "- {recording_id}: {count} hard-excluded electrodes".format(
+                        recording_id=entry["recording_id"],
+                        count=int(
+                            entry.get("hard_excluded_electrode_count") or 0
+                        ),
+                    )
+                )
+        else:
+            lines.append("- None")
+        lines.extend(["", "Manual recording exclusions"])
+        normalized_manual_recordings = _normalize_manual_recording_entries(
+            manual_recordings
+        )
+        if normalized_manual_recordings:
+            for entry in normalized_manual_recordings:
+                lines.append(f"- {entry['recording_id']}: {entry['reason']}")
+        else:
+            lines.append("- None")
+        lines.extend(["", "Reviewed recording summary"])
+        recording_summaries = [
+            item
+            for item in _iter_mapping_entries(report.get("recording_summaries"))
+            if item.get("pause_review")
+        ]
+        if recording_summaries:
+            for item in recording_summaries:
+                reasons = ", ".join(
+                    str(reason) for reason in item.get("pause_reasons", []) or []
+                )
+                lines.append(
+                    "- {recording_id} ({participant_id}, {session_id}): max "
+                    "{value:.3f} uV at {condition}/{electrode}; {reasons}".format(
+                        recording_id=item.get("recording_id") or "",
+                        participant_id=item.get("participant_id") or "",
+                        session_id=item.get("session_id") or "",
+                        value=float(item.get("max_abs_summed_bca_uv") or 0.0),
+                        condition=item.get("max_condition") or "",
+                        electrode=item.get("max_electrode") or "",
+                        reasons=reasons,
+                    )
+                )
+        else:
+            lines.append("- No recording required review.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -983,6 +1580,62 @@ def _filter_preprocessing_manual_exclusions(project: Any, subjects: list[str]) -
         )
     )
     return [subject for subject in subjects if str(subject).upper() not in excluded]
+
+
+def _filter_preprocessing_manual_recording_exclusions(
+    project: Any,
+    recording_ids: list[str],
+    *,
+    recording_assignments: Mapping[str, Mapping[str, object]],
+) -> list[str]:
+    preprocessing = getattr(project, "preprocessing", {}) or {}
+    excluded_participants = {
+        str(value).casefold()
+        for value in normalize_manual_excluded_participants(
+            preprocessing.get("manual_excluded_participants", [])
+        )
+    }
+    excluded_recordings = {
+        str(value).casefold()
+        for value in normalize_manual_excluded_recordings(
+            preprocessing.get("manual_excluded_recordings", [])
+        )
+    }
+    return [
+        recording_id
+        for recording_id in recording_ids
+        if recording_id.casefold() not in excluded_recordings
+        and str(
+            recording_assignments.get(recording_id, {}).get("participant_id") or ""
+        ).casefold()
+        not in excluded_participants
+    ]
+
+
+def _recording_assignments_from_index(
+    dataset_index: ProjectDatasetIndex,
+) -> dict[str, dict[str, object]]:
+    assignments: dict[str, dict[str, object]] = {}
+    group_by_participant = dataset_index.participant_group_id_map()
+    for recording_id in dataset_index.recording_ids:
+        recording = dataset_index.recordings.get(recording_id)
+        if recording is None:
+            raise RuntimeError(
+                "Repeated-session frequency-domain QC is missing the canonical "
+                f"recording assignment for {recording_id}."
+            )
+        session = dataset_index.sessions.get(recording.session_id)
+        assignments[recording_id] = {
+            "recording_id": recording_id,
+            "participant_id": recording.participant_id,
+            "group_id": group_by_participant.get(recording.participant_id, ""),
+            "session_id": recording.session_id,
+            "session_label": session.label if session is not None else recording.session_id,
+            "source_id": recording.source_id,
+            "visit_index": recording.visit_index,
+            "days_from_baseline": recording.days_from_baseline,
+        }
+    return assignments
 
 
 def _filter_to_completed_subjects(
@@ -1122,6 +1775,26 @@ def _manual_entries_from_state(state: Mapping[str, object]) -> list[dict[str, ob
     return _normalize_manual_entries(state.get("manual_participant_exclusions"))
 
 
+def _auto_recording_electrode_entries_from_state(
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    return _normalize_auto_recording_electrode_entries(
+        state.get("auto_recording_electrode_exclusions")
+    )
+
+
+def _auto_recording_entries_from_state(
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    return _normalize_auto_recording_entries(state.get("auto_recording_exclusions"))
+
+
+def _manual_recording_entries_from_state(
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    return _normalize_manual_recording_entries(state.get("manual_recording_exclusions"))
+
+
 def _normalize_auto_electrode_entries(value: object) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     for item in _iter_mapping_entries(value):
@@ -1183,6 +1856,122 @@ def _normalize_manual_entries(value: object) -> list[dict[str, object]]:
     return sorted(entries, key=lambda entry: entry["participant_id"])
 
 
+def _normalize_auto_recording_electrode_entries(
+    value: object,
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for item in _iter_mapping_entries(value):
+        recording_id = _normalize_recording_id(item.get("recording_id"))
+        electrode = _normalize_electrode(item.get("electrode"))
+        if not recording_id or not electrode:
+            continue
+        conditions = sorted(
+            {
+                str(condition)
+                for condition in item.get("triggering_conditions", []) or []
+            }
+        )
+        entries.append(
+            {
+                "recording_id": recording_id,
+                "participant_id": _normalize_participant_id(
+                    item.get("participant_id")
+                ),
+                "session_id": str(item.get("session_id") or ""),
+                "visit_index": _optional_int(item.get("visit_index")),
+                "electrode": electrode,
+                "reason": str(
+                    item.get("reason")
+                    or "abs summed BCA exceeded hard electrode threshold"
+                ),
+                "threshold_uv": float(
+                    item.get("threshold_uv")
+                    or DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS.hard_electrode_summed_bca_uv
+                ),
+                "max_abs_summed_bca_uv": float(
+                    item.get("max_abs_summed_bca_uv") or 0.0
+                ),
+                "triggering_conditions": conditions,
+                "source": str(
+                    item.get("source") or "automatic_frequency_domain_qc"
+                ),
+            }
+        )
+    return sorted(
+        entries,
+        key=lambda entry: (str(entry["recording_id"]), str(entry["electrode"])),
+    )
+
+
+def _normalize_auto_recording_entries(value: object) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for item in _iter_mapping_entries(value):
+        recording_id = _normalize_recording_id(item.get("recording_id"))
+        if not recording_id:
+            continue
+        entries.append(
+            {
+                "recording_id": recording_id,
+                "participant_id": _normalize_participant_id(
+                    item.get("participant_id")
+                ),
+                "session_id": str(item.get("session_id") or ""),
+                "visit_index": _optional_int(item.get("visit_index")),
+                "reason": str(
+                    item.get("reason")
+                    or (
+                        "more than 10 unique electrodes exceeded hard electrode "
+                        "threshold in this recording"
+                    )
+                ),
+                "hard_excluded_electrode_count": int(
+                    item.get("hard_excluded_electrode_count") or 0
+                ),
+                "source": str(
+                    item.get("source") or "automatic_frequency_domain_qc"
+                ),
+            }
+        )
+    return sorted(entries, key=lambda entry: str(entry["recording_id"]))
+
+
+def _normalize_manual_recording_entries(value: object) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for item in _iter_mapping_entries(value):
+        recording_id = _normalize_recording_id(item.get("recording_id"))
+        if not recording_id:
+            continue
+        reason = str(item.get("reason") or WARNING_REASON_UNUSUAL_VALUES)
+        if reason not in MANUAL_EXCLUSION_REASONS:
+            reason = WARNING_REASON_UNUSUAL_VALUES
+        entry: dict[str, object] = {
+            "recording_id": recording_id,
+            "participant_id": _normalize_participant_id(
+                item.get("participant_id")
+            ),
+            "session_id": str(item.get("session_id") or ""),
+            "reason": reason,
+            "source": str(item.get("source") or "manual_qc_review"),
+        }
+        if item.get("added_at"):
+            entry["added_at"] = str(item.get("added_at"))
+        if item.get("updated_at"):
+            entry["updated_at"] = str(item.get("updated_at"))
+        entries.append(entry)
+    return sorted(entries, key=lambda entry: str(entry["recording_id"]))
+
+
+def _report_recording_assignment(
+    report: Mapping[str, object],
+    recording_id: str,
+) -> Mapping[str, object]:
+    key = recording_id.casefold()
+    for item in _iter_mapping_entries(report.get("recording_assignments")):
+        if str(item.get("recording_id") or "").casefold() == key:
+            return item
+    return {}
+
+
 def _iter_mapping_entries(value: object) -> list[Mapping[str, object]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
@@ -1192,6 +1981,17 @@ def _iter_mapping_entries(value: object) -> list[Mapping[str, object]]:
 def _normalize_participant_id(value: object) -> str:
     text = str(value or "").strip().upper()
     return text
+
+
+def _normalize_recording_id(value: object) -> str:
+    return str(value or "").strip().upper()
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_electrode(value: object) -> str:
@@ -1240,11 +2040,15 @@ __all__ = [
     "MANUAL_EXCLUSION_REASONS",
     "FrequencyDomainExclusions",
     "FrequencyDomainQcThresholds",
+    "REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION",
     "active_frequency_domain_exclusions",
     "apply_frequency_domain_qc_decision",
     "clear_manual_frequency_domain_participant_exclusions",
+    "clear_manual_frequency_domain_recording_exclusions",
+    "filter_frequency_domain_recordings",
     "filter_frequency_domain_subjects",
     "frequency_domain_excluded_electrodes_for_subject",
+    "frequency_domain_excluded_electrodes_for_recording",
     "is_frequency_domain_output_stale",
     "load_frequency_domain_qc_state",
     "mark_frequency_domain_outputs_current",

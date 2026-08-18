@@ -399,7 +399,7 @@ def _run_failed_results_from_ledger(host: Any, plan: ProcessingPlan) -> list[dic
     for state in plan.states:
         if state.info.path.resolve() not in run_paths:
             continue
-        entry = entries.get(state.participant_id)
+        entry = entries.get(state.processing_id)
         if not isinstance(entry, dict):
             continue
         status = str(entry.get("status") or "").casefold()
@@ -445,7 +445,7 @@ def _run_condition_warning_results_from_ledger(host: Any, plan: ProcessingPlan) 
 
     warning_results: list[dict] = []
     for state in plan.states:
-        entry = entries.get(state.participant_id)
+        entry = entries.get(state.processing_id)
         if not isinstance(entry, dict):
             continue
         has_warning = (
@@ -1294,6 +1294,35 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         if raw_file_infos:
             settings["_fpvs_participant_id_by_file"] = {
                 str(info.path.resolve()): info.subject_id
+                for info in raw_file_infos
+            }
+            settings["_fpvs_recording_id_by_file"] = {
+                str(info.path.resolve()): info.recording_id
+                for info in raw_file_infos
+                if info.recording_id is not None
+            }
+            settings["_fpvs_session_id_by_file"] = {
+                str(info.path.resolve()): info.session_id
+                for info in raw_file_infos
+                if info.session_id is not None
+            }
+            settings["_fpvs_session_label_by_file"] = {
+                str(info.path.resolve()): info.session_label
+                for info in raw_file_infos
+                if info.session_label is not None
+            }
+            settings["_fpvs_visit_index_by_file"] = {
+                str(info.path.resolve()): info.visit_index
+                for info in raw_file_infos
+                if info.visit_index is not None
+            }
+            settings["_fpvs_days_from_baseline_by_file"] = {
+                str(info.path.resolve()): info.days_from_baseline
+                for info in raw_file_infos
+                if info.days_from_baseline is not None
+            }
+            settings["_fpvs_output_stem_by_file"] = {
+                str(info.path.resolve()): info.output_stem
                 for info in raw_file_infos
             }
             settings["_fpvs_group_id_by_file"] = {

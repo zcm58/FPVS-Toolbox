@@ -19,15 +19,14 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLayout,
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QStyle,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -63,6 +62,13 @@ from Tools.Publication_Maps.models import (
     PublicationMetric,
 )
 from Tools.Publication_Maps.output_contract import validate_output_root
+from Tools.Publication_Maps.session_controls import (
+    PublicationSessionControlError,
+    PublicationSessionState,
+    SESSION_MODE_COMPARISON,
+    SESSION_MODE_CONDITION,
+    publication_session_state,
+)
 from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO
 from Tools.Publication_Maps.worker import PublicationMapsWorker
 
@@ -122,47 +128,39 @@ class PublicationMapsWindow(QWidget):
         self._dataset_index: ProjectDatasetIndex | None = None
         self._conditions: tuple[str, ...] = ()
         self._condition_counts: dict[str, int] = {}
+        self._session_state = PublicationSessionState(repeated=False)
+        self._session_control_error = ""
+        self._session_controls_initialized = False
+        self._last_run_was_session_grid = False
 
         outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.setSpacing(0)
+        outer_layout.setContentsMargins(8, 8, 8, 8)
+        outer_layout.setSpacing(8)
+        outer_layout.addWidget(self._build_input_group(), 0)
 
-        self.content_scroll = QScrollArea(self)
-        self.content_scroll.setObjectName("publication_maps_scroll_area")
-        self.content_scroll.setWidgetResizable(True)
-        self.content_scroll.setFrameStyle(0)
-        self.content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.workflow_tabs = QTabWidget(self)
+        self.workflow_tabs.setObjectName("publication_maps_workflow_tabs")
+        selection_page = QWidget(self.workflow_tabs)
+        selection_layout = QGridLayout(selection_page)
+        selection_layout.setContentsMargins(0, 8, 0, 0)
+        selection_layout.setHorizontalSpacing(8)
+        selection_layout.addWidget(self._build_conditions_group(), 0, 0)
+        selection_layout.addWidget(self._build_settings_group(), 0, 1)
+        selection_layout.setColumnStretch(0, 1)
+        selection_layout.setColumnStretch(1, 1)
 
-        self.scroll_content = QWidget(self.content_scroll)
-        self.scroll_content.setObjectName("publication_maps_scroll_content")
-        self.scroll_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        layout = QVBoxLayout(self.scroll_content)
-        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        output_page = QWidget(self.workflow_tabs)
+        output_layout = QGridLayout(output_page)
+        output_layout.setContentsMargins(0, 8, 0, 0)
+        output_layout.setHorizontalSpacing(8)
+        output_layout.addWidget(self._build_output_group(), 0, 0)
+        output_layout.addWidget(self._build_run_group(), 0, 1)
+        output_layout.setColumnStretch(0, 1)
+        output_layout.setColumnStretch(1, 1)
 
-        layout.addWidget(self._build_input_group(), 0)
-
-        body = QGridLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setHorizontalSpacing(8)
-        body.setVerticalSpacing(8)
-        layout.addLayout(body, 1)
-
-        body.setColumnStretch(0, 1)
-        body.setColumnStretch(1, 1)
-        body.setRowStretch(0, 0)
-        body.setRowStretch(1, 0)
-        body.setRowStretch(2, 1)
-        body.setRowMinimumHeight(0, SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
-        body.setRowMinimumHeight(1, SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
-        body.addWidget(self._build_conditions_group(), 0, 0)
-        body.addWidget(self._build_settings_group(), 0, 1)
-        body.addWidget(self._build_output_group(), 1, 0)
-        body.addWidget(self._build_run_group(), 1, 1)
-
-        self.content_scroll.setWidget(self.scroll_content)
-        outer_layout.addWidget(self.content_scroll)
+        self.workflow_tabs.addTab(selection_page, "Data & Maps")
+        self.workflow_tabs.addTab(output_page, "Output & Run")
+        outer_layout.addWidget(self.workflow_tabs, 1)
 
         self._apply_button_icons()
         self._set_default_paths()
@@ -245,7 +243,7 @@ class PublicationMapsWindow(QWidget):
         self.conditions_list.setMinimumHeight(140)
         self.conditions_list.setMaximumHeight(220)
         self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.conditions_list.itemChanged.connect(lambda _item: self._update_run_state())
+        self.conditions_list.itemChanged.connect(self._on_condition_item_changed)
         self.conditions_summary = QLabel("Selected conditions: 0 | Total files: 0")
         self.conditions_summary.setProperty("caption", True)
 
@@ -257,6 +255,75 @@ class PublicationMapsWindow(QWidget):
         buttons.add_button(self.select_all_btn)
         buttons.add_button(self.select_none_btn)
 
+        self.session_controls_widget = QWidget(group)
+        self.session_controls_widget.setObjectName(
+            "publication_maps_session_controls"
+        )
+        session_layout = QGridLayout(self.session_controls_widget)
+        session_layout.setContentsMargins(0, 0, 0, 0)
+        session_layout.setHorizontalSpacing(8)
+        session_layout.setVerticalSpacing(5)
+        self.session_dimension_combo = QComboBox(self.session_controls_widget)
+        self.session_dimension_combo.setAccessibleName(
+            "Scalp Maps comparison dimension"
+        )
+        self.session_dimension_combo.addItem(
+            "Condition (one session)", SESSION_MODE_CONDITION
+        )
+        self.session_dimension_combo.addItem(
+            "Session comparison", SESSION_MODE_COMPARISON
+        )
+        self.session_dimension_combo.currentIndexChanged.connect(
+            self._on_session_mode_changed
+        )
+        session_layout.addWidget(QLabel("Compare:"), 0, 0)
+        session_layout.addWidget(self.session_dimension_combo, 0, 1, 1, 3)
+
+        self.single_session_label = QLabel("Session:")
+        self.single_session_combo = QComboBox(self.session_controls_widget)
+        self.single_session_combo.setAccessibleName(
+            "Session for condition scalp maps"
+        )
+        self.single_session_combo.currentIndexChanged.connect(
+            lambda _index: self._update_run_state()
+        )
+        session_layout.addWidget(self.single_session_label, 1, 0)
+        session_layout.addWidget(self.single_session_combo, 1, 1, 1, 3)
+
+        self.reference_session_label = QLabel("Reference:")
+        self.reference_session_combo = QComboBox(self.session_controls_widget)
+        self.reference_session_combo.setAccessibleName("Reference session")
+        self.reference_session_combo.currentIndexChanged.connect(
+            lambda _index: self._update_run_state()
+        )
+        self.comparison_session_label = QLabel("Comparison:")
+        self.comparison_session_combo = QComboBox(self.session_controls_widget)
+        self.comparison_session_combo.setAccessibleName("Comparison session")
+        self.comparison_session_combo.currentIndexChanged.connect(
+            lambda _index: self._update_run_state()
+        )
+        session_layout.addWidget(self.reference_session_label, 2, 0)
+        session_layout.addWidget(self.reference_session_combo, 2, 1)
+        session_layout.addWidget(self.comparison_session_label, 2, 2)
+        session_layout.addWidget(self.comparison_session_combo, 2, 3)
+        self.session_difference_check = QCheckBox(
+            "Add paired within-participant difference row",
+            self.session_controls_widget,
+        )
+        self.session_difference_check.setChecked(True)
+        session_layout.addWidget(self.session_difference_check, 3, 0, 1, 4)
+        self.session_caveat_label = QLabel(self.session_controls_widget)
+        self.session_caveat_label.setObjectName(
+            "publication_maps_session_order_caveat"
+        )
+        self.session_caveat_label.setProperty("caption", True)
+        self.session_caveat_label.setWordWrap(True)
+        session_layout.addWidget(self.session_caveat_label, 4, 0, 1, 4)
+        session_layout.setColumnStretch(1, 1)
+        session_layout.setColumnStretch(3, 1)
+        self.session_controls_widget.hide()
+
+        group.content_layout.addWidget(self.session_controls_widget)
         group.content_layout.addWidget(self.conditions_list)
         group.content_layout.addWidget(buttons)
         group.content_layout.addWidget(self.conditions_summary)
@@ -673,6 +740,7 @@ class PublicationMapsWindow(QWidget):
 
     def _on_input_root_changed(self, _text: str) -> None:
         self._dataset_index = None
+        self._refresh_session_controls(None)
         self._conditions = ()
         self._condition_counts = {}
         self.group_combo.blockSignals(True)
@@ -694,6 +762,7 @@ class PublicationMapsWindow(QWidget):
         root_text = self.input_root_edit.text().strip()
         if not root_text:
             self._dataset_index = None
+            self._refresh_session_controls(None)
             self._conditions = ()
             self._condition_counts = {}
             self._populate_group_combo()
@@ -715,6 +784,7 @@ class PublicationMapsWindow(QWidget):
                 },
             )
             self._dataset_index = None
+            self._refresh_session_controls(None, error=str(exc))
             self._conditions = ()
             self._condition_counts = {}
             self._populate_group_combo()
@@ -739,6 +809,12 @@ class PublicationMapsWindow(QWidget):
                 active_project_mismatch = True
         if active_project_mismatch:
             self._dataset_index = None
+            self._refresh_session_controls(
+                None,
+                error=(
+                    "Choose the active project's configured Excel folder."
+                ),
+            )
             self._conditions = ()
             self._condition_counts = {}
             self._populate_group_combo()
@@ -754,15 +830,225 @@ class PublicationMapsWindow(QWidget):
 
         self._dataset_index = dataset_index
         self._populate_group_combo()
+        self._refresh_session_controls(dataset_index)
         self._populate_conditions_from_index()
         self._set_ready_status()
         self._update_run_state()
+
+    def _refresh_session_controls(
+        self,
+        dataset_index: ProjectDatasetIndex | None,
+        *,
+        error: str = "",
+    ) -> None:
+        """Bind session selectors only to canonical project metadata."""
+
+        state = PublicationSessionState(repeated=False)
+        if dataset_index is not None:
+            try:
+                state = publication_session_state(dataset_index)
+            except PublicationSessionControlError as exc:
+                error = str(exc)
+        self._session_state = state
+        self._session_control_error = error
+        if not hasattr(self, "session_controls_widget"):
+            return
+        prior_mode = self.session_dimension_combo.currentData()
+        prior_single = self.single_session_combo.currentData()
+        prior_reference = self.reference_session_combo.currentData()
+        prior_comparison = self.comparison_session_combo.currentData()
+        combos = (
+            self.single_session_combo,
+            self.reference_session_combo,
+            self.comparison_session_combo,
+        )
+        self.session_dimension_combo.blockSignals(True)
+        for combo in combos:
+            combo.blockSignals(True)
+        try:
+            for combo in combos:
+                combo.clear()
+                for session in state.sessions:
+                    combo.addItem(session.display_label, session.session_id)
+            mode = (
+                str(prior_mode)
+                if prior_mode in {SESSION_MODE_CONDITION, SESSION_MODE_COMPARISON}
+                else state.default_mode
+            )
+            if state.repeated and not self._session_controls_initialized:
+                mode = state.default_mode
+            mode_index = self.session_dimension_combo.findData(mode)
+            self.session_dimension_combo.setCurrentIndex(max(0, mode_index))
+            for combo, prior, fallback in (
+                (self.single_session_combo, prior_single, 0),
+                (self.reference_session_combo, prior_reference, 0),
+                (self.comparison_session_combo, prior_comparison, 1),
+            ):
+                index = combo.findData(prior)
+                combo.setCurrentIndex(
+                    index if index >= 0 else min(fallback, combo.count() - 1)
+                )
+        finally:
+            self.session_dimension_combo.blockSignals(False)
+            for combo in combos:
+                combo.blockSignals(False)
+        self._session_controls_initialized = (
+            self._session_controls_initialized or state.repeated
+        )
+        self.session_controls_widget.setVisible(state.repeated or bool(error))
+        self.session_caveat_label.setText(error or state.caveat)
+        self._on_session_mode_changed()
+
+    def _session_mode(self) -> str:
+        return str(
+            self.session_dimension_combo.currentData() or SESSION_MODE_CONDITION
+        )
+
+    def _session_comparison_active(self) -> bool:
+        return bool(
+            self._session_state.repeated
+            and self._session_mode() == SESSION_MODE_COMPARISON
+        )
+
+    def _selected_session_ids(self) -> tuple[str, ...]:
+        return self._session_state.selected_ids(
+            mode=self._session_mode(),
+            single_session_id=str(self.single_session_combo.currentData() or ""),
+            reference_session_id=str(
+                self.reference_session_combo.currentData() or ""
+            ),
+            comparison_session_id=str(
+                self.comparison_session_combo.currentData() or ""
+            ),
+        )
+
+    def _on_session_mode_changed(self, _index: int | None = None) -> None:
+        repeated = self._session_state.repeated
+        comparison = self._session_comparison_active()
+        self.single_session_label.setVisible(repeated and not comparison)
+        self.single_session_combo.setVisible(repeated and not comparison)
+        for widget in (
+            self.reference_session_label,
+            self.reference_session_combo,
+            self.comparison_session_label,
+            self.comparison_session_combo,
+            self.session_difference_check,
+        ):
+            widget.setVisible(repeated and comparison)
+        if comparison:
+            all_index = self.group_combo.findData(ALL_GROUPS_VALUE)
+            if all_index >= 0:
+                self.group_combo.blockSignals(True)
+                self.group_combo.setCurrentIndex(all_index)
+                self.group_combo.blockSignals(False)
+            if self.paired_figures_check.isChecked():
+                self.paired_figures_check.setChecked(False)
+            if self.group_comparison_check.isChecked():
+                self.group_comparison_check.setChecked(False)
+            self._enforce_single_session_condition()
+        self.group_combo.setEnabled(not comparison and not self._busy)
+        self._update_paired_controls_state()
+        self._update_group_comparison_controls_state()
+        if self._dataset_index is not None:
+            self._populate_conditions_from_index()
+            self._set_ready_status()
+        self._update_run_state()
+
+    def _enforce_single_session_condition(self) -> None:
+        if not self._session_comparison_active() or self.conditions_list.count() == 0:
+            return
+        selected = [
+            index
+            for index in range(self.conditions_list.count())
+            if self.conditions_list.item(index).checkState() == Qt.Checked
+        ]
+        keep = selected[-1] if selected else 0
+        self.conditions_list.blockSignals(True)
+        try:
+            for index in range(self.conditions_list.count()):
+                self.conditions_list.item(index).setCheckState(
+                    Qt.Checked if index == keep else Qt.Unchecked
+                )
+        finally:
+            self.conditions_list.blockSignals(False)
+
+    def _on_condition_item_changed(self, item: QListWidgetItem) -> None:
+        if self._session_comparison_active() and item.checkState() == Qt.Checked:
+            self.conditions_list.blockSignals(True)
+            try:
+                for index in range(self.conditions_list.count()):
+                    other = self.conditions_list.item(index)
+                    if other is not item:
+                        other.setCheckState(Qt.Unchecked)
+            finally:
+                self.conditions_list.blockSignals(False)
+        self._update_run_state()
+
+    def _session_selection_valid(self) -> bool:
+        if self._session_control_error:
+            return False
+        if not self._session_state.repeated:
+            return True
+        try:
+            session_ids = self._selected_session_ids()
+        except PublicationSessionControlError:
+            return False
+        if not self._session_comparison_active():
+            return len(session_ids) == 1
+        dataset_index = self._dataset_index
+        selected_conditions = self._selected_conditions()
+        if (
+            dataset_index is None
+            or len(dataset_index.ordered_groups) != 2
+            or len(selected_conditions) != 1
+            or len(session_ids) != 2
+        ):
+            return False
+        records = dataset_index.select(
+            conditions=selected_conditions,
+            group_ids=tuple(group.group_id for group in dataset_index.ordered_groups),
+            session_ids=session_ids,
+        )
+        cells = {
+            (str(record.group_id).casefold(), str(record.session_id).casefold())
+            for record in records
+        }
+        return all(
+            (group.group_id.casefold(), session_id.casefold()) in cells
+            for group in dataset_index.ordered_groups
+            for session_id in session_ids
+        )
 
     def _set_ready_status(self) -> None:
         output_root_error = self._output_root_validation_error()
         if output_root_error is not None:
             self.status_label.set_text(output_root_error)
             self.status_label.set_variant("error")
+            return
+        if self._session_control_error:
+            self.status_label.set_text(self._session_control_error)
+            self.status_label.set_variant("error")
+            return
+        if self._session_state.repeated and not self._session_selection_valid():
+            self.status_label.set_text(
+                "Choose a valid canonical session selection. Session grids require "
+                "one condition and data in every group × session cell."
+            )
+            self.status_label.set_variant("warning")
+            return
+        if self._session_comparison_active() and self._session_selection_valid():
+            sessions = self._selected_session_ids()
+            labels = {
+                session.session_id: session.display_label
+                for session in self._session_state.sessions
+            }
+            condition = self._selected_conditions()[0]
+            self.status_label.set_text(
+                f"Session grid ready for {condition}: {labels[sessions[0]]} vs "
+                f"{labels[sessions[1]]}. Participant and paired N will be shown; "
+                "interpret the fixed-order difference descriptively."
+            )
+            self.status_label.set_variant("info")
             return
         if (
             hasattr(self, "group_comparison_check")
@@ -823,6 +1109,11 @@ class PublicationMapsWindow(QWidget):
         if self._dataset_index is None:
             self._update_run_state()
             return
+        if self._session_comparison_active():
+            all_index = self.group_combo.findData(ALL_GROUPS_VALUE)
+            if all_index >= 0 and self.group_combo.currentIndex() != all_index:
+                self.group_combo.setCurrentIndex(all_index)
+                return
         self._populate_conditions_from_index()
         self._set_ready_status()
         self._update_run_state()
@@ -846,9 +1137,16 @@ class PublicationMapsWindow(QWidget):
             return ()
         groups = self._request_groups()
         group_ids = tuple(group.group_id for group in groups if group is not None)
+        try:
+            session_ids = self._selected_session_ids()
+        except PublicationSessionControlError:
+            session_ids = ()
         if group_ids:
-            return dataset_index.select(group_ids=group_ids)
-        return dataset_index.workbooks
+            return dataset_index.select(
+                group_ids=group_ids,
+                session_ids=session_ids or None,
+            )
+        return dataset_index.select(session_ids=session_ids or None)
 
     def _populate_conditions_from_index(self) -> None:
         previously_checked = set(self._selected_conditions())
@@ -874,7 +1172,12 @@ class PublicationMapsWindow(QWidget):
                 self.conditions_list.addItem(item)
         finally:
             self.conditions_list.blockSignals(False)
-        if not had_conditions and len(self._selected_conditions()) >= 2:
+        self._enforce_single_session_condition()
+        if (
+            not had_conditions
+            and not self._session_comparison_active()
+            and len(self._selected_conditions()) >= 2
+        ):
             # Construction briefly has no indexed conditions and disables the
             # paired default. Restore it when the first canonical cohort loads.
             self.paired_figures_check.setChecked(True)
@@ -889,6 +1192,7 @@ class PublicationMapsWindow(QWidget):
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         finally:
             self.conditions_list.blockSignals(False)
+        self._enforce_single_session_condition()
         self._sync_paired_condition_selectors()
         self._update_condition_summary()
         self._update_run_state()
@@ -923,9 +1227,16 @@ class PublicationMapsWindow(QWidget):
         )
         if hasattr(self, "paired_figures_check"):
             self._sync_paired_condition_selectors(selected_conditions)
-            if len(selected_conditions) < 2 and self.paired_figures_check.isChecked():
+            if (
+                self._session_comparison_active()
+                or len(selected_conditions) < 2
+            ) and self.paired_figures_check.isChecked():
                 self.paired_figures_check.setChecked(False)
-            self.paired_figures_check.setEnabled(len(selected_conditions) >= 2 and not self._busy)
+            self.paired_figures_check.setEnabled(
+                not self._session_comparison_active()
+                and len(selected_conditions) >= 2
+                and not self._busy
+            )
             self._update_paired_controls_state()
         if hasattr(self, "group_comparison_check"):
             self._update_group_comparison_controls_state()
@@ -941,6 +1252,7 @@ class PublicationMapsWindow(QWidget):
         ready = ready and bool(self._selected_metrics())
         ready = ready and self._paired_conditions_valid()
         ready = ready and self._group_comparison_valid()
+        ready = ready and self._session_selection_valid()
         ready = ready and self._output_root_validation_error() is None
         self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
 
@@ -1008,11 +1320,16 @@ class PublicationMapsWindow(QWidget):
         selected_count = len(self._selected_conditions())
         checked = self.paired_figures_check.isChecked()
         enabled = checked and selected_count >= 2 and not self._busy
-        self.paired_conditions_widget.setVisible(checked)
+        self.paired_conditions_widget.setVisible(
+            checked and not self._session_comparison_active()
+        )
         self.paired_condition_a_combo.setEnabled(enabled)
         self.paired_condition_b_combo.setEnabled(enabled)
 
     def _on_paired_figures_toggled(self, checked: bool) -> None:
+        if checked and self._session_comparison_active():
+            self.paired_figures_check.setChecked(False)
+            return
         if checked and self.group_comparison_check.isChecked():
             self.group_comparison_check.setChecked(False)
         self._update_paired_controls_state()
@@ -1081,6 +1398,8 @@ class PublicationMapsWindow(QWidget):
 
     def _group_comparison_available(self) -> bool:
         if self._dataset_index is None:
+            return False
+        if self._session_comparison_active():
             return False
         return bool(
             len(self._dataset_index.ordered_groups) == 2
@@ -1272,6 +1591,11 @@ class PublicationMapsWindow(QWidget):
             self.paired_condition_a_combo,
             self.paired_condition_b_combo,
             self.group_comparison_check,
+            self.session_dimension_combo,
+            self.single_session_combo,
+            self.reference_session_combo,
+            self.comparison_session_combo,
+            self.session_difference_check,
         )
 
     def _embedded_host(self) -> QWidget | None:
@@ -1317,6 +1641,8 @@ class PublicationMapsWindow(QWidget):
         self._toggle_metric_range_controls()
         self._update_paired_controls_state()
         self._update_group_comparison_controls_state()
+        if self._session_comparison_active():
+            self.group_combo.setEnabled(False)
 
         if not busy:
             self._update_run_state()
@@ -1352,6 +1678,8 @@ class PublicationMapsWindow(QWidget):
                 high_color=self.bca_high_color,
             )
         selected_conditions = self._selected_conditions()
+        selected_session_ids = self._selected_session_ids()
+        session_grid_enabled = self._session_comparison_active()
         paired_enabled = (
             self.paired_figures_check.isChecked()
             and len(selected_conditions) >= 2
@@ -1390,6 +1718,15 @@ class PublicationMapsWindow(QWidget):
                 group_id=None if group is None else group.group_id,
                 group_label=None if group is None else group.label,
                 group_folder=None if group is None else group.folder_name,
+                session_ids=selected_session_ids,
+                export_session_grid_figure=session_grid_enabled,
+                session_comparison_ids=(
+                    selected_session_ids if session_grid_enabled else ()
+                ),
+                export_paired_session_difference=(
+                    session_grid_enabled
+                    and self.session_difference_check.isChecked()
+                ),
             )
             for group in groups
         )
@@ -1437,6 +1774,13 @@ class PublicationMapsWindow(QWidget):
                 "in both groups."
             )
             return
+        if not self._session_selection_valid():
+            message = self._session_control_error or (
+                "Session comparison requires one condition, two distinct canonical "
+                "sessions, exactly two stable groups, and data in every group × session cell."
+            )
+            self._show_validation_error(message)
+            return
         requests = self._collect_requests()
         if not requests:
             self._show_validation_error(
@@ -1450,10 +1794,16 @@ class PublicationMapsWindow(QWidget):
         self._last_generated_figure_count = 0
         self._pending_outcome = None
         self._cancel_requested = False
+        self._last_run_was_session_grid = self._session_comparison_active()
         self.log_box.clear()
         self.progress.setValue(0)
+        start_label = (
+            "repeated-session grid"
+            if self._last_run_was_session_grid
+            else "group-scoped generation"
+        )
         self.status_label.set_text(
-            f"Starting {len(requests)} group-scoped generation request(s)..."
+            f"Starting {start_label} ({len(requests)} request(s))..."
         )
         self.status_label.set_variant("info")
 
@@ -1536,6 +1886,7 @@ class PublicationMapsWindow(QWidget):
                 "The Scalp Maps worker exited without a terminal outcome."
             )
         self._handle_worker_outcome(outcome)
+        self._last_run_was_session_grid = False
         self._cancel_requested = False
         self._last_generated_figure_count = 0
         self.generation_idle.emit()
@@ -1613,7 +1964,11 @@ class PublicationMapsWindow(QWidget):
         self._last_generated_figure_count += len(batch_figure_paths)
         for path in batch_figure_paths:
             self._append_log(
-                f"Comparison figure: {path}",
+                (
+                    f"Session-grid figure: {path}"
+                    if self._last_run_was_session_grid
+                    else f"Comparison figure: {path}"
+                ),
                 update_status=False,
             )
 
@@ -1626,7 +1981,13 @@ class PublicationMapsWindow(QWidget):
             show_error(self, "Scalp Maps error", message)
             return
         group_count = len(outcome.results)
-        if batch_figure_paths:
+        if batch_figure_paths and self._last_run_was_session_grid:
+            self.status_label.set_text(
+                f"Complete: {self._last_generated_figure_count} repeated-session "
+                f"figure file(s) with participant N and paired N for "
+                f"{group_count} canonical groups."
+            )
+        elif batch_figure_paths:
             self.status_label.set_text(
                 f"Complete: {self._last_generated_figure_count} comparison figure "
                 f"file(s) for {group_count} canonical groups."

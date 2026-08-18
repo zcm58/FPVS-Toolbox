@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 from PySide6.QtCore import QEventLoop, QObject, QThread, Signal, Slot, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QHeaderView,
     QHBoxLayout,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import make_action_button
+from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.io.load_utils import format_bdf_recording_not_started_message
 from Main_App.processing.qc_summary_export import QUALITY_CHECK_FOLDER
 from Main_App.processing.full_fft_grid_qc import audit_project_full_fft_grids
@@ -52,6 +54,8 @@ from Main_App.projects.grouping import project_group_context
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
+    normalize_manual_excluded_recording_conditions,
+    normalize_manual_excluded_recordings,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,6 +159,10 @@ class _PreflightQcWorker(QObject):
                             duration_s=observation.duration_s,
                             issue=observation.issue,
                             already_excluded=observation.already_excluded,
+                            recording_id=observation.recording_id,
+                            session_id=observation.session_id,
+                            session_label=observation.session_label,
+                            visit_index=observation.visit_index,
                         )
                         for observation in project_grid_audit.observations
                     ),
@@ -220,6 +228,38 @@ def _result_group_display_name(
     group_labels: Mapping[str, str],
 ) -> str:
     return _group_display_name(result.group_id, group_labels)
+
+
+def _recording_aware(values: Sequence[Any]) -> bool:
+    """Return whether rows carry canonical v2.2 recording identities."""
+
+    return any(
+        str(getattr(value, "recording_id", "") or "").strip()
+        for value in values
+    )
+
+
+def _identity_id(value: Any) -> str:
+    """Use recording identity for v2.2 and the exact participant fallback."""
+
+    return str(
+        getattr(value, "recording_id", None)
+        or getattr(value, "participant_id", None)
+        or getattr(value, "subject_id", "")
+    ).strip()
+
+
+def _session_label(value: Any) -> str:
+    return str(
+        getattr(value, "session_label", None)
+        or getattr(value, "session_id", None)
+        or "—"
+    )
+
+
+def _visit_label(value: Any) -> str:
+    visit_index = getattr(value, "visit_index", None)
+    return str(visit_index) if visit_index is not None else "—"
 
 
 def _merge_removed_maps(
@@ -377,7 +417,7 @@ def _removed_review_reason_map(scan: PreflightQcScan) -> dict[str, str]:
                 + ", ".join(result.rare_burst_channels)
             )
         if fragments:
-            reasons[result.participant_id] = "; ".join(fragments)
+            reasons[result.identity_id] = "; ".join(fragments)
     return reasons
 
 
@@ -689,6 +729,8 @@ def _set_preflight_table(
     editable_columns: Sequence[int] | None = None,
     stretch_column: int | None = None,
     center_columns: bool = False,
+    compact_rows: bool = False,
+    preferred_column_widths: Mapping[int, int] | None = None,
 ) -> None:
     table = getattr(host, "processing_files_table", None)
     if table is None:
@@ -702,10 +744,16 @@ def _set_preflight_table(
             widget = table.cellWidget(row_index, column_index)
             if widget is None:
                 continue
+            widget.hide()
             table.removeCellWidget(row_index, column_index)
             widget.deleteLater()
     table.clearContents()
-    table.setWordWrap(True)
+    preferred_widths = {
+        int(column): max(1, int(width))
+        for column, width in (preferred_column_widths or {}).items()
+    }
+    table.setWordWrap(not compact_rows)
+    table.setTextElideMode(Qt.ElideRight)
     table.setColumnCount(len(headers))
     table.setHorizontalHeaderLabels(list(headers))
     if center_columns:
@@ -714,13 +762,15 @@ def _set_preflight_table(
             if header_item is not None:
                 header_item.setTextAlignment(Qt.AlignCenter)
     header = table.horizontalHeader()
+    header.setStretchLastSection(not compact_rows)
     resolved_stretch_column = len(headers) - 1 if stretch_column is None else stretch_column
     for column_index in range(len(headers)):
-        mode = (
-            QHeaderView.Stretch
-            if column_index == resolved_stretch_column
-            else QHeaderView.ResizeToContents
-        )
+        if column_index in preferred_widths:
+            mode = QHeaderView.Interactive
+        elif column_index == resolved_stretch_column:
+            mode = QHeaderView.Stretch
+        else:
+            mode = QHeaderView.ResizeToContents
         header.setSectionResizeMode(column_index, mode)
     table.setRowCount(len(rows))
     table.setEditTriggers(
@@ -740,9 +790,40 @@ def _set_preflight_table(
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             if center_columns or column_index == 0:
                 item.setTextAlignment(Qt.AlignCenter)
+            if str(value):
+                item.setToolTip(str(value))
             table.setItem(row_index, column_index, item)
-    table.resizeRowsToContents()
+    for column_index, width in preferred_widths.items():
+        if 0 <= column_index < len(headers):
+            header.resizeSection(column_index, width)
+    vertical_header = table.verticalHeader()
+    if compact_rows:
+        row_height = max(30, table.fontMetrics().lineSpacing() + 14)
+        vertical_header.setSectionResizeMode(QHeaderView.Fixed)
+        vertical_header.setDefaultSectionSize(row_height)
+        for row_index in range(table.rowCount()):
+            table.setRowHeight(row_index, row_height)
+    else:
+        vertical_header.setSectionResizeMode(QHeaderView.Interactive)
+        table.resizeRowsToContents()
     table.scrollToTop()
+    horizontal_scroll = table.horizontalScrollBar()
+    horizontal_scroll.setValue(horizontal_scroll.minimum())
+    vertical_scroll = table.verticalScrollBar()
+    vertical_scroll.setValue(vertical_scroll.minimum())
+
+
+def _install_preflight_cell_widget(
+    table: Any,
+    row: int,
+    column: int,
+    widget: Any,
+) -> None:
+    """Install a compact editor without letting it inherit a tall review row."""
+
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    widget.setMaximumHeight(widget.sizeHint().height())
+    table.setCellWidget(row, column, widget)
 
 
 def _clear_preflight_table_click_handler(host: Any, table: Any | None = None) -> None:
@@ -890,10 +971,14 @@ def _confirm_recording_not_started(
     if not flagged:
         return True
     names = [item.path.name for item in flagged]
+    recording_mode = _recording_aware(flagged)
     detail_rows = [
         (
-            _result_group_display_name(item, group_labels),
             item.participant_id,
+            item.recording_id or "Not registered",
+            _session_label(item),
+            _visit_label(item),
+            _result_group_display_name(item, group_labels),
             item.path.name,
         )
         for item in flagged
@@ -905,8 +990,10 @@ def _confirm_recording_not_started(
         'was actually recorded. The most likely reason is that the experiment '
         'administrator forgot to click "Start Recording".',
         details="\n".join(
-            f"{group} | {participant_id} | {file_name}"
-            for group, participant_id, file_name in detail_rows
+            " | ".join(row)
+            if recording_mode
+            else f"{row[4]} | {row[0]} | {row[5]}"
+            for row in detail_rows
         ),
     )
     _begin_preflight_page(
@@ -935,15 +1022,32 @@ def _confirm_recording_not_started(
         "processing_current_file_label",
         'The most likely explanation is that the experiment administrator forgot to push "Start Recording" on BioSemi.',
     )
-    _set_preflight_table(
-        host,
-        ["PID", "Group", "File", "Recommended action"],
-        [
-            (participant_id, group, file_name, "Exclude from processing")
-            for group, participant_id, file_name in detail_rows
-        ],
-        stretch_column=3,
-    )
+    if recording_mode:
+        _set_preflight_table(
+            host,
+            [
+                "Participant",
+                "Recording",
+                "Session / phase-at-visit",
+                "Visit",
+                "Group",
+                "File",
+                "Recommended action",
+            ],
+            [(*row, "Exclude this recording") for row in detail_rows],
+            stretch_column=6,
+        )
+    else:
+        _set_preflight_table(
+            host,
+            ["PID", "Group", "File", "Recommended action"],
+            [
+                (participant_id, group, file_name, "Exclude from processing")
+                for participant_id, _recording, _session, _visit, group, file_name
+                in detail_rows
+            ],
+            stretch_column=3,
+        )
     choice = _await_preflight_choice(
         host,
         (
@@ -1110,6 +1214,14 @@ def _review_removed_electrodes(
     scan: PreflightQcScan,
     group_labels: Mapping[str, str],
 ) -> bool:
+    if _recording_aware(raw_file_infos):
+        return _review_removed_electrodes_by_recording(
+            host,
+            raw_file_infos,
+            params,
+            scan,
+        )
+
     existing = normalize_manual_removed_electrodes_map(
         params.get("manual_removed_electrodes")
     )
@@ -1262,6 +1374,346 @@ def _review_removed_electrodes(
     return True
 
 
+def _review_removed_electrodes_by_recording(
+    host: Any,
+    raw_file_infos: Sequence[Any],
+    params: dict[str, Any],
+    scan: PreflightQcScan,
+) -> bool:
+    """Review v2.2 removed-electrode decisions without merging two visits."""
+
+    participant_map = normalize_manual_removed_electrodes_map(
+        params.get("manual_removed_electrodes")
+    )
+    recording_map = normalize_manual_removed_electrodes_map(
+        params.get("manual_removed_electrodes_by_recording")
+    )
+    auto_flagged = scan.suggested_removed_electrodes
+    reasons = _removed_review_reason_map(scan)
+    active_recording_keys = {
+        str(getattr(info, "recording_id", "") or "").strip().casefold()
+        for info in raw_file_infos
+        if str(getattr(info, "recording_id", "") or "").strip()
+    }
+    coverage = project_recording_coverage_rows(
+        host.currentProject,
+        raw_file_infos,
+    )
+    displayed = tuple(
+        identity
+        for identity in coverage
+        if identity.recording_id is None
+        or identity.recording_id.casefold() in active_recording_keys
+    )
+
+    _show_data_quality_notice(
+        host,
+        "Review removed electrodes for each recording.",
+        "Each visit keeps its own recording identity. Participant-wide entries "
+        "remain available as legacy fallbacks, while recording-specific decisions "
+        "can differ between visits.",
+    )
+    _begin_preflight_page(
+        host,
+        step=_CONFIRM_REMOVED_ELECTRODES_STEP,
+        title="Confirm Removed Electrodes",
+        message="Review each recording before processing begins.",
+        busy=False,
+        review_visible=True,
+        review_title="Removed Electrodes by Recording",
+        progress_visible=False,
+        checklist=(
+            "Confirm electrode decisions for each available recording",
+            "Choose participant-wide fallback or this-recording scope",
+            "Treat missing visits as coverage, not fabricated data",
+        ),
+    )
+    _set_label(
+        host,
+        "processing_summary_label",
+        "Session/phase-at-visit labels and visit order are shown separately. "
+        "When every participant follows the same order, phase and order effects "
+        "remain confounded.",
+    )
+    _set_label(
+        host,
+        "processing_current_file_label",
+        "Edit accepted FPVS flags and manual additions, then choose whether the "
+        "final list applies to this recording or as the participant fallback.",
+    )
+
+    headers = (
+        "Participant",
+        "Recording",
+        "Session / phase-at-visit",
+        "Visit",
+        "Group",
+        "Coverage",
+        "FPVS Toolbox flagged",
+        "Why flagged",
+        "Manual additions",
+        "Final confirmed removed",
+        "Scope",
+    )
+    rows: list[tuple[str, ...]] = []
+    available_rows: dict[int, Any] = {}
+    for identity in displayed:
+        recording_id = str(identity.recording_id or "").strip()
+        if not recording_id:
+            rows.append(
+                (
+                    identity.participant_id,
+                    "Not registered",
+                    identity.session_label or identity.session_id or "—",
+                    str(identity.visit_index or "—"),
+                    identity.group_label,
+                    identity.coverage_status,
+                    "",
+                    "Missing declared visit",
+                    "",
+                    "",
+                    "Coverage only",
+                )
+            )
+            continue
+        explicit_override = any(
+            key.casefold() == recording_id.casefold() for key in recording_map
+        )
+        existing_values = (
+            _map_lookup(recording_map, recording_id)
+            if explicit_override
+            else _map_lookup(participant_map, identity.participant_id)
+        )
+        auto_values = parse_electrode_list(_map_lookup(auto_flagged, recording_id))
+        auto_lookup = {channel.casefold() for channel in auto_values}
+        manual_additions = [
+            channel
+            for channel in parse_electrode_list(existing_values)
+            if channel.casefold() not in auto_lookup
+        ]
+        final_values = _unique_channels(auto_values, manual_additions)
+        row_index = len(rows)
+        rows.append(
+            (
+                identity.participant_id,
+                recording_id,
+                identity.session_label or identity.session_id or "—",
+                str(identity.visit_index or "—"),
+                identity.group_label,
+                identity.coverage_status,
+                ", ".join(auto_values),
+                _string_map_lookup(reasons, recording_id)
+                or ("Existing recording override" if explicit_override else "Participant fallback"),
+                ", ".join(manual_additions),
+                ", ".join(final_values),
+                "",
+            )
+        )
+        available_rows[row_index] = (identity, explicit_override, bool(auto_values))
+
+    _set_preflight_table(
+        host,
+        headers,
+        rows,
+        editable_columns=(6, 8),
+        stretch_column=7,
+        compact_rows=True,
+        preferred_column_widths={
+            1: 156,
+            2: 184,
+            7: 240,
+            8: 140,
+            9: 176,
+            10: 176,
+        },
+    )
+    table = getattr(host, "processing_files_table", None)
+    if table is not None:
+        for row_index in range(table.rowCount()):
+            if row_index not in available_rows:
+                for column in (6, 8):
+                    item = table.item(row_index, column)
+                    if item is not None:
+                        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                continue
+            _identity, explicit_override, has_auto = available_rows[row_index]
+            scope = QComboBox(table)
+            scope.setObjectName(f"removed_electrode_scope_{row_index}")
+            scope.addItem("This recording", "recording")
+            scope.addItem("Participant (all visits)", "participant")
+            if not explicit_override and not has_auto:
+                scope.setCurrentIndex(1)
+            scope.setToolTip(
+                "Recording scope keeps visits independent. Participant scope updates "
+                "the fallback used by every visit without its own override."
+            )
+            _install_preflight_cell_widget(table, row_index, 10, scope)
+
+    def _refresh_final_column(row_index: int) -> None:
+        if table is None or row_index not in available_rows:
+            return
+        identity, _explicit, _auto = available_rows[row_index]
+        accepted_item = table.item(row_index, 6)
+        manual_item = table.item(row_index, 8)
+        final_item = table.item(row_index, 9)
+        if final_item is None or not identity.recording_id:
+            return
+        record, _moved_to_manual, _moved_to_auto = _normalize_removed_review_entry(
+            original_auto=_map_lookup(auto_flagged, identity.recording_id),
+            accepted_auto_text=accepted_item.text() if accepted_item else "",
+            manual_additions_text=manual_item.text() if manual_item else "",
+        )
+        final_item.setText(
+            ", ".join(record["final_confirmed_removed"])  # type: ignore[index]
+        )
+
+    def _on_item_changed(item: QTableWidgetItem) -> None:
+        if item.column() in (6, 8):
+            _refresh_final_column(item.row())
+
+    if table is not None:
+        table.itemChanged.connect(_on_item_changed)
+    choice = _await_preflight_choice(
+        host,
+        (
+            ("Save / Next", "save", "primary"),
+            ("Cancel Processing", "cancel", "secondary"),
+        ),
+    )
+    if table is not None:
+        try:
+            table.itemChanged.disconnect(_on_item_changed)
+        except (TypeError, RuntimeError):
+            pass
+    if choice != "save":
+        return False
+
+    records: dict[str, dict[str, object]] = {}
+    recording_replacements: dict[str, list[str]] = {}
+    participant_replacements: dict[str, list[str]] = {}
+    participant_scope_values: dict[str, list[list[str]]] = {}
+    warnings: list[str] = []
+    recording_ids: list[str] = []
+    for row_index, (identity, _explicit, _has_auto) in available_rows.items():
+        if table is None or not identity.recording_id:
+            continue
+        recording_id = identity.recording_id
+        recording_ids.append(recording_id)
+        accepted_item = table.item(row_index, 6)
+        manual_item = table.item(row_index, 8)
+        scope_widget = table.cellWidget(row_index, 10)
+        scope = (
+            str(scope_widget.currentData())
+            if isinstance(scope_widget, QComboBox)
+            else "recording"
+        )
+        record, moved_to_manual, moved_to_auto = _normalize_removed_review_entry(
+            original_auto=_map_lookup(auto_flagged, recording_id),
+            accepted_auto_text=accepted_item.text() if accepted_item else "",
+            manual_additions_text=manual_item.text() if manual_item else "",
+        )
+        final_values = list(record["final_confirmed_removed"])  # type: ignore[arg-type]
+        record.update(
+            {
+                "participant_id": identity.participant_id,
+                "recording_id": recording_id,
+                "session_id": identity.session_id,
+                "session_label": identity.session_label,
+                "visit_index": identity.visit_index,
+                "scope": scope,
+            }
+        )
+        records[recording_id] = record
+        if scope == "participant":
+            participant_scope_values.setdefault(
+                identity.participant_id.casefold(), []
+            ).append(final_values)
+            participant_replacements[identity.participant_id] = final_values
+        else:
+            recording_replacements[recording_id] = final_values
+        if moved_to_manual:
+            warnings.append(
+                f"{recording_id}: moved to Manual additions: "
+                + ", ".join(moved_to_manual)
+            )
+        if moved_to_auto:
+            warnings.append(
+                f"{recording_id}: treated original FPVS flag(s) as accepted: "
+                + ", ".join(moved_to_auto)
+            )
+
+    for participant_key, decisions in participant_scope_values.items():
+        normalized_decisions = {
+            tuple(channel.casefold() for channel in decision)
+            for decision in decisions
+        }
+        if len(normalized_decisions) > 1:
+            QMessageBox.warning(
+                host,
+                "Conflicting Participant-Wide Decisions",
+                "Participant-wide rows for the same participant must use the same "
+                f"final electrode list ({participant_key}). Choose recording scope "
+                "for visit-specific differences.",
+            )
+            return False
+    if warnings:
+        QMessageBox.warning(
+            host,
+            "Removed Electrode Review",
+            "Some entries were moved to preserve source tracking:\n\n"
+            + "\n".join(warnings),
+        )
+
+    updated_participants = _replace_removed_map_for_participants(
+        participant_map,
+        participant_replacements,
+        list(participant_replacements),
+    )
+    updated_recordings = _replace_removed_map_for_participants(
+        recording_map,
+        recording_replacements,
+        recording_ids,
+    )
+    updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
+    updated_preproc["removed_electrode_detection_mode"] = (
+        REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    )
+    updated_preproc["manual_removed_electrodes"] = updated_participants
+    updated_preproc["manual_removed_electrodes_by_recording"] = updated_recordings
+    try:
+        normalized = host.currentProject.update_preprocessing(updated_preproc)
+        host.currentProject.save()
+    except ValueError as exc:
+        QMessageBox.warning(host, "Invalid Manual Removed Electrodes", str(exc))
+        return False
+    except OSError as exc:
+        logger.exception("Failed to save recording removed-electrode settings.")
+        QMessageBox.critical(host, "Project Save Error", str(exc))
+        return False
+
+    params["manual_removed_electrodes"] = dict(
+        normalized.get("manual_removed_electrodes") or {}
+    )
+    params["manual_removed_electrodes_by_recording"] = dict(
+        normalized.get("manual_removed_electrodes_by_recording") or {}
+    )
+    params["removed_electrode_detection_mode"] = normalized.get(
+        "removed_electrode_detection_mode"
+    )
+    params["auto_detect_removed_electrodes"] = bool(
+        normalized.get("auto_detect_removed_electrodes")
+    )
+    params["_fpvs_removed_electrode_review_by_recording"] = records
+    host.validated_params = params
+    try:
+        host.log(
+            "Data quality check saved recording-aware removed-electrode decisions."
+        )
+    except (AttributeError, TypeError, RuntimeError):
+        pass
+    return True
+
+
 def _removed_review_rows_from_table(host: Any) -> list[tuple[str, str, str, str]]:
     table = getattr(host, "processing_files_table", None)
     if table is None:
@@ -1387,6 +1839,15 @@ def _hard_candidate_detail_text(
     spectral_message = result.raw_spectral_message
     lines = [
         f"Participant: {result.participant_id}",
+        *(
+            (
+                f"Recording: {result.recording_id}",
+                f"Session / phase-at-visit: {_session_label(result)}",
+                f"Visit: {_visit_label(result)}",
+            )
+            if result.recording_id
+            else ()
+        ),
         f"Group: {_result_group_display_name(result, labels)}",
         f"File: {result.path.name}",
         f"Flag: {_hard_candidate_flag(result)}",
@@ -1429,8 +1890,23 @@ def _hard_candidate_detail_text(
 def _hard_candidate_row_values(
     candidates: Sequence[PreflightQcFileResult],
     group_labels: Mapping[str, str] | None = None,
-) -> list[tuple[str, str, str, str, str]]:
+) -> list[tuple[str, ...]]:
     labels = group_labels or {}
+    if _recording_aware(candidates):
+        return [
+            (
+                result.participant_id,
+                result.recording_id or "Not registered",
+                _session_label(result),
+                _visit_label(result),
+                _result_group_display_name(result, labels),
+                _hard_candidate_flag(result),
+                _hard_candidate_reason(result),
+                "",
+                "",
+            )
+            for result in candidates
+        ]
     return [
         (
             result.participant_id,
@@ -1462,7 +1938,9 @@ def _show_hard_exclusion_detail_dialog(
 
     title = QLabel(
         (
-            f"{result.participant_id} · "
+            f"{result.participant_id}"
+            + (f" · {result.recording_id}" if result.recording_id else "")
+            + " · "
             f"{_result_group_display_name(result, group_labels)}: "
             f"{_hard_candidate_reason(result)}"
         ),
@@ -1502,9 +1980,12 @@ def _install_hard_exclusion_details(
     table = getattr(host, "processing_files_table", None)
     if table is None:
         return
-    candidate_by_pid = {result.participant_id.casefold(): result for result in candidates}
+    recording_mode = _recording_aware(candidates)
+    identity_column = 1 if recording_mode else _HARD_EXCLUSION_PID_COLUMN
+    details_column = 8 if recording_mode else _HARD_EXCLUSION_DETAILS_COLUMN
+    candidate_by_pid = {_identity_id(result).casefold(): result for result in candidates}
     details_by_pid = {
-        result.participant_id.casefold(): _hard_candidate_detail_text(
+        _identity_id(result).casefold(): _hard_candidate_detail_text(
             result,
             group_labels,
         )
@@ -1513,7 +1994,7 @@ def _install_hard_exclusion_details(
     setattr(host, _HARD_EXCLUSION_DETAILS_ATTR, details_by_pid)
     table.setSelectionMode(QAbstractItemView.NoSelection)
     for row in range(table.rowCount()):
-        item = table.item(row, _HARD_EXCLUSION_PID_COLUMN)
+        item = table.item(row, identity_column)
         pid = item.text().strip() if item else ""
         candidate = candidate_by_pid.get(pid.casefold())
         details = details_by_pid.get(pid.casefold())
@@ -1532,14 +2013,14 @@ def _install_hard_exclusion_details(
                 )
             )
         )
-        table.setCellWidget(row, _HARD_EXCLUSION_DETAILS_COLUMN, button)
+        table.setCellWidget(row, details_column, button)
     table.resizeRowsToContents()
 
 
 def _condition_crop_review_rows(
     audit: PreflightConditionCropGridAudit,
     group_labels: Mapping[str, str],
-) -> list[tuple[str, str, str, str, str, str, str]]:
+) -> list[tuple[str, ...]]:
     expected = (
         f"{audit.reference_duration_s:g} s "
         f"({audit.reference_oddball_cycles} oddball cycles)"
@@ -1547,7 +2028,8 @@ def _condition_crop_review_rows(
         and audit.reference_oddball_cycles is not None
         else "No strict-majority grid"
     )
-    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    recording_mode = _recording_aware(audit.observations)
+    rows: list[tuple[str, ...]] = []
     for observation in audit.review_candidates:
         observed = (
             f"{observation.duration_s:g} s "
@@ -1556,28 +2038,39 @@ def _condition_crop_review_rows(
             and observation.oddball_cycles is not None
             else "Unavailable"
         )
-        rows.append(
-            (
-                observation.participant_id,
-                _group_display_name(observation.group_id, group_labels),
-                observation.condition_label,
-                observed,
-                expected,
-                (
-                    observation.issue
-                    or (
-                        "Multiple valid FFT grids exist; choose which "
-                        "participant-condition cohort to keep."
-                        if audit.has_unresolved_grid_conflict
-                        else (
-                            "Usable crop has a different FFT grid from the "
-                            "project majority."
-                        )
-                    )
-                ),
-                "",
-            )
+        reason = observation.issue or (
+            "Multiple valid FFT grids exist; choose which condition cohort to keep."
+            if audit.has_unresolved_grid_conflict
+            else "Usable crop has a different FFT grid from the project majority."
         )
+        if recording_mode:
+            rows.append(
+                (
+                    observation.participant_id,
+                    observation.recording_id or "Not registered",
+                    _session_label(observation),
+                    _visit_label(observation),
+                    _group_display_name(observation.group_id, group_labels),
+                    observation.condition_label,
+                    observed,
+                    expected,
+                    reason,
+                    "",
+                    "",
+                )
+            )
+        else:
+            rows.append(
+                (
+                    observation.participant_id,
+                    _group_display_name(observation.group_id, group_labels),
+                    observation.condition_label,
+                    observed,
+                    expected,
+                    reason,
+                    "",
+                )
+            )
     return rows
 
 
@@ -1589,11 +2082,41 @@ def _checked_condition_crop_pairs(
     if table is None:
         return {candidate.pair_key for candidate in candidates}
     checked: set[tuple[str, str]] = set()
+    recording_mode = _recording_aware(candidates)
+    check_column = 10 if recording_mode else _CONDITION_EXCLUSION_CHECK_COLUMN
     for row, candidate in enumerate(candidates):
-        item = table.item(row, _CONDITION_EXCLUSION_CHECK_COLUMN)
+        item = table.item(row, check_column)
         if item is not None and item.checkState() == Qt.Checked:
             checked.add(candidate.pair_key)
     return checked
+
+
+def _checked_condition_crop_scopes(
+    host: Any,
+    candidates: Sequence[PreflightConditionCropObservation],
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """Return checked participant and recording pairs from v2.2 scope widgets."""
+
+    table = getattr(host, "processing_files_table", None)
+    if table is None:
+        return set(), {candidate.pair_key for candidate in candidates}
+    participant_pairs: set[tuple[str, str]] = set()
+    recording_pairs: set[tuple[str, str]] = set()
+    for row, candidate in enumerate(candidates):
+        item = table.item(row, 10)
+        if item is None or item.checkState() != Qt.Checked:
+            continue
+        scope_widget = table.cellWidget(row, 9)
+        scope = (
+            str(scope_widget.currentData())
+            if isinstance(scope_widget, QComboBox)
+            else "recording"
+        )
+        if scope == "participant":
+            participant_pairs.add(candidate.participant_pair_key)
+        elif candidate.recording_pair_key is not None:
+            recording_pairs.add(candidate.recording_pair_key)
+    return participant_pairs, recording_pairs
 
 
 def _replace_reviewed_condition_exclusions(
@@ -1617,6 +2140,34 @@ def _replace_reviewed_condition_exclusions(
     return normalize_manual_excluded_participant_conditions(values)
 
 
+def _replace_reviewed_recording_condition_exclusions(
+    existing: Mapping[str, Sequence[str]] | None,
+    candidates: Sequence[PreflightConditionCropObservation],
+    checked_pairs: set[tuple[str, str]],
+) -> dict[str, list[str]]:
+    normalized = normalize_manual_excluded_recording_conditions(existing)
+    reviewed_pairs = {
+        pair
+        for candidate in candidates
+        if (pair := candidate.recording_pair_key) is not None
+    }
+    values: dict[str, list[str]] = {}
+    for recording_id, conditions in normalized.items():
+        for condition in conditions:
+            if (recording_id.casefold(), condition.casefold()) in reviewed_pairs:
+                continue
+            values.setdefault(recording_id, []).append(condition)
+    for candidate in candidates:
+        if (
+            candidate.recording_pair_key in checked_pairs
+            and candidate.recording_id is not None
+        ):
+            values.setdefault(candidate.recording_id, []).append(
+                candidate.condition_label
+            )
+    return normalize_manual_excluded_recording_conditions(values)
+
+
 def _confirm_condition_crop_exclusions(
     host: Any,
     params: dict[str, Any],
@@ -1626,21 +2177,33 @@ def _confirm_condition_crop_exclusions(
     existing = normalize_manual_excluded_participant_conditions(
         params.get("manual_excluded_participant_conditions")
     )
+    existing_recordings = normalize_manual_excluded_recording_conditions(
+        params.get("manual_excluded_recording_conditions")
+    )
     audit = build_preflight_condition_crop_grid_audit(
         scan,
         excluded_participant_conditions=existing,
         excluded_participants=normalize_manual_excluded_participants(
             params.get("manual_excluded_participants")
         ),
+        excluded_recording_conditions=existing_recordings,
+        excluded_recordings=normalize_manual_excluded_recordings(
+            params.get("manual_excluded_recordings")
+        ),
     )
     candidates = audit.review_candidates
     if not candidates:
         return True
+    recording_mode = _recording_aware(candidates)
 
     _show_data_quality_notice(
         host,
         "Review conditions with a different usable FFT crop.",
         "These condition workbooks would use a different frequency grid from "
+        "the project majority. You can exclude a recording-condition or the "
+        "participant-condition across all visits without deleting data."
+        if recording_mode
+        else "These condition workbooks would use a different frequency grid from "
         "the project majority. You can exclude selected participant-condition "
         "pairs from downstream analysis without deleting raw data or workbooks.",
     )
@@ -1668,12 +2231,32 @@ def _confirm_condition_crop_exclusions(
     _set_label(
         host,
         "processing_current_file_label",
-        "Checked rows remain on disk but will not enter Stats, harmonic selection, "
-        "Plot Generator, or other shared-index analyses.",
+        (
+            "Session/phase-at-visit and visit order are distinct fields; fixed "
+            "ordering can confound them. Checked rows remain on disk."
+            if recording_mode
+            else "Checked rows remain on disk but will not enter Stats, harmonic "
+            "selection, Plot Generator, or other shared-index analyses."
+        ),
     )
-    _set_preflight_table(
-        host,
-        [
+    if recording_mode:
+        headers = (
+            "Participant",
+            "Recording",
+            "Session / phase-at-visit",
+            "Visit",
+            "Group",
+            "Condition",
+            "Usable FFT crop",
+            "Project reference",
+            "Reason",
+            "Scope",
+            "Exclude downstream",
+        )
+        stretch_column = 8
+        check_column = 10
+    else:
+        headers = (
             "PID",
             "Group",
             "Condition",
@@ -1681,10 +2264,29 @@ def _confirm_condition_crop_exclusions(
             "Project reference",
             "Reason",
             "Exclude downstream",
-        ],
+        )
+        stretch_column = 5
+        check_column = _CONDITION_EXCLUSION_CHECK_COLUMN
+    _set_preflight_table(
+        host,
+        headers,
         _condition_crop_review_rows(audit, group_labels),
-        stretch_column=5,
+        stretch_column=stretch_column,
         center_columns=True,
+        compact_rows=recording_mode,
+        preferred_column_widths=(
+            {
+                1: 156,
+                2: 184,
+                6: 176,
+                7: 176,
+                8: 240,
+                9: 176,
+                10: 156,
+            }
+            if recording_mode
+            else None
+        ),
     )
     table = getattr(host, "processing_files_table", None)
     if table is not None:
@@ -1693,10 +2295,10 @@ def _confirm_condition_crop_exclusions(
             for observation in audit.recommended_exclusions
         }
         for row, candidate in enumerate(candidates):
-            item = table.item(row, _CONDITION_EXCLUSION_CHECK_COLUMN)
+            item = table.item(row, check_column)
             if item is None:
                 item = QTableWidgetItem()
-                table.setItem(row, _CONDITION_EXCLUSION_CHECK_COLUMN, item)
+                table.setItem(row, check_column, item)
             item.setFlags(
                 (item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable
             )
@@ -1707,6 +2309,16 @@ def _confirm_condition_crop_exclusions(
             )
             if candidate.already_excluded:
                 item.setToolTip("This participant-condition is already excluded.")
+            if recording_mode:
+                scope = QComboBox(table)
+                scope.setObjectName(f"condition_crop_scope_{row}")
+                scope.addItem("This recording", "recording")
+                scope.addItem("Participant (all visits)", "participant")
+                scope.setToolTip(
+                    "Choose whether this condition omission applies to one "
+                    "recording or to the participant across every visit."
+                )
+                _install_preflight_cell_widget(table, row, 9, scope)
 
     while True:
         choice = _await_preflight_choice(
@@ -1718,12 +2330,31 @@ def _confirm_condition_crop_exclusions(
         )
         if choice != "save":
             return True
-        updated = _replace_reviewed_condition_exclusions(
-            existing,
-            candidates,
-            _checked_condition_crop_pairs(host, candidates),
-        )
-        if audit.is_compatible_with_exclusions(updated):
+        if recording_mode:
+            checked_participants, checked_recordings = (
+                _checked_condition_crop_scopes(host, candidates)
+            )
+            updated = _replace_reviewed_condition_exclusions(
+                existing,
+                candidates,
+                checked_participants,
+            )
+            updated_recordings = _replace_reviewed_recording_condition_exclusions(
+                existing_recordings,
+                candidates,
+                checked_recordings,
+            )
+        else:
+            updated = _replace_reviewed_condition_exclusions(
+                existing,
+                candidates,
+                _checked_condition_crop_pairs(host, candidates),
+            )
+            updated_recordings = existing_recordings
+        if audit.is_compatible_with_exclusions(
+            updated,
+            recording_exclusions=updated_recordings,
+        ):
             break
         QMessageBox.warning(
             host,
@@ -1735,6 +2366,7 @@ def _confirm_condition_crop_exclusions(
 
     updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
     updated_preproc["manual_excluded_participant_conditions"] = updated
+    updated_preproc["manual_excluded_recording_conditions"] = updated_recordings
     try:
         normalized = host.currentProject.update_preprocessing(updated_preproc)
         host.currentProject.save()
@@ -1747,7 +2379,7 @@ def _confirm_condition_crop_exclusions(
         )
         return False
 
-    if updated != existing:
+    if updated != existing or updated_recordings != existing_recordings:
         try:
             mark_frequency_domain_outputs_stale(
                 host.currentProject.project_root,
@@ -1769,11 +2401,15 @@ def _confirm_condition_crop_exclusions(
     params["manual_excluded_participant_conditions"] = dict(
         normalized.get("manual_excluded_participant_conditions") or {}
     )
+    params["manual_excluded_recording_conditions"] = dict(
+        normalized.get("manual_excluded_recording_conditions") or {}
+    )
     host.validated_params = params
     try:
         host.log(
-            "Data quality check saved downstream participant-condition "
-            f"exclusions: {params['manual_excluded_participant_conditions']}",
+            "Data quality check saved downstream condition exclusions: "
+            f"participants={params['manual_excluded_participant_conditions']}; "
+            f"recordings={params['manual_excluded_recording_conditions']}",
             level=logging.WARNING,
         )
     except (AttributeError, TypeError, RuntimeError):
@@ -1790,12 +2426,23 @@ def _confirm_hard_exclusions(
     candidates = scan.hard_exclusion_candidates
     if not candidates:
         return set()
+    recording_mode = _recording_aware(candidates)
     _show_data_quality_notice(
         host,
-        "Review participants that may need to be excluded.",
-        "FPVS Toolbox found participant-level data quality problems. The next "
-        "screen lists the candidates and lets you add them to the manual "
-        "participant exclusion list before processing starts.",
+        (
+            "Review recordings that may need to be excluded."
+            if recording_mode
+            else "Review participants that may need to be excluded."
+        ),
+        (
+            "FPVS Toolbox found recording-level data quality problems. Choose "
+            "whether each candidate applies only to that recording or to the "
+            "participant across all visits."
+            if recording_mode
+            else "FPVS Toolbox found participant-level data quality problems. The "
+            "next screen lists the candidates and lets you add them to the manual "
+            "participant exclusion list before processing starts."
+        ),
     )
     _begin_preflight_page(
         host,
@@ -1804,33 +2451,75 @@ def _confirm_hard_exclusions(
         message="Review participant-level data quality failures before processing begins.",
         busy=False,
         review_visible=True,
-        review_title="Participant Exclusions",
+        review_title=(
+            "Recording / Participant Exclusions"
+            if recording_mode
+            else "Participant Exclusions"
+        ),
         progress_visible=False,
         checklist=(
-            "Review participants with hard data quality failures",
-            "Add confirmed cases to the participant exclusion list",
+            "Review recordings with hard data quality failures"
+            if recording_mode
+            else "Review participants with hard data quality failures",
+            "Choose single-recording or participant-wide scope"
+            if recording_mode
+            else "Add confirmed cases to the participant exclusion list",
             "Leave uncertain cases available if you want to inspect them later",
         ),
     )
     _set_label(
         host,
         "processing_summary_label",
-        "FPVS Toolbox found participant-level data quality failures that should "
-        "not enter the processed dataset.",
+        "FPVS Toolbox found recording-level data quality failures that should "
+        "not enter the processed dataset."
+        if recording_mode
+        else "FPVS Toolbox found participant-level data quality failures that "
+        "should not enter the processed dataset.",
     )
     _set_label(
         host,
         "processing_current_file_label",
-        "Review the candidates below. You can add them to the manual participant "
-        "exclusion list or continue without changing the list.",
+        "Session/phase-at-visit and visit order are distinct; fixed order can "
+        "confound them. Review scope for each candidate below."
+        if recording_mode
+        else "Review the candidates below. You can add them to the manual "
+        "participant exclusion list or continue without changing the list.",
     )
+    if recording_mode:
+        headers = (
+            "Participant",
+            "Recording",
+            "Session / phase-at-visit",
+            "Visit",
+            "Group",
+            "Flag",
+            "Reason",
+            "Scope",
+            "More info",
+        )
+        stretch_column = 6
+    else:
+        headers = ("PID", "Group", "Flag", "Reason", "More info")
+        stretch_column = _HARD_EXCLUSION_REASON_COLUMN
     _set_preflight_table(
         host,
-        ["PID", "Group", "Flag", "Reason", "More info"],
+        headers,
         _hard_candidate_row_values(candidates, group_labels),
-        stretch_column=_HARD_EXCLUSION_REASON_COLUMN,
+        stretch_column=stretch_column,
         center_columns=True,
     )
+    table = getattr(host, "processing_files_table", None)
+    if recording_mode and table is not None:
+        for row in range(len(candidates)):
+            scope = QComboBox(table)
+            scope.setObjectName(f"hard_exclusion_scope_{row}")
+            scope.addItem("This recording", "recording")
+            scope.addItem("Participant (all visits)", "participant")
+            scope.setToolTip(
+                "Recording scope excludes one visit. Participant scope excludes "
+                "all current and future visits for this participant."
+            )
+            _install_preflight_cell_widget(table, row, 7, scope)
     _install_hard_exclusion_details(host, candidates, group_labels)
     choice = _await_preflight_choice(
         host,
@@ -1845,11 +2534,41 @@ def _confirm_hard_exclusions(
     current = normalize_manual_excluded_participants(
         params.get("manual_excluded_participants")
     )
-    updated = normalize_manual_excluded_participants(
-        [*current, *(result.participant_id for result in candidates)]
+    current_recordings = normalize_manual_excluded_recordings(
+        params.get("manual_excluded_recordings")
     )
+    if recording_mode:
+        participant_additions: list[str] = []
+        recording_additions: list[str] = []
+        accepted: set[str] = set()
+        for row, result in enumerate(candidates):
+            scope_widget = table.cellWidget(row, 7) if table is not None else None
+            scope = (
+                str(scope_widget.currentData())
+                if isinstance(scope_widget, QComboBox)
+                else "recording"
+            )
+            if scope == "participant":
+                participant_additions.append(result.participant_id)
+                accepted.add(result.participant_id.casefold())
+            elif result.recording_id:
+                recording_additions.append(result.recording_id)
+                accepted.add(result.recording_id.casefold())
+        updated = normalize_manual_excluded_participants(
+            [*current, *participant_additions]
+        )
+        updated_recordings = normalize_manual_excluded_recordings(
+            [*current_recordings, *recording_additions]
+        )
+    else:
+        updated = normalize_manual_excluded_participants(
+            [*current, *(result.participant_id for result in candidates)]
+        )
+        updated_recordings = current_recordings
+        accepted = {result.participant_id.casefold() for result in candidates}
     updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
     updated_preproc["manual_excluded_participants"] = updated
+    updated_preproc["manual_excluded_recordings"] = updated_recordings
     try:
         normalized = host.currentProject.update_preprocessing(updated_preproc)
         host.currentProject.save()
@@ -1864,12 +2583,16 @@ def _confirm_hard_exclusions(
     params["manual_excluded_participants"] = list(
         normalized.get("manual_excluded_participants") or []
     )
+    params["manual_excluded_recordings"] = list(
+        normalized.get("manual_excluded_recordings") or []
+    )
     host.validated_params = params
-    accepted = {result.participant_id.casefold() for result in candidates}
     try:
         host.log(
-            "Data quality check added participant exclusion(s): "
-            + ", ".join(params["manual_excluded_participants"]),
+            "Data quality check added exclusion(s): participants="
+            + ", ".join(params["manual_excluded_participants"])
+            + "; recordings="
+            + ", ".join(params["manual_excluded_recordings"]),
             level=logging.WARNING,
         )
     except (AttributeError, TypeError, RuntimeError):
@@ -1903,7 +2626,7 @@ def _style_preflight_review_sheet(worksheet: Any) -> None:
 
 def _write_preflight_review_flags(
     host: Any,
-    rows: Sequence[tuple[str, str, str, str]],
+    rows: Sequence[tuple[str, ...]],
 ) -> Path:
     target = _quality_check_dir(host).resolve() / _DATA_QUALITY_REVIEW_FLAGS_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1911,7 +2634,19 @@ def _write_preflight_review_flags(
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Review Flags"
-    worksheet.append(("PID", "Group", "Source File", "Flagged Item"))
+    worksheet.append(
+        (
+            "Participant",
+            "Recording",
+            "Session / phase-at-visit",
+            "Visit",
+            "Group",
+            "Source File",
+            "Flagged Item",
+        )
+        if rows and len(rows[0]) == 7
+        else ("PID", "Group", "Source File", "Flagged Item")
+    )
     for row in rows:
         worksheet.append(row)
     _style_preflight_review_sheet(worksheet)
@@ -1923,11 +2658,15 @@ def _remaining_review_rows(
     scan: PreflightQcScan,
     accepted_hard_exclusions: set[str],
     group_labels: Mapping[str, str] | None = None,
-) -> list[tuple[str, str, str, str]]:
+) -> list[tuple[str, ...]]:
     labels = group_labels or {}
-    rows: list[tuple[str, str, str, str]] = []
+    recording_mode = _recording_aware(scan.results)
+    rows: list[tuple[str, ...]] = []
     for result in scan.suspicious_results:
-        if result.participant_id.casefold() in accepted_hard_exclusions:
+        if (
+            result.participant_id.casefold() in accepted_hard_exclusions
+            or result.identity_id.casefold() in accepted_hard_exclusions
+        ):
             continue
         fragments: list[str] = []
         if result.load_error:
@@ -1947,14 +2686,27 @@ def _remaining_review_rows(
                 + ", ".join(result.raw_spectral_flagged_channels[:8])
             )
         if fragments:
-            rows.append(
-                (
-                    result.participant_id,
-                    _result_group_display_name(result, labels),
-                    result.path.name,
-                    "; ".join(fragments),
+            if recording_mode:
+                rows.append(
+                    (
+                        result.participant_id,
+                        result.recording_id or "Not registered",
+                        _session_label(result),
+                        _visit_label(result),
+                        _result_group_display_name(result, labels),
+                        result.path.name,
+                        "; ".join(fragments),
+                    )
                 )
-            )
+            else:
+                rows.append(
+                    (
+                        result.participant_id,
+                        _result_group_display_name(result, labels),
+                        result.path.name,
+                        "; ".join(fragments),
+                    )
+                )
     return rows
 
 
@@ -1967,6 +2719,7 @@ def _show_suspicious_remainder(
     rows = _remaining_review_rows(scan, accepted_hard_exclusions, group_labels)
     if not rows:
         return True
+    recording_mode = len(rows[0]) == 7
 
     report_path: Path | None = None
     report_message = ""
@@ -2016,9 +2769,21 @@ def _show_suspicious_remainder(
     )
     _set_preflight_table(
         host,
-        ["PID", "Group", "Source File", "Review item"],
+        (
+            [
+                "Participant",
+                "Recording",
+                "Session / phase-at-visit",
+                "Visit",
+                "Group",
+                "Source File",
+                "Review item",
+            ]
+            if recording_mode
+            else ["PID", "Group", "Source File", "Review item"]
+        ),
         rows,
-        stretch_column=3,
+        stretch_column=6 if recording_mode else 3,
     )
     choice = _await_preflight_choice(
         host,

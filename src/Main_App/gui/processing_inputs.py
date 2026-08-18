@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 import config
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
+from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.participant_review import review_participants_for_processing
 from Main_App.gui.event_map import has_complete_event_map_entry
 from Main_App.processing.processing_controller import (
@@ -26,6 +27,7 @@ from Main_App.processing.processing_controller import (
     raw_file_info_for_path,
     raw_selection_start_folder,
     register_participants,
+    validate_repeated_recording_sources_for_processing,
 )
 from Main_App.processing.processing_ledger import classify_processing_inputs
 from Main_App.processing.fft_multinotch import (
@@ -37,6 +39,7 @@ from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
 )
+from Main_App.projects.recordings import project_recording_context
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     normalize_manual_removed_electrodes_map,
@@ -112,6 +115,30 @@ def validate_inputs(host: Any) -> bool:
         file_paths = [info.path for info in raw_file_infos]
         host.data_paths = [str(p) for p in file_paths]
         host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
+
+    preflight_file_infos = raw_file_infos
+    try:
+        recording_context = project_recording_context(host.currentProject)
+        if mode_now == "Single" and recording_context.is_repeated_session:
+            preflight_file_infos = prepare_batch_file_infos(host.currentProject)
+        repeated_source_report = validate_repeated_recording_sources_for_processing(
+            host.currentProject,
+            preflight_file_infos,
+        )
+    except Exception as exc:
+        logger.exception("Repeated-session processing source preflight failed.")
+        QMessageBox.critical(host, "Project Data Error", str(exc))
+        return False
+    if repeated_source_report is not None and repeated_source_report.warnings:
+        try:
+            host.log(
+                repeated_source_report.summary_text(),
+                level=logging.WARNING,
+            )
+        except (AttributeError, TypeError, RuntimeError):
+            logger.warning(
+                "Repeated-session source preflight found coverage warnings."
+            )
 
     # Save/output folder from project
     excel_sub = host.currentProject.subfolders.get("excel")
@@ -310,13 +337,28 @@ def _ensure_manual_removed_electrodes_reviewed(
     manual_map = normalize_manual_removed_electrodes_map(
         params.get("manual_removed_electrodes")
     )
+    recording_map = normalize_manual_removed_electrodes_map(
+        params.get("manual_removed_electrodes_by_recording")
+    )
     reviewed = {pid.casefold() for pid in manual_map}
-    missing = [
-        str(info.subject_id).strip()
+    reviewed_recordings = {
+        recording_id.casefold() for recording_id in recording_map
+    }
+    recording_aware = any(
+        str(getattr(info, "recording_id", "") or "").strip()
         for info in raw_file_infos
-        if str(info.subject_id).strip()
-        and str(info.subject_id).strip().casefold() not in reviewed
-    ]
+    )
+    missing: list[str] = []
+    for info in raw_file_infos:
+        participant_id = str(info.subject_id).strip()
+        recording_id = str(getattr(info, "recording_id", "") or "").strip()
+        if not participant_id:
+            continue
+        if participant_id.casefold() in reviewed:
+            continue
+        if recording_id and recording_id.casefold() in reviewed_recordings:
+            continue
+        missing.append(recording_id if recording_aware and recording_id else participant_id)
     if not missing:
         return True
 
@@ -324,14 +366,28 @@ def _ensure_manual_removed_electrodes_reviewed(
         "manual_removed_electrodes_review_required",
         extra={
             "project_root": str(getattr(host.currentProject, "project_root", "")),
-            "missing_participant_ids": list(missing),
+            "missing_participant_or_recording_ids": list(missing),
         },
     )
-    dialog = ManualRemovedElectrodesDialog(
-        [str(info.subject_id) for info in raw_file_infos],
-        manual_map,
-        host,
+    recording_rows = (
+        project_recording_coverage_rows(host.currentProject, raw_file_infos)
+        if recording_aware
+        else ()
     )
+    if recording_aware:
+        dialog = ManualRemovedElectrodesDialog(
+            [str(info.subject_id) for info in raw_file_infos],
+            manual_map,
+            host,
+            recording_rows=recording_rows,
+            manual_removed_electrodes_by_recording=recording_map,
+        )
+    else:
+        dialog = ManualRemovedElectrodesDialog(
+            [str(info.subject_id) for info in raw_file_infos],
+            manual_map,
+            host,
+        )
     if dialog.exec() != QDialog.Accepted:
         host.log("Manual removed-electrode review cancelled.")
         return False
@@ -339,11 +395,21 @@ def _ensure_manual_removed_electrodes_reviewed(
     updated_map = normalize_manual_removed_electrodes_map(
         dialog.manual_removed_electrodes()
     )
+    updated_recording_map = (
+        normalize_manual_removed_electrodes_map(
+            dialog.manual_removed_electrodes_by_recording()
+        )
+        if recording_aware
+        else recording_map
+    )
     updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
     updated_preproc["removed_electrode_detection_mode"] = (
         REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
     )
     updated_preproc["manual_removed_electrodes"] = updated_map
+    updated_preproc["manual_removed_electrodes_by_recording"] = (
+        updated_recording_map
+    )
     try:
         normalized = host.currentProject.update_preprocessing(updated_preproc)
         host.currentProject.save()
@@ -358,6 +424,9 @@ def _ensure_manual_removed_electrodes_reviewed(
     params["manual_removed_electrodes"] = dict(
         normalized.get("manual_removed_electrodes") or {}
     )
+    params["manual_removed_electrodes_by_recording"] = dict(
+        normalized.get("manual_removed_electrodes_by_recording") or {}
+    )
     params["removed_electrode_detection_mode"] = normalized.get(
         "removed_electrode_detection_mode"
     )
@@ -365,7 +434,11 @@ def _ensure_manual_removed_electrodes_reviewed(
         normalized.get("auto_detect_removed_electrodes")
     )
     host.validated_params = params
-    host.log("Manual removed-electrode list reviewed for current BDF pool.")
+    host.log(
+        "Manual removed-electrode list reviewed for each current recording."
+        if recording_aware
+        else "Manual removed-electrode list reviewed for current BDF pool."
+    )
     return True
 
 
@@ -467,11 +540,20 @@ def build_validated_params(host: Any) -> dict | None:
         "manual_removed_electrodes": dict(
             normalized.get("manual_removed_electrodes") or {}
         ),
+        "manual_removed_electrodes_by_recording": dict(
+            normalized.get("manual_removed_electrodes_by_recording") or {}
+        ),
         "manual_excluded_participants": list(
             normalized.get("manual_excluded_participants") or []
         ),
+        "manual_excluded_recordings": list(
+            normalized.get("manual_excluded_recordings") or []
+        ),
         "manual_excluded_participant_conditions": dict(
             normalized.get("manual_excluded_participant_conditions") or {}
+        ),
+        "manual_excluded_recording_conditions": dict(
+            normalized.get("manual_excluded_recording_conditions") or {}
         ),
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,

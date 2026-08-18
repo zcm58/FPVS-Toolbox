@@ -47,6 +47,7 @@ from Main_App.gui.components import (
     show_error,
     show_tool_info,
 )
+from Main_App.projects import repeated_session_tool_block_reason
 
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
@@ -804,6 +805,23 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _start_run(self) -> None:
         if self._thread is not None:
+            return
+        try:
+            repeated_block = repeated_session_tool_block_reason(
+                self._project_root,
+                tool_name="Individual Detectability",
+            )
+        except Exception as exc:  # noqa: BLE001
+            show_error(
+                self,
+                "Project Metadata Error",
+                f"Cannot validate repeated-session compatibility: {exc}",
+            )
+            return
+        if repeated_block:
+            self.status_label.set_text(repeated_block)
+            self.status_label.set_variant("warning")
+            show_error(self, "Repeated Sessions Not Supported", repeated_block)
             return
         output_root = self.output_root_edit.text().strip()
         input_root = self.input_root_edit.text().strip()

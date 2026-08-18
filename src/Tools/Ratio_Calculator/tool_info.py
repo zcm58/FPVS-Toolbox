@@ -21,6 +21,14 @@ an audit workbook, matching PNG/PDF plots, and a run log to the selected output
 folder.
 </p>
 
+<h3>Repeated Sessions</h3>
+<p>
+This tool is currently disabled for repeated-session projects because its
+participant-only pairing cannot preserve canonical recording and session
+identity. The protective gate prevents visits from being collapsed or treated
+as independent people.
+</p>
+
 <h3>Interpretation Notes</h3>
 <p>
 Ratios are unstable when a denominator is close to zero and are not

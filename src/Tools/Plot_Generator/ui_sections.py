@@ -205,6 +205,52 @@ class PlotGeneratorUiSectionsMixin:
         self._selectors_grid = selectors_grid
         params_layout.addLayout(selectors_grid)
 
+        self.session_controls_widget = QWidget()
+        self.session_controls_widget.setObjectName("snr_session_controls")
+        session_grid = QGridLayout(self.session_controls_widget)
+        session_grid.setContentsMargins(0, 0, 0, 0)
+        session_grid.setHorizontalSpacing(8)
+        session_grid.setVerticalSpacing(5)
+        self.session_dimension_combo = QComboBox()
+        self.session_dimension_combo.setAccessibleName("SNR comparison dimension")
+        self.session_dimension_combo.addItem("Condition (one session)", "condition")
+        self.session_dimension_combo.addItem("Session comparison", "session_comparison")
+        self.session_dimension_combo.currentIndexChanged.connect(
+            self._on_session_mode_changed
+        )
+        session_grid.addWidget(QLabel("Compare:"), 0, 0)
+        session_grid.addWidget(self.session_dimension_combo, 0, 1, 1, 3)
+
+        self.single_session_label = QLabel("Session:")
+        self.single_session_combo = QComboBox()
+        self.single_session_combo.setAccessibleName("Session for condition plots")
+        self.single_session_combo.currentIndexChanged.connect(self._check_required)
+        session_grid.addWidget(self.single_session_label, 1, 0)
+        session_grid.addWidget(self.single_session_combo, 1, 1, 1, 3)
+
+        self.reference_session_label = QLabel("Reference:")
+        self.reference_session_combo = QComboBox()
+        self.reference_session_combo.setAccessibleName("Reference session")
+        self.reference_session_combo.currentIndexChanged.connect(self._check_required)
+        self.comparison_session_label = QLabel("Comparison:")
+        self.comparison_session_combo = QComboBox()
+        self.comparison_session_combo.setAccessibleName("Comparison session")
+        self.comparison_session_combo.currentIndexChanged.connect(self._check_required)
+        session_grid.addWidget(self.reference_session_label, 2, 0)
+        session_grid.addWidget(self.reference_session_combo, 2, 1)
+        session_grid.addWidget(self.comparison_session_label, 2, 2)
+        session_grid.addWidget(self.comparison_session_combo, 2, 3)
+
+        self.session_caveat_label = QLabel()
+        self.session_caveat_label.setObjectName("snr_session_order_caveat")
+        self.session_caveat_label.setWordWrap(True)
+        self.session_caveat_label.setProperty("caption", True)
+        session_grid.addWidget(self.session_caveat_label, 3, 0, 1, 4)
+        session_grid.setColumnStretch(1, 1)
+        session_grid.setColumnStretch(3, 1)
+        self.session_controls_widget.hide()
+        params_layout.addWidget(self.session_controls_widget)
+
         self.overlay_check = QCheckBox("Overlay Comparison")
         self.overlay_check.toggled.connect(self._overlay_toggled)
 

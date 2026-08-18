@@ -15,13 +15,20 @@ from .grouping import (
 )
 from .preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
+    REPEATED_SESSION_PREPROCESSING_KEYS,
     normalize_preprocessing_settings,
+)
+from .recordings import (
+    normalize_project_recording_sources,
+    normalize_project_recordings,
+    normalize_project_sessions,
 )
 
 EXCEL_SUBFOLDER_NAME = "1 - Excel Data Files"
 SNR_SUBFOLDER_NAME = "2 - SNR Plots"
 STATS_SUBFOLDER_NAME = "3 - Statistical Analysis Results"
 PROJECT_SCHEMA_VERSION = "2.1.0"
+REPEATED_SESSION_PROJECT_SCHEMA_VERSION = "2.2.0"
 _LEGACY_BANDPASS_WARNED: set[Path] = set()
 logger = logging.getLogger(__name__)
 
@@ -56,6 +63,26 @@ DEFAULTS: Dict[str, Any] = {
     # Preprocessing parameters expected by GUI (dict)
     "preprocessing": {},
 }
+
+
+def _preprocessing_manifest_payload(
+    normalized: Mapping[str, Any],
+    *,
+    repeated_session: bool,
+) -> dict[str, Any]:
+    """Persist legacy keys exactly and recording-scoped QC only for v2.2."""
+
+    payload = {
+        key: normalized[key] for key in PREPROCESSING_CANONICAL_KEYS
+    }
+    if not repeated_session:
+        return payload
+    for key in REPEATED_SESSION_PREPROCESSING_KEYS:
+        value = normalized.get(key)
+        if value in (None, "", [], {}):
+            continue
+        payload[key] = value
+    return payload
 
 
 def _resolve_subpath(project_root: Path, value: str) -> Path:
@@ -102,6 +129,63 @@ def _group_lock_fingerprint(groups: Mapping[str, Mapping[str, Any]]) -> str:
         }
         for group_id, info in sorted(groups.items())
     ]
+    encoded = json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _recordings_lock_fingerprint(
+    sessions: Mapping[str, Mapping[str, Any]],
+    sources: Mapping[str, Mapping[str, Any]],
+    recordings: Mapping[str, Mapping[str, Any]],
+) -> str:
+    """Return a stable fingerprint for locked repeated-session assignments."""
+
+    payload = {
+        "sessions": [
+            {
+                "session_id": session_id,
+                "label": str(info.get("label") or ""),
+                "visit_index": int(info["visit_index"]),
+            }
+            for session_id, info in sorted(sessions.items())
+        ],
+        "recording_sources": [
+            {
+                "source_id": source_id,
+                "group_id": str(info["group_id"]),
+                "session_id": str(info["session_id"]),
+                "raw_input_folder": os.path.normcase(
+                    os.fspath(
+                        Path(info["raw_input_folder"]).resolve(strict=False)
+                    )
+                ),
+            }
+            for source_id, info in sorted(sources.items())
+        ],
+        "recordings": [
+            {
+                "recording_id": recording_id,
+                "participant_id": str(info["participant_id"]),
+                "session_id": str(info["session_id"]),
+                "source_id": str(info["source_id"]),
+                "raw_file": os.path.normcase(
+                    os.fspath(Path(info["raw_file"]).resolve(strict=False))
+                ),
+                "visit_index": int(info["visit_index"]),
+                "days_from_baseline": (
+                    float(info["days_from_baseline"])
+                    if info.get("days_from_baseline") is not None
+                    else None
+                ),
+            }
+            for recording_id, info in sorted(recordings.items())
+        ],
+    }
     encoded = json.dumps(
         payload,
         separators=(",", ":"),
@@ -224,6 +308,9 @@ class Project:
       - event_map: Dict[str, Any]
       - groups: Dict[str, Dict[str, Any]]
       - participants: Dict[str, Dict[str, Any]]
+      - sessions: Dict[str, Dict[str, Any]]
+      - recording_sources: Dict[str, Dict[str, Any]]
+      - recordings: Dict[str, Dict[str, Any]]
       - processing_fingerprint_v9_compatibility: Dict[str, float]
       - manifest: Dict[str, Any]  (raw, for persistence)
     """
@@ -311,9 +398,14 @@ class Project:
                 )
                 _LEGACY_BANDPASS_WARNED.add(self.project_root)
         self._legacy_inversion = legacy_inversion if legacy_inversion else None
-        manifest["preprocessing"] = {
-            key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
-        }
+        manifest["preprocessing"] = _preprocessing_manifest_payload(
+            self.preprocessing,
+            repeated_session=bool(
+                manifest.get("sessions")
+                or manifest.get("recording_sources")
+                or manifest.get("recordings")
+            ),
+        )
         _store_processing_fingerprint_v9_compatibility(
             manifest,
             self.processing_fingerprint_v9_compatibility,
@@ -338,6 +430,21 @@ class Project:
             self.groups,
             group_aliases,
         )
+        self.sessions = normalize_project_sessions(manifest.get("sessions", {}))
+        self.recording_sources = normalize_project_recording_sources(
+            self.project_root,
+            manifest.get("recording_sources", {}),
+            self.groups,
+            self.sessions,
+        )
+        self.recordings = normalize_project_recordings(
+            self.project_root,
+            manifest.get("recordings", {}),
+            self.groups,
+            self.participants,
+            self.sessions,
+            self.recording_sources,
+        )
         if self.groups:
             # Grouped projects have no project-level raw-data folder. Keeping a
             # synthesized ``<project>/Input`` path here would recreate the old
@@ -360,6 +467,33 @@ class Project:
             )
         self._groups_lock_fingerprint = (
             current_group_fingerprint if self.groups_locked else None
+        )
+        has_recording_metadata = bool(
+            self.sessions or self.recording_sources or self.recordings
+        )
+        current_recordings_fingerprint = _recordings_lock_fingerprint(
+            self.sessions,
+            self.recording_sources,
+            self.recordings,
+        )
+        stored_recordings_fingerprint = str(
+            manifest.get("recordings_lock_fingerprint") or ""
+        ).strip()
+        if (
+            self.groups_locked
+            and has_recording_metadata
+            and stored_recordings_fingerprint
+            and stored_recordings_fingerprint != current_recordings_fingerprint
+        ):
+            raise ValueError(
+                "Locked project session, recording-source, or recording definitions "
+                "do not match their stored fingerprint. Restore the registered "
+                "repeated-session layout or create a new project."
+            )
+        self._recordings_lock_fingerprint = (
+            current_recordings_fingerprint
+            if self.groups_locked and has_recording_metadata
+            else None
         )
 
         # Results subfolders (absolute paths under results_folder)
@@ -435,9 +569,14 @@ class Project:
         # Keep the merged view as the in-memory manifest so subsequent saves retain defaults
         proj.manifest = merged
         if proj._legacy_inversion is not None:
-            raw_manifest["preprocessing"] = {
-                key: proj.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
-            }
+            raw_manifest["preprocessing"] = _preprocessing_manifest_payload(
+                proj.preprocessing,
+                repeated_session=bool(
+                    raw_manifest.get("sessions")
+                    or raw_manifest.get("recording_sources")
+                    or raw_manifest.get("recordings")
+                ),
+            )
             _store_processing_fingerprint_v9_compatibility(
                 raw_manifest,
                 proj.processing_fingerprint_v9_compatibility,
@@ -498,9 +637,14 @@ class Project:
             self.preprocessing if isinstance(self.preprocessing, Mapping) else {}
         )
         self.preprocessing = normalized_pp
-        data["preprocessing"] = {
-            key: normalized_pp[key] for key in PREPROCESSING_CANONICAL_KEYS
-        }
+        data["preprocessing"] = _preprocessing_manifest_payload(
+            normalized_pp,
+            repeated_session=bool(
+                getattr(self, "sessions", {})
+                or getattr(self, "recording_sources", {})
+                or getattr(self, "recordings", {})
+            ),
+        )
         _store_processing_fingerprint_v9_compatibility(
             data,
             self.processing_fingerprint_v9_compatibility,
@@ -614,6 +758,106 @@ class Project:
         else:
             data.pop("participants", None)
 
+        # Optional v2.2 repeated-session metadata. Legacy projects retain the
+        # exact v2.1 persisted shape until at least one of these mappings is used.
+        normalized_sessions = normalize_project_sessions(
+            getattr(self, "sessions", {}) or {}
+        )
+        normalized_sources = normalize_project_recording_sources(
+            self.project_root,
+            getattr(self, "recording_sources", {}) or {},
+            normalized_groups,
+            normalized_sessions,
+        )
+        normalized_recordings = normalize_project_recordings(
+            self.project_root,
+            getattr(self, "recordings", {}) or {},
+            normalized_groups,
+            normalized_participants,
+            normalized_sessions,
+            normalized_sources,
+        )
+        self.sessions = normalized_sessions
+        self.recording_sources = normalized_sources
+        self.recordings = normalized_recordings
+        has_recording_metadata = bool(
+            normalized_sessions or normalized_sources or normalized_recordings
+        )
+        current_recordings_fingerprint = _recordings_lock_fingerprint(
+            normalized_sessions,
+            normalized_sources,
+            normalized_recordings,
+        )
+        locked_recordings_fingerprint = getattr(
+            self,
+            "_recordings_lock_fingerprint",
+            None,
+        )
+        if (
+            getattr(self, "groups_locked", False)
+            and locked_recordings_fingerprint is not None
+            and locked_recordings_fingerprint != current_recordings_fingerprint
+        ):
+            raise ValueError(
+                "Locked project session, recording-source, and recording assignments "
+                "cannot be changed. Restore the registered repeated-session layout "
+                "or create a new project."
+            )
+        if has_recording_metadata:
+            data["schema_version"] = REPEATED_SESSION_PROJECT_SCHEMA_VERSION
+            data["sessions"] = {
+                session_id: {
+                    "label": str(info["label"]),
+                    "visit_index": int(info["visit_index"]),
+                }
+                for session_id, info in normalized_sessions.items()
+            }
+            data["recording_sources"] = {
+                source_id: {
+                    "group_id": str(info["group_id"]),
+                    "session_id": str(info["session_id"]),
+                    "raw_input_folder": _relativize(
+                        self.project_root,
+                        Path(info["raw_input_folder"]),
+                    ),
+                }
+                for source_id, info in normalized_sources.items()
+            }
+            recordings_out: Dict[str, Dict[str, Any]] = {}
+            for recording_id, info in normalized_recordings.items():
+                recording_out: Dict[str, Any] = {
+                    "participant_id": str(info["participant_id"]),
+                    "session_id": str(info["session_id"]),
+                    "source_id": str(info["source_id"]),
+                    "raw_file": _relativize(
+                        self.project_root,
+                        Path(info["raw_file"]),
+                    ),
+                    "visit_index": int(info["visit_index"]),
+                }
+                if info.get("days_from_baseline") is not None:
+                    recording_out["days_from_baseline"] = float(
+                        info["days_from_baseline"]
+                    )
+                recordings_out[recording_id] = recording_out
+            data["recordings"] = recordings_out
+
+            if getattr(self, "groups_locked", False):
+                self._recordings_lock_fingerprint = current_recordings_fingerprint
+                data["recordings_lock_fingerprint"] = (
+                    current_recordings_fingerprint
+                )
+            else:
+                self._recordings_lock_fingerprint = None
+                data.pop("recordings_lock_fingerprint", None)
+        else:
+            data["schema_version"] = PROJECT_SCHEMA_VERSION
+            data.pop("sessions", None)
+            data.pop("recording_sources", None)
+            data.pop("recordings", None)
+            data.pop("recordings_lock_fingerprint", None)
+            self._recordings_lock_fingerprint = None
+
         data = _preserve_disk_tools_metadata(manifest_path, data)
 
         # Keep in-memory manifest consistent for subsequent operations.
@@ -643,7 +887,12 @@ class Project:
 
         normalized = normalize_preprocessing_settings(values)
         self.preprocessing = normalized
-        self.manifest["preprocessing"] = {
-            key: normalized[key] for key in PREPROCESSING_CANONICAL_KEYS
-        }
+        self.manifest["preprocessing"] = _preprocessing_manifest_payload(
+            normalized,
+            repeated_session=bool(
+                getattr(self, "sessions", {})
+                or getattr(self, "recording_sources", {})
+                or getattr(self, "recordings", {})
+            ),
+        )
         return normalized

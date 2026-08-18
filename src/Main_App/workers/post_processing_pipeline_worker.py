@@ -45,6 +45,19 @@ _SOURCE_PHASE_MESSAGE_BY_MODE = {
     ),
 }
 
+_REPEATED_SESSION_STATS_READY_SKIP_MESSAGE = (
+    "Skipped the legacy LORETA Stats-ready workbook for this repeated-session "
+    "project. Repeated-session analysis uses the recording-aware full-audit "
+    "workbook; the legacy LORETA workbook is participant-keyed and cannot "
+    "represent multiple recordings safely."
+)
+_REPEATED_SESSION_SOURCE_SKIP_MESSAGE = (
+    "Automatic LORETA project-source generation was skipped for this "
+    "repeated-session project because the current project-source producers "
+    "are participant-keyed and are not recording-aware. Source-ready "
+    "derivatives were left unchanged."
+)
+
 
 @dataclass(frozen=True)
 class PostProcessingStepResult:
@@ -405,7 +418,25 @@ class PostProcessingPipelineWorker(QObject):
             str(report.workbook_path),
         )
 
+    def _is_repeated_session_project(self) -> bool:
+        """Return the canonical project recording-mode classification."""
+
+        from Main_App.projects import project_recording_context
+
+        return project_recording_context(self._project).is_repeated_session
+
     def _run_stats_ready_export(self, project_root: Path) -> PostProcessingStepResult:
+        if self._is_repeated_session_project():
+            artifact_id = "stats_ready_summed_bca"
+            self._artifact_targets.pop(artifact_id, None)
+            self._artifact_archives.pop(artifact_id, None)
+            self._emit_progress(_REPEATED_SESSION_STATS_READY_SKIP_MESSAGE)
+            return PostProcessingStepResult(
+                artifact_id,
+                True,
+                _REPEATED_SESSION_STATS_READY_SKIP_MESSAGE,
+            )
+
         self._emit_progress("FPVS Toolbox is preparing analysis files for downstream tools.")
         artifact_id = "stats_ready_summed_bca"
         from Main_App.processing.artifact_freshness import canonical_artifact_path
@@ -586,6 +617,35 @@ class PostProcessingPipelineWorker(QObject):
         )
 
     def _run_source_maps(self, project_root: Path) -> list[PostProcessingStepResult]:
+        if self._is_repeated_session_project():
+            self._emit_progress(_REPEATED_SESSION_SOURCE_SKIP_MESSAGE)
+            steps: list[PostProcessingStepResult] = []
+            completed_before_source_maps = POST_PROCESSING_PHASE_COUNT - len(
+                SOURCE_OUTPUT_MODES
+            )
+            for index, mode in enumerate(SOURCE_OUTPUT_MODES, start=1):
+                self._artifact_targets.pop(mode, None)
+                self._artifact_archives.pop(mode, None)
+                phase_id = _SOURCE_PHASE_BY_MODE[mode]
+                self._emit_phase_progress(
+                    phase_id,
+                    completed_before_source_maps + index - 1,
+                    _REPEATED_SESSION_SOURCE_SKIP_MESSAGE,
+                )
+                steps.append(
+                    PostProcessingStepResult(
+                        mode,
+                        True,
+                        _REPEATED_SESSION_SOURCE_SKIP_MESSAGE,
+                    )
+                )
+                self._emit_phase_progress(
+                    phase_id,
+                    completed_before_source_maps + index,
+                    _REPEATED_SESSION_SOURCE_SKIP_MESSAGE,
+                )
+            return steps
+
         self._emit_progress(
             "Generating Hauk-informed time-domain source-space maps for 3D visualization of oddball responses."
         )

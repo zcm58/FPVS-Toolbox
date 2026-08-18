@@ -36,6 +36,41 @@ is produced—even if another condition or participant is later interrupted—th
 group-folder layout is locked and fingerprinted. Restore a missing registered
 folder or create a new project if the group design itself must change.
 
+### Repeated-Session Project Setup
+
+When creating a project, choose **Repeated sessions / visits**, enter the
+stable between-participant groups, then enter session labels in visit order.
+Select one raw source folder for every group x session cell. If the named
+project folder already contains raw data but has no `project.json`, the GUI can
+create the project in place after confirmation; existing files are preserved.
+
+When BDFs already exist, setup performs a read-only identity preflight before
+writing the manifest. Cross-session group changes, duplicate
+participant/session files, nested BDFs, and partially empty group/session cells
+block creation. Missing visits for individual participants are shown as
+warnings and retained. The preflight does not open BDF signal contents and does
+not infer group or session membership from generated output folders.
+
+### Repeated-Session Processing QC
+
+Repeated-session projects keep participant identity and recording identity
+separate. The QC screens show the participant, recording, session or
+phase-at-visit label, visit index, and group for every available recording.
+A declared visit with no registered recording is shown as missing coverage; the
+Toolbox does not create or impute a visit.
+
+Participant-wide exclusions apply to every visit. Use the single-recording
+scope when only one visit should be excluded, and use recording-condition scope
+when only one condition from one visit should be omitted downstream. Removed
+electrodes can likewise be saved per recording; the participant-level list is a
+legacy fallback for recordings without an explicit override.
+
+The session label and visit index describe different facts. For example,
+"Luteal" can be the phase-at-visit label while `visit_index = 1` records when
+that visit occurred. If every participant is tested in the same phase order,
+phase and order or time effects are confounded; the QC metadata preserves this
+fact but cannot statistically separate those effects.
+
 ### Data Compatibility
 
 The currently validated workflow targets BioSemi ActiveTwo 64-channel BDF

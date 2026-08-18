@@ -26,6 +26,14 @@ If processing-time harmonic
 selection is missing or stale, the Post-processing Required dialog can launch
 the shared rebuild workflow; EEG preprocessing is not repeated.
 </p>
+<p>
+Repeated-session projects explicitly choose one session for the ordinary
+condition workflow or two sessions for a group-column by session-row grid.
+The grid shares color limits, shows participant n, and can add a paired
+comparison-minus-reference row. Canonical recording/session identity is
+required. A fixed phase order confounds phase with visit order and elapsed
+time, so this output is descriptive and carries that caveat on the figure.
+</p>
 
 <h3>Output Notes</h3>
 <p>

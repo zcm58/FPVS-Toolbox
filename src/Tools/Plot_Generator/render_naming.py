@@ -7,6 +7,7 @@ import re
 
 
 GROUP_OVERLAY_SUFFIX = "_group_overlay"
+SESSION_COMPARISON_SUFFIX = "_session_comparison"
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*\x00-\x1f]+')
 # Leave headroom for both figure extensions on Windows installations that still
 # enforce conservative path limits.
@@ -78,4 +79,9 @@ def claim_figure_stem(
         attempt += 1
 
 
-__all__ = ["GROUP_OVERLAY_SUFFIX", "claim_figure_stem", "safe_figure_stem"]
+__all__ = [
+    "GROUP_OVERLAY_SUFFIX",
+    "SESSION_COMPARISON_SUFFIX",
+    "claim_figure_stem",
+    "safe_figure_stem",
+]

@@ -65,6 +65,16 @@ directories are selection-dependent artifacts: a changed accepted list marks
 both stale, archives any preceding directory during replacement, and rebuilds
 them from the durable time-domain derivatives in the selection-only resume.
 
+Project-source orchestration is currently participant-keyed and is therefore
+not valid for a project with multiple recording IDs per participant. The Main
+App post-processing worker detects repeated-session mode through the canonical
+`Main_App.projects.project_recording_context` API and treats the legacy
+LORETA Stats-ready workbook plus both automatic source-map producers as
+successful, non-applicable skips. It must not invoke those consumers, delete a
+preceding source artifact, or mark a nonexistent replacement current. The
+recording-aware source-ready derivatives remain durable inputs for a future
+recording-aware producer. Single-session orchestration remains unchanged.
+
 The default L2 method, `l2_mne_hauk_source_psd_cortical_normal_v1`, selects the
 cortical surface-normal component with MNE source PSD `pick_ori="normal"`. The
 GUI can instead request historical `l2_mne_hauk_source_psd_v1` when a user

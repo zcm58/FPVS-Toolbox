@@ -110,6 +110,15 @@ Neither current exporter reads FullFFT amplitude workbooks or uses them as a
 fallback; legacy amplitude-derived manifests remain importable only under
 their existing method identities.
 
+Those project-source exporters and the legacy LORETA Stats-ready workbook are
+currently participant-keyed. For canonical repeated-session projects, the
+post-processing worker reports them as successful, non-applicable skips rather
+than passing recording-keyed ledger/index data into an overwriting shape.
+Skipping occurs before artifact replacement, so existing files and
+recording-aware source-ready derivatives are not deleted or relabeled as
+current. The recording-aware full-audit workbook remains the downstream Stats
+input. Single-session publication and freshness behavior is unchanged.
+
 This is a sibling generated output, not an alternate `post_process()` entry
 point. It must reuse the already-validated exact `55_onbin` crop metadata and
 must not calculate FFT amplitudes, neighboring-bin metrics, source estimates,

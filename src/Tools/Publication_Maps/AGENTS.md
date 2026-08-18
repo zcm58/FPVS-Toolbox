@@ -27,6 +27,20 @@ Rules:
   or describe the comparison figure as a statistical test. Comparison mode is
   mutually exclusive with paired-condition mode and publishes only the
   combined PNG/PDF figure pair at the selected base output root.
+- Repeated-session projects require an explicit dimension. Condition mode
+  filters the canonical workbook cohort to one session. Session comparison
+  accepts one condition, exactly two canonical groups, and two distinct
+  canonical sessions, then renders group columns × session rows with one
+  shared per-metric scale.
+- Build repeated-session panels from exact canonical workbook paths and
+  `recording_id`/`session_id`/`group_id`/`visit_index` metadata. Never infer a
+  visit or phase from a path. Calculate optional comparison-minus-reference
+  values within participant before averaging, use a shared diverging scale,
+  and report participant `n` and paired `n`.
+- Fixed phase order is a design confound. Repeated-session GUI and figures must
+  state that phase cannot be separated from visit order, elapsed time, retest,
+  or drift; do not describe the descriptive difference as an isolated phase
+  effect.
 - Apply the shared participant, participant-condition, and frequency-domain
   exclusions before aggregation. Preserve dataset-index duplicate preference
   and diagnostics, and reject empty, unassigned, or ambiguous requested
@@ -56,10 +70,12 @@ Rules:
   distinct cancelled outcome and must not publish a partial figure set or a
   normal completion result. Keep the worker/thread and host navigation locked
   until the worker actually returns.
-- Visible figure titles should be condition names only. In two-group comparison
+- Visible ordinary figure titles should be condition names only. In two-group comparison
   mode, the selected condition is the overall title and canonical group labels
   are the two column headers. Do not add selected harmonics, subject counts, or
-  cache/source provenance to visible figure titles.
+  cache/source provenance to visible figure titles. Repeated-session grids are
+  the exception: panel titles must also show canonical session label, visit
+  index, participant `n`, and paired `n` where applicable.
 - Single-condition and paired-condition figures should fit a standard US letter
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
@@ -79,6 +95,9 @@ Rules:
   sets for that run.
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
+- Keep the embedded page within the supported 1280×900 workspace without a
+  page-level scroll area. Use flat purpose tabs for data/maps and output/run;
+  do not nest `SectionCard` surfaces.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:
   it starts checked with a `0.0` to `0.4 BCA` range; unchecked maps
   auto-scale.

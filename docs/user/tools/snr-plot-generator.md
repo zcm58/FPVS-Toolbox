@@ -69,6 +69,35 @@ supported comparison for that mode. The first and second color and legend
 controls map to the first two selected groups. Additional selected groups use
 automatic distinct colors, marker shapes, and their project labels.
 
+## Repeated-Session Projects
+
+When the project declares canonical recording and session metadata, SNR Plots
+shows an explicit **Compare** selector:
+
+- **Condition (one session)** keeps the existing condition workflow but first
+  requires one session. This prevents two visits from being pooled under the
+  same participant ID.
+- **Session comparison** requires one task condition and two different
+  sessions. Stable project groups become vertically stacked figure rows in one
+  standard-width column, and the session curves are overlaid within each group.
+  Session choices use the project label and visit order, for example
+  `Luteal phase — Visit 1`.
+
+The session-comparison legend reports the participant `n` for every
+group-by-session curve. Each group panel uses the same default width and height
+allocation as an ordinary single SNR plot. The exported filename adds
+`_session_comparison`, so it cannot overwrite an ordinary or group-overlay figure.
+
+This mode uses only canonical `recording_id`, `session_id`, `group_id`, and
+`visit_index` metadata. Missing or ambiguous identity blocks the run; the tool
+does not infer phase or visit from workbook or folder names.
+
+If every participant completed luteal first and follicular second, phase is
+fully confounded with visit order and elapsed time. The plots are therefore
+descriptive phase/visit comparisons, not evidence that separates a phase effect
+from order, retest, or time effects. This caveat appears in the window and on
+the exported figure.
+
 Each curve label includes the number of participants that contributed finite
 SNR values to that ROI, such as `Control (n=18)`. If a selected group has no
 usable data for an ROI, the tool names that group and ROI in the log and run
@@ -92,7 +121,8 @@ selected output folder, which defaults to the active project's
 spreadsheet, QC workbook, or JSON manifest. Ordinary figures use
 `<condition> - <ROI>`. Group overlays use
 `<condition> - <ROI>_group_overlay`, so they remain distinct from ordinary
-figures.
+figures. Repeated-session comparisons use
+`<condition> - <ROI>_session_comparison`.
 
 The compact page hides status and progress while idle. They appear while a run
 is active; progress hides again when the run ends, while completion or warning
@@ -132,11 +162,13 @@ itself an inferential significance test.
 1. Open **SNR Plots** after processing the project.
 2. Confirm the **Processed Excel Folder** and **Plot Output Folder**.
 3. Select the condition and ROI scope.
-4. For a single-group project, optionally enable a two-condition overlay.
-5. For a multi-group project, select the groups to include; group overlay is
+4. For a repeated-session project, choose **Condition (one session)** or
+   **Session comparison**, then select the canonical session or session pair.
+5. For a single-group project, optionally enable a two-condition overlay.
+6. For a multi-group project, select the groups to include; group overlay is
    required and enabled automatically.
-6. Adjust labels, ranges, colors, and optional spectral QC.
-7. Select **Generate SNR Plots**, then use **Open Plot Folder** to review the
+7. Adjust labels, ranges, colors, and optional spectral QC.
+8. Select **Generate SNR Plots**, then use **Open Plot Folder** to review the
    matching PNG/PDF figures in `2 - SNR Plots`.
 
 ## References

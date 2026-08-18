@@ -6,6 +6,10 @@ round of statistical checks. It is designed to answer a small set of common
 FPVS questions consistently. It is not the final project-specific statistical
 model for every study.
 
+Repeated-session projects open a separate paired change workflow in the same
+Stats window. They are never scanned as flat groups or routed through the
+Standard Screening model.
+
 Standard FPVS Screening is currently available under **Beta Tools**. Enable
 Beta Tools in **Settings > Advanced**, then close and reopen FPVS Toolbox. The
 beta placement reflects the screen's intentionally bounded publication role;
@@ -60,6 +64,52 @@ Project metadata determines the mode:
 The screen does not offer an "ignore groups" shortcut. If pooling participants
 is scientifically justified, create a separately defined single-group project
 so the design and provenance remain explicit.
+
+## Repeated-Session / Phase-at-Visit Analysis
+
+For a v2.2 project, `participant_id` identifies the person, `group_id`
+identifies the stable between-participant group, and `recording_id` plus
+`session_id` identify each repeated visit. Choose **Open Repeated-Session
+Analysis** after post-processing has created the canonical full-audit workbook.
+The dialog:
+
+- shows the two stable groups and two ordered sessions;
+- reports complete recording pairs and missing visits separately by group;
+- requires you to select the prespecified Condition x ROI outcomes for the
+  current run; and
+- retains recording-level QC, exclusions, missingness, and pair status in the
+  result workbook.
+
+Version 1 supports exactly two stable groups and two ordered sessions. For each
+selected Condition x ROI outcome, it calculates one participant change:
+
+```text
+participant change = visit 2 Summed BCA - visit 1 Summed BCA
+```
+
+The primary test is a two-sided Welch comparison of those participant changes
+between the two groups. It reports the signed difference in change, 95%
+confidence interval, Welch statistic and degrees of freedom, raw p-value,
+Holm-adjusted p-value, complete-pair N per group, and Hedges g. One primary
+Holm family spans every outcome you selected. A selected outcome that is not
+estimable remains in the declared family and audit; the Toolbox does not drop
+it to make the correction smaller.
+
+Secondary results test the paired change within each group using a two-sided
+one-sample t-test of participant changes. Those tests use one separate Holm
+family across both groups and all selected outcomes and report Cohen's dz.
+There is no imputation, no automatic statistical fallback, and no one-click
+Group x Session x Condition x ROI model. Participants with only one visit do
+not contribute to that outcome's paired change but remain visible in the
+participant, outcome, and coverage audits.
+
+When every participant completes luteal first and follicular second, menstrual
+phase is perfectly aligned with visit order, elapsed time, repetition,
+practice, and habituation. No statistical model can separate those effects in
+that design. Report the contrast as **session 2 (follicular) minus session 1
+(luteal)** or **session/phase-at-visit**, not as an isolated physiological
+phase effect. The between-group difference in change can still reflect
+group-specific order or retest effects.
 
 ## Available Observations and Missing Conditions
 
@@ -428,6 +478,13 @@ project. The current standard report is named:
 - `Native Single-Group Available-Case LMM Results.xlsx`; or
 - `Native Multi-Group Available-Case LMM Results.xlsx`.
 
+The separate repeated-session workflow writes
+`Repeated_Session_Change_Analysis.xlsx`. It contains the primary between-group
+change tests, secondary within-group paired changes, participant deltas,
+participant-session audit, outcome-pair audit, pair coverage, locked method
+metadata, the canonical recording-aware long data, and a machine-readable
+schema. The workbook always carries the fixed-order confounding warning.
+
 It includes:
 
 - At a Glance and Detailed Methods;
@@ -456,7 +513,10 @@ Every completed data-processing run also writes
 `Analysis_Ready_Summed_BCA_Full_Audit.xlsx` automatically. This second workbook
 is designed for an outside statistician or a custom RStudio workflow. Its
 primary `ROI Long` sheet contains all available processed participants and
-conditions, including observations currently excluded by Toolbox QC. Those
+conditions, including observations currently excluded by Toolbox QC. For v2.2
+projects its row identity also includes Recording ID, Session ID and label,
+Visit Index, Days From Baseline, and stable Group ID. Two visits therefore
+remain two rows and cannot overwrite one another. Those
 decisions appear as `Current Toolbox Exclusion`, `QC Flag`, and `QC Notes`
 fields; they do not remove values. Separate sheets provide raw, RMS-normalized,
 and signed-mean-normalized wide data, electrode-level values, whole-scalp

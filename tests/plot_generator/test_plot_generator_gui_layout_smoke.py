@@ -1,8 +1,18 @@
+from pathlib import Path
+
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QLabel, QScrollArea, QWidget
 
 from Main_App.gui.typography import FONT_ROLES
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
+from Tools.Plot_Generator import selection_state as plot_selection_state
+from Tools.Plot_Generator import session_selection as plot_session_selection
+from Main_App.projects import (
+    GroupInfo,
+    ProjectDatasetIndex,
+    SessionInfo,
+    WorkbookRecord,
+)
 from Main_App.gui.components import (
     ActionRow,
     PathPickerRow,
@@ -200,3 +210,131 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     window.log.append("Smoke log line")
     qtbot.wait(10)
     assert "Smoke log line" in window.log.toPlainText()
+
+
+def _repeated_plot_index(tmp_path: Path) -> ProjectDatasetIndex:
+    excel_root = tmp_path / "excel"
+    (excel_root / "Faces").mkdir(parents=True)
+    groups = {
+        "birth_control": GroupInfo(
+            "birth_control",
+            "Birth control",
+            "Birth Control",
+            tmp_path / "raw-bc",
+        ),
+        "no_birth_control": GroupInfo(
+            "no_birth_control",
+            "No birth control",
+            "No Birth Control",
+            tmp_path / "raw-no-bc",
+        ),
+    }
+    sessions = {
+        "luteal": SessionInfo("luteal", "Luteal phase", 1),
+        "follicular": SessionInfo("follicular", "Follicular phase", 2),
+    }
+    workbooks = tuple(
+        WorkbookRecord(
+            participant_id=participant_id,
+            condition="Faces",
+            path=(
+                excel_root
+                / "Faces"
+                / groups[group_id].folder_name
+                / session.session_id
+                / f"{participant_id}.xlsx"
+            ),
+            group_id=group_id,
+            group_label=groups[group_id].label,
+            observed_layout="condition_group_session",
+            observed_group_folder=groups[group_id].folder_name,
+            recording_id=f"{participant_id}_{session.session_id}",
+            session_id=session.session_id,
+            session_label=session.label,
+            visit_index=session.visit_index,
+        )
+        for participant_id, group_id in (
+            ("P01", "birth_control"),
+            ("P02", "no_birth_control"),
+        )
+        for session in sessions.values()
+    )
+    return ProjectDatasetIndex(
+        project_root=tmp_path,
+        excel_root=excel_root,
+        scan_root=excel_root,
+        manifest={"name": "Repeated"},
+        groups=groups,
+        participants={},
+        workbooks=workbooks,
+        excluded_workbooks=(),
+        diagnostics=(),
+        sessions=sessions,
+    )
+
+
+def test_plot_generator_repeated_session_controls_build_canonical_worker_kwargs(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    index = _repeated_plot_index(tmp_path)
+    monkeypatch.setattr(
+        plot_session_selection,
+        "load_project_dataset_index",
+        lambda _path: index,
+    )
+    monkeypatch.setattr(
+        plot_selection_state,
+        "load_manifest_for_excel_root",
+        lambda _path: {"name": "Repeated"},
+    )
+    monkeypatch.setattr(
+        plot_selection_state,
+        "normalize_participants_map",
+        lambda _manifest: {
+            "P01": "Birth control",
+            "P02": "No birth control",
+        },
+    )
+    monkeypatch.setattr(
+        plot_selection_state,
+        "extract_group_names",
+        lambda _manifest: ["Birth control", "No birth control"],
+    )
+    monkeypatch.setattr(
+        plot_selection_state,
+        "has_multi_groups",
+        lambda _manifest: True,
+    )
+
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.folder_edit.setText(str(index.excel_root))
+    window._populate_conditions(str(index.excel_root))
+    window.out_edit.setText(str(tmp_path / "plots"))
+    window.show()
+
+    assert window.session_controls_widget.isVisible()
+    assert window.session_dimension_combo.currentData() == "session_comparison"
+    assert window.reference_session_combo.currentText() == "Luteal phase — Visit 1"
+    assert window.comparison_session_combo.currentText() == "Follicular phase — Visit 2"
+    assert "confounded with visit order" in window.session_caveat_label.text()
+    assert window.condition_combo.currentText() == "Faces"
+    assert window.legend_group.isVisible() is False
+
+    kwargs = window._session_worker_kwargs()
+    assert kwargs["session_comparison_ids"] == ("luteal", "follicular")
+    assert kwargs["session_group_ids"] == (
+        "birth_control",
+        "no_birth_control",
+    )
+    assert "include_paired_session_difference" not in kwargs
+    assert not hasattr(window, "session_difference_check")
+
+    window.session_dimension_combo.setCurrentIndex(
+        window.session_dimension_combo.findData("condition")
+    )
+    assert window._session_worker_kwargs() == {
+        "workbook_session_ids": ("luteal",)
+    }

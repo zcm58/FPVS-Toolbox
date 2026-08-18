@@ -42,9 +42,10 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
             self._record_dataset_index_diagnostic(index, diagnostic)
         if index.manifest is not None and len(index.ordered_groups) > 1:
             self.multi_group_mode = True
-            group_mode_error = self._group_mode_configuration_error()
-            if group_mode_error is not None:
-                raise RuntimeError(group_mode_error)
+            if not getattr(self, "session_comparison_ids", ()):
+                group_mode_error = self._group_mode_configuration_error()
+                if group_mode_error is not None:
+                    raise RuntimeError(group_mode_error)
         if index.manifest is not None:
             canonical_groups = index.participant_group_label_map(
                 uppercase_keys=True,
@@ -107,8 +108,13 @@ class PlotDataCollectionMixin(PlotSpectralQcWorkflowMixin):
         if not cond_folder.is_dir():
             return []
         index = self._load_dataset_index()
-        records = index.select(conditions=(condition,))
-        if not records:
+        session_ids = tuple(getattr(self, "workbook_session_ids", ()) or ())
+        records = index.select(
+            conditions=(condition,),
+            session_ids=session_ids or None,
+            require_nonempty_sessions=bool(session_ids),
+        )
+        if not records and not session_ids:
             resolved_condition = cond_folder.resolve(strict=False)
             records = tuple(
                 record

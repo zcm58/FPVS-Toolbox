@@ -48,6 +48,14 @@ QC_SUMMARY_HEADERS = (
     "Included in Final Set",
     "Exclusion Reason",
 )
+RECORDING_QC_IDENTITY_HEADERS = (
+    "PID",
+    "Recording ID",
+    "Session ID",
+    "Session",
+    "Visit Index",
+    "Group ID",
+)
 _REVIEW_FLAG_PATTERNS = {
     "high_amplitude": re.compile(r"high-amplitude channel\(s\):\s*([^;]+)", re.IGNORECASE),
     "rare_burst": re.compile(r"rare-burst channel\(s\):\s*([^;]+)", re.IGNORECASE),
@@ -255,7 +263,7 @@ def _unique_ordered(*groups: Sequence[str]) -> list[str]:
     return merged
 
 
-def _review_flags_by_pid(project: Any) -> dict[str, dict[str, list[str]]]:
+def _review_flags_by_identity(project: Any) -> dict[str, dict[str, list[str]]]:
     report_path = _quality_check_root(project) / DATA_QUALITY_REVIEW_FLAGS_FILENAME
     if not report_path.exists():
         return {}
@@ -267,21 +275,46 @@ def _review_flags_by_pid(project: Any) -> dict[str, dict[str, list[str]]]:
         worksheet = workbook["Review Flags"] if "Review Flags" in workbook.sheetnames else workbook.active
         rows = worksheet.iter_rows(values_only=True)
         headers = [str(value or "").strip() for value in next(rows, ())]
-        try:
-            pid_index = headers.index("PID")
-            item_index = headers.index("Flagged Item")
-        except ValueError:
+        participant_index = next(
+            (
+                headers.index(header)
+                for header in ("PID", "Participant")
+                if header in headers
+            ),
+            None,
+        )
+        recording_index = next(
+            (
+                headers.index(header)
+                for header in ("Recording", "Recording ID")
+                if header in headers
+            ),
+            None,
+        )
+        if participant_index is None or "Flagged Item" not in headers:
             return {}
-        by_pid: dict[str, dict[str, list[str]]] = {}
+        item_index = headers.index("Flagged Item")
+        by_identity: dict[str, dict[str, list[str]]] = {}
         for row in rows:
             if row is None:
                 continue
-            pid = str(row[pid_index] or "").strip()
+            participant_id = str(row[participant_index] or "").strip()
+            recording_id = (
+                str(row[recording_index] or "").strip()
+                if recording_index is not None and recording_index < len(row)
+                else ""
+            )
             item = str(row[item_index] or "").strip()
-            if not pid or not item:
+            identity = (
+                recording_id
+                if recording_id
+                and recording_id.casefold() != "not registered"
+                else participant_id
+            )
+            if not identity or not item:
                 continue
-            bucket = by_pid.setdefault(
-                pid.casefold(),
+            bucket = by_identity.setdefault(
+                identity.casefold(),
                 {
                     "high_amplitude": [],
                     "rare_burst": [],
@@ -296,7 +329,7 @@ def _review_flags_by_pid(project: Any) -> dict[str, dict[str, list[str]]]:
                         bucket[key],
                         _split_review_items(match.group(1)),
                     )
-        return by_pid
+        return by_identity
     finally:
         workbook.close()
 
@@ -487,12 +520,14 @@ def build_processing_qc_rows(
 
     ledger = load_ledger(Path(project.project_root))
     results_by_path = _result_by_path(results)
-    review_flags = _review_flags_by_pid(project)
+    review_flags = _review_flags_by_identity(project)
     cache_index: _PreprocessedCacheQcIndex | None = None
     rows: list[dict[str, object]] = []
     for state in plan.states:
-        review = review_flags.get(state.participant_id.casefold(), {})
-        entry = _entry_for_pid(ledger, state.participant_id)
+        review = review_flags.get(
+            (state.info.recording_id or state.participant_id).casefold(),
+        ) or review_flags.get(state.participant_id.casefold(), {})
+        entry = _entry_for_pid(ledger, state.processing_id)
         if entry:
             if cache_index is None:
                 cache_index = _preprocessed_cache_qc_index(project)
@@ -734,8 +769,7 @@ def build_processing_qc_rows(
             included_text = "Included (partial conditions)"
         else:
             included_text = "Included" if included else "Excluded"
-        rows.append(
-            {
+        row: dict[str, object] = {
                 "PID": state.participant_id,
                 "Manually Removed Electrodes": _join_channels(
                     raw_qc_manual_removed_channels
@@ -791,7 +825,17 @@ def build_processing_qc_rows(
                 "Included in Final Set": included_text,
                 "Exclusion Reason": _exclusion_reason(entry, result),
             }
-        )
+        if state.info.recording_id:
+            row = {
+                "PID": state.participant_id,
+                "Recording ID": state.info.recording_id,
+                "Session ID": state.info.session_id or "",
+                "Session": state.info.session_label or "",
+                "Visit Index": state.info.visit_index or "",
+                "Group ID": state.info.group or "",
+                **{key: value for key, value in row.items() if key != "PID"},
+            }
+        rows.append(row)
     return rows
 
 
@@ -808,10 +852,16 @@ def export_processing_qc_summary(
 
     workbook = Workbook()
     worksheet = workbook.active
-    worksheet.title = QC_SUMMARY_SHEET
-    worksheet.append(list(QC_SUMMARY_HEADERS))
+    repeated_session = any(row.get("Recording ID") for row in rows)
+    headers = (
+        RECORDING_QC_IDENTITY_HEADERS + QC_SUMMARY_HEADERS[1:]
+        if repeated_session
+        else QC_SUMMARY_HEADERS
+    )
+    worksheet.title = "Recording QC" if repeated_session else QC_SUMMARY_SHEET
+    worksheet.append(list(headers))
     for row in rows:
-        worksheet.append([row[header] for header in QC_SUMMARY_HEADERS])
+        worksheet.append([row.get(header, "") for header in headers])
 
     center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for row in worksheet.iter_rows():
@@ -837,6 +887,7 @@ __all__ = [
     "DATA_QUALITY_REVIEW_FLAGS_FILENAME",
     "QC_SUMMARY_FILENAME",
     "QC_SUMMARY_HEADERS",
+    "RECORDING_QC_IDENTITY_HEADERS",
     "QC_SUMMARY_SHEET",
     "QUALITY_CHECK_FOLDER",
     "build_processing_qc_rows",

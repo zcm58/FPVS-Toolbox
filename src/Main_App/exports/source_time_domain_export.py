@@ -66,6 +66,8 @@ class SourceReadyTimeDomainExportResult:
     output_root: Path
     manifest_path: Path
     artifacts: tuple[SourceReadyTimeDomainArtifact, ...]
+    recording_id: str | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,8 @@ def write_source_ready_time_domain_derivatives(
     participant_id: str,
     condition_epochs: Mapping[str, Any],
     condition_ids: Mapping[str, str | int] | None = None,
+    recording_id: str | None = None,
+    session_id: str | None = None,
     group_id: str | None = None,
     group_folder: str | None = None,
     crop_provenance_by_condition: Mapping[str, Mapping[str, Any]] | None = None,
@@ -102,6 +106,15 @@ def write_source_ready_time_domain_derivatives(
 
     root = _active_project_root(project_root)
     participant = _path_component(participant_id, field="participant_id")
+    normalized_recording_id = _optional_identifier(
+        recording_id,
+        field="recording_id",
+    )
+    normalized_session_id = _optional_identifier(session_id, field="session_id")
+    artifact_identity = _path_component(
+        normalized_recording_id or participant,
+        field="recording_id" if normalized_recording_id else "participant_id",
+    )
     normalized_group_id = _optional_identifier(group_id, field="group_id")
     normalized_group_folder = _optional_path_component(
         group_folder if group_folder is not None else normalized_group_id,
@@ -114,7 +127,7 @@ def write_source_ready_time_domain_derivatives(
     plans = _condition_plans(
         root=root,
         output_root=output_root,
-        participant_id=participant,
+        artifact_identity=artifact_identity,
         group_folder=normalized_group_folder,
         condition_epochs=condition_epochs,
         condition_ids=condition_ids or {},
@@ -122,7 +135,7 @@ def write_source_ready_time_domain_derivatives(
     manifest_parts = [SOURCE_READY_TIME_DOMAIN_MANIFEST_FOLDER]
     if normalized_group_folder is not None:
         manifest_parts.append(normalized_group_folder)
-    manifest_parts.append(f"{participant}.json")
+    manifest_parts.append(f"{artifact_identity}.json")
     manifest_path = _project_path(output_root, *manifest_parts)
 
     crop_lookup = crop_provenance_by_condition or {}
@@ -156,6 +169,8 @@ def write_source_ready_time_domain_derivatives(
                 raw=average_raw,
                 repetition_count=repetition_count,
                 participant_id=participant,
+                recording_id=normalized_recording_id,
+                session_id=normalized_session_id,
                 group_id=normalized_group_id,
                 group_folder=normalized_group_folder,
                 fif_sha256=fif_sha256,
@@ -180,7 +195,7 @@ def write_source_ready_time_domain_derivatives(
 
         manifest = {
             "format": SOURCE_READY_TIME_DOMAIN_PARTICIPANT_MANIFEST_FORMAT,
-            "schema_version": 1,
+            "schema_version": 2 if normalized_recording_id else 1,
             "complete": True,
             "participant_id": participant,
             "group_id": normalized_group_id,
@@ -199,6 +214,9 @@ def write_source_ready_time_domain_derivatives(
                 for artifact in artifacts
             ],
         }
+        if normalized_recording_id:
+            manifest["recording_id"] = normalized_recording_id
+            manifest["session_id"] = normalized_session_id
         _atomic_write_json(manifest_path, manifest)
         committed = True
     finally:
@@ -224,6 +242,8 @@ def write_source_ready_time_domain_derivatives(
         output_root=output_root,
         manifest_path=manifest_path,
         artifacts=tuple(artifacts),
+        recording_id=normalized_recording_id,
+        session_id=normalized_session_id,
     )
 
 
@@ -241,7 +261,7 @@ def _condition_plans(
     *,
     root: Path,
     output_root: Path,
-    participant_id: str,
+    artifact_identity: str,
     group_folder: str | None,
     condition_epochs: Mapping[str, Any],
     condition_ids: Mapping[str, str | int],
@@ -267,7 +287,7 @@ def _condition_plans(
         if group_folder is not None:
             folder_parts.append(group_folder)
         condition_dir = _project_path(output_root, *folder_parts)
-        stem = f"{participant_id}_{condition_id}_avg"
+        stem = f"{artifact_identity}_{condition_id}_avg"
         fif_path = _project_path(condition_dir, f"{stem}_raw.fif")
         sidecar_path = _project_path(condition_dir, f"{stem}_raw.json")
         plans.append(
@@ -362,13 +382,14 @@ def _crop_payload(
         raise ValueError(
             f"crop provenance N_mod_step={n_mod_step} does not match N % N_step={computed_mod}"
         )
-    return {
+    payload = {
         "crop_mode": str(crop_mode) if crop_mode is not None else None,
         "N": n_times,
         "N_step": n_step,
         "N_mod_step": n_mod_step,
         "provenance": _json_value(provided),
     }
+    return payload
 
 
 def _epochs_metadata_records(epochs: Any) -> list[dict[str, Any]]:
@@ -405,6 +426,8 @@ def _sidecar_payload(
     raw: Any,
     repetition_count: int,
     participant_id: str,
+    recording_id: str | None,
+    session_id: str | None,
     group_id: str | None,
     group_folder: str | None,
     fif_sha256: str,
@@ -418,9 +441,9 @@ def _sidecar_payload(
     channel_names = list(raw.ch_names)
     channel_types = list(raw.get_channel_types())
     processing_mapping = processing if isinstance(processing, Mapping) else {}
-    return {
+    payload = {
         "format": SOURCE_READY_TIME_DOMAIN_FORMAT,
-        "schema_version": 1,
+        "schema_version": 2 if recording_id else 1,
         "complete": True,
         "writer": {
             "mne_version": str(mne.__version__),
@@ -466,6 +489,10 @@ def _sidecar_payload(
         "crop": _json_value(dict(crop)),
         "resolved_protocol": _json_value(dict(resolved_protocol)),
     }
+    if recording_id:
+        payload["recording_id"] = recording_id
+        payload["session_id"] = session_id
+    return payload
 
 
 def _projection_payload(projection: Mapping[str, Any]) -> dict[str, Any]:

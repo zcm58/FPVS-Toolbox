@@ -417,6 +417,63 @@ def test_run_full_pipeline_manual_participant_exclusion_skips_loader(
     assert "P12 was manually excluded" in str(result["message"])
 
 
+def test_run_full_pipeline_manual_recording_exclusion_preserves_paired_visit(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    luteal = tmp_path / "p12_luteal.bdf"
+    luteal.write_bytes(b"not a real bdf")
+
+    def _unexpected_loader(*_args, **_kwargs):
+        raise AssertionError("manual recording exclusion should skip the loader")
+
+    monkeypatch.setattr("Main_App.io.load_utils.load_eeg_file", _unexpected_loader)
+    file_key = str(luteal.resolve())
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=luteal,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            "manual_excluded_recordings": ["P12__luteal"],
+            "_fpvs_participant_id_by_file": {file_key: "P12"},
+            "_fpvs_recording_id_by_file": {file_key: "P12__luteal"},
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "excluded"
+    assert result["stage"] == "preflight"
+    assert result["reason"] == "manual_recording_exclusion"
+    assert "P12__luteal was manually excluded" in str(result["message"])
+
+
+def test_recording_manual_removed_electrodes_override_participant_defaults(
+    tmp_path: Path,
+) -> None:
+    follicular = tmp_path / "p12_follicular.bdf"
+    follicular.write_bytes(b"not a real bdf")
+    file_key = str(follicular.resolve())
+    settings = {
+        "removed_electrode_detection_mode": "manual",
+        "manual_removed_electrodes": {"P12": ["P9"]},
+        "manual_removed_electrodes_by_recording": {
+            "P12__follicular": ["Oz"],
+        },
+        "_fpvs_participant_id_by_file": {file_key: "P12"},
+        "_fpvs_recording_id_by_file": {file_key: "P12__follicular"},
+    }
+
+    assert process_runner._manual_removed_electrodes_for_file(
+        follicular,
+        settings,
+    ) == ["Oz"]
+
+
 def test_parallel_runner_skips_manual_participant_exclusions_before_pool(
     monkeypatch,
     tmp_path: Path,

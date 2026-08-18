@@ -36,6 +36,11 @@ shows a concise result. Full preparation and method details remain in the
 exported workbook.
 </p>
 <p>
+Repeated-session projects are protectively disabled because this method does
+not yet carry canonical recording/session identity. This prevents visits from
+being collapsed or treated as independent participants.
+</p>
+<p>
 The analysis never changes project metadata, QC decisions, source workbooks,
 or participant assignments. A successful run creates a new, non-overwriting
 results folder containing a polished Excel workbook and reproducibility files.

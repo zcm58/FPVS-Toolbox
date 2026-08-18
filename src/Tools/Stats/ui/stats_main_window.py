@@ -43,13 +43,18 @@ class StatsWindow(
 
         self._project_path = Path(self.project_dir).resolve()
         self._project_is_multi_group = False
+        self._project_is_repeated_session = False
         self._results_folder_hint: str | None = None
         self._subfolder_hints: dict[str, str] = {}
         self.project_title = os.path.basename(self.project_dir)
         self._load_project_context_from_root(self._project_path)
 
         super().__init__(parent)
-        self.setWindowTitle("Standard FPVS Screening")
+        self.setWindowTitle(
+            "Repeated Session FPVS Analysis"
+            if self._project_is_repeated_session
+            else "Standard FPVS Screening"
+        )
         logger.debug(
             "stats_window_init",
             extra={
@@ -141,6 +146,7 @@ class StatsWindow(
         # UI
         self._init_ui()
         self._initialize_native_analysis_controls()
+        self._sync_repeated_session_project_ui()
         self._update_single_group_analysis_availability()
         self.results_textbox = self.summary_text
         self._update_manual_exclusion_summary()
@@ -171,9 +177,15 @@ class StatsWindow(
             self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
             self._results_folder_hint, self._subfolder_hints = load_manifest_data(self._project_path, cfg)
             self._project_is_multi_group = is_multi_group_project_config(cfg)
+            self._project_is_repeated_session = bool(
+                cfg.get("sessions")
+                or cfg.get("recording_sources")
+                or cfg.get("recordings")
+            )
         except Exception:
             self.project_title = os.path.basename(self.project_dir)
             self._project_is_multi_group = False
+            self._project_is_repeated_session = False
 
     def rebind_project_context(
         self,
@@ -190,6 +202,8 @@ class StatsWindow(
         self._invalidate_controller_context()
         self._load_project_context_from_root(new_root)
         self._clear_project_bound_stats_state(invalidate_controller=False)
+        if hasattr(self, "setup_tabs"):
+            self._sync_repeated_session_project_ui()
         if hasattr(self, "harmonic_profile_value"):
             self._refresh_canonical_harmonic_summary()
         if clear_last_export:

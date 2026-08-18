@@ -36,6 +36,12 @@ Common long-running work:
   harmonic selection, standard Summed BCA export, full-audit workbook
   generation, and source-estimation logic remain owned by their processing,
   Stats, `Main_App.exports`, and LORETA source-producer modules.
+  For a canonical repeated-session project, the participant-keyed legacy
+  Stats-ready workbook and both LORETA project-source producers are not
+  applicable: the worker emits explicit successful skip steps and phase
+  progress without invoking them or touching existing artifacts. The
+  recording-aware full-audit export still runs. Single-session behavior keeps
+  the full order above.
 - After accepted frequency-domain QC is marked current, the full pipeline
   writes or revalidates processing-owned neutral FullFFT provenance before it
   attempts harmonic selection or any selection-derived export. That
@@ -81,6 +87,9 @@ Common long-running work:
   still exists with a current matching record, it may finish as a no-op. A
   standard selection-only rebuild leaves neutral FullFFT provenance unchanged
   because its source/cohort inputs did not change.
+  Repeated-session resumes rebuild only recording-aware applicable outputs;
+  the participant-keyed Stats-ready and LORETA steps remain explicit
+  non-applicable successes.
 - A confirmed Save-triggered harmonic rebuild shows the shared post-processing
   activity page while the embedded Settings page remains alive and guarded in
   the background. The FullFFT-grid audit uses indeterminate progress, then the

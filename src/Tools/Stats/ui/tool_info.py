@@ -23,6 +23,17 @@ WORKFLOW_HTML = """
       trail.</li>
 </ol>
 
+<h3>Repeated-session projects</h3>
+<p>
+Projects with repeated recordings use a separate paired workflow. The stable
+project group remains between participants, while session/phase-at-visit is
+within participant. Select prespecified Condition × ROI outcomes, review the
+complete-pair audit, and run the versioned participant-change analysis. It
+compares visit-2-minus-visit-1 changes between groups and applies Holm
+correction across the declared outcomes. Repeated recordings are never routed
+through the flat Standard Screening scanner.
+</p>
+
 <h3>How incomplete observations are handled</h3>
 <p>
 The screening freezes the eligible participant cohort, then uses each finite
@@ -65,6 +76,18 @@ label cannot create independence.
 Standard FPVS Screening is a transparent first-round screen. Covariates,
 additional groups, random slopes, longitudinal structure, and other
 study-specific questions require a planned custom analysis.
+</p>
+
+<h3>Repeated session/phase-at-visit method</h3>
+<p>
+The repeated workflow uses complete observed pairs separately for each
+declared Condition × ROI outcome, with no imputation and no statistical
+fallback. Its primary test is a two-sided Welch comparison of participant
+visit-2-minus-visit-1 changes between exactly two stable groups; paired
+within-group changes are secondary. When everyone completes the phases in the
+same order, phase is perfectly confounded with visit order, elapsed time,
+repetition, practice, and habituation. The result must therefore be described
+as a session/phase-at-visit contrast, not a pure physiological phase effect.
 </p>
 """
 

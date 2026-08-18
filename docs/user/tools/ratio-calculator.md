@@ -10,6 +10,12 @@ Use this tool only when a condition ratio is part of a planned descriptive or
 exploratory analysis. Both conditions must contain processed workbooks for the
 same participants.
 
+Ratio Calculator is currently disabled for repeated-session v2.2 projects. It
+does not yet carry canonical recording/session identity, so allowing it to scan
+those workbooks could collapse visits or treat them as independent people. Use
+the session-aware long export or another explicitly recording-aware workflow
+instead; the GUI blocks the run before reading data.
+
 A ratio is not automatically a normalized or better outcome. Values can become
 unstable when the denominator is small, and the resulting distributions may be
 skewed. Inspect the underlying condition values and report the numerator,

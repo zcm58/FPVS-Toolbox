@@ -282,6 +282,11 @@ def test_new_project_single_group_writes_no_groups_metadata(tmp_path, monkeypatc
     monkeypatch.setattr(project_manager.QInputDialog, "getText", fake_get_text)
     monkeypatch.setattr(project_manager.QInputDialog, "getInt", lambda *a, **k: (1, True))
     monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getItem",
+        lambda *a, **k: (project_manager.FLAT_PROJECT_STRUCTURE, True),
+    )
+    monkeypatch.setattr(
         project_manager.QFileDialog,
         "getExistingDirectory",
         lambda *a, **k: str(raw_dir),
@@ -342,6 +347,60 @@ def test_new_project_rejects_existing_project_without_overwriting_manifest(
     assert json.loads(manifest_path.read_text(encoding="utf-8")) == original_manifest
 
 
+def test_new_project_can_use_existing_folder_without_manifest(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    projects_root = tmp_path / "projects"
+    project_root = projects_root / "Existing Raw Study"
+    raw_dir = project_root / "Raw"
+    raw_dir.mkdir(parents=True)
+    preserved = project_root / "notes.txt"
+    preserved.write_text("keep me", encoding="utf-8")
+    loaded: list[Project] = []
+    host = SimpleNamespace(
+        projectsRoot=projects_root,
+        loadProject=lambda project: loaded.append(project),
+    )
+
+    monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getText",
+        lambda *args, **kwargs: ("Existing Raw Study", True),
+    )
+    monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getInt",
+        lambda *args, **kwargs: (1, True),
+    )
+    monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: (project_manager.FLAT_PROJECT_STRUCTURE, True),
+    )
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: str(raw_dir),
+    )
+    monkeypatch.setattr(
+        project_manager.QMessageBox,
+        "question",
+        lambda *args, **kwargs: project_manager.QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        project_manager.QMessageBox,
+        "information",
+        lambda *args, **kwargs: None,
+    )
+
+    project_manager.new_project(host)
+
+    assert len(loaded) == 1
+    assert (project_root / "project.json").is_file()
+    assert preserved.read_text(encoding="utf-8") == "keep me"
+
+
 def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monkeypatch) -> None:
     raw_root = tmp_path / "raw"
     control_dir = raw_root / "Control"
@@ -368,6 +427,11 @@ def test_new_project_multigroup_defaults_labels_from_folder_names(tmp_path, monk
 
     monkeypatch.setattr(project_manager.QInputDialog, "getText", fake_get_text)
     monkeypatch.setattr(project_manager.QInputDialog, "getInt", lambda *a, **k: (2, True))
+    monkeypatch.setattr(
+        project_manager.QInputDialog,
+        "getItem",
+        lambda *a, **k: (project_manager.FLAT_PROJECT_STRUCTURE, True),
+    )
     monkeypatch.setattr(
         project_manager.QFileDialog,
         "getExistingDirectory",

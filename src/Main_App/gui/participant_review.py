@@ -31,39 +31,79 @@ class ParticipantReviewDialog(AppDialog):
         rows: Sequence[ParticipantReviewRow],
         parent: QWidget | None = None,
     ) -> None:
+        repeated = any(row.recording_id for row in rows)
         super().__init__(
-            "Review Participants",
+            "Review Recordings" if repeated else "Review Participants",
             parent,
-            size=SurfaceSize(width=860, height=460, min_width=720, min_height=360),
+            size=SurfaceSize(
+                width=1100 if repeated else 860,
+                height=500 if repeated else 460,
+                min_width=820 if repeated else 720,
+                min_height=360,
+            ),
         )
         self.rows = list(rows)
+        self.repeated_session = repeated
 
         summary = QLabel(
-            "FPVS Toolbox found participant assignments that need review before processing."
+            (
+                "FPVS Toolbox found participant and session-recording assignments "
+                "that need review before processing. Each recording remains linked "
+                "to the same participant for paired analysis."
+                if repeated
+                else "FPVS Toolbox found participant assignments that need review "
+                "before processing."
+            )
         )
         summary.setWordWrap(True)
         self.root_layout.addWidget(summary)
 
-        self.table = QTableWidget(len(self.rows), 4, self)
-        self.table.setObjectName("participant_review_table")
-        self.table.setHorizontalHeaderLabels(
-            ["Participant", "Group", "Raw File", "Status"]
+        headers = (
+            [
+                "Participant",
+                "Group",
+                "Session",
+                "Visit",
+                "Recording",
+                "Raw File",
+                "Status",
+            ]
+            if repeated
+            else ["Participant", "Group", "Raw File", "Status"]
         )
+        self.table = QTableWidget(len(self.rows), len(headers), self)
+        self.table.setObjectName("participant_review_table")
+        self.table.setHorizontalHeaderLabels(headers)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        for column in range(len(headers)):
+            mode = (
+                QHeaderView.Stretch
+                if headers[column] == "Raw File"
+                else QHeaderView.ResizeToContents
+            )
+            self.table.horizontalHeader().setSectionResizeMode(column, mode)
 
         for row_index, row in enumerate(self.rows):
             values = (
-                row.participant_id,
-                row.group_label,
-                str(row.raw_file),
-                row.status,
+                (
+                    row.participant_id,
+                    row.group_label,
+                    row.session_label or row.session_id or "",
+                    str(row.visit_index or ""),
+                    row.recording_id or "",
+                    str(row.raw_file),
+                    row.status,
+                )
+                if repeated
+                else (
+                    row.participant_id,
+                    row.group_label,
+                    str(row.raw_file),
+                    row.status,
+                )
             )
             for col_index, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -73,7 +113,11 @@ class ParticipantReviewDialog(AppDialog):
         self.root_layout.addWidget(self.table)
 
         self.continue_button = make_action_button(
-            "Add Participants and Continue",
+            (
+                "Register Participants and Recordings"
+                if repeated
+                else "Add Participants and Continue"
+            ),
             variant="primary",
         )
         self.continue_button.setObjectName("participant_review_continue_button")

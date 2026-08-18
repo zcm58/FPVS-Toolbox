@@ -87,6 +87,10 @@ class PublicationMapRequest:
     group_id: str | None = None
     group_label: str | None = None
     group_folder: str | None = None
+    session_ids: tuple[str, ...] = ()
+    export_session_grid_figure: bool = False
+    session_comparison_ids: tuple[str, ...] = ()
+    export_paired_session_difference: bool = False
 
 
 @dataclass(frozen=True)

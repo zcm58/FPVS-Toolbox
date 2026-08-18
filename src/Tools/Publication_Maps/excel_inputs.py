@@ -127,6 +127,7 @@ def select_publication_workbooks(
     group_id: str | None = None,
     group_label: str | None = None,
     group_folder: str | None = None,
+    session_ids: Iterable[str] | None = None,
 ) -> tuple[tuple[WorkbookEntry, ...], GroupInfo | None]:
     """Select active canonical workbook records for one group-scoped run."""
 
@@ -145,7 +146,9 @@ def select_publication_workbooks(
     records = index.select(
         conditions=requested_conditions,
         group_ids=None if group is None else (group.group_id,),
+        session_ids=session_ids,
         require_nonempty_groups=False,
+        require_nonempty_sessions=session_ids is not None,
     )
     excluded = {str(subject).strip().casefold() for subject in excluded_subjects if str(subject).strip()}
     records = tuple(record for record in records if record.participant_id.casefold() not in excluded)
@@ -209,6 +212,7 @@ def discover_workbooks(
     group_id: str | None = None,
     group_label: str | None = None,
     group_folder: str | None = None,
+    session_ids: Iterable[str] | None = None,
 ) -> list[WorkbookEntry]:
     """Return shared-index workbooks for one canonical group scope."""
 
@@ -223,6 +227,7 @@ def discover_workbooks(
         group_id=group_id,
         group_label=group_label,
         group_folder=group_folder,
+        session_ids=session_ids,
     )
     return list(entries)
 

@@ -8,8 +8,10 @@ from Main_App.projects.preprocessing_settings import (
     NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
     PREPROCESSING_CANONICAL_KEYS,
     is_participant_condition_excluded,
+    is_recording_condition_excluded,
     new_project_preprocessing_settings,
     normalize_manual_excluded_participant_conditions,
+    normalize_manual_excluded_recording_conditions,
     normalize_preprocessing_settings,
 )
 
@@ -31,8 +33,11 @@ def test_defaults_use_expected_bandpass():
     assert normalized["auto_detect_removed_electrodes"] is True
     assert normalized["removed_electrode_detection_mode"] == "auto"
     assert normalized["manual_removed_electrodes"] == {}
+    assert normalized["manual_removed_electrodes_by_recording"] == {}
     assert normalized["manual_excluded_participants"] == []
+    assert normalized["manual_excluded_recordings"] == []
     assert normalized["manual_excluded_participant_conditions"] == {}
+    assert normalized["manual_excluded_recording_conditions"] == {}
     assert normalized["harmonic_selection_profile"] == LEGACY_HARMONIC_SELECTION_PROFILE
     assert normalized["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
     assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
@@ -221,3 +226,36 @@ def test_manual_excluded_participant_conditions_accept_json_mapping():
         "P1": ["Negative Valence"],
         "P4": ["Negative Valence"],
     }
+
+
+def test_recording_scoped_qc_settings_normalize_without_changing_participant_scope():
+    normalized = normalize_preprocessing_settings(
+        {
+            "manual_removed_electrodes": {"P01": ["P9"]},
+            "manual_removed_electrodes_by_recording": {
+                "P01__follicular": ["oz", "O2"],
+            },
+            "manual_excluded_participants": ["P09"],
+            "manual_excluded_recordings": ["P01__luteal", "p01__luteal"],
+            "manual_excluded_recording_conditions": {
+                "P01__follicular": ["Faces", "faces", "Objects"],
+            },
+        }
+    )
+
+    assert normalized["manual_removed_electrodes"] == {"P01": ["P9"]}
+    assert normalized["manual_removed_electrodes_by_recording"] == {
+        "P01__follicular": ["Oz", "O2"],
+    }
+    assert normalized["manual_excluded_participants"] == ["P09"]
+    assert normalized["manual_excluded_recordings"] == ["P01__luteal"]
+    assert normalized["manual_excluded_recording_conditions"] == {
+        "P01__follicular": ["Faces", "Objects"],
+    }
+    assert is_recording_condition_excluded(
+        normalize_manual_excluded_recording_conditions(
+            normalized["manual_excluded_recording_conditions"]
+        ),
+        "p01__FOLLICULAR",
+        "faces",
+    )

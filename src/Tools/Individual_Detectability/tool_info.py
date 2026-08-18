@@ -22,6 +22,14 @@ custom harmonics, thresholds, ROI behavior, and correction options. Custom
 harmonics do not replace the saved project selection.
 </p>
 
+<h3>Repeated Sessions</h3>
+<p>
+This tool is currently disabled for repeated-session projects because its
+participant-keyed collection is not yet recording-aware. The protective gate
+prevents one visit from overwriting another. Use a session-aware SNR, Scalp
+Maps, Stats, or long-export workflow instead.
+</p>
+
 <h3>Interpretation Notes</h3>
 <p>
 Individual-level detectability is a review and reporting aid. Check the chosen

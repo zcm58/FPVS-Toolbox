@@ -1087,6 +1087,8 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     page.metric_snr_check.setChecked(False)
     assert not page.fixed_snr_range_check.isEnabled()
     page.metric_snr_check.setChecked(True)
+    page.workflow_tabs.setCurrentIndex(1)
+    qtbot.wait(20)
     assert page.paired_figures_check.isChecked()
     assert page.paired_conditions_widget.isVisible()
     assert page.paired_condition_a_combo.currentText() == "CondA"

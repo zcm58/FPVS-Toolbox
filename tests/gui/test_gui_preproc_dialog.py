@@ -18,6 +18,7 @@ from Main_App.gui.manual_participant_exclusions_dialog import (
     ManualParticipantExclusionsDialog,
 )
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
+from Main_App.gui.recording_qc_identity import QcRecordingIdentity
 from Main_App.gui import processing_inputs
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
@@ -1211,6 +1212,57 @@ def test_manual_participant_exclusions_dialog_saves_project_list(
 
     reloaded = Project.load(project.project_root)
     assert reloaded.preprocessing["manual_excluded_participants"] == ["P12"]
+
+
+def test_recording_aware_manual_qc_dialogs_keep_missing_visit_as_coverage(qtbot):
+    rows = (
+        QcRecordingIdentity(
+            participant_id="P01",
+            group_id="control",
+            group_label="No Birth Control",
+            recording_id="P01__luteal",
+            session_id="luteal",
+            session_label="Luteal",
+            visit_index=1,
+        ),
+        QcRecordingIdentity(
+            participant_id="P01",
+            group_id="control",
+            group_label="No Birth Control",
+            session_id="follicular",
+            session_label="Follicular",
+            visit_index=2,
+            coverage_status="Missing / not registered",
+        ),
+    )
+    removed_dialog = ManualRemovedElectrodesDialog(
+        ["P01"],
+        {"P01": ["Oz"]},
+        recording_rows=rows,
+    )
+    qtbot.addWidget(removed_dialog)
+    removed_dialog.table.item(1, 5).setCheckState(Qt.Checked)
+    removed_dialog.table.item(1, 6).setText("P9")
+
+    assert removed_dialog.table.item(2, 1).text() == "Missing / not registered"
+    assert removed_dialog.manual_removed_electrodes() == {"P01": ["Oz"]}
+    assert removed_dialog.manual_removed_electrodes_by_recording() == {
+        "P01__luteal": ["P9"]
+    }
+
+    exclusion_dialog = ManualParticipantExclusionsDialog(
+        ["P01"],
+        [],
+        recording_rows=rows,
+    )
+    qtbot.addWidget(exclusion_dialog)
+    exclusion_dialog.table.item(1, 6).setCheckState(Qt.Checked)
+
+    assert exclusion_dialog.excluded_participants() == []
+    assert exclusion_dialog.excluded_recordings() == ["P01__luteal"]
+    assert not (
+        exclusion_dialog.table.item(2, 6).flags() & Qt.ItemIsEnabled
+    )
 
 
 def test_manual_removed_electrodes_prompt_updates_new_bdf_pool_pid(

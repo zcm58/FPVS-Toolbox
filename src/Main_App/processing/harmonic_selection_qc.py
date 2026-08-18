@@ -8,14 +8,18 @@ import math
 import os
 import tempfile
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
 from Main_App.processing.processing_ledger import load_ledger
-from Main_App.processing.frequency_domain_qc import filter_frequency_domain_subjects
+from Main_App.processing.frequency_domain_qc import (
+    active_frequency_domain_exclusions,
+    filter_frequency_domain_recordings,
+    filter_frequency_domain_subjects,
+)
 from Tools.Stats.analysis.dv_policy_group_significant import (
     GroupSignificantHarmonicSelection,
     build_group_significant_harmonic_selection,
@@ -75,6 +79,18 @@ class ProcessingHarmonicSelectionInputs:
     settings: DVPolicySettings
     base_frequency_hz: float
     max_frequency_hz: float | None
+    recording_assignments: dict[str, dict[str, object]] = field(default_factory=dict)
+    declared_session_ids: tuple[str, ...] = ()
+    participant_group_ids: dict[str, str] = field(default_factory=dict)
+    declared_group_ids: tuple[str, ...] = ()
+
+    @property
+    def is_repeated_session(self) -> bool:
+        return bool(self.recording_assignments)
+
+
+def _inputs_are_repeated(inputs: object) -> bool:
+    return bool(getattr(inputs, "recording_assignments", {}))
 
 
 @dataclass(frozen=True)
@@ -187,6 +203,27 @@ def run_processing_harmonic_selection_qc(
             max_freq=max_frequency_hz,
             project_root=project_root,
             force_recalculate=force_recalculate,
+            participant_group_ids=(
+                inputs.participant_group_ids
+                if _inputs_are_repeated(inputs)
+                else None
+            ),
+            declared_group_ids=(
+                inputs.declared_group_ids if _inputs_are_repeated(inputs) else None
+            ),
+            recording_assignments=(
+                inputs.recording_assignments if _inputs_are_repeated(inputs) else None
+            ),
+            declared_session_ids=(
+                inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
+            ),
+            electrode_exclusions_by_subject=(
+                active_frequency_domain_exclusions(
+                    project_root
+                ).auto_excluded_electrodes_by_recording
+                if _inputs_are_repeated(inputs)
+                else None
+            ),
         )
         if (
             force_recalculate
@@ -213,6 +250,13 @@ def run_processing_harmonic_selection_qc(
             dv_metadata=dv_metadata,
             project_root=project_root,
             use_accepted_processing_selection=False,
+            electrode_exclusions_by_subject=(
+                active_frequency_domain_exclusions(
+                    project_root
+                ).auto_excluded_electrodes_by_recording
+                if _inputs_are_repeated(inputs)
+                else None
+            ),
         )
         if fixed_data is None:
             raise RuntimeError("Harmonic selection QC could not build fixed harmonics.")
@@ -247,6 +291,12 @@ def _require_persisted_group_harmonic_selection(
         max_freq_hz=inputs.max_frequency_hz,
         settings=inputs.settings,
         rois=inputs.rois,
+        recording_assignments=(
+            inputs.recording_assignments if _inputs_are_repeated(inputs) else None
+        ),
+        declared_session_ids=(
+            inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
+        ),
     )
     lookup = lookup_cached_group_harmonic_selection(cache_request)
     if lookup.hit is not None:
@@ -281,6 +331,28 @@ def _canonical_selection_metadata(
         canonical["source_workbook_fingerprints"] = (
             _portable_source_workbook_fingerprints(sources)
         )
+    if _inputs_are_repeated(inputs):
+        canonical.update(
+            {
+                "selection_identity_level": "recording",
+                "selection_recordings": list(inputs.subjects),
+                "selection_subjects": list(
+                    dict.fromkeys(
+                        str(row.get("participant_id") or "")
+                        for row in inputs.recording_assignments.values()
+                        if str(row.get("participant_id") or "")
+                    )
+                ),
+                "selection_conditions": list(inputs.conditions),
+                "declared_session_ids": list(inputs.declared_session_ids),
+                "declared_group_ids": list(inputs.declared_group_ids),
+                "recording_assignments": [
+                    dict(inputs.recording_assignments[recording_id])
+                    for recording_id in inputs.subjects
+                ],
+                "applied_uniformly_across_sessions": True,
+            }
+        )
     canonical.pop("selection_fingerprint", None)
     canonical["selection_fingerprint"] = compute_selection_fingerprint(canonical)
     return canonical
@@ -298,6 +370,12 @@ def _processing_cache_request(
         max_freq_hz=inputs.max_frequency_hz,
         settings=inputs.settings,
         rois=inputs.rois,
+        recording_assignments=(
+            inputs.recording_assignments if _inputs_are_repeated(inputs) else None
+        ),
+        declared_session_ids=(
+            inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
+        ),
     )
     if request is None:
         raise RuntimeError(
@@ -541,6 +619,12 @@ def load_processing_harmonic_selection(
         max_freq_hz=inputs.max_frequency_hz,
         settings=inputs.settings,
         rois=inputs.rois,
+        recording_assignments=(
+            inputs.recording_assignments if _inputs_are_repeated(inputs) else None
+        ),
+        declared_session_ids=(
+            inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
+        ),
     )
     try:
         selection = group_significant_selection_from_metadata(
@@ -581,9 +665,26 @@ def _processing_harmonic_selection_inputs(
         raise ValueError(
             "The supplied dataset index belongs to a different project root."
         )
-    subjects = list(dataset_index.participant_ids)
     conditions = list(dataset_index.conditions)
-    subject_data = dataset_index.subject_data(require_group_assignment=True)
+    repeated_session = dataset_index.is_repeated_session
+    if repeated_session:
+        subjects = list(dataset_index.recording_ids)
+        subject_data = dataset_index.recording_data(require_group_assignment=True)
+        recording_assignments = _recording_assignments_from_index(dataset_index)
+        participant_group_ids = dataset_index.participant_group_id_map()
+        declared_group_ids = tuple(
+            group.group_id for group in dataset_index.ordered_groups
+        )
+        declared_session_ids = tuple(
+            session.session_id for session in dataset_index.ordered_sessions
+        )
+    else:
+        subjects = list(dataset_index.participant_ids)
+        subject_data = dataset_index.subject_data(require_group_assignment=True)
+        recording_assignments = {}
+        participant_group_ids = {}
+        declared_group_ids = ()
+        declared_session_ids = ()
     subjects, subject_data = _filter_to_completed_subjects(
         project_root=project_root,
         subjects=subjects,
@@ -592,14 +693,39 @@ def _processing_harmonic_selection_inputs(
     ordered_conditions = _ordered_conditions(project, conditions)
     subject_data = _filter_subject_data(subject_data, ordered_conditions)
     subjects = [subject for subject in subjects if subject_data.get(subject)]
-    subjects, subject_data, frequency_excluded = filter_frequency_domain_subjects(
-        project_root,
-        subjects,
-        subject_data,
-    )
+    if repeated_session:
+        subjects = _filter_manual_participant_exclusions_from_recordings(
+            project,
+            subjects,
+            recording_assignments=recording_assignments,
+        )
+        subject_data = {
+            recording_id: dict(subject_data.get(recording_id, {}))
+            for recording_id in subjects
+            if subject_data.get(recording_id)
+        }
+        subjects, subject_data, frequency_excluded = (
+            filter_frequency_domain_recordings(
+                project_root,
+                subjects,
+                subject_data,
+                recording_participant_ids={
+                    recording_id: str(row.get("participant_id") or "")
+                    for recording_id, row in recording_assignments.items()
+                },
+            )
+        )
+    else:
+        subjects, subject_data, frequency_excluded = filter_frequency_domain_subjects(
+            project_root,
+            subjects,
+            subject_data,
+        )
     if frequency_excluded:
         message = (
-            "Frequency-domain participant exclusions applied before final harmonic "
+            "Frequency-domain "
+            + ("recording" if repeated_session else "participant")
+            + " exclusions applied before final harmonic "
             "selection: " + ", ".join(frequency_excluded)
         )
         if log_func is not None:
@@ -620,6 +746,14 @@ def _processing_harmonic_selection_inputs(
         settings=settings,
         base_frequency_hz=_analysis_base_frequency_hz(),
         max_frequency_hz=_analysis_bca_upper_limit_hz(),
+        recording_assignments={
+            recording_id: dict(recording_assignments[recording_id])
+            for recording_id in subjects
+            if recording_id in recording_assignments
+        },
+        declared_session_ids=declared_session_ids,
+        participant_group_ids=participant_group_ids,
+        declared_group_ids=declared_group_ids,
     )
 
 
@@ -733,6 +867,57 @@ def _persisted_preprocessing_settings(project: Any) -> dict[str, object]:
                 return copy.deepcopy(dict(preprocessing))
     fallback = getattr(project, "preprocessing", {}) or {}
     return copy.deepcopy(dict(fallback)) if isinstance(fallback, Mapping) else {}
+
+
+def _recording_assignments_from_index(
+    dataset_index: ProjectDatasetIndex,
+) -> dict[str, dict[str, object]]:
+    participant_groups = dataset_index.participant_group_id_map()
+    assignments: dict[str, dict[str, object]] = {}
+    for recording_id in dataset_index.recording_ids:
+        recording = dataset_index.recordings.get(recording_id)
+        if recording is None:
+            raise RuntimeError(
+                "Repeated-session harmonic selection is missing the canonical "
+                f"recording assignment for {recording_id}."
+            )
+        assignments[recording_id] = {
+            "recording_id": recording_id,
+            "participant_id": recording.participant_id,
+            "group_id": participant_groups.get(recording.participant_id, ""),
+            "session_id": recording.session_id,
+            "source_id": recording.source_id,
+            "visit_index": recording.visit_index,
+            "days_from_baseline": recording.days_from_baseline,
+        }
+    return assignments
+
+
+def _filter_manual_participant_exclusions_from_recordings(
+    project: Any,
+    recording_ids: list[str],
+    *,
+    recording_assignments: Mapping[str, Mapping[str, object]],
+) -> list[str]:
+    from Main_App.projects.preprocessing_settings import (
+        normalize_manual_excluded_participants,
+    )
+
+    preprocessing = _persisted_preprocessing_settings(project)
+    excluded = {
+        str(participant_id).casefold()
+        for participant_id in normalize_manual_excluded_participants(
+            preprocessing.get("manual_excluded_participants", [])
+        )
+    }
+    return [
+        recording_id
+        for recording_id in recording_ids
+        if str(
+            recording_assignments.get(recording_id, {}).get("participant_id") or ""
+        ).casefold()
+        not in excluded
+    ]
 
 
 def _filter_to_completed_subjects(

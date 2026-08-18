@@ -20,8 +20,6 @@ from Tools.Plot_Generator.manifest_utils import (
     normalize_participants_map,
 )
 from Main_App.processing.roi_settings import ALL_ROIS_OPTION
-
-
 ALL_CONDITIONS_OPTION = "All Conditions"
 _UNSELECTED_GROUP_COLOR = "#d9dee8"
 _AUTO_GROUP_COLOR = "#9aa4b2"
@@ -174,6 +172,9 @@ class PlotGeneratorSelectionMixin:
                 ]
             except OSError:
                 subfolders = []
+            indexed = getattr(self, "_selection_dataset_index", None)
+            if indexed is not None and indexed.manifest is not None:
+                subfolders = list(indexed.conditions)
 
             with QSignalBlocker(self.condition_combo), QSignalBlocker(
                 self.condition_b_combo
@@ -184,7 +185,11 @@ class PlotGeneratorSelectionMixin:
                     self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
                     self.condition_combo.addItems(subfolders)
                     self.condition_b_combo.addItems(subfolders)
-            if self.overlay_check.isChecked() or self._group_overlay_enabled():
+            if (
+                self.overlay_check.isChecked()
+                or self._group_overlay_enabled()
+                or self._session_comparison_active()
+            ):
                 self._ensure_condition_a_valid_for_overlay()
                 self._set_all_conditions_enabled(False)
             else:
@@ -205,6 +210,15 @@ class PlotGeneratorSelectionMixin:
                 manifest = None
         self._subject_groups_map = normalize_participants_map(manifest)
         groups = extract_group_names(manifest)
+        self._refresh_session_controls(folder)
+        indexed = getattr(self, "_selection_dataset_index", None)
+        if indexed is not None and indexed.ordered_groups:
+            groups = [group.label for group in indexed.ordered_groups]
+            self._group_ids_by_label = {
+                group.label: group.group_id for group in indexed.ordered_groups
+            }
+        else:
+            self._group_ids_by_label = {}
         self._available_groups = groups
         self._has_multi_groups = has_multi_groups(
             manifest
@@ -280,7 +294,9 @@ class PlotGeneratorSelectionMixin:
     def _update_multigroup_mode_controls(self) -> None:
         multi_group = bool(self._has_multi_groups)
         if hasattr(self, "overlay_row"):
-            self.overlay_row.setVisible(not multi_group)
+            self.overlay_row.setVisible(
+                not multi_group and not self._session_comparison_active()
+            )
         if multi_group:
             if self.overlay_check.isChecked():
                 self.overlay_check.setChecked(False)

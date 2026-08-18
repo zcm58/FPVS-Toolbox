@@ -77,6 +77,29 @@ FPVS Toolbox uses a strict hybrid settings model:
   batch processing.
 - `group_count == 1` projects keep the normal single-group shape and do not
   write `groups` metadata.
+- Repeated-session projects opt into schema v2.2 with three additive
+  namespaces: `sessions`, `recording_sources`, and `recordings`. A session owns
+  a stable `session_id`, display label, and positive `visit_index`; a recording
+  source owns exactly one canonical `group_id` x `session_id` raw folder; a
+  recording owns one participant, source, session, direct-child BDF path,
+  visit index, and optional `days_from_baseline`. `participant_id` remains the
+  person/pairing identity and its `group_id` cannot change between sessions.
+  `recording_id` is the durable processing, ledger, derivative, workbook, and
+  recording-scoped QC identity.
+- The repeated-project creation flow collects groups and ordered sessions
+  separately, requires one source folder per group x session cell, and runs a
+  BDF-header-free identity preflight in a cancellable background worker when
+  source files already exist. Project creation resumes on the GUI thread only
+  after that worker returns an accepted audit; cancellation or failure creates
+  no project manifest. The
+  preflight blocks duplicate participant/session recordings, cross-session
+  group drift, nested BDFs, empty cells in a partially populated design, and
+  optionally declared filename-token conflicts. Missing participant sessions
+  remain explicit warnings and are imported without imputation. A completely
+  empty source scaffold remains valid.
+- Schema v2.1 manifests retain their exact field and preprocessing-setting
+  shape. Loading a legacy project may synthesize compatibility recording
+  identity in memory, but must not rewrite the manifest as v2.2.
 - Generated incremental-processing state lives under the active project root at
   `.fpvs_processing/processing_ledger.json` and
   `.fpvs_processing/processing_runs.jsonl`. This folder is recoverable state,
@@ -158,6 +181,13 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Multi-group Excel output layout is condition-first/group-second:
   `1 - Excel Data Files/<Condition>/<Group>/<Participant>_<Condition>_Results.xlsx`.
   Single-group output remains flat under each condition folder.
+- Repeated-session Excel output preserves the same condition-first/group-second
+  directories but uses
+  `<recording_id>_<condition>_Results.xlsx`. `WorkbookRecord` carries the
+  participant, recording, session, visit, interval, and group fields; duplicate
+  identity is `(recording_id, condition)`. `subject_data()` rejects repeated
+  projects because its participant-only key cannot represent two visits;
+  session-aware consumers use `recording_data()` and recording/session filters.
 - Experimental LORETA Visualizer source-map exports are generated under the
   active project root at `6 - Source Localization/`, with method-specific
   subfolders such as `L2-MNE Hauk Z-Score Beta/` and
@@ -216,6 +246,16 @@ The processing contract is deliberately strict:
   partial-condition result or completed participant before cancellation.
   Project creation and participant review alone do not lock the layout. Later
   direct model or manifest changes to locked group definitions hard-fail.
+
+For v2.2, batch discovery enumerates explicit recording sources instead of the
+common group roots. The same participant is expected across different
+sessions, but more than one BDF for one participant/session, reuse of a
+recording ID, or group drift across visits blocks before BDF loading. The
+processing ledger and expected-output planner key by recording ID, and the
+group/session/source/recording fingerprint locks with the first repeated
+output. Participant-wide, recording-wide, participant-condition, and
+recording-condition exclusions remain distinct. Per-recording removed-
+electrode choices override the participant-level compatibility fallback.
 
 The shared read-only group/participant context is now available from
 `Main_App.projects`. `Main_App.projects.dataset_index` is the single

@@ -741,6 +741,81 @@ def test_multigroup_expected_outputs_are_condition_first_group_second(tmp_path) 
     }
 
 
+def test_repeated_sessions_use_distinct_recording_ledger_and_output_identity(
+    tmp_path,
+) -> None:
+    project, original_info = _project_with_raw(tmp_path)
+    raw_root = original_info.path.parent
+    luteal_file = raw_root / "P01_BC_L.bdf"
+    follicular_file = raw_root / "P01_BC_F.bdf"
+    luteal_file.write_bytes(b"luteal")
+    follicular_file.write_bytes(b"follicular")
+    project.groups = {
+        "birth_control": {
+            "label": "Birth control",
+            "folder_name": "Birth Control",
+            "raw_input_folder": raw_root,
+        }
+    }
+    project.save()
+    infos = [
+        RawFileInfo(
+            luteal_file.resolve(),
+            "P01",
+            "birth_control",
+            "rec_p01_luteal",
+            "luteal",
+            "Luteal (Visit 1)",
+            1,
+            "bc_luteal",
+        ),
+        RawFileInfo(
+            follicular_file.resolve(),
+            "P01",
+            "birth_control",
+            "rec_p01_follicular",
+            "follicular",
+            "Follicular (Visit 2)",
+            2,
+            "bc_follicular",
+        ),
+    ]
+
+    plan = classify_processing_inputs(project, infos, _settings(), project.event_map)
+
+    assert [state.processing_id for state in plan.states] == [
+        "rec_p01_luteal",
+        "rec_p01_follicular",
+    ]
+    assert [state.expected_outputs[0].name for state in plan.states] == [
+        "rec_p01_luteal_Condition A_Results.xlsx",
+        "rec_p01_follicular_Condition A_Results.xlsx",
+    ]
+    for state in plan.states:
+        state.expected_outputs[0].parent.mkdir(parents=True, exist_ok=True)
+        state.expected_outputs[0].write_bytes(b"xlsx")
+    record_processing_results(
+        project,
+        plan,
+        [
+            {"status": "ok", "file": str(luteal_file.resolve()), "audit": {}},
+            {"status": "ok", "file": str(follicular_file.resolve()), "audit": {}},
+        ],
+        run_mode="batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+
+    ledger = json.loads(
+        (project.project_root / ".fpvs_processing" / "processing_ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert set(ledger["entries"]) == {"rec_p01_luteal", "rec_p01_follicular"}
+    assert ledger["entries"]["rec_p01_luteal"]["participant_id"] == "P01"
+    assert ledger["entries"]["rec_p01_luteal"]["session_id"] == "luteal"
+
+
 def test_two_groups_receive_distinct_canonical_output_routes(tmp_path) -> None:
     project, control_info = _project_with_raw(tmp_path)
     treatment_dir = tmp_path / "treatment_raw"
