@@ -1,4 +1,4 @@
-"""Qt workers for project inspection, preparation, and permutation inference."""
+"""Qt workers for project inspection and one-shot clustering analysis."""
 
 from __future__ import annotations
 
@@ -16,7 +16,12 @@ from Main_App.processing.full_fft_provenance import (
 )
 
 from .backend_adapter import FreeHarmonicBackend
-from .models import AnalysisSetup, ProjectAnalysisOptions, ProjectFrequencySnapshot
+from .models import (
+    AnalysisSetup,
+    AnalysisWorkerOutcome,
+    ProjectAnalysisOptions,
+    ProjectFrequencySnapshot,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +44,7 @@ def _requires_post_processing(error: BaseException) -> bool:
 
 
 class _CancellableWorker(QObject):
-    """Signal shell shared by the three sequential background operations."""
+    """Signal shell shared by background operations."""
 
     progress = Signal(int, int, str)
     completed = Signal(object)
@@ -138,8 +143,8 @@ class ProjectInspectionWorker(_CancellableWorker):
         )
 
 
-class PreparationWorker(_CancellableWorker):
-    """Read workbooks once and retain the prepared participant tensors."""
+class AnalysisWorker(_CancellableWorker):
+    """Prepare, analyze, and export one contrast on a single worker thread."""
 
     def __init__(
         self,
@@ -157,7 +162,12 @@ class PreparationWorker(_CancellableWorker):
         self._setup = setup
 
     def _execute(self) -> object:
-        return self._backend.prepare(
+        self._emit_progress(
+            0,
+            0,
+            "Preparing participant x electrode x harmonic data...",
+        )
+        prepared = self._backend.prepare(
             self._project_root,
             self._frequencies,
             self._options,
@@ -165,26 +175,32 @@ class PreparationWorker(_CancellableWorker):
             progress=self._emit_progress,
             cancel_check=self._should_cancel,
         )
-
-
-class PermutationWorker(_CancellableWorker):
-    """Analyze one exact prepared object and publish only on success."""
-
-    def __init__(self, backend: FreeHarmonicBackend, prepared: object) -> None:
-        super().__init__()
-        self._backend = backend
-        self._prepared = prepared
-
-    def _execute(self) -> object:
-        return self._backend.run(
-            self._prepared,
+        if self._should_cancel():
+            raise RuntimeError("Operation cancelled after preparation.")
+        self._emit_progress(
+            1,
+            1,
+            "Preparation complete. Starting cluster permutations...",
+        )
+        self._emit_progress(
+            0,
+            0,
+            "Running whole-participant cluster permutations...",
+        )
+        run_outcome = self._backend.run(
+            prepared,
             progress=self._emit_progress,
             cancel_check=self._should_cancel,
+        )
+        # Do not re-check cancellation after ``run`` returns. A returned run
+        # has committed its additive export and must remain visible as success.
+        return AnalysisWorkerOutcome(
+            prepared=prepared,
+            run_outcome=run_outcome,
         )
 
 
 __all__ = [
-    "PermutationWorker",
-    "PreparationWorker",
+    "AnalysisWorker",
     "ProjectInspectionWorker",
 ]

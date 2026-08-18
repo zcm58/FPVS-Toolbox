@@ -164,8 +164,17 @@ class RunOutcome:
     receipt: object
 
 
+@dataclass(frozen=True, slots=True)
+class AnalysisWorkerOutcome:
+    """Transient prepared data and exported result returned to the GUI once."""
+
+    prepared: object
+    run_outcome: RunOutcome
+
+
 __all__ = [
     "AnalysisSetup",
+    "AnalysisWorkerOutcome",
     "GroupChoice",
     "GuiAnalysisDesign",
     "GuiHarmonicMode",

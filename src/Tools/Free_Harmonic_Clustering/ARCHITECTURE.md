@@ -54,8 +54,9 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 - `gui/backend_adapter.py`: translates active-project and GUI selections into
   immutable backend requests without adding scientific behavior.
 - `gui/models.py`: GUI-only prepared/result view models.
-- `gui/workers.py`: cancellable signal-driven preparation and permutation
-  workers; workers do not touch widgets.
+- `gui/workers.py`: cancellable inspection plus one signal-driven analysis
+  worker that prepares, permutes, and exports sequentially without touching
+  widgets.
 - `gui/page.py`: embedded `FreeHarmonicClusteringPage` with one scroll-free
   setup/results workspace plus a compact persistent status/action footer.
 - `gui/__init__.py`: small embedded-GUI import surface.
@@ -180,8 +181,10 @@ family, and whole-participant exchangeability.
   permutations. A concise Results section appears beneath Setup when complete;
   detailed cohort, exclusion, harmonic, source-coverage, and participant x
   sensor x harmonic provenance remains in the exported workbook.
-- Prepared arrays remain in memory while the automatic permutation phase runs,
-  so source workbooks are not read a second time.
+- Prepared arrays remain worker-local while the automatic permutation and
+  export phases run, so source workbooks are not read a second time. After the
+  result table receives plain display strings, the page retains no prepared or
+  permutation tensors.
 - Results is hidden before completion and shows the current session's
   significant clusters in one bounded table ordered by ascending raw
   sign-specific p-value. Technical run metadata and the full cluster table stay
@@ -189,8 +192,9 @@ family, and whole-participant exchangeability.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
   information dialog explains fixed-domain fill-through and base-overlap
   exclusion.
-- Long preparation and permutations run outside the UI thread. Cancellation,
-  failure, and project switching cannot publish a partial completed bundle.
+- Long preparation, permutations, and export run sequentially on one worker
+  thread. Cancellation, failure, and project switching cannot publish a
+  partial completed bundle.
 
 ## Output
 

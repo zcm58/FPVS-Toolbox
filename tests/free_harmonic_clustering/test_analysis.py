@@ -10,6 +10,8 @@ from Tools.Free_Harmonic_Clustering.analysis import (
     DegenerateVarianceWarning,
     NEGATIVE_TAIL,
     POSITIVE_TAIL,
+    _independent_permutation_t_maps_flat,
+    _paired_permutation_t_maps_flat,
     biosemi64_adjacency_manifest,
     biosemi64_edge_export,
     biosemi64_spatial_adjacency,
@@ -290,6 +292,77 @@ def test_signed_null_extrema_use_zero_when_a_tail_has_no_cluster() -> None:
     assert negative.tolist() == [0.0, -9.0, 0.0]
 
 
+def test_mass_only_null_extrema_exactly_match_full_component_reference() -> None:
+    rng = np.random.default_rng(1842)
+    maps = rng.normal(size=(37, 4, 5))
+    maps[0, 0, 0] = np.inf
+    maps[1, 3, 4] = -np.inf
+    adjacency = _chain_adjacency(4)
+    threshold = 1.1
+
+    expected_positive = np.zeros(maps.shape[0], dtype=np.float64)
+    expected_negative = np.zeros(maps.shape[0], dtype=np.float64)
+    for permutation_index, t_map in enumerate(maps):
+        components = signed_cluster_components(
+            t_map,
+            spatial_adjacency=adjacency,
+            threshold=threshold,
+        )
+        positive = [component.mass for component in components if component.tail == POSITIVE_TAIL]
+        negative = [component.mass for component in components if component.tail == NEGATIVE_TAIL]
+        if positive:
+            expected_positive[permutation_index] = max(positive)
+        if negative:
+            expected_negative[permutation_index] = min(negative)
+
+    actual_positive, actual_negative = signed_null_extrema(
+        maps,
+        spatial_adjacency=adjacency,
+        threshold=threshold,
+    )
+
+    assert np.array_equal(actual_positive, expected_positive)
+    assert np.array_equal(actual_negative, expected_negative)
+
+
+def test_cached_paired_sufficient_statistics_are_bitwise_equivalent() -> None:
+    rng = np.random.default_rng(1843)
+    differences = rng.normal(size=(11, 23))
+    signs = rng.choice(np.asarray([-1.0, 1.0]), size=(29, 11))
+    sum_squares = np.sum(np.square(differences), axis=0, dtype=np.float64)
+
+    uncached = _paired_permutation_t_maps_flat(differences, signs)
+    cached = _paired_permutation_t_maps_flat(
+        differences,
+        signs,
+        sum_squares=sum_squares,
+    )
+
+    assert np.array_equal(cached, uncached)
+
+
+def test_cached_independent_sufficient_statistics_are_bitwise_equivalent() -> None:
+    rng = np.random.default_rng(1844)
+    pooled = rng.normal(size=(15, 23))
+    masks = np.zeros((29, pooled.shape[0]), dtype=bool)
+    for row in masks:
+        row[rng.permutation(pooled.shape[0])[:7]] = True
+    pooled_squares = np.square(pooled)
+    total_sums = np.sum(pooled, axis=0, dtype=np.float64)
+    total_squares = np.sum(pooled_squares, axis=0, dtype=np.float64)
+
+    uncached = _independent_permutation_t_maps_flat(pooled, masks)
+    cached = _independent_permutation_t_maps_flat(
+        pooled,
+        masks,
+        pooled_squares=pooled_squares,
+        total_sums=total_sums,
+        total_squares=total_squares,
+    )
+
+    assert np.array_equal(cached, uncached)
+
+
 @pytest.mark.parametrize(
     ("tail", "observed", "null"),
     (
@@ -416,6 +489,33 @@ def test_independent_monte_carlo_preserves_group_sizes_and_batch_sequence() -> N
     assert np.array_equal(first.null_positive_maxima, second.null_positive_maxima)
     assert np.array_equal(first.null_negative_minima, second.null_negative_minima)
     assert first.clusters == second.clusters
+
+
+def test_core_validates_and_converts_spatial_adjacency_once() -> None:
+    class CountingAdjacency:
+        def __init__(self, values: np.ndarray) -> None:
+            self.values = values
+            self.toarray_calls = 0
+
+        def toarray(self) -> np.ndarray:
+            self.toarray_calls += 1
+            return self.values
+
+    adjacency = CountingAdjacency(_chain_adjacency(2))
+    arm_a = np.arange(24.0).reshape(6, 2, 2)
+    arm_b = np.zeros_like(arm_a)
+
+    run_cluster_permutation_core(
+        arm_a,
+        arm_b,
+        design="paired_conditions",
+        spatial_adjacency=adjacency,  # type: ignore[arg-type]
+        permutation_count=9,
+        seed=31,
+        batch_size=4,
+    )
+
+    assert adjacency.toarray_calls == 1
 
 
 def test_condition_swap_flips_paired_t_map() -> None:

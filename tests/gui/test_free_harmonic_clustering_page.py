@@ -17,6 +17,7 @@ from Main_App.processing.full_fft_provenance import (  # noqa: E402
     FullFftProvenanceMissingError,
 )
 import Main_App.gui.update_manager as update_manager  # noqa: E402
+from Tools.Free_Harmonic_Clustering import FreeHarmonicInputError  # noqa: E402
 from Tools.Free_Harmonic_Clustering.gui import (  # noqa: E402
     FreeHarmonicClusteringPage,
     ProjectFrequencySnapshot,
@@ -24,14 +25,18 @@ from Tools.Free_Harmonic_Clustering.gui import (  # noqa: E402
     has_active_operations,
 )
 from Tools.Free_Harmonic_Clustering.gui.models import (  # noqa: E402
-    FreeHarmonicInputError,
+    AnalysisSetup,
+    AnalysisWorkerOutcome,
     GuiAnalysisDesign,
     GuiHarmonicMode,
     GroupChoice,
     ProjectAnalysisOptions,
     RunOutcome,
 )
-from Tools.Free_Harmonic_Clustering.gui.workers import _CancellableWorker  # noqa: E402
+from Tools.Free_Harmonic_Clustering.gui.workers import (  # noqa: E402
+    AnalysisWorker,
+    _CancellableWorker,
+)
 from Tools.Free_Harmonic_Clustering.gui.operation_registry import (  # noqa: E402
     register_active_operation,
     release_active_operation,
@@ -76,6 +81,18 @@ def _options(
         frequency_resolution_hz=0.01,
         compatibility_message="Exact cohort grids are checked during Prepare.",
         diagnostics=diagnostics,
+    )
+
+
+def _analysis_setup() -> AnalysisSetup:
+    return AnalysisSetup(
+        design=GuiAnalysisDesign.PAIRED_CONDITIONS,
+        condition_a="Neutral Happy",
+        condition_b="Neutral Fear",
+        group_ids=("anxious", "non_anxious"),
+        harmonic_mode=GuiHarmonicMode.AUTOMATIC,
+        fixed_highest_harmonic_order=None,
+        max_harmonic_hz=20.0,
     )
 
 
@@ -445,13 +462,14 @@ def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
     assert "Project inputs loaded" in page.workflow_status.text()
 
 
-def test_paired_condition_guard_invalidates_prepared_state(
+def test_paired_condition_guard_invalidates_completed_result(
     qtbot,
     tmp_path: Path,
 ) -> None:
     page = _page(qtbot, tmp_path)
-    page._on_preparation_completed(_prepared(tmp_path))
-    assert page._prepared is not None
+    page._has_result = True
+    page.results_panel.show()
+    assert page._has_result
 
     requested_a = page.paired_condition_b_combo.currentData()
     page.paired_condition_a_combo.setCurrentIndex(
@@ -463,7 +481,7 @@ def test_paired_condition_guard_invalidates_prepared_state(
         page.paired_condition_a_combo.currentData()
         != page.paired_condition_b_combo.currentData()
     )
-    assert page._prepared is None
+    assert not page._has_result
     assert page.setup_panel.isVisible()
     assert page.results_panel.isHidden()
     assert "Setup changed" in page.workflow_status.text()
@@ -495,54 +513,123 @@ def test_valid_independent_setup_enables_one_click_analysis(
     assert page._setup_error() is None
     assert page.run_analysis_button.isEnabled()
 
-    started_stages: list[str] = []
+    started_operations: list[tuple[object, str]] = []
 
     def _record_start(
-        _worker: object,
+        worker: object,
         *,
         stage: str,
         **_kwargs: object,
     ) -> None:
-        started_stages.append(stage)
+        started_operations.append((worker, stage))
 
     monkeypatch.setattr(page, "_start_operation", _record_start)
     qtbot.mouseClick(page.run_analysis_button, QtCore.Qt.LeftButton)
 
-    assert started_stages == ["preparation"]
-    assert page._continue_to_permutations
+    assert len(started_operations) == 1
+    worker, stage = started_operations[0]
+    assert isinstance(worker, AnalysisWorker)
+    assert stage == "analysis"
 
 
-def test_successful_preparation_automatically_starts_permutations(
-    qtbot,
+def test_analysis_worker_chains_phases_and_preserves_late_export_success(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    page = _page(qtbot, tmp_path)
     prepared = _prepared(tmp_path)
-    permutation_starts: list[bool] = []
-    monkeypatch.setattr(
-        page,
-        "_run_permutations",
-        lambda: permutation_starts.append(True),
+    run_outcome = RunOutcome(
+        result=SimpleNamespace(clusters=()),
+        receipt=SimpleNamespace(output_directory=tmp_path / "run-001"),
     )
-    page._active_stage = "preparation"
-    page._continue_to_permutations = True
 
-    page._on_preparation_completed(prepared)
-    page._on_operation_thread_finished()
+    class Backend:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.worker: AnalysisWorker | None = None
 
-    assert page.setup_panel.isVisible()
-    assert page.results_panel.isHidden()
-    assert permutation_starts == [True]
-    assert not page._continue_to_permutations
+        def prepare(self, *_args, **_kwargs):
+            self.calls.append("prepare")
+            return prepared
 
-    page._active_stage = "preparation"
-    page._continue_to_permutations = True
-    page._on_operation_cancelled()
-    page._on_operation_thread_finished()
+        def run(self, received: object, **_kwargs):
+            self.calls.append("run")
+            assert received is prepared
+            assert self.worker is not None
+            self.worker.cancel()
+            return run_outcome
 
-    assert permutation_starts == [True]
-    assert not page._continue_to_permutations
+    backend = Backend()
+    worker = AnalysisWorker(
+        backend,
+        tmp_path,
+        ProjectFrequencySnapshot(1.2, 6.0),
+        _options(tmp_path),
+        _analysis_setup(),
+    )
+    backend.worker = worker
+    progress: list[tuple[int, int, str]] = []
+    completed: list[object] = []
+    cancelled: list[bool] = []
+    worker.progress.connect(
+        lambda done, total, message: progress.append((done, total, message))
+    )
+    worker.completed.connect(completed.append)
+    worker.cancelled.connect(lambda: cancelled.append(True))
+
+    worker.run()
+
+    assert backend.calls == ["prepare", "run"]
+    assert progress == [
+        (0, 0, "Preparing participant x electrode x harmonic data..."),
+        (1, 1, "Preparation complete. Starting cluster permutations..."),
+        (0, 0, "Running whole-participant cluster permutations..."),
+    ]
+    assert completed == [
+        AnalysisWorkerOutcome(
+            prepared=prepared,
+            run_outcome=run_outcome,
+        )
+    ]
+    assert cancelled == []
+
+
+def test_analysis_worker_cancellation_between_phases_skips_permutations(
+    tmp_path: Path,
+) -> None:
+    prepared = _prepared(tmp_path)
+
+    class Backend:
+        def __init__(self) -> None:
+            self.worker: AnalysisWorker | None = None
+            self.run_called = False
+
+        def prepare(self, *_args, **_kwargs):
+            assert self.worker is not None
+            self.worker.cancel()
+            return prepared
+
+        def run(self, *_args, **_kwargs):
+            self.run_called = True
+            raise AssertionError("Permutation phase should not start after cancellation.")
+
+    backend = Backend()
+    worker = AnalysisWorker(
+        backend,
+        tmp_path,
+        ProjectFrequencySnapshot(1.2, 6.0),
+        _options(tmp_path),
+        _analysis_setup(),
+    )
+    backend.worker = worker
+    completed: list[object] = []
+    cancelled: list[bool] = []
+    worker.completed.connect(completed.append)
+    worker.cancelled.connect(lambda: cancelled.append(True))
+
+    worker.run()
+
+    assert not backend.run_called
+    assert completed == []
+    assert cancelled == [True]
 
 
 def test_results_appear_in_compact_single_screen_without_run_metadata(
@@ -552,7 +639,6 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
 ) -> None:
     page = _page(qtbot, tmp_path)
     prepared = _prepared(tmp_path)
-    page._on_preparation_completed(prepared)
 
     assert page.setup_panel.isVisible()
     assert page.results_panel.isHidden()
@@ -602,10 +688,20 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
         result=result,
         receipt=SimpleNamespace(output_directory=run_folder),
     )
-    page._on_run_completed(outcome)
+    page._on_analysis_completed(
+        AnalysisWorkerOutcome(
+            prepared=prepared,
+            run_outcome=outcome,
+        )
+    )
 
     assert page.setup_panel.isVisible()
     assert page.results_panel.isVisible()
+    assert page._has_result
+    assert not hasattr(page, "_prepared")
+    assert not hasattr(page, "_run_outcome")
+    assert all(value is not prepared for value in page.__dict__.values())
+    assert all(value is not outcome for value in page.__dict__.values())
     assert page.run_analysis_button.isVisible()
     assert page.workflow_actions.isVisible()
     assert page.significant_table.rowCount() == 1

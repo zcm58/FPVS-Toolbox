@@ -43,6 +43,7 @@ from Tools.Free_Harmonic_Clustering.tool_info import (
 from .backend_adapter import FreeHarmonicBackend, FreeHarmonicBackendAdapter
 from .models import (
     AnalysisSetup,
+    AnalysisWorkerOutcome,
     GuiAnalysisDesign,
     GuiHarmonicMode,
     ProjectAnalysisOptions,
@@ -53,7 +54,7 @@ from .operation_registry import (
     register_active_operation,
     release_active_operation,
 )
-from .workers import PermutationWorker, PreparationWorker, ProjectInspectionWorker
+from .workers import AnalysisWorker, ProjectInspectionWorker
 
 
 logger = logging.getLogger(__name__)
@@ -97,13 +98,11 @@ class FreeHarmonicClusteringPage(QWidget):
             self._frequency_error = str(exc)
 
         self._options: ProjectAnalysisOptions | None = None
-        self._prepared: object | None = None
-        self._run_outcome: RunOutcome | None = None
+        self._has_result = False
         self._thread: QThread | None = None
         self._worker: object | None = None
         self._completion_callback: Callable[[object], None] | None = None
         self._active_stage: str | None = None
-        self._continue_to_permutations = False
         self._pending_context: tuple[Path, ProjectFrequencySnapshot | None, str | None] | None = None
         self._pending_post_processing_reason: str | None = None
         self._updating_controls = False
@@ -566,8 +565,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._options = None
         self._inspection_failed = False
         self._pending_post_processing_reason = None
-        self._continue_to_permutations = False
-        self._clear_prepared_and_results()
+        self._clear_results()
         self._clear_choice_controls()
         self._update_results_folder_button()
         self._begin_project_inspection()
@@ -714,8 +712,8 @@ class FreeHarmonicClusteringPage(QWidget):
     def _on_setup_changed(self) -> None:
         if self._updating_controls:
             return
-        if self._prepared is not None or self._run_outcome is not None:
-            self._clear_prepared_and_results()
+        if self._has_result:
+            self._clear_results()
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
                 "Setup changed. Run the analysis again to use the new choices."
@@ -854,9 +852,8 @@ class FreeHarmonicClusteringPage(QWidget):
         assert self._options is not None
         assert self._frequency_snapshot is not None
         setup = self._current_setup()
-        self._clear_prepared_and_results()
-        self._continue_to_permutations = True
-        worker = PreparationWorker(
+        self._clear_results()
+        worker = AnalysisWorker(
             self._backend,
             self._project_root,
             self._frequency_snapshot,
@@ -865,39 +862,22 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         self._start_operation(
             worker,
-            stage="preparation",
+            stage="analysis",
             message="Preparing participant x electrode x harmonic data...",
-            on_completed=self._on_preparation_completed,
+            on_completed=self._on_analysis_completed,
         )
 
-    def _on_preparation_completed(self, prepared: object) -> None:
-        self._prepared = prepared
-        self.workflow_status.set_variant("success")
-        self.workflow_status.set_text(
-            "Preparation complete. Starting cluster permutations..."
-        )
-        self._update_buttons()
-
-    @Slot()
-    def _run_permutations(self) -> None:
-        if self._prepared is None:
-            self._show_error("Run the analysis to prepare data before permutations.")
+    def _on_analysis_completed(self, value: object) -> None:
+        if not isinstance(value, AnalysisWorkerOutcome) or not isinstance(
+            value.run_outcome,
+            RunOutcome,
+        ):
+            self._show_error("Analysis returned an invalid result.")
             return
-        worker = PermutationWorker(self._backend, self._prepared)
-        self._start_operation(
-            worker,
-            stage="permutations",
-            message="Running whole-participant cluster permutations...",
-            on_completed=self._on_run_completed,
-        )
-
-    def _on_run_completed(self, value: object) -> None:
-        self._continue_to_permutations = False
-        if not isinstance(value, RunOutcome):
-            self._show_error("Permutation analysis returned an invalid result.")
-            return
-        self._run_outcome = value
-        self._populate_results(value)
+        self._populate_results(value.prepared, value.run_outcome)
+        # The table now owns plain display strings. Do not retain the prepared
+        # participant tensors or permutation arrays on the long-lived page.
+        self._has_result = True
         self.results_panel.show()
         self._update_results_folder_button()
         self.workflow_status.hide()
@@ -965,7 +945,6 @@ class FreeHarmonicClusteringPage(QWidget):
 
     @Slot(str)
     def _on_operation_failed(self, message: str) -> None:
-        self._continue_to_permutations = False
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
@@ -975,10 +954,9 @@ class FreeHarmonicClusteringPage(QWidget):
     def _on_post_processing_required(self, reason: str) -> None:
         if self._retired:
             return
-        self._continue_to_permutations = False
         self._inspection_failed = True
         self._options = None
-        self._clear_prepared_and_results()
+        self._clear_results()
         self._clear_choice_controls()
         self._pending_post_processing_reason = str(reason)
         self.workflow_status.hide()
@@ -992,7 +970,6 @@ class FreeHarmonicClusteringPage(QWidget):
 
     @Slot()
     def _on_operation_cancelled(self) -> None:
-        self._continue_to_permutations = False
         if not self._retired:
             if self._active_stage == "inspection":
                 self._inspection_failed = True
@@ -1019,18 +996,15 @@ class FreeHarmonicClusteringPage(QWidget):
         self._completion_callback = None
         self._active_stage = None
         if self._retired:
-            self._continue_to_permutations = False
             self.progress_bar.hide()
             return
         if self._pending_context is not None:
-            self._continue_to_permutations = False
             self.progress_bar.hide()
             context = self._pending_context
             self._pending_context = None
             self._apply_new_context(*context)
             return
         if post_processing_reason:
-            self._continue_to_permutations = False
             self.progress_bar.hide()
             self._update_buttons()
             self.post_processing_required.emit(
@@ -1039,15 +1013,6 @@ class FreeHarmonicClusteringPage(QWidget):
                 str(self._project_root),
             )
             return
-        if (
-            finished_stage == "preparation"
-            and self._continue_to_permutations
-            and self._prepared is not None
-        ):
-            self._continue_to_permutations = False
-            self._run_permutations()
-            return
-        self._continue_to_permutations = False
         self.progress_bar.hide()
         self._update_buttons()
 
@@ -1057,8 +1022,6 @@ class FreeHarmonicClusteringPage(QWidget):
 
         worker = self._worker
         if worker is not None and hasattr(worker, "cancel"):
-            if self._active_stage == "preparation":
-                self._continue_to_permutations = False
             worker.cancel()
             if not self._retired:
                 self.workflow_status.set_variant("warning")
@@ -1071,7 +1034,6 @@ class FreeHarmonicClusteringPage(QWidget):
         if self._retired:
             return
         self._retired = True
-        self._continue_to_permutations = False
         self._pending_context = None
         self._pending_post_processing_reason = None
         self.cancel_active_work()
@@ -1082,7 +1044,7 @@ class FreeHarmonicClusteringPage(QWidget):
         super().closeEvent(event)
 
     # ------------------------------------------------------------ summaries
-    def _populate_results(self, outcome: RunOutcome) -> None:
+    def _populate_results(self, prepared: object, outcome: RunOutcome) -> None:
         result = outcome.result
         clusters = self._sorted_clusters(result)
         significant = tuple(
@@ -1107,7 +1069,7 @@ class FreeHarmonicClusteringPage(QWidget):
                 )
             )
             self.significant_table.show()
-            self._fill_significant_table(significant)
+            self._fill_significant_table(prepared, significant)
         else:
             self.significant_table.hide()
             self.significant_table.setRowCount(0)
@@ -1136,11 +1098,10 @@ class FreeHarmonicClusteringPage(QWidget):
             )
         )
 
-    def _cluster_display(self, cluster: object) -> dict[str, str]:
-        assert self._prepared is not None
-        sensor_names = tuple(getattr(self._prepared, "sensor_names", ()))
-        orders = tuple(int(value) for value in getattr(self._prepared, "harmonic_orders", ()))
-        frequencies = tuple(float(value) for value in getattr(self._prepared, "harmonics_hz", ()))
+    def _cluster_display(self, prepared: object, cluster: object) -> dict[str, str]:
+        sensor_names = tuple(getattr(prepared, "sensor_names", ()))
+        orders = tuple(int(value) for value in getattr(prepared, "harmonic_orders", ()))
+        frequencies = tuple(float(value) for value in getattr(prepared, "harmonics_hz", ()))
         sensor_indices = tuple(dict.fromkeys(int(value) for value in getattr(cluster, "sensor_indices", ())))
         harmonic_indices = tuple(dict.fromkeys(int(value) for value in getattr(cluster, "harmonic_indices", ())))
         sensors = ", ".join(sensor_names[index] for index in sensor_indices)
@@ -1149,8 +1110,8 @@ class FreeHarmonicClusteringPage(QWidget):
             for index in harmonic_indices
         )
         sign = str(getattr(cluster, "sign", ""))
-        arm_a = str(getattr(self._prepared, "arm_a_label", "A"))
-        arm_b = str(getattr(self._prepared, "arm_b_label", "B"))
+        arm_a = str(getattr(prepared, "arm_a_label", "A"))
+        arm_b = str(getattr(prepared, "arm_b_label", "B"))
         direction = f"{arm_a} > {arm_b}" if sign == "positive" else f"{arm_b} > {arm_a}"
         return {
             "direction": direction,
@@ -1160,24 +1121,27 @@ class FreeHarmonicClusteringPage(QWidget):
             "raw_p": f"{float(getattr(cluster, 'p_value', 1.0)):.4f}",
         }
 
-    def _fill_significant_table(self, clusters: tuple[object, ...]) -> None:
+    def _fill_significant_table(
+        self,
+        prepared: object,
+        clusters: tuple[object, ...],
+    ) -> None:
         self.significant_table.setRowCount(len(clusters))
         for row, cluster in enumerate(clusters):
-            display = self._cluster_display(cluster)
+            display = self._cluster_display(prepared, cluster)
             for column, key in enumerate(("direction", "sensors", "harmonics", "mass", "raw_p")):
                 self.significant_table.setItem(row, column, QTableWidgetItem(display[key]))
 
     # -------------------------------------------------------------- utilities
     def _reset_session_views(self) -> None:
-        self._clear_prepared_and_results()
+        self._clear_results()
         self.design_stack.setCurrentIndex(0)
         self.fixed_highest_label.hide()
         self.fixed_highest_combo.parentWidget().hide()
         self._update_buttons()
 
-    def _clear_prepared_and_results(self) -> None:
-        self._prepared = None
-        self._run_outcome = None
+    def _clear_results(self) -> None:
+        self._has_result = False
         self.significant_table.setRowCount(0)
         self.significant_table.hide()
         self.result_status.set_variant("info")

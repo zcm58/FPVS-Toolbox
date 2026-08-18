@@ -579,7 +579,20 @@ def prepare_project_contrast(
             "not required."
         )
 
-    snr_by_arm: dict[str, list[np.ndarray]] = {"a": [], "b": []}
+    sensor_count = len(DEFAULT_ELECTRODE_NAMES_64)
+    candidate_harmonic_count = int(plan.candidate_orders.size)
+    candidate_shape = (sensor_count, candidate_harmonic_count)
+    numeric_started = perf_counter()
+    candidate_snr_a = np.empty(
+        (len(cohort.arm_a_records), *candidate_shape),
+        dtype=np.float64,
+    )
+    candidate_snr_b = np.empty(
+        (len(cohort.arm_b_records), *candidate_shape),
+        dtype=np.float64,
+    )
+    numeric_seconds_total = perf_counter() - numeric_started
+    next_snr_row = {"a": 0, "b": 0}
     raw_sum_by_arm = {
         "a": np.zeros(len(plan.selected_frequency_columns), dtype=np.float64),
         "b": np.zeros(len(plan.selected_frequency_columns), dtype=np.float64),
@@ -587,7 +600,6 @@ def prepare_project_contrast(
     source_workbooks: list[CohortWorkbook] = []
     reader_phase_seconds: defaultdict[str, float] = defaultdict(float)
     amplitude_seconds_total = 0.0
-    numeric_seconds_total = 0.0
     for read_number, (arm, arm_label, record, path, relative) in enumerate(
         resolved_rows,
         start=1,
@@ -619,7 +631,11 @@ def prepare_project_contrast(
             raise FreeHarmonicInputError(
                 f"Could not compute participant SNR from {relative}: {exc}"
             ) from exc
-        snr_by_arm[arm].append(participant_snr)
+        participant_index = next_snr_row[arm]
+        target_snr = candidate_snr_a if arm == "a" else candidate_snr_b
+        target_snr[participant_index] = participant_snr
+        next_snr_row[arm] = participant_index + 1
+        del participant_snr, target_snr
         raw_sum_by_arm[arm] += np.sum(matrix, axis=0, dtype=np.float64)
         del matrix
         numeric_seconds_total += perf_counter() - numeric_started
@@ -645,9 +661,6 @@ def prepare_project_contrast(
         _check_cancel(cancel_check)
 
     numeric_started = perf_counter()
-    candidate_snr_a = np.ascontiguousarray(np.stack(snr_by_arm["a"], axis=0))
-    candidate_snr_b = np.ascontiguousarray(np.stack(snr_by_arm["b"], axis=0))
-    sensor_count = len(DEFAULT_ELECTRODE_NAMES_64)
     grand_a = raw_sum_by_arm["a"] / (
         candidate_snr_a.shape[0] * sensor_count
     )
@@ -657,6 +670,7 @@ def prepare_project_contrast(
     selection = select_harmonics(grand_a, grand_b, plan, spec)
     selected_snr_a = select_snr_harmonics(candidate_snr_a, selection)
     selected_snr_b = select_snr_harmonics(candidate_snr_b, selection)
+    del candidate_snr_a, candidate_snr_b
     normalized_a = l2_normalize_snr(selected_snr_a)
     normalized_b = l2_normalize_snr(selected_snr_b)
     numeric_seconds_total += perf_counter() - numeric_started

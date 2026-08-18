@@ -501,11 +501,17 @@ def validate_spatial_adjacency(adjacency: np.ndarray, *, sensor_count: int | Non
 def spatial_edges_from_adjacency(adjacency: np.ndarray) -> tuple[tuple[int, int], ...]:
     """Return deterministic undirected index pairs from spatial adjacency."""
     normalized = validate_spatial_adjacency(adjacency)
+    return _spatial_edges_from_validated_adjacency(normalized)
+
+
+def _spatial_edges_from_validated_adjacency(
+    adjacency: np.ndarray,
+) -> tuple[tuple[int, int], ...]:
     return tuple(
         (left, right)
-        for left in range(normalized.shape[0])
-        for right in range(left + 1, normalized.shape[1])
-        if normalized[left, right]
+        for left in range(adjacency.shape[0])
+        for right in range(left + 1, adjacency.shape[1])
+        if adjacency[left, right]
     )
 
 
@@ -544,7 +550,7 @@ def cartesian_free_harmonic_edges(
             for first in range(harmonics)
             for second in range(first + 1, harmonics)
         )
-    for left_sensor, right_sensor in spatial_edges_from_adjacency(spatial):
+    for left_sensor, right_sensor in _spatial_edges_from_validated_adjacency(spatial):
         edges.extend(
             (left_sensor * harmonics + harmonic, right_sensor * harmonics + harmonic)
             for harmonic in range(harmonics)
@@ -643,12 +649,21 @@ def independent_t_map(group_a: np.ndarray, group_b: np.ndarray) -> tuple[np.ndar
     return t_map, degrees_of_freedom
 
 
-def _paired_permutation_t_maps_flat(differences_flat: np.ndarray, signs: np.ndarray) -> np.ndarray:
+def _paired_permutation_t_maps_flat(
+    differences_flat: np.ndarray,
+    signs: np.ndarray,
+    *,
+    sum_squares: np.ndarray | None = None,
+) -> np.ndarray:
     participant_count = differences_flat.shape[0]
     means = np.einsum("bn,np->bp", signs, differences_flat, optimize=False) / float(participant_count)
-    sum_squares = np.sum(np.square(differences_flat), axis=0, dtype=np.float64)
-    variance_numerators = sum_squares[None, :] - participant_count * np.square(means)
-    scale = np.maximum(sum_squares[None, :], participant_count * np.square(means))
+    invariant_sum_squares = (
+        np.sum(np.square(differences_flat), axis=0, dtype=np.float64)
+        if sum_squares is None
+        else sum_squares
+    )
+    variance_numerators = invariant_sum_squares[None, :] - participant_count * np.square(means)
+    scale = np.maximum(invariant_sum_squares[None, :], participant_count * np.square(means))
     variance_numerators = _clip_roundoff_negative(
         variance_numerators,
         scale=scale,
@@ -674,6 +689,10 @@ def paired_permutation_t_maps(differences: np.ndarray, signs: np.ndarray) -> np.
 def _independent_permutation_t_maps_flat(
     pooled_flat: np.ndarray,
     group_a_masks: np.ndarray,
+    *,
+    pooled_squares: np.ndarray | None = None,
+    total_sums: np.ndarray | None = None,
+    total_squares: np.ndarray | None = None,
 ) -> np.ndarray:
     masks = group_a_masks.astype(np.float64, copy=False)
     participant_count = pooled_flat.shape[0]
@@ -681,12 +700,19 @@ def _independent_permutation_t_maps_flat(
     count_b = participant_count - count_a
     degrees_of_freedom = participant_count - 2
 
-    total_sums = np.sum(pooled_flat, axis=0, dtype=np.float64)
-    total_squares = np.sum(np.square(pooled_flat), axis=0, dtype=np.float64)
+    invariant_pooled_squares = np.square(pooled_flat) if pooled_squares is None else pooled_squares
+    invariant_total_sums = (
+        np.sum(pooled_flat, axis=0, dtype=np.float64) if total_sums is None else total_sums
+    )
+    invariant_total_squares = (
+        np.sum(invariant_pooled_squares, axis=0, dtype=np.float64)
+        if total_squares is None
+        else total_squares
+    )
     sums_a = np.einsum("bn,np->bp", masks, pooled_flat, optimize=False)
-    squares_a = np.einsum("bn,np->bp", masks, np.square(pooled_flat), optimize=False)
-    sums_b = total_sums[None, :] - sums_a
-    squares_b = total_squares[None, :] - squares_a
+    squares_a = np.einsum("bn,np->bp", masks, invariant_pooled_squares, optimize=False)
+    sums_b = invariant_total_sums[None, :] - sums_a
+    squares_b = invariant_total_squares[None, :] - squares_a
     means_a = sums_a / float(count_a)
     means_b = sums_b / float(count_b)
     within_ss = (squares_a - count_a * np.square(means_a)) + (
@@ -741,17 +767,18 @@ def cluster_forming_t_threshold(degrees_of_freedom: int, *, entry_alpha: float =
     return threshold
 
 
-def _union_find_components(
+def _union_find_active_node_groups(
     active: np.ndarray,
     *,
     spatial_edges: Sequence[tuple[int, int]],
-) -> tuple[tuple[int, ...], ...]:
+    active_nodes: np.ndarray | None = None,
+) -> tuple[list[int], ...]:
     sensor_count, harmonic_count = active.shape
     node_count = sensor_count * harmonic_count
     parent = np.full(node_count, -1, dtype=np.int64)
     rank = np.zeros(node_count, dtype=np.uint8)
-    active_nodes = np.flatnonzero(active.reshape(-1))
-    parent[active_nodes] = active_nodes
+    nodes = np.flatnonzero(active.reshape(-1)) if active_nodes is None else active_nodes
+    parent[nodes] = nodes
 
     def find(node: int) -> int:
         root = node
@@ -793,10 +820,19 @@ def _union_find_components(
             )
 
     grouped: dict[int, list[int]] = {}
-    for node in active_nodes:
+    for node in nodes:
         node_index = int(node)
         grouped.setdefault(find(node_index), []).append(node_index)
-    return tuple(tuple(nodes) for nodes in sorted(grouped.values(), key=lambda item: tuple(item)))
+    return tuple(grouped.values())
+
+
+def _union_find_components(
+    active: np.ndarray,
+    *,
+    spatial_edges: Sequence[tuple[int, int]],
+) -> tuple[tuple[int, ...], ...]:
+    grouped = _union_find_active_node_groups(active, spatial_edges=spatial_edges)
+    return tuple(tuple(nodes) for nodes in sorted(grouped, key=lambda item: tuple(item)))
 
 
 def _signed_cluster_components_from_edges(
@@ -848,7 +884,7 @@ def signed_cluster_components(
         raise ValueError("Cluster-forming threshold must be finite and positive.")
     return _signed_cluster_components_from_edges(
         t_values,
-        spatial_edges=spatial_edges_from_adjacency(spatial),
+        spatial_edges=_spatial_edges_from_validated_adjacency(spatial),
         threshold=cutoff,
     )
 
@@ -869,17 +905,64 @@ def signed_null_extrema(
     cutoff = float(threshold)
     if not math.isfinite(cutoff) or cutoff <= 0.0:
         raise ValueError("Cluster-forming threshold must be finite and positive.")
-    edges = spatial_edges_from_adjacency(spatial)
+    edges = _spatial_edges_from_validated_adjacency(spatial)
+    return _signed_null_extrema_from_edges(maps, spatial_edges=edges, threshold=cutoff)
+
+
+def _extreme_cluster_mass(
+    t_values: np.ndarray,
+    *,
+    active: np.ndarray,
+    spatial_edges: Sequence[tuple[int, int]],
+    positive: bool,
+) -> float:
+    """Return one tail's extreme mass without constructing cluster records."""
+    flat_t = t_values.reshape(-1)
+    active_nodes = np.flatnonzero(active.reshape(-1))
+    if active_nodes.size == 0:
+        return 0.0
+    if active_nodes.size == 1:
+        return float(flat_t[int(active_nodes[0])])
+    groups = _union_find_active_node_groups(
+        active,
+        spatial_edges=spatial_edges,
+        active_nodes=active_nodes,
+    )
+
+    def component_mass(nodes: list[int]) -> float:
+        if len(nodes) == 1:
+            return float(flat_t[nodes[0]])
+        return float(np.sum(flat_t[np.asarray(nodes, dtype=np.int64)], dtype=np.float64))
+
+    masses = (
+        component_mass(nodes)
+        for nodes in groups
+    )
+    return max(masses) if positive else min(masses)
+
+
+def _signed_null_extrema_from_edges(
+    maps: np.ndarray,
+    *,
+    spatial_edges: Sequence[tuple[int, int]],
+    threshold: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return signed null extrema using a previously validated graph."""
     positive_maxima = np.zeros(maps.shape[0], dtype=np.float64)
     negative_minima = np.zeros(maps.shape[0], dtype=np.float64)
     for permutation_index, t_values in enumerate(maps):
-        components = _signed_cluster_components_from_edges(t_values, spatial_edges=edges, threshold=cutoff)
-        positive_masses = [component.mass for component in components if component.tail == POSITIVE_TAIL]
-        negative_masses = [component.mass for component in components if component.tail == NEGATIVE_TAIL]
-        if positive_masses:
-            positive_maxima[permutation_index] = max(positive_masses)
-        if negative_masses:
-            negative_minima[permutation_index] = min(negative_masses)
+        positive_maxima[permutation_index] = _extreme_cluster_mass(
+            t_values,
+            active=t_values >= threshold,
+            spatial_edges=spatial_edges,
+            positive=True,
+        )
+        negative_minima[permutation_index] = _extreme_cluster_mass(
+            t_values,
+            active=t_values <= -threshold,
+            spatial_edges=spatial_edges,
+            positive=False,
+        )
     return positive_maxima, negative_minima
 
 
@@ -1076,6 +1159,7 @@ def run_cluster_permutation_core(
     if normalized_design == PAIRED_DESIGN and first.shape != second.shape:
         raise ValueError("Paired analysis arms must contain the same participants and dimensions.")
     spatial = validate_spatial_adjacency(spatial_adjacency, sensor_count=first.shape[1])
+    spatial_edges = _spatial_edges_from_validated_adjacency(spatial)
     total_permutations = int(permutation_count)
     permutations_per_batch = int(batch_size)
     if total_permutations < 1:
@@ -1089,9 +1173,9 @@ def run_cluster_permutation_core(
     else:
         observed_t, degrees_of_freedom = independent_t_map(first, second)
     threshold = cluster_forming_t_threshold(degrees_of_freedom, entry_alpha=float(cluster_entry_alpha))
-    observed_components = signed_cluster_components(
+    observed_components = _signed_cluster_components_from_edges(
         observed_t,
-        spatial_adjacency=spatial,
+        spatial_edges=spatial_edges,
         threshold=threshold,
     )
     observed_seconds = perf_counter() - observed_started
@@ -1126,9 +1210,25 @@ def run_cluster_permutation_core(
     if normalized_design == PAIRED_DESIGN:
         differences = first - second
         flat_differences = differences.reshape(differences.shape[0], -1)
+        paired_sum_squares = np.sum(
+            np.square(flat_differences),
+            axis=0,
+            dtype=np.float64,
+        )
+        assignment_float_buffer = np.empty(
+            (min(permutations_per_batch, total_permutations), first.shape[0]),
+            dtype=np.float64,
+        )
     else:
         pooled = np.concatenate((first, second), axis=0)
         flat_pooled = pooled.reshape(pooled.shape[0], -1)
+        pooled_squares = np.square(flat_pooled)
+        pooled_total_sums = np.sum(flat_pooled, axis=0, dtype=np.float64)
+        pooled_total_squares = np.sum(pooled_squares, axis=0, dtype=np.float64)
+        assignment_float_buffer = np.empty(
+            (min(permutations_per_batch, total_permutations), flat_pooled.shape[0]),
+            dtype=np.float64,
+        )
 
     permutation_started = perf_counter()
     while completed < total_permutations:
@@ -1142,7 +1242,12 @@ def run_cluster_permutation_core(
                 participant_count=first.shape[0],
             )
             assignment_digest.update(np.ascontiguousarray(signs, dtype=np.int8).tobytes())
-            flat_t = _paired_permutation_t_maps_flat(flat_differences, signs.astype(np.float64))
+            assignment_float_buffer[:count] = signs
+            flat_t = _paired_permutation_t_maps_flat(
+                flat_differences,
+                assignment_float_buffer[:count],
+                sum_squares=paired_sum_squares,
+            )
             t_batch = flat_t.reshape(count, first.shape[1], first.shape[2])
         else:
             masks = _random_fixed_size_group_masks(
@@ -1152,11 +1257,18 @@ def run_cluster_permutation_core(
                 group_a_count=first.shape[0],
             )
             assignment_digest.update(np.ascontiguousarray(masks, dtype=np.uint8).tobytes())
-            flat_t = _independent_permutation_t_maps_flat(flat_pooled, masks)
+            assignment_float_buffer[:count] = masks
+            flat_t = _independent_permutation_t_maps_flat(
+                flat_pooled,
+                assignment_float_buffer[:count],
+                pooled_squares=pooled_squares,
+                total_sums=pooled_total_sums,
+                total_squares=pooled_total_squares,
+            )
             t_batch = flat_t.reshape(count, first.shape[1], first.shape[2])
-        batch_positive, batch_negative = signed_null_extrema(
+        batch_positive, batch_negative = _signed_null_extrema_from_edges(
             t_batch,
-            spatial_adjacency=spatial,
+            spatial_edges=spatial_edges,
             threshold=threshold,
         )
         positive_null[completed : completed + count] = batch_positive

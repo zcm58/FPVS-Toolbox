@@ -98,9 +98,14 @@ signal-driven workers.
 
 - Build one deduplicated selected-column plan for all target/noise bins.
 - Parse each selected FullFFT worksheet at most once per run.
-- Convert workbook values immediately to contiguous NumPy arrays.
+- Convert workbook values immediately into preallocated contiguous arm tensors;
+  do not accumulate participant arrays only to stack-copy them later.
 - Vectorize preparation and batched t-map generation across participants,
   sensors, and harmonics. Per-permutation cluster extraction may iterate.
+- Validate the spatial graph and build its deterministic edge table once per
+  run. Reuse batch-invariant sums, squares, and assignment buffers.
+- Null permutations may use a mass-only cluster path, but its signed extreme
+  masses must remain bitwise-equivalent to the full component construction.
 - Do not run-scope cache every source DataFrame when each workbook is consumed
   once; that duplicates memory.
 - Preserve timing and selected-column counts in provenance.
@@ -143,8 +148,10 @@ the page implementation.
 - The primary human-readable artifact is a polished
   `Free_Harmonic_Clustering_Results.xlsx` workbook. Retain machine-readable
   CSV, compressed-array, and manifest artifacts alongside it.
-- Preparation and permutation work must run outside the UI thread. Workers
-  communicate through signals and never touch widgets.
+- Preparation, permutation inference, and export run sequentially on one
+  background analysis worker. Workers communicate through signals and never
+  touch widgets; the page must not retain prepared/result tensors after their
+  display strings have been populated.
 
 ## Verification
 
