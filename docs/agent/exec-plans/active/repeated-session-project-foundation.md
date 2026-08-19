@@ -181,6 +181,24 @@ Rules:
 - Because session and visit order are perfectly aligned in the motivating
   dataset, every result uses `session/phase-at-visit` language.
 
+### Free Harmonic Clustering
+
+- Repeated projects are recognized automatically and use the separately
+  versioned `fhc_repeated_session_batch_v1` workflow; legacy one-contrast
+  projects remain unchanged.
+- Exactly two stable groups, two ordered sessions, and every project condition
+  produce four participant-level families: session-averaged groups, paired
+  Visit 2 minus Visit 1 within each group, and the between-group difference in
+  participant session change.
+- All primary families use complete recording pairs. Missing visits and
+  batch-local recording exclusions with required reasons remain in the audit;
+  recordings are never treated as independent participants.
+- One harmonic domain is selected and frozen across the entire batch. Global
+  run p-values receive Holm correction across conditions within each family and
+  a conservative second correction across the full batch.
+- The fixed-order confounding appears in GUI, workbook, manifest, and reporting
+  guidance. The legacy powered-null receipt does not cover this extension.
+
 ## Delivery Slices
 
 1. Project/session/recording schema, public context, persistence, dataset index,
@@ -195,6 +213,9 @@ Rules:
 6. Birth Control folder import/validation and visible end-to-end smoke.
 7. Protective gates/skips for participant-keyed tools and post-processing
    outputs that cannot yet preserve recording identity.
+8. Versioned repeated-session Free Harmonic Clustering preparation, four-family
+   batch inference/export, embedded GUI, documentation, and Birth Control
+   acceptance analysis.
 
 ## Private study input audit
 
@@ -255,3 +276,6 @@ implicated.
 - [x] Focused non-Qt verification and documented CI-only visible/pytest-qt
   smoke. The repo-wide path stage retains the unrelated `outputs/rcads-*`
   findings described above.
+- [ ] Repeated-session Free Harmonic Clustering extension and Birth Control
+  acceptance run (tracked in
+  `repeated-session-free-harmonic-clustering.md`).

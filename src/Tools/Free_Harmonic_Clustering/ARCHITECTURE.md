@@ -23,6 +23,7 @@ managed project root
   -> retained non-base harmonic domain and participant L2 normalization
   -> one GUI action chaining preparation and inference
   -> paired sign flips or independent group-label permutations
+  -> optional repeated-session run-global Holm correction
   -> free-harmonic/spatial connected components and cluster-mass inference
   -> atomic project-local Excel workbook, manifest, tables, and compressed arrays
 ```
@@ -59,6 +60,8 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
   widgets.
 - `gui/page.py`: embedded `FreeHarmonicClusteringPage` with one scroll-free
   setup/results workspace plus a compact persistent status/action footer.
+- `gui/recording_exclusions_dialog.py`: source-immutable editor for batch-local
+  canonical recording exclusions; every selected row requires an audit reason.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
 ## Contrast Modes
@@ -71,6 +74,24 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
 
 Each run owns one ordered A-minus-B sensor x harmonic family. A collection of
 separate condition runs is not automatically corrected across conditions.
+
+Repeated-session projects use the separately versioned
+`fhc_repeated_session_batch_v1` contract. It requires exactly two stable groups
+and two distinct ordered sessions, freezes one shared harmonic domain across
+all declared cells, and emits four participant-level families per condition:
+
+- `session_averaged_groups`: average the two candidate-SNR session tensors
+  within a complete participant, L2-normalize the mean once, and compare groups;
+- `paired_sessions_within_group:<group A>`: separately normalize each session,
+  then sign-flip Visit 2 minus Visit 1 tensors within the first group;
+- `paired_sessions_within_group:<group B>`: the same paired contrast within the
+  second group; and
+- `group_session_change`: compare the normalized-session Visit 2 minus Visit 1
+  participant tensors between groups without renormalizing the difference.
+
+All primary families use complete phase-balanced pairs. Missing visits and
+analysis-specific recording exclusions with reasons remain in the cohort audit;
+there is no imputation, node-wise omission, or recording-level independence.
 
 ## Method Identity
 
@@ -115,6 +136,13 @@ prepared tensors; a changed FullFFT source, cohort/QC state, rate, grid, or
 processing/export identity blocks preparation until post-processing rebuilds
 the neutral record.
 
+The repeated-session batch extends, but does not rename or recalibrate, the
+legacy method. It reuses the fixed numerical graph/cluster-permutation core and
+records its own batch contract, shared-domain fingerprint, tensor semantics,
+derived per-run seeds, and multiplicity methods. The reviewed powered legacy
+receipt is not evidence for the repeated composite tensors, interaction
+contrast, shared multi-cell selector, or Holm layers.
+
 ## Inference Boundary
 
 Cluster correction applies to one declared electrode x harmonic family,
@@ -123,6 +151,15 @@ adjacency, node-entry threshold, contrast family, and valid whole-participant
 exchangeability. It favors extended effects and does not turn cluster-level
 significance into pointwise evidence for a sensor, harmonic, cell, or boundary.
 Separate runs are separate uncorrected families.
+
+Within a repeated-session batch, each condition-level electrode x harmonic run
+first retains the same signed maximum-cluster correction. Its global two-sided
+run p-value is the strongest observed cluster's doubled two-sided p-value (or 1
+when no cluster forms). Holm correction is then applied across every declared
+condition separately within each of the four scientific family IDs, with a
+second conservative Holm layer across the entire condition x family batch.
+Those Holm values are run-level annotations; cluster-specific raw p-values are
+never presented as cross-condition adjusted values.
 
 Automatic mode selects its observed-arm ceiling before permutation and then
 holds that domain fixed. The conditional maximum-cluster null does not by
@@ -176,25 +213,31 @@ family, and whole-participant exchangeability.
 
 - The page is part of the default Quick Tools list and does not depend on the
   Beta Tools setting.
-- Setup resolves one contrast and displays the A-minus-B direction. One **Run
-  Analysis** action automatically prepares the analysis and starts
-  permutations. A concise Results section appears beneath Setup when complete;
-  detailed cohort, exclusion, harmonic, source-coverage, and participant x
-  sensor x harmonic provenance remains in the exported workbook.
+- Flat-project Setup resolves one contrast and displays the A-minus-B direction.
+  A repeated-session project is recognized from canonical inspection options
+  and replaces the legacy selector with read-only groups, ordered sessions,
+  all-condition/four-family summary, exact later-minus-earlier direction,
+  fixed-order warning, and a compact analysis-only recording-exclusion dialog
+  with required reasons. One run action starts the applicable workflow. A
+  concise Results section appears beneath Setup when complete; detailed cohort,
+  exclusion, harmonic, source-coverage, and participant x sensor x harmonic
+  provenance remains in the exported workbook.
 - Prepared arrays remain worker-local while the automatic permutation and
   export phases run, so source workbooks are not read a second time. After the
   result table receives plain display strings, the page retains no prepared or
   permutation tensors.
-- Results is hidden before completion and shows the current session's
+- Results is hidden before completion. Legacy Results shows current-session
   significant clusters in one bounded table ordered by ascending raw
-  sign-specific p-value. Technical run metadata and the full cluster table stay
-  in the exported workbook. Version 1 has no plots or run-history browser.
+  sign-specific p-value. Repeated Results shows one compact row per condition x
+  family with the global run p-value and both Holm layers. Technical metadata
+  and full cluster tables stay in the workbook. The page has no plots or
+  run-history browser.
 - About this analysis uses shared tabbed `ToolInfoContent`. A second contextual
   information dialog explains fixed-domain fill-through and base-overlap
   exclusion.
-- Long preparation, permutations, and export run sequentially on one worker
-  thread. Cancellation, failure, and project switching cannot publish a
-  partial completed bundle.
+- Long preparation, permutations, repeated-batch multiplicity correction where
+  applicable, and export run sequentially on one worker thread. Cancellation,
+  failure, and project switching cannot publish a partial completed bundle.
 
 ## Output
 
@@ -214,7 +257,12 @@ and Exclusions, Methods and Provenance, Node Statistics, and Null Distribution
 worksheets. CSV, compressed-array, and manifest artifacts remain available for
 machine use and audit.
 
-## Version 1 Acceptance
+Repeated batches publish the same way but use
+`Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx` and batch-oriented
+summary, cohort/exclusion, shared-harmonic, cluster/membership, node/null,
+methods/provenance, and source-audit tables within one additive directory.
+
+## Legacy Version 1 Acceptance
 
 Automated tests use synthetic or temporary project fixtures and never bundle or
 depend on the private ACR project. Final acceptance additionally requires a

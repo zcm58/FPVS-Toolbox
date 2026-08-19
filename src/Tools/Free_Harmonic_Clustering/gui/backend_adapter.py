@@ -21,7 +21,10 @@ from .models import (
     GuiHarmonicMode,
     ProjectAnalysisOptions,
     ProjectFrequencySnapshot,
+    RecordingChoice,
+    RepeatedBatchSetup,
     RunOutcome,
+    SessionChoice,
 )
 
 
@@ -65,6 +68,17 @@ class FreeHarmonicBackend(Protocol):
         progress: ProgressSink,
         cancel_check: CancelCheck,
     ) -> RunOutcome: ...
+
+    def run_repeated_batch(
+        self,
+        project_root: Path,
+        frequencies: ProjectFrequencySnapshot,
+        options: ProjectAnalysisOptions,
+        setup: RepeatedBatchSetup,
+        *,
+        progress: ProgressSink,
+        cancel_check: CancelCheck,
+    ) -> object: ...
 
     def results_parent(self, project_root: Path) -> Path: ...
 
@@ -154,6 +168,33 @@ def _normalized_options(raw: object, project_root: Path) -> ProjectAnalysisOptio
         str(_attribute(item, "message", default=item))
         for item in _as_tuple(_attribute(raw, "diagnostics", "warnings"))
     )
+    sessions = tuple(
+        SessionChoice(
+            session_id=str(_attribute(session, "session_id", "id", default="")),
+            label=str(_attribute(session, "label", "name", default="")),
+            visit_index=int(_attribute(session, "visit_index", default=0)),
+        )
+        for session in _as_tuple(_attribute(raw, "sessions", "ordered_sessions"))
+    )
+    recordings = tuple(
+        RecordingChoice(
+            recording_id=str(_attribute(recording, "recording_id", default="")),
+            participant_id=str(_attribute(recording, "participant_id", default="")),
+            group_id=str(_attribute(recording, "group_id", default="")),
+            group_label=str(_attribute(recording, "group_label", default="")),
+            session_id=str(_attribute(recording, "session_id", default="")),
+            session_label=str(_attribute(recording, "session_label", default="")),
+            visit_index=int(_attribute(recording, "visit_index", default=0)),
+        )
+        for recording in _as_tuple(_attribute(raw, "recordings"))
+    )
+    is_repeated_session = bool(
+        _attribute(
+            raw,
+            "is_repeated_session",
+            default=bool(sessions),
+        )
+    )
     return ProjectAnalysisOptions(
         project_root=project_root,
         conditions=conditions,
@@ -180,7 +221,50 @@ def _normalized_options(raw: object, project_root: Path) -> ProjectAnalysisOptio
             _attribute(raw, "representative_workbook_relative_path", default="")
         ),
         diagnostics=diagnostics,
+        is_repeated_session=is_repeated_session,
+        sessions=sessions,
+        recordings=recordings,
+        fixed_order_confounding=str(
+            _attribute(raw, "fixed_order_confounding", default="")
+        ),
     )
+
+
+def _method_spec_from_gui(
+    frequencies: ProjectFrequencySnapshot,
+    *,
+    harmonic_mode: GuiHarmonicMode,
+    fixed_highest_harmonic_order: int | None,
+    max_harmonic_hz: float,
+) -> object:
+    """Build the headless method spec without leaking backend types to widgets."""
+
+    from Tools.Free_Harmonic_Clustering import FreeHarmonicMethodSpec
+
+    spec_fields = getattr(FreeHarmonicMethodSpec, "__dataclass_fields__", {})
+    kwargs: dict[str, object] = {
+        "oddball_frequency_hz": frequencies.oddball_frequency_hz,
+        "base_frequency_hz": frequencies.base_frequency_hz,
+        "max_harmonic_hz": max_harmonic_hz,
+    }
+    if "harmonic_selection_mode" in spec_fields:
+        try:
+            from Tools.Free_Harmonic_Clustering import HarmonicSelectionMode
+
+            mode = (
+                HarmonicSelectionMode.AUTOMATIC
+                if harmonic_mode is GuiHarmonicMode.AUTOMATIC
+                else HarmonicSelectionMode.FIXED_HIGHEST
+            )
+        except (ImportError, AttributeError):
+            mode = harmonic_mode.value
+        kwargs["harmonic_selection_mode"] = mode
+        kwargs["fixed_highest_harmonic_order"] = fixed_highest_harmonic_order
+    elif harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
+        raise BackendCapabilityError(
+            "This build cannot prepare a fixed highest-harmonic domain."
+        )
+    return FreeHarmonicMethodSpec(**kwargs)
 
 
 class FreeHarmonicBackendAdapter:
@@ -267,6 +351,10 @@ class FreeHarmonicBackendAdapter:
                     options.representative_workbook_relative_path
                 ),
                 diagnostics=options.diagnostics,
+                is_repeated_session=options.is_repeated_session,
+                sessions=options.sessions,
+                recordings=options.recordings,
+                fixed_order_confounding=options.fixed_order_confounding,
             )
         logger.info(
             "free_harmonic_gui_inspection_completed",
@@ -295,7 +383,6 @@ class FreeHarmonicBackendAdapter:
     ) -> object:
         from Tools.Free_Harmonic_Clustering import (
             AnalysisDesign,
-            FreeHarmonicMethodSpec,
             ProjectContrastRequest,
             prepare_project_contrast,
         )
@@ -312,32 +399,12 @@ class FreeHarmonicBackendAdapter:
             condition_b=setup.condition_b,
             group_ids=setup.group_ids,
         )
-        spec_fields = getattr(FreeHarmonicMethodSpec, "__dataclass_fields__", {})
-        kwargs: dict[str, object] = {
-            "oddball_frequency_hz": frequencies.oddball_frequency_hz,
-            "base_frequency_hz": frequencies.base_frequency_hz,
-            "max_harmonic_hz": setup.max_harmonic_hz,
-        }
-        if "harmonic_selection_mode" in spec_fields:
-            try:
-                from Tools.Free_Harmonic_Clustering import HarmonicSelectionMode
-
-                mode = (
-                    HarmonicSelectionMode.AUTOMATIC
-                    if setup.harmonic_mode is GuiHarmonicMode.AUTOMATIC
-                    else HarmonicSelectionMode.FIXED_HIGHEST
-                )
-            except (ImportError, AttributeError):
-                mode = setup.harmonic_mode.value
-            kwargs["harmonic_selection_mode"] = mode
-            kwargs["fixed_highest_harmonic_order"] = (
-                setup.fixed_highest_harmonic_order
-            )
-        elif setup.harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
-            raise BackendCapabilityError(
-                "This build cannot prepare a fixed highest-harmonic domain."
-            )
-        spec = FreeHarmonicMethodSpec(**kwargs)
+        spec = _method_spec_from_gui(
+            frequencies,
+            harmonic_mode=setup.harmonic_mode,
+            fixed_highest_harmonic_order=setup.fixed_highest_harmonic_order,
+            max_harmonic_hz=setup.max_harmonic_hz,
+        )
 
         def report(completed: int, total: int) -> None:
             progress(completed, total, "Reading and vectorizing FullFFT workbooks...")
@@ -386,6 +453,78 @@ class FreeHarmonicBackendAdapter:
         progress(1, 1, "Publishing the completed result bundle...")
         receipt = export_free_harmonic_run(prepared, result)  # type: ignore[arg-type]
         return RunOutcome(result=result, receipt=receipt)
+
+    def run_repeated_batch(
+        self,
+        project_root: Path,
+        frequencies: ProjectFrequencySnapshot,
+        options: ProjectAnalysisOptions,
+        setup: RepeatedBatchSetup,
+        *,
+        progress: ProgressSink,
+        cancel_check: CancelCheck,
+    ) -> object:
+        from Tools.Free_Harmonic_Clustering import (
+            RecordingExclusionRequest,
+            RepeatedSessionBatchRequest,
+            run_repeated_session_fhc_batch,
+        )
+
+        if len(options.groups) != 2 or len(options.sessions) != 2:
+            raise BackendCapabilityError(
+                "The repeated-session FHC batch requires exactly two groups "
+                "and two ordered sessions."
+            )
+        ordered_sessions = tuple(
+            sorted(options.sessions, key=lambda session: session.visit_index)
+        )
+        request = RepeatedSessionBatchRequest(
+            project_root=Path(project_root),
+            conditions=options.conditions,
+            group_ids=tuple(group.group_id for group in options.groups),
+            # A-minus-B is explicitly later visit minus earlier visit.
+            session_ids=(
+                ordered_sessions[1].session_id,
+                ordered_sessions[0].session_id,
+            ),
+            recording_exclusions=tuple(
+                RecordingExclusionRequest(item.recording_id, item.reason)
+                for item in setup.recording_exclusions
+            ),
+        )
+        spec = _method_spec_from_gui(
+            frequencies,
+            harmonic_mode=setup.harmonic_mode,
+            fixed_highest_harmonic_order=setup.fixed_highest_harmonic_order,
+            max_harmonic_hz=setup.max_harmonic_hz,
+        )
+
+        def report(*values: object) -> None:
+            if len(values) >= 3:
+                completed, total, message = values[:3]
+            elif len(values) == 2:
+                completed, total = values
+                message = "Running repeated-session FHC batch..."
+            else:
+                completed, total, message = 0, 0, "Running repeated-session FHC batch..."
+            progress(int(completed), int(total), str(message))
+
+        logger.info(
+            "free_harmonic_gui_repeated_batch_started",
+            extra={
+                "project_root": str(project_root),
+                "condition_count": len(options.conditions),
+                "recording_exclusion_count": len(setup.recording_exclusions),
+                "session_a": ordered_sessions[1].session_id,
+                "session_b": ordered_sessions[0].session_id,
+            },
+        )
+        return run_repeated_session_fhc_batch(
+            request,
+            spec,
+            progress_callback=report,
+            cancel_check=cancel_check,
+        )
 
     def results_parent(self, project_root: Path) -> Path:
         from Tools.Free_Harmonic_Clustering.exports import DEFAULT_RESULTS_SUBFOLDER

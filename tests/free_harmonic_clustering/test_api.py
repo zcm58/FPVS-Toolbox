@@ -50,9 +50,7 @@ def test_headless_xlsx_inputs_use_shared_main_app_io(
     stats_imports = {
         node.module
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        and node.module is not None
-        and node.module.startswith("Tools.Stats")
+        if isinstance(node, ast.ImportFrom) and node.module is not None and node.module.startswith("Tools.Stats")
     }
 
     assert expected_reader_names <= main_app_reader_names
@@ -291,12 +289,111 @@ def test_project_options_use_one_header_and_allow_ungrouped_paired_project(
     assert "selected cohort" in options.compatibility_message
     assert "FullFFT provenance matched" in options.compatibility_message
     assert options.eligible_orders == (1, 2, 3, 4, 6)
-    assert options.eligible_harmonics_hz == pytest.approx(
-        (1.2, 2.4, 3.6, 4.8, 7.2)
-    )
+    assert options.eligible_harmonics_hz == pytest.approx((1.2, 2.4, 3.6, 4.8, 7.2))
     assert options.excluded_base_orders == (5,)
     assert options.fft_upper_frequency_hz == pytest.approx(7.3)
     assert before == after
+
+
+def test_project_options_expose_canonical_sessions_and_recording_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "project.json").write_text("{}", encoding="utf-8")
+    workbook = project_root / "condition-a.xlsx"
+    workbook.write_bytes(b"representative")
+    sessions = {
+        "luteal": SimpleNamespace(
+            session_id="luteal",
+            label="Luteal Phase",
+            visit_index=1,
+        ),
+        "follicular": SimpleNamespace(
+            session_id="follicular",
+            label="Follicular Phase",
+            visit_index=2,
+        ),
+    }
+    groups = {
+        "bc": SimpleNamespace(group_id="bc", label="BC Group"),
+        "control": SimpleNamespace(group_id="control", label="Control Group"),
+    }
+    dataset = SimpleNamespace(
+        project_root=project_root,
+        conditions=("Neutral Angry",),
+        ordered_groups=(groups["bc"], groups["control"]),
+        groups=groups,
+        ordered_sessions=(sessions["luteal"], sessions["follicular"]),
+        sessions=sessions,
+        recording_sources={
+            "bc_f": SimpleNamespace(source_id="bc_f", group_id="bc"),
+        },
+        recordings={
+            "P18_F": SimpleNamespace(
+                recording_id="P18_F",
+                participant_id="P18",
+                session_id="follicular",
+                source_id="bc_f",
+                visit_index=2,
+            ),
+        },
+        participants={
+            "P18": SimpleNamespace(participant_id="P18", group_id="bc"),
+        },
+        diagnostics=(),
+    )
+    frequencies = np.arange(293, dtype=np.float64) * 0.025
+    header = ["Electrode", *(f"{frequency:.6f}_Hz" for frequency in frequencies)]
+
+    import Main_App.io
+    import Main_App.processing.full_fft_provenance
+    import Main_App.projects
+
+    monkeypatch.setattr(
+        Main_App.projects,
+        "load_project_dataset_index",
+        lambda _root: dataset,
+    )
+    monkeypatch.setattr(
+        Main_App.io,
+        "read_xlsx_sheet_header",
+        lambda *_args, **_kwargs: header,
+    )
+    expected_grid = build_available_frequency_window_plan(
+        header,
+        oddball_frequency_hz=1.2,
+        base_frequency_hz=6.0,
+        noise_half_width_hz=0.1,
+    ).grid_fingerprint
+    monkeypatch.setattr(
+        Main_App.processing.full_fft_provenance,
+        "validate_project_full_fft_provenance",
+        lambda *args, **kwargs: SimpleNamespace(
+            grid_fingerprint=expected_grid,
+            source_paths=(workbook.name,),
+            source_workbook_count=1,
+        ),
+    )
+
+    options = api.inspect_project_analysis_options(
+        project_root,
+        oddball_frequency_hz=1.2,
+        base_frequency_hz=6.0,
+    )
+
+    assert [row.session_id for row in options.sessions] == [
+        "luteal",
+        "follicular",
+    ]
+    assert len(options.recordings) == 1
+    recording = options.recordings[0]
+    assert recording.recording_id == "P18_F"
+    assert recording.group_id == "bc"
+    assert recording.group_label == "BC Group"
+    assert recording.session_id == "follicular"
+    assert recording.visit_index == 2
 
 
 @pytest.mark.parametrize(
@@ -304,15 +401,12 @@ def test_project_options_use_one_header_and_allow_ungrouped_paired_project(
     [
         (
             FullFftProvenanceMissingError(
-                "Neutral FullFFT provenance is missing. Rerun post-processing; "
-                "EEG preprocessing is not required."
+                "Neutral FullFFT provenance is missing. Rerun post-processing; EEG preprocessing is not required."
             ),
             "provenance is missing",
         ),
         (
-            FullFftProvenanceStaleError(
-                "Neutral FullFFT provenance is stale because the workbook changed."
-            ),
+            FullFftProvenanceStaleError("Neutral FullFFT provenance is stale because the workbook changed."),
             "provenance is stale",
         ),
     ],
@@ -349,9 +443,7 @@ def test_project_options_surface_neutral_provenance_failures_before_header_io(
     monkeypatch.setattr(
         Main_App.io,
         "read_xlsx_sheet_header",
-        lambda *args, **kwargs: pytest.fail(
-            "rate mismatch must block before the workbook header is opened"
-        ),
+        lambda *args, **kwargs: pytest.fail("rate mismatch must block before the workbook header is opened"),
     )
     monkeypatch.setattr(
         Main_App.processing.full_fft_provenance,
@@ -365,6 +457,7 @@ def test_project_options_surface_neutral_provenance_failures_before_header_io(
             oddball_frequency_hz=1.2,
             base_frequency_hz=6.0,
         )
+
 
 def test_project_options_ignore_stats_harmonic_cache_when_neutral_record_is_valid(
     tmp_path: Path,

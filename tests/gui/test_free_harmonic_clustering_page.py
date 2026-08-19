@@ -25,16 +25,25 @@ from Tools.Free_Harmonic_Clustering.gui import (  # noqa: E402
     has_active_operations,
 )
 from Tools.Free_Harmonic_Clustering.gui.models import (  # noqa: E402
+    AnalysisRecordingExclusion,
     AnalysisSetup,
     AnalysisWorkerOutcome,
     GuiAnalysisDesign,
     GuiHarmonicMode,
     GroupChoice,
     ProjectAnalysisOptions,
+    RecordingChoice,
+    RepeatedBatchSetup,
+    RepeatedBatchWorkerOutcome,
     RunOutcome,
+    SessionChoice,
+)
+from Tools.Free_Harmonic_Clustering.gui.recording_exclusions_dialog import (  # noqa: E402
+    RecordingExclusionsDialog,
 )
 from Tools.Free_Harmonic_Clustering.gui.workers import (  # noqa: E402
     AnalysisWorker,
+    RepeatedSessionBatchWorker,
     _CancellableWorker,
 )
 from Tools.Free_Harmonic_Clustering.gui.operation_registry import (  # noqa: E402
@@ -93,6 +102,49 @@ def _analysis_setup() -> AnalysisSetup:
         harmonic_mode=GuiHarmonicMode.AUTOMATIC,
         fixed_highest_harmonic_order=None,
         max_harmonic_hz=20.0,
+    )
+
+
+def _repeated_options(project_root: Path) -> ProjectAnalysisOptions:
+    sessions = (
+        SessionChoice("luteal_phase", "Luteal Phase", 1),
+        SessionChoice("follicular_phase", "Follicular Phase", 2),
+    )
+    groups = (
+        GroupChoice("bc_group", "BC Group"),
+        GroupChoice("control_group", "Control Group"),
+    )
+    recordings = tuple(
+        RecordingChoice(
+            recording_id=f"{participant}__{session.session_id}",
+            participant_id=participant,
+            group_id=group.group_id,
+            group_label=group.label,
+            session_id=session.session_id,
+            session_label=session.label,
+            visit_index=session.visit_index,
+        )
+        for participant, group in (("P18", groups[0]), ("P20", groups[1]))
+        for session in sessions
+    )
+    return ProjectAnalysisOptions(
+        project_root=project_root,
+        conditions=("Neutral Angry", "Angry Control", "Neutral Happy", "Neutral Sad"),
+        groups=groups,
+        eligible_orders=(1, 2, 3, 4, 6),
+        eligible_harmonics_hz=(1.2, 2.4, 3.6, 4.8, 7.2),
+        excluded_base_orders=(5,),
+        excluded_base_harmonics_hz=(6.0,),
+        fft_upper_hz=20.0,
+        effective_harmonic_upper_hz=19.2,
+        frequency_resolution_hz=0.01,
+        compatibility_message="Exact cohort grids are checked during Prepare.",
+        is_repeated_session=True,
+        sessions=sessions,
+        recordings=recordings,
+        fixed_order_confounding=(
+            "Session/phase-at-visit is perfectly aligned with visit order."
+        ),
     )
 
 
@@ -301,6 +353,162 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     page._active_stage = "inspection"
     page._on_operation_cancelled()
     assert page._inspection_failed
+
+
+def test_repeated_project_uses_prespecified_batch_without_page_scroll(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
+    page.resize(1280, 900)
+    QtWidgets.QApplication.processEvents()
+
+    assert page.design_combo.count() == 1
+    assert page.design_combo.currentData() == (
+        GuiAnalysisDesign.REPEATED_SESSION_BATCH.value
+    )
+    assert not page.design_combo.isEnabled()
+    assert page.design_stack.currentIndex() == 2
+    assert page.findChildren(QtWidgets.QScrollArea) == []
+    assert "BC Group" in page.repeated_groups_value.text()
+    assert "Control Group" in page.repeated_groups_value.text()
+    assert page.repeated_sessions_value.text() == (
+        "Luteal Phase (Visit 1) -> Follicular Phase (Visit 2)"
+    )
+    assert "All 4 project conditions" in page.repeated_conditions_value.text()
+    assert "Visit 2 - Visit 1" in page.repeated_batch_value.text()
+    assert "aligned with visit order" in page.repeated_order_warning.text()
+    assert page.review_exclusions_button.isEnabled()
+    assert page.run_analysis_button.text() == "Run Full Repeated-Session Batch"
+    assert page._setup_error() is None
+
+    started: list[tuple[object, str]] = []
+    monkeypatch.setattr(
+        page,
+        "_start_operation",
+        lambda worker, *, stage, **_kwargs: started.append((worker, stage)),
+    )
+    qtbot.mouseClick(page.run_analysis_button, QtCore.Qt.LeftButton)
+
+    assert len(started) == 1
+    worker, stage = started[0]
+    assert isinstance(worker, RepeatedSessionBatchWorker)
+    assert stage == "repeated_session_batch"
+
+
+def test_recording_exclusion_dialog_requires_reason_and_is_analysis_only(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    options = _repeated_options(tmp_path)
+    dialog = RecordingExclusionsDialog(options.recordings)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    assert "only to this Free Harmonic Clustering batch" in (
+        dialog.findChild(
+            QtWidgets.QWidget,
+            "free_harmonic_exclusion_scope_note",
+        ).text()
+    )
+    dialog.table.item(0, 0).setCheckState(QtCore.Qt.Checked)
+    assert not dialog.apply_button.isEnabled()
+    assert "Add a reason" in dialog.validation_status.text()
+
+    dialog.table.item(0, 6).setText("User-declared outlier")
+    assert dialog.apply_button.isEnabled()
+    assert dialog.exclusions() == (
+        AnalysisRecordingExclusion(
+            options.recordings[0].recording_id,
+            "User-declared outlier",
+        ),
+    )
+
+
+def test_repeated_batch_worker_delegates_every_phase_off_widget_state(
+    tmp_path: Path,
+) -> None:
+    options = _repeated_options(tmp_path)
+    setup = RepeatedBatchSetup(
+        harmonic_mode=GuiHarmonicMode.AUTOMATIC,
+        fixed_highest_harmonic_order=None,
+        max_harmonic_hz=20.0,
+        recording_exclusions=(
+            AnalysisRecordingExclusion(
+                "P18__follicular_phase",
+                "User-declared outlier",
+            ),
+        ),
+    )
+    sentinel = SimpleNamespace(result=SimpleNamespace(outcomes=()), receipt=object())
+
+    class Backend:
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def run_repeated_batch(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return sentinel
+
+    backend = Backend()
+    worker = RepeatedSessionBatchWorker(
+        backend,
+        tmp_path,
+        ProjectFrequencySnapshot(1.2, 6.0),
+        options,
+        setup,
+    )
+    completed: list[object] = []
+    worker.completed.connect(completed.append)
+
+    worker.run()
+
+    assert len(backend.calls) == 1
+    assert completed == [RepeatedBatchWorkerOutcome(run=sentinel)]
+
+
+def test_repeated_batch_result_table_shows_both_holm_layers(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    page = _page(qtbot, tmp_path)
+    page._on_inspection_completed(_repeated_options(tmp_path.resolve()))
+    conditions = _repeated_options(tmp_path).conditions
+    families = (
+        "session_averaged_groups",
+        "paired_sessions_within_group:bc_group",
+        "paired_sessions_within_group:control_group",
+        "group_session_change",
+    )
+    outcomes = tuple(
+        SimpleNamespace(
+            family_id=family,
+            condition=condition,
+            result=SimpleNamespace(
+                clusters=(SimpleNamespace(significant=True),),
+            ),
+            global_two_sided_p_value=0.01,
+            holm_within_family_p_value=0.04,
+            holm_all_batch_p_value=0.16,
+        )
+        for condition in conditions
+        for family in families
+    )
+    run = SimpleNamespace(result=SimpleNamespace(outcomes=outcomes))
+
+    page._on_repeated_batch_completed(RepeatedBatchWorkerOutcome(run=run))
+
+    assert page.results_panel.isVisible()
+    assert page.batch_table.isVisible()
+    assert page.significant_table.isHidden()
+    assert page.batch_table.rowCount() == 16
+    assert page.batch_table.item(0, 0).text() == "Session Averaged Groups"
+    assert page.batch_table.item(0, 4).text() == "0.0400"
+    assert page.batch_table.item(0, 5).text() == "0.1600"
+    assert "session/phase-at-visit" in page.result_status.text()
 
 
 def test_provenance_failure_requests_shared_post_processing_without_error_banner(

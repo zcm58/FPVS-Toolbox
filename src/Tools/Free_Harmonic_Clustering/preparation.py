@@ -23,9 +23,7 @@ from .models import (
 )
 
 
-_FREQUENCY_COLUMN = re.compile(
-    r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)_Hz$"
-)
+_FREQUENCY_COLUMN = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)_Hz$")
 _ZERO_TOLERANCE_HZ = 5e-5
 _TARGET_TOLERANCE_HZ = 5e-5
 _GRID_TOLERANCE_HZ = 6e-5
@@ -54,24 +52,16 @@ def _frequency_columns(header: Sequence[object]) -> tuple[tuple[str, ...], np.nd
             continue
         frequency = float(match.group(1))
         if not np.isfinite(frequency):
-            raise FreeHarmonicPreparationError(
-                f"FullFFT frequency column {column!r} is not finite."
-            )
+            raise FreeHarmonicPreparationError(f"FullFFT frequency column {column!r} is not finite.")
         columns.append(column)
         frequencies.append(frequency)
     if len(columns) < 2:
-        raise FreeHarmonicPreparationError(
-            "No usable FullFFT frequency grid was found."
-        )
+        raise FreeHarmonicPreparationError("No usable FullFFT frequency grid was found.")
     if len(set(columns)) != len(columns):
-        raise FreeHarmonicPreparationError(
-            "FullFFT frequency column names must be unique."
-        )
+        raise FreeHarmonicPreparationError("FullFFT frequency column names must be unique.")
     values = np.ascontiguousarray(frequencies, dtype=np.float64)
     if np.any(np.diff(values) <= 0.0):
-        raise FreeHarmonicPreparationError(
-            "FullFFT frequency columns must be strictly increasing."
-        )
+        raise FreeHarmonicPreparationError("FullFFT frequency columns must be strictly increasing.")
     return tuple(columns), values
 
 
@@ -93,34 +83,22 @@ def build_frequency_window_plan(
         raise TypeError("spec must be a FreeHarmonicMethodSpec.")
     header_names = tuple(str(value or "").strip() for value in header)
     if header_names.count(electrode_column) != 1:
-        raise FreeHarmonicPreparationError(
-            f"FullFFT requires exactly one {electrode_column!r} column."
-        )
+        raise FreeHarmonicPreparationError(f"FullFFT requires exactly one {electrode_column!r} column.")
     full_columns, frequencies = _frequency_columns(header)
     if abs(float(frequencies[0])) > _ZERO_TOLERANCE_HZ:
-        raise FreeHarmonicPreparationError(
-            "The FullFFT frequency grid must begin at 0 Hz."
-        )
+        raise FreeHarmonicPreparationError("The FullFFT frequency grid must begin at 0 Hz.")
 
     oddball_hz = float(spec.oddball_frequency_hz)
-    target_positions = np.flatnonzero(
-        np.abs(frequencies - oddball_hz) <= _TARGET_TOLERANCE_HZ
-    )
+    target_positions = np.flatnonzero(np.abs(frequencies - oddball_hz) <= _TARGET_TOLERANCE_HZ)
     if target_positions.size != 1 or int(target_positions[0]) <= 0:
-        raise FreeHarmonicPreparationError(
-            "The FullFFT grid must contain exactly one oddball-frequency column."
-        )
+        raise FreeHarmonicPreparationError("The FullFFT grid must contain exactly one oddball-frequency column.")
     oddball_bin = int(target_positions[0])
     resolution_hz = oddball_hz / oddball_bin
     expected = np.arange(frequencies.size, dtype=np.float64) * resolution_hz
     if np.any(np.abs(frequencies - expected) > _GRID_TOLERANCE_HZ):
-        raise FreeHarmonicPreparationError(
-            "The FullFFT frequency columns are not one uniform zero-based grid."
-        )
+        raise FreeHarmonicPreparationError("The FullFFT frequency columns are not one uniform zero-based grid.")
 
-    maximum_order = int(
-        np.floor((float(spec.max_harmonic_hz) + _GRID_TOLERANCE_HZ) / oddball_hz)
-    )
+    maximum_order = int(np.floor((float(spec.max_harmonic_hz) + _GRID_TOLERANCE_HZ) / oddball_hz))
     all_orders = np.arange(1, maximum_order + 1, dtype=np.int64)
     all_harmonics = all_orders.astype(np.float64) * oddball_hz
     base_ratios = all_harmonics / float(spec.base_frequency_hz)
@@ -135,9 +113,7 @@ def build_frequency_window_plan(
     excluded_orders = all_orders[base_overlap]
     excluded_harmonics = all_harmonics[base_overlap]
     if not candidate_orders.size:
-        raise FreeHarmonicPreparationError(
-            "No non-base oddball harmonics remain in the requested range."
-        )
+        raise FreeHarmonicPreparationError("No non-base oddball harmonics remain in the requested range.")
 
     target_full_indices: list[int] = []
     noise_full_indices: list[np.ndarray] = []
@@ -153,23 +129,15 @@ def build_frequency_window_plan(
         upper_hz = float(harmonic_hz) + half_width_hz
         if (
             target_index >= frequencies.size
-            or abs(float(frequencies[target_index]) - float(harmonic_hz))
-            > _GRID_TOLERANCE_HZ
+            or abs(float(frequencies[target_index]) - float(harmonic_hz)) > _GRID_TOLERANCE_HZ
         ):
+            raise FreeHarmonicPreparationError(f"FullFFT is missing the {float(harmonic_hz):g} Hz harmonic bin.")
+        if lower_hz < float(frequencies[0]) - window_tolerance or upper_hz > float(frequencies[-1]) + window_tolerance:
             raise FreeHarmonicPreparationError(
-                f"FullFFT is missing the {float(harmonic_hz):g} Hz harmonic bin."
-            )
-        if (
-            lower_hz < float(frequencies[0]) - window_tolerance
-            or upper_hz > float(frequencies[-1]) + window_tolerance
-        ):
-            raise FreeHarmonicPreparationError(
-                "FullFFT does not contain the complete physical noise window "
-                f"for {float(harmonic_hz):g} Hz."
+                f"FullFFT does not contain the complete physical noise window for {float(harmonic_hz):g} Hz."
             )
         in_window = np.flatnonzero(
-            (frequencies >= lower_hz - window_tolerance)
-            & (frequencies <= upper_hz + window_tolerance)
+            (frequencies >= lower_hz - window_tolerance) & (frequencies <= upper_hz + window_tolerance)
         )
         excluded_adjacent = np.array(
             [target_index - 1, target_index, target_index + 1],
@@ -193,8 +161,7 @@ def build_frequency_window_plan(
     if len(noise_counts) != 1:
         details = ", ".join(str(value) for value in sorted(noise_counts))
         raise FreeHarmonicPreparationError(
-            "Eligible harmonics do not share one complete physical noise-window "
-            f"size (observed {details} bins)."
+            f"Eligible harmonics do not share one complete physical noise-window size (observed {details} bins)."
         )
 
     required_full_indices = np.unique(
@@ -207,20 +174,14 @@ def build_frequency_window_plan(
     )
     selected_columns = tuple(full_columns[index] for index in required_full_indices)
     selected_frequencies = np.ascontiguousarray(frequencies[required_full_indices])
-    compact_index = {
-        int(full_index): compact
-        for compact, full_index in enumerate(required_full_indices.tolist())
-    }
+    compact_index = {int(full_index): compact for compact, full_index in enumerate(required_full_indices.tolist())}
     target_selected_indices = np.fromiter(
         (compact_index[index] for index in target_full_indices),
         dtype=np.int64,
         count=len(target_full_indices),
     )
     noise_selected_indices = np.ascontiguousarray(
-        [
-            [compact_index[int(index)] for index in indices]
-            for indices in noise_full_indices
-        ],
+        [[compact_index[int(index)] for index in indices] for indices in noise_full_indices],
         dtype=np.int64,
     )
 
@@ -273,13 +234,10 @@ def build_available_frequency_window_plan(
         if not np.isfinite(value) or value <= 0.0:
             raise ValueError(f"{field_name} must be finite and positive.")
     usable_upper_hz = float(frequencies[-1]) - half_width_hz
-    highest_order = int(
-        np.floor((usable_upper_hz + _GRID_TOLERANCE_HZ) / oddball_hz)
-    )
+    highest_order = int(np.floor((usable_upper_hz + _GRID_TOLERANCE_HZ) / oddball_hz))
     if highest_order < 1:
         raise FreeHarmonicPreparationError(
-            "FullFFT does not contain one oddball harmonic with a complete "
-            "physical noise window."
+            "FullFFT does not contain one oddball harmonic with a complete physical noise window."
         )
     specification = FreeHarmonicMethodSpec(
         oddball_frequency_hz=oddball_hz,
@@ -301,12 +259,8 @@ def compute_participant_snr(
     """Return target/noise-mean SNR for every leading observation dimension."""
 
     amplitudes = np.asarray(selected_amplitudes, dtype=np.float64)
-    if amplitudes.ndim < 1 or amplitudes.shape[-1] != len(
-        plan.selected_frequency_columns
-    ):
-        raise FreeHarmonicPreparationError(
-            "Selected amplitude tensor has the wrong frequency-axis length."
-        )
+    if amplitudes.ndim < 1 or amplitudes.shape[-1] != len(plan.selected_frequency_columns):
+        raise FreeHarmonicPreparationError("Selected amplitude tensor has the wrong frequency-axis length.")
     if not np.all(np.isfinite(amplitudes)):
         raise FreeHarmonicPreparationError("FullFFT amplitudes must be finite.")
     if np.any(amplitudes < 0.0):
@@ -315,9 +269,7 @@ def compute_participant_snr(
     noise = np.take(amplitudes, plan.noise_selected_indices, axis=-1)
     noise_mean = np.mean(noise, axis=-1)
     if np.any(~np.isfinite(noise_mean)) or np.any(noise_mean <= 0.0):
-        raise FreeHarmonicPreparationError(
-            "Every harmonic noise window must have a finite positive mean."
-        )
+        raise FreeHarmonicPreparationError("Every harmonic noise window must have a finite positive mean.")
     snr = targets / noise_mean
     if not np.all(np.isfinite(snr)):
         raise FreeHarmonicPreparationError("Participant SNR contains non-finite values.")
@@ -334,15 +286,11 @@ def compute_harmonic_z(
 
     amplitude = np.asarray(grand_selected_amplitude, dtype=np.float64)
     if amplitude.ndim != 1 or amplitude.size != len(plan.selected_frequency_columns):
-        raise FreeHarmonicPreparationError(
-            "Grand amplitude spectrum must be one selected-frequency vector."
-        )
+        raise FreeHarmonicPreparationError("Grand amplitude spectrum must be one selected-frequency vector.")
     if not np.all(np.isfinite(amplitude)):
         raise FreeHarmonicPreparationError("Grand amplitude spectrum must be finite.")
     if np.any(amplitude < 0.0):
-        raise FreeHarmonicPreparationError(
-            "Grand amplitude spectrum must be non-negative."
-        )
+        raise FreeHarmonicPreparationError("Grand amplitude spectrum must be non-negative.")
     ddof = int(ddof)
     if ddof < 0 or plan.noise_selected_indices.shape[1] <= ddof:
         raise FreeHarmonicPreparationError("Noise-window ddof is not estimable.")
@@ -351,9 +299,7 @@ def compute_harmonic_z(
     noise_mean = np.mean(noise, axis=-1)
     noise_sd = np.std(noise, axis=-1, ddof=ddof)
     if np.any(~np.isfinite(noise_sd)) or np.any(noise_sd <= 0.0):
-        raise FreeHarmonicPreparationError(
-            "Every harmonic noise window must have finite non-zero sample variance."
-        )
+        raise FreeHarmonicPreparationError("Every harmonic noise window must have finite non-zero sample variance.")
     z_scores = (targets - noise_mean) / noise_sd
     if not np.all(np.isfinite(z_scores)):
         raise FreeHarmonicPreparationError("Harmonic z scores contain non-finite values.")
@@ -386,12 +332,28 @@ def select_harmonics(
     )
     detected_a = z_a > float(spec.harmonic_z_threshold)
     detected_b = z_b > float(spec.harmonic_z_threshold)
-    detected_either = detected_a | detected_b
-    highest_detected_order = (
-        int(np.max(plan.candidate_orders[detected_either]))
-        if np.any(detected_either)
-        else None
+    return _selection_from_z(
+        z_a,
+        z_b,
+        detected_a,
+        detected_b,
+        plan,
+        spec,
     )
+
+
+def _selection_from_z(
+    z_a: np.ndarray,
+    z_b: np.ndarray,
+    detected_a: np.ndarray,
+    detected_b: np.ndarray,
+    plan: FrequencyWindowPlan,
+    spec: FreeHarmonicMethodSpec,
+) -> HarmonicSelection:
+    """Resolve fill-through from already calculated arm-level selector z."""
+
+    detected_either = detected_a | detected_b
+    highest_detected_order = int(np.max(plan.candidate_orders[detected_either])) if np.any(detected_either) else None
     fixed_order: int | None = None
     if spec.harmonic_selection_mode is HarmonicSelectionMode.AUTOMATIC:
         if highest_detected_order is None:
@@ -414,13 +376,10 @@ def select_harmonics(
             else:
                 detail = "it is not an eligible non-base oddball harmonic"
             raise FreeHarmonicPreparationError(
-                "fixed_highest_harmonic_order "
-                f"{fixed_order} ({harmonic_hz:g} Hz) is invalid because {detail}."
+                f"fixed_highest_harmonic_order {fixed_order} ({harmonic_hz:g} Hz) is invalid because {detail}."
             )
         selected_ceiling = fixed_order
-    selected_indices = np.flatnonzero(
-        plan.candidate_orders <= selected_ceiling
-    )
+    selected_indices = np.flatnonzero(plan.candidate_orders <= selected_ceiling)
     return HarmonicSelection(
         candidate_orders=plan.candidate_orders,
         candidate_harmonics_hz=plan.candidate_harmonics_hz,
@@ -441,6 +400,57 @@ def select_harmonics(
     )
 
 
+def select_harmonics_across_cells(
+    grand_selected_amplitudes: np.ndarray,
+    plan: FrequencyWindowPlan,
+    spec: FreeHarmonicMethodSpec,
+) -> tuple[HarmonicSelection, np.ndarray, np.ndarray]:
+    """Select one domain from equally weighted group x session x condition cells.
+
+    Each row is one participant-mean cell spectrum. Selector z is calculated
+    independently for every row; the retained ceiling is the highest eligible
+    strict detection in any row. The returned cell-level z and detection arrays
+    are immutable copies suitable for the batch audit.
+    """
+
+    spectra = np.asarray(grand_selected_amplitudes, dtype=np.float64)
+    if spectra.ndim != 2 or spectra.shape[0] < 1 or spectra.shape[1] != len(plan.selected_frequency_columns):
+        raise FreeHarmonicPreparationError("Shared selector spectra must be cell x selected frequency.")
+    if not np.all(np.isfinite(spectra)) or np.any(spectra < 0.0):
+        raise FreeHarmonicPreparationError("Shared selector cell spectra must be finite and non-negative.")
+    cell_z = np.ascontiguousarray(
+        [
+            compute_harmonic_z(
+                spectrum,
+                plan,
+                ddof=spec.harmonic_z_ddof,
+            )
+            for spectrum in spectra
+        ],
+        dtype=np.float64,
+    )
+    cell_detected = np.ascontiguousarray(
+        cell_z > float(spec.harmonic_z_threshold),
+        dtype=np.bool_,
+    )
+    # HarmonicSelection remains the common legacy-compatible domain object.
+    # Its two audit arms are both the across-cell maximum and therefore must be
+    # interpreted only through the explicit SharedHarmonicSelectionAudit.
+    maximum_z = np.max(cell_z, axis=0)
+    detected_any = np.any(cell_detected, axis=0)
+    selection = _selection_from_z(
+        maximum_z,
+        maximum_z,
+        detected_any,
+        detected_any,
+        plan,
+        spec,
+    )
+    cell_z.setflags(write=False)
+    cell_detected.setflags(write=False)
+    return selection, cell_z, cell_detected
+
+
 def select_snr_harmonics(
     participant_snr: np.ndarray,
     selection: HarmonicSelection,
@@ -449,9 +459,7 @@ def select_snr_harmonics(
 
     snr = np.asarray(participant_snr, dtype=np.float64)
     if snr.ndim != 3 or snr.shape[-1] != selection.candidate_orders.size:
-        raise FreeHarmonicPreparationError(
-            "Participant SNR must be participant x sensor x candidate harmonic."
-        )
+        raise FreeHarmonicPreparationError("Participant SNR must be participant x sensor x candidate harmonic.")
     selected = np.take(snr, selection.selected_candidate_indices, axis=-1)
     if not np.all(np.isfinite(selected)):
         raise FreeHarmonicPreparationError("Selected participant SNR must be finite.")
@@ -463,9 +471,7 @@ def l2_normalize_snr(selected_snr: np.ndarray) -> np.ndarray:
 
     snr = np.asarray(selected_snr, dtype=np.float64)
     if snr.ndim != 3 or snr.shape[1] < 1 or snr.shape[2] < 1:
-        raise FreeHarmonicPreparationError(
-            "Selected SNR must be participant x sensor x harmonic."
-        )
+        raise FreeHarmonicPreparationError("Selected SNR must be participant x sensor x harmonic.")
     if not np.all(np.isfinite(snr)):
         raise FreeHarmonicPreparationError("Selected participant SNR must be finite.")
     norms = np.sqrt(np.sum(np.square(snr), axis=(1, 2), keepdims=True))
@@ -484,5 +490,6 @@ __all__ = [
     "compute_participant_snr",
     "l2_normalize_snr",
     "select_harmonics",
+    "select_harmonics_across_cells",
     "select_snr_harmonics",
 ]

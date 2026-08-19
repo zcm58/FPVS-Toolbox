@@ -11,9 +11,8 @@ import numpy as np
 
 
 METHOD_VERSION = "hermann_free_harmonic_clustering_cleanroom_v2"
-SENSOR_ADJACENCY_VERSION = (
-    "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
-)
+REPEATED_SESSION_BATCH_VERSION = "fhc_repeated_session_batch_v1"
+SENSOR_ADJACENCY_VERSION = "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
 
 
 class FreeHarmonicError(RuntimeError):
@@ -51,12 +50,8 @@ class NoHarmonicsSelectedError(FreeHarmonicPreparationError):
                 (arm_b_z, np.float64),
             )
         )
-        if any(array.ndim != 1 for array in arrays) or len(
-            {array.size for array in arrays}
-        ) != 1:
-            raise ValueError(
-                "No-harmonics diagnostic arrays must be aligned vectors."
-            )
+        if any(array.ndim != 1 for array in arrays) or len({array.size for array in arrays}) != 1:
+            raise ValueError("No-harmonics diagnostic arrays must be aligned vectors.")
         for array in arrays:
             array.setflags(write=False)
         threshold = float(z_threshold)
@@ -84,6 +79,22 @@ class AnalysisDesign(str, Enum):
 
     INDEPENDENT_GROUPS = "independent_groups"
     PAIRED_CONDITIONS = "paired_conditions"
+
+
+class RepeatedSessionContrastFamily(str, Enum):
+    """Prespecified repeated-session scientific contrast families."""
+
+    SESSION_AVERAGED_GROUPS = "session_averaged_groups"
+    PAIRED_SESSIONS_WITHIN_GROUP = "paired_sessions_within_group"
+    GROUP_SESSION_CHANGE = "group_session_change"
+
+
+class RepeatedSessionTensorSemantics(str, Enum):
+    """How repeated-session run tensors were derived before inference."""
+
+    SESSION_AVERAGED_NORMALIZED_PROFILE = "session_averaged_candidate_snr_then_l2_normalized"
+    SESSION_NORMALIZED_PAIRED_PROFILE = "each_session_snr_l2_normalized"
+    NORMALIZED_SESSION_CHANGE = "l2_normalized_session_a_minus_l2_normalized_session_b"
 
 
 class HarmonicSelectionMode(str, Enum):
@@ -126,9 +137,7 @@ class FreeHarmonicMethodSpec:
     oddball_frequency_hz: float = 1.2
     base_frequency_hz: float = 6.0
     max_harmonic_hz: float = 48.0
-    harmonic_selection_mode: HarmonicSelectionMode = (
-        HarmonicSelectionMode.AUTOMATIC
-    )
+    harmonic_selection_mode: HarmonicSelectionMode = HarmonicSelectionMode.AUTOMATIC
     fixed_highest_harmonic_order: int | None = None
     noise_half_width_hz: float = 0.1
     harmonic_z_threshold: float = 3.29
@@ -163,10 +172,7 @@ class FreeHarmonicMethodSpec:
                 else HarmonicSelectionMode(str(self.harmonic_selection_mode))
             )
         except ValueError as exc:
-            raise ValueError(
-                "harmonic_selection_mode must be 'automatic' or "
-                "'fixed_highest'."
-            ) from exc
+            raise ValueError("harmonic_selection_mode must be 'automatic' or 'fixed_highest'.") from exc
         object.__setattr__(
             self,
             "harmonic_selection_mode",
@@ -175,20 +181,10 @@ class FreeHarmonicMethodSpec:
         fixed_order = self.fixed_highest_harmonic_order
         if selection_mode is HarmonicSelectionMode.AUTOMATIC:
             if fixed_order is not None:
-                raise ValueError(
-                    "fixed_highest_harmonic_order must be omitted in automatic "
-                    "harmonic-selection mode."
-                )
+                raise ValueError("fixed_highest_harmonic_order must be omitted in automatic harmonic-selection mode.")
         else:
-            if (
-                fixed_order is None
-                or isinstance(fixed_order, bool)
-                or int(fixed_order) < 1
-            ):
-                raise ValueError(
-                    "fixed_highest mode requires a positive integer "
-                    "fixed_highest_harmonic_order."
-                )
+            if fixed_order is None or isinstance(fixed_order, bool) or int(fixed_order) < 1:
+                raise ValueError("fixed_highest mode requires a positive integer fixed_highest_harmonic_order.")
             object.__setattr__(
                 self,
                 "fixed_highest_harmonic_order",
@@ -232,48 +228,120 @@ class ProjectContrastRequest:
     condition_a: str
     condition_b: str | None = None
     group_ids: tuple[str, ...] = ()
+    session_ids: tuple[str, ...] = ()
+    contrast_family_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_root", Path(self.project_root))
         try:
-            design = (
-                self.design
-                if isinstance(self.design, AnalysisDesign)
-                else AnalysisDesign(str(self.design))
-            )
+            design = self.design if isinstance(self.design, AnalysisDesign) else AnalysisDesign(str(self.design))
         except ValueError as exc:
             raise ValueError(f"Unsupported analysis design: {self.design!r}.") from exc
         object.__setattr__(self, "design", design)
         condition_a = _nonempty_text(self.condition_a, field_name="condition_a")
         condition_b = (
-            None
-            if self.condition_b in (None, "")
-            else _nonempty_text(self.condition_b, field_name="condition_b")
+            None if self.condition_b in (None, "") else _nonempty_text(self.condition_b, field_name="condition_b")
         )
         groups = _tuple_text(self.group_ids)
+        sessions = _tuple_text(self.session_ids)
         if len({group.casefold() for group in groups}) != len(groups):
             raise ValueError("group_ids must contain distinct canonical group IDs.")
+        if len({session.casefold() for session in sessions}) != len(sessions):
+            raise ValueError("session_ids must contain distinct canonical session IDs.")
+        family_id = (
+            None
+            if self.contrast_family_id in (None, "")
+            else _nonempty_text(
+                self.contrast_family_id,
+                field_name="contrast_family_id",
+            )
+        )
+        if sessions and len(sessions) != 2:
+            raise ValueError("Repeated-session contrasts require two ordered session_ids.")
+        if bool(sessions) != bool(family_id):
+            raise ValueError("session_ids and contrast_family_id must be supplied together.")
         if design is AnalysisDesign.INDEPENDENT_GROUPS:
             if condition_b is not None:
-                raise ValueError(
-                    "independent_groups uses one condition; condition_b must be omitted."
-                )
+                raise ValueError("independent_groups uses one condition; condition_b must be omitted.")
             if len(groups) != 2:
-                raise ValueError(
-                    "independent_groups requires two ordered canonical group_ids."
-                )
+                raise ValueError("independent_groups requires two ordered canonical group_ids.")
         else:
             if condition_b is None:
                 raise ValueError("paired_conditions requires condition_b.")
-            if condition_a.casefold() == condition_b.casefold():
+            if condition_a.casefold() == condition_b.casefold() and not sessions:
                 raise ValueError("paired_conditions requires two distinct conditions.")
             if len(groups) > 1:
-                raise ValueError(
-                    "paired_conditions accepts at most one canonical group filter."
-                )
+                raise ValueError("paired_conditions accepts at most one canonical group filter.")
+            if sessions and len(groups) != 1:
+                raise ValueError("Repeated paired-session contrasts require one canonical group filter.")
         object.__setattr__(self, "condition_a", condition_a)
         object.__setattr__(self, "condition_b", condition_b)
         object.__setattr__(self, "group_ids", groups)
+        object.__setattr__(self, "session_ids", sessions)
+        object.__setattr__(self, "contrast_family_id", family_id)
+
+
+@dataclass(frozen=True, slots=True)
+class RecordingExclusionRequest:
+    """One analysis-only recording exclusion with an explicit reason."""
+
+    recording_id: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("recording_id", "reason"):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class RepeatedSessionBatchRequest:
+    """One versioned, phase-balanced repeated-session FHC batch.
+
+    ``group_ids`` are ordered A-minus-B. ``session_ids`` are likewise ordered
+    A-minus-B and therefore encode the requested change direction explicitly
+    (for example, Visit 2 minus Visit 1).
+    """
+
+    project_root: Path
+    conditions: tuple[str, ...]
+    group_ids: tuple[str, str]
+    session_ids: tuple[str, str]
+    recording_exclusions: tuple[RecordingExclusionRequest, ...] = ()
+    batch_version: str = REPEATED_SESSION_BATCH_VERSION
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "project_root", Path(self.project_root))
+        conditions = _tuple_text(self.conditions)
+        groups = _tuple_text(self.group_ids)
+        sessions = _tuple_text(self.session_ids)
+        if not conditions:
+            raise ValueError("Repeated-session batches require conditions.")
+        if len({value.casefold() for value in conditions}) != len(conditions):
+            raise ValueError("conditions must contain distinct labels.")
+        if len(groups) != 2 or len({value.casefold() for value in groups}) != 2:
+            raise ValueError("Repeated-session batches require two ordered canonical group_ids.")
+        if len(sessions) != 2 or len({value.casefold() for value in sessions}) != 2:
+            raise ValueError("Repeated-session batches require two ordered canonical session_ids.")
+        exclusions = tuple(self.recording_exclusions)
+        if any(not isinstance(row, RecordingExclusionRequest) for row in exclusions):
+            raise TypeError("recording_exclusions must contain RecordingExclusionRequest values.")
+        if len({row.recording_id.casefold() for row in exclusions}) != len(exclusions):
+            raise ValueError("recording_exclusions must be unique by recording_id.")
+        object.__setattr__(self, "conditions", conditions)
+        object.__setattr__(self, "group_ids", groups)
+        object.__setattr__(self, "session_ids", sessions)
+        object.__setattr__(self, "recording_exclusions", exclusions)
+        batch_version = _nonempty_text(
+            self.batch_version,
+            field_name="batch_version",
+        )
+        if batch_version != REPEATED_SESSION_BATCH_VERSION:
+            raise ValueError(f"Unsupported repeated-session batch version {batch_version!r}.")
+        object.__setattr__(self, "batch_version", batch_version)
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +362,59 @@ class ProjectGroupOption:
             "label",
             _nonempty_text(self.label, field_name="label"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectSessionOption:
+    """One canonical session exposed for repeated-session setup."""
+
+    session_id: str
+    label: str
+    visit_index: int
+
+    def __post_init__(self) -> None:
+        for field_name in ("session_id", "label"):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+        visit_index = int(self.visit_index)
+        if isinstance(self.visit_index, bool) or visit_index < 1:
+            raise ValueError("visit_index must be a positive integer.")
+        object.__setattr__(self, "visit_index", visit_index)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectRecordingOption:
+    """Canonical recording identity for analysis-only exclusion setup."""
+
+    recording_id: str
+    participant_id: str
+    group_id: str
+    group_label: str
+    session_id: str
+    session_label: str
+    visit_index: int
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "recording_id",
+            "participant_id",
+            "group_id",
+            "group_label",
+            "session_id",
+            "session_label",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+        visit_index = int(self.visit_index)
+        if isinstance(self.visit_index, bool) or visit_index < 1:
+            raise ValueError("visit_index must be a positive integer.")
+        object.__setattr__(self, "visit_index", visit_index)
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +443,8 @@ class ProjectAnalysisOptions:
     excluded_base_harmonics_hz: tuple[float, ...]
     incompatible_workbooks: tuple[str, ...] = ()
     diagnostics: tuple[str, ...] = ()
+    sessions: tuple[ProjectSessionOption, ...] = ()
+    recordings: tuple[ProjectRecordingOption, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_root", Path(self.project_root))
@@ -386,6 +509,28 @@ class ProjectAnalysisOptions:
             _tuple_text(self.incompatible_workbooks),
         )
         object.__setattr__(self, "diagnostics", _tuple_text(self.diagnostics))
+        sessions = tuple(self.sessions)
+        recordings = tuple(self.recordings)
+        if any(not isinstance(row, ProjectSessionOption) for row in sessions):
+            raise TypeError("sessions must contain ProjectSessionOption values.")
+        if any(not isinstance(row, ProjectRecordingOption) for row in recordings):
+            raise TypeError("recordings must contain ProjectRecordingOption values.")
+        if len({row.session_id.casefold() for row in sessions}) != len(sessions):
+            raise ValueError("Project session IDs must be distinct.")
+        if len({row.visit_index for row in sessions}) != len(sessions):
+            raise ValueError("Project session visit indices must be distinct.")
+        if len({row.recording_id.casefold() for row in recordings}) != len(recordings):
+            raise ValueError("Project recording IDs must be distinct.")
+        session_keys = {row.session_id.casefold() for row in sessions}
+        group_keys = {row.group_id.casefold() for row in groups}
+        if recordings and not sessions:
+            raise ValueError("Recording options require canonical session options.")
+        if any(row.session_id.casefold() not in session_keys for row in recordings):
+            raise ValueError("Recording options reference an unknown session_id.")
+        if any(row.group_id.casefold() not in group_keys for row in recordings):
+            raise ValueError("Recording options reference an unknown group_id.")
+        object.__setattr__(self, "sessions", sessions)
+        object.__setattr__(self, "recordings", recordings)
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,9 +730,10 @@ class HarmonicSelection:
             raise ValueError("At least one harmonic must be retained.")
         if np.any(selected_indices < 0) or np.any(selected_indices >= candidate_count):
             raise ValueError("selected_candidate_indices exceed the candidate domain.")
-        if normalized["selected_orders"].size != selected_indices.size or normalized[
-            "selected_harmonics_hz"
-        ].size != selected_indices.size:
+        if (
+            normalized["selected_orders"].size != selected_indices.size
+            or normalized["selected_harmonics_hz"].size != selected_indices.size
+        ):
             raise ValueError("Selected harmonic arrays must have matching lengths.")
         for field_name, value in normalized.items():
             object.__setattr__(self, field_name, value)
@@ -609,19 +755,13 @@ class HarmonicSelection:
         fixed_order = self.fixed_highest_harmonic_order
         if selection_mode is HarmonicSelectionMode.AUTOMATIC:
             if fixed_order is not None:
-                raise ValueError(
-                    "Automatic selection cannot record a fixed harmonic ceiling."
-                )
+                raise ValueError("Automatic selection cannot record a fixed harmonic ceiling.")
         else:
             if fixed_order is None or int(fixed_order) < 1:
-                raise ValueError(
-                    "Fixed selection requires fixed_highest_harmonic_order."
-                )
+                raise ValueError("Fixed selection requires fixed_highest_harmonic_order.")
             fixed_order = int(fixed_order)
             if fixed_order != int(normalized["selected_orders"][-1]):
-                raise ValueError(
-                    "Fixed harmonic ceiling must equal the highest retained order."
-                )
+                raise ValueError("Fixed harmonic ceiling must equal the highest retained order.")
         object.__setattr__(self, "highest_detected_order", highest_detected)
         object.__setattr__(self, "selection_mode", selection_mode)
         object.__setattr__(self, "fixed_highest_harmonic_order", fixed_order)
@@ -641,6 +781,10 @@ class CohortWorkbook:
     project_relative_path: str
     header_read_seconds: float
     amplitude_read_seconds: float
+    recording_id: str | None = None
+    session_id: str | None = None
+    session_label: str | None = None
+    visit_index: int | None = None
 
     def __post_init__(self) -> None:
         arm = str(self.arm).strip().casefold()
@@ -664,6 +808,27 @@ class CohortWorkbook:
             if not np.isfinite(value) or value < 0.0:
                 raise ValueError(f"{field_name} must be finite and non-negative.")
             object.__setattr__(self, field_name, value)
+        repeated_values = tuple(
+            None if value in (None, "") else str(value).strip()
+            for value in (
+                self.recording_id,
+                self.session_id,
+                self.session_label,
+            )
+        )
+        if any(repeated_values) and not all(repeated_values):
+            raise ValueError("Recording/session workbook identity must be supplied together.")
+        visit_index = self.visit_index
+        if all(repeated_values):
+            if visit_index is None or isinstance(visit_index, bool) or int(visit_index) < 1:
+                raise ValueError("Repeated-session workbooks require a positive visit_index.")
+            visit_index = int(visit_index)
+        elif visit_index is not None:
+            raise ValueError("visit_index requires recording/session workbook identity.")
+        object.__setattr__(self, "recording_id", repeated_values[0])
+        object.__setattr__(self, "session_id", repeated_values[1])
+        object.__setattr__(self, "session_label", repeated_values[2])
+        object.__setattr__(self, "visit_index", visit_index)
 
 
 @dataclass(frozen=True, slots=True)
@@ -681,6 +846,106 @@ class ParticipantConditionExclusion:
                 field_name,
                 _nonempty_text(getattr(self, field_name), field_name=field_name),
             )
+
+
+@dataclass(frozen=True, slots=True)
+class RepeatedSessionCohortAuditRow:
+    """Complete-pair eligibility for one participant x condition cell."""
+
+    participant_id: str
+    group_id: str
+    condition: str
+    available_session_ids: tuple[str, ...]
+    missing_session_ids: tuple[str, ...]
+    recording_ids_by_session: tuple[tuple[str, str], ...] = ()
+    excluded_recording_ids: tuple[str, ...] = ()
+    excluded_session_ids: tuple[str, ...] = ()
+    exclusion_reasons: tuple[str, ...] = ()
+    included_complete_pair: bool = False
+
+    def __post_init__(self) -> None:
+        for field_name in ("participant_id", "group_id", "condition"):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+        available = _tuple_text(self.available_session_ids)
+        missing = _tuple_text(self.missing_session_ids)
+        if set(value.casefold() for value in available).intersection(value.casefold() for value in missing):
+            raise ValueError("Available and missing session IDs must not overlap.")
+        recording_rows = tuple(
+            (
+                _nonempty_text(session_id, field_name="recording session_id"),
+                _nonempty_text(recording_id, field_name="recording_id"),
+            )
+            for session_id, recording_id in self.recording_ids_by_session
+        )
+        if len({session.casefold() for session, _ in recording_rows}) != len(recording_rows):
+            raise ValueError("recording_ids_by_session must be unique by session.")
+        excluded_recordings = _tuple_text(self.excluded_recording_ids)
+        excluded_sessions = _tuple_text(self.excluded_session_ids)
+        reasons = _tuple_text(self.exclusion_reasons)
+        if not (len(excluded_recordings) == len(excluded_sessions) == len(reasons)):
+            raise ValueError("Excluded recording IDs, session IDs, and reasons must align.")
+        included = bool(self.included_complete_pair)
+        if included and missing:
+            raise ValueError("A complete-pair audit row cannot have missing sessions.")
+        object.__setattr__(self, "available_session_ids", available)
+        object.__setattr__(self, "missing_session_ids", missing)
+        object.__setattr__(self, "recording_ids_by_session", recording_rows)
+        object.__setattr__(self, "excluded_recording_ids", excluded_recordings)
+        object.__setattr__(self, "excluded_session_ids", excluded_sessions)
+        object.__setattr__(self, "exclusion_reasons", reasons)
+        object.__setattr__(self, "included_complete_pair", included)
+
+
+@dataclass(frozen=True, slots=True)
+class SharedHarmonicSelectionAudit:
+    """Equal-cell automatic selector audit for one repeated-session batch."""
+
+    cell_labels: tuple[str, ...]
+    cell_group_ids: tuple[str, ...]
+    cell_session_ids: tuple[str, ...]
+    cell_conditions: tuple[str, ...]
+    cell_participant_counts: tuple[int, ...]
+    z_scores: np.ndarray
+    detected: np.ndarray
+
+    def __post_init__(self) -> None:
+        labels = _tuple_text(self.cell_labels)
+        groups = _tuple_text(self.cell_group_ids)
+        sessions = _tuple_text(self.cell_session_ids)
+        conditions = _tuple_text(self.cell_conditions)
+        counts = tuple(int(value) for value in self.cell_participant_counts)
+        cell_count = len(labels)
+        if not cell_count or any(len(values) != cell_count for values in (groups, sessions, conditions, counts)):
+            raise ValueError("Shared selector cell metadata must be aligned.")
+        if any(value < 1 for value in counts):
+            raise ValueError("Every shared selector cell must contain participants.")
+        z_scores = _readonly_array(
+            self.z_scores,
+            dtype=np.float64,
+            ndim=2,
+            field_name="z_scores",
+        )
+        detected = _readonly_array(
+            self.detected,
+            dtype=np.bool_,
+            ndim=2,
+            field_name="detected",
+        )
+        if z_scores.shape != detected.shape or z_scores.shape[0] != cell_count:
+            raise ValueError("Shared selector z/detection arrays must align to cells.")
+        if not np.all(np.isfinite(z_scores)):
+            raise ValueError("Shared selector z scores must be finite.")
+        object.__setattr__(self, "cell_labels", labels)
+        object.__setattr__(self, "cell_group_ids", groups)
+        object.__setattr__(self, "cell_session_ids", sessions)
+        object.__setattr__(self, "cell_conditions", conditions)
+        object.__setattr__(self, "cell_participant_counts", counts)
+        object.__setattr__(self, "z_scores", z_scores)
+        object.__setattr__(self, "detected", detected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -704,6 +969,9 @@ class PreparationProvenance:
     ledger_excluded_participants: tuple[str, ...] = ()
     manual_excluded_participants: tuple[str, ...] = ()
     frequency_qc_excluded_participants: tuple[str, ...] = ()
+    completed_recordings: tuple[str, ...] = ()
+    ledger_excluded_recordings: tuple[str, ...] = ()
+    frequency_qc_excluded_recordings: tuple[str, ...] = ()
     incomplete_pair_participants: tuple[str, ...] = ()
     participant_condition_exclusions: tuple[
         ParticipantConditionExclusion,
@@ -715,6 +983,10 @@ class PreparationProvenance:
     full_fft_cohort_fingerprint: str = ""
     full_fft_frequency_qc_fingerprint: str = ""
     full_fft_processing_export_fingerprint: str = ""
+    repeated_session_batch_version: str = ""
+    shared_domain_fingerprint: str = ""
+    request_recording_exclusions: tuple[RecordingExclusionRequest, ...] = ()
+    repeated_session_cohort_audit: tuple[RepeatedSessionCohortAuditRow, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("source_sheet", "grid_fingerprint", "selected_columns_fingerprint"):
@@ -743,9 +1015,7 @@ class PreparationProvenance:
             if value < 0:
                 raise ValueError(f"{field_name} must be non-negative.")
             object.__setattr__(self, field_name, value)
-        timing_rows = tuple(
-            (str(name), float(seconds)) for name, seconds in self.reader_phase_seconds
-        )
+        timing_rows = tuple((str(name), float(seconds)) for name, seconds in self.reader_phase_seconds)
         if any(not np.isfinite(seconds) or seconds < 0.0 for _, seconds in timing_rows):
             raise ValueError("reader_phase_seconds must be finite and non-negative.")
         object.__setattr__(self, "reader_phase_seconds", timing_rows)
@@ -754,28 +1024,19 @@ class PreparationProvenance:
             "ledger_excluded_participants",
             "manual_excluded_participants",
             "frequency_qc_excluded_participants",
+            "completed_recordings",
+            "ledger_excluded_recordings",
+            "frequency_qc_excluded_recordings",
             "incomplete_pair_participants",
             "dataset_diagnostics",
         ):
             object.__setattr__(self, field_name, _tuple_text(getattr(self, field_name)))
         condition_exclusions = tuple(self.participant_condition_exclusions)
-        if any(
-            not isinstance(row, ParticipantConditionExclusion)
-            for row in condition_exclusions
-        ):
-            raise TypeError(
-                "participant_condition_exclusions must contain "
-                "ParticipantConditionExclusion values."
-            )
-        identities = {
-            (row.participant_id.casefold(), row.condition.casefold())
-            for row in condition_exclusions
-        }
+        if any(not isinstance(row, ParticipantConditionExclusion) for row in condition_exclusions):
+            raise TypeError("participant_condition_exclusions must contain ParticipantConditionExclusion values.")
+        identities = {(row.participant_id.casefold(), row.condition.casefold()) for row in condition_exclusions}
         if len(identities) != len(condition_exclusions):
-            raise ValueError(
-                "participant_condition_exclusions must be unique by "
-                "participant and condition."
-            )
+            raise ValueError("participant_condition_exclusions must be unique by participant and condition.")
         object.__setattr__(
             self,
             "participant_condition_exclusions",
@@ -788,20 +1049,35 @@ class PreparationProvenance:
             "full_fft_frequency_qc_fingerprint",
             "full_fft_processing_export_fingerprint",
         )
-        neutral_values = tuple(
-            str(getattr(self, field_name) or "").strip()
-            for field_name in neutral_fields
-        )
+        neutral_values = tuple(str(getattr(self, field_name) or "").strip() for field_name in neutral_fields)
         if any(neutral_values) and not all(neutral_values):
-            raise ValueError(
-                "Neutral FullFFT provenance fields must be supplied together."
-            )
+            raise ValueError("Neutral FullFFT provenance fields must be supplied together.")
         for field_name, value in zip(
             neutral_fields,
             neutral_values,
             strict=True,
         ):
             object.__setattr__(self, field_name, value)
+        repeated_version = str(self.repeated_session_batch_version or "").strip()
+        shared_fingerprint = str(self.shared_domain_fingerprint or "").strip()
+        if bool(repeated_version) != bool(shared_fingerprint):
+            raise ValueError("Repeated-session batch version and shared-domain fingerprint must be supplied together.")
+        request_exclusions = tuple(self.request_recording_exclusions)
+        cohort_audit = tuple(self.repeated_session_cohort_audit)
+        if any(not isinstance(row, RecordingExclusionRequest) for row in request_exclusions):
+            raise TypeError("request_recording_exclusions must contain RecordingExclusionRequest values.")
+        if any(not isinstance(row, RepeatedSessionCohortAuditRow) for row in cohort_audit):
+            raise TypeError("repeated_session_cohort_audit must contain RepeatedSessionCohortAuditRow values.")
+        if (request_exclusions or cohort_audit) and not repeated_version:
+            raise ValueError("Repeated-session exclusions/audit require a batch version.")
+        object.__setattr__(self, "repeated_session_batch_version", repeated_version)
+        object.__setattr__(self, "shared_domain_fingerprint", shared_fingerprint)
+        object.__setattr__(
+            self,
+            "request_recording_exclusions",
+            request_exclusions,
+        )
+        object.__setattr__(self, "repeated_session_cohort_audit", cohort_audit)
 
 
 @dataclass(frozen=True, slots=True)
@@ -843,16 +1119,9 @@ class PreparedContrast:
         if not isinstance(self.provenance, PreparationProvenance):
             raise TypeError("provenance must be PreparationProvenance.")
         if self.selection.selection_mode is not self.method.harmonic_selection_mode:
-            raise ValueError(
-                "Prepared method and resolved harmonic selection modes must match."
-            )
-        if (
-            self.selection.fixed_highest_harmonic_order
-            != self.method.fixed_highest_harmonic_order
-        ):
-            raise ValueError(
-                "Prepared method and resolved fixed harmonic ceilings must match."
-            )
+            raise ValueError("Prepared method and resolved harmonic selection modes must match.")
+        if self.selection.fixed_highest_harmonic_order != self.method.fixed_highest_harmonic_order:
+            raise ValueError("Prepared method and resolved fixed harmonic ceilings must match.")
         object.__setattr__(self, "project_root", Path(self.project_root))
         object.__setattr__(
             self,
@@ -917,9 +1186,7 @@ class PreparedContrast:
             harmonics,
             self.selection.selected_harmonics_hz,
         ):
-            raise ValueError(
-                "Prepared harmonic arrays must match the resolved harmonic selection."
-            )
+            raise ValueError("Prepared harmonic arrays must match the resolved harmonic selection.")
         expected_a = (len(participants_a), len(sensors), harmonics.size)
         expected_b = (len(participants_b), len(sensors), harmonics.size)
         if values_a.shape != expected_a:
@@ -930,14 +1197,10 @@ class PreparedContrast:
             raise ValueError(f"snr_a shape must be {expected_a}; got {snr_a.shape}.")
         if snr_b.shape != expected_b:
             raise ValueError(f"snr_b shape must be {expected_b}; got {snr_b.shape}.")
-        if not all(
-            np.all(np.isfinite(array))
-            for array in (snr_a, snr_b, values_a, values_b)
-        ):
+        if not all(np.all(np.isfinite(array)) for array in (snr_a, snr_b, values_a, values_b)):
             raise ValueError("Prepared SNR and normalized contrast tensors must be finite.")
         if self.request.design is AnalysisDesign.PAIRED_CONDITIONS and (
-            tuple(pid.casefold() for pid in participants_a)
-            != tuple(pid.casefold() for pid in participants_b)
+            tuple(pid.casefold() for pid in participants_a) != tuple(pid.casefold() for pid in participants_b)
         ):
             raise ValueError("Paired contrast participant IDs and ordering must match.")
         object.__setattr__(self, "participant_ids_a", participants_a)
@@ -950,6 +1213,198 @@ class PreparedContrast:
         object.__setattr__(self, "values_a", values_a)
         object.__setattr__(self, "values_b", values_b)
         object.__setattr__(self, "source_workbooks", tuple(self.source_workbooks))
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedRepeatedSessionContrast:
+    """One prepared condition/family member of a repeated-session batch."""
+
+    family: RepeatedSessionContrastFamily
+    family_id: str
+    family_label: str
+    condition: str
+    tensor_semantics: RepeatedSessionTensorSemantics
+    prepared: PreparedContrast
+    group_id: str | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            family = (
+                self.family
+                if isinstance(self.family, RepeatedSessionContrastFamily)
+                else RepeatedSessionContrastFamily(str(self.family))
+            )
+        except ValueError as exc:
+            raise ValueError("Unsupported repeated-session contrast family.") from exc
+        try:
+            tensor_semantics = (
+                self.tensor_semantics
+                if isinstance(
+                    self.tensor_semantics,
+                    RepeatedSessionTensorSemantics,
+                )
+                else RepeatedSessionTensorSemantics(str(self.tensor_semantics))
+            )
+        except ValueError as exc:
+            raise ValueError("Unsupported repeated-session tensor semantics.") from exc
+        for field_name in ("family_id", "family_label", "condition"):
+            object.__setattr__(
+                self,
+                field_name,
+                _nonempty_text(getattr(self, field_name), field_name=field_name),
+            )
+        if not isinstance(self.prepared, PreparedContrast):
+            raise TypeError("prepared must be a PreparedContrast.")
+        group_id = None if self.group_id in (None, "") else str(self.group_id).strip()
+        if family is RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP:
+            if group_id is None:
+                raise ValueError("Within-group session contrasts require group_id.")
+            if self.prepared.request.design is not AnalysisDesign.PAIRED_CONDITIONS:
+                raise ValueError("Within-group session contrasts must use paired inference.")
+            expected_semantics = RepeatedSessionTensorSemantics.SESSION_NORMALIZED_PAIRED_PROFILE
+        else:
+            if group_id is not None:
+                raise ValueError("Between-group repeated contrasts do not use group_id.")
+            if self.prepared.request.design is not AnalysisDesign.INDEPENDENT_GROUPS:
+                raise ValueError("Between-group repeated contrasts require independent inference.")
+            expected_semantics = (
+                RepeatedSessionTensorSemantics.NORMALIZED_SESSION_CHANGE
+                if family is RepeatedSessionContrastFamily.GROUP_SESSION_CHANGE
+                else RepeatedSessionTensorSemantics.SESSION_AVERAGED_NORMALIZED_PROFILE
+            )
+        if tensor_semantics is not expected_semantics:
+            raise ValueError("Repeated-session tensor semantics do not match the contrast family.")
+        if self.prepared.request.contrast_family_id != self.family_id:
+            raise ValueError("Prepared request family ID does not match its batch wrapper.")
+        if self.prepared.request.condition_a.casefold() != self.condition.casefold():
+            raise ValueError("Prepared request condition does not match its batch wrapper.")
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "tensor_semantics", tensor_semantics)
+        object.__setattr__(self, "group_id", group_id)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedRepeatedSessionBatch:
+    """Prepared phase-balanced FHC tensors sharing one harmonic domain."""
+
+    request: RepeatedSessionBatchRequest
+    method: FreeHarmonicMethodSpec
+    project_root: Path
+    conditions: tuple[str, ...]
+    groups: tuple[ProjectGroupOption, ...]
+    sessions: tuple[ProjectSessionOption, ...]
+    contrast_runs: tuple[PreparedRepeatedSessionContrast, ...]
+    shared_selection: HarmonicSelection
+    shared_selection_audit: SharedHarmonicSelectionAudit
+    frequency_plan: FrequencyWindowPlan
+    sensor_names: tuple[str, ...]
+    shared_domain_fingerprint: str
+    source_workbooks: tuple[CohortWorkbook, ...]
+    cohort_audit: tuple[RepeatedSessionCohortAuditRow, ...]
+    provenance: PreparationProvenance
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.request, RepeatedSessionBatchRequest):
+            raise TypeError("request must be a RepeatedSessionBatchRequest.")
+        if not isinstance(self.method, FreeHarmonicMethodSpec):
+            raise TypeError("method must be a FreeHarmonicMethodSpec.")
+        if not isinstance(self.shared_selection, HarmonicSelection):
+            raise TypeError("shared_selection must be a HarmonicSelection.")
+        if not isinstance(self.shared_selection_audit, SharedHarmonicSelectionAudit):
+            raise TypeError("shared_selection_audit must be SharedHarmonicSelectionAudit.")
+        if not isinstance(self.frequency_plan, FrequencyWindowPlan):
+            raise TypeError("frequency_plan must be a FrequencyWindowPlan.")
+        if not isinstance(self.provenance, PreparationProvenance):
+            raise TypeError("provenance must be PreparationProvenance.")
+        root = Path(self.project_root)
+        conditions = _tuple_text(self.conditions)
+        groups = tuple(self.groups)
+        sessions = tuple(self.sessions)
+        runs = tuple(self.contrast_runs)
+        sensors = _tuple_text(self.sensor_names)
+        source_workbooks = tuple(self.source_workbooks)
+        audit = tuple(self.cohort_audit)
+        if conditions != self.request.conditions:
+            raise ValueError("Prepared batch conditions must match its request order.")
+        if len(groups) != 2 or any(not isinstance(row, ProjectGroupOption) for row in groups):
+            raise ValueError("Prepared batch requires two canonical groups.")
+        if tuple(row.group_id.casefold() for row in groups) != tuple(
+            value.casefold() for value in self.request.group_ids
+        ):
+            raise ValueError("Prepared batch groups must match its request order.")
+        if len(sessions) != 2 or any(not isinstance(row, ProjectSessionOption) for row in sessions):
+            raise ValueError("Prepared batch requires two canonical sessions.")
+        if tuple(row.session_id.casefold() for row in sessions) != tuple(
+            value.casefold() for value in self.request.session_ids
+        ):
+            raise ValueError("Prepared batch sessions must match its request order.")
+        if len(runs) != len(conditions) * 4 or any(
+            not isinstance(row, PreparedRepeatedSessionContrast) for row in runs
+        ):
+            raise ValueError("Prepared batch requires exactly four runs per condition.")
+        expected_order: list[tuple[str, RepeatedSessionContrastFamily, str | None]] = []
+        for condition in conditions:
+            expected_order.extend(
+                (
+                    (
+                        condition,
+                        RepeatedSessionContrastFamily.SESSION_AVERAGED_GROUPS,
+                        None,
+                    ),
+                    (
+                        condition,
+                        RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP,
+                        groups[0].group_id,
+                    ),
+                    (
+                        condition,
+                        RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP,
+                        groups[1].group_id,
+                    ),
+                    (
+                        condition,
+                        RepeatedSessionContrastFamily.GROUP_SESSION_CHANGE,
+                        None,
+                    ),
+                )
+            )
+        observed_order = [(row.condition, row.family, row.group_id) for row in runs]
+        if observed_order != expected_order:
+            raise ValueError("Repeated-session contrast runs are not in stable condition/family order.")
+        for row in runs:
+            prepared = row.prepared
+            if prepared.method != self.method:
+                raise ValueError("All batch runs must use the shared method specification.")
+            if prepared.frequency_plan.grid_fingerprint != self.frequency_plan.grid_fingerprint:
+                raise ValueError("All batch runs must use the shared frequency plan.")
+            if not np.array_equal(
+                prepared.harmonic_orders,
+                self.shared_selection.selected_orders,
+            ):
+                raise ValueError("All batch runs must use the shared harmonic domain.")
+            if prepared.sensor_names != sensors:
+                raise ValueError("All batch runs must use the shared sensor order.")
+        fingerprint = _nonempty_text(
+            self.shared_domain_fingerprint,
+            field_name="shared_domain_fingerprint",
+        )
+        if fingerprint != self.provenance.shared_domain_fingerprint:
+            raise ValueError("Batch/provenance shared-domain fingerprints must match.")
+        if self.provenance.repeated_session_batch_version != self.request.batch_version:
+            raise ValueError("Batch/provenance repeated-session versions must match.")
+        if any(not isinstance(row, CohortWorkbook) for row in source_workbooks):
+            raise TypeError("source_workbooks must contain CohortWorkbook values.")
+        if any(not isinstance(row, RepeatedSessionCohortAuditRow) for row in audit):
+            raise TypeError("cohort_audit must contain RepeatedSessionCohortAuditRow values.")
+        object.__setattr__(self, "project_root", root)
+        object.__setattr__(self, "conditions", conditions)
+        object.__setattr__(self, "groups", groups)
+        object.__setattr__(self, "sessions", sessions)
+        object.__setattr__(self, "contrast_runs", runs)
+        object.__setattr__(self, "sensor_names", sensors)
+        object.__setattr__(self, "shared_domain_fingerprint", fingerprint)
+        object.__setattr__(self, "source_workbooks", source_workbooks)
+        object.__setattr__(self, "cohort_audit", audit)
 
 
 @dataclass(frozen=True, slots=True)
@@ -985,9 +1440,7 @@ class ClusterRecord:
         mass = float(self.mass)
         if np.isnan(mass):
             raise ValueError("mass must not be NaN.")
-        if (sign == "positive" and not mass > 0.0) or (
-            sign == "negative" and not mass < 0.0
-        ):
+        if (sign == "positive" and not mass > 0.0) or (sign == "negative" and not mass < 0.0):
             raise ValueError("mass sign must match the cluster sign.")
         for field_name in (
             "p_value",
@@ -1010,12 +1463,8 @@ class ClusterRecord:
         harmonic_indices = tuple(int(value) for value in self.harmonic_indices)
         if not node_indices:
             raise ValueError("A cluster requires at least one node.")
-        if not (
-            len(node_indices) == len(sensor_indices) == len(harmonic_indices)
-        ):
-            raise ValueError(
-                "node, sensor, and harmonic index tuples must have matching lengths."
-            )
+        if not (len(node_indices) == len(sensor_indices) == len(harmonic_indices)):
+            raise ValueError("node, sensor, and harmonic index tuples must have matching lengths.")
         if any(value < 0 for values in (node_indices, sensor_indices, harmonic_indices) for value in values):
             raise ValueError("Cluster indices must be non-negative.")
         effect_size = None if self.effect_size is None else float(self.effect_size)
@@ -1065,11 +1514,7 @@ class ClusterPermutationResult:
 
     def __post_init__(self) -> None:
         try:
-            design = (
-                self.design
-                if isinstance(self.design, AnalysisDesign)
-                else AnalysisDesign(str(self.design))
-            )
+            design = self.design if isinstance(self.design, AnalysisDesign) else AnalysisDesign(str(self.design))
         except ValueError as exc:
             raise ValueError(f"Unsupported analysis design: {self.design!r}.") from exc
         observed = _readonly_array(
@@ -1206,8 +1651,19 @@ __all__ = [
     "ParticipantConditionExclusion",
     "PreparationProvenance",
     "PreparedContrast",
+    "PreparedRepeatedSessionBatch",
+    "PreparedRepeatedSessionContrast",
     "ProjectAnalysisOptions",
     "ProjectContrastRequest",
     "ProjectGroupOption",
+    "ProjectRecordingOption",
+    "ProjectSessionOption",
+    "REPEATED_SESSION_BATCH_VERSION",
+    "RecordingExclusionRequest",
+    "RepeatedSessionBatchRequest",
+    "RepeatedSessionCohortAuditRow",
+    "RepeatedSessionContrastFamily",
+    "RepeatedSessionTensorSemantics",
     "SENSOR_ADJACENCY_VERSION",
+    "SharedHarmonicSelectionAudit",
 ]

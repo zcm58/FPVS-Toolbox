@@ -17,23 +17,32 @@ from Tools.Free_Harmonic_Clustering.preparation import (
     compute_participant_snr,
     l2_normalize_snr,
     select_harmonics,
+    select_harmonics_across_cells,
     select_snr_harmonics,
 )
 
 
 def _header(*, spacing_hz: float = 0.025, upper_hz: float = 5.0) -> list[str]:
-    frequencies = np.arange(
-        int(round(upper_hz / spacing_hz)) + 1,
-        dtype=np.float64,
-    ) * spacing_hz
+    frequencies = (
+        np.arange(
+            int(round(upper_hz / spacing_hz)) + 1,
+            dtype=np.float64,
+        )
+        * spacing_hz
+    )
     return ["Electrode", *(f"{frequency:.6f}_Hz" for frequency in frequencies)]
 
 
 def _selected_spectrum(plan, *, target_value: float = 1.0) -> np.ndarray:
-    spectrum = 1.0 + np.arange(
-        len(plan.selected_frequency_columns),
-        dtype=np.float64,
-    ) % 7 * 0.05
+    spectrum = (
+        1.0
+        + np.arange(
+            len(plan.selected_frequency_columns),
+            dtype=np.float64,
+        )
+        % 7
+        * 0.05
+    )
     spectrum[plan.target_selected_indices] = target_value
     return spectrum
 
@@ -128,9 +137,7 @@ def test_participant_snr_and_l2_normalization_are_vectorized_per_matrix() -> Non
     selected = select_snr_harmonics(snr, selection)
     normalized = l2_normalize_snr(selected)
     assert normalized.flags.c_contiguous
-    assert np.sqrt(np.sum(np.square(normalized), axis=(1, 2))) == pytest.approx(
-        np.ones(2)
-    )
+    assert np.sqrt(np.sum(np.square(normalized), axis=(1, 2))) == pytest.approx(np.ones(2))
 
 
 def test_participant_snr_rejects_negative_fullfft_amplitude() -> None:
@@ -186,3 +193,33 @@ def test_method_spec_rejects_ambiguous_harmonic_selection_configuration() -> Non
         FreeHarmonicMethodSpec(fixed_highest_harmonic_order=2)
     with pytest.raises(ValueError, match="requires a positive integer"):
         FreeHarmonicMethodSpec(harmonic_selection_mode="fixed_highest")
+
+
+def test_shared_selector_uses_highest_detection_in_any_equal_weight_cell() -> None:
+    spec = FreeHarmonicMethodSpec(
+        base_frequency_hz=6.0,
+        max_harmonic_hz=3.6,
+    )
+    plan = build_frequency_window_plan(_header(), spec)
+    cells = np.stack(
+        [
+            _selected_spectrum(plan, target_value=1.0),
+            _selected_spectrum(plan, target_value=1.0),
+        ]
+    )
+    highest = int(np.flatnonzero(plan.candidate_orders == 3)[0])
+    cells[1, plan.target_selected_indices[highest]] = 20.0
+
+    selection, cell_z, detected = select_harmonics_across_cells(
+        cells,
+        plan,
+        spec,
+    )
+
+    assert selection.selected_orders.tolist() == [1, 2, 3]
+    assert selection.highest_detected_order == 3
+    assert detected.shape == cell_z.shape == (2, 3)
+    assert detected[1, highest]
+    assert not detected[0, highest]
+    assert not cell_z.flags.writeable
+    assert not detected.flags.writeable

@@ -4,9 +4,9 @@
 
 This package owns the clean-room Free Harmonic Clustering Analysis backend and
 its thin embedded GUI. Numerical preparation, inference, and export modules
-remain GUI-neutral. The GUI gathers active-project context, runs one contrast,
-and presents a concise current-session result while delegating long work to
-signal-driven workers.
+remain GUI-neutral. The GUI gathers active-project context, runs one legacy
+contrast or one versioned repeated-session batch, and presents a concise
+current-session result while delegating long work to signal-driven workers.
 
 ## Non-Negotiables
 
@@ -80,9 +80,26 @@ signal-driven workers.
 - Treat the analysis as source-immutable. It may create an additive completed
   run bundle, but it must not change project settings, participant metadata,
   ledgers, QC decisions, or processed workbooks.
-- Run exactly one ordered two-level contrast at a time. Version 1 has no
-  omnibus/group-by-condition test, all-condition batch, result plots,
-  historical-run browser, or clipboard/manuscript helper.
+- Preserve exactly one ordered two-level contrast per legacy run. The
+  `fhc_repeated_session_batch_v1` extension is the only all-condition batch:
+  it requires two stable groups and two ordered sessions and runs the four
+  prespecified participant-level families documented in `ARCHITECTURE.md`.
+  It is not an omnibus model builder. Result plots, a historical-run browser,
+  and clipboard/manuscript helpers remain out of scope.
+- Keep repeated-session participant, recording, group, session, visit, and
+  condition identity canonical. Use complete pairs for all primary families;
+  report missing visits as coverage and never treat recordings as independent
+  participants, impute visits, or zero-fill them.
+- Analysis-specific recording exclusions are additive, batch-local, and require
+  nonempty reasons. Export them with the cohort audit without mutating project
+  QC or metadata.
+- Freeze one shared harmonic domain across the repeated batch. Preserve the
+  versioned tensor semantics and apply run-level Holm correction across
+  conditions within each of four families plus the conservative all-batch
+  layer. Never relabel raw cluster p-values as cross-run adjusted p-values.
+- The reviewed legacy powered-null receipt does not cover the repeated batch,
+  shared multi-cell selection, composite tensors, group-session interaction,
+  or Holm layers. State that limitation in user-facing methods and exports.
 - Read base and oddball rates, conditions, canonical groups, exclusions,
   participants, and FullFFT availability dynamically. Do not add tool-local
   metadata overrides or hard-coded stimulation frequencies.
@@ -117,6 +134,9 @@ Keep the package root small. Public callers should use:
 - `prepare_project_contrast(...)`
 - `run_free_harmonic_clustering(...)`
 - `export_free_harmonic_run(...)`
+- `prepare_repeated_session_batch(...)`
+- `run_repeated_session_fhc_batch(...)`
+- `export_repeated_session_batch(...)`
 
 Do not expose pandas frames, MNE objects, or XML-reader internals.
 
@@ -133,25 +153,31 @@ the page implementation.
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a
   post-processing worker itself.
-- Use one tab-free workspace. One **Run Analysis** action automatically chains
-  preparation and permutations; a concise Results section appears beneath the
-  setup controls only after completion. Detailed cohort, harmonic-selection,
-  method, and run provenance remains in the exported workbook rather than a
-  dense intermediate GUI review.
+- Use one tab-free workspace. Flat projects keep **Run Analysis** for one
+  contrast. Repeated projects are recognized automatically and replace those
+  selectors with the prespecified two-group/two-session all-condition batch,
+  exact later-minus-earlier direction, fixed-order warning, and a compact
+  analysis-only recording-exclusion dialog with required reasons. A concise
+  Results section appears only after completion; detailed cohort, harmonic,
+  method, and run provenance remains in the exported workbook.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result
   tables may scroll internally when their data exceeds the available viewport.
-- Results shows the current session's significant clusters ordered by ascending
-  raw tail p. It does not print assignment count, degrees of freedom,
-  cluster-forming threshold, or seed in the main GUI. Full cluster and method
-  details remain in the exported workbook; past runs remain available through
-  Open Results Folder.
+- Legacy Results shows current-session significant clusters ordered by
+  ascending raw tail p. Repeated Results shows the condition x family global p
+  plus both Holm layers in one bounded table. It does not print assignment
+  count, degrees of freedom, cluster-forming threshold, or seed in the main
+  GUI. Full details remain in the exported workbook; past runs remain
+  available through Open Results Folder.
 - The primary human-readable artifact is a polished
   `Free_Harmonic_Clustering_Results.xlsx` workbook. Retain machine-readable
   CSV, compressed-array, and manifest artifacts alongside it.
-- Preparation, permutation inference, and export run sequentially on one
-  background analysis worker. Workers communicate through signals and never
-  touch widgets; the page must not retain prepared/result tensors after their
-  display strings have been populated.
+- Repeated batches use
+  `Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx` with consolidated
+  batch/cohort/multiplicity audit tables and the same reproducibility bundle.
+- Preparation, permutation inference, multiplicity correction where applicable,
+  and export run sequentially on one background analysis worker. Workers
+  communicate through signals and never touch widgets; the page must not retain
+  prepared/result tensors after their display strings have been populated.
 
 ## Verification
 

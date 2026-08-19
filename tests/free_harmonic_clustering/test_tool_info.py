@@ -7,6 +7,7 @@ from Tools.Free_Harmonic_Clustering.tool_info import (
     PAPER_URL,
     PUBLIC_REPOSITORY_URL,
     REFERENCES_HTML,
+    REPEATED_SESSION_HTML,
 )
 
 
@@ -35,3 +36,16 @@ def test_references_tab_only_links_to_hermann_sources() -> None:
     assert "zcm58.github.io" not in references_copy
     assert "all credit for this methodology goes to the authors" in references_copy
     assert "links to the paper and repository" in references_copy
+
+
+def test_repeated_session_tab_states_batch_and_fixed_order_limits() -> None:
+    tabs = {tab.key: tab for tab in FREE_HARMONIC_CLUSTERING_TOOL_INFO.tabs}
+
+    assert tabs["repeated_sessions"].html == REPEATED_SESSION_HTML
+    copy = " ".join(REPEATED_SESSION_HTML.casefold().split())
+    assert "four prespecified contrast families" in copy
+    assert "group difference in session change" in copy
+    assert "later visit minus earlier visit" in copy
+    assert "perfectly confounded" in copy
+    assert "holm-adjusted" in copy
+    assert "do not change project qc" in copy

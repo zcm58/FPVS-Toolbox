@@ -9,13 +9,15 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from .api import run_free_harmonic_clustering
+from .api import run_free_harmonic_clustering, run_repeated_session_fhc_batch
 from .models import (
     AnalysisDesign,
     FreeHarmonicError,
     FreeHarmonicMethodSpec,
     NoHarmonicsSelectedError,
     ProjectContrastRequest,
+    RecordingExclusionRequest,
+    RepeatedSessionBatchRequest,
 )
 
 
@@ -101,16 +103,75 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional canonical group filter for the paired cohort.",
     )
     _add_run_options(paired)
+
+    repeated = subparsers.add_parser(
+        "repeated-session",
+        help=("Run the prespecified four-family repeated-session batch across one or more conditions."),
+    )
+    repeated.add_argument("--project-root", type=Path, required=True)
+    repeated.add_argument(
+        "--condition",
+        action="append",
+        required=True,
+        help="Declared condition; repeat once per condition in planned order.",
+    )
+    repeated.add_argument("--group-a", required=True)
+    repeated.add_argument("--group-b", required=True)
+    repeated.add_argument(
+        "--session-a",
+        required=True,
+        help="Canonical session for the positive side of A-minus-B (for example Visit 2).",
+    )
+    repeated.add_argument(
+        "--session-b",
+        required=True,
+        help="Canonical session subtracted from session A (for example Visit 1).",
+    )
+    repeated.add_argument(
+        "--exclude-recording",
+        action="append",
+        default=[],
+        metavar="RECORDING_ID=REASON",
+        help=("Analysis-only recording exclusion with explicit reason; repeat for additional recordings."),
+    )
+    _add_run_options(repeated)
     return parser
 
 
-def _request_from_args(args: argparse.Namespace) -> ProjectContrastRequest:
+def _recording_exclusions(
+    values: Sequence[str],
+) -> tuple[RecordingExclusionRequest, ...]:
+    rows: list[RecordingExclusionRequest] = []
+    for raw_value in values:
+        recording_id, separator, reason = str(raw_value).partition("=")
+        if not separator or not recording_id.strip() or not reason.strip():
+            raise ValueError("--exclude-recording must use RECORDING_ID=REASON with both values present.")
+        rows.append(
+            RecordingExclusionRequest(
+                recording_id=recording_id.strip(),
+                reason=reason.strip(),
+            )
+        )
+    return tuple(rows)
+
+
+def _request_from_args(
+    args: argparse.Namespace,
+) -> ProjectContrastRequest | RepeatedSessionBatchRequest:
     if args.command == "independent":
         return ProjectContrastRequest(
             project_root=args.project_root,
             design=AnalysisDesign.INDEPENDENT_GROUPS,
             condition_a=args.condition,
             group_ids=(args.group_a, args.group_b),
+        )
+    if args.command == "repeated-session":
+        return RepeatedSessionBatchRequest(
+            project_root=args.project_root,
+            conditions=tuple(args.condition),
+            group_ids=(args.group_a, args.group_b),
+            session_ids=(args.session_a, args.session_b),
+            recording_exclusions=_recording_exclusions(args.exclude_recording),
         )
     group_ids = () if args.group in (None, "") else (args.group,)
     return ProjectContrastRequest(
@@ -124,6 +185,44 @@ def _request_from_args(args: argparse.Namespace) -> ProjectContrastRequest:
 
 def _summary_payload(run: object) -> dict[str, object]:
     prepared = run.prepared
+    if hasattr(prepared, "contrast_runs"):
+        payload = {
+            "status": "prepared" if run.prepare_only else "complete",
+            "analysis_kind": "repeated_session_batch",
+            "batch_version": prepared.request.batch_version,
+            "conditions": list(prepared.conditions),
+            "condition_count": len(prepared.conditions),
+            "contrast_run_count": len(prepared.contrast_runs),
+            "group_ids_a_minus_b": list(prepared.request.group_ids),
+            "session_ids_a_minus_b": list(prepared.request.session_ids),
+            "retained_harmonic_count": len(prepared.shared_selection.selected_harmonics_hz),
+            "shared_domain_fingerprint": prepared.shared_domain_fingerprint,
+            "prepare_only": run.prepare_only,
+            "write_performed": run.receipt is not None,
+            "cluster_inference_scope": ("conditional signed max-cluster control within each run"),
+            "cross_run_multiplicity": (
+                "Holm across conditions within each family plus conservative Holm across all batch runs"
+            ),
+            "calibration_status": (
+                "legacy numerical core reused; multi-cell selector and batch not covered by legacy powered receipt"
+            ),
+        }
+        if run.result is not None:
+            payload["results"] = [
+                {
+                    "family_id": outcome.family_id,
+                    "condition": outcome.condition,
+                    "global_two_sided_cluster_p_value": (outcome.global_two_sided_p_value),
+                    "holm_within_family_p_value": (outcome.holm_within_family_p_value),
+                    "holm_all_batch_p_value": outcome.holm_all_batch_p_value,
+                    "derived_seed": outcome.derived_seed,
+                }
+                for outcome in run.result.outcomes
+            ]
+        if run.receipt is not None:
+            payload["output_directory"] = str(run.receipt.output_directory)
+            payload["manifest_path"] = str(run.receipt.manifest_path)
+        return payload
     payload: dict[str, object] = {
         "status": "prepared" if run.prepare_only else "complete",
         "design": prepared.request.design.value,
@@ -179,7 +278,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             n_permutations=args.n_permutations,
             seed=args.seed,
         )
-        run = run_free_harmonic_clustering(
+        runner = (
+            run_repeated_session_fhc_batch
+            if isinstance(request, RepeatedSessionBatchRequest)
+            else run_free_harmonic_clustering
+        )
+        run = runner(
             request,
             method,
             prepare_only=args.prepare_only,

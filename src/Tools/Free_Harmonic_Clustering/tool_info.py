@@ -20,11 +20,16 @@ by summing BCA values across harmonics.
   <li><b>Paired Conditions:</b> Condition A minus Condition B for the same
   complete participants, optionally within one canonical project group.</li>
   <li><b>Independent Groups:</b> Group A minus Group B for one condition.</li>
+  <li><b>Repeated-Session Full Batch:</b> for a project with exactly two stable
+  groups and two ordered sessions, run all project conditions through four
+  prespecified contrast families.</li>
 </ul>
 <p>
-Each run tests one ordered contrast. Positive clusters indicate A &gt; B and
-negative clusters indicate A &lt; B. Set A and B directly in the setup controls;
-select them in the opposite order to reverse the contrast.
+Each legacy run tests one ordered contrast. Positive clusters indicate A &gt; B
+and negative clusters indicate A &lt; B. Set A and B directly in the setup
+controls; select them in the opposite order to reverse the contrast. The
+repeated-session batch uses the fixed directions described in its dedicated
+tab.
 </p>
 
 <h3>Project-Bound Workflow</h3>
@@ -36,14 +41,55 @@ shows a concise result. Full preparation and method details remain in the
 exported workbook.
 </p>
 <p>
-Repeated-session projects are protectively disabled because this method does
-not yet carry canonical recording/session identity. This prevents visits from
-being collapsed or treated as independent participants.
+Repeated-session projects are recognized automatically. Their batch uses
+canonical participant, recording, group, session, and visit identity; missing
+visits remain coverage exclusions and recordings are never treated as
+independent participants.
 </p>
 <p>
 The analysis never changes project metadata, QC decisions, source workbooks,
 or participant assignments. A successful run creates a new, non-overwriting
 results folder containing a polished Excel workbook and reproducibility files.
+</p>
+"""
+
+REPEATED_SESSION_HTML = """
+<h2>Repeated-Session Full Batch</h2>
+<p>
+For projects with exactly two stable groups and two ordered sessions, the tool
+runs every project condition through four prespecified contrast families:
+</p>
+<ol>
+  <li><b>Groups averaged over sessions:</b> compare the two groups after
+  averaging each complete participant's two session tensors.</li>
+  <li><b>Session contrast in Group 1:</b> paired later-visit minus earlier-visit
+  tensors.</li>
+  <li><b>Session contrast in Group 2:</b> the same paired contrast.</li>
+  <li><b>Group difference in session change:</b> compare participant
+  later-minus-earlier difference tensors between groups. This is the direct
+  group-by-session interaction contrast.</li>
+</ol>
+<p>
+The primary batch uses complete, phase-balanced participant pairs for every
+contrast. Missing sessions are reported as coverage; they are never imputed or
+zero-filled. Analysis-only recording exclusions can be added before a run, and
+each requires a reason. These exclusions are exported with the batch but do not
+change project QC or source files.
+</p>
+<h3>Direction and Fixed Order</h3>
+<p>
+The session direction is always later visit minus earlier visit. When every
+participant completed sessions in the same order, session/phase-at-visit is
+perfectly confounded with visit order, elapsed time, repetition, and
+habituation. Results must not be described as an isolated physiological phase
+effect.
+</p>
+<h3>Multiplicity</h3>
+<p>
+Each condition-level run retains its electrode &times; harmonic maximum-cluster
+correction. The batch additionally reports Holm-adjusted global run p-values
+across conditions within each of the four contrast families and a conservative
+Holm adjustment across every condition &times; family test in the full batch.
 </p>
 """
 
@@ -94,6 +140,14 @@ researcher choose the highest included oddball harmonic and applies the same
 fill-through rule. In both modes, candidates are derived from the active
 project and available FFT grid, and every base-rate overlap is excluded.
 </p>
+<p>
+The repeated-session batch freezes one shared harmonic domain across all
+groups, sessions, conditions, and contrast families. Its automatic selector
+calculates z separately in every declared group &times; session &times; condition cell,
+uses the highest strict detection in any cell, and fills through once for the
+batch. This prevents a contrast from receiving a more favorable domain merely
+because its observed arms selected a different ceiling.
+</p>
 
 <h3>Clusters and Permutations</h3>
 <p>
@@ -142,8 +196,9 @@ magnitude.
   make any individual electrode, harmonic, cell, or cluster boundary
   pointwise significant.</li>
   <li>The procedure provides weak/global family-wise error control for the one
-  declared electrode &times; harmonic family. Separate condition runs are not
-  automatically corrected as one larger family.</li>
+  declared electrode &times; harmonic family. Legacy one-contrast runs remain
+  separate families; the repeated-session full batch adds the prespecified
+  Holm corrections described in its dedicated tab.</li>
   <li>Cluster-average effect sizes are descriptive, post-selection, and depend
   on cluster shape.</li>
   <li>A higher-harmonic effect can reflect a more complex response waveform,
@@ -152,6 +207,12 @@ magnitude.
   workflow but remains an inferential limitation. A preregistered fixed domain
   is preferable for a confirmatory analysis.</li>
 </ul>
+<p>
+The completed powered null calibration receipt applies only to the frozen
+legacy paired-condition and independent-group workflows. It does not validate
+the new repeated-session batch, its composite tensors, interaction contrast,
+or cross-condition Holm layer.
+</p>
 """
 
 REFERENCES_HTML = f"""
@@ -202,6 +263,11 @@ FREE_HARMONIC_CLUSTERING_TOOL_INFO = ToolInfoContent(
     tabs=(
         ToolInfoTab("overview", "Overview", OVERVIEW_HTML),
         ToolInfoTab("method", "Method", METHOD_HTML),
+        ToolInfoTab(
+            "repeated_sessions",
+            "Repeated Sessions",
+            REPEATED_SESSION_HTML,
+        ),
         ToolInfoTab("interpretation", "Interpretation", INTERPRETATION_HTML),
         ToolInfoTab("references", "References", REFERENCES_HTML),
     ),
@@ -224,4 +290,5 @@ __all__ = [
     "PAPER_URL",
     "PUBLIC_REPOSITORY_URL",
     "REFERENCES_HTML",
+    "REPEATED_SESSION_HTML",
 ]

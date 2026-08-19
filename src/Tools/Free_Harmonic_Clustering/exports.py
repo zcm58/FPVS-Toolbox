@@ -14,7 +14,7 @@ import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
-from typing import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 from uuid import uuid4
 
 import numpy as np
@@ -34,8 +34,13 @@ from .models import (
     ExportReceipt,
     FreeHarmonicInputError,
     PreparedContrast,
+    PreparedRepeatedSessionBatch,
+    RepeatedSessionContrastFamily,
     SENSOR_ADJACENCY_VERSION,
 )
+
+if TYPE_CHECKING:
+    from .api import RepeatedSessionBatchResult
 
 
 TOOL_TITLE = "Free Harmonic Clustering Analysis"
@@ -46,6 +51,8 @@ DEFAULT_RESULTS_SUBFOLDER = Path(
 )
 MANIFEST_FILENAME = "manifest.json"
 HUMAN_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Results.xlsx"
+REPEATED_SESSION_WORKBOOK_FILENAME = "Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx"
+REPEATED_SESSION_EXPORT_SCHEMA_VERSION = 1
 HUMAN_WORKBOOK_SHEETS: tuple[str, ...] = (
     "Run Summary",
     "Significant Clusters",
@@ -146,10 +153,7 @@ def _validate_result(prepared: PreparedContrast, result: ClusterPermutationResul
     if result.design is not prepared.request.design:
         raise ValueError("Prepared contrast and cluster result designs do not match.")
     if result.sensor_adjacency_version != prepared.method.sensor_adjacency_version:
-        raise ValueError(
-            "Prepared method and cluster result spatial adjacency versions do "
-            "not match."
-        )
+        raise ValueError("Prepared method and cluster result spatial adjacency versions do not match.")
     expected_shape = (len(prepared.sensor_names), len(prepared.harmonics_hz))
     if result.observed_t.shape != expected_shape:
         raise ValueError(f"Cluster result shape must be {expected_shape}; got {result.observed_t.shape}.")
@@ -252,9 +256,7 @@ def _write_npz(path: Path, prepared: PreparedContrast, result: ClusterPermutatio
                 dtype=np.int64,
             ),
             highest_detected_harmonic_order=np.asarray(
-                -1
-                if prepared.selection.highest_detected_order is None
-                else prepared.selection.highest_detected_order,
+                -1 if prepared.selection.highest_detected_order is None else prepared.selection.highest_detected_order,
                 dtype=np.int64,
             ),
             target_selected_indices=np.asarray(plan.target_selected_indices),
@@ -464,13 +466,7 @@ def _harmonic_selection_rows(prepared: PreparedContrast) -> list[dict[str, objec
                 "detected_arm_b": bool(selection.detected_arm_b[index]),
                 "retained_fill_through": index in selected,
                 "exclusion_reason": (
-                    ""
-                    if index in selected
-                    else (
-                        "above_highest_detected"
-                        if automatic
-                        else "above_fixed_ceiling"
-                    )
+                    "" if index in selected else ("above_highest_detected" if automatic else "above_fixed_ceiling")
                 ),
             }
         )
@@ -749,6 +745,12 @@ def _number_format(field_name: str) -> str | None:
         "participant_index",
         "permutation_index",
         "selection_ceiling_order",
+        "participant_count",
+        "observed_cluster_count",
+        "raw_significant_cluster_count",
+        "degrees_of_freedom",
+        "derived_seed",
+        "visit_index",
     }:
         return "0"
     if field_name in {
@@ -758,6 +760,12 @@ def _number_format(field_name: str) -> str | None:
         "p_ci_low",
         "p_ci_high",
         "cluster_p_value",
+        "global_two_sided_cluster_p_value",
+        "holm_within_family_p_value",
+        "holm_all_batch_p_value",
+        "run_global_two_sided_p_value",
+        "run_holm_within_family_p_value",
+        "run_holm_all_batch_p_value",
     }:
         return "0.0000"
     if "hz" in field_name:
@@ -772,6 +780,8 @@ def _number_format(field_name: str) -> str | None:
         "effect_denominator_sd",
         "arm_a_z",
         "arm_b_z",
+        "z_score",
+        "z_threshold",
         "arm_a_normalized_cluster_node_mean",
         "arm_b_normalized_cluster_node_mean",
         "arm_a_minus_b_raw_difference",
@@ -866,10 +876,7 @@ def _write_table_sheet(
     sheet.row_dimensions[header_row].height = 32
     if rows:
         for row_index, row in enumerate(rows, start=header_row + 1):
-            significant = (
-                significant_field is not None
-                and bool(row.get(significant_field, False))
-            )
+            significant = significant_field is not None and bool(row.get(significant_field, False))
             for column_index, field_name in enumerate(fields, start=1):
                 cell = sheet.cell(row=row_index, column=column_index)
                 _set_excel_value(cell, row.get(field_name, ""))
@@ -912,16 +919,12 @@ def _write_table_sheet(
             color="666666",
         )
         sheet.cell(row=header_row + 1, column=1).fill = _NOTE_FILL
-        sheet.cell(row=header_row + 1, column=1).alignment = Alignment(
-            wrap_text=True
-        )
+        sheet.cell(row=header_row + 1, column=1).alignment = Alignment(wrap_text=True)
         sheet.column_dimensions[last_column].width = max(
             sheet.column_dimensions[last_column].width or 0,
             12,
         )
-    sheet.auto_filter.ref = (
-        f"A{header_row}:{get_column_letter(len(fields))}{last_row}"
-    )
+    sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(fields))}{last_row}"
     sheet.freeze_panes = f"A{header_row + 1}"
     _set_reasonable_widths(sheet, fields=fields, rows=rows)
 
@@ -1002,8 +1005,7 @@ def _methods_and_provenance_rows(
         (
             "Independent clean-room FieldTrip-style compressed BioSemi64 "
             "reconstruction; fixed 169-edge MNE subset plus 28 audited additions"
-            if result.sensor_adjacency_version == SENSOR_ADJACENCY_VERSION
-            and len(result.sensor_adjacency_edges) == 197
+            if result.sensor_adjacency_version == SENSOR_ADJACENCY_VERSION and len(result.sensor_adjacency_edges) == 197
             else "Explicit versioned edge table recorded in manifest.json"
         ),
         "This is not represented as the authors' unpublished adjacency matrix.",
@@ -1103,8 +1105,7 @@ def _write_run_summary_sheet(
         sheet,
         title=TOOL_TITLE,
         description=(
-            "Human-readable run summary. Raw tail p-values are the primary "
-            "Hermann-compatible cluster-level results."
+            "Human-readable run summary. Raw tail p-values are the primary Hermann-compatible cluster-level results."
         ),
         column_count=9,
     )
@@ -1151,11 +1152,7 @@ def _write_run_summary_sheet(
     sheet.column_dimensions["B"].width = 60
 
     significant = sorted(
-        (
-            row
-            for row in cluster_rows
-            if bool(row.get("significant_cluster_level", False))
-        ),
+        (row for row in cluster_rows if bool(row.get("significant_cluster_level", False))),
         key=_cluster_sort_key,
     )
     section_row = 5 + len(overview) + 1
@@ -1274,23 +1271,16 @@ def _write_human_workbook(
         "n_b",
     )
     sorted_clusters = sorted(cluster_rows, key=_cluster_sort_key)
-    significant_clusters = [
-        row
-        for row in sorted_clusters
-        if bool(row.get("significant_cluster_level", False))
-    ]
+    significant_clusters = [row for row in sorted_clusters if bool(row.get("significant_cluster_level", False))]
     _write_table_sheet(
         workbook["Significant Clusters"],
         title="Significant Clusters",
         description=(
-            "Clusters meeting the raw sign-specific Monte Carlo p < .025 "
-            "threshold, sorted by ascending raw tail p."
+            "Clusters meeting the raw sign-specific Monte Carlo p < .025 threshold, sorted by ascending raw tail p."
         ),
         fields=cluster_fields,
         rows=significant_clusters,
-        empty_message=(
-            "No clusters met the Hermann-compatible per-direction threshold."
-        ),
+        empty_message=("No clusters met the Hermann-compatible per-direction threshold."),
         significant_field="significant_cluster_level",
     )
     _write_table_sheet(
@@ -1365,10 +1355,7 @@ def _write_human_workbook(
     _write_table_sheet(
         workbook["Participants and Exclusions"],
         title="Participants and Exclusions",
-        description=(
-            "Included analysis-arm membership plus project/QC exclusions "
-            "recorded during preparation."
-        ),
+        description=("Included analysis-arm membership plus project/QC exclusions recorded during preparation."),
         fields=participant_fields,
         rows=participant_rows,
     )
@@ -1499,9 +1486,7 @@ def _manifest_payload(
             "cluster_level_inference_only": True,
             "pointwise_sensor_harmonic_significance": False,
             "cross_contrast_family_corrected": False,
-            "adaptive_harmonic_selection_uses_analysis_data": (
-                selection.selection_mode.value == "automatic"
-            ),
+            "adaptive_harmonic_selection_uses_analysis_data": (selection.selection_mode.value == "automatic"),
             "adaptive_selection_confirmatory_caveat": (
                 (
                     "The paper-faithful harmonic domain is selected from the "
@@ -1517,8 +1502,7 @@ def _manifest_payload(
                 )
             ),
             "exchangeability_assumption": (
-                "Within-participant whole-tensor swaps are exchangeable under "
-                "the paired null."
+                "Within-participant whole-tensor swaps are exchangeable under the paired null."
                 if prepared.request.design.value == "paired_conditions"
                 else "Unrestricted whole-participant group labels are "
                 "exchangeable under the independent-groups global null; "
@@ -1564,17 +1548,11 @@ def _manifest_payload(
             "selected_frequency_column_count": (provenance.selected_frequency_column_count),
             "workbook_count": provenance.workbook_count,
             "neutral_full_fft_provenance": {
-                "method_version": (
-                    provenance.full_fft_provenance_method_version
-                ),
+                "method_version": (provenance.full_fft_provenance_method_version),
                 "source_fingerprint": provenance.full_fft_source_fingerprint,
                 "cohort_fingerprint": provenance.full_fft_cohort_fingerprint,
-                "frequency_qc_fingerprint": (
-                    provenance.full_fft_frequency_qc_fingerprint
-                ),
-                "processing_export_fingerprint": (
-                    provenance.full_fft_processing_export_fingerprint
-                ),
+                "frequency_qc_fingerprint": (provenance.full_fft_frequency_qc_fingerprint),
+                "processing_export_fingerprint": (provenance.full_fft_processing_export_fingerprint),
             },
             "timing_seconds": {
                 "header_read": provenance.header_read_seconds,
@@ -1591,17 +1569,14 @@ def _manifest_payload(
                 "frequency_qc_excluded_participants": list(provenance.frequency_qc_excluded_participants),
                 "incomplete_pair_participants": list(provenance.incomplete_pair_participants),
                 "participant_condition_exclusions": [
-                    asdict(row)
-                    for row in provenance.participant_condition_exclusions
+                    asdict(row) for row in provenance.participant_condition_exclusions
                 ],
                 "dataset_diagnostics": list(provenance.dataset_diagnostics),
             },
         },
         "harmonic_selection": {
             "mode": selection.selection_mode.value,
-            "fixed_highest_harmonic_order": (
-                selection.fixed_highest_harmonic_order
-            ),
+            "fixed_highest_harmonic_order": (selection.fixed_highest_harmonic_order),
             "z_threshold": selection.z_threshold,
             "z_ddof": selection.z_ddof,
             "highest_detected_order": selection.highest_detected_order,
@@ -1948,13 +1923,1233 @@ def export_free_harmonic_run(
     )
 
 
+def _batch_family_tensor_semantics(
+    family: RepeatedSessionContrastFamily,
+    *,
+    session_a_label: str,
+    session_b_label: str,
+) -> str:
+    if family is RepeatedSessionContrastFamily.SESSION_AVERAGED_GROUPS:
+        return (
+            "Complete-pair participant mean SNR across both sessions, followed "
+            "by one global L2 normalization across the retained sensor x "
+            "harmonic tensor; independent comparison of canonical groups."
+        )
+    if family is RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP:
+        return (
+            f"{session_a_label} and {session_b_label} SNR tensors were separately "
+            "L2-normalized within participant; inference uses the paired "
+            f"{session_a_label} minus {session_b_label} normalized-pattern change."
+        )
+    return (
+        f"Each participant's separately L2-normalized {session_a_label} minus "
+        f"{session_b_label} sensor x harmonic tensor was formed first; those "
+        "normalized-pattern change tensors were compared between canonical "
+        "groups and were not renormalized after subtraction."
+    )
+
+
+def _batch_run_slug(family_id: str, condition: str) -> str:
+    readable = re.sub(
+        r"[^A-Za-z0-9._-]+",
+        "-",
+        f"{family_id}-{condition}",
+    ).strip("-._")
+    digest = hashlib.sha256(f"{family_id.casefold()}\0{condition.casefold()}".encode("utf-8")).hexdigest()[:10]
+    return f"{(readable or 'contrast')[:80]}-{digest}"
+
+
+def _batch_summary_rows(
+    prepared: PreparedRepeatedSessionBatch,
+    result: "RepeatedSessionBatchResult",
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    session_a, session_b = prepared.sessions
+    for outcome in result.outcomes:
+        run = outcome.prepared_run
+        contrast = run.prepared
+        cluster_result = outcome.result
+        rows.append(
+            {
+                "family_id": run.family_id,
+                "family": run.family.value,
+                "family_label": run.family_label,
+                "condition": run.condition,
+                "group_id": run.group_id or "",
+                "design": contrast.request.design.value,
+                "arm_a_label": contrast.arm_a_label,
+                "arm_b_label": contrast.arm_b_label,
+                "n_a": len(contrast.participant_ids_a),
+                "n_b": len(contrast.participant_ids_b),
+                "global_two_sided_cluster_p_value": (outcome.global_two_sided_p_value),
+                "holm_within_family_p_value": (outcome.holm_within_family_p_value),
+                "holm_all_batch_p_value": outcome.holm_all_batch_p_value,
+                "significant_raw_global": (outcome.global_two_sided_p_value <= 0.05),
+                "significant_holm_within_family": (outcome.holm_within_family_p_value <= 0.05),
+                "significant_holm_all_batch": (outcome.holm_all_batch_p_value <= 0.05),
+                "observed_cluster_count": len(cluster_result.clusters),
+                "raw_significant_cluster_count": sum(cluster.significant for cluster in cluster_result.clusters),
+                "degrees_of_freedom": cluster_result.degrees_of_freedom,
+                "derived_seed": outcome.derived_seed,
+                "permutation_assignment_hash": (cluster_result.permutation_assignment_hash),
+                "tensor_semantics_id": run.tensor_semantics.value,
+                "tensor_semantics": _batch_family_tensor_semantics(
+                    run.family,
+                    session_a_label=session_a.label,
+                    session_b_label=session_b.label,
+                ),
+            }
+        )
+    return rows
+
+
+def _batch_cluster_rows(
+    result: "RepeatedSessionBatchResult",
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for outcome in result.outcomes:
+        run = outcome.prepared_run
+        for cluster_row in _cluster_summary_rows(run.prepared, outcome.result):
+            arm_a_mean = cluster_row.pop("arm_a_normalized_cluster_node_mean")
+            arm_b_mean = cluster_row.pop("arm_b_normalized_cluster_node_mean")
+            tensor_difference = cluster_row.pop("arm_a_minus_b_raw_difference")
+            cluster_row.pop("arm_a_minus_b_normalized_difference")
+            cluster_row["arm_a_tensor_cluster_node_mean"] = arm_a_mean
+            cluster_row["arm_b_tensor_cluster_node_mean"] = arm_b_mean
+            cluster_row["arm_a_minus_b_tensor_difference"] = tensor_difference
+            cluster_row["descriptive_effect_label"] = (
+                "post-selection/shape-dependent cluster-node mean on the "
+                "declared repeated-session tensor"
+            )
+            cluster_row["effect_value_scale"] = run.tensor_semantics.value
+            rows.append(
+                {
+                    "family_id": run.family_id,
+                    "family": run.family.value,
+                    "family_label": run.family_label,
+                    "condition": run.condition,
+                    "group_id": run.group_id or "",
+                    "run_global_two_sided_p_value": (outcome.global_two_sided_p_value),
+                    "run_holm_within_family_p_value": (outcome.holm_within_family_p_value),
+                    "run_holm_all_batch_p_value": (outcome.holm_all_batch_p_value),
+                    **cluster_row,
+                }
+            )
+    return rows
+
+
+def _batch_membership_rows(
+    result: "RepeatedSessionBatchResult",
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for outcome in result.outcomes:
+        run = outcome.prepared_run
+        for membership in _cluster_membership_rows(run.prepared, outcome.result):
+            rows.append(
+                {
+                    "family_id": run.family_id,
+                    "condition": run.condition,
+                    "group_id": run.group_id or "",
+                    **membership,
+                }
+            )
+    return rows
+
+
+def _batch_node_rows(
+    result: "RepeatedSessionBatchResult",
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for outcome in result.outcomes:
+        run = outcome.prepared_run
+        for node in _node_statistic_rows(run.prepared, outcome.result):
+            rows.append(
+                {
+                    "family_id": run.family_id,
+                    "condition": run.condition,
+                    "group_id": run.group_id or "",
+                    **node,
+                }
+            )
+    return rows
+
+
+def _batch_cohort_audit_rows(
+    prepared: PreparedRepeatedSessionBatch,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "participant_id": row.participant_id,
+            "group_id": row.group_id,
+            "condition": row.condition,
+            "available_session_ids": "|".join(row.available_session_ids),
+            "missing_session_ids": "|".join(row.missing_session_ids),
+            "recording_ids_by_session": "|".join(
+                f"{session_id}:{recording_id}" for session_id, recording_id in row.recording_ids_by_session
+            ),
+            "excluded_recording_ids": "|".join(row.excluded_recording_ids),
+            "excluded_session_ids": "|".join(row.excluded_session_ids),
+            "exclusion_reasons": "|".join(row.exclusion_reasons),
+            "included_complete_pair": row.included_complete_pair,
+        }
+        for row in prepared.cohort_audit
+    ]
+
+
+def _batch_shared_selection_rows(
+    prepared: PreparedRepeatedSessionBatch,
+) -> list[dict[str, object]]:
+    selection = prepared.shared_selection
+    audit = prepared.shared_selection_audit
+    retained = {int(index) for index in selection.selected_candidate_indices}
+    rows: list[dict[str, object]] = []
+    for cell_index, cell_label in enumerate(audit.cell_labels):
+        for harmonic_index, (order, harmonic_hz) in enumerate(
+            zip(
+                selection.candidate_orders,
+                selection.candidate_harmonics_hz,
+                strict=True,
+            )
+        ):
+            rows.append(
+                {
+                    "cell_label": cell_label,
+                    "group_id": audit.cell_group_ids[cell_index],
+                    "session_id": audit.cell_session_ids[cell_index],
+                    "condition": audit.cell_conditions[cell_index],
+                    "participant_count": audit.cell_participant_counts[cell_index],
+                    "harmonic_order": int(order),
+                    "harmonic_hz": float(harmonic_hz),
+                    "z_score": float(audit.z_scores[cell_index, harmonic_index]),
+                    "strict_z_detected": bool(audit.detected[cell_index, harmonic_index]),
+                    "retained_shared_fill_through": harmonic_index in retained,
+                    "z_threshold": selection.z_threshold,
+                }
+            )
+    return rows
+
+
+def _batch_source_rows(
+    prepared: PreparedRepeatedSessionBatch,
+    project_root: Path,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for record in prepared.source_workbooks:
+        relative = _validate_source_workbook(record, project_root)
+        key = relative.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        stat = Path(record.source_path).stat()
+        rows.append(
+            {
+                "recording_id": record.recording_id or "",
+                "participant_id": record.participant_id,
+                "group_id": record.group_id or "",
+                "group_label": record.group_label or "",
+                "session_id": record.session_id or "",
+                "session_label": record.session_label or "",
+                "visit_index": record.visit_index or "",
+                "condition": record.condition,
+                "project_relative_path": relative,
+                "source_size_bytes": int(stat.st_size),
+                "source_mtime_ns": int(stat.st_mtime_ns),
+                "header_read_seconds": record.header_read_seconds,
+                "amplitude_read_seconds": record.amplitude_read_seconds,
+            }
+        )
+    return rows
+
+
+def _batch_methods_rows(
+    prepared: PreparedRepeatedSessionBatch,
+    result: "RepeatedSessionBatchResult",
+) -> list[dict[str, object]]:
+    session_a, session_b = prepared.sessions
+    provenance = prepared.provenance
+    plan = prepared.frequency_plan
+    first_result = result.outcomes[0].result
+    rows: list[dict[str, object]] = [
+        {
+            "category": "Batch contract",
+            "item": "batch_version",
+            "value": prepared.request.batch_version,
+            "notes": "Versioned repeated-session extension; legacy one-contrast behavior is unchanged.",
+        },
+        {
+            "category": "Calibration",
+            "item": "calibration_status",
+            "value": "not covered by legacy powered receipt",
+            "notes": (
+                "The legacy v2 numerical permutation core is reused unchanged, "
+                "but its powered automatic-domain receipt does not validate the "
+                "multi-cell shared selector or this repeated-session batch of "
+                f"{len(prepared.contrast_runs)} runs."
+            ),
+        },
+        {
+            "category": "Harmonic domain",
+            "item": "shared_domain_fingerprint",
+            "value": prepared.shared_domain_fingerprint,
+            "notes": "One frozen candidate domain was supplied to every batch run.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "source_sheet",
+            "value": provenance.source_sheet,
+            "notes": "Original processing-owned FullFFT amplitudes; standard selected-harmonic outputs were not consumed.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "grid_fingerprint",
+            "value": provenance.grid_fingerprint,
+            "notes": "Exact FullFFT frequency-grid identity.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "selected_columns_fingerprint",
+            "value": provenance.selected_columns_fingerprint,
+            "notes": "Exact target/noise-column selection identity.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "full_fft_provenance_method_version",
+            "value": provenance.full_fft_provenance_method_version,
+            "notes": "Neutral processing-owned FullFFT provenance contract.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "full_fft_source_fingerprint",
+            "value": provenance.full_fft_source_fingerprint,
+            "notes": "Canonical active source-workbook identity.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "full_fft_cohort_fingerprint",
+            "value": provenance.full_fft_cohort_fingerprint,
+            "notes": "Canonical processing cohort identity.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "full_fft_frequency_qc_fingerprint",
+            "value": provenance.full_fft_frequency_qc_fingerprint,
+            "notes": "Frequency-domain QC identity used by neutral FullFFT provenance.",
+        },
+        {
+            "category": "Input provenance",
+            "item": "full_fft_processing_export_fingerprint",
+            "value": provenance.full_fft_processing_export_fingerprint,
+            "notes": "Processing/export identity used by neutral FullFFT provenance.",
+        },
+        {
+            "category": "Frequency plan",
+            "item": "frequency_resolution_hz",
+            "value": plan.frequency_resolution_hz,
+            "notes": "Resolved from the canonical FullFFT grid.",
+        },
+        {
+            "category": "Frequency plan",
+            "item": "noise_window_rule",
+            "value": "physical +/- half-width inclusive; target and immediate adjacent FFT bins excluded",
+            "notes": (
+                "noise_half_width_hz="
+                f"{prepared.method.noise_half_width_hz:g}; exact resolved bins "
+                "are listed below"
+            ),
+        },
+        {
+            "category": "Adjacency",
+            "item": "sensor_adjacency_version",
+            "value": first_result.sensor_adjacency_version,
+            "notes": "Shared by every run in the repeated-session batch.",
+        },
+        {
+            "category": "Adjacency",
+            "item": "sensor_adjacency_fingerprint_sha256",
+            "value": first_result.sensor_adjacency_fingerprint,
+            "notes": "Exact ordered sensor-edge graph identity.",
+        },
+        {
+            "category": "Adjacency",
+            "item": "sensor_adjacency_edges",
+            "value": json.dumps(
+                [list(edge) for edge in first_result.sensor_adjacency_edges],
+                separators=(",", ":"),
+            ),
+            "notes": f"{len(first_result.sensor_adjacency_edges)} undirected sensor edges; harmonic adjacency is complete within sensor.",
+        },
+        {
+            "category": "Multiplicity",
+            "item": "within_family",
+            "value": result.within_family_method,
+            "notes": (
+                "Applied to run-global two-sided cluster p values across all "
+                "declared conditions separately for each scientific family."
+            ),
+        },
+        {
+            "category": "Multiplicity",
+            "item": "all_batch",
+            "value": result.all_batch_method,
+            "notes": "Conservative sensitivity correction across every batch run.",
+        },
+        {
+            "category": "Inference",
+            "item": "run_global_p_definition",
+            "value": "minimum cluster adjusted_two_sided_p_value; 1 when no observed clusters",
+            "notes": (
+                "The signed max-cluster null already controls electrode x "
+                "harmonic multiplicity within a run. Cross-run Holm values are "
+                "run-level annotations and are not cluster-specific p values."
+            ),
+        },
+        {
+            "category": "Session direction",
+            "item": "arm_a_minus_arm_b",
+            "value": f"{session_a.label} minus {session_b.label}",
+            "notes": (
+                f"Visit {session_a.visit_index} minus Visit {session_b.visit_index}; "
+                "session/phase is confounded with fixed visit order, elapsed "
+                "time, and retest effects."
+            ),
+        },
+    ]
+    for family in RepeatedSessionContrastFamily:
+        rows.append(
+            {
+                "category": "Tensor semantics",
+                "item": family.value,
+                "value": _batch_family_tensor_semantics(
+                    family,
+                    session_a_label=session_a.label,
+                    session_b_label=session_b.label,
+                ),
+                "notes": "FHC tests normalized sensor x harmonic response distributions, not total Raw BCA magnitude.",
+            }
+        )
+    for field_name, value in asdict(prepared.method).items():
+        rows.append(
+            {
+                "category": "Method setting",
+                "item": field_name,
+                "value": value,
+                "notes": ("Base batch seed; each run receives a stable derived seed." if field_name == "seed" else ""),
+            }
+        )
+    for harmonic_index, (order, harmonic_hz) in enumerate(
+        zip(plan.candidate_orders, plan.candidate_harmonics_hz, strict=True)
+    ):
+        target_index = int(plan.target_selected_indices[harmonic_index])
+        noise_indices = tuple(
+            int(value) for value in plan.noise_selected_indices[harmonic_index]
+        )
+        rows.append(
+            {
+                "category": "Frequency-bin audit",
+                "item": f"H{int(order)} ({float(harmonic_hz):g} Hz)",
+                "value": json.dumps(
+                    {
+                        "target_selected_index": target_index,
+                        "target_column": plan.selected_frequency_columns[target_index],
+                        "target_bin_hz": float(plan.selected_frequencies_hz[target_index]),
+                        "target_error_hz": float(
+                            plan.selected_frequencies_hz[target_index]
+                            - harmonic_hz
+                        ),
+                        "noise_selected_indices": list(noise_indices),
+                        "noise_columns": [
+                            plan.selected_frequency_columns[index]
+                            for index in noise_indices
+                        ],
+                        "noise_frequencies_hz": [
+                            float(plan.selected_frequencies_hz[index])
+                            for index in noise_indices
+                        ],
+                    },
+                    separators=(",", ":"),
+                ),
+                "notes": "Exact target and physical neighboring-noise bins used for participant SNR.",
+            }
+        )
+    for outcome in result.outcomes:
+        rows.append(
+            {
+                "category": "Derived seed mapping",
+                "item": f"{outcome.family_id} | {outcome.condition}",
+                "value": outcome.derived_seed,
+                "notes": outcome.result.permutation_assignment_hash,
+            }
+        )
+    for warning in dict.fromkeys(warning for outcome in result.outcomes for warning in outcome.result.warnings):
+        rows.append(
+            {
+                "category": "Inference warning",
+                "item": "warning",
+                "value": warning,
+                "notes": "",
+            }
+        )
+    return rows
+
+
+def _write_batch_arrays(
+    path: Path,
+    *,
+    outcome: object,
+    prepared: PreparedRepeatedSessionBatch,
+) -> None:
+    run = outcome.prepared_run
+    contrast = run.prepared
+    result = outcome.result
+    session_a, session_b = prepared.sessions
+    semantics = _batch_family_tensor_semantics(
+        run.family,
+        session_a_label=session_a.label,
+        session_b_label=session_b.label,
+    )
+    if run.family is RepeatedSessionContrastFamily.SESSION_AVERAGED_GROUPS:
+        tensor_a_key = "l2_normalized_participant_mean_snr_group_a"
+        tensor_b_key = "l2_normalized_participant_mean_snr_group_b"
+    elif run.family is RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP:
+        tensor_a_key = "l2_normalized_session_a_snr"
+        tensor_b_key = "l2_normalized_session_b_snr"
+    else:
+        tensor_a_key = "normalized_snr_session_change_group_a"
+        tensor_b_key = "normalized_snr_session_change_group_b"
+    metadata = {
+        "family_id": run.family_id,
+        "family": run.family.value,
+        "condition": run.condition,
+        "group_id": run.group_id,
+        "arm_a_label": contrast.arm_a_label,
+        "arm_b_label": contrast.arm_b_label,
+        "tensor_a_key": tensor_a_key,
+        "tensor_b_key": tensor_b_key,
+        "tensor_semantics_id": run.tensor_semantics.value,
+        "tensor_semantics": semantics,
+        "shared_domain_fingerprint": prepared.shared_domain_fingerprint,
+        "global_two_sided_cluster_p_value": (outcome.global_two_sided_p_value),
+        "holm_within_family_p_value": outcome.holm_within_family_p_value,
+        "holm_all_batch_p_value": outcome.holm_all_batch_p_value,
+        "derived_seed": outcome.derived_seed,
+    }
+    payload = {
+        tensor_a_key: np.asarray(contrast.values_a),
+        tensor_b_key: np.asarray(contrast.values_b),
+        "participant_ids_a": np.asarray(contrast.participant_ids_a, dtype=np.str_),
+        "participant_ids_b": np.asarray(contrast.participant_ids_b, dtype=np.str_),
+        "sensor_names": np.asarray(contrast.sensor_names, dtype=np.str_),
+        "harmonic_orders": np.asarray(contrast.harmonic_orders),
+        "harmonics_hz": np.asarray(contrast.harmonics_hz),
+        "observed_t": np.asarray(result.observed_t),
+        "cluster_labels": np.asarray(result.cluster_labels),
+        "null_positive_max_mass": np.asarray(result.null_positive_max_mass),
+        "null_negative_min_mass": np.asarray(result.null_negative_min_mass),
+        "metadata_json": np.asarray(
+            json.dumps(metadata, sort_keys=True, ensure_ascii=False),
+            dtype=np.str_,
+        ),
+    }
+    with path.open("wb") as stream:
+        np.savez_compressed(stream, **payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_repeated_session_workbook(
+    path: Path,
+    *,
+    summary_rows: Sequence[Mapping[str, object]],
+    cluster_rows: Sequence[Mapping[str, object]],
+    membership_rows: Sequence[Mapping[str, object]],
+    node_rows: Sequence[Mapping[str, object]],
+    cohort_rows: Sequence[Mapping[str, object]],
+    selection_rows: Sequence[Mapping[str, object]],
+    source_rows: Sequence[Mapping[str, object]],
+    methods_rows: Sequence[Mapping[str, object]],
+) -> None:
+    sheets = (
+        "Batch Summary",
+        "Family-Significant Runs",
+        "All Clusters",
+        "Cluster Membership",
+        "Node Statistics",
+        "Cohort Audit",
+        "Shared Harmonic Selection",
+        "Source Workbooks",
+        "Methods and Provenance",
+    )
+    workbook = Workbook()
+    workbook.active.title = sheets[0]
+    for name in sheets[1:]:
+        workbook.create_sheet(name)
+    summary_fields = (
+        "family_id",
+        "family_label",
+        "condition",
+        "group_id",
+        "design",
+        "arm_a_label",
+        "arm_b_label",
+        "n_a",
+        "n_b",
+        "global_two_sided_cluster_p_value",
+        "holm_within_family_p_value",
+        "holm_all_batch_p_value",
+        "significant_raw_global",
+        "significant_holm_within_family",
+        "significant_holm_all_batch",
+        "observed_cluster_count",
+        "raw_significant_cluster_count",
+        "degrees_of_freedom",
+        "derived_seed",
+        "tensor_semantics_id",
+        "tensor_semantics",
+    )
+    _write_table_sheet(
+        workbook["Batch Summary"],
+        title="Repeated-Session FHC Batch Summary",
+        description=(
+            "Run-global cluster p values and Holm corrections. Cross-condition "
+            "adjustments are run-level annotations, not cluster-specific p values."
+        ),
+        fields=summary_fields,
+        rows=summary_rows,
+        significant_field="significant_holm_within_family",
+    )
+    _write_table_sheet(
+        workbook["Family-Significant Runs"],
+        title="Family-Corrected Significant Runs",
+        description=(
+            "Runs with Holm-adjusted p < .05 across the declared conditions in their prespecified scientific family."
+        ),
+        fields=summary_fields,
+        rows=[row for row in summary_rows if bool(row["significant_holm_within_family"])],
+        empty_message="No run survived Holm correction within its scientific family.",
+        significant_field="significant_holm_within_family",
+    )
+    cluster_fields = (
+        "family_id",
+        "family_label",
+        "condition",
+        "group_id",
+        "run_global_two_sided_p_value",
+        "run_holm_within_family_p_value",
+        "run_holm_all_batch_p_value",
+        "cluster_id",
+        "sign",
+        "mass",
+        "p_value",
+        "conservative_p_value",
+        "adjusted_two_sided_p_value",
+        "significant_cluster_level",
+        "node_count",
+        "sensors",
+        "harmonic_orders",
+        "harmonics_hz",
+        "effect_size",
+        "effect_size_kind",
+        "effect_direction",
+        "n_a",
+        "n_b",
+    )
+    _write_table_sheet(
+        workbook["All Clusters"],
+        title="All Observed Clusters",
+        description=(
+            "Raw conditional max-cluster inference. Individual nodes are not "
+            "pointwise significant and Holm values apply only to the run."
+        ),
+        fields=cluster_fields,
+        rows=cluster_rows,
+        significant_field="significant_cluster_level",
+    )
+    membership_fields = (
+        "family_id",
+        "condition",
+        "group_id",
+        "cluster_id",
+        "sign",
+        "node_index",
+        "sensor",
+        "harmonic_order",
+        "harmonic_hz",
+        "observed_t",
+        "cluster_mass",
+        "cluster_p_value",
+        "cluster_significant",
+    )
+    _write_table_sheet(
+        workbook["Cluster Membership"],
+        title="Cluster Membership",
+        description="Sensor-harmonic membership only; no pointwise inference is claimed.",
+        fields=membership_fields,
+        rows=membership_rows,
+        significant_field="cluster_significant",
+    )
+    node_fields = (
+        "family_id",
+        "condition",
+        "group_id",
+        "node_index",
+        "sensor_index",
+        "sensor",
+        "harmonic_index",
+        "harmonic_order",
+        "harmonic_hz",
+        "observed_t",
+        "cluster_id",
+        "cluster_sign",
+        "cluster_p_value",
+        "cluster_significant",
+        "pointwise_significance_claimed",
+    )
+    _write_table_sheet(
+        workbook["Node Statistics"],
+        title="Node Statistics",
+        description=(
+            "Observed sensor-harmonic t values and cluster membership for every "
+            "batch run; no pointwise significance is claimed."
+        ),
+        fields=node_fields,
+        rows=node_rows,
+        significant_field="cluster_significant",
+    )
+    cohort_fields = (
+        "participant_id",
+        "group_id",
+        "condition",
+        "available_session_ids",
+        "missing_session_ids",
+        "recording_ids_by_session",
+        "excluded_recording_ids",
+        "excluded_session_ids",
+        "exclusion_reasons",
+        "included_complete_pair",
+    )
+    _write_table_sheet(
+        workbook["Cohort Audit"],
+        title="Complete-Pair Cohort Audit",
+        description=(
+            "Availability and explicit analysis-only recording exclusions for "
+            "every participant x condition cell. Missing sessions reduce coverage."
+        ),
+        fields=cohort_fields,
+        rows=cohort_rows,
+    )
+    selection_fields = (
+        "cell_label",
+        "group_id",
+        "session_id",
+        "condition",
+        "participant_count",
+        "harmonic_order",
+        "harmonic_hz",
+        "z_score",
+        "strict_z_detected",
+        "retained_shared_fill_through",
+        "z_threshold",
+    )
+    _write_table_sheet(
+        workbook["Shared Harmonic Selection"],
+        title="Shared Multi-Cell Harmonic Selection",
+        description=(
+            "One shared domain selected before inference and reused unchanged for every condition and contrast family."
+        ),
+        fields=selection_fields,
+        rows=selection_rows,
+    )
+    source_fields = (
+        "recording_id",
+        "participant_id",
+        "group_id",
+        "session_id",
+        "session_label",
+        "visit_index",
+        "condition",
+        "project_relative_path",
+        "source_size_bytes",
+        "source_mtime_ns",
+        "header_read_seconds",
+        "amplitude_read_seconds",
+    )
+    _write_table_sheet(
+        workbook["Source Workbooks"],
+        title="Recording-Aware Source Workbooks",
+        description="Original FullFFT workbooks consumed through the canonical project index.",
+        fields=source_fields,
+        rows=source_rows,
+    )
+    _write_table_sheet(
+        workbook["Methods and Provenance"],
+        title="Methods and Provenance",
+        description=(
+            "Tensor estimands, fixed-order caveat, multiplicity, calibration "
+            "scope, seeds, fingerprints, and numerical warnings."
+        ),
+        fields=("category", "item", "value", "notes"),
+        rows=methods_rows,
+    )
+    workbook.save(path)
+    with path.open("rb+") as stream:
+        os.fsync(stream.fileno())
+
+
+def _batch_artifact_manifest_row(
+    *,
+    role: str,
+    staging_path: Path,
+    staging_root: Path,
+    destination: Path,
+    project_root: Path,
+) -> dict[str, object]:
+    digest, size = _sha256_file(staging_path)
+    relative_in_bundle = staging_path.relative_to(staging_root)
+    final_path = destination / relative_in_bundle
+    return {
+        "role": role,
+        "path": _relative_to(
+            final_path,
+            project_root,
+            label="Batch artifact",
+        ).as_posix(),
+        "sha256": digest,
+        "size_bytes": size,
+    }
+
+
+def export_repeated_session_batch(
+    prepared: PreparedRepeatedSessionBatch,
+    result: "RepeatedSessionBatchResult",
+    *,
+    run_id: str | None = None,
+    destination: str | Path | None = None,
+) -> ExportReceipt:
+    """Atomically publish one corrected repeated-session FHC batch bundle."""
+
+    if not isinstance(prepared, PreparedRepeatedSessionBatch):
+        raise TypeError("prepared must be a PreparedRepeatedSessionBatch.")
+    outcomes = tuple(getattr(result, "outcomes", ()))
+    if len(outcomes) != len(prepared.contrast_runs):
+        raise ValueError("Batch result does not match the prepared contrast count.")
+    if int(getattr(result, "base_seed", -1)) != prepared.method.seed:
+        raise ValueError("Batch result base seed does not match the prepared method.")
+    from .analysis import (
+        adjust_batch_cluster_p_values,
+        derive_repeated_session_run_seed,
+    )
+
+    expected_multiplicity = adjust_batch_cluster_p_values(
+        tuple(
+            (outcome.family_id, outcome.condition, outcome.result)
+            for outcome in outcomes
+        )
+    )
+    first_adjacency: tuple[str, str, tuple[tuple[int, int], ...]] | None = None
+    for expected, outcome, expected_adjustment in zip(
+        prepared.contrast_runs,
+        outcomes,
+        expected_multiplicity,
+        strict=True,
+    ):
+        actual = outcome.prepared_run
+        if actual is not expected:
+            raise ValueError(
+                "Batch result must reference the exact prepared contrast objects."
+            )
+        if (
+            actual.family_id.casefold() != expected.family_id.casefold()
+            or actual.condition.casefold() != expected.condition.casefold()
+        ):
+            raise ValueError("Batch result order does not match preparation order.")
+        _validate_result(actual.prepared, outcome.result)
+        expected_seed = derive_repeated_session_run_seed(
+            prepared.method.seed,
+            family_id=expected.family_id,
+            condition=expected.condition,
+        )
+        if outcome.result.seed != outcome.derived_seed or outcome.derived_seed != expected_seed:
+            raise ValueError("Batch result seed mapping is inconsistent.")
+        expected_values = (
+            expected_adjustment.global_two_sided_p_value,
+            expected_adjustment.holm_within_family_p_value,
+            expected_adjustment.holm_all_batch_p_value,
+        )
+        actual_values = (
+            outcome.global_two_sided_p_value,
+            outcome.holm_within_family_p_value,
+            outcome.holm_all_batch_p_value,
+        )
+        if any(
+            not np.isclose(actual_value, expected_value, rtol=0.0, atol=1e-15)
+            for actual_value, expected_value in zip(
+                actual_values,
+                expected_values,
+                strict=True,
+            )
+        ):
+            raise ValueError(
+                "Batch result run-global or Holm p values are inconsistent "
+                "with the cluster results."
+            )
+        adjacency = (
+            outcome.result.sensor_adjacency_version,
+            outcome.result.sensor_adjacency_fingerprint,
+            outcome.result.sensor_adjacency_edges,
+        )
+        if first_adjacency is None:
+            first_adjacency = adjacency
+        elif adjacency != first_adjacency:
+            raise ValueError("Every batch run must use the same sensor adjacency graph.")
+
+    first = prepared.contrast_runs[0].prepared
+    project_root = _resolve_project_root(first)
+    if Path(prepared.project_root).resolve(strict=False) != project_root:
+        raise FreeHarmonicInputError("Prepared batch and contrast refer to different project roots.")
+    resolved_run_id, final_directory = resolve_run_destination(
+        first,
+        run_id=run_id,
+        destination=destination,
+    )
+    if final_directory.exists():
+        raise FileExistsError(f"Free-harmonic batch already exists: {final_directory}")
+
+    summary_rows = _batch_summary_rows(prepared, result)
+    cluster_rows = _batch_cluster_rows(result)
+    membership_rows = _batch_membership_rows(result)
+    node_rows = _batch_node_rows(result)
+    cohort_rows = _batch_cohort_audit_rows(prepared)
+    selection_rows = _batch_shared_selection_rows(prepared)
+    source_rows = _batch_source_rows(prepared, project_root)
+    methods_rows = _batch_methods_rows(prepared, result)
+    created_at_utc = datetime.now(UTC).isoformat()
+
+    parent = final_directory.parent
+    _relative_to(parent.resolve(strict=False), project_root, label="Output parent")
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = parent / f".{resolved_run_id}.staging-{uuid4().hex}"
+    _relative_to(staging.resolve(strict=False), project_root, label="Staging directory")
+    staging.mkdir(exist_ok=False)
+    artifacts: list[dict[str, object]] = []
+
+    csv_specs = (
+        ("batch_summary", "batch_summary.csv", tuple(summary_rows[0]) if summary_rows else (), summary_rows),
+        (
+            "all_clusters",
+            "all_clusters.csv",
+            tuple(cluster_rows[0])
+            if cluster_rows
+            else ("family_id", "family_label", "condition", "group_id", "cluster_id"),
+            cluster_rows,
+        ),
+        (
+            "cluster_membership",
+            "cluster_membership.csv",
+            tuple(membership_rows[0]) if membership_rows else ("family_id", "condition", "group_id", "cluster_id"),
+            membership_rows,
+        ),
+        (
+            "node_statistics",
+            "node_statistics.csv",
+            tuple(node_rows[0]) if node_rows else ("family_id", "condition", "group_id", "node_index"),
+            node_rows,
+        ),
+        ("cohort_audit", "cohort_audit.csv", tuple(cohort_rows[0]) if cohort_rows else (), cohort_rows),
+        (
+            "shared_harmonic_selection",
+            "shared_harmonic_selection.csv",
+            tuple(selection_rows[0]) if selection_rows else (),
+            selection_rows,
+        ),
+        ("source_workbooks", "source_workbooks.csv", tuple(source_rows[0]) if source_rows else (), source_rows),
+        ("methods_and_provenance", "methods_and_provenance.csv", ("category", "item", "value", "notes"), methods_rows),
+    )
+    try:
+        for role, filename, fields, rows in csv_specs:
+            if not fields:
+                raise ValueError(f"Batch export has no columns for {role}.")
+            path = staging / filename
+            _write_csv(path, fields, rows)
+            artifacts.append(
+                _batch_artifact_manifest_row(
+                    role=role,
+                    staging_path=path,
+                    staging_root=staging,
+                    destination=final_directory,
+                    project_root=project_root,
+                )
+            )
+
+        arrays_directory = staging / "contrast_arrays"
+        arrays_directory.mkdir()
+        array_mapping: list[dict[str, object]] = []
+        for outcome in outcomes:
+            slug = _batch_run_slug(outcome.family_id, outcome.condition)
+            path = arrays_directory / f"{slug}.npz"
+            _write_batch_arrays(path, outcome=outcome, prepared=prepared)
+            artifacts.append(
+                _batch_artifact_manifest_row(
+                    role="contrast_arrays",
+                    staging_path=path,
+                    staging_root=staging,
+                    destination=final_directory,
+                    project_root=project_root,
+                )
+            )
+            array_mapping.append(
+                {
+                    "family_id": outcome.family_id,
+                    "condition": outcome.condition,
+                    "path": f"contrast_arrays/{path.name}",
+                }
+            )
+
+        workbook_path = staging / REPEATED_SESSION_WORKBOOK_FILENAME
+        _write_repeated_session_workbook(
+            workbook_path,
+            summary_rows=summary_rows,
+            cluster_rows=cluster_rows,
+            membership_rows=membership_rows,
+            node_rows=node_rows,
+            cohort_rows=cohort_rows,
+            selection_rows=selection_rows,
+            source_rows=source_rows,
+            methods_rows=methods_rows,
+        )
+        artifacts.append(
+            _batch_artifact_manifest_row(
+                role="human_readable_workbook",
+                staging_path=workbook_path,
+                staging_root=staging,
+                destination=final_directory,
+                project_root=project_root,
+            )
+        )
+
+        session_a, session_b = prepared.sessions
+        provenance = prepared.provenance
+        first_result = outcomes[0].result
+        manifest = {
+            "schema_version": REPEATED_SESSION_EXPORT_SCHEMA_VERSION,
+            "analysis_kind": "repeated_session_free_harmonic_clustering_batch",
+            "run_id": resolved_run_id,
+            "created_at_utc": created_at_utc,
+            "project": {
+                "project_root": ".",
+                "output_directory": _relative_to(
+                    final_directory,
+                    project_root,
+                    label="Output directory",
+                ).as_posix(),
+            },
+            "batch": {
+                "version": prepared.request.batch_version,
+                "conditions": list(prepared.conditions),
+                "group_ids_a_minus_b": list(prepared.request.group_ids),
+                "session_ids_a_minus_b": list(prepared.request.session_ids),
+                "session_labels_a_minus_b": [session_a.label, session_b.label],
+                "visit_indices_a_minus_b": [
+                    session_a.visit_index,
+                    session_b.visit_index,
+                ],
+                "recording_exclusions": [asdict(row) for row in prepared.request.recording_exclusions],
+                "base_seed": result.base_seed,
+                "shared_domain_fingerprint": prepared.shared_domain_fingerprint,
+            },
+            "method": asdict(prepared.method),
+            "frequency_plan": _frequency_plan_manifest(first),
+            "preparation": {
+                "source_sheet": provenance.source_sheet,
+                "grid_fingerprint": provenance.grid_fingerprint,
+                "selected_columns_fingerprint": (
+                    provenance.selected_columns_fingerprint
+                ),
+                "frequency_resolution_hz": provenance.frequency_resolution_hz,
+                "full_frequency_column_count": (
+                    provenance.full_frequency_column_count
+                ),
+                "selected_frequency_column_count": (
+                    provenance.selected_frequency_column_count
+                ),
+                "workbook_count": provenance.workbook_count,
+                "neutral_full_fft_provenance": {
+                    "method_version": (
+                        provenance.full_fft_provenance_method_version
+                    ),
+                    "source_fingerprint": (
+                        provenance.full_fft_source_fingerprint
+                    ),
+                    "cohort_fingerprint": (
+                        provenance.full_fft_cohort_fingerprint
+                    ),
+                    "frequency_qc_fingerprint": (
+                        provenance.full_fft_frequency_qc_fingerprint
+                    ),
+                    "processing_export_fingerprint": (
+                        provenance.full_fft_processing_export_fingerprint
+                    ),
+                },
+                "timing_seconds": {
+                    "header_read": provenance.header_read_seconds,
+                    "amplitude_read": provenance.amplitude_read_seconds,
+                    "numeric_preparation": (
+                        provenance.numeric_preparation_seconds
+                    ),
+                    "total": provenance.total_seconds,
+                    "reader_phases": dict(provenance.reader_phase_seconds),
+                },
+                "cohort_filters": {
+                    "ledger_filter_applied": provenance.ledger_filter_applied,
+                    "completed_recordings": list(
+                        provenance.completed_recordings
+                    ),
+                    "ledger_excluded_recordings": list(
+                        provenance.ledger_excluded_recordings
+                    ),
+                    "manual_excluded_participants": list(
+                        provenance.manual_excluded_participants
+                    ),
+                    "frequency_qc_excluded_participants": list(
+                        provenance.frequency_qc_excluded_participants
+                    ),
+                    "frequency_qc_excluded_recordings": list(
+                        provenance.frequency_qc_excluded_recordings
+                    ),
+                    "incomplete_pair_participants": list(
+                        provenance.incomplete_pair_participants
+                    ),
+                    "participant_condition_exclusions": [
+                        asdict(row)
+                        for row in provenance.participant_condition_exclusions
+                    ],
+                    "analysis_recording_exclusions": [
+                        asdict(row)
+                        for row in provenance.request_recording_exclusions
+                    ],
+                    "dataset_diagnostics": list(
+                        provenance.dataset_diagnostics
+                    ),
+                },
+            },
+            "harmonic_selection": {
+                "mode": prepared.shared_selection.selection_mode.value,
+                "z_threshold": prepared.shared_selection.z_threshold,
+                "z_ddof": prepared.shared_selection.z_ddof,
+                "highest_detected_order": (
+                    prepared.shared_selection.highest_detected_order
+                ),
+                "selected_ceiling_order": int(
+                    prepared.shared_selection.selected_orders[-1]
+                ),
+                "selected_orders": [
+                    int(value)
+                    for value in prepared.shared_selection.selected_orders
+                ],
+                "selected_harmonics_hz": [
+                    float(value)
+                    for value in prepared.shared_selection.selected_harmonics_hz
+                ],
+                "candidate_count": int(
+                    prepared.shared_selection.candidate_orders.size
+                ),
+                "selected_count": int(
+                    prepared.shared_selection.selected_orders.size
+                ),
+                "shared_cell_audit_artifact": "shared_harmonic_selection.csv",
+            },
+            "adjacency": {
+                "version": first_result.sensor_adjacency_version,
+                "fingerprint_sha256": first_result.sensor_adjacency_fingerprint,
+                "edge_count": len(first_result.sensor_adjacency_edges),
+                "sensor_edges": [
+                    list(edge) for edge in first_result.sensor_adjacency_edges
+                ],
+                "harmonic_adjacency": "complete-within-sensor",
+                "flattening_order": "sensor-major",
+            },
+            "multiplicity": {
+                "run_global_p": ("minimum cluster adjusted_two_sided_p_value; 1 when no observed clusters"),
+                "within_family": result.within_family_method,
+                "all_batch": result.all_batch_method,
+                "cluster_specific_cross_condition_adjustment": False,
+            },
+            "calibration": {
+                "legacy_numerical_core_reused_unchanged": True,
+                "legacy_powered_receipt_validates_repeated_batch": False,
+                "status": (
+                    "The powered legacy receipt does not validate the multi-cell "
+                    "shared selector or the repeated-session multi-run batch."
+                ),
+            },
+            "claims": {
+                "whole_participant_exchangeability_only": True,
+                "cluster_level_inference_only": True,
+                "pointwise_sensor_harmonic_significance": False,
+                "session_phase_confound": (
+                    "Session/phase-at-visit is confounded with fixed visit order, elapsed time, and retest effects."
+                ),
+                "estimand": ("normalized sensor x harmonic response distribution; not total Raw BCA magnitude"),
+            },
+            "tensor_semantics": {
+                family.value: _batch_family_tensor_semantics(
+                    family,
+                    session_a_label=session_a.label,
+                    session_b_label=session_b.label,
+                )
+                for family in RepeatedSessionContrastFamily
+            },
+            "results": summary_rows,
+            "contrast_arrays": array_mapping,
+            "source_workbooks": source_rows,
+            "artifacts": artifacts,
+        }
+        manifest_path = staging / MANIFEST_FILENAME
+        _write_manifest(manifest_path, manifest)
+        if final_directory.exists():
+            raise FileExistsError(f"Free-harmonic batch appeared during export: {final_directory}")
+        os.replace(staging, final_directory)
+    except BaseException:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
+
+    receipt_artifacts = [
+        ExportArtifact(
+            role=str(row["role"]),
+            path=project_root / str(row["path"]),
+            sha256=str(row["sha256"]),
+            size_bytes=int(row["size_bytes"]),
+        )
+        for row in artifacts
+    ]
+    final_manifest = final_directory / MANIFEST_FILENAME
+    manifest_sha256, manifest_size = _sha256_file(final_manifest)
+    receipt_artifacts.append(
+        ExportArtifact(
+            role="manifest",
+            path=final_manifest,
+            sha256=manifest_sha256,
+            size_bytes=manifest_size,
+        )
+    )
+    return ExportReceipt(
+        output_directory=final_directory,
+        manifest_path=final_manifest,
+        artifacts=tuple(receipt_artifacts),
+    )
+
+
 __all__ = [
     "DEFAULT_RESULTS_SUBFOLDER",
     "EXPORT_SCHEMA_VERSION",
     "HUMAN_WORKBOOK_FILENAME",
     "HUMAN_WORKBOOK_SHEETS",
     "MANIFEST_FILENAME",
+    "REPEATED_SESSION_EXPORT_SCHEMA_VERSION",
+    "REPEATED_SESSION_WORKBOOK_FILENAME",
     "TOOL_TITLE",
     "export_free_harmonic_run",
+    "export_repeated_session_batch",
     "resolve_run_destination",
 ]

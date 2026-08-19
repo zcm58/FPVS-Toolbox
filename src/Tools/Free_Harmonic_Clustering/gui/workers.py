@@ -21,6 +21,8 @@ from .models import (
     AnalysisWorkerOutcome,
     ProjectAnalysisOptions,
     ProjectFrequencySnapshot,
+    RepeatedBatchSetup,
+    RepeatedBatchWorkerOutcome,
 )
 
 
@@ -200,7 +202,44 @@ class AnalysisWorker(_CancellableWorker):
         )
 
 
+class RepeatedSessionBatchWorker(_CancellableWorker):
+    """Prepare, analyze, correct, and export the full repeated-session batch."""
+
+    def __init__(
+        self,
+        backend: FreeHarmonicBackend,
+        project_root: Path,
+        frequencies: ProjectFrequencySnapshot,
+        options: ProjectAnalysisOptions,
+        setup: RepeatedBatchSetup,
+    ) -> None:
+        super().__init__()
+        self._backend = backend
+        self._project_root = Path(project_root)
+        self._frequencies = frequencies
+        self._options = options
+        self._setup = setup
+
+    def _execute(self) -> object:
+        self._emit_progress(
+            0,
+            0,
+            "Preparing the shared repeated-session harmonic domain and cohorts...",
+        )
+        run = self._backend.run_repeated_batch(
+            self._project_root,
+            self._frequencies,
+            self._options,
+            self._setup,
+            progress=self._emit_progress,
+            cancel_check=self._should_cancel,
+        )
+        # A returned batch has already published its additive result bundle.
+        return RepeatedBatchWorkerOutcome(run=run)
+
+
 __all__ = [
     "AnalysisWorker",
     "ProjectInspectionWorker",
+    "RepeatedSessionBatchWorker",
 ]

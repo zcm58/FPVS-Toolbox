@@ -354,6 +354,15 @@ tensors, spatial adjacency, dependency version, or expected outputs.
   values and N per group. For paired conditions, report complete paired N.
 - Report the one declared contrast and its direction (`arm A - arm B`). A set
   of separate condition runs is not automatically corrected across conditions.
+- For a repeated-session batch, report the two canonical group IDs, the two
+  canonical session IDs/labels and visit indices, all declared conditions, and
+  the four prespecified families: session-averaged groups, Visit 2 minus Visit
+  1 within each group, and the between-group difference in participant session
+  change. State that all primary families used complete phase-balanced pairs;
+  report complete-pair and missing-visit N by group and condition.
+- When session/phase is aligned with visit order, call the contrast
+  `session/phase-at-visit` and state that phase cannot be separated from visit
+  order, elapsed time, repetition, habituation, or other retest effects.
 - Report all ledger, participant-condition, whole-participant, and frequency-
   domain QC exclusions. Missing nodes were not zero-filled or omitted with
   varying degrees of freedom.
@@ -387,6 +396,12 @@ tensors, spatial adjacency, dependency version, or expected outputs.
 - State whether the analyzed sample selected the harmonic domain. The paper-
   faithful default is adaptive/same-data selection, not an independently fixed
   confirmatory domain.
+- For a repeated batch, report the one shared-domain fingerprint and selection
+  provenance across all group x session x condition cells. Describe the exact
+  tensor rules: normalize the within-participant two-session mean once for the
+  session-averaged group family; normalize each session separately before
+  paired Visit 2 minus Visit 1; and do not renormalize that difference before
+  the between-group change comparison.
 
 ### Cluster inference
 
@@ -413,6 +428,10 @@ tensors, spatial adjacency, dependency version, or expected outputs.
   domain, adjacency, cluster-entry threshold, contrast family, and valid whole-
   participant exchangeability. It favors spatially or harmonically extended
   effects and does not correct a collection of separately run contrasts.
+- For a repeated batch, report the global two-sided run p-value, Holm p-value
+  across conditions within each of the four family IDs, and conservative Holm
+  p-value across all condition x family runs. These are run-level corrections;
+  do not label a cluster's raw sign-specific p-value as Holm-adjusted.
 - For Hermann automatic selection, state that the domain was selected from the
   observed arms and then held fixed during permutation. Conditional cluster
   correction alone does not establish unconditional error control for the
@@ -430,11 +449,21 @@ tensors, spatial adjacency, dependency version, or expected outputs.
   with every design-by-regime guardrail passing. Do not generalize this bounded
   simulation evidence beyond its frozen regimes, present it as universal proof
   or power, or imply that it validates the truth of a real-data finding.
+- State explicitly that the reviewed powered receipt covers the frozen legacy
+  paired-condition and independent-group workflows only. It does not validate
+  the repeated-session shared selector, composite tensors, group-by-session
+  interaction contrast, or cross-condition Holm layers.
 
 Retain `Free_Harmonic_Clustering_Results.xlsx`, the run manifest, compressed
 arrays, machine-readable result tables, source-workbook provenance, exact
 adjacency edges, null extrema or hash, Toolbox commit, and analysis
 plan/preregistration.
+
+For repeated batches, also retain the complete-pair cohort/coverage audit,
+analysis-only recording exclusions and their required reasons, shared-domain
+tables/fingerprint, per-run derived seeds, both Holm layers, and the fixed-order
+confounding statement. Analysis-specific exclusions are source-immutable and
+must not be presented as changes to project QC.
 
 ## Hauk-Informed Source-PSD Workflow
 

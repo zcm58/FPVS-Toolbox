@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from .api import (
     FreeHarmonicRun,
+    RepeatedSessionBatchResult,
+    RepeatedSessionBatchRun,
+    RepeatedSessionContrastOutcome,
     analyze_prepared_contrast,
+    analyze_prepared_repeated_session_batch,
     inspect_project_analysis_options,
     prepare_project_contrast,
+    prepare_repeated_session_batch,
     run_free_harmonic_clustering,
+    run_repeated_session_fhc_batch,
 )
-from .exports import export_free_harmonic_run
+from .exports import export_free_harmonic_run, export_repeated_session_batch
 from .models import (
     AnalysisDesign,
     ClusterPermutationResult,
@@ -24,9 +30,17 @@ from .models import (
     NoHarmonicsSelectedError,
     ParticipantConditionExclusion,
     PreparedContrast,
+    PreparedRepeatedSessionBatch,
+    PreparedRepeatedSessionContrast,
     ProjectAnalysisOptions,
     ProjectContrastRequest,
     ProjectGroupOption,
+    ProjectRecordingOption,
+    ProjectSessionOption,
+    RecordingExclusionRequest,
+    RepeatedSessionBatchRequest,
+    RepeatedSessionContrastFamily,
+    RepeatedSessionTensorSemantics,
 )
 
 __all__ = [
@@ -44,12 +58,27 @@ __all__ = [
     "NoHarmonicsSelectedError",
     "ParticipantConditionExclusion",
     "PreparedContrast",
+    "PreparedRepeatedSessionBatch",
+    "PreparedRepeatedSessionContrast",
     "ProjectAnalysisOptions",
     "ProjectContrastRequest",
     "ProjectGroupOption",
+    "ProjectRecordingOption",
+    "ProjectSessionOption",
+    "RecordingExclusionRequest",
+    "RepeatedSessionBatchRequest",
+    "RepeatedSessionBatchResult",
+    "RepeatedSessionBatchRun",
+    "RepeatedSessionContrastFamily",
+    "RepeatedSessionContrastOutcome",
+    "RepeatedSessionTensorSemantics",
     "analyze_prepared_contrast",
+    "analyze_prepared_repeated_session_batch",
     "export_free_harmonic_run",
+    "export_repeated_session_batch",
     "inspect_project_analysis_options",
     "prepare_project_contrast",
+    "prepare_repeated_session_batch",
     "run_free_harmonic_clustering",
+    "run_repeated_session_fhc_batch",
 ]

@@ -11,10 +11,11 @@ import math
 
 
 class GuiAnalysisDesign(str, Enum):
-    """User-facing names for the two supported exchangeability designs."""
+    """User-facing names for the supported GUI workflows."""
 
     PAIRED_CONDITIONS = "paired_conditions"
     INDEPENDENT_GROUPS = "independent_groups"
+    REPEATED_SESSION_BATCH = "repeated_session_batch"
 
 
 class GuiHarmonicMode(str, Enum):
@@ -91,6 +92,78 @@ class GroupChoice:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionChoice:
+    """One canonical ordered within-participant session."""
+
+    session_id: str
+    label: str
+    visit_index: int
+
+    def __post_init__(self) -> None:
+        session_id = str(self.session_id).strip()
+        label = str(self.label).strip()
+        visit_index = int(self.visit_index)
+        if not session_id or not label:
+            raise ValueError("Session choices require a canonical ID and label.")
+        if visit_index < 1:
+            raise ValueError("Session visit_index must be positive.")
+        object.__setattr__(self, "session_id", session_id)
+        object.__setattr__(self, "label", label)
+        object.__setattr__(self, "visit_index", visit_index)
+
+
+@dataclass(frozen=True, slots=True)
+class RecordingChoice:
+    """Canonical recording identity available for an analysis-only exclusion."""
+
+    recording_id: str
+    participant_id: str
+    group_id: str
+    group_label: str
+    session_id: str
+    session_label: str
+    visit_index: int
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "recording_id",
+            "participant_id",
+            "group_id",
+            "group_label",
+            "session_id",
+            "session_label",
+        ):
+            value = str(getattr(self, field_name)).strip()
+            if not value:
+                raise ValueError(f"{field_name} cannot be empty.")
+            object.__setattr__(self, field_name, value)
+        visit_index = int(self.visit_index)
+        if visit_index < 1:
+            raise ValueError("Recording visit_index must be positive.")
+        object.__setattr__(self, "visit_index", visit_index)
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisRecordingExclusion:
+    """Analysis-only recording exclusion with required audit reason."""
+
+    recording_id: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        recording_id = str(self.recording_id).strip()
+        reason = str(self.reason).strip()
+        if not recording_id:
+            raise ValueError("An analysis exclusion requires a recording ID.")
+        if not reason:
+            raise ValueError(
+                f"Analysis exclusion {recording_id!r} requires a reason."
+            )
+        object.__setattr__(self, "recording_id", recording_id)
+        object.__setattr__(self, "reason", reason)
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectAnalysisOptions:
     """Header-only, read-only project discovery shown by the page."""
 
@@ -111,6 +184,10 @@ class ProjectAnalysisOptions:
     workbook_count: int = 0
     representative_workbook_relative_path: str = ""
     diagnostics: tuple[str, ...] = ()
+    is_repeated_session: bool = False
+    sessions: tuple[SessionChoice, ...] = ()
+    recordings: tuple[RecordingChoice, ...] = ()
+    fixed_order_confounding: str = ""
 
     def __post_init__(self) -> None:
         root = Path(self.project_root).expanduser().resolve(strict=False)
@@ -140,6 +217,18 @@ class ProjectAnalysisOptions:
             self,
             "diagnostics",
             tuple(str(value).strip() for value in self.diagnostics if str(value).strip()),
+        )
+        object.__setattr__(self, "is_repeated_session", bool(self.is_repeated_session))
+        object.__setattr__(
+            self,
+            "sessions",
+            tuple(sorted(self.sessions, key=lambda item: item.visit_index)),
+        )
+        object.__setattr__(self, "recordings", tuple(self.recordings))
+        object.__setattr__(
+            self,
+            "fixed_order_confounding",
+            str(self.fixed_order_confounding).strip(),
         )
 
 
@@ -172,7 +261,25 @@ class AnalysisWorkerOutcome:
     run_outcome: RunOutcome
 
 
+@dataclass(frozen=True, slots=True)
+class RepeatedBatchSetup:
+    """Prespecified two-group, two-session FHC batch setup."""
+
+    harmonic_mode: GuiHarmonicMode
+    fixed_highest_harmonic_order: int | None
+    max_harmonic_hz: float
+    recording_exclusions: tuple[AnalysisRecordingExclusion, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RepeatedBatchWorkerOutcome:
+    """Completed repeated-session batch and its additive export receipt."""
+
+    run: object
+
+
 __all__ = [
+    "AnalysisRecordingExclusion",
     "AnalysisSetup",
     "AnalysisWorkerOutcome",
     "GroupChoice",
@@ -180,5 +287,9 @@ __all__ = [
     "GuiHarmonicMode",
     "ProjectAnalysisOptions",
     "ProjectFrequencySnapshot",
+    "RecordingChoice",
+    "RepeatedBatchSetup",
+    "RepeatedBatchWorkerOutcome",
     "RunOutcome",
+    "SessionChoice",
 ]

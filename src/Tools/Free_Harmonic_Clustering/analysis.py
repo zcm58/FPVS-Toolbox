@@ -45,9 +45,159 @@ DEFAULT_CLUSTER_ALPHA_PER_TAIL = 0.025
 DEFAULT_PERMUTATION_COUNT = 10_000
 DEFAULT_BATCH_SIZE = 256
 
-BIOSEMI64_ADJACENCY_VERSION = (
-    "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
-)
+
+@dataclass(frozen=True, slots=True)
+class BatchMultiplicityRecord:
+    """Run-level p values before and after prespecified batch correction."""
+
+    family_id: str
+    condition: str
+    global_two_sided_p_value: float
+    holm_within_family_p_value: float
+    holm_all_batch_p_value: float
+
+    def __post_init__(self) -> None:
+        for field_name in ("family_id", "condition"):
+            value = str(getattr(self, field_name) or "").strip()
+            if not value:
+                raise ValueError(f"{field_name} must not be empty.")
+            object.__setattr__(self, field_name, value)
+        for field_name in (
+            "global_two_sided_p_value",
+            "holm_within_family_p_value",
+            "holm_all_batch_p_value",
+        ):
+            value = float(getattr(self, field_name))
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(f"{field_name} must be finite and between zero and one.")
+            object.__setattr__(self, field_name, value)
+
+
+def global_cluster_two_sided_p_value(
+    result: ClusterPermutationResult,
+) -> float:
+    """Return one global, two-sided cluster p value for a completed run.
+
+    Each cluster's ``adjusted_two_sided_p_value`` is already conditional on
+    the run's sensor-by-harmonic candidate domain and its signed max-cluster
+    null.  The minimum is therefore the run-level evidence for at least one
+    cluster; a run with no observed clusters has a global p value of one.
+
+    Cross-condition or cross-contrast multiplicity is intentionally outside
+    this helper and must be applied to these run-level values, never written
+    back into the cluster-specific records.
+    """
+
+    if not isinstance(result, ClusterPermutationResult):
+        raise TypeError("result must be a ClusterPermutationResult.")
+    if not result.clusters:
+        return 1.0
+    return float(min(cluster.adjusted_two_sided_p_value for cluster in result.clusters))
+
+
+def holm_adjust_p_values(p_values: Sequence[float]) -> tuple[float, ...]:
+    """Return stable Holm step-down adjusted p values in input order."""
+
+    values = np.asarray(tuple(p_values), dtype=np.float64)
+    if values.ndim != 1:
+        raise ValueError("p_values must be a one-dimensional sequence.")
+    if not np.all(np.isfinite(values)) or np.any(values < 0.0) or np.any(values > 1.0):
+        raise ValueError("p_values must be finite and between zero and one.")
+    if values.size == 0:
+        return ()
+
+    order = np.argsort(values, kind="stable")
+    ranked = values[order]
+    multipliers = np.arange(values.size, 0, -1, dtype=np.float64)
+    adjusted_ranked = np.minimum(
+        1.0,
+        np.maximum.accumulate(ranked * multipliers),
+    )
+    adjusted = np.empty_like(adjusted_ranked)
+    adjusted[order] = adjusted_ranked
+    return tuple(float(value) for value in adjusted)
+
+
+def adjust_batch_cluster_p_values(
+    runs: Sequence[tuple[str, str, ClusterPermutationResult]],
+) -> tuple[BatchMultiplicityRecord, ...]:
+    """Apply planned run-level Holm corrections without mutating clusters.
+
+    ``runs`` contains ``(family_id, condition, result)`` rows.  Holm is first
+    applied separately within every scientific family, then conservatively to
+    all supplied batch runs.  Duplicate family/condition cells are rejected so
+    a run cannot silently enter either correction family twice.
+    """
+
+    normalized = tuple(runs)
+    identities: set[tuple[str, str]] = set()
+    family_rows: dict[str, list[int]] = {}
+    raw_p_values: list[float] = []
+    labels: list[tuple[str, str]] = []
+    for index, row in enumerate(normalized):
+        if len(row) != 3:
+            raise ValueError("Each batch run must contain family_id, condition, and result.")
+        family_id = str(row[0] or "").strip()
+        condition = str(row[1] or "").strip()
+        if not family_id or not condition:
+            raise ValueError("Batch family IDs and conditions must not be empty.")
+        identity = (family_id.casefold(), condition.casefold())
+        if identity in identities:
+            raise ValueError("Batch runs must be unique by scientific family and condition.")
+        identities.add(identity)
+        if not isinstance(row[2], ClusterPermutationResult):
+            raise TypeError("Batch results must be ClusterPermutationResult values.")
+        labels.append((family_id, condition))
+        raw_p_values.append(global_cluster_two_sided_p_value(row[2]))
+        family_rows.setdefault(family_id.casefold(), []).append(index)
+
+    all_adjusted = holm_adjust_p_values(raw_p_values)
+    within_adjusted = [1.0] * len(normalized)
+    for indices in family_rows.values():
+        family_adjusted = holm_adjust_p_values(tuple(raw_p_values[index] for index in indices))
+        for index, adjusted in zip(indices, family_adjusted, strict=True):
+            within_adjusted[index] = adjusted
+
+    return tuple(
+        BatchMultiplicityRecord(
+            family_id=family_id,
+            condition=condition,
+            global_two_sided_p_value=raw_p_values[index],
+            holm_within_family_p_value=within_adjusted[index],
+            holm_all_batch_p_value=all_adjusted[index],
+        )
+        for index, (family_id, condition) in enumerate(labels)
+    )
+
+
+def derive_repeated_session_run_seed(
+    base_seed: int,
+    *,
+    family_id: str,
+    condition: str,
+) -> int:
+    """Derive one order-invariant PCG64 seed for a batch contrast cell."""
+
+    if isinstance(base_seed, bool) or int(base_seed) < 0:
+        raise ValueError("base_seed must be a non-negative integer.")
+    family = str(family_id or "").strip().casefold()
+    condition_key = str(condition or "").strip().casefold()
+    if not family or not condition_key:
+        raise ValueError("family_id and condition must not be empty.")
+    digest = hashlib.sha256()
+    digest.update(b"fpvs-fhc-repeated-session-run-seed-v1\0")
+    digest.update(str(int(base_seed)).encode("ascii"))
+    digest.update(b"\0")
+    digest.update(family.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(condition_key.encode("utf-8"))
+    # Stay inside the conventional signed 63-bit seed domain while retaining
+    # enough entropy that distinct canonical cells have negligible collision
+    # risk.  The mapping is exported with every batch.
+    return int.from_bytes(digest.digest()[:8], "big") & ((1 << 63) - 1)
+
+
+BIOSEMI64_ADJACENCY_VERSION = "biosemi64-fieldtrip-style-compressed-cleanroom-v1"
 BIOSEMI64_CHANNELS: tuple[str, ...] = (
     "Fp1",
     "AF7",
@@ -348,9 +498,7 @@ def _biosemi64_fingerprint() -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-BIOSEMI64_ADJACENCY_FINGERPRINT = (
-    "9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6"
-)
+BIOSEMI64_ADJACENCY_FINGERPRINT = "9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6"
 if _biosemi64_fingerprint() != BIOSEMI64_ADJACENCY_FINGERPRINT:  # pragma: no cover - import-time integrity guard
     raise RuntimeError("The embedded BioSemi64 adjacency no longer matches its scientific fingerprint.")
 
@@ -546,14 +694,11 @@ def cartesian_free_harmonic_edges(
     for sensor in range(spatial.shape[0]):
         offset = sensor * harmonics
         edges.extend(
-            (offset + first, offset + second)
-            for first in range(harmonics)
-            for second in range(first + 1, harmonics)
+            (offset + first, offset + second) for first in range(harmonics) for second in range(first + 1, harmonics)
         )
     for left_sensor, right_sensor in _spatial_edges_from_validated_adjacency(spatial):
         edges.extend(
-            (left_sensor * harmonics + harmonic, right_sensor * harmonics + harmonic)
-            for harmonic in range(harmonics)
+            (left_sensor * harmonics + harmonic, right_sensor * harmonics + harmonic) for harmonic in range(harmonics)
         )
     return tuple(sorted(edges))
 
@@ -658,9 +803,7 @@ def _paired_permutation_t_maps_flat(
     participant_count = differences_flat.shape[0]
     means = np.einsum("bn,np->bp", signs, differences_flat, optimize=False) / float(participant_count)
     invariant_sum_squares = (
-        np.sum(np.square(differences_flat), axis=0, dtype=np.float64)
-        if sum_squares is None
-        else sum_squares
+        np.sum(np.square(differences_flat), axis=0, dtype=np.float64) if sum_squares is None else sum_squares
     )
     variance_numerators = invariant_sum_squares[None, :] - participant_count * np.square(means)
     scale = np.maximum(invariant_sum_squares[None, :], participant_count * np.square(means))
@@ -701,13 +844,9 @@ def _independent_permutation_t_maps_flat(
     degrees_of_freedom = participant_count - 2
 
     invariant_pooled_squares = np.square(pooled_flat) if pooled_squares is None else pooled_squares
-    invariant_total_sums = (
-        np.sum(pooled_flat, axis=0, dtype=np.float64) if total_sums is None else total_sums
-    )
+    invariant_total_sums = np.sum(pooled_flat, axis=0, dtype=np.float64) if total_sums is None else total_sums
     invariant_total_squares = (
-        np.sum(invariant_pooled_squares, axis=0, dtype=np.float64)
-        if total_squares is None
-        else total_squares
+        np.sum(invariant_pooled_squares, axis=0, dtype=np.float64) if total_squares is None else total_squares
     )
     sums_a = np.einsum("bn,np->bp", masks, pooled_flat, optimize=False)
     squares_a = np.einsum("bn,np->bp", masks, invariant_pooled_squares, optimize=False)
@@ -715,9 +854,7 @@ def _independent_permutation_t_maps_flat(
     squares_b = invariant_total_squares[None, :] - squares_a
     means_a = sums_a / float(count_a)
     means_b = sums_b / float(count_b)
-    within_ss = (squares_a - count_a * np.square(means_a)) + (
-        squares_b - count_b * np.square(means_b)
-    )
+    within_ss = (squares_a - count_a * np.square(means_a)) + (squares_b - count_b * np.square(means_b))
     scale = np.maximum(
         squares_a + squares_b,
         count_a * np.square(means_a) + count_b * np.square(means_b),
@@ -934,10 +1071,7 @@ def _extreme_cluster_mass(
             return float(flat_t[nodes[0]])
         return float(np.sum(flat_t[np.asarray(nodes, dtype=np.int64)], dtype=np.float64))
 
-    masses = (
-        component_mass(nodes)
-        for nodes in groups
-    )
+    masses = (component_mass(nodes) for nodes in groups)
     return max(masses) if positive else min(masses)
 
 
@@ -1430,9 +1564,7 @@ def run_cluster_permutation(
     if not isinstance(specification, FreeHarmonicMethodSpec):
         raise TypeError("method must be a FreeHarmonicMethodSpec.")
     if specification.sensor_adjacency_version != BIOSEMI64_ADJACENCY_VERSION:
-        raise ValueError(
-            "Method sensor_adjacency_version does not match the embedded BioSemi64 scientific adjacency."
-        )
+        raise ValueError("Method sensor_adjacency_version does not match the embedded BioSemi64 scientific adjacency.")
     sensor_order = tuple(str(name) for name in sensor_names)
     spatial = biosemi64_spatial_adjacency(sensor_order)
     try:

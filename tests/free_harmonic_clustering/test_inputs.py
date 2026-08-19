@@ -19,6 +19,10 @@ from Tools.Free_Harmonic_Clustering.models import (
     FreeHarmonicInputError,
     FreeHarmonicMethodSpec,
     ProjectContrastRequest,
+    RecordingExclusionRequest,
+    RepeatedSessionBatchRequest,
+    RepeatedSessionContrastFamily,
+    RepeatedSessionTensorSemantics,
 )
 from Tools.Free_Harmonic_Clustering.preparation import (
     build_available_frequency_window_plan,
@@ -26,10 +30,13 @@ from Tools.Free_Harmonic_Clustering.preparation import (
 
 
 def _header(*, spacing_hz: float = 0.025, upper_hz: float = 3.75) -> list[str]:
-    frequencies = np.arange(
-        int(round(upper_hz / spacing_hz)) + 1,
-        dtype=np.float64,
-    ) * spacing_hz
+    frequencies = (
+        np.arange(
+            int(round(upper_hz / spacing_hz)) + 1,
+            dtype=np.float64,
+        )
+        * spacing_hz
+    )
     return ["Electrode", *(f"{frequency:.6f}_Hz" for frequency in frequencies)]
 
 
@@ -61,24 +68,18 @@ def _write_project(
         "results_folder": ".",
         "subfolders": {"excel": "1 - Excel Data Files"},
         "groups": group_payload,
-        "participants": {
-            participant: {"group_id": group_id}
-            for participant, group_id in participant_groups.items()
-        },
+        "participants": {participant: {"group_id": group_id} for participant, group_id in participant_groups.items()},
         "preprocessing": {
             "manual_excluded_participants": list(manual_excluded_participants),
             "manual_excluded_participant_conditions": {
                 participant: list(conditions)
-                for participant, conditions in (
-                    participant_condition_exclusions or {}
-                ).items()
+                for participant, conditions in (participant_condition_exclusions or {}).items()
             },
         },
         "tools": {
             "frequency_domain_qc": {
                 "auto_participant_exclusions": [
-                    {"participant_id": participant}
-                    for participant in frequency_excluded_participants
+                    {"participant_id": participant} for participant in frequency_excluded_participants
                 ],
                 "manual_participant_exclusions": [],
                 "auto_participant_electrode_exclusions": [
@@ -108,22 +109,122 @@ def _write_project(
 
     ledger_directory = root / ".fpvs_processing"
     ledger_directory.mkdir()
-    statuses = ledger_statuses or {
-        participant: "completed" for participant in participant_groups
-    }
+    statuses = ledger_statuses or {participant: "completed" for participant in participant_groups}
     (ledger_directory / "processing_ledger.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "entries": {
-                    participant: {"status": status}
-                    for participant, status in statuses.items()
-                },
+                "entries": {participant: {"status": status} for participant, status in statuses.items()},
             }
         ),
         encoding="utf-8",
     )
     return root, paths
+
+
+def _write_repeated_project(
+    root: Path,
+    *,
+    participants_by_group: dict[str, tuple[str, ...]],
+    conditions: tuple[str, ...],
+    missing_workbooks: set[tuple[str, str, str]] | None = None,
+    recording_condition_exclusions: dict[str, tuple[str, ...]] | None = None,
+) -> Path:
+    root.mkdir(parents=True)
+    group_definitions = {
+        "bc_group": ("BC Group", "BC Group"),
+        "control_group": ("Control Group", "Control Group"),
+    }
+    session_definitions = {
+        "follicular_phase": ("Follicular Phase", 2),
+        "luteal_phase": ("Luteal Phase", 1),
+    }
+    groups: dict[str, dict[str, str]] = {}
+    sources: dict[str, dict[str, str]] = {}
+    participants: dict[str, dict[str, str]] = {}
+    recordings: dict[str, dict[str, object]] = {}
+    for group_id, (group_label, folder_name) in group_definitions.items():
+        group_raw = root / "Raw" / folder_name
+        group_raw.mkdir(parents=True)
+        groups[group_id] = {
+            "label": group_label,
+            "folder_name": folder_name,
+            "raw_input_folder": str(group_raw),
+        }
+        for session_id, (_session_label, visit_index) in session_definitions.items():
+            source_id = f"{group_id}__{session_id}"
+            source_root = group_raw / session_id
+            source_root.mkdir()
+            sources[source_id] = {
+                "group_id": group_id,
+                "session_id": session_id,
+                "raw_input_folder": str(source_root),
+            }
+            for participant_id in participants_by_group[group_id]:
+                participants[participant_id] = {"group_id": group_id}
+                recording_id = f"{participant_id}__{session_id}"
+                raw_file = source_root / f"{recording_id}.bdf"
+                raw_file.write_bytes(b"bdf")
+                recordings[recording_id] = {
+                    "participant_id": participant_id,
+                    "session_id": session_id,
+                    "source_id": source_id,
+                    "raw_file": str(raw_file),
+                    "visit_index": visit_index,
+                }
+    manifest = {
+        "results_folder": ".",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "groups": groups,
+        "participants": participants,
+        "sessions": {
+            session_id: {"label": label, "visit_index": visit_index}
+            for session_id, (label, visit_index) in session_definitions.items()
+        },
+        "recording_sources": sources,
+        "recordings": recordings,
+        "preprocessing": {
+            "manual_excluded_recording_conditions": {
+                recording_id: list(values) for recording_id, values in (recording_condition_exclusions or {}).items()
+            }
+        },
+        "tools": {"frequency_domain_qc": {"downstream_outputs_stale": False}},
+    }
+    (root / "project.json").write_text(
+        json.dumps(manifest, indent=2),
+        encoding="utf-8",
+    )
+    missing = missing_workbooks or set()
+    for group_id, participant_ids in participants_by_group.items():
+        folder_name = group_definitions[group_id][1]
+        for participant_id in participant_ids:
+            for session_id in session_definitions:
+                recording_id = f"{participant_id}__{session_id}"
+                for condition in conditions:
+                    if (participant_id, session_id, condition) in missing:
+                        continue
+                    parent = root / "1 - Excel Data Files" / condition / folder_name
+                    parent.mkdir(parents=True, exist_ok=True)
+                    (parent / f"{recording_id}_{condition}_Results.xlsx").write_bytes(b"selected-reader-test-double")
+    ledger_root = root / ".fpvs_processing"
+    ledger_root.mkdir()
+    (ledger_root / "processing_ledger.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    recording_id: {
+                        "status": "completed",
+                        "participant_id": info["participant_id"],
+                        "session_id": info["session_id"],
+                    }
+                    for recording_id, info in recordings.items()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
 
 
 def _install_reader_doubles(
@@ -163,9 +264,7 @@ def _install_reader_doubles(
 
     monkeypatch.setattr(inputs, "_read_fullfft_header", read_header)
     monkeypatch.setattr(inputs, "_read_fullfft_selected_columns", read_selected)
-    provenance_header = (header_for_path or (lambda _path: _header()))(
-        Path("provenance-reference.xlsx")
-    )
+    provenance_header = (header_for_path or (lambda _path: _header()))(Path("provenance-reference.xlsx"))
 
     def validate_provenance(
         _project_root: Path,
@@ -267,11 +366,216 @@ def test_repeated_session_project_is_blocked_before_provenance_or_workbook_io(
         unexpected_provenance,
     )
 
-    with pytest.raises(FreeHarmonicInputError, match="not yet recording-aware"):
+    with pytest.raises(
+        FreeHarmonicInputError,
+        match="Use the repeated-session batch",
+    ):
         inputs.prepare_project_contrast(
             _independent_request(root),
             FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
         )
+
+
+def test_repeated_batch_prepares_four_stable_runs_per_condition_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _write_repeated_project(
+        tmp_path / "Repeated",
+        participants_by_group={
+            "bc_group": ("BC1", "BC2", "BC3", "BC4"),
+            "control_group": ("C1", "C2", "C3"),
+        },
+        conditions=("Condition A", "Condition B"),
+        recording_condition_exclusions={
+            "BC3__follicular_phase": ("Condition B",),
+        },
+    )
+    header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+    request = RepeatedSessionBatchRequest(
+        project_root=root,
+        conditions=("Condition A", "Condition B"),
+        group_ids=("bc_group", "control_group"),
+        session_ids=("follicular_phase", "luteal_phase"),
+        recording_exclusions=(
+            RecordingExclusionRequest(
+                recording_id="BC4__follicular_phase",
+                reason="Declared P18-like outlier",
+            ),
+        ),
+    )
+
+    prepared = inputs.prepare_repeated_session_batch(
+        request,
+        FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+    )
+
+    assert prepared.conditions == ("Condition A", "Condition B")
+    assert [row.group_id for row in prepared.groups] == [
+        "bc_group",
+        "control_group",
+    ]
+    assert [row.session_id for row in prepared.sessions] == [
+        "follicular_phase",
+        "luteal_phase",
+    ]
+    assert len(prepared.contrast_runs) == 8
+    assert [(row.condition, row.family, row.group_id) for row in prepared.contrast_runs] == [
+        (
+            "Condition A",
+            RepeatedSessionContrastFamily.SESSION_AVERAGED_GROUPS,
+            None,
+        ),
+        (
+            "Condition A",
+            RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP,
+            "bc_group",
+        ),
+        (
+            "Condition A",
+            RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP,
+            "control_group",
+        ),
+        (
+            "Condition A",
+            RepeatedSessionContrastFamily.GROUP_SESSION_CHANGE,
+            None,
+        ),
+        (
+            "Condition B",
+            RepeatedSessionContrastFamily.SESSION_AVERAGED_GROUPS,
+            None,
+        ),
+        (
+            "Condition B",
+            RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP,
+            "bc_group",
+        ),
+        (
+            "Condition B",
+            RepeatedSessionContrastFamily.PAIRED_SESSIONS_WITHIN_GROUP,
+            "control_group",
+        ),
+        (
+            "Condition B",
+            RepeatedSessionContrastFamily.GROUP_SESSION_CHANGE,
+            None,
+        ),
+    ]
+    assert len(header_calls) == len(amplitude_calls) == 22
+    assert len(set(amplitude_calls)) == 22
+    assert prepared.provenance.workbook_count == 22
+    assert len(prepared.source_workbooks) == 22
+    assert all(row.recording_id and row.session_id for row in prepared.source_workbooks)
+    assert prepared.shared_selection_audit.z_scores.shape == (8, 3)
+    assert prepared.shared_selection_audit.cell_participant_counts == (
+        3,
+        3,
+        3,
+        3,
+        2,
+        2,
+        3,
+        3,
+    )
+    assert prepared.shared_domain_fingerprint == (prepared.provenance.shared_domain_fingerprint)
+
+    condition_a_runs = prepared.contrast_runs[:4]
+    pooled, paired_bc, _paired_control, change = condition_a_runs
+    assert pooled.tensor_semantics is (RepeatedSessionTensorSemantics.SESSION_AVERAGED_NORMALIZED_PROFILE)
+    assert paired_bc.tensor_semantics is (RepeatedSessionTensorSemantics.SESSION_NORMALIZED_PAIRED_PROFILE)
+    assert change.tensor_semantics is (RepeatedSessionTensorSemantics.NORMALIZED_SESSION_CHANGE)
+    assert pooled.prepared.participant_ids_a == ("BC1", "BC2", "BC3")
+    assert paired_bc.prepared.participant_ids_a == ("BC1", "BC2", "BC3")
+    assert np.linalg.norm(
+        pooled.prepared.values_a,
+        axis=(1, 2),
+    ) == pytest.approx(np.ones(3))
+    assert change.prepared.values_a == pytest.approx(paired_bc.prepared.values_a - paired_bc.prepared.values_b)
+    assert change.prepared.snr_a == pytest.approx(paired_bc.prepared.snr_a - paired_bc.prepared.snr_b)
+
+    bc4_audit = [
+        row for row in prepared.cohort_audit if row.participant_id == "BC4" and row.condition == "Condition A"
+    ][0]
+    assert not bc4_audit.included_complete_pair
+    assert bc4_audit.available_session_ids == ("luteal_phase",)
+    assert bc4_audit.missing_session_ids == ("follicular_phase",)
+    assert bc4_audit.excluded_recording_ids == ("BC4__follicular_phase",)
+    assert "Declared P18-like outlier" in bc4_audit.exclusion_reasons[0]
+    bc3_b_audit = [
+        row for row in prepared.cohort_audit if row.participant_id == "BC3" and row.condition == "Condition B"
+    ][0]
+    assert not bc3_b_audit.included_complete_pair
+    assert bc3_b_audit.exclusion_reasons == ("Project recording/condition exclusion",)
+
+
+def test_repeated_batch_unknown_analysis_exclusion_blocks_before_workbook_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _write_repeated_project(
+        tmp_path / "Repeated",
+        participants_by_group={
+            "bc_group": ("BC1", "BC2"),
+            "control_group": ("C1", "C2"),
+        },
+        conditions=("Condition A",),
+    )
+    header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+
+    with pytest.raises(FreeHarmonicInputError, match="unknown canonical recording"):
+        inputs.prepare_repeated_session_batch(
+            RepeatedSessionBatchRequest(
+                project_root=root,
+                conditions=("Condition A",),
+                group_ids=("bc_group", "control_group"),
+                session_ids=("follicular_phase", "luteal_phase"),
+                recording_exclusions=(RecordingExclusionRequest("not-a-recording", "test"),),
+            ),
+            FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+        )
+
+    assert header_calls == []
+    assert amplitude_calls == []
+
+
+def test_repeated_batch_requires_two_complete_participants_in_every_cell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _write_repeated_project(
+        tmp_path / "Repeated",
+        participants_by_group={
+            "bc_group": ("BC1", "BC2", "BC3"),
+            "control_group": ("C1", "C2", "C3"),
+        },
+        conditions=("Condition A",),
+    )
+    header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+
+    with pytest.raises(FreeHarmonicInputError, match="phase-balanced participants"):
+        inputs.prepare_repeated_session_batch(
+            RepeatedSessionBatchRequest(
+                project_root=root,
+                conditions=("Condition A",),
+                group_ids=("bc_group", "control_group"),
+                session_ids=("follicular_phase", "luteal_phase"),
+                recording_exclusions=(
+                    RecordingExclusionRequest(
+                        "BC2__follicular_phase",
+                        "outlier",
+                    ),
+                    RecordingExclusionRequest(
+                        "BC3__follicular_phase",
+                        "outlier",
+                    ),
+                ),
+            ),
+            FreeHarmonicMethodSpec(max_harmonic_hz=3.6),
+        )
+
+    assert header_calls == []
+    assert amplitude_calls == []
 
 
 def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
@@ -307,10 +611,7 @@ def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
     assert len(header_calls) == len(amplitude_calls) == 4
     assert len(set(amplitude_calls)) == 4
     assert prepared.provenance.workbook_count == 4
-    assert (
-        prepared.provenance.full_fft_provenance_method_version
-        == "test-neutral-full-fft-v1"
-    )
+    assert prepared.provenance.full_fft_provenance_method_version == "test-neutral-full-fft-v1"
     assert prepared.provenance.full_fft_source_fingerprint == "source-fingerprint"
     assert prepared.provenance.reader_phase_seconds == (("xml_selected_rows", 0.004),)
     assert progress[-1] == (8, 8)
@@ -318,13 +619,8 @@ def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
     assert prepared.snr_b.shape == prepared.values_b.shape == (2, 64, 3)
     assert prepared.values_a.flags.c_contiguous
     assert not prepared.values_a.flags.writeable
-    assert np.sqrt(np.sum(prepared.values_a**2, axis=(1, 2))) == pytest.approx(
-        np.ones(2)
-    )
-    assert all(
-        not workbook.project_relative_path.startswith(("/", "\\"))
-        for workbook in prepared.source_workbooks
-    )
+    assert np.sqrt(np.sum(prepared.values_a**2, axis=(1, 2))) == pytest.approx(np.ones(2))
+    assert all(not workbook.project_relative_path.startswith(("/", "\\")) for workbook in prepared.source_workbooks)
 
 
 def test_direct_preparation_blocks_missing_neutral_provenance_before_fullfft_io(
@@ -336,8 +632,7 @@ def test_direct_preparation_blocks_missing_neutral_provenance_before_fullfft_io(
 
     def missing_provenance(*args: object, **kwargs: object) -> object:
         raise FullFftProvenanceMissingError(
-            "Neutral FullFFT provenance is missing. Rerun post-processing; "
-            "EEG preprocessing is not required."
+            "Neutral FullFFT provenance is missing. Rerun post-processing; EEG preprocessing is not required."
         )
 
     monkeypatch.setattr(
@@ -412,9 +707,7 @@ def test_paired_conditions_allow_managed_project_without_group_metadata(
         condition_root = root / "1 - Excel Data Files" / condition
         condition_root.mkdir(parents=True)
         for participant in ("P1", "P2"):
-            (condition_root / f"{participant}_{condition}_Results.xlsx").write_bytes(
-                b"selected-reader-test-double"
-            )
+            (condition_root / f"{participant}_{condition}_Results.xlsx").write_bytes(b"selected-reader-test-double")
     _headers, amplitude_calls = _install_reader_doubles(monkeypatch)
 
     prepared = inputs.prepare_project_contrast(
@@ -461,10 +754,7 @@ def test_relevant_participant_condition_exclusions_are_preserved_in_provenance(
     )
 
     exclusions = prepared.provenance.participant_condition_exclusions
-    assert [
-        (row.participant_id, row.condition, row.reason)
-        for row in exclusions
-    ] == [
+    assert [(row.participant_id, row.condition, row.reason) for row in exclusions] == [
         ("P3", "Happy", "Project participant-condition exclusion"),
     ]
     assert prepared.provenance.incomplete_pair_participants == ("P3",)

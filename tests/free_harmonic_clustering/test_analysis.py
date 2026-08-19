@@ -12,6 +12,7 @@ from Tools.Free_Harmonic_Clustering.analysis import (
     POSITIVE_TAIL,
     _independent_permutation_t_maps_flat,
     _paired_permutation_t_maps_flat,
+    adjust_batch_cluster_p_values,
     biosemi64_adjacency_manifest,
     biosemi64_edge_export,
     biosemi64_spatial_adjacency,
@@ -19,6 +20,9 @@ from Tools.Free_Harmonic_Clustering.analysis import (
     cartesian_free_harmonic_edges,
     cluster_forming_t_threshold,
     cluster_monte_carlo_p_value,
+    derive_repeated_session_run_seed,
+    global_cluster_two_sided_p_value,
+    holm_adjust_p_values,
     independent_cluster_effect_size,
     independent_permutation_t_maps,
     independent_t_map,
@@ -34,6 +38,7 @@ from Tools.Free_Harmonic_Clustering.analysis import (
 from Tools.Free_Harmonic_Clustering.models import (
     AnalysisDesign,
     ClusterPermutationResult,
+    ClusterRecord,
     FreeHarmonicMethodSpec,
 )
 
@@ -44,6 +49,103 @@ def _chain_adjacency(sensor_count: int) -> np.ndarray:
         adjacency[sensor, sensor + 1] = True
         adjacency[sensor + 1, sensor] = True
     return adjacency
+
+
+def _result_with_cluster_p_values(
+    adjusted_two_sided_p_values: tuple[float, ...],
+) -> ClusterPermutationResult:
+    clusters = tuple(
+        ClusterRecord(
+            cluster_id=index + 1,
+            sign="positive",
+            mass=float(index + 1),
+            p_value=min(1.0, p_value / 2.0),
+            conservative_p_value=min(1.0, p_value / 2.0),
+            adjusted_two_sided_p_value=p_value,
+            tie_count=0,
+            p_ci_low=0.0,
+            p_ci_high=1.0,
+            confidence_interval_straddles_alpha=False,
+            significant=p_value < 0.05,
+            node_indices=(index,),
+            sensor_indices=(0,),
+            harmonic_indices=(index,),
+        )
+        for index, p_value in enumerate(adjusted_two_sided_p_values)
+    )
+    labels = np.arange(1, len(clusters) + 1, dtype=np.int64)[None, :]
+    return ClusterPermutationResult(
+        design=AnalysisDesign.PAIRED_CONDITIONS,
+        observed_t=np.ones(labels.shape, dtype=np.float64),
+        cluster_labels=labels,
+        clusters=clusters,
+        null_positive_max_mass=np.zeros(9, dtype=np.float64),
+        null_negative_min_mass=np.zeros(9, dtype=np.float64),
+        permutations_evaluated=9,
+        degrees_of_freedom=4,
+        cluster_forming_threshold=3.0,
+        cluster_entry_alpha=0.01,
+        cluster_alpha_per_tail=0.025,
+        sensor_adjacency_version="synthetic-v1",
+        sensor_adjacency_fingerprint="fingerprint",
+        sensor_adjacency_edges=(("A", "B"),),
+        rng_algorithm="PCG64",
+        seed=1,
+        permutation_assignment_hash="assignments",
+    )
+
+
+def test_run_global_p_uses_minimum_max_cluster_corrected_two_sided_p() -> None:
+    result = _result_with_cluster_p_values((0.42, 0.08, 0.31))
+
+    assert global_cluster_two_sided_p_value(result) == pytest.approx(0.08)
+
+    no_cluster_result = _result_with_cluster_p_values(())
+    assert global_cluster_two_sided_p_value(no_cluster_result) == 1.0
+
+
+def test_holm_adjustment_is_monotone_and_restores_input_order() -> None:
+    assert holm_adjust_p_values((0.04, 0.01, 0.03, 0.50)) == pytest.approx((0.09, 0.04, 0.09, 0.50))
+    assert holm_adjust_p_values(()) == ()
+    with pytest.raises(ValueError, match="between zero and one"):
+        holm_adjust_p_values((0.1, float("nan")))
+
+
+def test_batch_correction_is_run_level_within_family_and_across_batch() -> None:
+    rows = (
+        ("group", "A", _result_with_cluster_p_values((0.01, 0.30))),
+        ("group", "B", _result_with_cluster_p_values((0.04,))),
+        ("phase-bc", "A", _result_with_cluster_p_values((0.02,))),
+        ("phase-bc", "B", _result_with_cluster_p_values(())),
+    )
+
+    adjusted = adjust_batch_cluster_p_values(rows)
+
+    assert [row.global_two_sided_p_value for row in adjusted] == pytest.approx([0.01, 0.04, 0.02, 1.0])
+    assert [row.holm_within_family_p_value for row in adjusted] == pytest.approx([0.02, 0.04, 0.04, 1.0])
+    assert [row.holm_all_batch_p_value for row in adjusted] == pytest.approx([0.04, 0.08, 0.06, 1.0])
+    with pytest.raises(ValueError, match="unique"):
+        adjust_batch_cluster_p_values((rows[0], rows[0]))
+
+
+def test_repeated_session_run_seed_is_canonical_and_order_independent() -> None:
+    seed = derive_repeated_session_run_seed(
+        1729,
+        family_id="Paired:BC_Group",
+        condition="Neutral Angry",
+    )
+
+    assert seed == derive_repeated_session_run_seed(
+        1729,
+        family_id=" paired:bc_group ",
+        condition="neutral angry",
+    )
+    assert seed != derive_repeated_session_run_seed(
+        1729,
+        family_id="Paired:Control_Group",
+        condition="Neutral Angry",
+    )
+    assert 0 <= seed < 2**63
 
 
 def test_biosemi64_adjacency_has_fixed_auditable_identity() -> None:
@@ -58,9 +160,7 @@ def test_biosemi64_adjacency_has_fixed_auditable_identity() -> None:
     assert int(np.count_nonzero(adjacency) // 2) == 197
     assert len(edges) == 197
     assert len(set(edges)) == len(edges)
-    assert BIOSEMI64_ADJACENCY_FINGERPRINT == (
-        "9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6"
-    )
+    assert BIOSEMI64_ADJACENCY_FINGERPRINT == ("9aa6734d6ed392c20b02f9e3e5ed56c224aaf0c6cacc95eb351b7923b1629fd6")
     assert manifest["fingerprint_sha256"] == BIOSEMI64_ADJACENCY_FINGERPRINT
     assert manifest["edge_count"] == 197
     assert manifest["base_edge_count"] == 169
@@ -697,9 +797,7 @@ def test_fixed_domain_gaussian_null_has_reasonable_global_rejection_rate(
             seed=3000 + replicate,
             batch_size=43,
         )
-        rejections += any(
-            cluster.inference.significant for cluster in result.clusters
-        )
+        rejections += any(cluster.inference.significant for cluster in result.clusters)
 
     # The deterministic fixtures yield 8/200 for each design. The wider bound
     # reflects finite Monte Carlo and simulation uncertainty while still

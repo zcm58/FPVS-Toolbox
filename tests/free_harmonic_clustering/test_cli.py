@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from Tools.Free_Harmonic_Clustering import __main__ as cli
-from Tools.Free_Harmonic_Clustering.api import FreeHarmonicRun
+from Tools.Free_Harmonic_Clustering.api import (
+    FreeHarmonicRun,
+    RepeatedSessionBatchRun,
+)
 from Tools.Free_Harmonic_Clustering.models import (
     AnalysisDesign,
     FreeHarmonicInputError,
@@ -135,6 +138,70 @@ def test_paired_cli_builds_condition_request_with_optional_group(
     summary = json.loads(capsys.readouterr().out)
     assert summary["status"] == "complete"
     assert summary["output_directory"] == str(output)
+
+
+def test_repeated_session_cli_builds_ordered_batch_and_recording_exclusion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        request: object,
+        method: object,
+        **kwargs: object,
+    ) -> RepeatedSessionBatchRun:
+        captured.update(request=request, method=method, kwargs=kwargs)
+        prepared = SimpleNamespace(
+            request=request,
+            conditions=request.conditions,
+            contrast_runs=(object(),) * (len(request.conditions) * 4),
+            shared_selection=SimpleNamespace(selected_harmonics_hz=(1.2, 2.4)),
+            shared_domain_fingerprint="shared-sha",
+        )
+        return RepeatedSessionBatchRun(
+            prepared=prepared,
+            result=None,
+            receipt=None,
+        )
+
+    monkeypatch.setattr(cli, "run_repeated_session_fhc_batch", fake_run)
+
+    exit_code = cli.main(
+        [
+            "repeated-session",
+            "--project-root",
+            str(tmp_path / "project"),
+            "--condition",
+            "Neutral Angry",
+            "--condition",
+            "Angry Control",
+            "--group-a",
+            "bc_group",
+            "--group-b",
+            "control_group",
+            "--session-a",
+            "follicular_phase",
+            "--session-b",
+            "luteal_phase",
+            "--exclude-recording",
+            "P18_BC_F=Declared outlier",
+            "--prepare-only",
+        ]
+    )
+
+    assert exit_code == 0
+    request = captured["request"]
+    assert request.conditions == ("Neutral Angry", "Angry Control")
+    assert request.group_ids == ("bc_group", "control_group")
+    assert request.session_ids == ("follicular_phase", "luteal_phase")
+    assert request.recording_exclusions[0].recording_id == "P18_BC_F"
+    assert request.recording_exclusions[0].reason == "Declared outlier"
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["analysis_kind"] == "repeated_session_batch"
+    assert summary["contrast_run_count"] == 8
+    assert summary["write_performed"] is False
 
 
 def test_cli_returns_nonzero_and_writes_error_to_stderr(

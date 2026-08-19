@@ -8,11 +8,12 @@ from typing import Any
 
 import logging
 
-from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QHeaderView,
     QHBoxLayout,
     QLabel,
@@ -42,19 +43,27 @@ from Tools.Free_Harmonic_Clustering.tool_info import (
 
 from .backend_adapter import FreeHarmonicBackend, FreeHarmonicBackendAdapter
 from .models import (
+    AnalysisRecordingExclusion,
     AnalysisSetup,
     AnalysisWorkerOutcome,
     GuiAnalysisDesign,
     GuiHarmonicMode,
     ProjectAnalysisOptions,
     ProjectFrequencySnapshot,
+    RepeatedBatchSetup,
+    RepeatedBatchWorkerOutcome,
     RunOutcome,
 )
 from .operation_registry import (
     register_active_operation,
     release_active_operation,
 )
-from .workers import AnalysisWorker, ProjectInspectionWorker
+from .recording_exclusions_dialog import RecordingExclusionsDialog
+from .workers import (
+    AnalysisWorker,
+    ProjectInspectionWorker,
+    RepeatedSessionBatchWorker,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -64,6 +73,18 @@ _FREQUENCY_UNSET = object()
 
 def _frequency_text(value: float) -> str:
     return f"{float(value):g} Hz"
+
+
+class _CurrentPageStackedWidget(QStackedWidget):
+    """Size a progressive setup stack to its visible page only."""
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        current = self.currentWidget()
+        return super().sizeHint() if current is None else current.sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        current = self.currentWidget()
+        return super().minimumSizeHint() if current is None else current.minimumSizeHint()
 
 
 class FreeHarmonicClusteringPage(QWidget):
@@ -98,6 +119,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self._frequency_error = str(exc)
 
         self._options: ProjectAnalysisOptions | None = None
+        self._recording_exclusions: tuple[AnalysisRecordingExclusion, ...] = ()
         self._has_result = False
         self._thread: QThread | None = None
         self._worker: object | None = None
@@ -222,7 +244,7 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         comparison_form.addRow("Analysis mode:", self.design_combo)
 
-        self.design_stack = QStackedWidget(self.comparison_card.content)
+        self.design_stack = _CurrentPageStackedWidget(self.comparison_card.content)
         self.design_stack.setObjectName("free_harmonic_design_stack")
         self.design_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         comparison_form.addRow(self.design_stack)
@@ -265,6 +287,63 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         independent_form.addRow("Group B:", self.independent_group_b_combo)
         self.design_stack.addWidget(independent_panel)
+
+        repeated_panel = QWidget(self.design_stack)
+        repeated_form = make_form_layout()
+        repeated_panel.setLayout(repeated_form)
+        self.repeated_groups_value = QLabel("Loading...", repeated_panel)
+        self.repeated_groups_value.setObjectName("free_harmonic_repeated_groups")
+        self.repeated_groups_value.setWordWrap(True)
+        repeated_form.addRow("Stable groups:", self.repeated_groups_value)
+        self.repeated_sessions_value = QLabel("Loading...", repeated_panel)
+        self.repeated_sessions_value.setObjectName("free_harmonic_repeated_sessions")
+        self.repeated_sessions_value.setWordWrap(True)
+        repeated_form.addRow("Ordered sessions:", self.repeated_sessions_value)
+        self.repeated_conditions_value = QLabel("Loading...", repeated_panel)
+        self.repeated_conditions_value.setObjectName("free_harmonic_repeated_conditions")
+        self.repeated_conditions_value.setWordWrap(True)
+        repeated_form.addRow("Conditions:", self.repeated_conditions_value)
+        self.repeated_batch_value = QLabel(
+            "Four prespecified contrast families per condition.",
+            repeated_panel,
+        )
+        self.repeated_batch_value.setObjectName("free_harmonic_repeated_families")
+        self.repeated_batch_value.setWordWrap(True)
+        repeated_form.addRow("Batch:", self.repeated_batch_value)
+        self.review_exclusions_button = make_action_button(
+            "Review recording exclusions...",
+            compact=True,
+            parent=repeated_panel,
+        )
+        self.review_exclusions_button.setObjectName(
+            "free_harmonic_review_recording_exclusions"
+        )
+        self.exclusion_count_label = QLabel(
+            "No analysis-specific exclusions.",
+            repeated_panel,
+        )
+        self.exclusion_count_label.setObjectName(
+            "free_harmonic_recording_exclusion_count"
+        )
+        self.exclusion_count_label.setWordWrap(True)
+        exclusion_row = QWidget(repeated_panel)
+        exclusion_layout = QHBoxLayout(exclusion_row)
+        exclusion_layout.setContentsMargins(0, 0, 0, 0)
+        exclusion_layout.setSpacing(8)
+        exclusion_layout.addWidget(self.review_exclusions_button)
+        exclusion_layout.addWidget(self.exclusion_count_label, 1)
+        repeated_form.addRow("Run exclusions:", exclusion_row)
+        self.repeated_order_warning = StatusBanner(
+            "Session/phase-at-visit is confounded with visit order and elapsed time.",
+            repeated_panel,
+            variant="warning",
+        )
+        self.repeated_order_warning.setObjectName(
+            "free_harmonic_repeated_order_warning"
+        )
+        self.repeated_order_warning.setWordWrap(True)
+        repeated_form.addRow(self.repeated_order_warning)
+        self.design_stack.addWidget(repeated_panel)
 
         for combo in (
             self.design_combo,
@@ -352,6 +431,11 @@ class FreeHarmonicClusteringPage(QWidget):
             (independent_form, self.independent_condition_combo),
             (independent_form, self.independent_group_a_combo),
             (independent_form, self.independent_group_b_combo),
+            (repeated_form, self.repeated_groups_value),
+            (repeated_form, self.repeated_sessions_value),
+            (repeated_form, self.repeated_conditions_value),
+            (repeated_form, self.repeated_batch_value),
+            (repeated_form, exclusion_row),
             (harmonics_form, self.harmonic_mode_combo),
             (harmonics_form, fixed_row),
         )
@@ -446,6 +530,25 @@ class FreeHarmonicClusteringPage(QWidget):
         )
         self.significant_table.hide()
         results_card.content_layout.addWidget(self.significant_table)
+        self.batch_table = self._new_result_table(
+            results_card.content,
+            "free_harmonic_repeated_batch_table",
+            (
+                "Contrast family",
+                "Condition",
+                "Significant clusters",
+                "Global p",
+                "Holm p (family)",
+                "Holm p (full batch)",
+            ),
+        )
+        self.batch_table.setMinimumHeight(220)
+        self.batch_table.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Preferred,
+        )
+        self.batch_table.hide()
+        results_card.content_layout.addWidget(self.batch_table)
         self.results_panel.hide()
 
     @staticmethod
@@ -494,6 +597,9 @@ class FreeHarmonicClusteringPage(QWidget):
         ):
             combo.currentIndexChanged.connect(self._on_setup_changed)
         self.run_analysis_button.clicked.connect(self._run_analysis)
+        self.review_exclusions_button.clicked.connect(
+            self._review_recording_exclusions
+        )
         self.cancel_button.clicked.connect(self.cancel_active_work)
         self.open_results_button.clicked.connect(self._open_results_folder)
 
@@ -563,6 +669,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._frequency_snapshot = snapshot
         self._frequency_error = frequency_error
         self._options = None
+        self._recording_exclusions = ()
         self._inspection_failed = False
         self._pending_post_processing_reason = None
         self._clear_results()
@@ -602,12 +709,26 @@ class FreeHarmonicClusteringPage(QWidget):
         if not value.grid_compatible:
             self.workflow_status.set_variant("error")
             self.workflow_status.set_text(value.compatibility_message)
+        elif value.is_repeated_session and (
+            len(value.groups) != 2 or len(value.sessions) != 2
+        ):
+            self.workflow_status.set_variant("error")
+            self.workflow_status.set_text(
+                "The repeated-session FHC batch requires exactly two stable "
+                "groups and two ordered sessions."
+            )
         elif value.diagnostics:
             self.workflow_status.set_variant("warning")
             self.workflow_status.set_text(
                 "Project inputs loaded with dataset diagnostics. Select Run "
                 "Analysis to continue. Exact cohort and input details will be "
                 "recorded in the completed results workbook."
+            )
+        elif value.is_repeated_session:
+            self.workflow_status.set_variant("warning")
+            self.workflow_status.set_text(
+                "Repeated-session design recognized. Review any analysis-only "
+                "recording exclusions, then run the prespecified full batch."
             )
         else:
             self.workflow_status.set_variant("info")
@@ -621,6 +742,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._updating_controls = True
         try:
             self._clear_choice_controls()
+            self._configure_design_choices(options)
             for condition in options.conditions:
                 self.paired_condition_a_combo.addItem(condition, condition)
                 self.paired_condition_b_combo.addItem(condition, condition)
@@ -651,10 +773,72 @@ class FreeHarmonicClusteringPage(QWidget):
                 self.fixed_highest_combo.setCurrentIndex(
                     self.fixed_highest_combo.count() - 1
                 )
+            self._populate_repeated_session_summary(options)
         finally:
             self._updating_controls = False
         self._on_design_changed()
         self._on_harmonic_mode_changed()
+
+    def _configure_design_choices(self, options: ProjectAnalysisOptions) -> None:
+        blocked = self.design_combo.blockSignals(True)
+        try:
+            self.design_combo.clear()
+            if options.is_repeated_session:
+                self.design_combo.addItem(
+                    "Full Repeated-Session Batch",
+                    GuiAnalysisDesign.REPEATED_SESSION_BATCH.value,
+                )
+            else:
+                self.design_combo.addItem(
+                    "Paired Conditions",
+                    GuiAnalysisDesign.PAIRED_CONDITIONS.value,
+                )
+                self.design_combo.addItem(
+                    "Independent Groups",
+                    GuiAnalysisDesign.INDEPENDENT_GROUPS.value,
+                )
+        finally:
+            self.design_combo.blockSignals(blocked)
+
+    def _populate_repeated_session_summary(
+        self,
+        options: ProjectAnalysisOptions,
+    ) -> None:
+        if not options.is_repeated_session:
+            self.repeated_groups_value.setText("Not a repeated-session project.")
+            self.repeated_sessions_value.setText("Not applicable.")
+            self.repeated_conditions_value.setText("Not applicable.")
+            self.repeated_order_warning.setText(
+                "Session/phase-at-visit is confounded with visit order and elapsed time."
+            )
+            self._update_exclusion_count_label()
+            return
+        self.repeated_groups_value.setText(
+            " vs ".join(f"{group.label} [{group.group_id}]" for group in options.groups)
+        )
+        ordered_sessions = tuple(
+            sorted(options.sessions, key=lambda session: session.visit_index)
+        )
+        self.repeated_sessions_value.setText(
+            " -> ".join(
+                f"{session.label} (Visit {session.visit_index})"
+                for session in ordered_sessions
+            )
+        )
+        self.repeated_conditions_value.setText(
+            f"All {len(options.conditions)} project conditions"
+        )
+        self.repeated_batch_value.setText(
+            "Group difference averaged over complete session pairs; paired "
+            "session/phase-at-visit contrast within each group; and the "
+            "between-group difference in Visit 2 - Visit 1 change."
+        )
+        warning = options.fixed_order_confounding or (
+            "Session/phase-at-visit is perfectly aligned with visit order. "
+            "Results cannot isolate phase from elapsed time, repetition, or habituation."
+        )
+        self.repeated_order_warning.setText(warning)
+        self._update_exclusion_count_label()
 
     def _clear_choice_controls(self) -> None:
         self._updating_controls = True
@@ -671,6 +855,14 @@ class FreeHarmonicClusteringPage(QWidget):
                 combo.clear()
         finally:
             self._updating_controls = False
+
+    def _update_exclusion_count_label(self) -> None:
+        count = len(self._recording_exclusions)
+        self.exclusion_count_label.setText(
+            "No analysis-specific exclusions."
+            if count == 0
+            else f"{count} recording exclusion(s), with audit reasons."
+        )
 
     # ------------------------------------------------------------- interaction
     def _selected_design(self) -> GuiAnalysisDesign | None:
@@ -694,8 +886,17 @@ class FreeHarmonicClusteringPage(QWidget):
     @Slot()
     def _on_design_changed(self) -> None:
         design = self._selected_design()
-        paired = design is GuiAnalysisDesign.PAIRED_CONDITIONS
-        self.design_stack.setCurrentIndex(0 if paired else 1)
+        stack_index = {
+            GuiAnalysisDesign.PAIRED_CONDITIONS: 0,
+            GuiAnalysisDesign.INDEPENDENT_GROUPS: 1,
+            GuiAnalysisDesign.REPEATED_SESSION_BATCH: 2,
+        }.get(design, 0)
+        self.design_stack.setCurrentIndex(stack_index)
+        self.design_stack.updateGeometry()
+        repeated = design is GuiAnalysisDesign.REPEATED_SESSION_BATCH
+        self.run_analysis_button.setText(
+            "Run Full Repeated-Session Batch" if repeated else "Run Analysis"
+        )
         self._on_setup_changed()
 
     @Slot()
@@ -769,6 +970,20 @@ class FreeHarmonicClusteringPage(QWidget):
         if design is GuiAnalysisDesign.PAIRED_CONDITIONS:
             arm_a = self.paired_condition_a_combo.currentText() or "Condition A"
             arm_b = self.paired_condition_b_combo.currentText() or "Condition B"
+        elif design is GuiAnalysisDesign.REPEATED_SESSION_BATCH:
+            options = self._options
+            sessions = () if options is None else options.sessions
+            if len(sessions) == 2:
+                ordered = tuple(sorted(sessions, key=lambda item: item.visit_index))
+                delta = f"{ordered[1].label} - {ordered[0].label}"
+            else:
+                delta = "Visit 2 - Visit 1"
+            self.direction_label.setText(
+                "Prespecified batch: group comparison averaged over complete "
+                "sessions, paired session contrasts within both groups, and "
+                f"between-group difference in {delta} change."
+            )
+            return
         else:
             arm_a = self.independent_group_a_combo.currentText() or "Group A"
             arm_b = self.independent_group_b_combo.currentText() or "Group B"
@@ -826,6 +1041,53 @@ class FreeHarmonicClusteringPage(QWidget):
             max_harmonic_hz=float(maximum),
         )
 
+    def _current_repeated_batch_setup(self) -> RepeatedBatchSetup:
+        if self._options is None or self._frequency_snapshot is None:
+            raise ValueError("Project inputs have not been loaded.")
+        if not self._options.is_repeated_session:
+            raise ValueError("The active project is not a repeated-session project.")
+        if len(self._options.groups) != 2 or len(self._options.sessions) != 2:
+            raise ValueError(
+                "The full repeated-session batch requires exactly two stable "
+                "groups and two ordered sessions."
+            )
+        if not self._options.conditions:
+            raise ValueError("The repeated-session project has no conditions.")
+        harmonic_mode = self._selected_harmonic_mode()
+        if harmonic_mode is None:
+            raise ValueError("Choose a harmonic-domain mode.")
+        fixed_order = None
+        if harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
+            value = self.fixed_highest_combo.currentData()
+            if value is None:
+                raise ValueError("Choose the highest included harmonic.")
+            fixed_order = int(value)
+        maximum = self._frequency_snapshot.max_harmonic_hz
+        if maximum is None:
+            maximum = self._options.effective_harmonic_upper_hz
+        if maximum is None and self._options.eligible_harmonics_hz:
+            maximum = self._options.eligible_harmonics_hz[-1]
+        if maximum is None:
+            raise ValueError("No eligible harmonics are available on the FullFFT grid.")
+        known_recordings = {
+            recording.recording_id.casefold() for recording in self._options.recordings
+        }
+        unknown = tuple(
+            item.recording_id
+            for item in self._recording_exclusions
+            if item.recording_id.casefold() not in known_recordings
+        )
+        if unknown:
+            raise ValueError(
+                "Analysis exclusions no longer match the project: " + ", ".join(unknown)
+            )
+        return RepeatedBatchSetup(
+            harmonic_mode=harmonic_mode,
+            fixed_highest_harmonic_order=fixed_order,
+            max_harmonic_hz=float(maximum),
+            recording_exclusions=self._recording_exclusions,
+        )
+
     def _setup_error(self) -> str | None:
         if self._retired:
             return "This project-bound page has been retired."
@@ -838,7 +1100,10 @@ class FreeHarmonicClusteringPage(QWidget):
         if not self._options.eligible_orders:
             return "No eligible non-base oddball harmonics are available on the FullFFT grid."
         try:
-            self._current_setup()
+            if self._selected_design() is GuiAnalysisDesign.REPEATED_SESSION_BATCH:
+                self._current_repeated_batch_setup()
+            else:
+                self._current_setup()
         except ValueError as exc:
             return str(exc)
         return None
@@ -851,6 +1116,26 @@ class FreeHarmonicClusteringPage(QWidget):
             return
         assert self._options is not None
         assert self._frequency_snapshot is not None
+        if self._selected_design() is GuiAnalysisDesign.REPEATED_SESSION_BATCH:
+            setup = self._current_repeated_batch_setup()
+            self._clear_results()
+            worker = RepeatedSessionBatchWorker(
+                self._backend,
+                self._project_root,
+                self._frequency_snapshot,
+                self._options,
+                setup,
+            )
+            self._start_operation(
+                worker,
+                stage="repeated_session_batch",
+                message=(
+                    "Preparing the shared participant x electrode x harmonic "
+                    "domain for all repeated-session contrasts..."
+                ),
+                on_completed=self._on_repeated_batch_completed,
+            )
+            return
         setup = self._current_setup()
         self._clear_results()
         worker = AnalysisWorker(
@@ -882,6 +1167,47 @@ class FreeHarmonicClusteringPage(QWidget):
         self._update_results_folder_button()
         self.workflow_status.hide()
         self._update_buttons()
+
+    def _on_repeated_batch_completed(self, value: object) -> None:
+        if not isinstance(value, RepeatedBatchWorkerOutcome):
+            self._show_error("Repeated-session batch returned an invalid result.")
+            return
+        self._populate_repeated_batch_results(value.run)
+        # The table owns plain strings only; keep no prepared tensors or
+        # permutation arrays on the long-lived page.
+        self._has_result = True
+        self.results_panel.show()
+        self._update_results_folder_button()
+        self.workflow_status.hide()
+        self._update_buttons()
+
+    @Slot()
+    def _review_recording_exclusions(self) -> None:
+        options = self._options
+        if (
+            options is None
+            or not options.is_repeated_session
+            or self._thread is not None
+        ):
+            return
+        if not options.recordings:
+            self._show_error(
+                "No canonical recording identities are available for exclusion review."
+            )
+            return
+        dialog = RecordingExclusionsDialog(
+            options.recordings,
+            self._recording_exclusions,
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        exclusions = dialog.exclusions()
+        if exclusions == self._recording_exclusions:
+            return
+        self._recording_exclusions = exclusions
+        self._update_exclusion_count_label()
+        self._on_setup_changed()
 
     # -------------------------------------------------------------- workers
     def _start_operation(
@@ -1045,6 +1371,8 @@ class FreeHarmonicClusteringPage(QWidget):
 
     # ------------------------------------------------------------ summaries
     def _populate_results(self, prepared: object, outcome: RunOutcome) -> None:
+        self.batch_table.hide()
+        self.batch_table.setRowCount(0)
         result = outcome.result
         clusters = self._sorted_clusters(result)
         significant = tuple(
@@ -1083,6 +1411,57 @@ class FreeHarmonicClusteringPage(QWidget):
                     else ""
                 )
             )
+
+    def _populate_repeated_batch_results(self, run: object) -> None:
+        self.significant_table.hide()
+        self.significant_table.setRowCount(0)
+        batch_result = getattr(run, "result", None)
+        outcomes = tuple(
+            getattr(batch_result, "outcomes", getattr(run, "results", ()))
+        )
+        self.batch_table.setRowCount(len(outcomes))
+        within_family_significant = 0
+        all_batch_significant = 0
+        for row, outcome in enumerate(outcomes):
+            family = getattr(outcome, "family_id", getattr(outcome, "family", ""))
+            family_value = getattr(family, "value", family)
+            prepared_run = getattr(outcome, "prepared_run", None)
+            family_label = str(
+                getattr(prepared_run, "family_label", "")
+                or str(family_value).replace("_", " ").title()
+            )
+            condition = str(getattr(outcome, "condition", ""))
+            result = getattr(outcome, "result", None)
+            clusters = tuple(getattr(result, "clusters", ()))
+            significant_clusters = sum(
+                bool(getattr(cluster, "significant", False)) for cluster in clusters
+            )
+            global_p = float(getattr(outcome, "global_two_sided_p_value", 1.0))
+            family_p = float(getattr(outcome, "holm_within_family_p_value", 1.0))
+            batch_p = float(getattr(outcome, "holm_all_batch_p_value", 1.0))
+            within_family_significant += family_p <= 0.05
+            all_batch_significant += batch_p <= 0.05
+            values = (
+                family_label,
+                condition,
+                str(significant_clusters),
+                f"{global_p:.4f}",
+                f"{family_p:.4f}",
+                f"{batch_p:.4f}",
+            )
+            for column, value in enumerate(values):
+                self.batch_table.setItem(row, column, QTableWidgetItem(value))
+        self.batch_table.show()
+        self.result_status.set_variant(
+            "success" if within_family_significant else "info"
+        )
+        self.result_status.set_text(
+            f"Repeated-session batch complete: {len(outcomes)} condition x contrast "
+            f"tests; {within_family_significant} pass Holm correction within their "
+            f"prespecified family and {all_batch_significant} pass the conservative "
+            "Holm correction across the full batch. Interpret session effects as "
+            "session/phase-at-visit effects because visit order was fixed."
+        )
 
     @staticmethod
     def _sorted_clusters(result: object) -> tuple[object, ...]:
@@ -1144,6 +1523,8 @@ class FreeHarmonicClusteringPage(QWidget):
         self._has_result = False
         self.significant_table.setRowCount(0)
         self.significant_table.hide()
+        self.batch_table.setRowCount(0)
+        self.batch_table.hide()
         self.result_status.set_variant("info")
         self.result_status.set_text("No result has been run.")
         self.results_panel.hide()
@@ -1174,9 +1555,23 @@ class FreeHarmonicClusteringPage(QWidget):
         self.cancel_button.setVisible(busy)
         self.cancel_button.setEnabled(busy)
         self.workflow_actions.setVisible(True)
-        self.design_combo.setEnabled(not busy and self._options is not None)
+        repeated_project = bool(
+            self._options is not None and self._options.is_repeated_session
+        )
+        self.design_combo.setEnabled(
+            not busy and self._options is not None and not repeated_project
+        )
         self.harmonic_mode_combo.setEnabled(not busy and self._options is not None)
         self.design_stack.setEnabled(not busy and self._options is not None)
+        repeated = (
+            self._selected_design() is GuiAnalysisDesign.REPEATED_SESSION_BATCH
+        )
+        self.review_exclusions_button.setEnabled(
+            not busy
+            and repeated
+            and self._options is not None
+            and bool(self._options.recordings)
+        )
         fixed = self._selected_harmonic_mode() is GuiHarmonicMode.FIXED_HIGHEST
         self.fixed_highest_combo.setEnabled(
             not busy and fixed and self._options is not None and self.fixed_highest_combo.count() > 0

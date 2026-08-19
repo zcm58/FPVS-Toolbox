@@ -22,30 +22,41 @@ environment.
 - One condition versus another for the same complete participant cohort forms
   a paired contrast. An optional canonical group filter may be applied, and
   whole-participant condition differences are permuted through sign flips.
-- Each run analyzes one ordered A-minus-B contrast. Separate condition runs do
+- Legacy runs analyze one ordered A-minus-B contrast. Separate legacy runs do
   not receive an automatic correction across conditions.
+- Canonical two-group, two-session projects expose a prespecified
+  repeated-session batch over all project conditions: groups averaged across
+  complete session pairs, Visit 2 minus Visit 1 within each group, and the
+  between-group difference in participant session change. One shared harmonic
+  domain is frozen for the batch; global run p-values receive Holm correction
+  across conditions within each family and across the full batch.
 
 ## Embedded workflow
 
 Open **Free Harmonic Clustering Analysis** from the default Quick Tools list in
 the Workspace Tools sidebar. The page dynamically
 reads project conditions, groups, exclusions, base and oddball frequencies,
-and FullFFT availability. It does not offer local metadata or participant
-overrides.
+and FullFFT availability. It does not offer local frequency, group, session,
+condition, or participant-identity overrides. Repeated batches may add
+source-immutable recording exclusions with required audit reasons.
 
-1. Choose Paired Conditions or Independent Groups and define one A-minus-B
-   contrast in the setup controls.
+1. For a flat project, choose Paired Conditions or Independent Groups and
+   define one A-minus-B contrast. A repeated-session project is recognized
+   automatically and shows its full-batch design instead.
 2. Use the default Hermann automatic harmonic selection, or choose the highest
    fixed oddball harmonic. Both modes fill through and exclude all dynamically
    identified base-rate overlaps.
-3. Select **Run Analysis** once. Preparation and permutations continue
-   automatically without rereading source workbooks.
-4. Review the concise significant-cluster results that appear beneath Setup.
+3. Optionally review analysis-only recording exclusions for a repeated batch;
+   each exclusion requires an audit reason and never changes project QC.
+4. Select **Run Analysis** or **Run Full Repeated-Session Batch** once.
+   Preparation, permutations, multiplicity correction, and export continue in
+   one worker pipeline.
+5. Review the concise cluster or batch results that appear beneath Setup.
    Use **Open Results Folder** for the polished Excel workbook, all clusters,
    and complete provenance.
 
 The GUI exposes the locked Hermann-compatible profile rather than advanced
-method controls. Version 1 runs 10,000 assignments, uses a two-sided node-entry
+method controls. The default runs 10,000 assignments, uses a two-sided node-entry
 alpha of `.01`, complete free-harmonic adjacency, the fixed 197-edge
 FieldTrip-style BioSemi64 spatial reconstruction, and separate signed nulls.
 Raw sign-specific cluster p-values are judged at `.025`; doubled p-values are
@@ -54,8 +65,8 @@ secondary two-sided presentations.
 The embedded workspace has no workflow tabs or page-level scrolling; the
 significant-cluster table scrolls internally only when needed. It shows the
 current session's latest result without printing technical run metadata in the
-main GUI. Plots, an all-condition batch, a historical-run browser, and
-clipboard/manuscript helpers are deferred beyond version 1.
+main GUI. Plots, a historical-run browser, and clipboard/manuscript helpers are
+not part of the current page.
 
 ## Headless use
 
@@ -85,6 +96,21 @@ Use the `paired` subcommand with `--condition-a`, `--condition-b`, and an
 optional canonical `--group` filter for repeated-condition analyses. Run
 `python -m Tools.Free_Harmonic_Clustering --help` for all options.
 
+The headless repeated-session batch uses canonical IDs and makes the change
+direction explicit. Repeat `--condition` in planned order and use
+`--exclude-recording RECORDING_ID=REASON` only for justified, batch-local
+exclusions:
+
+```powershell
+python -m Tools.Free_Harmonic_Clustering repeated-session `
+  --project-root "<managed-project-root>" `
+  --condition "Neutral Angry" --condition "Angry Control" `
+  --condition "Neutral Happy" --condition "Neutral Sad" `
+  --group-a bc_group --group-b control_group `
+  --session-a follicular_phase --session-b luteal_phase `
+  --exclude-recording "participant-id__session-id=User-declared outlier"
+```
+
 The Hermann-compatible adaptive selector stops with the structured code
 `NO_HARMONICS_SELECTED` when neither arm has a non-base oddball harmonic with
 strict `z > 3.29`. The command does not substitute the Toolbox's different
@@ -112,6 +138,13 @@ Clusters, Cluster Membership, Harmonic Selection, Participants and Exclusions,
 Methods and Provenance, Node Statistics, and Null Distribution worksheets.
 Machine-readable artifacts remain beside it for reproducibility.
 
+Repeated batches use
+`Free_Harmonic_Clustering_Repeated_Session_Batch.xlsx` in one additive run
+directory. The workbook and companion files include run-global and both Holm
+layers, every cluster/member/node/null table, complete-pair coverage and
+reasoned exclusions, shared-domain provenance, derived seeds, source records,
+and the fixed-order warning.
+
 The tool is source-immutable. It may add a completed result folder, but it
 never edits `project.json`, settings, participant metadata, ledgers, QC
 decisions, or processed workbooks. Failed or cancelled work does not publish a
@@ -122,7 +155,13 @@ family. A significant cluster does not make its individual sensors,
 harmonics, cells, or boundaries pointwise significant. Cluster effect sizes
 are descriptive, post-selection, and shape-dependent.
 
-## Version 1 acceptance
+The completed legacy powered-null receipt does not validate the new
+repeated-session batch, shared multi-cell harmonic selection, composite
+tensors, group-by-session interaction contrast, or cross-condition Holm layer.
+Repeated-session phase labels must be reported as session/phase-at-visit when
+phase is aligned with fixed visit order.
+
+## Legacy Version 1 acceptance
 
 Automated preparation, inference, export, and GUI coverage uses synthetic or
 temporary managed-project fixtures. Tests must never bundle or depend on the
