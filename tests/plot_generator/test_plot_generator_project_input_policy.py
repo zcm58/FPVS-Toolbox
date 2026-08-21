@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from Main_App.projects import Project
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
     _project_plot_input_folder,
@@ -39,8 +41,9 @@ class _LegendField:
 
 
 class _SavingProject(SimpleNamespace):
-    def save(self):
+    def save(self, *, updated_tool_namespaces=()):
         self.saved = True
+        self.saved_tool_names = set(updated_tool_namespaces)
 
 
 class _FakeWindow(PlotGeneratorSettingsMixin, SimpleNamespace):
@@ -109,6 +112,56 @@ def test_multigroup_project_settings_drop_stale_saved_input_folder() -> None:
     assert "input_folder" not in plot_settings
     assert plot_settings["output_folder"] == "C:/Project/2 - SNR Plots"
     assert project.saved is True
+    assert project.saved_tool_names == {"snr_plot"}
+
+
+def test_plot_settings_survive_successive_project_disk_roundtrips(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    manifest_path = project_root / "project.json"
+    manifest_path.write_text(
+        json.dumps({"name": "Plot persistence"}),
+        encoding="utf-8",
+    )
+    project = Project.load(project_root)
+    window = _FakeWindow(
+        _project=project,
+        _ui_initializing=False,
+        stem_color="#111111",
+        stem_color_b="#222222",
+        folder_edit=_Value(str(project_root / "1 - Excel Data Files")),
+        out_edit=_Value(str(project_root / "2 - SNR Plots")),
+        spectral_qc_check=_Value(True),
+        legend_custom_check=_Value(True),
+        legend_condition_a_edit=_Value("Condition A"),
+        legend_condition_b_edit=_Value("Condition B"),
+        legend_a_peaks_edit=_Value("A Peaks"),
+        legend_b_peaks_edit=_Value("B Peaks"),
+        _append_log=lambda _message: None,
+    )
+
+    window._persist_legend_settings()
+    assert window._persist_project_plot_settings(include_paths=True)
+
+    disk_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    disk_manifest["tools"]["stats"] = {"external_marker": "preserve"}
+    manifest_path.write_text(json.dumps(disk_manifest, indent=2), encoding="utf-8")
+    window.legend_condition_a_edit = _Value("Updated Condition A")
+    window._persist_legend_settings()
+
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    snr_plot = saved["tools"]["snr_plot"]
+    assert snr_plot["legend_labels"]["condition_a_label"] == "Updated Condition A"
+    assert snr_plot["plot_settings"] == {
+        "stem_color": "#111111",
+        "stem_color_b": "#222222",
+        "spectral_qc_enabled": True,
+        "input_folder": str(project_root / "1 - Excel Data Files"),
+        "output_folder": str(project_root / "2 - SNR Plots"),
+    }
+    assert saved["tools"]["stats"] == {"external_marker": "preserve"}
 
 
 def test_group_options_require_canonical_project_excel_root(tmp_path: Path) -> None:

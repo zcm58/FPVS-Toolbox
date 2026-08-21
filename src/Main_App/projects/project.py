@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
@@ -215,7 +216,12 @@ def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> boo
     return True
 
 
-def _preserve_disk_tools_metadata(manifest_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
+def _preserve_disk_tools_metadata(
+    manifest_path: Path,
+    data: Dict[str, Any],
+    *,
+    updated_tool_namespaces: Collection[str] = (),
+) -> Dict[str, Any]:
     if not manifest_path.exists():
         return data
     try:
@@ -227,7 +233,14 @@ def _preserve_disk_tools_metadata(manifest_path: Path, data: Dict[str, Any]) -> 
     current_tools = current.get("tools")
     if not isinstance(current_tools, Mapping):
         return data
-    data["tools"] = dict(current_tools)
+    merged_tools = dict(current_tools)
+    in_memory_tools = data.get("tools")
+    for tool_name in sorted({str(name) for name in updated_tool_namespaces if name}):
+        if isinstance(in_memory_tools, Mapping) and tool_name in in_memory_tools:
+            merged_tools[tool_name] = in_memory_tools[tool_name]
+        else:
+            merged_tools.pop(tool_name, None)
+    data["tools"] = merged_tools
     return data
 
 
@@ -584,10 +597,13 @@ class Project:
             _write_manifest_if_changed(resolved_manifest_path, raw_manifest)
         return proj
 
-    def save(self) -> None:
+    def save(self, *, updated_tool_namespaces: Collection[str] = ()) -> None:
         """
         Persist manifest. Store relative paths when inside project_root.
         Keep absolute paths for out-of-project locations.
+
+        Disk-authored tool namespaces remain authoritative unless their names
+        are explicitly listed in ``updated_tool_namespaces``.
         """
         manifest_path = self.project_root / "project.json"
 
@@ -858,7 +874,11 @@ class Project:
             data.pop("recordings_lock_fingerprint", None)
             self._recordings_lock_fingerprint = None
 
-        data = _preserve_disk_tools_metadata(manifest_path, data)
+        data = _preserve_disk_tools_metadata(
+            manifest_path,
+            data,
+            updated_tool_namespaces=updated_tool_namespaces,
+        )
 
         # Keep in-memory manifest consistent for subsequent operations.
         self.manifest = data

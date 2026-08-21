@@ -114,7 +114,7 @@ class PlotGeneratorSettingsMixin:
             cursor.pop("input_folder", None)
         cursor.update(payload)
         try:
-            self._project.save()
+            self._project.save(updated_tool_namespaces={"snr_plot"})
         except Exception as exc:
             self._append_log("Failed to save SNR plot settings to project.json.")
             logger.warning(
@@ -323,7 +323,7 @@ class PlotGeneratorSettingsMixin:
         cursor.clear()
         cursor.update(data)
         try:
-            self._project.save()
+            self._project.save(updated_tool_namespaces={"snr_plot"})
         except Exception as exc:
             self._append_log(
                 "Failed to save legend label settings to project.json."
