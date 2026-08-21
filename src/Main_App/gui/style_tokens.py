@@ -14,10 +14,8 @@ DANGER_COLOR = "#B42318"
 DANGER_COLOR_HOVER = "#912018"
 DANGER_SOFT_BG = "#FEEDEB"
 DANGER_SOFT_BORDER = "#F6C8C3"
-SUCCESS_COLOR = "#1A7F37"
 SUCCESS_SOFT_BG = "#EAF6EE"
 SUCCESS_SOFT_BORDER = "#BFE5CB"
-WARNING_COLOR = "#8A5A00"
 WARNING_SOFT_BG = "#FFF5D6"
 WARNING_SOFT_BORDER = "#E7D184"
 
@@ -29,9 +27,6 @@ LOG_PANEL_BG = "#F4F7FA"
 LOG_BG = "#EEF2F6"
 LANDING_CARD_BG = "#FBFCFE"
 LANDING_CARD_BORDER = "#D9E3EE"
-LANDING_CARD_ACCENT_BG = "#F5F9FD"
-LANDING_BADGE_BG = "#E7F0FA"
-LANDING_BADGE_BORDER = "#C7D9EE"
 
 BORDER_COLOR = "#D7DEE8"
 BORDER_SOFT_COLOR = "#E4EAF2"
@@ -62,49 +57,10 @@ EVENT_ID_COLUMN_WIDTH = 88
 EVENT_REMOVE_BUTTON_SIZE = 30
 
 
-def build_main_page_stylesheet() -> str:
-    """Return the scoped stylesheet for the polished main page."""
-    from Main_App.gui.widgets.labels import build_subsection_header_stylesheet
+def build_tool_label_stylesheet() -> str:
+    """Return shared tool-title, result-value, and eyebrow label rules."""
 
     return f"""
-        #Page1 {{
-            background: {PAGE_BG};
-        }}
-
-        #MainContent {{
-            background: {CONTENT_BG};
-        }}
-
-        QGroupBox {{
-            border: 1px solid {BORDER_SOFT_COLOR};
-            border-radius: {CORNER_RADIUS}px;
-            margin-top: 0;
-            background: {SURFACE_BG};
-            color: {TEXT_PRIMARY};
-        }}
-
-        QGroupBox::title {{
-            color: transparent;
-            height: 0;
-            width: 0;
-            margin: 0;
-            padding: 0;
-        }}
-
-        QScrollArea,
-        #event_map_scroll {{
-            background: transparent;
-            border: none;
-        }}
-
-        QScrollArea > QWidget > QWidget {{
-            background: transparent;
-        }}
-
-        QLabel {{
-            color: {TEXT_PRIMARY};
-        }}
-
         QLabel[toolTitle="true"] {{
             color: {TEXT_PRIMARY};
             font-size: {css_font_size("tool_title")};
@@ -122,39 +78,26 @@ def build_main_page_stylesheet() -> str:
             font-size: {css_font_size("caption")};
             font-weight: {css_font_weight("caption")};
         }}
+    """
 
+
+def build_card_header_stylesheet() -> str:
+    """Return shared card-header and subsection-header rules."""
+    from Main_App.gui.widgets.labels import build_subsection_header_stylesheet
+
+    return f"""
         QWidget[cardHeader="true"] {{
             background: transparent;
         }}
 
         {build_subsection_header_stylesheet()}
+    """
 
-        QRadioButton {{
-            color: {TEXT_PRIMARY};
-            spacing: 8px;
-        }}
 
-        QLineEdit,
-        QTextEdit,
-        QProgressBar {{
-            border: 1px solid {BORDER_COLOR};
-            border-radius: 8px;
-            padding: 6px 10px;
-            background: {SURFACE_BG};
-            color: {TEXT_PRIMARY};
-        }}
+def build_progress_bar_stylesheet() -> str:
+    """Return shared progress-bar fill rules."""
 
-        QLineEdit:focus,
-        QTextEdit:focus {{
-            border-color: {ACCENT_COLOR};
-        }}
-
-        QLineEdit:disabled,
-        QTextEdit:disabled {{
-            background: #F1F3F6;
-            color: {TEXT_MUTED};
-        }}
-
+    return f"""
         QProgressBar {{
             text-align: center;
             background: #EBEEF3;
@@ -164,7 +107,13 @@ def build_main_page_stylesheet() -> str:
             background-color: {ACCENT_COLOR};
             border-radius: 7px;
         }}
+    """
 
+
+def build_action_button_stylesheet() -> str:
+    """Return shared action-button variant rules."""
+
+    return f"""
         QPushButton,
         QToolButton {{
             border: 1px solid {BORDER_COLOR};
@@ -290,7 +239,13 @@ def build_main_page_stylesheet() -> str:
             border-color: {DANGER_SOFT_BORDER};
             color: white;
         }}
+    """
 
+
+def build_status_banner_stylesheet() -> str:
+    """Return shared status-banner variant rules."""
+
+    return f"""
         QWidget[statusVariant="info"] {{
             background: {INFO_BG};
             border: 1px solid {INFO_BORDER};
@@ -314,6 +269,85 @@ def build_main_page_stylesheet() -> str:
             border: 1px solid {SUCCESS_SOFT_BORDER};
             border-radius: 8px;
         }}
+    """
+
+
+def build_main_page_stylesheet() -> str:
+    """Return the scoped stylesheet for the polished main page."""
+    return f"""
+        #Page1 {{
+            background: {PAGE_BG};
+        }}
+
+        #MainContent {{
+            background: {CONTENT_BG};
+        }}
+
+        QGroupBox {{
+            border: 1px solid {BORDER_SOFT_COLOR};
+            border-radius: {CORNER_RADIUS}px;
+            margin-top: 0;
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
+        }}
+
+        QGroupBox::title {{
+            color: transparent;
+            height: 0;
+            width: 0;
+            margin: 0;
+            padding: 0;
+        }}
+
+        QScrollArea,
+        #event_map_scroll {{
+            background: transparent;
+            border: none;
+        }}
+
+        QScrollArea > QWidget > QWidget {{
+            background: transparent;
+        }}
+
+        QLabel {{
+            color: {TEXT_PRIMARY};
+        }}
+
+        {build_tool_label_stylesheet()}
+
+        {build_card_header_stylesheet()}
+
+        QRadioButton {{
+            color: {TEXT_PRIMARY};
+            spacing: 8px;
+        }}
+
+        QLineEdit,
+        QTextEdit,
+        QProgressBar {{
+            border: 1px solid {BORDER_COLOR};
+            border-radius: 8px;
+            padding: 6px 10px;
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
+        }}
+
+        QLineEdit:focus,
+        QTextEdit:focus {{
+            border-color: {ACCENT_COLOR};
+        }}
+
+        QLineEdit:disabled,
+        QTextEdit:disabled {{
+            background: #F1F3F6;
+            color: {TEXT_MUTED};
+        }}
+
+        {build_progress_bar_stylesheet()}
+
+        {build_action_button_stylesheet()}
+
+        {build_status_banner_stylesheet()}
 
         #processing_group QLineEdit:read-only {{
             background: {SURFACE_ALT_BG};

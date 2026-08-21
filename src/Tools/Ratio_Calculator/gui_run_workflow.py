@@ -186,10 +186,7 @@ class RatioRunWorkflowMixin:
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg.setIcon(QMessageBox.Information)
         if msg.exec() == QMessageBox.Yes:
-            try:
-                open_path_in_file_manager(self._output_dir)
-            except Exception as exc:
-                self._append_log(f"Failed to open output folder: {exc}")
+            self._open_output_folder()
 
     def _open_output_folder(self) -> None:
         if self._output_dir is None:

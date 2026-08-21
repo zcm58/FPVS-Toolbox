@@ -149,8 +149,9 @@ class PlotGeneratorSettingsMixin:
         for key, text in defaults.items():
             self._set_legend_text_auto(key, text)
 
-    def _force_legend_defaults(self) -> None:
-        defaults = self._legend_default_values()
+    def _force_legend_defaults(self, defaults: dict[str, str] | None = None) -> None:
+        if defaults is None:
+            defaults = self._legend_default_values()
         self._syncing_legend_defaults = True
         try:
             for key, text in defaults.items():
@@ -159,9 +160,6 @@ class PlotGeneratorSettingsMixin:
                 self._legend_fields[key].setText(text)
         finally:
             self._syncing_legend_defaults = False
-
-    def _prefill_legend_defaults_if_empty(self) -> None:
-        self._sync_legend_defaults_with_conditions()
 
     def _mark_legend_manual_override(self, key: str) -> None:
         if self._syncing_legend_defaults:
@@ -194,7 +192,7 @@ class PlotGeneratorSettingsMixin:
         self.legend_condition_b_edit.setEnabled(checked and show_b)
         self.legend_b_peaks_edit.setEnabled(checked and show_b)
         if checked:
-            self._prefill_legend_defaults_if_empty()
+            self._sync_legend_defaults_with_conditions()
         if not self._ui_initializing:
             self._persist_legend_settings()
 
@@ -202,14 +200,7 @@ class PlotGeneratorSettingsMixin:
         self._legend_manual_overrides.clear()
         defaults = self._legend_default_values()
         self.legend_custom_check.setChecked(self._DEFAULT_CUSTOM_LEGEND_LABELS_ENABLED)
-        self._syncing_legend_defaults = True
-        try:
-            self.legend_condition_a_edit.setText(defaults["condition_a_label"])
-            self.legend_condition_b_edit.setText(defaults["condition_b_label"])
-            self.legend_a_peaks_edit.setText(defaults["a_peaks_label"])
-            self.legend_b_peaks_edit.setText(defaults["b_peaks_label"])
-        finally:
-            self._syncing_legend_defaults = False
+        self._force_legend_defaults(defaults)
         self._legend_auto_values = dict(defaults)
         show_b = self.overlay_check.isChecked() or (
             hasattr(self, "_group_overlay_enabled") and self._group_overlay_enabled()

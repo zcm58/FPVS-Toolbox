@@ -52,6 +52,17 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
         self._progress_anim.setEndValue(value)
         self._progress_anim.start()
 
+    def _launch_worker(self) -> None:
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(self._generation_finished)
+        self._thread.start()
+
     def _on_progress(self, msg: str, processed: int, total: int) -> None:
         if msg:
             self._append_log(msg)
@@ -60,11 +71,10 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
 
         if self._total_conditions:
             frac = (self._current_condition - 1) / self._total_conditions
-            if total:
-                frac += processed / total / self._total_conditions
+            frac += processed / total / self._total_conditions
             value = int(frac * 100)
         else:
-            value = int(100 * processed / total) if total else 0
+            value = int(100 * processed / total)
         self._animate_progress_to(value)
 
     def _start_next_condition(self) -> None:
@@ -146,15 +156,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             ),
             **group_kwargs,
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(self._generation_finished)
-        self._thread.start()
+        self._launch_worker()
 
     def _offer_spectral_qc_participant_exclusions(self) -> None:
         candidates = whole_participant_exclusion_candidates(self._spectral_qc_flags)
@@ -345,12 +347,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
             self._set_workflow_status("Preparing SNR plot generation...", "info")
             self.log.clear()
             self._conditions_queue.clear()
-            self._generated_paths.clear()
-            self._failed_items.clear()
-            self._warning_items.clear()
-            self._spectral_qc_flags.clear()
-            self._spectral_qc_analysis_identities.clear()
-            self._batch_dataset_index = None
+            self._clear_generation_result_state()
             self._animate_progress_to(0)
             if self.overlay_check.isChecked():
                 cond_a = self.condition_combo.currentText()
@@ -400,15 +397,7 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                     spectral_qc_enabled=self.spectral_qc_check.isChecked(),
                     **group_kwargs,
                 )
-                self._worker.moveToThread(self._thread)
-                self._thread.started.connect(self._worker.run)
-                self._worker.progress.connect(self._on_progress)
-                self._worker.finished.connect(self._on_worker_finished)
-                self._worker.finished.connect(self._thread.quit)
-                self._worker.finished.connect(self._worker.deleteLater)
-                self._thread.finished.connect(self._thread.deleteLater)
-                self._thread.finished.connect(self._generation_finished)
-                self._thread.start()
+                self._launch_worker()
             else:
                 self._all_conditions = (
                     self.condition_combo.currentText() == ALL_CONDITIONS_OPTION

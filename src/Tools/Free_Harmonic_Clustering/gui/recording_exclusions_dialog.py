@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import QSignalBlocker, Qt, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -204,8 +204,7 @@ class RecordingExclusionsDialog(AppDialog):
 
     @Slot()
     def _clear_selections(self) -> None:
-        blocked = self.table.blockSignals(True)
-        try:
+        with QSignalBlocker(self.table):
             for row in self._row_recording_ids:
                 include = self.table.item(row, 0)
                 reason = self.table.item(row, 6)
@@ -213,8 +212,6 @@ class RecordingExclusionsDialog(AppDialog):
                     include.setCheckState(Qt.Unchecked)
                 if reason is not None:
                     reason.setText("")
-        finally:
-            self.table.blockSignals(blocked)
         self._update_validation()
 
     @Slot()

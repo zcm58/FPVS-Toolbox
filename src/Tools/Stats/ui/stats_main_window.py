@@ -295,10 +295,6 @@ class StatsWindow(
         self._pipeline_run_reports.clear()
         if hasattr(self, "conditions_list_layout"):
             self._populate_conditions_panel([])
-        if hasattr(self, "summary_text"):
-            self.summary_text.clear()
-        if hasattr(self, "output_text"):
-            self.output_text.clear()
         if hasattr(self, "le_folder"):
             self._set_data_folder_path("")
         if hasattr(self, "_update_manual_exclusion_summary"):

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+from PySide6.QtWidgets import QFileDialog
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
@@ -342,6 +343,28 @@ def test_loreta_mri_slice_figure_export_path_prefers_project_source_dir(tmp_path
     )
 
     assert path == str(zscore_dir / "loreta_mri_slices_Color_Response_eLORETA_volume.pdf")
+
+
+def test_loreta_pdf_export_chooser_preserves_dialog_contract(tmp_path, monkeypatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    def choose(*args):
+        calls.append(args)
+        return str(tmp_path / "figure"), "PDF files (*.pdf)"
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose)
+
+    host = object()
+    path = LoretaVisualizerWindow._choose_pdf_export_path(
+        host,
+        "Export test figure",
+        "suggested.pdf",
+    )
+
+    assert path == tmp_path / "figure.pdf"
+    assert calls == [
+        (host, "Export test figure", "suggested.pdf", "PDF files (*.pdf)")
+    ]
 
 
 def test_loreta_split_figure_condition_code_labels_color_and_semantic_responses() -> None:

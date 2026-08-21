@@ -18,7 +18,10 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_manual_removed_electrodes_map,
     parse_electrode_list,
 )
-from Main_App.gui.recording_qc_identity import QcRecordingIdentity
+from Main_App.gui.recording_qc_identity import (
+    QcRecordingIdentity,
+    ordered_participant_ids,
+)
 
 
 class ManualRemovedElectrodesDialog(QDialog):
@@ -55,7 +58,7 @@ class ManualRemovedElectrodesDialog(QDialog):
         recording_participants = tuple(
             row.participant_id for row in self._recording_rows
         )
-        pids = _ordered_participant_ids(
+        pids = ordered_participant_ids(
             (*participant_ids, *recording_participants),
             normalized,
         )
@@ -289,32 +292,6 @@ def _set_read_only_values(
         item = QTableWidgetItem(str(value))
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         table.setItem(row, start_column + offset, item)
-
-
-def _ordered_participant_ids(
-    participant_ids: Sequence[str],
-    manual_removed_electrodes: Mapping[str, Sequence[str]],
-) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for source in (participant_ids, tuple(manual_removed_electrodes)):
-        for raw_pid in source:
-            pid = str(raw_pid or "").strip()
-            if not pid:
-                continue
-            key = pid.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered.append(pid)
-    return sorted(ordered, key=_participant_sort_key)
-
-
-def _participant_sort_key(value: str) -> tuple[str, int, str]:
-    prefix = "".join(ch for ch in value if not ch.isdigit()).casefold()
-    digits = "".join(ch for ch in value if ch.isdigit())
-    number = int(digits) if digits else -1
-    return prefix, number, value.casefold()
 
 
 __all__ = ["ManualRemovedElectrodesDialog"]

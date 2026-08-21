@@ -18,7 +18,10 @@ from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recordings,
 )
-from Main_App.gui.recording_qc_identity import QcRecordingIdentity
+from Main_App.gui.recording_qc_identity import (
+    QcRecordingIdentity,
+    ordered_participant_ids,
+)
 
 
 class ManualParticipantExclusionsDialog(QDialog):
@@ -50,7 +53,7 @@ class ManualParticipantExclusionsDialog(QDialog):
         excluded_recording_lookup = {
             recording_id.casefold() for recording_id in normalized_recordings
         }
-        pids = _ordered_participant_ids(
+        pids = ordered_participant_ids(
             (*participant_ids, *(row.participant_id for row in self._recording_rows)),
             excluded,
         )
@@ -240,32 +243,6 @@ def _set_read_only_values(
         item = QTableWidgetItem(str(value))
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         table.setItem(row, column, item)
-
-
-def _ordered_participant_ids(
-    participant_ids: Sequence[str],
-    excluded_participants: Sequence[str],
-) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for source in (participant_ids, excluded_participants):
-        for raw_pid in source:
-            pid = str(raw_pid or "").strip()
-            if not pid:
-                continue
-            key = pid.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered.append(pid)
-    return sorted(ordered, key=_participant_sort_key)
-
-
-def _participant_sort_key(value: str) -> tuple[str, int, str]:
-    prefix = "".join(ch for ch in value if not ch.isdigit()).casefold()
-    digits = "".join(ch for ch in value if ch.isdigit())
-    number = int(digits) if digits else -1
-    return prefix, number, value.casefold()
 
 
 __all__ = ["ManualParticipantExclusionsDialog"]

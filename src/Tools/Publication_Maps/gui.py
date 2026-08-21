@@ -31,8 +31,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import config
-from Main_App import SettingsManager
 from Main_App.gui.components import (
     ActionRow,
     PathPickerRow,
@@ -122,7 +120,6 @@ class PublicationMapsWindow(QWidget):
         self._last_generated_figure_count = 0
         self._pending_outcome: PublicationMapsWorkerOutcome | None = None
         self._cancel_requested = False
-        self._settings_fallback: SettingsManager | None = None
         self.bca_low_color = DEFAULT_BCA_LOW_COLOR
         self.bca_high_color = DEFAULT_BCA_HIGH_COLOR
         self._dataset_index: ProjectDatasetIndex | None = None
@@ -1181,7 +1178,6 @@ class PublicationMapsWindow(QWidget):
             # Construction briefly has no indexed conditions and disables the
             # paired default. Restore it when the first canonical cohort loads.
             self.paired_figures_check.setChecked(True)
-        self._sync_paired_condition_selectors()
         self._update_condition_summary()
 
     def _set_all_conditions(self, checked: bool) -> None:
@@ -1193,8 +1189,6 @@ class PublicationMapsWindow(QWidget):
         finally:
             self.conditions_list.blockSignals(False)
         self._enforce_single_session_condition()
-        self._sync_paired_condition_selectors()
-        self._update_condition_summary()
         self._update_run_state()
 
     def _selected_conditions(self) -> tuple[str, ...]:
@@ -1242,7 +1236,6 @@ class PublicationMapsWindow(QWidget):
             self._update_group_comparison_controls_state()
 
     def _update_run_state(self) -> None:
-        self._refresh_analysis_setting_labels()
         self._update_condition_summary()
         ready = bool(self.input_root_edit.text().strip())
         ready = ready and bool(self.output_root_edit.text().strip())
@@ -1484,41 +1477,6 @@ class PublicationMapsWindow(QWidget):
         selected = set(self._selected_conditions())
         return bool(first and second and first != second and first in selected and second in selected)
 
-    def _settings_manager(self):
-        host = self._embedded_host()
-        manager = getattr(host, "settings", None)
-        if manager is not None and hasattr(manager, "get"):
-            return manager
-        parent = self.parent()
-        manager = getattr(parent, "settings", None)
-        if manager is not None and hasattr(manager, "get"):
-            return manager
-        if self._settings_fallback is None:
-            self._settings_fallback = SettingsManager()
-        return self._settings_fallback
-
-    def _analysis_setting_float(self, key: str, fallback: float) -> float:
-        manager = self._settings_manager()
-        try:
-            return float(manager.get("analysis", key, str(fallback)))
-        except (TypeError, ValueError):
-            return float(fallback)
-
-    def _analysis_base_frequency_hz(self) -> float:
-        return self._analysis_setting_float("base_freq", 6.0)
-
-    def _analysis_bca_upper_limit_hz(self) -> float:
-        return self._analysis_setting_float(
-            "bca_upper_limit",
-            float(config.DEFAULT_BCA_UPPER_LIMIT),
-        )
-
-    def _refresh_analysis_setting_labels(self) -> None:
-        if not hasattr(self, "base_freq_value"):
-            return
-        self.base_freq_value.setText(f"{self._analysis_base_frequency_hz():g} Hz")
-        self.bca_limit_value.setText(f"{self._analysis_bca_upper_limit_hz():g} Hz")
-
     def _apply_bca_color_button_styles(self) -> None:
         self.color_low_btn.setStyleSheet(f"background-color: {self.bca_low_color};")
         self.color_high_btn.setStyleSheet(f"background-color: {self.bca_high_color};")
@@ -1648,7 +1606,6 @@ class PublicationMapsWindow(QWidget):
             self._update_run_state()
 
     def _collect_requests(self) -> tuple[PublicationMapRequest, ...]:
-        self._refresh_analysis_setting_labels()
         metrics = self._selected_metrics()
         color_bounds: dict[PublicationMetric, ColorBounds] = {}
         if PublicationMetric.BCA in metrics:

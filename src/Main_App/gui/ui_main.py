@@ -32,7 +32,6 @@ from .style_tokens import (
     EVENT_REMOVE_BUTTON_SIZE,
     PAGE_MARGIN,
     SECTION_GAP,
-    SIDEBAR_WIDTH,
     build_landing_page_stylesheet,
     build_main_page_stylesheet,
 )
@@ -159,9 +158,6 @@ def init_ui(self) -> None:
 
     # Sidebar placeholder (populated by sidebar.init_sidebar)
     self.sidebar = QWidget(page1)
-    self.sidebar.setObjectName("sidebar")
-    self.sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-    self.sidebar.setFixedWidth(SIDEBAR_WIDTH)
     row.addWidget(self.sidebar)
 
     # Right: vertical stack -> header on top, content below

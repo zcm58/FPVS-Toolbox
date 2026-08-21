@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import gc
-
-import pandas as pd
+from datetime import datetime
 
 from Main_App.Shared import user_messages
 
@@ -47,7 +46,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
 
     host.busy = False
     host._set_controls_enabled(True)
-    host.log(f"--- GUI Controls Re-enabled at {pd.Timestamp.now()} ---")
+    host.log(f"--- GUI Controls Re-enabled at {datetime.now()} ---")
 
     host.data_paths = []
     host._max_progress = 1
@@ -65,7 +64,7 @@ def finalize_processing_host_state(host, success: bool) -> None:
     if callable(winfo_exists) and winfo_exists():
         log_text.configure(state="normal")
         ready_msg = (
-            f"{pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]} [GUI]: "
+            f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} [GUI]: "
             "Ready for next file selection...\n"
         )
         log_text.insert("end", ready_msg)

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Main_App.gui.recording_qc_identity import build_recording_coverage_rows
+from Main_App.gui.recording_qc_identity import (
+    build_recording_coverage_rows,
+    ordered_participant_ids,
+)
 from Main_App.projects.grouping import GroupInfo, ParticipantInfo
 from Main_App.projects.recordings import (
     ProjectRecordingContext,
@@ -84,3 +87,10 @@ def test_legacy_context_has_no_recording_coverage_rows(tmp_path: Path) -> None:
     )
 
     assert build_recording_coverage_rows(context) == ()
+
+
+def test_ordered_participant_ids_preserves_natural_order_and_first_spelling() -> None:
+    assert ordered_participant_ids(
+        ("P10", "p2", "", "NoDigits"),
+        ("P2", "P01", "nodigits", "  "),
+    ) == ["NoDigits", "P01", "p2", "P10"]

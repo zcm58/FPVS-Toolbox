@@ -10,6 +10,7 @@ from PySide6.QtCore import QSignalBlocker
 from PySide6.QtWidgets import QFileDialog, QComboBox, QLineEdit
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.projects import EXCEL_SUBFOLDER_NAME
 
 CUSTOM_CONDITION_OPTION = "Custom path"
 
@@ -37,7 +38,7 @@ class RatioConditionSelectionMixin:
     def _excel_root(self) -> Optional[Path]:
         if not self._project_root:
             return None
-        return self._project_root / "1 - Excel Data Files"
+        return self._project_root / EXCEL_SUBFOLDER_NAME
 
     def _set_default_output(self) -> None:
         if self.output_edit.text().strip():
@@ -87,7 +88,6 @@ class RatioConditionSelectionMixin:
             self._apply_condition_selection(second, is_a=False)
         self._maybe_autoload_participants(force=True)
         self._refresh_rois()
-        self._update_run_state()
 
     def _populate_condition_combo(self, combo: QComboBox, edit: QLineEdit) -> None:
         current_path = edit.text().strip()
@@ -193,7 +193,7 @@ class RatioConditionSelectionMixin:
             if is_output:
                 preferred = self._project_root / "5 - Ratio Summaries"
             else:
-                preferred = self._project_root / "1 - Excel Data Files"
+                preferred = self._project_root / EXCEL_SUBFOLDER_NAME
             if preferred.exists():
                 return preferred
             return self._project_root

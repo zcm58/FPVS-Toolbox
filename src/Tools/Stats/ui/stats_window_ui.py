@@ -2,13 +2,31 @@
 # ruff: noqa: F405
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLayout, QProgressBar
+from PySide6.QtWidgets import QLayout, QProgressBar, QTabWidget
 
 from Main_App.gui.components import make_info_button, show_tool_info
 from Tools.Stats.ui.tool_info import STATS_TOOL_INFO
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
+
+
+def _make_flat_document_tabs(object_name: str) -> QTabWidget:
+    tabs = QTabWidget()
+    tabs.setObjectName(object_name)
+    tabs.setDocumentMode(True)
+    tabs.setStyleSheet(
+        f"""
+        QTabWidget#{object_name}::pane {{
+            border: 0;
+            background: transparent;
+        }}
+        QTabWidget#{object_name} > QWidget {{
+            background: transparent;
+        }}
+        """
+    )
+    return tabs
 
 
 class StatsWindowUiMixin:
@@ -648,20 +666,7 @@ class StatsWindowUiMixin:
         output_header_layout.addWidget(output_header)
 
         output_layout.addWidget(output_header_widget)
-        self.results_tabs = QTabWidget()
-        self.results_tabs.setObjectName("stats_results_tabs")
-        self.results_tabs.setDocumentMode(True)
-        self.results_tabs.setStyleSheet(
-            """
-            QTabWidget#stats_results_tabs::pane {
-                border: 0;
-                background: transparent;
-            }
-            QTabWidget#stats_results_tabs > QWidget {
-                background: transparent;
-            }
-            """
-        )
+        self.results_tabs = _make_flat_document_tabs("stats_results_tabs")
         self.results_tabs.addTab(self.summary_text, "At a glance")
         self.results_tabs.addTab(self.log_text, "Run log")
         output_layout.addWidget(self.results_tabs, 1)
@@ -809,39 +814,13 @@ class StatsWindowUiMixin:
         export_context_layout.addWidget(roi_context_section)
         export_context_layout.addStretch(1)
 
-        self.advanced_tabs = QTabWidget()
-        self.advanced_tabs.setObjectName("stats_advanced_tabs")
-        self.advanced_tabs.setDocumentMode(True)
-        self.advanced_tabs.setStyleSheet(
-            """
-            QTabWidget#stats_advanced_tabs::pane {
-                border: 0;
-                background: transparent;
-            }
-            QTabWidget#stats_advanced_tabs > QWidget {
-                background: transparent;
-            }
-            """
-        )
+        self.advanced_tabs = _make_flat_document_tabs("stats_advanced_tabs")
         self.advanced_tabs.addTab(inference_page, "Screening")
         self.advanced_tabs.addTab(dv_quality_page, "DV & quality")
         self.advanced_tabs.addTab(export_context_page, "Export & context")
         advanced_layout_page.addWidget(self.advanced_tabs, 1)
 
-        self.setup_tabs = QTabWidget()
-        self.setup_tabs.setObjectName("stats_setup_tabs")
-        self.setup_tabs.setDocumentMode(True)
-        self.setup_tabs.setStyleSheet(
-            """
-            QTabWidget#stats_setup_tabs::pane {
-                border: 0;
-                background: transparent;
-            }
-            QTabWidget#stats_setup_tabs > QWidget {
-                background: transparent;
-            }
-            """
-        )
+        self.setup_tabs = _make_flat_document_tabs("stats_setup_tabs")
         self.setup_tabs.addTab(basic_page, "Basic")
         self.setup_tabs.addTab(advanced_page, "Advanced")
         self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)

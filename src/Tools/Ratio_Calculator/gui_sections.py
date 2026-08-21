@@ -80,7 +80,7 @@ class RatioSectionsMixin:
         self.label_a_edit = QLineEdit()
         self.label_a_edit.setPlaceholderText("Condition A label")
         self.label_a_edit.textEdited.connect(self._mark_label_a_dirty)
-        self.label_a_edit.textChanged.connect(self._on_label_text_changed)
+        self.label_a_edit.textChanged.connect(self._update_run_label_default)
 
         self.condition_b_combo = QComboBox()
         self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_selected)
@@ -104,7 +104,7 @@ class RatioSectionsMixin:
         self.label_b_edit = QLineEdit()
         self.label_b_edit.setPlaceholderText("Condition B label")
         self.label_b_edit.textEdited.connect(self._mark_label_b_dirty)
-        self.label_b_edit.textChanged.connect(self._on_label_text_changed)
+        self.label_b_edit.textChanged.connect(self._update_run_label_default)
 
         (
             self.output_path_row,
@@ -135,20 +135,20 @@ class RatioSectionsMixin:
         condition_b_header_layout = QHBoxLayout(condition_b_header)
         condition_b_header_layout.setContentsMargins(0, 0, 0, 0)
         condition_b_header_layout.setSpacing(6)
-        condition_b_header_layout.addWidget(self._make_caption_label("Condition B"))
+        condition_b_header_layout.addWidget(SubsectionHeaderLabel("Condition B"))
         condition_b_header_layout.addStretch(1)
         condition_b_header_layout.addWidget(condition_actions)
 
-        cond_layout.addWidget(self._make_caption_label("Condition A"), 0, 0)
+        cond_layout.addWidget(SubsectionHeaderLabel("Condition A"), 0, 0)
         cond_layout.addWidget(condition_b_header, 0, 1)
         cond_layout.addWidget(self.condition_a_combo, 1, 0)
         cond_layout.addWidget(self.condition_b_combo, 1, 1)
-        cond_layout.addWidget(self._make_caption_label("Condition A Folder"), 2, 0)
-        cond_layout.addWidget(self._make_caption_label("Condition B Folder"), 2, 1)
+        cond_layout.addWidget(SubsectionHeaderLabel("Condition A Folder"), 2, 0)
+        cond_layout.addWidget(SubsectionHeaderLabel("Condition B Folder"), 2, 1)
         cond_layout.addWidget(self.input_a_row, 3, 0)
         cond_layout.addWidget(self.input_b_row, 3, 1)
-        cond_layout.addWidget(self._make_caption_label("Condition A Label"), 4, 0)
-        cond_layout.addWidget(self._make_caption_label("Condition B Label"), 4, 1)
+        cond_layout.addWidget(SubsectionHeaderLabel("Condition A Label"), 4, 0)
+        cond_layout.addWidget(SubsectionHeaderLabel("Condition B Label"), 4, 1)
         cond_layout.addWidget(self.label_a_edit, 5, 0)
         cond_layout.addWidget(self.label_b_edit, 5, 1)
         cond_layout.addWidget(self.validation_label, 6, 0, 1, 2)
@@ -272,10 +272,6 @@ class RatioSectionsMixin:
             self.run_label_edit,
         ]:
             widget.textChanged.connect(self._update_run_state)
-
-    @staticmethod
-    def _make_caption_label(text: str) -> SubsectionHeaderLabel:
-        return SubsectionHeaderLabel(text)
 
     @staticmethod
     def _make_folder_path_row(
@@ -418,8 +414,8 @@ class RatioSectionsMixin:
         output_layout.setContentsMargins(0, 0, 0, 0)
         output_layout.setHorizontalSpacing(12)
         output_layout.setVerticalSpacing(4)
-        output_layout.addWidget(self._make_caption_label("Output Folder"), 0, 0)
-        output_layout.addWidget(self._make_caption_label("Run Label"), 0, 1)
+        output_layout.addWidget(SubsectionHeaderLabel("Output Folder"), 0, 0)
+        output_layout.addWidget(SubsectionHeaderLabel("Run Label"), 0, 1)
         output_layout.addWidget(self.output_path_row, 1, 0)
         output_layout.addWidget(self.run_label_edit, 1, 1)
         output_layout.setColumnStretch(0, 3)

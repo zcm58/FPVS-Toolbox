@@ -35,6 +35,23 @@ def update_workflow_status(owner, text: str, variant: str = "info") -> None:
 class PlotGeneratorLifecycleMixin:
     """Own cancellation and completion while a generation thread is active."""
 
+    def _clear_generation_result_state(self) -> None:
+        self._generated_paths.clear()
+        self._failed_items.clear()
+        self._warning_items.clear()
+        self._spectral_qc_flags.clear()
+        self._spectral_qc_analysis_identities.clear()
+        self._batch_dataset_index = None
+
+    def _reset_generation_run_state(self) -> None:
+        self._clear_generation_result_state()
+        self._post_processing_required_request = None
+        self._gen_params = None
+        self._cancel_requested = False
+        self._worker_reported_cancelled = False
+        self._worker_outcome_received = False
+        self._late_cancel_after_commit = False
+
     def _set_workflow_status(self, text: str, variant: str = "info") -> None:
         update_workflow_status(self, text, variant)
 
@@ -224,18 +241,7 @@ class PlotGeneratorLifecycleMixin:
             )
 
         post_processing_request = self._post_processing_required_request
-        self._generated_paths.clear()
-        self._failed_items.clear()
-        self._warning_items.clear()
-        self._spectral_qc_flags.clear()
-        self._spectral_qc_analysis_identities.clear()
-        self._batch_dataset_index = None
-        self._post_processing_required_request = None
-        self._gen_params = None
-        self._cancel_requested = False
-        self._worker_reported_cancelled = False
-        self._worker_outcome_received = False
-        self._late_cancel_after_commit = False
+        self._reset_generation_run_state()
         if post_processing_request is not None:
             reason, project_root = post_processing_request
             self.post_processing_required.emit(
@@ -267,18 +273,7 @@ class PlotGeneratorLifecycleMixin:
             message = "Generation cancelled. No new figure files were saved."
             self._append_log("Generation cancelled.")
         update_workflow_status(self, message, "warning")
-        self._generated_paths.clear()
-        self._failed_items.clear()
-        self._warning_items.clear()
-        self._spectral_qc_flags.clear()
-        self._spectral_qc_analysis_identities.clear()
-        self._batch_dataset_index = None
-        self._post_processing_required_request = None
-        self._gen_params = None
-        self._cancel_requested = False
-        self._worker_reported_cancelled = False
-        self._worker_outcome_received = False
-        self._late_cancel_after_commit = False
+        self._reset_generation_run_state()
 
     def _generation_finished(self) -> None:
         self._thread = None

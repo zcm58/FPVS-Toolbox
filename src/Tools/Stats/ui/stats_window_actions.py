@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import traceback
 from html import escape
 
 from Main_App.gui.open_paths import open_path_in_file_manager
@@ -634,11 +635,6 @@ class StatsWindowActionsMixin:
         text = self.summary_text.toPlainText()
         self._copy_text_to_clipboard(text, context="summary")
 
-    def _copy_log_text(self) -> None:
-        """Handle the copy log text step for the Stats workflow."""
-        text = self.log_text.toPlainText()
-        self._copy_text_to_clipboard(text, context="log")
-
     def _open_export_path(self) -> None:
         """Handle the open export path step for the Stats workflow."""
         path = self._last_export_path or ""
@@ -949,8 +945,7 @@ class StatsWindowActionsMixin:
             return
         self._clear_output_views()
         self.posthoc_results_data = None
-        our = self._update_export_buttons  # keep line short
-        our()
+        self._update_export_buttons()
         self._controller.run_single_group_posthoc_only()
 
     # ---- exports ----
@@ -966,7 +961,6 @@ class StatsWindowActionsMixin:
             self._set_status(f"RM-ANOVA exported to: {out_dir}")
             self._set_last_export_path(out_dir)
         except Exception as e:
-            import traceback
             logger.exception("RM-ANOVA export failed.")
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
@@ -982,7 +976,6 @@ class StatsWindowActionsMixin:
             self._set_status(f"Mixed Model results exported to: {out_dir}")
             self._set_last_export_path(out_dir)
         except Exception as e:
-            import traceback
             logger.exception("Mixed Model export failed.")
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
@@ -998,7 +991,6 @@ class StatsWindowActionsMixin:
             self._set_status(f"Post-hoc results exported to: {out_dir}")
             self._set_last_export_path(out_dir)
         except Exception as e:
-            import traceback
             logger.exception("Post-hoc export failed.")
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")

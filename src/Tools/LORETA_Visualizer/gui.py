@@ -610,14 +610,11 @@ def default_split_figure_export_path(
     condition_label: str,
 ) -> str:
     """Return a helpful default path for publication split figure exports."""
-    start_dir_text = resolve_loreta_import_start_dir(
+    return _default_pdf_export_path(
         project_root=project_root,
         last_import_dir=last_import_dir,
+        stem=f"loreta_split_hemispheres_{condition_label}",
     )
-    stem = _safe_export_stem(f"loreta_split_hemispheres_{condition_label}")
-    if start_dir_text:
-        return str(Path(start_dir_text) / f"{stem}.pdf")
-    return f"{stem}.pdf"
 
 
 def default_stacked_split_figure_export_path(
@@ -630,14 +627,11 @@ def default_stacked_split_figure_export_path(
     """Return a helpful default path for stacked publication split figure exports."""
     top_code = split_figure_condition_code(top_condition_label)
     bottom_code = split_figure_condition_code(bottom_condition_label)
-    start_dir_text = resolve_loreta_import_start_dir(
+    return _default_pdf_export_path(
         project_root=project_root,
         last_import_dir=last_import_dir,
+        stem=f"loreta_split_hemispheres_{top_code}_{bottom_code}",
     )
-    stem = _safe_export_stem(f"loreta_split_hemispheres_{top_code}_{bottom_code}")
-    if start_dir_text:
-        return str(Path(start_dir_text) / f"{stem}.pdf")
-    return f"{stem}.pdf"
 
 
 def default_mri_slice_figure_export_path(
@@ -647,11 +641,24 @@ def default_mri_slice_figure_export_path(
     condition_label: str,
 ) -> str:
     """Return a helpful default path for orthogonal MRI slice figure exports."""
+    return _default_pdf_export_path(
+        project_root=project_root,
+        last_import_dir=last_import_dir,
+        stem=f"loreta_mri_slices_{condition_label}",
+    )
+
+
+def _default_pdf_export_path(
+    *,
+    project_root: Path | None,
+    last_import_dir: Path | None,
+    stem: str,
+) -> str:
     start_dir_text = resolve_loreta_import_start_dir(
         project_root=project_root,
         last_import_dir=last_import_dir,
     )
-    stem = _safe_export_stem(f"loreta_mri_slices_{condition_label}")
+    stem = _safe_export_stem(stem)
     if start_dir_text:
         return str(Path(start_dir_text) / f"{stem}.pdf")
     return f"{stem}.pdf"
@@ -810,10 +817,6 @@ def _safe_export_stem(text: str) -> str:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text).strip())
     stem = re.sub(r"_+", "_", stem).strip("._-")
     return stem or "loreta_split_hemispheres"
-
-
-def _object_name_slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")
 
 
 def _coerce_existing_project_root(value: object) -> Path | None:
@@ -1082,17 +1085,6 @@ def _source_export_status_text(
     include_flagged_subjects: bool,
     zscore_model: str = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
 ) -> str:
-    _ = automatic, include_flagged_subjects, zscore_model
-    if export_mode == PROJECT_SOURCE_EXPORT_ALL_ZSCORE:
-        return LORETA_SOURCE_MAP_BUILD_STATUS
-    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_SOURCE_PSD:
-        return LORETA_SOURCE_MAP_BUILD_STATUS
-    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_SOURCE_PSD:
-        return LORETA_SOURCE_MAP_BUILD_STATUS
-    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-        return LORETA_SOURCE_MAP_BUILD_STATUS
-    if export_mode == PROJECT_SOURCE_EXPORT_ELORETA_VOLUME:
-        return LORETA_SOURCE_MAP_BUILD_STATUS
     return LORETA_SOURCE_MAP_BUILD_STATUS
 
 
@@ -1651,8 +1643,7 @@ class LoretaVisualizerWindow(QWidget):
         controls.shell_layout.setSpacing(0)
         controls.content_layout.setSpacing(8)
 
-        def add_control_section(text: str, *, accent: bool = False) -> tuple[QWidget, QVBoxLayout]:
-            _ = (text, accent)
+        def add_control_section() -> tuple[QWidget, QVBoxLayout]:
             if controls.content_layout.count() > 0:
                 controls.content_layout.addSpacing(10)
             return controls, controls.content_layout
@@ -1671,7 +1662,7 @@ class LoretaVisualizerWindow(QWidget):
             row.addWidget(value_label, 0)
             target_layout.addLayout(row)
 
-        selection_section, selection_layout = add_control_section("Selection", accent=True)
+        selection_section, selection_layout = add_control_section()
 
         source_method_label = make_field_label("Method", selection_section)
         selection_layout.addWidget(source_method_label)
@@ -1718,7 +1709,7 @@ class LoretaVisualizerWindow(QWidget):
         self.cluster_mask_check.toggled.connect(self._set_cluster_mask_enabled)
         selection_layout.addWidget(self.cluster_mask_check)
 
-        color_section, color_layout = add_control_section("Color")
+        color_section, color_layout = add_control_section()
 
         self.activation_auto_scale_check = QCheckBox("Auto color scale", color_section)
         self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
@@ -1774,7 +1765,7 @@ class LoretaVisualizerWindow(QWidget):
         range_row.addWidget(self.activation_max_spin)
         color_layout.addLayout(range_row)
 
-        view_section, view_layout = add_control_section("View")
+        view_section, view_layout = add_control_section()
 
         self.opacity_label = make_field_label("Brain opacity", view_section)
 
@@ -1853,7 +1844,7 @@ class LoretaVisualizerWindow(QWidget):
         self.reset_camera_btn.clicked.connect(self._reset_camera)
         view_layout.addWidget(self.reset_camera_btn)
 
-        actions_section, actions_layout = add_control_section("Actions")
+        actions_section, actions_layout = add_control_section()
 
         self.export_figures_btn = make_action_button(
             "Export Figures...",
@@ -1891,7 +1882,6 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_activation_range_enabled()
         self._sync_activation_render_mode_controls()
         self._update_activation_scale_readout(DEFAULT_SCALAR_MIN, DEFAULT_SCALAR_MAX)
-        self._update_condition_status()
         return controls
 
     def _open_loreta_method_info(self) -> None:
@@ -2045,7 +2035,6 @@ class LoretaVisualizerWindow(QWidget):
         ):
             widget.setVisible(split_mode_active)
             widget.setEnabled(self.renderer is not None and split_mode_active)
-        self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
         self._sync_cluster_mask_control()
 
     def _sync_cluster_mask_control(self) -> None:
@@ -2167,7 +2156,6 @@ class LoretaVisualizerWindow(QWidget):
         if isinstance(condition_id, str):
             self._selected_condition_id = condition_id
             self._sync_summary_combo_for_selected_condition(preferred_summary=self._selected_summary_id)
-        self._update_condition_status()
         self._refresh_current_activation()
 
     def _on_summary_changed(self, _index: int) -> None:
@@ -2175,19 +2163,6 @@ class LoretaVisualizerWindow(QWidget):
         if isinstance(summary_id, str):
             self._selected_summary_id = summary_id
         self._refresh_current_activation()
-
-    def _update_condition_status(self) -> None:
-        manifest_entry = self._selected_manifest_entry()
-        if manifest_entry is not None:
-            return
-
-    def _zoom_in(self) -> None:
-        if self.renderer is not None:
-            self.renderer.zoom_in()
-
-    def _zoom_out(self) -> None:
-        if self.renderer is not None:
-            self.renderer.zoom_out()
 
     def _reset_camera(self) -> None:
         if self.renderer is not None:
@@ -2237,17 +2212,12 @@ class LoretaVisualizerWindow(QWidget):
             last_import_dir=self._last_import_dir,
             condition_label=self._selected_condition_label(),
         )
-        file_name, _selected_filter = QFileDialog.getSaveFileName(
-            self,
+        output_path = self._choose_pdf_export_path(
             "Export publication split hemisphere figures",
             default_path,
-            "PDF files (*.pdf)",
         )
-        if not file_name:
+        if output_path is None:
             return
-        output_path = Path(file_name)
-        if output_path.suffix.lower() != ".pdf":
-            output_path = output_path.with_suffix(".pdf")
         try:
             pdf_path, png_path = renderer.write_split_hemisphere_figures(output_path)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -2307,17 +2277,12 @@ class LoretaVisualizerWindow(QWidget):
             top_condition_label=top_label,
             bottom_condition_label=bottom_label,
         )
-        file_name, _selected_filter = QFileDialog.getSaveFileName(
-            self,
+        output_path = self._choose_pdf_export_path(
             "Export stacked split hemisphere figures",
             default_path,
-            "PDF files (*.pdf)",
         )
-        if not file_name:
+        if output_path is None:
             return
-        output_path = Path(file_name)
-        if output_path.suffix.lower() != ".pdf":
-            output_path = output_path.with_suffix(".pdf")
         try:
             pdf_path, png_path = renderer.write_split_hemisphere_stack_figures(output_path, panels=panels)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -2482,17 +2447,12 @@ class LoretaVisualizerWindow(QWidget):
             last_import_dir=self._last_import_dir,
             condition_label=self._selected_condition_label(),
         )
-        file_name, _selected_filter = QFileDialog.getSaveFileName(
-            self,
+        output_path = self._choose_pdf_export_path(
             "Export MRI slice figure",
             default_path,
-            "PDF files (*.pdf)",
         )
-        if not file_name:
+        if output_path is None:
             return
-        output_path = Path(file_name)
-        if output_path.suffix.lower() != ".pdf":
-            output_path = output_path.with_suffix(".pdf")
         try:
             pdf_path, png_path = write_mri_orthogonal_slice_figures(
                 output_path,
@@ -2517,6 +2477,20 @@ class LoretaVisualizerWindow(QWidget):
         if group is not None:
             return group.label
         return "source map"
+
+    def _choose_pdf_export_path(self, title: str, default_path: str) -> Path | None:
+        file_name, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            title,
+            default_path,
+            "PDF files (*.pdf)",
+        )
+        if not file_name:
+            return None
+        output_path = Path(file_name)
+        if output_path.suffix.lower() != ".pdf":
+            output_path = output_path.with_suffix(".pdf")
+        return output_path
 
     def _selected_manifest_entry(self) -> PreparedSourceManifestEntry | None:
         return self._manifest_entry_for(self._selected_condition_id, self._selected_summary_id)
@@ -2792,9 +2766,6 @@ class LoretaVisualizerWindow(QWidget):
             },
         )
 
-    def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
-        self._build_project_source_maps_for_modes((export_mode,), automatic=automatic)
-
     def _build_project_source_maps_for_modes(
         self,
         export_modes: tuple[str, ...],
@@ -2955,8 +2926,7 @@ class LoretaVisualizerWindow(QWidget):
         thread.start()
 
     @Slot(str)
-    def _on_stats_ready_workbook_progress(self, message: str) -> None:
-        _ = message
+    def _on_stats_ready_workbook_progress(self, _message: str) -> None:
         self._set_source_export_status(LORETA_SUMMARY_REPORT_STATUS, variant="info")
 
     @Slot(object)
@@ -3005,8 +2975,7 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_project_source_button()
 
     @Slot(str)
-    def _on_project_source_maps_progress(self, message: str) -> None:
-        _ = message
+    def _on_project_source_maps_progress(self, _message: str) -> None:
         self._set_source_export_status(LORETA_SOURCE_MAP_BUILD_STATUS, variant="info")
 
     @Slot(object)

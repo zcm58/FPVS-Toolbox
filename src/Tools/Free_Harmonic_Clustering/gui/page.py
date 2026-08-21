@@ -841,6 +841,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self._update_exclusion_count_label()
 
     def _clear_choice_controls(self) -> None:
+        was_updating = self._updating_controls
         self._updating_controls = True
         try:
             for combo in (
@@ -854,7 +855,7 @@ class FreeHarmonicClusteringPage(QWidget):
             ):
                 combo.clear()
         finally:
-            self._updating_controls = False
+            self._updating_controls = was_updating
 
     def _update_exclusion_count_label(self) -> None:
         count = len(self._recording_exclusions)
@@ -1015,22 +1016,7 @@ class FreeHarmonicClusteringPage(QWidget):
             if not group_a or not group_b or group_a.casefold() == group_b.casefold():
                 raise ValueError("Independent analysis requires two different groups.")
 
-        harmonic_mode = self._selected_harmonic_mode()
-        if harmonic_mode is None:
-            raise ValueError("Choose a harmonic-domain mode.")
-        fixed_order = None
-        if harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
-            value = self.fixed_highest_combo.currentData()
-            if value is None:
-                raise ValueError("Choose the highest included harmonic.")
-            fixed_order = int(value)
-        maximum = self._frequency_snapshot.max_harmonic_hz
-        if maximum is None:
-            maximum = self._options.effective_harmonic_upper_hz
-        if maximum is None and self._options.eligible_harmonics_hz:
-            maximum = self._options.eligible_harmonics_hz[-1]
-        if maximum is None:
-            raise ValueError("No eligible harmonics are available on the FullFFT grid.")
+        harmonic_mode, fixed_order, maximum = self._current_harmonic_domain()
         return AnalysisSetup(
             design=design,
             condition_a=condition_a,
@@ -1038,7 +1024,7 @@ class FreeHarmonicClusteringPage(QWidget):
             group_ids=group_ids,
             harmonic_mode=harmonic_mode,
             fixed_highest_harmonic_order=fixed_order,
-            max_harmonic_hz=float(maximum),
+            max_harmonic_hz=maximum,
         )
 
     def _current_repeated_batch_setup(self) -> RepeatedBatchSetup:
@@ -1053,22 +1039,7 @@ class FreeHarmonicClusteringPage(QWidget):
             )
         if not self._options.conditions:
             raise ValueError("The repeated-session project has no conditions.")
-        harmonic_mode = self._selected_harmonic_mode()
-        if harmonic_mode is None:
-            raise ValueError("Choose a harmonic-domain mode.")
-        fixed_order = None
-        if harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
-            value = self.fixed_highest_combo.currentData()
-            if value is None:
-                raise ValueError("Choose the highest included harmonic.")
-            fixed_order = int(value)
-        maximum = self._frequency_snapshot.max_harmonic_hz
-        if maximum is None:
-            maximum = self._options.effective_harmonic_upper_hz
-        if maximum is None and self._options.eligible_harmonics_hz:
-            maximum = self._options.eligible_harmonics_hz[-1]
-        if maximum is None:
-            raise ValueError("No eligible harmonics are available on the FullFFT grid.")
+        harmonic_mode, fixed_order, maximum = self._current_harmonic_domain()
         known_recordings = {
             recording.recording_id.casefold() for recording in self._options.recordings
         }
@@ -1084,9 +1055,28 @@ class FreeHarmonicClusteringPage(QWidget):
         return RepeatedBatchSetup(
             harmonic_mode=harmonic_mode,
             fixed_highest_harmonic_order=fixed_order,
-            max_harmonic_hz=float(maximum),
+            max_harmonic_hz=maximum,
             recording_exclusions=self._recording_exclusions,
         )
+
+    def _current_harmonic_domain(self) -> tuple[GuiHarmonicMode, int | None, float]:
+        harmonic_mode = self._selected_harmonic_mode()
+        if harmonic_mode is None:
+            raise ValueError("Choose a harmonic-domain mode.")
+        fixed_order = None
+        if harmonic_mode is GuiHarmonicMode.FIXED_HIGHEST:
+            value = self.fixed_highest_combo.currentData()
+            if value is None:
+                raise ValueError("Choose the highest included harmonic.")
+            fixed_order = int(value)
+        maximum = self._frequency_snapshot.max_harmonic_hz
+        if maximum is None:
+            maximum = self._options.effective_harmonic_upper_hz
+        if maximum is None and self._options.eligible_harmonics_hz:
+            maximum = self._options.eligible_harmonics_hz[-1]
+        if maximum is None:
+            raise ValueError("No eligible harmonics are available on the FullFFT grid.")
+        return harmonic_mode, fixed_order, float(maximum)
 
     def _setup_error(self) -> str | None:
         if self._retired:
@@ -1160,21 +1150,18 @@ class FreeHarmonicClusteringPage(QWidget):
             self._show_error("Analysis returned an invalid result.")
             return
         self._populate_results(value.prepared, value.run_outcome)
-        # The table now owns plain display strings. Do not retain the prepared
-        # participant tensors or permutation arrays on the long-lived page.
-        self._has_result = True
-        self.results_panel.show()
-        self._update_results_folder_button()
-        self.workflow_status.hide()
-        self._update_buttons()
+        self._show_completed_results()
 
     def _on_repeated_batch_completed(self, value: object) -> None:
         if not isinstance(value, RepeatedBatchWorkerOutcome):
             self._show_error("Repeated-session batch returned an invalid result.")
             return
         self._populate_repeated_batch_results(value.run)
-        # The table owns plain strings only; keep no prepared tensors or
-        # permutation arrays on the long-lived page.
+        self._show_completed_results()
+
+    def _show_completed_results(self) -> None:
+        """Reveal display-only results without retaining worker analysis arrays."""
+
         self._has_result = True
         self.results_panel.show()
         self._update_results_folder_button()
@@ -1384,17 +1371,17 @@ class FreeHarmonicClusteringPage(QWidget):
             bool(getattr(cluster, "confidence_interval_straddles_alpha", False))
             for cluster in clusters
         )
+        caution = (
+            " At least one result is close to the decision threshold; "
+            "interpret it cautiously."
+            if unstable
+            else ""
+        )
         if significant:
             self.result_status.set_variant("warning" if unstable else "success")
             cluster_word = "cluster" if len(significant) == 1 else "clusters"
             self.result_status.set_text(
-                f"{len(significant)} significant {cluster_word} found."
-                + (
-                    " At least one result is close to the decision threshold; "
-                    "interpret it cautiously."
-                    if unstable
-                    else ""
-                )
+                f"{len(significant)} significant {cluster_word} found." + caution
             )
             self.significant_table.show()
             self._fill_significant_table(prepared, significant)
@@ -1403,13 +1390,7 @@ class FreeHarmonicClusteringPage(QWidget):
             self.significant_table.setRowCount(0)
             self.result_status.set_variant("warning" if unstable else "info")
             self.result_status.set_text(
-                "No significant clusters were found."
-                + (
-                    " At least one result is close to the decision threshold; "
-                    "interpret it cautiously."
-                    if unstable
-                    else ""
-                )
+                "No significant clusters were found." + caution
             )
 
     def _populate_repeated_batch_results(self, run: object) -> None:

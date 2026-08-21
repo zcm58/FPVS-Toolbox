@@ -22,9 +22,6 @@ class RatioSettingsMixin:
     def _mark_run_label_dirty(self) -> None:
         self._run_label_dirty = True
 
-    def _on_label_text_changed(self) -> None:
-        self._update_run_label_default()
-
     def _update_run_label_default(self) -> None:
         if self._run_label_dirty:
             return

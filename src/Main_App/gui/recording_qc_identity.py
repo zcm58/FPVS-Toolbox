@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -94,7 +95,7 @@ def build_recording_coverage_rows(
     rows: list[QcRecordingIdentity] = []
     for participant_key, participant_id in sorted(
         participant_casing.items(),
-        key=lambda item: _participant_sort_key(item[1]),
+        key=lambda item: participant_sort_key(item[1]),
     ):
         group_id = participant_groups.get(participant_key)
         group_label = (
@@ -146,15 +147,37 @@ def project_recording_coverage_rows(
     )
 
 
-def _participant_sort_key(value: str) -> tuple[str, int, str]:
+def participant_sort_key(value: str) -> tuple[str, int, str]:
+    """Return the established natural-sort key for participant identifiers."""
+
     prefix = "".join(ch for ch in value if not ch.isdigit()).casefold()
     digits = "".join(ch for ch in value if ch.isdigit())
     number = int(digits) if digits else -1
     return prefix, number, value.casefold()
 
 
+def ordered_participant_ids(*sources: Iterable[object]) -> list[str]:
+    """Normalize, deduplicate, and naturally sort participant identifiers."""
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for source in sources:
+        for raw_pid in source:
+            participant_id = str(raw_pid or "").strip()
+            if not participant_id:
+                continue
+            key = participant_id.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(participant_id)
+    return sorted(ordered, key=participant_sort_key)
+
+
 __all__ = [
     "QcRecordingIdentity",
     "build_recording_coverage_rows",
+    "ordered_participant_ids",
+    "participant_sort_key",
     "project_recording_coverage_rows",
 ]

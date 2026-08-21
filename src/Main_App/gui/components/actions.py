@@ -24,7 +24,6 @@ class ActionRow(QWidget):
         self.row_layout.setSpacing(spacing)
         if alignment == Qt.AlignRight:
             self.row_layout.addStretch(1)
-        self._alignment = alignment
 
     def add_button(self, button: QPushButton) -> QPushButton:
         self.row_layout.addWidget(button)

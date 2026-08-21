@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import os
 import logging
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QThread, Qt, QUrl
+from PySide6.QtCore import QSignalBlocker, QThread, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,7 +46,7 @@ from Main_App.gui.components import (
     show_error,
     show_tool_info,
 )
-from Main_App.projects import repeated_session_tool_block_reason
+from Main_App.projects import EXCEL_SUBFOLDER_NAME, repeated_session_tool_block_reason
 
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
@@ -111,14 +110,6 @@ class IndividualDetectabilityWindow(QWidget):
         self._set_default_input_root()
         self._refresh_conditions()
         self._update_run_state()
-
-    @contextmanager
-    def _block_signals(self, widget: QWidget):
-        was_blocked = widget.blockSignals(True)
-        try:
-            yield
-        finally:
-            widget.blockSignals(was_blocked)
 
     def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
         if provided_root:
@@ -513,7 +504,7 @@ class IndividualDetectabilityWindow(QWidget):
         if self.input_root_edit.text().strip():
             return
         if self._project_root:
-            candidate = self._project_root / "1 - Excel Data Files"
+            candidate = self._project_root / EXCEL_SUBFOLDER_NAME
             if candidate.exists():
                 self.input_root_edit.setText(str(candidate))
 
@@ -537,7 +528,7 @@ class IndividualDetectabilityWindow(QWidget):
         if self._last_dir and self._last_dir.exists():
             return self._last_dir
         if self._project_root:
-            candidate = self._project_root / "1 - Excel Data Files"
+            candidate = self._project_root / EXCEL_SUBFOLDER_NAME
             if candidate.exists():
                 return candidate
         return Path.home()
@@ -567,7 +558,7 @@ class IndividualDetectabilityWindow(QWidget):
                 ],
             },
         )
-        with self._block_signals(self.conditions_list):
+        with QSignalBlocker(self.conditions_list):
             self.conditions_list.clear()
             for cond in self._conditions:
                 item = QListWidgetItem(f"{cond.name} ({len(cond.files)})")
@@ -584,7 +575,7 @@ class IndividualDetectabilityWindow(QWidget):
         self._update_run_state()
 
     def _set_all_conditions(self, checked: bool) -> None:
-        with self._block_signals(self.conditions_list):
+        with QSignalBlocker(self.conditions_list):
             for i in range(self.conditions_list.count()):
                 item = self.conditions_list.item(i)
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
@@ -654,7 +645,7 @@ class IndividualDetectabilityWindow(QWidget):
                 },
             )
 
-        with self._block_signals(self.participant_table):
+        with QSignalBlocker(self.participant_table):
             self.participant_table.setRowCount(len(participants))
             for row, pid in enumerate(participants):
                 exclude_item = QTableWidgetItem()
@@ -784,7 +775,6 @@ class IndividualDetectabilityWindow(QWidget):
     def _update_run_state(self) -> None:
         ready = bool(self.output_root_edit.text().strip())
         ready = ready and bool(self._selected_conditions())
-        ready = ready and bool(self._collect_output_stems())
         self.run_btn.setEnabled(ready and self._thread is None)
 
     def _toggle_log_panel(self, checked: bool) -> None:
@@ -880,7 +870,6 @@ class IndividualDetectabilityWindow(QWidget):
         self.progress.setValue(100)
         if self.open_on_complete_check.isChecked():
             QDesktopServices.openUrl(QUrl.fromLocalFile(output_root))
-        self._update_run_state()
 
     def _cleanup_worker(self) -> None:
         if self._worker:

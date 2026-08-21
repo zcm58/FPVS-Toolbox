@@ -161,7 +161,6 @@ class SequenceFigureWindow(QWidget):
         self._worker = SequenceFigureWorker(spec)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_progress)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._thread.quit)
@@ -187,9 +186,6 @@ class SequenceFigureWindow(QWidget):
             base_frequency_hz=self.base_frequency_edit.text().strip() or "6",
             oddball_frequency_hz=self.oddball_frequency_edit.text().strip() or "1.2",
         )
-
-    def _on_progress(self, _message: str) -> None:
-        return
 
     def _on_failed(self, message: str) -> None:
         self.export_btn.setEnabled(True)

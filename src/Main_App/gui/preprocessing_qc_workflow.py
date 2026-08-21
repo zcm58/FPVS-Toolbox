@@ -26,7 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import make_action_button
-from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
+from Main_App.gui.recording_qc_identity import (
+    participant_sort_key,
+    project_recording_coverage_rows,
+)
 from Main_App.io.load_utils import format_bdf_recording_not_started_message
 from Main_App.processing.qc_summary_export import QUALITY_CHECK_FOLDER
 from Main_App.processing.full_fft_grid_qc import audit_project_full_fft_grids
@@ -174,13 +177,6 @@ class _PreflightQcWorker(QObject):
         self.finished.emit(scan)
 
 
-def _participant_sort_key(value: str) -> tuple[str, int, str]:
-    prefix = "".join(ch for ch in value if not ch.isdigit()).casefold()
-    digits = "".join(ch for ch in value if ch.isdigit())
-    number = int(digits) if digits else -1
-    return prefix, number, value.casefold()
-
-
 def _project_group_labels(host: Any) -> dict[str, str]:
     project = getattr(host, "currentProject", None)
     if project is None:
@@ -276,7 +272,7 @@ def _merge_removed_maps(
             current.append(electrode)
             seen.add(electrode.casefold())
         merged[pid] = current
-    return dict(sorted(merged.items(), key=lambda item: _participant_sort_key(item[0])))
+    return dict(sorted(merged.items(), key=lambda item: participant_sort_key(item[0])))
 
 
 def _filter_removed_map_for_participants(
@@ -305,7 +301,7 @@ def _replace_removed_map_for_participants(
     for pid, electrodes in replacements.items():
         if pid.casefold() in keys:
             merged[pid] = list(electrodes)
-    return dict(sorted(merged.items(), key=lambda item: _participant_sort_key(item[0])))
+    return dict(sorted(merged.items(), key=lambda item: participant_sort_key(item[0])))
 
 
 def _unique_channels(*values: Sequence[str]) -> list[str]:
@@ -354,7 +350,7 @@ def _removed_review_row_values(
             continue
         seen_pids.add(key)
         all_pids.append(pid)
-    all_pids.sort(key=_participant_sort_key)
+    all_pids.sort(key=participant_sort_key)
 
     for pid in all_pids:
         auto_values = parse_electrode_list(_map_lookup(auto_flagged, pid))
@@ -736,7 +732,7 @@ def _set_preflight_table(
     if table is None:
         return
     _clear_preflight_table_click_handler(host, table)
-    editable_lookup = set(int(column) for column in (editable_columns or ()))
+    editable_lookup = {int(column) for column in (editable_columns or ())}
     if editable_last_column and headers:
         editable_lookup.add(len(headers) - 1)
     for row_index in range(table.rowCount()):
@@ -2882,14 +2878,12 @@ def run_preprocessing_qc_workflow(
         scan,
         group_labels,
     )
-    if not _show_suspicious_remainder(
+    return _show_suspicious_remainder(
         host,
         scan,
         accepted_hard_exclusions,
         group_labels,
-    ):
-        return False
-    return True
+    )
 
 
 __all__ = ["run_preprocessing_qc_workflow"]

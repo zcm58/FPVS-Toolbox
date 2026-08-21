@@ -206,10 +206,7 @@ class PlotGeneratorWindow(
         self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
         self._progress_anim.setDuration(200)
         if default_in:
-            self.folder_edit.setText(default_in)
             self._populate_conditions(default_in)
-        if default_out:
-            self.out_edit.setText(default_out)
 
         self._thread: QThread | None = None
         self._worker: object | None = None
@@ -259,12 +256,11 @@ class PlotGeneratorWindow(
         self.legend_condition_b_edit.setEnabled(custom and show_b)
         self.legend_b_peaks_edit.setEnabled(custom and show_b)
         if custom:
-            self._prefill_legend_defaults_if_empty()
+            self._sync_legend_defaults_with_conditions()
 
     def _update_selector_columns(self, overlay_on: bool) -> None:
         if not hasattr(self, "_selectors_grid"):
             return
-        _ = overlay_on
         self._selectors_grid.setColumnStretch(0, 1)
         self._selectors_grid.setColumnStretch(1, 1)
         self.condB_container.setVisible(overlay_on)

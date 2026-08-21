@@ -1646,22 +1646,6 @@ class StatsWindowPipelineMixin:
             }, handle_report
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
-    def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
-        """Handle the prompt view results step for the Stats workflow."""
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Standard FPVS Screening Complete")
-        msg.setText("Standard FPVS Screening is complete.\nView results?")
-        msg.setIcon(QMessageBox.Information)
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.Yes)
-        reply = msg.exec()
-
-        if reply == QMessageBox.Yes:
-            if stats_folder.is_dir():
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(stats_folder)))
-            else:
-                self.append_log(section, f"Stats folder not found: {stats_folder}", "error")
-
     @Slot(int)
     def _on_worker_progress(self, val: int) -> None:
         """Handle the on worker progress step for the Stats workflow."""
@@ -1769,23 +1753,5 @@ class StatsWindowPipelineMixin:
             self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
-
-    @Slot(dict)
-    def _on_rm_anova_finished(self, payload: dict) -> None:
-        """Handle the on rm anova finished step for the Stats workflow."""
-        self._apply_rm_anova_results(payload)
-        self._end_run()
-
-    @Slot(dict)
-    def _on_mixed_model_finished(self, payload: dict) -> None:
-        """Handle the on mixed model finished step for the Stats workflow."""
-        self._apply_mixed_model_results(payload)
-        self._end_run()
-
-    @Slot(dict)
-    def _on_posthoc_finished(self, payload: dict) -> None:
-        """Handle the on posthoc finished step for the Stats workflow."""
-        self._apply_posthoc_results(payload)
-        self._end_run()
 
     # --------------------------- UI building ---------------------------

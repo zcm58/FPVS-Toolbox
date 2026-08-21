@@ -20,8 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import FPVS_TOOLBOX_VERSION
-from Main_App.gui.components import make_action_button
-from Main_App.gui.components.messages import confirm, show_warning
+from Main_App.gui.components import confirm, make_action_button, show_warning
 from Main_App.gui.typography import apply_font_role
 from Main_App.updates.downloader import download_installer
 from Main_App.updates.github_releases import check_for_updates
@@ -419,9 +418,7 @@ def _host_has_active_work(host: QWidget) -> bool:
     ):
         if _handle_is_active(getattr(host, attr_name, None)):
             return True
-    if getattr(host, "_post_worker", None) is not None:
-        return True
-    return False
+    return getattr(host, "_post_worker", None) is not None
 
 
 def _handle_is_active(handle: Any) -> bool:

@@ -599,7 +599,7 @@ class SensitivityAnalysisWindow(QWidget):
         self.power_spin.valueChanged.connect(self._on_assumptions_changed)
         self.alpha_spin.valueChanged.connect(self._on_assumptions_changed)
         self.alternative_combo.currentIndexChanged.connect(
-            self._on_alternative_changed
+            self._on_guidance_assumptions_changed
         )
         self.effect_target_combo.currentIndexChanged.connect(
             self._update_derived_measurements
@@ -609,20 +609,20 @@ class SensitivityAnalysisWindow(QWidget):
         self.correlation_spin.valueChanged.connect(self._on_assumptions_changed)
         self.epsilon_spin.valueChanged.connect(self._on_assumptions_changed)
         self.lmm_target_combo.currentIndexChanged.connect(
-            self._on_lmm_assumptions_changed
+            self._on_guidance_assumptions_changed
         )
         self.lmm_sample_size_spin.valueChanged.connect(
-            self._on_lmm_assumptions_changed
+            self._on_guidance_assumptions_changed
         )
         self.lmm_conditions_spin.valueChanged.connect(
-            self._on_lmm_assumptions_changed
+            self._on_guidance_assumptions_changed
         )
-        self.lmm_rois_spin.valueChanged.connect(self._on_lmm_assumptions_changed)
+        self.lmm_rois_spin.valueChanged.connect(self._on_guidance_assumptions_changed)
         self.lmm_correlation_spin.valueChanged.connect(
-            self._on_lmm_assumptions_changed
+            self._on_guidance_assumptions_changed
         )
         self.lmm_simulations_spin.valueChanged.connect(
-            self._on_lmm_assumptions_changed
+            self._on_guidance_assumptions_changed
         )
         self.calculate_button.clicked.connect(self.calculate)
         self.cancel_button.clicked.connect(self._cancel_lmm_simulation)
@@ -631,11 +631,7 @@ class SensitivityAnalysisWindow(QWidget):
     def _on_assumptions_changed(self) -> None:
         self._clear_result()
 
-    def _on_alternative_changed(self) -> None:
-        self._update_assumption_guidance()
-        self._clear_result()
-
-    def _on_lmm_assumptions_changed(self) -> None:
+    def _on_guidance_assumptions_changed(self) -> None:
         self._update_assumption_guidance()
         self._clear_result()
 

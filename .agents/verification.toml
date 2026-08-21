@@ -104,6 +104,7 @@ tests = [
   "tests/plot_generator/test_plot_generator_gridlines.py",
   "tests/plot_generator/test_plot_generator_group_overlay_worker.py",
   "tests/plot_generator/test_plot_generator_group_integrity.py",
+  "tests/plot_generator/test_plot_generator_lifecycle_state.py",
   "tests/plot_generator/test_plot_generator_manifest_utils.py",
   "tests/plot_generator/test_plot_generator_oddballs_from_xmax.py",
   "tests/plot_generator/test_plot_generator_project_input_policy.py",
