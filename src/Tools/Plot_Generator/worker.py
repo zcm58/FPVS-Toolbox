@@ -347,12 +347,17 @@ class _Worker(
 
     def _read_analysis_float(self, option: str, fallback: float) -> float:
         try:
-            mgr = SettingsManager()
+            mgr = getattr(self, "_settings_manager", None)
+            if mgr is None:
+                mgr = SettingsManager()
             raw = mgr.get("analysis", option, str(fallback))
             value = float(raw)
+            if not math.isfinite(value):
+                return fallback
+            self._settings_manager = mgr
         except Exception:
             return fallback
-        return value if math.isfinite(value) else fallback
+        return value
 
     def _derive_oddball_harmonics(self, max_hz: float) -> List[float]:
         if not math.isfinite(max_hz) or max_hz <= 0:

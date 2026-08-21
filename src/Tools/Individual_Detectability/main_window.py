@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import logging
 from pathlib import Path
 from typing import Optional
@@ -46,7 +45,11 @@ from Main_App.gui.components import (
     show_error,
     show_tool_info,
 )
-from Main_App.projects import EXCEL_SUBFOLDER_NAME, repeated_session_tool_block_reason
+from Main_App.projects import (
+    EXCEL_SUBFOLDER_NAME,
+    repeated_session_tool_block_reason,
+    resolve_active_project_root,
+)
 
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
@@ -112,21 +115,10 @@ class IndividualDetectabilityWindow(QWidget):
         self._update_run_state()
 
     def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
-        if provided_root:
-            root = Path(provided_root)
-            if root.exists():
-                return root
-        env_root = os.environ.get("FPVS_PROJECT_ROOT")
-        if env_root:
-            root = Path(env_root)
-            if root.exists():
-                return root
-        proj = getattr(self.parent(), "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
-            root = Path(proj.project_root)
-            if root.exists():
-                return root
-        return None
+        return resolve_active_project_root(
+            provided_root,
+            current_project=getattr(self.parent(), "currentProject", None),
+        )
 
     def _build_basic_tab(self) -> None:
         self.basic_grid = make_section_grid_layout(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -10,7 +9,7 @@ from PySide6.QtCore import QSignalBlocker
 from PySide6.QtWidgets import QFileDialog, QComboBox, QLineEdit
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
-from Main_App.projects import EXCEL_SUBFOLDER_NAME
+from Main_App.projects import EXCEL_SUBFOLDER_NAME, resolve_active_project_root
 
 CUSTOM_CONDITION_OPTION = "Custom path"
 
@@ -19,21 +18,10 @@ class RatioConditionSelectionMixin:
     """GUI-only condition and folder selection behavior."""
 
     def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
-        if provided_root:
-            root = Path(provided_root)
-            if root.exists():
-                return root
-        env_root = os.environ.get("FPVS_PROJECT_ROOT")
-        if env_root:
-            root = Path(env_root)
-            if root.exists():
-                return root
-        proj = getattr(self.parent(), "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
-            root = Path(proj.project_root)
-            if root.exists():
-                return root
-        return None
+        return resolve_active_project_root(
+            provided_root,
+            current_project=getattr(self.parent(), "currentProject", None),
+        )
 
     def _excel_root(self) -> Optional[Path]:
         if not self._project_root:

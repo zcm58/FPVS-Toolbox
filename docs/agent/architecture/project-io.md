@@ -2,6 +2,15 @@
 
 Project-aware workflows should resolve paths from the active project root, not from the process current directory or a developer-machine path.
 
+The canonical project root is runtime context: it is the directory containing
+the opened `project.json`, exposed as `Project.project_root`. It is not stored
+as an absolute manifest field, because copied, renamed, or cross-platform
+projects must rebase to the directory that was actually opened. Embedded tools
+with the standard explicit/environment/current-project fallback use the public
+`Main_App.projects.resolve_active_project_root()` helper; specialized tools may
+retain stricter request validation or ancestry discovery when their established
+workflow requires it.
+
 Primary paths:
 
 - `src/Main_App/projects/` is the canonical active import surface for project

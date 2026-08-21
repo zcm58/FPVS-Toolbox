@@ -14,6 +14,7 @@ class RatioCalculatorWorker(QObject):
     status = Signal(str)
     error = Signal(str)
     finished = Signal(str, str)
+    terminal = Signal()
     log = Signal(str)
 
     def __init__(
@@ -65,3 +66,5 @@ class RatioCalculatorWorker(QObject):
             self.finished.emit(str(result.output_dir), str(result.excel_path))
         except Exception:
             self.error.emit(traceback.format_exc())
+        finally:
+            self.terminal.emit()

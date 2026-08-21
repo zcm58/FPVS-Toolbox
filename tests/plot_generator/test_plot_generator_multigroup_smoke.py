@@ -19,7 +19,12 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 def plot_smoke_env(monkeypatch):
     """Patch heavy plot generator helpers for lightweight smoke tests."""
 
-    monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda: {"ROI": ["Cz"]}, raising=False)
+    monkeypatch.setattr(
+        plot_gui,
+        "load_rois_from_settings",
+        lambda _manager=None: {"ROI": ["Cz"]},
+        raising=False,
+    )
 
     data_store: dict[str, object] = {
         "freqs": [1.0, 2.0],

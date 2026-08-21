@@ -94,7 +94,7 @@ def test_cancel_waits_for_worker_exit_and_suppresses_queued_condition(
     monkeypatch.setattr(
         plot_gui,
         "load_rois_from_settings",
-        lambda: {"ROI": ["Cz"]},
+        lambda _manager=None: {"ROI": ["Cz"]},
     )
     questions: list[str] = []
     monkeypatch.setattr(

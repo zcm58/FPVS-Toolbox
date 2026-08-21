@@ -5,6 +5,7 @@ import pytest
 if importlib.util.find_spec("matplotlib") is None:
     pytest.skip("matplotlib not available", allow_module_level=True)
 
+from Tools.Plot_Generator import worker as worker_module
 from Tools.Plot_Generator.worker import _Worker
 
 
@@ -45,3 +46,74 @@ def test_explicit_oddballs_override_auto_derived(monkeypatch, tmp_path):
     worker = _worker(tmp_path, x_max=10.0, oddballs=[1.0, 2.0])
 
     assert worker.oddballs == [1.0, 2.0]
+
+
+def test_analysis_frequency_reads_share_one_successful_settings_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    constructions = 0
+
+    class FakeSettingsManager:
+        def __init__(self):
+            nonlocal constructions
+            constructions += 1
+
+        def get(self, _section, option, _fallback):
+            return {"base_freq": "6.0", "oddball_freq": "1.2"}[option]
+
+    monkeypatch.setattr(worker_module, "SettingsManager", FakeSettingsManager)
+
+    worker = _worker(tmp_path, x_max=10.0)
+
+    assert constructions == 1
+    assert worker._analysis_base_freq == 6.0
+    assert worker._analysis_oddball_freq == 1.2
+
+
+def test_analysis_frequency_fallback_survives_settings_construction_failure(
+    monkeypatch,
+    tmp_path,
+):
+    constructions = 0
+
+    class FailingSettingsManager:
+        def __init__(self):
+            nonlocal constructions
+            constructions += 1
+            raise OSError("settings unavailable")
+
+    monkeypatch.setattr(worker_module, "SettingsManager", FailingSettingsManager)
+
+    worker = _worker(tmp_path, x_max=10.0)
+
+    assert constructions == 2
+    assert worker._analysis_base_freq == 6.0
+    assert worker._analysis_oddball_freq == 1.2
+
+
+def test_invalid_analysis_frequency_does_not_cache_failed_settings_read(
+    monkeypatch,
+    tmp_path,
+):
+    constructions = 0
+
+    class PartiallyInvalidSettingsManager:
+        def __init__(self):
+            nonlocal constructions
+            constructions += 1
+
+        def get(self, _section, option, _fallback):
+            return {"base_freq": "nan", "oddball_freq": "1.2"}[option]
+
+    monkeypatch.setattr(
+        worker_module,
+        "SettingsManager",
+        PartiallyInvalidSettingsManager,
+    )
+
+    worker = _worker(tmp_path, x_max=10.0)
+
+    assert constructions == 2
+    assert worker._analysis_base_freq == 6.0
+    assert worker._analysis_oddball_freq == 1.2

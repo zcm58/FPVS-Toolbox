@@ -185,8 +185,6 @@ class SettingsManager:
         self.config.read_dict(DEFAULTS)
         migrated = False
         if os.path.exists(self.ini_path):
-            existing = configparser.ConfigParser()
-            existing.read(self.ini_path)
             self.config.read(self.ini_path)
         elif self._uses_default_path:
             old_path = legacy_settings_file()

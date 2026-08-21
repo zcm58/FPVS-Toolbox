@@ -84,6 +84,8 @@ class RatioSettingsMixin:
         if not output_dir:
             return False, "Select an output folder."
         out_path = Path(output_dir)
+        if out_path.is_dir():
+            return True, None
         try:
             out_path.mkdir(parents=True, exist_ok=True)
         except Exception as exc:

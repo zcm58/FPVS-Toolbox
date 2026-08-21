@@ -26,6 +26,7 @@ manual_smoke = ["Use File > Check for Updates in a visible Main App window when 
 [scopes.project-io]
 audits = ["paths"]
 tests = [
+  "tests/project_io/test_active_project_root.py",
   "tests/project_io/test_project_dataset_index.py",
   "tests/project_io/test_project_enumeration_io.py",
   "tests/project_io/test_project_group_context.py",
@@ -133,9 +134,14 @@ manual_smoke = ["Enable Beta Tools, restart, acknowledge the shared beta notice,
 
 [scopes.ratio-calculator]
 audits = ["gui", "paths"]
-tests = ["tests/ratio_calculator/test_ratio_calculator_plots.py", "tests/ratio_calculator/test_ratio_calculator_file_filters.py"]
+tests = [
+  "tests/ratio_calculator/test_ratio_calculator_plots.py",
+  "tests/ratio_calculator/test_ratio_calculator_file_filters.py",
+  "tests/ratio_calculator/test_ratio_calculator_output_paths.py",
+  "tests/ratio_calculator/test_ratio_calculator_worker_lifecycle.py",
+]
 include = ["src/Tools/Ratio_Calculator/**", "tests/ratio_calculator/**"]
-manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning, open Ratio Calculator from the Main App, and exercise the changed control or export in a visible session."]
+manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning and open Ratio Calculator from the Main App. Start a small run and confirm Run stays disabled until completion, then re-enables; double-clicking must not start a second run. Repeat with a deliberately unreadable input workbook, confirm the existing error presentation appears, correct the input, and verify a new run can start without restarting the app."]
 
 [scopes.sequence-figure]
 audits = ["gui", "paths"]

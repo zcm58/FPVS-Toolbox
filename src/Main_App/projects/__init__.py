@@ -37,6 +37,7 @@ _RECORDING_PREFLIGHT_NAMES = {
 }
 _RAW_IDENTITY_NAMES = {"infer_raw_participant_id"}
 _SESSION_COMPATIBILITY_NAMES = {"repeated_session_tool_block_reason"}
+_PROJECT_CONTEXT_NAMES = {"resolve_active_project_root"}
 _GROUPING_NAMES = {
     "GroupConfigurationError",
     "GroupInfo",
@@ -92,6 +93,7 @@ __all__ = sorted(
     | _GROUPING_NAMES
     | _PROJECT_NAMES
     | _PREPROCESSING_NAMES
+    | _PROJECT_CONTEXT_NAMES
     | _RAW_IDENTITY_NAMES
     | _RECORDING_NAMES
     | _RECORDING_PREFLIGHT_NAMES
@@ -116,6 +118,10 @@ def __getattr__(name: str) -> Any:
         project = importlib.import_module("Main_App.projects.project")
 
         return getattr(project, name)
+    if name in _PROJECT_CONTEXT_NAMES:
+        project_context = importlib.import_module("Main_App.projects.project_context")
+
+        return getattr(project_context, name)
     if name in _RECORDING_NAMES:
         recordings = importlib.import_module("Main_App.projects.recordings")
 

@@ -163,18 +163,18 @@ class PlotGeneratorSelectionMixin:
         self._populating_conditions = True
         try:
             self._refresh_group_controls(folder)
-            subfolders: list[str] = []
-            try:
-                subfolders = [
-                    f.name
-                    for f in Path(folder).iterdir()
-                    if f.is_dir() and ".fif" not in f.name.lower()
-                ]
-            except OSError:
-                subfolders = []
             indexed = getattr(self, "_selection_dataset_index", None)
             if indexed is not None and indexed.manifest is not None:
                 subfolders = list(indexed.conditions)
+            else:
+                try:
+                    subfolders = [
+                        f.name
+                        for f in Path(folder).iterdir()
+                        if f.is_dir() and ".fif" not in f.name.lower()
+                    ]
+                except OSError:
+                    subfolders = []
 
             with QSignalBlocker(self.condition_combo), QSignalBlocker(
                 self.condition_b_combo

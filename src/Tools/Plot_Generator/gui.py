@@ -72,9 +72,8 @@ class PlotGeneratorWindow(
         self.setWindowTitle("Generate SNR Plots")
         self._ui_initializing = True
         self._populating_conditions = False
-        self.roi_map = load_rois_from_settings()
-
         mgr = SettingsManager()
+        self.roi_map = load_rois_from_settings(mgr)
         self.plot_mgr = plot_mgr or PlotSettingsManager()
         default_in = self.plot_mgr.get("paths", "input_folder", "")
         default_out = self.plot_mgr.get("paths", "output_folder", "")

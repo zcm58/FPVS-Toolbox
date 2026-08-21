@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -46,7 +45,12 @@ from Main_App.gui.components import (
     show_error,
     show_tool_info,
 )
-from Main_App.projects import GroupInfo, ProjectDatasetIndex, load_project_dataset_index
+from Main_App.projects import (
+    GroupInfo,
+    ProjectDatasetIndex,
+    load_project_dataset_index,
+    resolve_active_project_root,
+)
 from Tools.Publication_Maps.generation_outcome import (
     PublicationMapsOutcomeStatus,
     PublicationMapsWorkerOutcome,
@@ -165,21 +169,10 @@ class PublicationMapsWindow(QWidget):
         self._update_run_state()
 
     def _resolve_project_root(self, provided_root: str | None) -> Path | None:
-        if provided_root:
-            root = Path(provided_root)
-            if root.exists():
-                return root
-        env_root = os.environ.get("FPVS_PROJECT_ROOT")
-        if env_root:
-            root = Path(env_root)
-            if root.exists():
-                return root
-        proj = getattr(self.parent(), "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
-            root = Path(proj.project_root)
-            if root.exists():
-                return root
-        return None
+        return resolve_active_project_root(
+            provided_root,
+            current_project=getattr(self.parent(), "currentProject", None),
+        )
 
     def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="publication_maps_input")

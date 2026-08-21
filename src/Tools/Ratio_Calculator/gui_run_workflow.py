@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 class RatioRunWorkflowMixin:
     """GUI-only run lifecycle, status, and log behavior."""
 
+    def _run_is_active(self) -> bool:
+        return self._thread is not None or self._worker is not None
+
     def _open_folder_from_edit(self, edit: QLineEdit) -> None:
         path_str = edit.text().strip()
         if not path_str:
@@ -43,13 +46,13 @@ class RatioRunWorkflowMixin:
             show_warning(self, "Open failed", f"Failed to open folder:\n{exc}")
 
     def _set_status_message(self, message: str) -> None:
-        if self._thread and self._thread.isRunning():
+        if self._run_is_active():
             return
         self.status_label.set_text(message)
         self._append_log(message)
 
     def _start_run(self) -> None:
-        if self._thread and self._thread.isRunning():
+        if self._run_is_active():
             show_info(self, "Running", "Ratio calculations are already running.")
             return
 
@@ -135,8 +138,8 @@ class RatioRunWorkflowMixin:
                 self.status_label.set_text("Ready")
                 return
 
-        self._thread = QThread()
-        self._worker = RatioCalculatorWorker(
+        thread = QThread()
+        worker = RatioCalculatorWorker(
             input_dir_a=input_a,
             condition_label_a=label_a,
             input_dir_b=input_b,
@@ -147,17 +150,26 @@ class RatioRunWorkflowMixin:
             settings=settings,
             roi_defs=self._active_roi_defs,
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self.progress.setValue)
-        self._worker.status.connect(self.status_label.set_text)
-        self._worker.log.connect(self._append_log)
-        self._worker.error.connect(self._handle_error)
-        self._worker.finished.connect(self._handle_finished)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.start()
+        self._thread = thread
+        self._worker = worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self.progress.setValue)
+        worker.status.connect(self.status_label.set_text)
+        worker.log.connect(self._append_log)
+        worker.error.connect(self._handle_error)
+        worker.finished.connect(self._handle_finished)
+        worker.terminal.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._handle_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        self.run_btn.setEnabled(False)
+        thread.start()
+
+    def _handle_thread_finished(self) -> None:
+        self._thread = None
+        self._worker = None
+        self._update_run_state()
 
     def _handle_error(self, message: str) -> None:
         self._append_log(message)
@@ -219,7 +231,7 @@ class RatioRunWorkflowMixin:
             self._maybe_autoload_participants()
             errors = self._validate_inputs()
             self._set_validation_errors(errors)
-        self.run_btn.setEnabled(required_fields and not errors)
+        self.run_btn.setEnabled(required_fields and not errors and not self._run_is_active())
         self.input_a_open_btn.setEnabled(bool(self.input_a_edit.text().strip()))
         self.input_b_open_btn.setEnabled(bool(self.input_b_edit.text().strip()))
         self.output_open_btn.setEnabled(bool(self.output_edit.text().strip()))
