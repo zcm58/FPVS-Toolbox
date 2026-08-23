@@ -153,9 +153,10 @@ the page implementation.
   **Post-processing Required** dialog. The page emits the affected project and
   reason; it must not show the raw provenance failure in its footer or launch a
   post-processing worker itself.
-- Use one tab-free workspace. Flat projects keep **Run Analysis** for one
-  contrast. Repeated projects are recognized automatically and replace those
-  selectors with the prespecified two-group/two-session all-condition batch,
+- Use one tab-free workspace. Flat and repeated projects use **Run Free
+  Harmonic Clustering Analysis**. Repeated projects are recognized
+  automatically and replace the flat-project selectors with
+  the prespecified two-group/two-session all-condition batch,
   exact later-minus-earlier direction, fixed-order warning, and a compact
   analysis-only recording-exclusion dialog with required reasons. A concise
   Results section appears only after completion; detailed cohort, harmonic,

@@ -48,7 +48,7 @@ source-immutable recording exclusions with required audit reasons.
    identified base-rate overlaps.
 3. Optionally review analysis-only recording exclusions for a repeated batch;
    each exclusion requires an audit reason and never changes project QC.
-4. Select **Run Analysis** or **Run Full Repeated-Session Batch** once.
+4. Select **Run Free Harmonic Clustering Analysis** once.
    Preparation, permutations, multiplicity correction, and export continue in
    one worker pipeline.
 5. Review the concise cluster or batch results that appear beneath Setup.

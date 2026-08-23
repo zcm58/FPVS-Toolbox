@@ -252,8 +252,12 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert not comparison_card.isAncestorOf(harmonics_card)
     assert not harmonics_card.isAncestorOf(comparison_card)
     assert comparison_card.geometry().top() == harmonics_card.geometry().top()
-    assert comparison_card.geometry().bottom() == harmonics_card.geometry().bottom()
-    assert abs(comparison_card.width() - harmonics_card.width()) <= 1
+    assert harmonics_card.geometry().bottom() < comparison_card.geometry().bottom()
+    assert comparison_card.width() > harmonics_card.width()
+    assert (
+        harmonics_card.sizePolicy().verticalPolicy()
+        == QtWidgets.QSizePolicy.Maximum
+    )
     assert comparison_card.height() < page.workspace.height() * 0.75
     comparison_field_x = {
         widget.mapTo(comparison_card, QtCore.QPoint(0, 0)).x()
@@ -298,6 +302,10 @@ def test_project_setup_is_dynamic_and_results_folder_is_reachable(
     assert page.paired_group_filter_combo.itemData(0) is None
     assert "Run Analysis" in page.workflow_status.text()
     assert "show the results below" in page.workflow_status.text()
+    assert (
+        page.run_analysis_button.text()
+        == "Run Free Harmonic Clustering Analysis"
+    )
     assert page.open_results_button.isEnabled()
     for combo in (
         page.paired_condition_a_combo,
@@ -381,7 +389,10 @@ def test_repeated_project_uses_prespecified_batch_without_page_scroll(
     assert "Visit 2 - Visit 1" in page.repeated_batch_value.text()
     assert "aligned with visit order" in page.repeated_order_warning.text()
     assert page.review_exclusions_button.isEnabled()
-    assert page.run_analysis_button.text() == "Run Full Repeated-Session Batch"
+    assert (
+        page.run_analysis_button.text()
+        == "Run Free Harmonic Clustering Analysis"
+    )
     assert page._setup_error() is None
 
     started: list[tuple[object, str]] = []
@@ -852,7 +863,10 @@ def test_results_appear_in_compact_single_screen_without_run_metadata(
     assert page.results_panel.isHidden()
     assert page.run_analysis_button.isEnabled()
     assert page.run_analysis_button.isVisible()
-    assert page.run_analysis_button.text() == "Run Analysis"
+    assert (
+        page.run_analysis_button.text()
+        == "Run Free Harmonic Clustering Analysis"
+    )
 
     significant = SimpleNamespace(
         cluster_id=1,

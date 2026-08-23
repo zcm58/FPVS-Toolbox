@@ -228,7 +228,7 @@ class FreeHarmonicClusteringPage(QWidget):
             QSizePolicy.Expanding,
             QSizePolicy.Preferred,
         )
-        cards_layout.addWidget(self.comparison_card, 1)
+        cards_layout.addWidget(self.comparison_card, 3)
         comparison_form = make_form_layout()
         self.comparison_card.content_layout.addLayout(comparison_form)
 
@@ -374,11 +374,8 @@ class FreeHarmonicClusteringPage(QWidget):
             content,
             object_name="free_harmonic_harmonics_card",
         )
-        self.harmonics_card.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Preferred,
-        )
-        cards_layout.addWidget(self.harmonics_card, 1)
+        self.harmonics_card.set_compact()
+        cards_layout.addWidget(self.harmonics_card, 2, Qt.AlignTop)
         harmonics_form = make_form_layout()
         self.harmonics_card.content_layout.addLayout(harmonics_form)
 
@@ -464,7 +461,7 @@ class FreeHarmonicClusteringPage(QWidget):
         self.progress_bar.hide()
         footer_layout.addWidget(self.progress_bar)
         self.run_analysis_button = make_action_button(
-            "Run Analysis",
+            "Run Free Harmonic Clustering Analysis",
             variant="primary",
             parent=footer,
         )
@@ -894,10 +891,6 @@ class FreeHarmonicClusteringPage(QWidget):
         }.get(design, 0)
         self.design_stack.setCurrentIndex(stack_index)
         self.design_stack.updateGeometry()
-        repeated = design is GuiAnalysisDesign.REPEATED_SESSION_BATCH
-        self.run_analysis_button.setText(
-            "Run Full Repeated-Session Batch" if repeated else "Run Analysis"
-        )
         self._on_setup_changed()
 
     @Slot()

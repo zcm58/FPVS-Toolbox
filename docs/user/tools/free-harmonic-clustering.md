@@ -140,13 +140,14 @@ selection remains unchanged.
 
 ## Run the Analysis
 
-For a legacy project, define one comparison and select **Run Analysis** once.
+For a legacy project, define one comparison and select **Run Free Harmonic
+Clustering Analysis** once.
 For a repeated-session project, review the detected groups, ordered sessions,
 all-condition plan, fixed-order warning, and optional analysis-only recording
-exclusions, then select **Run Full Repeated-Session Batch**. The tool prepares
-the data and continues through all permutations and export without another
-confirmation. A concise result appears beneath the setup controls when the run
-completes.
+exclusions, then select **Run Free Harmonic Clustering Analysis**. The tool
+prepares the data and continues through all permutations and export without
+another confirmation. A concise result appears beneath the setup controls when
+the run completes.
 
 The main workspace intentionally omits dense preparation and technical run
 summaries. The completed workbook records the full cohort, exclusions,
