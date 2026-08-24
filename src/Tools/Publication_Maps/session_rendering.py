@@ -210,11 +210,15 @@ def render_session_grid_figures(
     cancel_check: Callable[[], None] | None = None,
     transaction: PublicationArtifactTransaction | None = None,
 ) -> list[Path]:
-    """Render one shared-limit 2×2 grid per requested metric."""
+    """Render one shared-limit 2×2 grid per condition and requested metric."""
 
     normalized = tuple(requests)
     validate_session_grid_requests(normalized)
-    panel_sets = build_session_panel_sets(tuple(results), normalized)
+    panel_sets = build_session_panel_sets(
+        tuple(results),
+        normalized,
+        cancel_check=cancel_check,
+    )
     owns_transaction = transaction is None
     active_transaction = transaction or PublicationArtifactTransaction(normalized[0])
     rendered: list[Path] = []
@@ -224,10 +228,25 @@ def render_session_grid_figures(
         request = normalized[0]
         base_output = Path(request.output_root).expanduser().resolve(strict=False)
         group_stem = "_and_".join(panel_sets[0].group_ids)
+        planned_panels: list[tuple[SessionMapPanelSet, str]] = []
+        seen_stems: dict[str, str] = {}
         for panel_set in panel_sets:
-            stem = sanitize_filename_stem(
-                f"{panel_set.condition}_{group_stem}_{panel_set.metric.value}_session_grid"
+            raw_stem = (
+                f"{panel_set.condition}_{group_stem}_"
+                f"{panel_set.metric.value}_session_grid"
             )
+            stem = sanitize_filename_stem(raw_stem)
+            prior = seen_stems.get(stem.casefold())
+            if prior is not None:
+                raise PublicationMapInputError(
+                    "Scalp Maps output names collide after Windows-safe filename "
+                    f"normalization: {prior!r} and {raw_stem!r}. Rename the "
+                    "conditions so each requested figure has a distinct name."
+                )
+            seen_stems[stem.casefold()] = raw_stem
+            planned_panels.append((panel_set, stem))
+
+        for panel_set, stem in planned_panels:
             for suffix, enabled in (
                 (".png", request.export_png),
                 (".pdf", request.export_pdf),

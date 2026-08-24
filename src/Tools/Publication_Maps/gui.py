@@ -935,7 +935,7 @@ class PublicationMapsWindow(QWidget):
                 self.paired_figures_check.setChecked(False)
             if self.group_comparison_check.isChecked():
                 self.group_comparison_check.setChecked(False)
-            self._enforce_single_session_condition()
+            self._select_single_session_condition_on_mode_entry()
         self.group_combo.setEnabled(not comparison and not self._busy)
         self._update_paired_controls_state()
         self._update_group_comparison_controls_state()
@@ -944,7 +944,7 @@ class PublicationMapsWindow(QWidget):
             self._set_ready_status()
         self._update_run_state()
 
-    def _enforce_single_session_condition(self) -> None:
+    def _select_single_session_condition_on_mode_entry(self) -> None:
         if not self._session_comparison_active() or self.conditions_list.count() == 0:
             return
         selected = [
@@ -962,16 +962,7 @@ class PublicationMapsWindow(QWidget):
         finally:
             self.conditions_list.blockSignals(False)
 
-    def _on_condition_item_changed(self, item: QListWidgetItem) -> None:
-        if self._session_comparison_active() and item.checkState() == Qt.Checked:
-            self.conditions_list.blockSignals(True)
-            try:
-                for index in range(self.conditions_list.count()):
-                    other = self.conditions_list.item(index)
-                    if other is not item:
-                        other.setCheckState(Qt.Unchecked)
-            finally:
-                self.conditions_list.blockSignals(False)
+    def _on_condition_item_changed(self, _item: QListWidgetItem) -> None:
         self._update_run_state()
 
     def _session_selection_valid(self) -> bool:
@@ -990,7 +981,7 @@ class PublicationMapsWindow(QWidget):
         if (
             dataset_index is None
             or len(dataset_index.ordered_groups) != 2
-            or len(selected_conditions) != 1
+            or not selected_conditions
             or len(session_ids) != 2
         ):
             return False
@@ -1000,11 +991,21 @@ class PublicationMapsWindow(QWidget):
             session_ids=session_ids,
         )
         cells = {
-            (str(record.group_id).casefold(), str(record.session_id).casefold())
+            (
+                str(record.condition).casefold(),
+                str(record.group_id).casefold(),
+                str(record.session_id).casefold(),
+            )
             for record in records
         }
         return all(
-            (group.group_id.casefold(), session_id.casefold()) in cells
+            (
+                condition.casefold(),
+                group.group_id.casefold(),
+                session_id.casefold(),
+            )
+            in cells
+            for condition in selected_conditions
             for group in dataset_index.ordered_groups
             for session_id in session_ids
         )
@@ -1022,7 +1023,8 @@ class PublicationMapsWindow(QWidget):
         if self._session_state.repeated and not self._session_selection_valid():
             self.status_label.set_text(
                 "Choose a valid canonical session selection. Session grids require "
-                "one condition and data in every group × session cell."
+                "at least one condition and data in every selected condition × "
+                "group × session cell."
             )
             self.status_label.set_variant("warning")
             return
@@ -1032,9 +1034,20 @@ class PublicationMapsWindow(QWidget):
                 session.session_id: session.display_label
                 for session in self._session_state.sessions
             }
-            condition = self._selected_conditions()[0]
+            selected_conditions = self._selected_conditions()
+            selection_text = (
+                selected_conditions[0]
+                if len(selected_conditions) == 1
+                else f"{len(selected_conditions)} conditions"
+            )
+            grid_label = (
+                "Session grid"
+                if len(selected_conditions) == 1
+                else "Session grids"
+            )
             self.status_label.set_text(
-                f"Session grid ready for {condition}: {labels[sessions[0]]} vs "
+                f"{grid_label} ready for {selection_text}: "
+                f"{labels[sessions[0]]} vs "
                 f"{labels[sessions[1]]}. Participant and paired N will be shown; "
                 "interpret the fixed-order difference descriptively."
             )
@@ -1154,15 +1167,20 @@ class PublicationMapsWindow(QWidget):
                 item = QListWidgetItem(f"{condition} ({counts[condition]})")
                 item.setData(Qt.UserRole, condition)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                checked = (
+                    condition in previously_checked
+                    if had_conditions
+                    else (
+                        not self._session_comparison_active()
+                        or condition == self._conditions[-1]
+                    )
+                )
                 item.setCheckState(
-                    Qt.Checked
-                    if not had_conditions or condition in previously_checked
-                    else Qt.Unchecked
+                    Qt.Checked if checked else Qt.Unchecked
                 )
                 self.conditions_list.addItem(item)
         finally:
             self.conditions_list.blockSignals(False)
-        self._enforce_single_session_condition()
         if (
             not had_conditions
             and not self._session_comparison_active()
@@ -1181,7 +1199,6 @@ class PublicationMapsWindow(QWidget):
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         finally:
             self.conditions_list.blockSignals(False)
-        self._enforce_single_session_condition()
         self._update_run_state()
 
     def _selected_conditions(self) -> tuple[str, ...]:
@@ -1726,8 +1743,9 @@ class PublicationMapsWindow(QWidget):
             return
         if not self._session_selection_valid():
             message = self._session_control_error or (
-                "Session comparison requires one condition, two distinct canonical "
-                "sessions, exactly two stable groups, and data in every group × session cell."
+                "Session comparison requires at least one condition, two distinct "
+                "canonical sessions, exactly two stable groups, and data in every "
+                "selected condition × group × session cell."
             )
             self._show_validation_error(message)
             return

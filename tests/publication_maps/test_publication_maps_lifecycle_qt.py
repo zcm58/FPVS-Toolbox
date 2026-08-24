@@ -307,7 +307,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
 
 
 @pytest.mark.qt
-def test_repeated_project_builds_explicit_session_grid_requests(
+def test_repeated_project_select_all_builds_multicondition_session_grid_requests(
     qtbot,
     monkeypatch,
     tmp_path,
@@ -325,7 +325,12 @@ def test_repeated_project_builds_explicit_session_grid_requests(
     assert page.reference_session_combo.currentText() == "Luteal phase — Visit 1"
     assert page.comparison_session_combo.currentText() == "Follicular phase — Visit 2"
     assert "confounded with visit order" in page.session_caveat_label.text()
-    assert len(page._selected_conditions()) == 1
+    assert page._selected_conditions() == ("Objects",)
+    page._set_all_conditions(False)
+    assert page._selected_conditions() == ()
+    qtbot.mouseClick(page.select_all_btn, Qt.LeftButton)
+
+    assert page._selected_conditions() == ("Faces", "Objects")
     assert page.group_combo.currentData() == publication_maps_gui.ALL_GROUPS_VALUE
     assert page.group_combo.isEnabled() is False
     assert page.paired_figures_check.isChecked() is False
@@ -333,6 +338,7 @@ def test_repeated_project_builds_explicit_session_grid_requests(
 
     requests = page._collect_requests()
     assert len(requests) == 2
+    assert all(request.conditions == ("Faces", "Objects") for request in requests)
     assert all(request.session_ids == ("luteal", "follicular") for request in requests)
     assert all(request.export_session_grid_figure for request in requests)
     assert all(
@@ -340,11 +346,16 @@ def test_repeated_project_builds_explicit_session_grid_requests(
         for request in requests
     )
     assert all(request.export_paired_session_difference for request in requests)
+    assert "Session grids ready for 2 conditions" in page.status_label.text()
 
     page.session_dimension_combo.setCurrentIndex(
         page.session_dimension_combo.findData("condition")
     )
     condition_requests = page._collect_requests()
+    assert all(
+        request.conditions == ("Faces", "Objects")
+        for request in condition_requests
+    )
     assert all(request.session_ids == ("luteal",) for request in condition_requests)
     assert all(not request.export_session_grid_figure for request in condition_requests)
 

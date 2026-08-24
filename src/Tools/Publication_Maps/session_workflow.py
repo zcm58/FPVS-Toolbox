@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 import pandas as pd
@@ -40,6 +40,7 @@ def validate_session_grid_requests(
         )
     baseline = replace(
         normalized[0],
+        conditions=(),
         group_id=None,
         group_label=None,
         group_folder=None,
@@ -47,6 +48,7 @@ def validate_session_grid_requests(
     if any(
         replace(
             request,
+            conditions=(),
             group_id=None,
             group_label=None,
             group_folder=None,
@@ -67,10 +69,10 @@ def validate_session_grid_requests(
         raise ValueError(
             "Session grids cannot be combined with condition-pair or group-comparison figures."
         )
-    if any(len(request.conditions) != 1 for request in normalized):
-        raise ValueError("Session grids require exactly one task condition.")
+    if any(not request.conditions for request in normalized):
+        raise ValueError("Session grids require at least one task condition.")
     if normalized[0].conditions != normalized[1].conditions:
-        raise ValueError("Session-grid requests must use the same condition.")
+        raise ValueError("Session-grid requests must use the same ordered conditions.")
     group_ids = tuple(str(request.group_id or "").strip() for request in normalized)
     if any(not value for value in group_ids) or len(
         {value.casefold() for value in group_ids}
@@ -154,18 +156,28 @@ def validate_session_grid_project(
         require_nonempty_sessions=True,
     )
     cells = {
-        (str(record.group_id).casefold(), str(record.session_id).casefold())
+        (
+            str(record.condition).casefold(),
+            str(record.group_id).casefold(),
+            str(record.session_id).casefold(),
+        )
         for record in records
     }
     missing = [
-        f"{group_id} × {session_id}"
+        f"{condition} × {group_id} × {session_id}"
+        for condition in normalized[0].conditions
         for group_id in requested_groups
         for session_id in requested_sessions
-        if (group_id.casefold(), session_id.casefold()) not in cells
+        if (
+            condition.casefold(),
+            group_id.casefold(),
+            session_id.casefold(),
+        )
+        not in cells
     ]
     if missing:
         raise PublicationMapInputError(
-            "The repeated-session grid has missing group × session cells: "
+            "The repeated-session grid has missing condition × group × session cells: "
             + ", ".join(missing)
             + "."
         )
@@ -175,9 +187,13 @@ def validate_session_grid_project(
 def build_session_panel_sets(
     results: Sequence[PublicationMapResult],
     requests: Sequence[PublicationMapRequest],
+    *,
+    cancel_check: Callable[[], None] | None = None,
 ) -> tuple[SessionMapPanelSet, ...]:
     """Combine group-scoped results into one panel set per metric."""
 
+    if cancel_check is not None:
+        cancel_check()
     normalized_results = tuple(results)
     normalized_requests = tuple(requests)
     if len(normalized_results) != 2:
@@ -185,6 +201,8 @@ def build_session_panel_sets(
             "Session grids require two completed canonical group results."
         )
     _index, records = validate_session_grid_project(normalized_requests)
+    if cancel_check is not None:
+        cancel_check()
     harmonic_sets = {
         tuple(result.selected_harmonics_hz) for result in normalized_results
     }
@@ -225,18 +243,25 @@ def build_session_panel_sets(
     first_request = normalized_requests[0]
     group_ids = tuple(str(request.group_id) for request in normalized_requests)
     metrics = tuple(dict.fromkeys(PublicationMetric(value) for value in first_request.metrics))
-    return tuple(
-        build_repeated_session_map_panels(
-            long_values=long_values,
-            workbook_records=records,
-            condition=first_request.conditions[0],
-            metric=metric,
-            selected_harmonics_hz=normalized_results[0].selected_harmonics_hz,
-            group_ids=group_ids,
-            session_ids=first_request.session_comparison_ids,
-        )
-        for metric in metrics
-    )
+    panel_sets: list[SessionMapPanelSet] = []
+    for condition in first_request.conditions:
+        for metric in metrics:
+            if cancel_check is not None:
+                cancel_check()
+            panel_sets.append(
+                build_repeated_session_map_panels(
+                    long_values=long_values,
+                    workbook_records=records,
+                    condition=condition,
+                    metric=metric,
+                    selected_harmonics_hz=(
+                        normalized_results[0].selected_harmonics_hz
+                    ),
+                    group_ids=group_ids,
+                    session_ids=first_request.session_comparison_ids,
+                )
+            )
+    return tuple(panel_sets)
 
 
 __all__ = [

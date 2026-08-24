@@ -29,9 +29,9 @@ Rules:
   combined PNG/PDF figure pair at the selected base output root.
 - Repeated-session projects require an explicit dimension. Condition mode
   filters the canonical workbook cohort to one session. Session comparison
-  accepts one condition, exactly two canonical groups, and two distinct
-  canonical sessions, then renders group columns × session rows with one
-  shared per-metric scale.
+  accepts one or more conditions, exactly two canonical groups, and two
+  distinct canonical sessions, then renders each condition independently as
+  group columns × session rows with one shared per-metric scale per condition.
 - Build repeated-session panels from exact canonical workbook paths and
   `recording_id`/`session_id`/`group_id`/`visit_index` metadata. Never infer a
   visit or phase from a path. Calculate optional comparison-minus-reference
