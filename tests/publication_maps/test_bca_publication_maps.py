@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -37,6 +37,9 @@ from Tools.Publication_Maps.rendering import (
     COMBINED_PAIRED_MAP_FIGSIZE,
     COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE,
     JOURNAL_TEXT_WIDTH_IN,
+    MULTI_GROUP_LAYOUT_STYLE,
+    PAIRED_CONDITION_LAYOUT_STYLE,
+    SINGLE_GROUP_LAYOUT_STYLE,
     _colorbar_text_kwargs,
     _combined_paired_layout_rects,
     _metric_limits,
@@ -61,6 +64,24 @@ def _stable_processing_harmonic_settings(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
     monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+
+
+def test_ordinary_figure_layout_families_have_independent_frozen_styles() -> None:
+    assert SINGLE_GROUP_LAYOUT_STYLE is not PAIRED_CONDITION_LAYOUT_STYLE
+    assert PAIRED_CONDITION_LAYOUT_STYLE is not MULTI_GROUP_LAYOUT_STYLE
+    assert SINGLE_GROUP_LAYOUT_STYLE.single_map_figsize == (6.5, 5.6)
+    assert PAIRED_CONDITION_LAYOUT_STYLE.paired_map_figsize == (6.5, 3.4)
+    assert MULTI_GROUP_LAYOUT_STYLE.paired_map_figsize == (6.5, 3.4)
+
+    revised_paired = replace(
+        PAIRED_CONDITION_LAYOUT_STYLE,
+        paired_map_figsize=(6.5, 4.0),
+    )
+
+    assert revised_paired.paired_map_figsize == (6.5, 4.0)
+    assert MULTI_GROUP_LAYOUT_STYLE.paired_map_figsize == (6.5, 3.4)
+    with pytest.raises(FrozenInstanceError):
+        PAIRED_CONDITION_LAYOUT_STYLE.paired_map_figsize = (6.5, 4.0)
 
 
 def test_discovers_condition_workbooks_and_skips_excel_lock_files(tmp_path: Path) -> None:

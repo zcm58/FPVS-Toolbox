@@ -37,10 +37,12 @@ Rules:
   visit or phase from a path. Calculate optional comparison-minus-reference
   values within participant before averaging, use a shared diverging scale,
   and report participant `n` and paired `n`.
-- Fixed phase order is a design confound. Repeated-session GUI and figures must
-  state that phase cannot be separated from visit order, elapsed time, retest,
-  or drift; do not describe the descriptive difference as an isolated phase
-  effect.
+- Fixed phase order is a design confound. Repeated-session GUI and help text
+  must state that phase cannot be separated from visit order, elapsed time,
+  retest, or drift. Repeated-session figures remain descriptive and must not
+  describe the difference as an isolated phase effect or statistical test, but
+  they must not repeat the long fixed-order caveat in the figure artwork or a
+  bottom footer.
 - Apply the shared participant, participant-condition, and frequency-domain
   exclusions before aggregation. Preserve dataset-index duplicate preference
   and diagnostics, and reject empty, unassigned, or ambiguous requested
@@ -76,8 +78,21 @@ Rules:
   cache/source provenance to visible figure titles. Repeated-session grids are
   the exception: panel titles must also show canonical session label, visit
   index, participant `n`, and paired `n` where applicable.
+- Figure geometry belongs to separate renderer-internal layout profiles for
+  ordinary single-map, paired-condition, ordinary two-group comparison, and
+  repeated-session figures. Their geometry must remain independently editable;
+  shared drawing and typography primitives may remain shared. These profiles
+  are developer contracts, not user-facing GUI settings, and must not add
+  project settings or persistence.
 - Single-condition and paired-condition figures should fit a standard US letter
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
+- Repeated-session grids must export at exactly 6.5 inches wide and no more
+  than 9 inches high, without tight-bounding-box cropping or an explanatory
+  footer. Show each full canonical group label once as a measured-width wrapped
+  column header, wrap full session labels within their panel column, and use a
+  thin neutral divider in the actual gap between the two group columns. Keep
+  these treatments clear of titles, maps, and colorbars; they are visual
+  structure only and carry no inferential meaning.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
   and Condition B combo boxes populated from the checked condition list.
 - Two-group comparison figures are available only when the managed project has
@@ -96,8 +111,18 @@ Rules:
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
 - Keep the embedded page within the supported 1280×900 workspace without a
-  page-level scroll area. Use flat purpose tabs for data/maps and output/run;
-  do not nest `SectionCard` surfaces.
+  page-level scroll area. Use flat purpose tabs for generation and advanced
+  settings; do not nest `SectionCard` surfaces. **Generate Maps** must contain
+  condition/session selection, map types, status, progress, and the generation
+  action. **Advanced Settings** owns the full-width output-folder controls,
+  color scales, and optional combined-figure configuration. Preserve the
+  active-project input root, selected output root, group-specific routing, and
+  output-folder action semantics while moving controls.
+- Keep generation history out of the embedded page in a focused **View
+  Generation Log** modal. Closing or hiding the modal must not clear its live
+  history or stop updates; reopening it during or after a run must show the
+  complete accumulated history for the current or most recent run. Starting a
+  new run may clear that prior run history, matching the existing workflow.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:
   it starts checked with a `0.0` to `0.4 BCA` range; unchecked maps
   auto-scale.
@@ -118,9 +143,9 @@ Rules:
 Focused local verification:
 
 ```console
+python .agents/scripts/verify.py --scope figures --tier focused
 python .agents/scripts/verify.py --scope publication-maps --tier focused
-python .agents/scripts/verify.py --scope stats --tier focused
 ```
 
-The second scope protects the shared processing-time harmonic contract. Qt
-execution remains CI-only by default.
+Add the `stats` scope only when a change touches the shared processing-time
+harmonic or numerical contract. Qt execution remains CI-only by default.

@@ -15,8 +15,13 @@ conditions using the significant-harmonic list saved when processing completed.
 <h3>Typical Workflow</h3>
 <p>
 Open a managed project, choose one canonical group (or All groups for separate
-group outputs), select one or more conditions, confirm metric and color-scale
-options, and run the export. The project&apos;s canonical processed-Excel root is
+group outputs), then select conditions and map types on the Generate Maps tab.
+That tab keeps generation status, progress, and the
+<strong>Generate Scalp Maps</strong> action together. Advanced Settings owns
+the full-width output-folder controls, color scales, and optional
+paired-condition or two-group figure layouts. <strong>View Generation
+Log</strong> opens the live history in a focused dialog; closing and reopening
+it does not discard messages. The project&apos;s canonical processed-Excel root is
 selected automatically and cannot be narrowed to a subgroup folder. When two
 conditions are selected, the paired condition figure option creates
 side-by-side maps. In an exactly-two-group project, choose All groups and one
@@ -32,7 +37,9 @@ condition workflow or two sessions for a group-column by session-row grid.
 The grid shares color limits, shows participant n, and can add a paired
 comparison-minus-reference row. Canonical recording/session identity is
 required. A fixed phase order confounds phase with visit order and elapsed
-time, so this output is descriptive and carries that caveat on the figure.
+time. The grid is descriptive; interpret it with the fixed-order caveat shown
+in the Scalp Maps workflow and described here rather than as an isolated phase
+effect.
 </p>
 
 <h3>Output Notes</h3>
@@ -40,8 +47,10 @@ time, so this output is descriptive and carries that caveat on the figure.
 The tool writes matching high-resolution PNG and PDF figure assets only.
 Ordinary multi-group runs write each group into its own named output folder.
 Two-group comparison mode writes one combined figure at the selected base
-output. Groups are never pooled implicitly. Fixed color ranges are useful when
-comparing conditions or groups.
+output. Repeated-session grids use the full 6.5-inch text width of a US Letter
+page with 1-inch horizontal margins, omit explanatory footers, and separate
+the canonical group columns with a neutral divider. Groups are never pooled
+implicitly. Fixed color ranges are useful when comparing conditions or groups.
 </p>
 """
 

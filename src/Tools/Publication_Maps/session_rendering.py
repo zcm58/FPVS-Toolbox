@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
+from matplotlib.lines import Line2D
 import pandas as pd
 
 from Main_App.exports.figure_style import apply_axis_text_style, figure_text_kwargs
@@ -23,7 +25,6 @@ from Tools.Publication_Maps.rendering import (
     plt,
     sanitize_filename_stem,
 )
-from Tools.Publication_Maps.session_controls import FIXED_ORDER_CAVEAT
 from Tools.Publication_Maps.session_panels import (
     PairedSessionDifferenceMap,
     SessionMapPanel,
@@ -33,6 +34,52 @@ from Tools.Publication_Maps.session_workflow import (
     build_session_panel_sets,
     validate_session_grid_requests,
 )
+
+
+@dataclass(frozen=True)
+class _RepeatedSessionLayoutProfile:
+    """Figure geometry owned only by the repeated-session renderer."""
+
+    width_in: float = 6.5
+    two_row_height_in: float = 6.5
+    three_row_height_in: float = 9.0
+    left: float = 0.04
+    right: float = 0.87
+    bottom: float = 0.035
+    two_row_top: float = 0.78
+    three_row_top: float = 0.82
+    two_row_hspace: float = 0.50
+    three_row_hspace: float = 0.65
+    wspace: float = 0.18
+    suptitle_y: float = 0.985
+    column_header_y: float = 0.92
+    column_text_padding: float = 0.012
+    panel_title_pad: float = 7.0
+    divider_color: str = "#B3B3B3"
+    divider_linewidth: float = 0.8
+    divider_gid: str = "repeated-session-group-divider"
+    column_header_gid_prefix: str = "repeated-session-group-header"
+
+    def figsize(self, *, include_difference: bool) -> tuple[float, float]:
+        height = (
+            self.three_row_height_in
+            if include_difference
+            else self.two_row_height_in
+        )
+        return self.width_in, height
+
+    def top(self, *, include_difference: bool) -> float:
+        return self.three_row_top if include_difference else self.two_row_top
+
+    def hspace(self, *, include_difference: bool) -> float:
+        return (
+            self.three_row_hspace
+            if include_difference
+            else self.two_row_hspace
+        )
+
+
+REPEATED_SESSION_LAYOUT = _RepeatedSessionLayoutProfile()
 
 
 def _panel_frame(panel: SessionMapPanel) -> pd.DataFrame:
@@ -70,6 +117,168 @@ def _main_vlim(
     return panel_set.common_vmin, panel_set.common_vmax
 
 
+def _group_column_divider_x(axes) -> float:
+    left_column_right = max(ax.get_position().x1 for ax in axes[:, 0])
+    right_column_left = min(ax.get_position().x0 for ax in axes[:, 1])
+    return (left_column_right + right_column_left) / 2.0
+
+
+def _wrap_text_to_width(
+    fig,
+    value: str,
+    *,
+    max_width_pixels: float,
+    text_kwargs: dict[str, object],
+) -> str:
+    """Wrap complete labels using their rendered width without truncation."""
+
+    renderer = fig.canvas.get_renderer()
+    probe = fig.text(0.0, 0.0, "", ha="left", va="bottom", **text_kwargs)
+
+    def fits(candidate: str) -> bool:
+        probe.set_text(candidate)
+        return probe.get_window_extent(renderer).width <= max_width_pixels
+
+    def split_token(token: str) -> list[str]:
+        chunks: list[str] = []
+        current = ""
+        for character in token:
+            candidate = f"{current}{character}"
+            if current and not fits(candidate):
+                chunks.append(current)
+                current = character
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+        return chunks or [token]
+
+    try:
+        lines: list[str] = []
+        for paragraph in str(value).splitlines() or [""]:
+            words = paragraph.split()
+            if not words:
+                lines.append("")
+                continue
+            current = ""
+            for word in words:
+                candidate = f"{current} {word}".strip()
+                if current and fits(candidate):
+                    current = candidate
+                    continue
+                if current:
+                    lines.append(current)
+                chunks = split_token(word)
+                lines.extend(chunks[:-1])
+                current = chunks[-1]
+            if current:
+                lines.append(current)
+        return "\n".join(lines)
+    finally:
+        probe.remove()
+
+
+def _column_text_width_pixels(fig, axes, column: int, divider_x: float) -> float:
+    center = sum(
+        axes[row, column].get_position().x0
+        + axes[row, column].get_position().x1
+        for row in range(axes.shape[0])
+    ) / (2.0 * axes.shape[0])
+    outer_left = REPEATED_SESSION_LAYOUT.left if column == 0 else divider_x
+    outer_right = divider_x if column == 0 else REPEATED_SESSION_LAYOUT.right
+    half_width = min(center - outer_left, outer_right - center)
+    half_width -= REPEATED_SESSION_LAYOUT.column_text_padding
+    return max(1.0, 2.0 * half_width * fig.bbox.width)
+
+
+def _apply_repeated_session_titles(
+    fig,
+    axes,
+    panel_set: SessionMapPanelSet,
+    panel_title_sections: dict[object, tuple[str, ...]],
+) -> None:
+    """Apply wrapped matrix headers and session-specific panel titles."""
+
+    divider_x = _group_column_divider_x(axes)
+    title_kwargs = figure_text_kwargs("condition_label")
+    header_kwargs = dict(title_kwargs)
+    header_kwargs["fontweight"] = "bold"
+    suptitle = fig._suptitle
+    if suptitle is not None:
+        suptitle.set_text(
+            _wrap_text_to_width(
+                fig,
+                suptitle.get_text(),
+                max_width_pixels=(1.0 - 2.0 * REPEATED_SESSION_LAYOUT.left)
+                * fig.bbox.width,
+                text_kwargs=figure_text_kwargs("panel_label"),
+            )
+        )
+
+    for column, group_id in enumerate(panel_set.group_ids):
+        max_width_pixels = _column_text_width_pixels(
+            fig,
+            axes,
+            column,
+            divider_x,
+        )
+        column_center = (
+            axes[0, column].get_position().x0
+            + axes[0, column].get_position().x1
+        ) / 2.0
+        group_label = panel_set.panel(group_id, panel_set.session_ids[0]).group_label
+        header = fig.text(
+            column_center,
+            REPEATED_SESSION_LAYOUT.column_header_y,
+            _wrap_text_to_width(
+                fig,
+                group_label,
+                max_width_pixels=max_width_pixels,
+                text_kwargs=header_kwargs,
+            ),
+            ha="center",
+            va="center",
+            **header_kwargs,
+        )
+        header.set_gid(
+            f"{REPEATED_SESSION_LAYOUT.column_header_gid_prefix}-{column}"
+        )
+        for ax in axes[:, column]:
+            wrapped_sections = tuple(
+                _wrap_text_to_width(
+                    fig,
+                    section,
+                    max_width_pixels=max_width_pixels,
+                    text_kwargs=title_kwargs,
+                )
+                for section in panel_title_sections[ax]
+            )
+            ax.set_title(
+                "\n".join(wrapped_sections),
+                pad=REPEATED_SESSION_LAYOUT.panel_title_pad,
+                **title_kwargs,
+            )
+
+
+def _add_group_column_divider(fig, axes) -> None:
+    """Add one neutral divider centered in the rendered group-column gutter."""
+
+    divider_x = _group_column_divider_x(axes)
+    grid_bottom = min(ax.get_position().y0 for ax in axes.flat)
+    grid_top = max(ax.get_position().y1 for ax in axes.flat)
+    divider = Line2D(
+        (divider_x, divider_x),
+        (grid_bottom, grid_top),
+        transform=fig.transFigure,
+        color=REPEATED_SESSION_LAYOUT.divider_color,
+        linewidth=REPEATED_SESSION_LAYOUT.divider_linewidth,
+        solid_capstyle="butt",
+        clip_on=False,
+    )
+    divider.set_gid(REPEATED_SESSION_LAYOUT.divider_gid)
+    fig.add_artist(divider)
+
+
 def _render_session_panel_set(
     panel_set: SessionMapPanelSet,
     request: PublicationMapRequest,
@@ -85,7 +294,9 @@ def _render_session_panel_set(
         row_count,
         2,
         squeeze=False,
-        figsize=(6.5, 8.0 if include_difference else 5.8),
+        figsize=REPEATED_SESSION_LAYOUT.figsize(
+            include_difference=include_difference
+        ),
         dpi=request.png_dpi,
     )
     metric = panel_set.metric
@@ -93,6 +304,7 @@ def _render_session_panel_set(
     cmap = colormap_for_metric(metric, bounds)
     main_vlim = _main_vlim(panel_set, bounds)
     main_images = []
+    panel_title_sections: dict[object, tuple[str, ...]] = {}
     try:
         for row, session_id in enumerate(panel_set.session_ids):
             for column, group_id in enumerate(panel_set.group_ids):
@@ -109,11 +321,9 @@ def _render_session_panel_set(
                     vlim_override=main_vlim,
                 )
                 main_images.append(image)
-                ax.set_title(
-                    f"{panel.group_label}\n{panel.session_label} "
+                panel_title_sections[ax] = (
+                    panel.session_label,
                     f"(Visit {panel.visit_index}, n={panel.participant_n})",
-                    pad=7,
-                    **figure_text_kwargs("condition_label"),
                 )
                 if missing:
                     _add_missing_note(ax, missing)
@@ -147,13 +357,10 @@ def _render_session_panel_set(
                     vlim_override=(-difference_limit, difference_limit),
                 )
                 difference_images.append(image)
-                ax.set_title(
-                    f"{difference.group_label}\n"
+                panel_title_sections[ax] = (
                     f"{difference.comparison_session_label} − "
-                    f"{difference.reference_session_label} "
+                    f"{difference.reference_session_label}",
                     f"(paired n={difference.paired_n})",
-                    pad=7,
-                    **figure_text_kwargs("condition_label"),
                 )
                 if missing:
                     _add_missing_note(ax, missing)
@@ -173,26 +380,28 @@ def _render_session_panel_set(
 
         fig.suptitle(
             f"{panel_set.condition} — {metric.display_name}",
-            y=0.985,
+            y=REPEATED_SESSION_LAYOUT.suptitle_y,
             **figure_text_kwargs("panel_label"),
         )
-        fig.text(
-            0.5,
-            0.012,
-            FIXED_ORDER_CAVEAT,
-            ha="center",
-            va="bottom",
-            wrap=True,
-            **figure_text_kwargs("small"),
-        )
         fig.subplots_adjust(
-            left=0.04,
-            right=0.87,
-            bottom=0.07,
-            top=0.91,
-            hspace=0.42,
-            wspace=0.18,
+            left=REPEATED_SESSION_LAYOUT.left,
+            right=REPEATED_SESSION_LAYOUT.right,
+            bottom=REPEATED_SESSION_LAYOUT.bottom,
+            top=REPEATED_SESSION_LAYOUT.top(
+                include_difference=include_difference
+            ),
+            hspace=REPEATED_SESSION_LAYOUT.hspace(
+                include_difference=include_difference
+            ),
+            wspace=REPEATED_SESSION_LAYOUT.wspace,
         )
+        _apply_repeated_session_titles(
+            fig,
+            axes,
+            panel_set,
+            panel_title_sections,
+        )
+        _add_group_column_divider(fig, axes)
         _save_figure(
             fig,
             output_path,

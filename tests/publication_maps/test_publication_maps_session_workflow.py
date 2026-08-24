@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from PIL import Image
 
 from Main_App.projects import (
     GroupInfo,
@@ -35,6 +37,7 @@ from Tools.Publication_Maps.session_workflow import (
     validate_session_grid_project,
     validate_session_grid_requests,
 )
+from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO_HTML
 
 
 def _repeated_index(
@@ -128,6 +131,75 @@ def _session_requests(
     )
 
 
+def _renderable_session_panel_set() -> SimpleNamespace:
+    group_ids = ("group_a", "group_b")
+    group_labels = {
+        "group_a": "Longitudinal Intervention Cohort Group Alpha",
+        "group_b": "Longitudinal Matched Comparison Cohort Group Beta",
+    }
+    session_ids = ("session_a", "session_b")
+    session_labels = {
+        "session_a": "Baseline Assessment Session With Extended Label",
+        "session_b": "Follow-Up Assessment Session With Extended Label",
+    }
+    panels = {
+        (group_id, session_id): SimpleNamespace(
+            group_label=group_labels[group_id],
+            session_label=session_labels[session_id],
+            visit_index=session_index,
+            participant_n=3,
+            values=(
+                SimpleNamespace(
+                    electrode="Cz",
+                    render_value=float(session_index),
+                    is_montage_electrode=True,
+                ),
+            ),
+        )
+        for group_id in group_ids
+        for session_index, session_id in enumerate(session_ids, start=1)
+    }
+    differences = {
+        group_id: SimpleNamespace(
+            group_label=group_labels[group_id],
+            comparison_session_label=session_labels["session_b"],
+            reference_session_label=session_labels["session_a"],
+            paired_n=2,
+            values=(
+                SimpleNamespace(
+                    electrode="Cz",
+                    aggregate_difference=1.0,
+                    is_montage_electrode=True,
+                ),
+            ),
+        )
+        for group_id in group_ids
+    }
+    return SimpleNamespace(
+        condition="Extended Visual Recognition and Attention Condition",
+        metric=PublicationMetric.BCA,
+        group_ids=group_ids,
+        session_ids=session_ids,
+        common_vmin=0.0,
+        common_vmax=2.0,
+        difference_vmin=-1.0,
+        difference_vmax=1.0,
+        panel=lambda group_id, session_id: panels[(group_id, session_id)],
+        paired_difference=lambda group_id: differences[group_id],
+    )
+
+
+def _pdf_media_box_points(path: Path) -> tuple[float, float]:
+    match = re.search(
+        rb"/MediaBox\s*\[\s*([0-9.]+)\s+([0-9.]+)\s+"
+        rb"([0-9.]+)\s+([0-9.]+)\s*\]",
+        path.read_bytes(),
+    )
+    assert match is not None
+    x0, y0, x1, y1 = (float(value) for value in match.groups())
+    return x1 - x0, y1 - y0
+
+
 def test_publication_session_state_and_exact_session_filter(tmp_path: Path) -> None:
     index = _repeated_index(tmp_path)
     state = publication_session_state(index)
@@ -149,6 +221,14 @@ def test_publication_session_state_and_exact_session_filter(tmp_path: Path) -> N
     assert len(entries) == 1
     assert entries[0].path.name == "P01.xlsx"
     assert "follicular" in entries[0].path.parts
+
+
+def test_repeated_session_help_keeps_caveat_outside_figure_artwork() -> None:
+    help_text = " ".join(SCALP_MAPS_TOOL_INFO_HTML.split())
+
+    assert "fixed-order caveat shown" in help_text
+    assert "rather than as an isolated phase effect" in help_text
+    assert "carries that caveat on the figure" not in help_text
 
 
 def test_publication_session_state_rejects_unstable_group(tmp_path: Path) -> None:
@@ -370,6 +450,187 @@ def test_session_renderer_queues_each_selected_condition_output_pair(
         "Objects_birth_control_and_no_birth_control_bca_session_grid.png",
         "Objects_birth_control_and_no_birth_control_bca_session_grid.pdf",
     ]
+
+
+@pytest.mark.parametrize(
+    ("include_difference", "expected_height_in"),
+    ((False, 6.5), (True, 9.0)),
+)
+def test_session_renderer_repeated_layout_artifact_contract(
+    tmp_path: Path,
+    monkeypatch,
+    include_difference: bool,
+    expected_height_in: float,
+) -> None:
+    test_dpi = 50
+    requests = tuple(
+        replace(
+            request,
+            export_paired_session_difference=include_difference,
+            export_png=True,
+            export_pdf=True,
+            png_dpi=test_dpi,
+        )
+        for request in _session_requests(tmp_path)
+    )
+    panel_set = _renderable_session_panel_set()
+    monkeypatch.setattr(
+        session_rendering,
+        "build_session_panel_sets",
+        lambda *_args, **_kwargs: (panel_set,),
+    )
+
+    def draw_test_map(_frame, *, ax, cmap, vlim_override, **_kwargs):
+        image = ax.imshow(
+            ((0.0, 1.0), (1.0, 0.0)),
+            cmap=cmap,
+            vmin=vlim_override[0],
+            vmax=vlim_override[1],
+        )
+        ax.set_axis_off()
+        return image, ()
+
+    monkeypatch.setattr(session_rendering, "_draw_topomap", draw_test_map)
+    real_save = session_rendering._save_figure
+    captured_layout: dict[str, object] = {}
+
+    def capture_save(fig, output_path, *, dpi, cancel_check=None) -> None:
+        if output_path.suffix.lower() == ".png":
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            row_count = 3 if include_difference else 2
+            map_axes = fig.axes[: row_count * 2]
+            suptitle = fig._suptitle
+            assert suptitle is not None
+            header_prefix = (
+                session_rendering.REPEATED_SESSION_LAYOUT.column_header_gid_prefix
+            )
+            headers = sorted(
+                (
+                    text
+                    for text in fig.texts
+                    if (text.get_gid() or "").startswith(header_prefix)
+                ),
+                key=lambda text: text.get_gid(),
+            )
+            dividers = [
+                artist
+                for artist in fig.artists
+                if artist.get_gid()
+                == session_rendering.REPEATED_SESSION_LAYOUT.divider_gid
+            ]
+            divider_x = (
+                float(dividers[0].get_xdata()[0]) if len(dividers) == 1 else None
+            )
+            figure_box = fig.bbox
+
+            def box_tuple(text) -> tuple[float, float, float, float]:
+                box = text.get_window_extent(renderer)
+                return box.x0, box.y0, box.x1, box.y1
+
+            captured_layout.update(
+                texts=tuple(text.get_text() for text in fig.texts),
+                divider_count=len(dividers),
+                divider_x=divider_x,
+                gutter_left=map_axes[0].get_position().x1,
+                gutter_right=map_axes[1].get_position().x0,
+                canvas=(
+                    figure_box.x0,
+                    figure_box.y0,
+                    figure_box.x1,
+                    figure_box.y1,
+                ),
+                suptitle_box=box_tuple(suptitle),
+                header_boxes=tuple(box_tuple(header) for header in headers),
+                header_texts=tuple(header.get_text() for header in headers),
+                panel_boxes=tuple(box_tuple(ax.title) for ax in map_axes),
+                panel_texts=tuple(ax.title.get_text() for ax in map_axes),
+            )
+        real_save(
+            fig,
+            output_path,
+            dpi=dpi,
+            cancel_check=cancel_check,
+        )
+
+    monkeypatch.setattr(session_rendering, "_save_figure", capture_save)
+
+    paths = session_rendering.render_session_grid_figures((), requests)
+
+    png_path = next(path for path in paths if path.suffix == ".png")
+    pdf_path = next(path for path in paths if path.suffix == ".pdf")
+    with Image.open(png_path) as image:
+        assert image.size == (int(6.5 * test_dpi), int(expected_height_in * test_dpi))
+        assert image.info["dpi"] == pytest.approx((test_dpi, test_dpi), abs=0.1)
+    pdf_width, pdf_height = _pdf_media_box_points(pdf_path)
+    assert pdf_width == pytest.approx(6.5 * 72.0)
+    assert pdf_height == pytest.approx(expected_height_in * 72.0)
+    assert FIXED_ORDER_CAVEAT not in captured_layout["texts"]
+    assert captured_layout["divider_count"] == 1
+    assert (
+        captured_layout["gutter_left"]
+        < captured_layout["divider_x"]
+        < captured_layout["gutter_right"]
+    )
+    assert len(captured_layout["header_boxes"]) == 2
+    canvas_left, canvas_bottom, canvas_right, canvas_top = captured_layout["canvas"]
+    divider_pixels = captured_layout["divider_x"] * (canvas_right - canvas_left)
+    repeated_right = (
+        session_rendering.REPEATED_SESSION_LAYOUT.right
+        * (canvas_right - canvas_left)
+    )
+    column_bounds = (
+        (canvas_left, divider_pixels),
+        (divider_pixels, repeated_right),
+    )
+    all_title_boxes = (
+        captured_layout["suptitle_box"],
+        *captured_layout["header_boxes"],
+        *captured_layout["panel_boxes"],
+    )
+    for left, bottom, right, top in all_title_boxes:
+        assert canvas_left <= left < right <= canvas_right
+        assert canvas_bottom <= bottom < top <= canvas_top
+    for column, header_box in enumerate(captured_layout["header_boxes"]):
+        assert column_bounds[column][0] <= header_box[0]
+        assert header_box[2] <= column_bounds[column][1]
+    for index, panel_box in enumerate(captured_layout["panel_boxes"]):
+        column = index % 2
+        assert column_bounds[column][0] <= panel_box[0]
+        assert panel_box[2] <= column_bounds[column][1]
+
+    def overlaps(first, second) -> bool:
+        return (
+            min(first[2], second[2]) > max(first[0], second[0])
+            and min(first[3], second[3]) > max(first[1], second[1])
+        )
+
+    for index, first in enumerate(all_title_boxes):
+        for second in all_title_boxes[index + 1 :]:
+            assert not overlaps(first, second)
+    expected_group_labels = tuple(
+        panel_set.panel(group_id, panel_set.session_ids[0]).group_label
+        for group_id in panel_set.group_ids
+    )
+    assert tuple(" ".join(text.split()) for text in captured_layout["header_texts"]) == (
+        expected_group_labels
+    )
+    normalized_panel_texts = tuple(
+        " ".join(text.split()) for text in captured_layout["panel_texts"]
+    )
+    for panel_text in normalized_panel_texts:
+        assert all(group_label not in panel_text for group_label in expected_group_labels)
+    for index, panel_text in enumerate(normalized_panel_texts):
+        row = index // 2
+        column = index % 2
+        group_id = panel_set.group_ids[column]
+        if row < 2:
+            session_id = panel_set.session_ids[row]
+            assert panel_set.panel(group_id, session_id).session_label in panel_text
+        else:
+            difference = panel_set.paired_difference(group_id)
+            assert difference.comparison_session_label in panel_text
+            assert difference.reference_session_label in panel_text
 
 
 def test_worker_stages_all_selected_session_grids_atomically(

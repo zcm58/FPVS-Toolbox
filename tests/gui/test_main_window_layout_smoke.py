@@ -1029,22 +1029,54 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     conditions_card = page.findChild(SectionCard, "publication_maps_conditions")
     settings_card = page.findChild(SectionCard, "publication_maps_settings")
     output_card = page.findChild(SectionCard, "publication_maps_output")
+    figure_layout_card = page.findChild(
+        SectionCard,
+        "publication_maps_figure_layout",
+    )
     run_card = page.findChild(SectionCard, "publication_maps_run")
     assert conditions_card is not None
     assert settings_card is not None
     assert output_card is not None
+    assert figure_layout_card is not None
     assert run_card is not None
-    assert conditions_card.geometry().top() == settings_card.geometry().top()
-    assert output_card.geometry().top() == run_card.geometry().top()
+    assert conditions_card.geometry().top() == run_card.geometry().top()
     assert conditions_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
     assert settings_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-    assert output_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
-    assert run_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
-    assert abs(conditions_card.geometry().bottom() - settings_card.geometry().bottom()) <= 1
-    assert abs(output_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
-    assert abs(conditions_card.geometry().width() - settings_card.geometry().width()) <= 1
-    assert abs(output_card.geometry().width() - run_card.geometry().width()) <= 1
-    assert not settings_card.header.isVisible()
+    assert figure_layout_card.minimumHeight() == SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT
+    assert run_card.minimumHeight() == SCALP_MAPS_TOP_ROW_MIN_HEIGHT
+    assert abs(conditions_card.geometry().bottom() - run_card.geometry().bottom()) <= 1
+    assert abs(conditions_card.geometry().width() - run_card.geometry().width()) <= 1
+    assert [
+        page.workflow_tabs.tabText(index)
+        for index in range(page.workflow_tabs.count())
+    ] == ["Generate Maps", "Advanced Settings"]
+    assert page.workflow_tabs.currentIndex() == 0
+    assert page.workflow_tabs.widget(0).isAncestorOf(conditions_card)
+    assert page.workflow_tabs.widget(0).isAncestorOf(run_card)
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.metric_bca_check)
+    assert page.workflow_tabs.widget(1).isAncestorOf(settings_card)
+    assert page.workflow_tabs.widget(1).isAncestorOf(output_card)
+    assert page.workflow_tabs.widget(1).isAncestorOf(figure_layout_card)
+    assert page.workflow_tabs.widget(1).isAncestorOf(page.output_root_row)
+    assert page.workflow_tabs.widget(1).isAncestorOf(
+        page.view_generation_log_btn
+    )
+    assert not page.workflow_tabs.widget(0).isAncestorOf(page.log_box)
+    assert not page.workflow_tabs.widget(1).isAncestorOf(page.log_box)
+    assert page.generation_log_dialog.isAncestorOf(page.log_box)
+    assert page.run_btn.text() == "Generate Scalp Maps"
+    assert page.output_format_label.text() == "PNG and PDF (600 DPI)"
+    assert page.status_label.isVisible()
+    assert "Paired-condition figure ready for CondA and CondB" in (
+        page.status_label.text()
+    )
+    for widget in (
+        page.conditions_list,
+        page.metric_bca_check,
+        page.status_label,
+        page.run_btn,
+    ):
+        assert widget.visibleRegion().contains(widget.rect())
     assert not hasattr(page, "base_freq_value")
     assert not hasattr(page, "bca_limit_value")
     assert page.metric_bca_check.isChecked()
@@ -1067,10 +1099,6 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.snr_vmax_spin.isEnabled()
     assert page.z_threshold_spin.value() == pytest.approx(1.64)
     assert page.z_threshold_spin.isEnabled()
-    assert page.export_png_check.isChecked()
-    assert not page.export_png_check.isEnabled()
-    assert page.export_pdf_check.isChecked()
-    assert not page.export_pdf_check.isEnabled()
     assert page.run_btn.isEnabled()
     page.metric_bca_check.setChecked(False)
     assert page.run_btn.isEnabled()
@@ -1078,9 +1106,13 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.run_btn.isEnabled()
     page.metric_z_check.setChecked(False)
     assert not page.run_btn.isEnabled()
+    assert page.status_label.text() == "Select at least one map type."
     page.metric_bca_check.setChecked(True)
     page.metric_snr_check.setChecked(True)
     page.metric_z_check.setChecked(True)
+    assert "Paired-condition figure ready for CondA and CondB" in (
+        page.status_label.text()
+    )
     assert page.fixed_snr_range_check.isEnabled()
     assert page.snr_vmin_spin.isEnabled()
     assert page.snr_vmax_spin.isEnabled()
@@ -1089,13 +1121,42 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     page.metric_snr_check.setChecked(True)
     page.workflow_tabs.setCurrentIndex(1)
     qtbot.wait(20)
+    assert settings_card.header.isVisible()
+    assert output_card.geometry().top() < settings_card.geometry().top()
+    assert settings_card.geometry().top() == figure_layout_card.geometry().top()
+    assert abs(output_card.geometry().left() - settings_card.geometry().left()) <= 1
+    assert (
+        abs(output_card.geometry().right() - figure_layout_card.geometry().right())
+        <= 1
+    )
     assert page.paired_figures_check.isChecked()
+    page.paired_figures_check.setChecked(False)
+    assert "Paired-condition figure ready" not in page.status_label.text()
+    page.paired_figures_check.setChecked(True)
+    assert "Paired-condition figure ready for CondA and CondB" in (
+        page.status_label.text()
+    )
     assert page.paired_conditions_widget.isVisible()
     assert page.paired_condition_a_combo.currentText() == "CondA"
     assert page.paired_condition_b_combo.currentText() == "CondB"
+    page.paired_condition_a_combo.setCurrentText("CondB")
+    assert page.paired_condition_a_combo.currentText() == "CondB"
+    assert page.paired_condition_b_combo.currentText() == "CondA"
+    assert "Paired-condition figure ready for CondB and CondA" in (
+        page.status_label.text()
+    )
     assert page.paired_condition_a_combo.isEnabled()
     assert page.paired_condition_b_combo.isEnabled()
-    assert page.status_label.isVisible()
+    for widget in (
+        page.output_root_edit,
+        page.open_output_btn,
+        page.view_generation_log_btn,
+        page.color_low_btn,
+        page.bca_vmax_spin,
+        page.paired_condition_a_combo,
+        page.group_comparison_hint,
+    ):
+        assert widget.visibleRegion().contains(widget.rect())
     page._set_busy_state(True)
     qtbot.wait(20)
 
@@ -1115,8 +1176,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert not page.snr_vmax_spin.isEnabled()
     assert not page.z_threshold_spin.isEnabled()
     assert not page.output_root_row.isEnabled()
-    assert not page.export_png_check.isEnabled()
-    assert not page.export_pdf_check.isEnabled()
+    assert page.view_generation_log_btn.isEnabled()
     assert not page.paired_figures_check.isEnabled()
     assert not page.paired_condition_a_combo.isEnabled()
     assert not page.paired_condition_b_combo.isEnabled()
@@ -1144,8 +1204,7 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.snr_vmax_spin.isEnabled()
     assert page.z_threshold_spin.isEnabled()
     assert page.output_root_row.isEnabled()
-    assert not page.export_png_check.isEnabled()
-    assert not page.export_pdf_check.isEnabled()
+    assert page.view_generation_log_btn.isEnabled()
     assert page.paired_condition_a_combo.isEnabled()
     assert page.paired_condition_b_combo.isEnabled()
     assert not page.cancel_btn.isEnabled()

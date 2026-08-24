@@ -6,9 +6,16 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import QMainWindow, QScrollArea, QTabWidget, QWidget
+from PySide6.QtWidgets import (
+    QDialogButtonBox,
+    QMainWindow,
+    QScrollArea,
+    QTabWidget,
+    QWidget,
+)
 
 from Main_App.gui import main_window as main_window_module
+from Main_App.gui.components import SectionCard
 from Main_App.projects import (
     GroupInfo,
     ProjectDatasetIndex,
@@ -297,13 +304,132 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
 
     assert isinstance(page.workflow_tabs, QTabWidget)
     assert page.findChildren(QScrollArea) == []
+    assert page.workflow_tabs.currentIndex() == 0
+    assert [
+        page.workflow_tabs.tabText(index)
+        for index in range(page.workflow_tabs.count())
+    ] == ["Generate Maps", "Advanced Settings"]
+    assert all(
+        "&" not in page.workflow_tabs.tabText(index)
+        and "_" not in page.workflow_tabs.tabText(index)
+        for index in range(page.workflow_tabs.count())
+    )
+    generation_page = page.workflow_tabs.widget(0)
+    advanced_page = page.workflow_tabs.widget(1)
+    for widget in (
+        page.conditions_list,
+        page.metric_bca_check,
+        page.status_label,
+        page.progress,
+        page.run_btn,
+    ):
+        assert generation_page.isAncestorOf(widget)
+    for widget in (
+        page.output_root_row,
+        page.output_format_label,
+        page.view_generation_log_btn,
+        page.color_low_btn,
+        page.fixed_bca_range_check,
+        page.paired_figures_check,
+        page.group_comparison_check,
+    ):
+        assert advanced_page.isAncestorOf(widget)
+    assert not generation_page.isAncestorOf(page.log_box)
+    assert not advanced_page.isAncestorOf(page.log_box)
+    assert page.generation_log_dialog.isAncestorOf(page.log_box)
+    assert page.run_btn.text() == "Generate Scalp Maps"
+    assert page.output_format_label.text() == "PNG and PDF (600 DPI)"
+    assert page.output_root_edit.text()
+    assert page.run_btn.isEnabled()
+
     page.workflow_tabs.setCurrentIndex(0)
     qtbot.waitUntil(lambda: not page.conditions_list.visibleRegion().isEmpty())
+    qtbot.waitUntil(lambda: not page.run_btn.visibleRegion().isEmpty())
+    for widget in (
+        page.conditions_list,
+        page.metric_bca_check,
+        page.status_label,
+        page.run_btn,
+    ):
+        assert widget.visibleRegion().contains(widget.rect())
     page.workflow_tabs.setCurrentIndex(1)
     qtbot.waitUntil(
         lambda: not page.group_comparison_widget.visibleRegion().isEmpty()
     )
-    qtbot.waitUntil(lambda: not page.log_box.visibleRegion().isEmpty())
+    qtbot.waitUntil(lambda: not page.color_low_btn.visibleRegion().isEmpty())
+    qtbot.waitUntil(lambda: not page.output_root_edit.visibleRegion().isEmpty())
+    for widget in (
+        page.output_root_edit,
+        page.open_output_btn,
+        page.view_generation_log_btn,
+        page.color_low_btn,
+        page.bca_vmax_spin,
+        page.group_comparison_a_label,
+        page.group_comparison_widget,
+    ):
+        assert widget.visibleRegion().contains(widget.rect())
+
+    output_card = advanced_page.findChild(
+        SectionCard,
+        "publication_maps_output",
+    )
+    appearance_card = advanced_page.findChild(
+        SectionCard,
+        "publication_maps_settings",
+    )
+    layout_card = advanced_page.findChild(
+        SectionCard,
+        "publication_maps_figure_layout",
+    )
+    assert output_card is not None
+    assert appearance_card is not None
+    assert layout_card is not None
+    assert output_card.geometry().top() < appearance_card.geometry().top()
+    assert appearance_card.geometry().top() == layout_card.geometry().top()
+    assert abs(output_card.geometry().left() - appearance_card.geometry().left()) <= 1
+    assert abs(output_card.geometry().right() - layout_card.geometry().right()) <= 1
+
+
+@pytest.mark.qt
+def test_generation_log_dialog_preserves_live_full_history(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    page.workflow_tabs.setCurrentIndex(1)
+    page.log_box.clear()
+    page._append_log("Before opening", update_status=False)
+
+    qtbot.mouseClick(page.view_generation_log_btn, Qt.LeftButton)
+    qtbot.waitUntil(page.generation_log_dialog.isVisible)
+
+    assert page.generation_log_dialog.isModal()
+    assert page.log_box is page.generation_log_dialog.viewer
+    buttons = page.generation_log_dialog.findChild(
+        QDialogButtonBox,
+        "publication_maps_generation_log_buttons",
+    )
+    assert buttons is not None
+    assert buttons.standardButtons() == QDialogButtonBox.StandardButton.Close
+    page._append_log("While open", update_status=False)
+    assert page.log_box.toPlainText().splitlines() == [
+        "Before opening",
+        "While open",
+    ]
+
+    page.generation_log_dialog.reject()
+    qtbot.waitUntil(lambda: not page.generation_log_dialog.isVisible())
+    page._append_log("While closed", update_status=False)
+    qtbot.mouseClick(page.view_generation_log_btn, Qt.LeftButton)
+    qtbot.waitUntil(page.generation_log_dialog.isVisible)
+
+    assert page.log_box.toPlainText().splitlines() == [
+        "Before opening",
+        "While open",
+        "While closed",
+    ]
+    page.generation_log_dialog.reject()
 
 
 @pytest.mark.qt
@@ -313,13 +439,29 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     tmp_path,
 ) -> None:
     index = _managed_repeated_index(tmp_path)
-    _host, page = _build_page(
+    host, page = _build_page(
         qtbot,
         monkeypatch,
         tmp_path,
         dataset_index=index,
     )
+    host.resize(1280, 900)
+    qtbot.waitUntil(
+        lambda: not page.session_controls_widget.visibleRegion().isEmpty()
+    )
 
+    assert page.workflow_tabs.currentIndex() == 0
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.session_controls_widget)
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.run_btn)
+    assert page.run_btn.text() == "Generate Scalp Maps"
+    assert page.run_btn.isVisible()
+    assert page.run_btn.isEnabled()
+    for widget in (
+        page.session_controls_widget,
+        page.run_btn,
+    ):
+        assert widget.visibleRegion().contains(widget.rect())
+    assert not page.workflow_tabs.widget(0).isAncestorOf(page.log_box)
     assert page.session_controls_widget.isVisible()
     assert page.session_dimension_combo.currentData() == "session_comparison"
     assert page.reference_session_combo.currentText() == "Luteal phase — Visit 1"
@@ -328,9 +470,11 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     assert page._selected_conditions() == ("Objects",)
     page._set_all_conditions(False)
     assert page._selected_conditions() == ()
+    assert page.status_label.text() == "Select at least one condition."
     qtbot.mouseClick(page.select_all_btn, Qt.LeftButton)
 
     assert page._selected_conditions() == ("Faces", "Objects")
+    assert "Session grids ready for 2 conditions" in page.status_label.text()
     assert page.group_combo.currentData() == publication_maps_gui.ALL_GROUPS_VALUE
     assert page.group_combo.isEnabled() is False
     assert page.paired_figures_check.isChecked() is False
@@ -537,6 +681,7 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         assert page.has_active_generation()
         assert page.run_btn.isEnabled() is False
         assert page.cancel_btn.isEnabled() is True
+        assert page.view_generation_log_btn.isEnabled() is True
         assert host.menuBar().isEnabled() is False
 
         page._cancel_run()
@@ -555,6 +700,7 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
 
         assert page.run_btn.isEnabled() is True
         assert page.cancel_btn.isEnabled() is False
+        assert page.view_generation_log_btn.isEnabled() is True
         assert host.menuBar().isEnabled() is True
         assert "No new output was published" in page.status_label.text()
         assert confirmations == []

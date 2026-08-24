@@ -29,6 +29,7 @@ from Tools.Publication_Maps.output_contract import (
     request_output_root,
 )
 from Tools.Publication_Maps.rendering import (
+    MULTI_GROUP_LAYOUT_STYLE,
     PAIRED_MAP_FIGSIZE,
     _assert_unique_figure_stems,
     _group_comparison_titles,
@@ -374,6 +375,7 @@ def test_two_group_comparison_renders_at_base_with_shared_limits(
     control = _comparison_result("control", "Control", scale=1.0)
     captured_vlim: list[tuple[float, float]] = []
     captured_titles: list[tuple[str, str, str]] = []
+    captured_layout_styles: list[object] = []
 
     from Tools.Publication_Maps import rendering as publication_rendering
 
@@ -395,6 +397,7 @@ def test_two_group_comparison_renders_at_base_with_shared_limits(
                 bounds=kwargs["bounds"],
             )
         )
+        captured_layout_styles.append(kwargs["layout_style"])
         real_render(first_values, second_values, **kwargs)
 
     monkeypatch.setattr(
@@ -413,6 +416,7 @@ def test_two_group_comparison_renders_at_base_with_shared_limits(
     ]
     assert captured_vlim == [(0.0, 40.0)]
     assert captured_titles == [("Clinical", "Control", "Faces")]
+    assert captured_layout_styles == [MULTI_GROUP_LAYOUT_STYLE]
     assert not (output_root / "Control").exists()
     assert not (output_root / "Clinical").exists()
     with Image.open(paths[0]) as image:

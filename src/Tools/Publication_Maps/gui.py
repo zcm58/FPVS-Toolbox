@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -55,6 +54,7 @@ from Tools.Publication_Maps.generation_outcome import (
     PublicationMapsOutcomeStatus,
     PublicationMapsWorkerOutcome,
 )
+from Tools.Publication_Maps.log_dialog import ScalpMapsGenerationLogDialog
 from Tools.Publication_Maps.models import (
     ColorBounds,
     DEFAULT_BCA_HIGH_COLOR,
@@ -133,6 +133,9 @@ class PublicationMapsWindow(QWidget):
         self._session_control_error = ""
         self._session_controls_initialized = False
         self._last_run_was_session_grid = False
+        self.generation_log_dialog = ScalpMapsGenerationLogDialog(self)
+        # Retain the existing log sink name so worker and outcome wiring stays exact.
+        self.log_box = self.generation_log_dialog.viewer
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(8, 8, 8, 8)
@@ -141,26 +144,45 @@ class PublicationMapsWindow(QWidget):
 
         self.workflow_tabs = QTabWidget(self)
         self.workflow_tabs.setObjectName("publication_maps_workflow_tabs")
-        selection_page = QWidget(self.workflow_tabs)
-        selection_layout = QGridLayout(selection_page)
-        selection_layout.setContentsMargins(0, 8, 0, 0)
-        selection_layout.setHorizontalSpacing(8)
-        selection_layout.addWidget(self._build_conditions_group(), 0, 0)
-        selection_layout.addWidget(self._build_settings_group(), 0, 1)
-        selection_layout.setColumnStretch(0, 1)
-        selection_layout.setColumnStretch(1, 1)
+        self.workflow_tabs.setAccessibleName("Scalp Maps workflow")
 
-        output_page = QWidget(self.workflow_tabs)
-        output_layout = QGridLayout(output_page)
-        output_layout.setContentsMargins(0, 8, 0, 0)
-        output_layout.setHorizontalSpacing(8)
-        output_layout.addWidget(self._build_output_group(), 0, 0)
-        output_layout.addWidget(self._build_run_group(), 0, 1)
-        output_layout.setColumnStretch(0, 1)
-        output_layout.setColumnStretch(1, 1)
+        selection_group = self._build_conditions_group()
+        generation_group = self._build_generation_group()
+        advanced_output_group = self._build_advanced_output_group()
+        map_settings_group = self._build_map_settings_group()
+        figure_layout_group = self._build_figure_layout_group()
 
-        self.workflow_tabs.addTab(selection_page, "Data & Maps")
-        self.workflow_tabs.addTab(output_page, "Output & Run")
+        generation_page = QWidget(self.workflow_tabs)
+        generation_layout = QGridLayout(generation_page)
+        generation_layout.setContentsMargins(0, 8, 0, 0)
+        generation_layout.setHorizontalSpacing(8)
+        generation_layout.addWidget(selection_group, 0, 0)
+        generation_layout.addWidget(generation_group, 0, 1)
+        generation_layout.setColumnStretch(0, 1)
+        generation_layout.setColumnStretch(1, 1)
+
+        advanced_page = QWidget(self.workflow_tabs)
+        advanced_layout = QGridLayout(advanced_page)
+        advanced_layout.setContentsMargins(0, 8, 0, 0)
+        advanced_layout.setHorizontalSpacing(8)
+        advanced_layout.setVerticalSpacing(8)
+        advanced_layout.addWidget(advanced_output_group, 0, 0, 1, 2)
+        advanced_layout.addWidget(map_settings_group, 1, 0)
+        advanced_layout.addWidget(figure_layout_group, 1, 1)
+        advanced_layout.setColumnStretch(0, 1)
+        advanced_layout.setColumnStretch(1, 1)
+        advanced_layout.setRowStretch(1, 1)
+
+        self.workflow_tabs.addTab(generation_page, "Generate Maps")
+        self.workflow_tabs.addTab(advanced_page, "Advanced Settings")
+        self.workflow_tabs.setTabToolTip(
+            0,
+            "Select data and map types, then generate maps with the configured output.",
+        )
+        self.workflow_tabs.setTabToolTip(
+            1,
+            "Configure output, review the generation log, and adjust figure settings.",
+        )
         outer_layout.addWidget(self.workflow_tabs, 1)
 
         self._apply_button_icons()
@@ -189,7 +211,7 @@ class PublicationMapsWindow(QWidget):
         form = make_form_layout()
 
         self.input_root_row = PathPickerRow(
-            "Browse...",
+            "Choose Excel folder",
             group,
             placeholder="Select Excel root folder",
         )
@@ -225,7 +247,7 @@ class PublicationMapsWindow(QWidget):
         return group
 
     def _build_conditions_group(self) -> SectionCard:
-        group = SectionCard("Conditions", object_name="publication_maps_conditions")
+        group = SectionCard("Map selection", object_name="publication_maps_conditions")
         group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -275,7 +297,7 @@ class PublicationMapsWindow(QWidget):
             "Session for condition scalp maps"
         )
         self.single_session_combo.currentIndexChanged.connect(
-            lambda _index: self._update_run_state()
+            lambda _index: self._refresh_ready_state()
         )
         session_layout.addWidget(self.single_session_label, 1, 0)
         session_layout.addWidget(self.single_session_combo, 1, 1, 1, 3)
@@ -284,13 +306,13 @@ class PublicationMapsWindow(QWidget):
         self.reference_session_combo = QComboBox(self.session_controls_widget)
         self.reference_session_combo.setAccessibleName("Reference session")
         self.reference_session_combo.currentIndexChanged.connect(
-            lambda _index: self._update_run_state()
+            lambda _index: self._refresh_ready_state()
         )
         self.comparison_session_label = QLabel("Comparison:")
         self.comparison_session_combo = QComboBox(self.session_controls_widget)
         self.comparison_session_combo.setAccessibleName("Comparison session")
         self.comparison_session_combo.currentIndexChanged.connect(
-            lambda _index: self._update_run_state()
+            lambda _index: self._refresh_ready_state()
         )
         session_layout.addWidget(self.reference_session_label, 2, 0)
         session_layout.addWidget(self.reference_session_combo, 2, 1)
@@ -319,31 +341,44 @@ class PublicationMapsWindow(QWidget):
         group.content_layout.addWidget(self.conditions_summary)
         return group
 
-    def _build_settings_group(self) -> SectionCard:
-        group = SectionCard("", object_name="publication_maps_settings")
-        group.header.hide()
-        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        form = make_form_layout()
-
-        self.metric_bca_check = QCheckBox("BCA", group)
+    def _build_metric_selection(self, parent: QWidget) -> QWidget:
+        self.metric_bca_check = QCheckBox("BCA", parent)
         self.metric_bca_check.setChecked(True)
         self.metric_bca_check.setToolTip("Export BCA scalp maps.")
         self.metric_bca_check.toggled.connect(
             lambda _checked: self._on_metric_selection_changed()
         )
-        self.metric_snr_check = QCheckBox("SNR", group)
+        self.metric_snr_check = QCheckBox("SNR", parent)
         self.metric_snr_check.setChecked(True)
         self.metric_snr_check.setToolTip("Export SNR scalp maps.")
         self.metric_snr_check.toggled.connect(
             lambda _checked: self._on_metric_selection_changed()
         )
-        self.metric_z_check = QCheckBox("Z-score", group)
+        self.metric_z_check = QCheckBox("Z-score", parent)
         self.metric_z_check.setChecked(True)
         self.metric_z_check.setToolTip("Export z-score scalp maps.")
         self.metric_z_check.toggled.connect(
             lambda _checked: self._on_metric_selection_changed()
         )
+
+        metrics_row = QWidget(parent)
+        metrics_layout = QHBoxLayout(metrics_row)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_layout.setSpacing(12)
+        metrics_layout.addWidget(self.metric_bca_check)
+        metrics_layout.addWidget(self.metric_snr_check)
+        metrics_layout.addWidget(self.metric_z_check)
+        metrics_layout.addStretch(1)
+        return metrics_row
+
+    def _build_map_settings_group(self) -> SectionCard:
+        group = SectionCard(
+            "Map appearance",
+            object_name="publication_maps_settings",
+        )
+        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        form = make_form_layout()
 
         self.color_low_btn = QPushButton(group)
         self.color_low_btn.setFixedSize(20, 20)
@@ -422,15 +457,6 @@ class PublicationMapsWindow(QWidget):
         color_layout.addWidget(self.color_high_btn)
         color_layout.addStretch(1)
 
-        metrics_row = QWidget(group)
-        metrics_layout = QHBoxLayout(metrics_row)
-        metrics_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_layout.setSpacing(12)
-        metrics_layout.addWidget(self.metric_bca_check)
-        metrics_layout.addWidget(self.metric_snr_check)
-        metrics_layout.addWidget(self.metric_z_check)
-        metrics_layout.addStretch(1)
-
         range_row = self._build_range_control_grid(
             group,
             lower_spin=self.bca_vmin_spin,
@@ -442,7 +468,6 @@ class PublicationMapsWindow(QWidget):
             upper_spin=self.snr_vmax_spin,
         )
 
-        form.addRow("Metrics:", metrics_row)
         form.addRow("Color scale:", color_row)
         form.addRow("", self.fixed_bca_range_check)
         form.addRow("BCA range:", range_row)
@@ -477,37 +502,76 @@ class PublicationMapsWindow(QWidget):
         layout.setColumnStretch(1, 1)
         return row
 
-    def _build_output_group(self) -> SectionCard:
-        group = SectionCard("Output", object_name="publication_maps_output")
-        group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    def _build_advanced_output_group(self) -> SectionCard:
+        group = SectionCard(
+            "Output and history",
+            object_name="publication_maps_output",
+        )
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         form = make_form_layout()
 
         self.output_root_row = PathPickerRow(
-            "Browse...",
+            "Choose output folder",
             group,
             placeholder="Select output folder",
         )
         self.output_root_row.setObjectName("publication_maps_output_root_row")
         self.output_root_edit = self.output_root_row.line_edit
+        self.output_root_edit.setAccessibleName("Scalp Maps output folder")
         self.output_root_btn = self.output_root_row.button
+        self.output_root_btn.setAccessibleName("Choose Scalp Maps output folder")
         self.output_root_btn.clicked.connect(self._browse_output_root)
         self.output_root_edit.textChanged.connect(self._on_output_root_changed)
-        self.open_output_btn = make_action_button("Open", compact=True, parent=group)
+        self.open_output_btn = make_action_button(
+            "Open output folder",
+            compact=True,
+            parent=group,
+        )
+        self.open_output_btn.setAccessibleName("Open Scalp Maps output folder")
         self.open_output_btn.clicked.connect(self._open_output_folder)
         self.output_root_row.row_layout.insertWidget(1, self.open_output_btn)
         form.addRow("Output folder:", self.output_root_row)
+
+        self.output_format_label = QLabel("PNG and PDF (600 DPI)", group)
+        self.output_format_label.setObjectName("publication_maps_output_formats")
+        self.output_format_label.setProperty("caption", True)
+        form.addRow("File formats:", self.output_format_label)
         group.content_layout.addLayout(form)
 
-        self.export_png_check = QCheckBox("PNG (600 DPI)", group)
-        self.export_png_check.setChecked(True)
-        self.export_png_check.setEnabled(False)
-        self.export_pdf_check = QCheckBox("PDF (600 DPI)", group)
-        self.export_pdf_check.setChecked(True)
-        self.export_pdf_check.setEnabled(False)
-        self.paired_figures_check = QCheckBox("Export paired condition figure only", group)
+        self.view_generation_log_btn = make_action_button(
+            "View Generation Log",
+            compact=True,
+            parent=group,
+        )
+        self.view_generation_log_btn.setObjectName(
+            "publication_maps_view_generation_log"
+        )
+        self.view_generation_log_btn.setAccessibleName(
+            "View Scalp Maps generation log"
+        )
+        self.view_generation_log_btn.setToolTip(
+            "Open the full log for the current or most recent Scalp Maps run."
+        )
+        self.view_generation_log_btn.clicked.connect(
+            self.generation_log_dialog.open
+        )
+        group.header.add_action_widget(self.view_generation_log_btn)
+        return group
+
+    def _build_figure_layout_group(self) -> SectionCard:
+        group = SectionCard(
+            "Figure layout",
+            object_name="publication_maps_figure_layout",
+        )
+        group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.paired_figures_check = QCheckBox(
+            "Create one paired-condition figure",
+            group,
+        )
         self.paired_figures_check.setToolTip(
-            "When at least two conditions are selected, export only the paired side-by-side scalp-map figure."
+            "When at least two conditions are selected, export only one "
+            "side-by-side figure for Condition A and Condition B."
         )
         self.paired_figures_check.toggled.connect(self._on_paired_figures_toggled)
 
@@ -519,12 +583,16 @@ class PublicationMapsWindow(QWidget):
         self.paired_condition_a_combo = QComboBox(self.paired_conditions_widget)
         self.paired_condition_a_combo.setToolTip("Select the first condition for the paired scalp-map figure.")
         self.paired_condition_a_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.paired_condition_a_combo.currentTextChanged.connect(lambda _text: self._update_run_state())
+        self.paired_condition_a_combo.currentTextChanged.connect(
+            lambda _text: self._refresh_ready_state()
+        )
 
         self.paired_condition_b_combo = QComboBox(self.paired_conditions_widget)
         self.paired_condition_b_combo.setToolTip("Select the second condition for the paired scalp-map figure.")
         self.paired_condition_b_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.paired_condition_b_combo.currentTextChanged.connect(lambda _text: self._update_run_state())
+        self.paired_condition_b_combo.currentTextChanged.connect(
+            lambda _text: self._refresh_ready_state()
+        )
 
         paired_a_container = QWidget(self.paired_conditions_widget)
         paired_a_layout = QVBoxLayout(paired_a_container)
@@ -548,7 +616,7 @@ class PublicationMapsWindow(QWidget):
         paired_layout.addLayout(paired_selectors)
 
         self.group_comparison_check = QCheckBox(
-            "Export two-group comparison figure only",
+            "Create one two-group comparison figure",
             group,
         )
         self.group_comparison_check.setObjectName(
@@ -614,10 +682,6 @@ class PublicationMapsWindow(QWidget):
         comparison_groups_layout.addWidget(comparison_a_container, 1)
         comparison_groups_layout.addWidget(comparison_b_container, 1)
 
-        formats = ActionRow(group, alignment=Qt.AlignLeft, spacing=12)
-        formats.row_layout.addWidget(self.export_png_check)
-        formats.row_layout.addWidget(self.export_pdf_check)
-        group.content_layout.addWidget(formats)
         group.content_layout.addWidget(self.paired_figures_check)
         group.content_layout.addWidget(self.paired_conditions_widget)
         group.content_layout.addWidget(self.group_comparison_check)
@@ -629,17 +693,44 @@ class PublicationMapsWindow(QWidget):
         self.group_comparison_widget.setVisible(False)
         return group
 
-    def _build_run_group(self) -> SectionCard:
-        group = SectionCard("Run", object_name="publication_maps_run")
-        group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
+    def _build_generation_group(self) -> SectionCard:
+        group = SectionCard(
+            "Generate scalp maps",
+            object_name="publication_maps_run",
+        )
+        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        form = make_form_layout()
+        form.addRow("Map types:", self._build_metric_selection(group))
+        group.content_layout.addLayout(form)
+
+        advanced_hint = QLabel(
+            "Use Advanced Settings to change the output folder, review the full "
+            "generation log, or customize figure appearance and layout.",
+            group,
+        )
+        advanced_hint.setProperty("caption", True)
+        advanced_hint.setWordWrap(True)
+        group.content_layout.addWidget(advanced_hint)
 
         self.progress = QProgressBar(group)
         self.progress.setValue(0)
+        self.progress.setAccessibleName("Scalp map generation progress")
         self.status_label = StatusBanner("Ready.", group)
         self.status_label.setObjectName("publication_maps_status")
-        self.run_btn = make_action_button("Run", variant="primary", parent=group)
+        self.run_btn = make_action_button(
+            "Generate Scalp Maps",
+            variant="primary",
+            parent=group,
+        )
+        self.run_btn.setObjectName("publication_maps_generate_button")
+        self.run_btn.setAccessibleName("Generate Scalp Maps")
+        self.run_btn.setToolTip(
+            "Generate the selected scalp map figures using the current settings."
+        )
         self.cancel_btn = make_action_button("Cancel", compact=True, parent=group)
+        self.cancel_btn.setAccessibleName("Cancel scalp map generation")
         self.cancel_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._start_run)
         self.cancel_btn.clicked.connect(self._cancel_run)
@@ -649,14 +740,8 @@ class PublicationMapsWindow(QWidget):
         row.add_button(self.cancel_btn)
         row.row_layout.addWidget(self.progress, 1)
 
-        self.log_box = QPlainTextEdit(group)
-        self.log_box.setReadOnly(True)
-        self.log_box.setMinimumHeight(100)
-        self.log_box.setProperty("logSurface", True)
-
         group.content_layout.addWidget(self.status_label)
         group.content_layout.addWidget(row)
-        group.content_layout.addWidget(self.log_box)
         return group
 
     def _apply_button_icons(self) -> None:
@@ -963,7 +1048,14 @@ class PublicationMapsWindow(QWidget):
             self.conditions_list.blockSignals(False)
 
     def _on_condition_item_changed(self, _item: QListWidgetItem) -> None:
+        self._refresh_ready_state()
+
+    def _refresh_ready_state(self) -> None:
+        """Refresh readiness and any first-tab summary affected by selection."""
+
         self._update_run_state()
+        if self._dataset_index is not None and not self._busy:
+            self._set_ready_status()
 
     def _session_selection_valid(self) -> bool:
         if self._session_control_error:
@@ -1020,6 +1112,14 @@ class PublicationMapsWindow(QWidget):
             self.status_label.set_text(self._session_control_error)
             self.status_label.set_variant("error")
             return
+        if not self._selected_conditions():
+            self.status_label.set_text("Select at least one condition.")
+            self.status_label.set_variant("warning")
+            return
+        if not self._selected_metrics():
+            self.status_label.set_text("Select at least one map type.")
+            self.status_label.set_variant("warning")
+            return
         if self._session_state.repeated and not self._session_selection_valid():
             self.status_label.set_text(
                 "Choose a valid canonical session selection. Session grids require "
@@ -1064,6 +1164,24 @@ class PublicationMapsWindow(QWidget):
                 f"{self.group_comparison_a_label.text()} vs "
                 f"{self.group_comparison_b_label.text()}. Only the descriptive "
                 "comparison figure will be generated."
+            )
+            self.status_label.set_variant("info")
+            return
+        if (
+            hasattr(self, "paired_figures_check")
+            and self.paired_figures_check.isChecked()
+            and self._paired_conditions_valid()
+        ):
+            first, second = self._selected_paired_conditions()
+            group_count = len(self._request_groups())
+            group_scope = (
+                "1 output group"
+                if group_count == 1
+                else f"{group_count} separate output groups"
+            )
+            self.status_label.set_text(
+                f"Paired-condition figure ready for {first} and {second} across "
+                f"{group_scope}. Each group will receive only its combined figure."
             )
             self.status_label.set_variant("info")
             return
@@ -1199,7 +1317,7 @@ class PublicationMapsWindow(QWidget):
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         finally:
             self.conditions_list.blockSignals(False)
-        self._update_run_state()
+        self._refresh_ready_state()
 
     def _selected_conditions(self) -> tuple[str, ...]:
         selected: list[str] = []
@@ -1338,7 +1456,7 @@ class PublicationMapsWindow(QWidget):
         self._update_paired_controls_state()
         self._update_group_comparison_controls_state()
         if hasattr(self, "run_btn"):
-            self._update_run_state()
+            self._refresh_ready_state()
 
     def _sync_group_comparison_labels(self) -> None:
         if not hasattr(self, "group_comparison_a_label"):
@@ -1504,7 +1622,7 @@ class PublicationMapsWindow(QWidget):
 
     def _on_metric_selection_changed(self) -> None:
         self._toggle_metric_range_controls()
-        self._update_run_state()
+        self._refresh_ready_state()
 
     def _toggle_metric_range_controls(self) -> None:
         bca_selected = self.metric_bca_check.isChecked()

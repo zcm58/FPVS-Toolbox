@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import matplotlib
@@ -39,17 +39,80 @@ apply_matplotlib_figure_style()
 
 BCA_CMAP = scalp_colormap(name="FpvsDetailedScalpSequential")
 JOURNAL_TEXT_WIDTH_IN = 6.5
-SINGLE_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.6)
-PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 3.4)
-COMBINED_PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.8)
-COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 8.0)
-COMBINED_PAIRED_MAP_LEFT = 0.07
-COMBINED_PAIRED_MAP_WIDTH = 0.31
-COMBINED_PAIRED_SECOND_COL_LEFT = 0.49
-COMBINED_PAIRED_COLORBAR_LEFT = 0.86
-COMBINED_PAIRED_COLORBAR_WIDTH = 0.025
-COMBINED_PAIRED_TOP_ROW_BOTTOM = 0.555
-COMBINED_PAIRED_BOTTOM_ROW_BOTTOM = 0.10
+
+
+@dataclass(frozen=True, slots=True)
+class ScalpMapLayoutStyle:
+    """Renderer-owned geometry for one ordinary Scalp Maps figure family."""
+
+    single_map_figsize: tuple[float, float]
+    paired_map_figsize: tuple[float, float]
+    combined_paired_map_figsize: tuple[float, float]
+    combined_paired_three_row_map_figsize: tuple[float, float]
+    combined_map_left: float = 0.07
+    combined_map_width: float = 0.31
+    combined_second_col_left: float = 0.49
+    combined_colorbar_left: float = 0.86
+    combined_colorbar_width: float = 0.025
+    combined_two_metric_top_row_bottom: float = 0.555
+    combined_two_metric_bottom_row_bottom: float = 0.10
+    paired_figure_title_y: float = 0.98
+    paired_figure_title_top: float = 0.78
+    combined_figure_title_y: float = 0.985
+    combined_title_reserved_top: float = 0.87
+    combined_title_reserved_bottom: float = 0.065
+    combined_title_reserved_min_gap: float = 0.012
+    combined_default_top: float = 0.94
+    combined_default_bottom: float = 0.075
+    combined_default_min_gap: float = 0.035
+
+
+SINGLE_GROUP_LAYOUT_STYLE = ScalpMapLayoutStyle(
+    single_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.6),
+    paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 3.4),
+    combined_paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.8),
+    combined_paired_three_row_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 8.0),
+)
+PAIRED_CONDITION_LAYOUT_STYLE = ScalpMapLayoutStyle(
+    single_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.6),
+    paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 3.4),
+    combined_paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.8),
+    combined_paired_three_row_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 8.0),
+)
+MULTI_GROUP_LAYOUT_STYLE = ScalpMapLayoutStyle(
+    single_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.6),
+    paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 3.4),
+    combined_paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.8),
+    combined_paired_three_row_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 8.0),
+)
+
+# Compatibility aliases for existing renderer and test imports. Caller-specific
+# code should use the immutable style owners above.
+SINGLE_MAP_FIGSIZE = SINGLE_GROUP_LAYOUT_STYLE.single_map_figsize
+PAIRED_MAP_FIGSIZE = PAIRED_CONDITION_LAYOUT_STYLE.paired_map_figsize
+COMBINED_PAIRED_MAP_FIGSIZE = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_paired_map_figsize
+)
+COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_paired_three_row_map_figsize
+)
+COMBINED_PAIRED_MAP_LEFT = PAIRED_CONDITION_LAYOUT_STYLE.combined_map_left
+COMBINED_PAIRED_MAP_WIDTH = PAIRED_CONDITION_LAYOUT_STYLE.combined_map_width
+COMBINED_PAIRED_SECOND_COL_LEFT = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_second_col_left
+)
+COMBINED_PAIRED_COLORBAR_LEFT = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_colorbar_left
+)
+COMBINED_PAIRED_COLORBAR_WIDTH = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_colorbar_width
+)
+COMBINED_PAIRED_TOP_ROW_BOTTOM = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_two_metric_top_row_bottom
+)
+COMBINED_PAIRED_BOTTOM_ROW_BOTTOM = (
+    PAIRED_CONDITION_LAYOUT_STYLE.combined_two_metric_bottom_row_bottom
+)
 SNR_COLORBAR_LABEL = "Signal to Noise Ratio"
 ZSCORE_COLORBAR_LABEL = "Z Score"
 ZSCORE_UNDER_COLOR = "#ffffff"
@@ -473,6 +536,7 @@ def render_group_comparison_figures(
                     dpi=first_request.png_dpi,
                     cancel_check=cancel_check,
                     figure_title=condition,
+                    layout_style=MULTI_GROUP_LAYOUT_STYLE,
                 )
                 rendered.append(final_path)
         else:
@@ -516,6 +580,7 @@ def render_group_comparison_figures(
                         dpi=first_request.png_dpi,
                         cancel_check=cancel_check,
                         figure_title=condition,
+                        layout_style=MULTI_GROUP_LAYOUT_STYLE,
                     )
                     rendered.append(final_path)
         _checkpoint(cancel_check)
@@ -693,7 +758,10 @@ def render_topomap(
 ) -> None:
     """Render one MNE topomap from grand-average values."""
 
-    fig, ax = plt.subplots(figsize=SINGLE_MAP_FIGSIZE, dpi=dpi)
+    fig, ax = plt.subplots(
+        figsize=SINGLE_GROUP_LAYOUT_STYLE.single_map_figsize,
+        dpi=dpi,
+    )
     try:
         _checkpoint(cancel_check)
         cmap = colormap_for_metric(metric, bounds)
@@ -799,6 +867,7 @@ def _render_paired_condition_figures(
                     bounds=bounds,
                     dpi=request.png_dpi,
                     cancel_check=cancel_check,
+                    layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
                 )
                 rendered.append(png_path)
             if request.export_pdf:
@@ -814,6 +883,7 @@ def _render_paired_condition_figures(
                     bounds=bounds,
                     dpi=request.png_dpi,
                     cancel_check=cancel_check,
+                    layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
                 )
                 rendered.append(pdf_path)
     return rendered
@@ -865,6 +935,7 @@ def _render_combined_paired_condition_figures(
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
                 cancel_check=cancel_check,
+                layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
             )
             rendered.append(png_path)
         if request.export_pdf:
@@ -879,6 +950,7 @@ def _render_combined_paired_condition_figures(
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
                 cancel_check=cancel_check,
+                layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
             )
             rendered.append(pdf_path)
     return rendered
@@ -926,9 +998,15 @@ def _render_paired_topomap(
     dpi: int,
     cancel_check: Callable[[], None] | None,
     figure_title: str | None = None,
+    layout_style: ScalpMapLayoutStyle = PAIRED_CONDITION_LAYOUT_STYLE,
 ) -> None:
     _checkpoint(cancel_check)
-    fig, axes = plt.subplots(1, 2, figsize=PAIRED_MAP_FIGSIZE, dpi=dpi)
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=layout_style.paired_map_figsize,
+        dpi=dpi,
+    )
     try:
         cmap = colormap_for_metric(metric, bounds)
         shared_vlim = _paired_vlim(
@@ -958,10 +1036,10 @@ def _render_paired_topomap(
         if figure_title:
             fig.suptitle(
                 str(figure_title),
-                y=0.98,
+                y=layout_style.paired_figure_title_y,
                 **figure_text_kwargs("condition_label"),
             )
-            fig.subplots_adjust(top=0.78)
+            fig.subplots_adjust(top=layout_style.paired_figure_title_top)
         if first_missing:
             _add_missing_note(axes[0], first_missing)
         if second_missing:
@@ -990,18 +1068,26 @@ def _render_combined_paired_topomap(
     dpi: int,
     cancel_check: Callable[[], None] | None,
     figure_title: str | None = None,
+    layout_style: ScalpMapLayoutStyle = PAIRED_CONDITION_LAYOUT_STYLE,
 ) -> None:
     _checkpoint(cancel_check)
-    fig = plt.figure(figsize=_combined_paired_figsize(metrics), dpi=dpi)
+    fig = plt.figure(
+        figsize=_combined_paired_figsize(
+            metrics,
+            layout_style=layout_style,
+        ),
+        dpi=dpi,
+    )
     layout = _combined_paired_layout_rects(
         metrics=metrics,
         reserve_figure_title=bool(figure_title),
+        layout_style=layout_style,
     )
     try:
         if figure_title:
             fig.suptitle(
                 str(figure_title),
-                y=0.985,
+                y=layout_style.combined_figure_title_y,
                 **figure_text_kwargs("condition_label"),
             )
         for row_idx, metric in enumerate(metrics):
@@ -1066,29 +1152,39 @@ def _combined_paired_layout_rects(
         PublicationMetric.SNR,
     ),
     reserve_figure_title: bool = False,
+    layout_style: ScalpMapLayoutStyle = PAIRED_CONDITION_LAYOUT_STYLE,
 ) -> dict[PublicationMetric, dict[str, tuple[float, float, float, float]]]:
-    figure_size = _combined_paired_figsize(metrics)
-    map_height = COMBINED_PAIRED_MAP_WIDTH * (figure_size[0] / figure_size[1])
+    figure_size = _combined_paired_figsize(
+        metrics,
+        layout_style=layout_style,
+    )
+    map_height = layout_style.combined_map_width * (
+        figure_size[0] / figure_size[1]
+    )
     if reserve_figure_title:
-        top = 0.87
-        bottom = 0.065
+        top = layout_style.combined_title_reserved_top
+        bottom = layout_style.combined_title_reserved_bottom
         gap = (top - bottom - (len(metrics) * map_height)) / max(len(metrics) - 1, 1)
-        gap = max(gap, 0.012)
+        gap = max(gap, layout_style.combined_title_reserved_min_gap)
         rows = {
             metric: top - map_height - index * (map_height + gap)
             for index, metric in enumerate(metrics)
         }
     elif metrics == (PublicationMetric.BCA, PublicationMetric.SNR):
         rows = {
-            PublicationMetric.BCA: COMBINED_PAIRED_TOP_ROW_BOTTOM,
-            PublicationMetric.SNR: COMBINED_PAIRED_BOTTOM_ROW_BOTTOM,
+            PublicationMetric.BCA: (
+                layout_style.combined_two_metric_top_row_bottom
+            ),
+            PublicationMetric.SNR: (
+                layout_style.combined_two_metric_bottom_row_bottom
+            ),
         }
     else:
-        top = 0.94
-        bottom = 0.075
+        top = layout_style.combined_default_top
+        bottom = layout_style.combined_default_bottom
         if len(metrics) > 1:
             gap = (top - bottom - (len(metrics) * map_height)) / (len(metrics) - 1)
-            gap = max(gap, 0.035)
+            gap = max(gap, layout_style.combined_default_min_gap)
         else:
             gap = 0.0
         rows = {
@@ -1098,21 +1194,21 @@ def _combined_paired_layout_rects(
     return {
         metric: {
             "first": (
-                COMBINED_PAIRED_MAP_LEFT,
+                layout_style.combined_map_left,
                 bottom,
-                COMBINED_PAIRED_MAP_WIDTH,
+                layout_style.combined_map_width,
                 map_height,
             ),
             "second": (
-                COMBINED_PAIRED_SECOND_COL_LEFT,
+                layout_style.combined_second_col_left,
                 bottom,
-                COMBINED_PAIRED_MAP_WIDTH,
+                layout_style.combined_map_width,
                 map_height,
             ),
             "colorbar": (
-                COMBINED_PAIRED_COLORBAR_LEFT,
+                layout_style.combined_colorbar_left,
                 bottom,
-                COMBINED_PAIRED_COLORBAR_WIDTH,
+                layout_style.combined_colorbar_width,
                 map_height,
             ),
         }
@@ -1120,10 +1216,14 @@ def _combined_paired_layout_rects(
     }
 
 
-def _combined_paired_figsize(metrics: tuple[PublicationMetric, ...]) -> tuple[float, float]:
+def _combined_paired_figsize(
+    metrics: tuple[PublicationMetric, ...],
+    *,
+    layout_style: ScalpMapLayoutStyle = PAIRED_CONDITION_LAYOUT_STYLE,
+) -> tuple[float, float]:
     if len(metrics) >= 3:
-        return COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE
-    return COMBINED_PAIRED_MAP_FIGSIZE
+        return layout_style.combined_paired_three_row_map_figsize
+    return layout_style.combined_paired_map_figsize
 
 
 def _draw_topomap(
