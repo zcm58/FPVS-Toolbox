@@ -1075,8 +1075,23 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         page.metric_bca_check,
         page.status_label,
         page.run_btn,
+        page.cancel_btn,
+        page.progress,
     ):
         assert widget.visibleRegion().contains(widget.rect())
+    assert page.run_btn.height() > 0
+    assert len(
+        {
+            page.run_btn.height(),
+            page.cancel_btn.height(),
+            page.progress.height(),
+        }
+    ) == 1
+    generation_text = " ".join(
+        label.text()
+        for label in page.workflow_tabs.widget(0).findChildren(QLabel)
+    )
+    assert "Advanced Settings" not in generation_text
     assert not hasattr(page, "base_freq_value")
     assert not hasattr(page, "bca_limit_value")
     assert page.metric_bca_check.isChecked()
@@ -1129,6 +1144,15 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         abs(output_card.geometry().right() - figure_layout_card.geometry().right())
         <= 1
     )
+    advanced_text = " ".join(
+        label.text()
+        for label in page.workflow_tabs.widget(1).findChildren(QLabel)
+    )
+    assert "exactly two canonical groups" not in advanced_text.casefold()
+    assert not hasattr(page, "group_comparison_hint")
+    assert "exactly two canonical groups" not in (
+        page.group_comparison_check.toolTip().casefold()
+    )
     assert page.paired_figures_check.isChecked()
     page.paired_figures_check.setChecked(False)
     assert "Paired-condition figure ready" not in page.status_label.text()
@@ -1154,7 +1178,6 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         page.color_low_btn,
         page.bca_vmax_spin,
         page.paired_condition_a_combo,
-        page.group_comparison_hint,
     ):
         assert widget.visibleRegion().contains(widget.rect())
     page._set_busy_state(True)

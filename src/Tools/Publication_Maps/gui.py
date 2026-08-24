@@ -623,27 +623,13 @@ class PublicationMapsWindow(QWidget):
             "publication_maps_group_comparison_check"
         )
         self.group_comparison_check.setToolTip(
-            "Available when All groups is selected, the project has exactly two "
-            "canonical groups, and exactly one condition with active workbooks in "
-            "both groups is checked. Exports a descriptive side-by-side figure "
-            "only; this is not a statistical test or difference map, and values "
-            "are never pooled."
+            "Exports a descriptive side-by-side figure for the two available "
+            "groups. Values are never pooled, and no statistical test or "
+            "difference map is performed."
         )
         self.group_comparison_check.toggled.connect(
             self._on_group_comparison_toggled
         )
-
-        self.group_comparison_hint = QLabel(
-            "For projects with exactly two canonical groups, choose All groups "
-            "and one condition represented in both groups. This mode exports only "
-            "the descriptive comparison figure.",
-            group,
-        )
-        self.group_comparison_hint.setObjectName(
-            "publication_maps_group_comparison_hint"
-        )
-        self.group_comparison_hint.setProperty("caption", True)
-        self.group_comparison_hint.setWordWrap(True)
 
         self.group_comparison_widget = QWidget(group)
         self.group_comparison_widget.setObjectName(
@@ -685,7 +671,6 @@ class PublicationMapsWindow(QWidget):
         group.content_layout.addWidget(self.paired_figures_check)
         group.content_layout.addWidget(self.paired_conditions_widget)
         group.content_layout.addWidget(self.group_comparison_check)
-        group.content_layout.addWidget(self.group_comparison_hint)
         group.content_layout.addWidget(self.group_comparison_widget)
         self.paired_figures_check.setChecked(True)
         self.paired_conditions_widget.setVisible(False)
@@ -705,20 +690,12 @@ class PublicationMapsWindow(QWidget):
         form.addRow("Map types:", self._build_metric_selection(group))
         group.content_layout.addLayout(form)
 
-        advanced_hint = QLabel(
-            "Use Advanced Settings to change the output folder, review the full "
-            "generation log, or customize figure appearance and layout.",
-            group,
-        )
-        advanced_hint.setProperty("caption", True)
-        advanced_hint.setWordWrap(True)
-        group.content_layout.addWidget(advanced_hint)
-
         self.progress = QProgressBar(group)
         self.progress.setValue(0)
         self.progress.setAccessibleName("Scalp map generation progress")
-        self.status_label = StatusBanner("Ready.", group)
+        self.status_label = StatusBanner("", group)
         self.status_label.setObjectName("publication_maps_status")
+        self.status_label.setVisible(False)
         self.run_btn = make_action_button(
             "Generate Scalp Maps",
             variant="primary",
@@ -729,17 +706,26 @@ class PublicationMapsWindow(QWidget):
         self.run_btn.setToolTip(
             "Generate the selected scalp map figures using the current settings."
         )
-        self.cancel_btn = make_action_button("Cancel", compact=True, parent=group)
+        self.cancel_btn = make_action_button("Cancel", parent=group)
         self.cancel_btn.setAccessibleName("Cancel scalp map generation")
         self.cancel_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._start_run)
         self.cancel_btn.clicked.connect(self._cancel_run)
+
+        action_height = max(
+            38,
+            self.run_btn.sizeHint().height(),
+            self.cancel_btn.sizeHint().height(),
+        )
+        for control in (self.run_btn, self.cancel_btn, self.progress):
+            control.setFixedHeight(action_height)
 
         row = ActionRow(group, alignment=Qt.AlignLeft)
         row.add_button(self.run_btn)
         row.add_button(self.cancel_btn)
         row.row_layout.addWidget(self.progress, 1)
 
+        group.content_layout.addStretch(1)
         group.content_layout.addWidget(self.status_label)
         group.content_layout.addWidget(row)
         return group
@@ -814,6 +800,7 @@ class PublicationMapsWindow(QWidget):
         return self._project_root or Path.home()
 
     def _on_input_root_changed(self, _text: str) -> None:
+        self.status_label.setVisible(True)
         self._dataset_index = None
         self._refresh_session_controls(None)
         self._conditions = ()
@@ -834,6 +821,7 @@ class PublicationMapsWindow(QWidget):
         self._update_run_state()
 
     def _refresh_conditions(self) -> None:
+        self.status_label.setVisible(True)
         root_text = self.input_root_edit.text().strip()
         if not root_text:
             self._dataset_index = None
@@ -1103,6 +1091,7 @@ class PublicationMapsWindow(QWidget):
         )
 
     def _set_ready_status(self) -> None:
+        self.status_label.setVisible(True)
         output_root_error = self._output_root_validation_error()
         if output_root_error is not None:
             self.status_label.set_text(output_root_error)
@@ -1129,29 +1118,8 @@ class PublicationMapsWindow(QWidget):
             self.status_label.set_variant("warning")
             return
         if self._session_comparison_active() and self._session_selection_valid():
-            sessions = self._selected_session_ids()
-            labels = {
-                session.session_id: session.display_label
-                for session in self._session_state.sessions
-            }
-            selected_conditions = self._selected_conditions()
-            selection_text = (
-                selected_conditions[0]
-                if len(selected_conditions) == 1
-                else f"{len(selected_conditions)} conditions"
-            )
-            grid_label = (
-                "Session grid"
-                if len(selected_conditions) == 1
-                else "Session grids"
-            )
-            self.status_label.set_text(
-                f"{grid_label} ready for {selection_text}: "
-                f"{labels[sessions[0]]} vs "
-                f"{labels[sessions[1]]}. Participant and paired N will be shown; "
-                "interpret the fixed-order difference descriptively."
-            )
-            self.status_label.set_variant("info")
+            self.status_label.set_text("")
+            self.status_label.setVisible(False)
             return
         if (
             hasattr(self, "group_comparison_check")
@@ -1380,6 +1348,7 @@ class PublicationMapsWindow(QWidget):
     def _on_output_root_changed(self, _text: str) -> None:
         validation_error = self._output_root_validation_error()
         if validation_error is not None:
+            self.status_label.setVisible(True)
             self.status_label.set_text(validation_error)
             self.status_label.set_variant("error")
         elif self._dataset_index is not None:
@@ -1888,6 +1857,7 @@ class PublicationMapsWindow(QWidget):
             if self._last_run_was_session_grid
             else "group-scoped generation"
         )
+        self.status_label.setVisible(True)
         self.status_label.set_text(
             f"Starting {start_label} ({len(requests)} request(s))..."
         )
@@ -1939,6 +1909,7 @@ class PublicationMapsWindow(QWidget):
         return True
 
     def _show_validation_error(self, message: str) -> None:
+        self.status_label.setVisible(True)
         self.status_label.set_text(message)
         self.status_label.set_variant("error")
         self._append_log(message, update_status=False)
@@ -1946,6 +1917,7 @@ class PublicationMapsWindow(QWidget):
     def _append_log(self, message: str, *, update_status: bool = True) -> None:
         self.log_box.appendPlainText(message)
         if update_status:
+            self.status_label.setVisible(True)
             self.status_label.set_text(message)
 
     def _on_worker_finished(self, outcome: object) -> None:

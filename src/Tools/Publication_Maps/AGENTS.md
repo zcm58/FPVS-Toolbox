@@ -113,11 +113,16 @@ Rules:
 - Keep the embedded page within the supported 1280×900 workspace without a
   page-level scroll area. Use flat purpose tabs for generation and advanced
   settings; do not nest `SectionCard` surfaces. **Generate Maps** must contain
-  condition/session selection, map types, status, progress, and the generation
-  action. **Advanced Settings** owns the full-width output-folder controls,
-  color scales, and optional combined-figure configuration. Preserve the
-  active-project input root, selected output root, group-specific routing, and
-  output-folder action semantics while moving controls.
+  condition/session selection, map types, progress, the generation action, and
+  inline status. In repeated-session mode, do not show a redundant valid-ready
+  summary; keep validation, running, cancellation, and completion status
+  visible. Do not show instructional text pointing to **Advanced Settings**.
+  Keep Generate, Cancel, and progress at one control height. **Advanced
+  Settings** owns the full-width output-folder controls, color scales, and
+  optional combined-figure configuration without a separate two-group
+  eligibility paragraph. Preserve the active-project input root, selected
+  output root, group-specific routing, and output-folder action semantics while
+  moving controls.
 - Keep generation history out of the embedded page in a focused **View
   Generation Log** modal. Closing or hiding the modal must not clear its live
   history or stop updates; reopening it during or after a run must show the

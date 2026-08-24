@@ -8,6 +8,7 @@ import pytest
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QDialogButtonBox,
+    QLabel,
     QMainWindow,
     QScrollArea,
     QTabWidget,
@@ -350,8 +351,22 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
         page.metric_bca_check,
         page.status_label,
         page.run_btn,
+        page.cancel_btn,
+        page.progress,
     ):
         assert widget.visibleRegion().contains(widget.rect())
+    assert page.run_btn.height() > 0
+    assert len(
+        {
+            page.run_btn.height(),
+            page.cancel_btn.height(),
+            page.progress.height(),
+        }
+    ) == 1
+    generation_text = " ".join(
+        label.text() for label in generation_page.findChildren(QLabel)
+    )
+    assert "Advanced Settings" not in generation_text
     page.workflow_tabs.setCurrentIndex(1)
     qtbot.waitUntil(
         lambda: not page.group_comparison_widget.visibleRegion().isEmpty()
@@ -388,6 +403,14 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     assert appearance_card.geometry().top() == layout_card.geometry().top()
     assert abs(output_card.geometry().left() - appearance_card.geometry().left()) <= 1
     assert abs(output_card.geometry().right() - layout_card.geometry().right()) <= 1
+    advanced_text = " ".join(
+        label.text() for label in advanced_page.findChildren(QLabel)
+    )
+    assert "exactly two canonical groups" not in advanced_text.casefold()
+    assert not hasattr(page, "group_comparison_hint")
+    assert "exactly two canonical groups" not in (
+        page.group_comparison_check.toolTip().casefold()
+    )
 
 
 @pytest.mark.qt
@@ -456,6 +479,8 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     assert page.run_btn.text() == "Generate Scalp Maps"
     assert page.run_btn.isVisible()
     assert page.run_btn.isEnabled()
+    assert page.status_label.isVisible() is False
+    assert "Session grids ready" not in page.status_label.text()
     for widget in (
         page.session_controls_widget,
         page.run_btn,
@@ -470,11 +495,13 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     assert page._selected_conditions() == ("Objects",)
     page._set_all_conditions(False)
     assert page._selected_conditions() == ()
+    assert page.status_label.isVisible()
     assert page.status_label.text() == "Select at least one condition."
     qtbot.mouseClick(page.select_all_btn, Qt.LeftButton)
 
     assert page._selected_conditions() == ("Faces", "Objects")
-    assert "Session grids ready for 2 conditions" in page.status_label.text()
+    assert page.status_label.isVisible() is False
+    assert "Session grids ready" not in page.status_label.text()
     assert page.group_combo.currentData() == publication_maps_gui.ALL_GROUPS_VALUE
     assert page.group_combo.isEnabled() is False
     assert page.paired_figures_check.isChecked() is False
@@ -490,7 +517,7 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
         for request in requests
     )
     assert all(request.export_paired_session_difference for request in requests)
-    assert "Session grids ready for 2 conditions" in page.status_label.text()
+    assert "Session grids ready" not in page.status_label.text()
 
     page.session_dimension_combo.setCurrentIndex(
         page.session_dimension_combo.findData("condition")
@@ -670,7 +697,13 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         "show_error",
         lambda _parent, _title, message: errors.append(message),
     )
-    host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=_managed_repeated_index(tmp_path),
+    )
+    assert page.status_label.isVisible() is False
 
     page._start_run()
     qtbot.waitUntil(lambda: bool(ControlledWorker.instances), timeout=2000)
@@ -683,6 +716,8 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         assert page.cancel_btn.isEnabled() is True
         assert page.view_generation_log_btn.isEnabled() is True
         assert host.menuBar().isEnabled() is False
+        assert page.status_label.isVisible()
+        assert "Starting repeated-session grid" in page.status_label.text()
 
         page._cancel_run()
 
@@ -690,6 +725,7 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         assert page.cancel_btn.isEnabled() is False
         assert page.has_active_generation()
         assert host.menuBar().isEnabled() is False
+        assert page.status_label.isVisible()
         assert "waiting for the active worker" in page.status_label.text()
 
         page._start_run()
@@ -702,6 +738,7 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         assert page.cancel_btn.isEnabled() is False
         assert page.view_generation_log_btn.isEnabled() is True
         assert host.menuBar().isEnabled() is True
+        assert page.status_label.isVisible()
         assert "No new output was published" in page.status_label.text()
         assert confirmations == []
         assert errors == []

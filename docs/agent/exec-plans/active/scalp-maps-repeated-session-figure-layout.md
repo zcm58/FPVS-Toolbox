@@ -49,6 +49,11 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   picker/open action to a full-width Advanced Settings section; a valid saved
   or default destination must still let repeated-session users generate from
   the first tab without visiting Advanced Settings.
+- Keep the repeated-session ready state concise: omit the idle readiness banner
+  and instructional Advanced Settings paragraph while retaining validation,
+  running, cancellation, and completion status. Generate, Cancel, and progress
+  must share one control height. Do not show a separate two-group eligibility
+  paragraph on Advanced Settings.
 - Remove the embedded log viewer from the page. Add **View Generation Log** to
   Advanced Settings and open one reusable modal viewer that preserves the full
   current-run history, updates while hidden or open, clears only when a new run
@@ -89,6 +94,9 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   Settings owns the output row and log button, the modal is reusable and shows
   messages received while hidden, and the first-tab action remains ready for a
   repeated-session project with a valid default output root.
+- CI Qt coverage also asserts equal action-row control heights and the absence
+  of the redundant Generate-tab guidance, repeated-session ready summary, and
+  Advanced-tab two-group eligibility paragraph.
 - Run `verify.py --scope figures --tier focused`, then
   `verify.py --scope publication-maps --tier focused`; add the `stats` scope
   only if implementation unexpectedly changes a numerical dependency. Do not
@@ -111,6 +119,10 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - The registered non-Qt Scalp Maps and figure-style suite passes: 104 tests.
 - GUI-focused static verification, Ruff, compilation, TOML parsing, and
   `git diff --check` pass. CI-only Qt tests were updated but not run locally.
+- The follow-up Generate-tab cleanup also passes the focused GUI gate, Ruff,
+  and syntax compilation. Registered CI-only Qt coverage now pins equal action
+  heights, the hidden valid repeated-session ready banner, and removal of the
+  redundant Generate/Advanced instructional copy.
 - Six actual BioSemi64 stress renders (BCA/SNR/Z; 2-row/3-row) retain complete
   long labels without overlap or clipping, omit the footer, and keep the
   divider/colorbars inside exact 6.5×6.5-inch or 6.5×9-inch canvases.
