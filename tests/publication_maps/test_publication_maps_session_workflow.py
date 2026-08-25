@@ -689,10 +689,10 @@ def test_session_renderer_repeated_layout_artifact_contract(
     )
     divider_pixels = canvas_left + (captured_layout["divider_x"] * canvas_width)
     map_boxes = captured_layout["map_boxes"]
-    assert min(box[0] for box in map_boxes) == pytest.approx(frame_left)
-    assert max(box[2] for box in map_boxes) == pytest.approx(frame_right)
-    assert min(box[1] for box in map_boxes) == pytest.approx(frame_bottom)
-    assert max(box[3] for box in map_boxes) == pytest.approx(frame_top)
+    assert frame_left < min(box[0] for box in map_boxes)
+    assert max(box[2] for box in map_boxes) < frame_right
+    assert frame_bottom < min(box[1] for box in map_boxes)
+    assert max(box[3] for box in map_boxes) < frame_top
     assert max(box[2] for box in captured_layout["row_label_boxes"]) < frame_left
     assert min(box[1] for box in captured_layout["header_boxes"]) > frame_top
     colorbar_left = canvas_left + (
@@ -700,6 +700,28 @@ def test_session_renderer_repeated_layout_artifact_contract(
     )
     assert frame_right < colorbar_left
     row_divider_lines = captured_layout["row_divider_lines"]
+    row_divider_pixels = tuple(
+        canvas_bottom + (line[1][0] * canvas_height)
+        for line in row_divider_lines
+    )
+    row_bounds = (frame_top, *row_divider_pixels, frame_bottom)
+    column_bounds = (
+        (frame_left, divider_pixels),
+        (divider_pixels, frame_right),
+    )
+    for row in range(len(row_bounds) - 1):
+        target_y = sum(row_bounds[row : row + 2]) / 2.0
+        row_boxes = map_boxes[row * 2 : (row + 1) * 2]
+        for column, box in enumerate(row_boxes):
+            target_x = sum(column_bounds[column]) / 2.0
+            assert (box[0] + box[2]) / 2.0 == pytest.approx(target_x, abs=1.0)
+            assert (box[1] + box[3]) / 2.0 == pytest.approx(target_y, abs=1.0)
+        row_label_box = captured_layout["row_label_boxes"][row]
+        assert (row_label_box[1] + row_label_box[3]) / 2.0 == pytest.approx(
+            target_y,
+            abs=1.0,
+        )
+
     for row, (x_values, y_values) in enumerate(row_divider_lines):
         assert x_values == pytest.approx((frame_x, frame_x + frame_width))
         assert y_values[0] == pytest.approx(y_values[1])
@@ -708,10 +730,6 @@ def test_session_renderer_repeated_layout_artifact_contract(
         lower_row_boxes = map_boxes[(row + 1) * 2 : (row + 2) * 2]
         assert max(box[3] for box in lower_row_boxes) < divider_y_pixels
         assert divider_y_pixels < min(box[1] for box in upper_row_boxes)
-    column_bounds = (
-        (frame_left, divider_pixels),
-        (divider_pixels, frame_right),
-    )
     all_title_boxes = (
         *captured_layout["header_boxes"],
         *captured_layout["row_label_boxes"],
@@ -722,6 +740,10 @@ def test_session_renderer_repeated_layout_artifact_contract(
     for column, header_box in enumerate(captured_layout["header_boxes"]):
         assert column_bounds[column][0] <= header_box[0]
         assert header_box[2] <= column_bounds[column][1]
+        assert (header_box[0] + header_box[2]) / 2.0 == pytest.approx(
+            sum(column_bounds[column]) / 2.0,
+            abs=1.0,
+        )
     def overlaps(first, second) -> bool:
         return (
             min(first[2], second[2]) > max(first[0], second[0])

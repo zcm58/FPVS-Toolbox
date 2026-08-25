@@ -75,6 +75,18 @@ class _RepeatedSessionLayoutProfile:
 REPEATED_SESSION_LAYOUT = _RepeatedSessionLayoutProfile()
 
 
+@dataclass(frozen=True, slots=True)
+class _MapGridGeometry:
+    """Fixed frame boundaries retained while map axes are centered within cells."""
+
+    left: float
+    right: float
+    bottom: float
+    top: float
+    column_divider: float
+    row_dividers: tuple[float, ...]
+
+
 def _panel_frame(panel: SessionMapPanel) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -244,17 +256,75 @@ def _apply_repeated_session_labels(
         )
 
 
-def _add_map_grid_frame(fig, axes) -> None:
-    """Box the map matrix and separate its group columns and session rows."""
+def _center_map_axes_in_grid_cells(axes, row_label_axes) -> _MapGridGeometry:
+    """Center every map and row label within the existing framed matrix cells."""
 
     grid_left = min(ax.get_position().x0 for ax in axes.flat)
     grid_right = max(ax.get_position().x1 for ax in axes.flat)
     grid_bottom = min(ax.get_position().y0 for ax in axes.flat)
     grid_top = max(ax.get_position().y1 for ax in axes.flat)
+    column_divider = _group_column_divider_x(axes)
+    row_dividers = tuple(
+        (
+            min(ax.get_position().y0 for ax in axes[row, :])
+            + max(ax.get_position().y1 for ax in axes[row + 1, :])
+        )
+        / 2.0
+        for row in range(len(axes) - 1)
+    )
+    geometry = _MapGridGeometry(
+        left=grid_left,
+        right=grid_right,
+        bottom=grid_bottom,
+        top=grid_top,
+        column_divider=column_divider,
+        row_dividers=row_dividers,
+    )
+
+    column_bounds = (
+        (geometry.left, geometry.column_divider),
+        (geometry.column_divider, geometry.right),
+    )
+    row_bounds = (
+        geometry.top,
+        *geometry.row_dividers,
+        geometry.bottom,
+    )
+    for row in range(len(axes)):
+        target_y = (row_bounds[row] + row_bounds[row + 1]) / 2.0
+        for column in range(axes.shape[1]):
+            position = axes[row, column].get_position()
+            target_x = sum(column_bounds[column]) / 2.0
+            axes[row, column].set_position(
+                (
+                    position.x0 + target_x - (position.x0 + position.x1) / 2.0,
+                    position.y0 + target_y - (position.y0 + position.y1) / 2.0,
+                    position.width,
+                    position.height,
+                )
+            )
+
+        label_position = row_label_axes[row].get_position()
+        row_label_axes[row].set_position(
+            (
+                label_position.x0,
+                label_position.y0
+                + target_y
+                - (label_position.y0 + label_position.y1) / 2.0,
+                label_position.width,
+                label_position.height,
+            )
+        )
+    return geometry
+
+
+def _add_map_grid_frame(fig, geometry: _MapGridGeometry) -> None:
+    """Box the map matrix and separate its group columns and session rows."""
+
     frame = Rectangle(
-        (grid_left, grid_bottom),
-        grid_right - grid_left,
-        grid_top - grid_bottom,
+        (geometry.left, geometry.bottom),
+        geometry.right - geometry.left,
+        geometry.top - geometry.bottom,
         transform=fig.transFigure,
         fill=False,
         edgecolor=REPEATED_SESSION_LAYOUT.divider_color,
@@ -264,10 +334,9 @@ def _add_map_grid_frame(fig, axes) -> None:
     frame.set_gid(REPEATED_SESSION_LAYOUT.grid_frame_gid)
     fig.add_artist(frame)
 
-    divider_x = _group_column_divider_x(axes)
     divider = Line2D(
-        (divider_x, divider_x),
-        (grid_bottom, grid_top),
+        (geometry.column_divider, geometry.column_divider),
+        (geometry.bottom, geometry.top),
         transform=fig.transFigure,
         color=REPEATED_SESSION_LAYOUT.divider_color,
         linewidth=REPEATED_SESSION_LAYOUT.divider_linewidth,
@@ -277,12 +346,9 @@ def _add_map_grid_frame(fig, axes) -> None:
     divider.set_gid(REPEATED_SESSION_LAYOUT.divider_gid)
     fig.add_artist(divider)
 
-    for row in range(len(axes) - 1):
-        upper_row_bottom = min(ax.get_position().y0 for ax in axes[row, :])
-        lower_row_top = max(ax.get_position().y1 for ax in axes[row + 1, :])
-        divider_y = (upper_row_bottom + lower_row_top) / 2.0
+    for row, divider_y in enumerate(geometry.row_dividers):
         row_divider = Line2D(
-            (grid_left, grid_right),
+            (geometry.left, geometry.right),
             (divider_y, divider_y),
             transform=fig.transFigure,
             color=REPEATED_SESSION_LAYOUT.divider_color,
@@ -432,13 +498,14 @@ def _render_session_panel_set(
                 )
             )
 
+        grid_geometry = _center_map_axes_in_grid_cells(axes, row_label_axes)
         _apply_repeated_session_labels(
             fig,
             axes,
             row_label_axes,
             panel_set,
         )
-        _add_map_grid_frame(fig, axes)
+        _add_map_grid_frame(fig, grid_geometry)
         for output_path in output_paths:
             _save_figure(
                 fig,
