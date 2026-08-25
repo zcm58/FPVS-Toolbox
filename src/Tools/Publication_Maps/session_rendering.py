@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from matplotlib.lines import Line2D
+import numpy as np
 import pandas as pd
 
 from Main_App.exports.figure_style import apply_axis_text_style, figure_text_kwargs
@@ -41,24 +42,24 @@ class _RepeatedSessionLayoutProfile:
     """Figure geometry owned only by the repeated-session renderer."""
 
     width_in: float = 6.5
-    two_row_height_in: float = 6.5
-    three_row_height_in: float = 9.0
-    left: float = 0.04
-    right: float = 0.87
-    bottom: float = 0.035
-    two_row_top: float = 0.78
-    three_row_top: float = 0.82
-    two_row_hspace: float = 0.50
-    three_row_hspace: float = 0.65
-    wspace: float = 0.18
-    suptitle_y: float = 0.985
-    column_header_y: float = 0.92
-    column_text_padding: float = 0.012
-    panel_title_pad: float = 7.0
+    two_row_height_in: float = 4.2
+    three_row_height_in: float = 5.9
+    left: float = 0.025
+    right: float = 0.86
+    bottom: float = 0.025
+    top: float = 0.89
+    hspace: float = 0.08
+    wspace: float = 0.08
+    width_ratios: tuple[float, float, float, float] = (0.20, 1.0, 1.0, 0.065)
+    column_header_y: float = 0.945
+    paired_colorbar_gap: float = 0.02
     divider_color: str = "#B3B3B3"
     divider_linewidth: float = 0.8
     divider_gid: str = "repeated-session-group-divider"
     column_header_gid_prefix: str = "repeated-session-group-header"
+    row_label_gid_prefix: str = "repeated-session-row-label"
+    map_axis_gid_prefix: str = "repeated-session-map"
+    colorbar_axis_gid_prefix: str = "repeated-session-colorbar"
 
     def figsize(self, *, include_difference: bool) -> tuple[float, float]:
         height = (
@@ -67,17 +68,6 @@ class _RepeatedSessionLayoutProfile:
             else self.two_row_height_in
         )
         return self.width_in, height
-
-    def top(self, *, include_difference: bool) -> float:
-        return self.three_row_top if include_difference else self.two_row_top
-
-    def hspace(self, *, include_difference: bool) -> float:
-        return (
-            self.three_row_hspace
-            if include_difference
-            else self.two_row_hspace
-        )
-
 
 REPEATED_SESSION_LAYOUT = _RepeatedSessionLayoutProfile()
 
@@ -178,50 +168,24 @@ def _wrap_text_to_width(
         probe.remove()
 
 
-def _column_text_width_pixels(fig, axes, column: int, divider_x: float) -> float:
-    center = sum(
-        axes[row, column].get_position().x0
-        + axes[row, column].get_position().x1
-        for row in range(axes.shape[0])
-    ) / (2.0 * axes.shape[0])
-    outer_left = REPEATED_SESSION_LAYOUT.left if column == 0 else divider_x
-    outer_right = divider_x if column == 0 else REPEATED_SESSION_LAYOUT.right
-    half_width = min(center - outer_left, outer_right - center)
-    half_width -= REPEATED_SESSION_LAYOUT.column_text_padding
-    return max(1.0, 2.0 * half_width * fig.bbox.width)
+def _column_text_width_pixels(fig, axes, column: int) -> float:
+    return max(
+        1.0,
+        min(ax.get_position().width for ax in axes[:, column]) * fig.bbox.width,
+    )
 
 
-def _apply_repeated_session_titles(
+def _apply_repeated_session_labels(
     fig,
     axes,
+    row_label_axes,
     panel_set: SessionMapPanelSet,
-    panel_title_sections: dict[object, tuple[str, ...]],
 ) -> None:
-    """Apply wrapped matrix headers and session-specific panel titles."""
+    """Apply agnostic group headers and one external label per matrix row."""
 
-    divider_x = _group_column_divider_x(axes)
-    title_kwargs = figure_text_kwargs("condition_label")
-    header_kwargs = dict(title_kwargs)
-    header_kwargs["fontweight"] = "bold"
-    suptitle = fig._suptitle
-    if suptitle is not None:
-        suptitle.set_text(
-            _wrap_text_to_width(
-                fig,
-                suptitle.get_text(),
-                max_width_pixels=(1.0 - 2.0 * REPEATED_SESSION_LAYOUT.left)
-                * fig.bbox.width,
-                text_kwargs=figure_text_kwargs("panel_label"),
-            )
-        )
-
+    header_kwargs = figure_text_kwargs("panel_label")
     for column, group_id in enumerate(panel_set.group_ids):
-        max_width_pixels = _column_text_width_pixels(
-            fig,
-            axes,
-            column,
-            divider_x,
-        )
+        max_width_pixels = _column_text_width_pixels(fig, axes, column)
         column_center = (
             axes[0, column].get_position().x0
             + axes[0, column].get_position().x1
@@ -232,7 +196,7 @@ def _apply_repeated_session_titles(
             REPEATED_SESSION_LAYOUT.column_header_y,
             _wrap_text_to_width(
                 fig,
-                group_label,
+                f"({chr(ord('A') + column)}) {group_label}",
                 max_width_pixels=max_width_pixels,
                 text_kwargs=header_kwargs,
             ),
@@ -243,21 +207,38 @@ def _apply_repeated_session_titles(
         header.set_gid(
             f"{REPEATED_SESSION_LAYOUT.column_header_gid_prefix}-{column}"
         )
-        for ax in axes[:, column]:
-            wrapped_sections = tuple(
-                _wrap_text_to_width(
-                    fig,
-                    section,
-                    max_width_pixels=max_width_pixels,
-                    text_kwargs=title_kwargs,
-                )
-                for section in panel_title_sections[ax]
-            )
-            ax.set_title(
-                "\n".join(wrapped_sections),
-                pad=REPEATED_SESSION_LAYOUT.panel_title_pad,
-                **title_kwargs,
-            )
+
+    row_labels = [
+        panel_set.panel(panel_set.group_ids[0], session_id).session_label
+        for session_id in panel_set.session_ids
+    ]
+    if len(row_label_axes) > len(row_labels):
+        difference = panel_set.paired_difference(panel_set.group_ids[0])
+        row_labels.append(
+            f"{difference.comparison_session_label} − "
+            f"{difference.reference_session_label}"
+        )
+
+    label_kwargs = figure_text_kwargs("condition_label")
+    for row, (label_ax, label) in enumerate(zip(row_label_axes, row_labels, strict=True)):
+        max_height_pixels = label_ax.get_position().height * fig.bbox.height
+        text = label_ax.text(
+            0.5,
+            0.5,
+            _wrap_text_to_width(
+                fig,
+                label,
+                max_width_pixels=max_height_pixels,
+                text_kwargs=label_kwargs,
+            ),
+            ha="center",
+            va="center",
+            rotation=90,
+            **label_kwargs,
+        )
+        text.set_gid(
+            f"{REPEATED_SESSION_LAYOUT.row_label_gid_prefix}-{row}"
+        )
 
 
 def _add_group_column_divider(fig, axes) -> None:
@@ -290,21 +271,44 @@ def _render_session_panel_set(
         cancel_check()
     include_difference = request.export_paired_session_difference
     row_count = 3 if include_difference else 2
-    fig, axes = plt.subplots(
-        row_count,
-        2,
-        squeeze=False,
+    fig = plt.figure(
         figsize=REPEATED_SESSION_LAYOUT.figsize(
             include_difference=include_difference
         ),
         dpi=request.png_dpi,
     )
+    grid = fig.add_gridspec(
+        row_count * 2,
+        4,
+        left=REPEATED_SESSION_LAYOUT.left,
+        right=REPEATED_SESSION_LAYOUT.right,
+        bottom=REPEATED_SESSION_LAYOUT.bottom,
+        top=REPEATED_SESSION_LAYOUT.top,
+        hspace=REPEATED_SESSION_LAYOUT.hspace,
+        wspace=REPEATED_SESSION_LAYOUT.wspace,
+        width_ratios=REPEATED_SESSION_LAYOUT.width_ratios,
+    )
+    axes = []
+    row_label_axes = []
+    for row in range(row_count):
+        row_slice = slice(row * 2, (row + 1) * 2)
+        label_ax = fig.add_subplot(grid[row_slice, 0])
+        label_ax.set_axis_off()
+        row_label_axes.append(label_ax)
+        row_axes = []
+        for column in range(2):
+            ax = fig.add_subplot(grid[row_slice, column + 1])
+            ax.set_gid(
+                f"{REPEATED_SESSION_LAYOUT.map_axis_gid_prefix}-{row}-{column}"
+            )
+            row_axes.append(ax)
+        axes.append(row_axes)
+    axes = np.asarray(axes, dtype=object)
     metric = panel_set.metric
     bounds = request.color_bounds.get(metric, ColorBounds())
     cmap = colormap_for_metric(metric, bounds)
     main_vlim = _main_vlim(panel_set, bounds)
     main_images = []
-    panel_title_sections: dict[object, tuple[str, ...]] = {}
     try:
         for row, session_id in enumerate(panel_set.session_ids):
             for column, group_id in enumerate(panel_set.group_ids):
@@ -321,14 +325,15 @@ def _render_session_panel_set(
                     vlim_override=main_vlim,
                 )
                 main_images.append(image)
-                panel_title_sections[ax] = (panel.session_label,)
                 if missing:
                     _add_missing_note(ax, missing)
+        main_cbar_ax = fig.add_subplot(grid[:4, 3])
+        main_cbar_ax.set_gid(
+            f"{REPEATED_SESSION_LAYOUT.colorbar_axis_gid_prefix}-main"
+        )
         main_cbar = fig.colorbar(
             main_images[0],
-            ax=list(axes[:2, :].flat),
-            fraction=0.025,
-            pad=0.025,
+            cax=main_cbar_ax,
         )
         _style_colorbar(main_cbar, metric=metric)
 
@@ -354,17 +359,15 @@ def _render_session_panel_set(
                     vlim_override=(-difference_limit, difference_limit),
                 )
                 difference_images.append(image)
-                panel_title_sections[ax] = (
-                    f"{difference.comparison_session_label} − "
-                    f"{difference.reference_session_label}",
-                )
                 if missing:
                     _add_missing_note(ax, missing)
+            difference_cbar_ax = fig.add_subplot(grid[4:6, 3])
+            difference_cbar_ax.set_gid(
+                f"{REPEATED_SESSION_LAYOUT.colorbar_axis_gid_prefix}-difference"
+            )
             difference_cbar = fig.colorbar(
                 difference_images[0],
-                ax=list(axes[2, :].flat),
-                fraction=0.025,
-                pad=0.025,
+                cax=difference_cbar_ax,
             )
             difference_label_kwargs = figure_text_kwargs("axis_label")
             difference_label_kwargs["fontweight"] = "bold"
@@ -373,29 +376,31 @@ def _render_session_panel_set(
                 **difference_label_kwargs,
             )
             apply_axis_text_style(difference_cbar.ax)
+            main_position = main_cbar_ax.get_position()
+            difference_position = difference_cbar_ax.get_position()
+            half_gap = REPEATED_SESSION_LAYOUT.paired_colorbar_gap / 2.0
+            main_cbar_ax.set_position(
+                (
+                    main_position.x0,
+                    main_position.y0 + half_gap,
+                    main_position.width,
+                    main_position.height - half_gap,
+                )
+            )
+            difference_cbar_ax.set_position(
+                (
+                    difference_position.x0,
+                    difference_position.y0,
+                    difference_position.width,
+                    difference_position.height - half_gap,
+                )
+            )
 
-        fig.suptitle(
-            f"{panel_set.condition} — {metric.display_name}",
-            y=REPEATED_SESSION_LAYOUT.suptitle_y,
-            **figure_text_kwargs("panel_label"),
-        )
-        fig.subplots_adjust(
-            left=REPEATED_SESSION_LAYOUT.left,
-            right=REPEATED_SESSION_LAYOUT.right,
-            bottom=REPEATED_SESSION_LAYOUT.bottom,
-            top=REPEATED_SESSION_LAYOUT.top(
-                include_difference=include_difference
-            ),
-            hspace=REPEATED_SESSION_LAYOUT.hspace(
-                include_difference=include_difference
-            ),
-            wspace=REPEATED_SESSION_LAYOUT.wspace,
-        )
-        _apply_repeated_session_titles(
+        _apply_repeated_session_labels(
             fig,
             axes,
+            row_label_axes,
             panel_set,
-            panel_title_sections,
         )
         _add_group_column_divider(fig, axes)
         _save_figure(
@@ -415,7 +420,7 @@ def render_session_grid_figures(
     cancel_check: Callable[[], None] | None = None,
     transaction: PublicationArtifactTransaction | None = None,
 ) -> list[Path]:
-    """Render one shared-limit 2×2 grid per condition and requested metric."""
+    """Render one compact shared-limit session matrix per condition and metric."""
 
     normalized = tuple(requests)
     validate_session_grid_requests(normalized)

@@ -450,7 +450,7 @@ def test_session_renderer_queues_each_selected_condition_output_pair(
 
 @pytest.mark.parametrize(
     ("include_difference", "expected_height_in"),
-    ((False, 6.5), (True, 9.0)),
+    ((False, 4.2), (True, 5.9)),
 )
 def test_session_renderer_repeated_layout_artifact_contract(
     tmp_path: Path,
@@ -494,10 +494,15 @@ def test_session_renderer_repeated_layout_artifact_contract(
         if output_path.suffix.lower() == ".png":
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
-            row_count = 3 if include_difference else 2
-            map_axes = fig.axes[: row_count * 2]
-            suptitle = fig._suptitle
-            assert suptitle is not None
+            map_prefix = session_rendering.REPEATED_SESSION_LAYOUT.map_axis_gid_prefix
+            map_axes = sorted(
+                (
+                    ax
+                    for ax in fig.axes
+                    if (ax.get_gid() or "").startswith(map_prefix)
+                ),
+                key=lambda ax: ax.get_gid(),
+            )
             header_prefix = (
                 session_rendering.REPEATED_SESSION_LAYOUT.column_header_gid_prefix
             )
@@ -508,6 +513,29 @@ def test_session_renderer_repeated_layout_artifact_contract(
                     if (text.get_gid() or "").startswith(header_prefix)
                 ),
                 key=lambda text: text.get_gid(),
+            )
+            row_label_prefix = (
+                session_rendering.REPEATED_SESSION_LAYOUT.row_label_gid_prefix
+            )
+            row_labels = sorted(
+                (
+                    text
+                    for ax in fig.axes
+                    for text in ax.texts
+                    if (text.get_gid() or "").startswith(row_label_prefix)
+                ),
+                key=lambda text: text.get_gid(),
+            )
+            colorbar_prefix = (
+                session_rendering.REPEATED_SESSION_LAYOUT.colorbar_axis_gid_prefix
+            )
+            colorbar_axes = sorted(
+                (
+                    ax
+                    for ax in fig.axes
+                    if (ax.get_gid() or "").startswith(colorbar_prefix)
+                ),
+                key=lambda ax: ax.get_position().y0,
             )
             dividers = [
                 artist
@@ -526,21 +554,43 @@ def test_session_renderer_repeated_layout_artifact_contract(
 
             captured_layout.update(
                 texts=tuple(text.get_text() for text in fig.texts),
+                has_suptitle=fig._suptitle is not None,
                 divider_count=len(dividers),
                 divider_x=divider_x,
                 gutter_left=map_axes[0].get_position().x1,
                 gutter_right=map_axes[1].get_position().x0,
+                map_axis_count=len(map_axes),
+                map_boxes=tuple(
+                    (
+                        ax.get_window_extent(renderer).x0,
+                        ax.get_window_extent(renderer).y0,
+                        ax.get_window_extent(renderer).x1,
+                        ax.get_window_extent(renderer).y1,
+                    )
+                    for ax in map_axes
+                ),
+                colorbar_axis_count=len(colorbar_axes),
+                colorbar_left=min(ax.get_position().x0 for ax in colorbar_axes),
+                colorbar_boxes=tuple(
+                    (
+                        ax.get_tightbbox(renderer).x0,
+                        ax.get_tightbbox(renderer).y0,
+                        ax.get_tightbbox(renderer).x1,
+                        ax.get_tightbbox(renderer).y1,
+                    )
+                    for ax in colorbar_axes
+                ),
                 canvas=(
                     figure_box.x0,
                     figure_box.y0,
                     figure_box.x1,
                     figure_box.y1,
                 ),
-                suptitle_box=box_tuple(suptitle),
                 header_boxes=tuple(box_tuple(header) for header in headers),
                 header_texts=tuple(header.get_text() for header in headers),
-                panel_boxes=tuple(box_tuple(ax.title) for ax in map_axes),
                 panel_texts=tuple(ax.title.get_text() for ax in map_axes),
+                row_label_boxes=tuple(box_tuple(label) for label in row_labels),
+                row_label_texts=tuple(label.get_text() for label in row_labels),
             )
         real_save(
             fig,
@@ -561,6 +611,14 @@ def test_session_renderer_repeated_layout_artifact_contract(
     pdf_width, pdf_height = _pdf_media_box_points(pdf_path)
     assert pdf_width == pytest.approx(6.5 * 72.0)
     assert pdf_height == pytest.approx(expected_height_in * 72.0)
+    assert captured_layout["has_suptitle"] is False
+    assert captured_layout["map_axis_count"] == (6 if include_difference else 4)
+    assert captured_layout["colorbar_axis_count"] == (
+        2 if include_difference else 1
+    )
+    if include_difference:
+        lower_colorbar, upper_colorbar = captured_layout["colorbar_boxes"]
+        assert lower_colorbar[3] < upper_colorbar[1]
     assert captured_layout["divider_count"] == 1
     assert (
         captured_layout["gutter_left"]
@@ -569,19 +627,27 @@ def test_session_renderer_repeated_layout_artifact_contract(
     )
     assert len(captured_layout["header_boxes"]) == 2
     canvas_left, canvas_bottom, canvas_right, canvas_top = captured_layout["canvas"]
+    for box in (*captured_layout["map_boxes"], *captured_layout["colorbar_boxes"]):
+        assert canvas_left <= box[0] < box[2] <= canvas_right
+        assert canvas_bottom <= box[1] < box[3] <= canvas_top
     divider_pixels = captured_layout["divider_x"] * (canvas_right - canvas_left)
-    repeated_right = (
-        session_rendering.REPEATED_SESSION_LAYOUT.right
-        * (canvas_right - canvas_left)
+    map_boxes = captured_layout["map_boxes"]
+    assert max(box[2] for box in captured_layout["row_label_boxes"]) < min(
+        box[0] for box in map_boxes
     )
+    assert min(box[1] for box in captured_layout["header_boxes"]) > max(
+        map_boxes[0][3], map_boxes[1][3]
+    )
+    map_right = max(box[2] for box in map_boxes)
+    colorbar_left = captured_layout["colorbar_left"] * (canvas_right - canvas_left)
+    assert map_right < colorbar_left
     column_bounds = (
         (canvas_left, divider_pixels),
-        (divider_pixels, repeated_right),
+        (divider_pixels, map_right),
     )
     all_title_boxes = (
-        captured_layout["suptitle_box"],
         *captured_layout["header_boxes"],
-        *captured_layout["panel_boxes"],
+        *captured_layout["row_label_boxes"],
     )
     for left, bottom, right, top in all_title_boxes:
         assert canvas_left <= left < right <= canvas_right
@@ -589,11 +655,6 @@ def test_session_renderer_repeated_layout_artifact_contract(
     for column, header_box in enumerate(captured_layout["header_boxes"]):
         assert column_bounds[column][0] <= header_box[0]
         assert header_box[2] <= column_bounds[column][1]
-    for index, panel_box in enumerate(captured_layout["panel_boxes"]):
-        column = index % 2
-        assert column_bounds[column][0] <= panel_box[0]
-        assert panel_box[2] <= column_bounds[column][1]
-
     def overlaps(first, second) -> bool:
         return (
             min(first[2], second[2]) > max(first[0], second[0])
@@ -608,27 +669,28 @@ def test_session_renderer_repeated_layout_artifact_contract(
         for group_id in panel_set.group_ids
     )
     assert tuple(" ".join(text.split()) for text in captured_layout["header_texts"]) == (
-        expected_group_labels
+        f"(A) {expected_group_labels[0]}",
+        f"(B) {expected_group_labels[1]}",
     )
     normalized_panel_texts = tuple(
         " ".join(text.split()) for text in captured_layout["panel_texts"]
     )
-    for panel_text in normalized_panel_texts:
-        assert all(group_label not in panel_text for group_label in expected_group_labels)
-    for index, panel_text in enumerate(normalized_panel_texts):
-        row = index // 2
-        column = index % 2
-        group_id = panel_set.group_ids[column]
-        if row < 2:
-            session_id = panel_set.session_ids[row]
-            expected_title = panel_set.panel(group_id, session_id).session_label
-        else:
-            difference = panel_set.paired_difference(group_id)
-            expected_title = (
-                f"{difference.comparison_session_label} − "
-                f"{difference.reference_session_label}"
-            )
-        assert panel_text == " ".join(expected_title.split())
+    assert normalized_panel_texts == ("",) * (6 if include_difference else 4)
+    expected_row_labels = [
+        panel_set.panel(panel_set.group_ids[0], session_id).session_label
+        for session_id in panel_set.session_ids
+    ]
+    if include_difference:
+        difference = panel_set.paired_difference(panel_set.group_ids[0])
+        expected_row_labels.append(
+            f"{difference.comparison_session_label} − "
+            f"{difference.reference_session_label}"
+        )
+    assert tuple(
+        " ".join(text.split()) for text in captured_layout["row_label_texts"]
+    ) == tuple(" ".join(text.split()) for text in expected_row_labels)
+    assert panel_set.condition not in captured_layout["texts"]
+    assert panel_set.metric.display_name not in captured_layout["texts"]
 
 
 def test_worker_stages_all_selected_session_grids_atomically(

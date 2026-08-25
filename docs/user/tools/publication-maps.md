@@ -77,13 +77,23 @@ selector adds two safe workflows:
   creates a group-column × session-row grid for the project's two stable
   groups, with one shared color scale across all four maps for each metric.
 
-Every panel title uses the canonical session label without visit numbers or
-sample-size annotations. The optional paired-difference row is calculated as
-comparison minus reference within each participant before averaging; its
-diverging color scale is shared across groups. Participant and paired counts
-remain part of the internal aggregation checks but are not printed on the
-figure. Missing `recording_id`, `session_id`, `group_id`, or visit metadata
-blocks the run, and Scalp Maps never guesses identity from paths or filenames.
+During **Session comparison**, Advanced Settings hides the inapplicable
+**Figure layout** section and expands **Map appearance** across the available
+width. Switching to **Condition (one session)** restores the applicable
+ordinary figure-layout options. Flat single-group projects show only the
+paired-condition option; exactly-two-group condition workflows can also show
+the two-group comparison option.
+
+Repeated-session figures use a compact matrix without an internal figure title
+or repeated per-map titles. Canonical groups appear once as agnostic `(A)` and
+`(B)` column headers, canonical session labels appear once in a vertical rail
+to the left, and color scales sit in a separate rail to the right. The optional
+paired-difference row is calculated as comparison minus reference within each
+participant before averaging; its diverging color scale is shared across
+groups. Participant and paired counts remain part of the internal aggregation
+checks but are not printed on the figure. Missing `recording_id`, `session_id`,
+`group_id`, or visit metadata blocks the run, and Scalp Maps never guesses
+identity from paths or filenames.
 
 BCA and SNR can use fixed or automatic color limits. The initial fixed ranges
 are 0.0–0.4 µV for BCA and 1.0–1.5 for SNR. Z-score maps use a configurable

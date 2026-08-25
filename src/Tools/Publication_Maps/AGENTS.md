@@ -73,10 +73,10 @@ Rules:
 - Visible ordinary figure titles should be condition names only. In two-group comparison
   mode, the selected condition is the overall title and canonical group labels
   are the two column headers. Do not add selected harmonics, subject counts, or
-  cache/source provenance to visible figure titles. Repeated-session grids are
-  the exception only for canonical session identity: session-row titles show
-  the full canonical session label, and difference-row titles show comparison
-  minus reference. They must not show visit indices or sample sizes.
+  cache/source provenance to visible figure titles. Repeated-session grids have
+  no overall or per-map title. Show canonical session identity once per row in
+  the external left label rail, including comparison minus reference for the
+  optional difference row. Do not show visit indices or sample sizes.
 - Figure geometry belongs to separate renderer-internal layout profiles for
   ordinary single-map, paired-condition, ordinary two-group comparison, and
   repeated-session figures. Their geometry must remain independently editable;
@@ -85,13 +85,14 @@ Rules:
   project settings or persistence.
 - Single-condition and paired-condition figures should fit a standard US letter
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
-- Repeated-session grids must export at exactly 6.5 inches wide and no more
-  than 9 inches high, without tight-bounding-box cropping or an explanatory
-  footer. Show each full canonical group label once as a measured-width wrapped
-  column header, wrap full session labels within their panel column, and use a
-  thin neutral divider in the actual gap between the two group columns. Keep
-  these treatments clear of titles, maps, and colorbars; they are visual
-  structure only and carry no inferential meaning.
+- Repeated-session grids use a compact four-column matrix: external left row
+  labels, the two canonical group map columns, and external right colorbars.
+  Two-session figures use four GridSpec rows and are 6.5×4.2 inches; enabling
+  the difference row uses six GridSpec rows and 6.5×5.9 inches. Do not use
+  tight-bounding-box cropping or an explanatory footer. Prefix the measured-
+  width wrapped canonical group headers with `(A)` and `(B)`, and use a thin
+  neutral divider in the actual gap between the map columns. Keep headers,
+  labels, maps, and colorbars unclipped and non-overlapping.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
   and Condition B combo boxes populated from the checked condition list.
 - Two-group comparison figures are available only when the managed project has
@@ -122,6 +123,15 @@ Rules:
   eligibility paragraph. Preserve the active-project input root, selected
   output root, group-specific routing, and output-folder action semantics while
   moving controls.
+- Derive project/workflow-specific presentation through the GUI-neutral
+  `ui_profile.py` resolver and apply it in one page method. Build Scalp Maps
+  widgets once; do not introduce separate single-group, multi-group, or
+  repeated-project page classes. Visibility represents workflow capability,
+  while existing enabled states continue to represent transient selection
+  eligibility. Session comparison hides Figure layout and lets Map appearance
+  span both Advanced Settings columns at content height. Condition workflows
+  retain Figure layout, showing paired-condition controls generally and the
+  two-group option only for exactly two canonical groups.
 - Keep generation history out of the embedded page in a focused **View
   Generation Log** modal. Closing or hiding the modal must not clear its live
   history or stop updates; reopening it during or after a run must show the

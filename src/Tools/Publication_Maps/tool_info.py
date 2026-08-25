@@ -34,9 +34,14 @@ the shared rebuild workflow; EEG preprocessing is not repeated.
 <p>
 Repeated-session projects explicitly choose one session for the ordinary
 condition workflow or two sessions for a group-column by session-row grid.
+During Session comparison, Advanced Settings hides the inapplicable Figure
+layout section and expands Map appearance; switching to Condition restores the
+applicable ordinary layout options.
 The grid shares color limits and can add a paired comparison-minus-reference
-row. Figure titles use the canonical session labels without visit numbers or
-sample-size annotations. Canonical recording/session identity is required.
+row. It omits the internal figure title, shows `(A)` and `(B)` canonical group
+headers once above the map columns, places canonical session labels vertically
+to the left, and keeps color scales outside the maps on the right. Visit numbers
+and sample sizes are omitted. Canonical recording/session identity is required.
 </p>
 
 <h3>Output Notes</h3>

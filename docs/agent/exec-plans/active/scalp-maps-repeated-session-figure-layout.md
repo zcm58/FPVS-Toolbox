@@ -31,10 +31,10 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   cancellation behavior. Continue calculating the counts for internal panel
   data and validation, but omit visit indices and all sample-size annotations
   from repeated-session figure titles.
-- Preserve matching PNG/PDF, 600 DPI, Arial figure typography, exact 6.5-inch
-  width, and a conservative portrait-page height target no greater than 9
-  inches. Do not change shared `_save_figure` behavior or add tight-bounding-box
-  cropping.
+- Preserve matching PNG/PDF, 600 DPI, Arial figure typography, and exact
+  6.5-inch width. Use 4.2 inches high for two plotted rows and 5.9 inches for
+  the difference-enabled three-row layout. Do not change shared `_save_figure`
+  behavior or add tight-bounding-box cropping.
 - Remove the repeated-grid `FIXED_ORDER_CAVEAT` from the figure artwork, GUI,
   help, and session state. Retain the repeated-session 6.5-inch width rule.
 - Use canonical project group labels; never hard-code birth-control names.
@@ -70,23 +70,31 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 2. Update the repeated-session style locally: remove the footer, reserve a
    non-overlapping title band, rebalance whitespace/height, and add the approved
    group-column separator treatment for both 2-row and 3-row grids.
-3. Update scoped `AGENTS.md`, `tool_info.py`, and focused renderer/layout
+3. Follow-up compact-matrix pass: remove the internal condition/metric title
+   and per-map titles; use a four-column by four/six-row GridSpec with a left
+   vertical session-label rail, `(A)`/`(B)` canonical group headers, and a
+   right colorbar rail. Preserve separate main and difference scales.
+4. Update scoped `AGENTS.md`, `tool_info.py`, and focused renderer/layout
    regressions; register any new test module in the publication-maps
    verification scope.
-4. Add the tool-local modal generation-log viewer and move output destination,
+5. Add the tool-local modal generation-log viewer and move output destination,
    file-format summary, open-folder action, and log access to a full-width
    Advanced Settings section; leave generation orchestration unchanged.
-5. Update CI-only Qt coverage and the manual smoke contract for tab ownership,
+6. Update CI-only Qt coverage and the manual smoke contract for tab ownership,
    unclipped controls, hidden/live log history, path validation, and generation
    from the first tab.
+7. Add one GUI-neutral capability profile for all Scalp Maps project/workflow
+   states. Apply it centrally so repeated Session comparison hides Figure
+   layout and expands Map appearance, while Condition modes retain only their
+   applicable layout options without rebuilding widgets or duplicating pages.
 
 ## Verification
 
-- After drawing the canvas, assert exact 6.5-inch width, bounded height, no
-  footer text, all titles inside the canvas, no suptitle/panel-title overlap,
-  no visit/sample-size title annotations, correct colorbar count/labels, and
-  repeated-only separator/header treatment. At the artifact level, verify PNG
-  pixel dimensions/DPI metadata and PDF physical page size.
+- After drawing the canvas, assert exact 6.5×4.2-inch or 6.5×5.9-inch size, no
+  footer or suptitle, empty per-map titles, unclipped `(A)`/`(B)` group headers,
+  one external canonical label per row, correct non-overlapping external
+  colorbar count/labels, and repeated-only separator treatment. At the artifact
+  level, verify PNG pixel dimensions/DPI metadata and PDF physical page size.
 - Keep characterization coverage green for single-group, paired-condition,
   ordinary two-group, filenames, shared limits, and repeated-mode routing.
 - CI Qt coverage asserts the page has no embedded log surface, Advanced
@@ -96,6 +104,10 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - CI Qt coverage also asserts equal action-row control heights and the absence
   of the redundant Generate-tab guidance, repeated-session ready summary, and
   Advanced-tab two-group eligibility paragraph.
+- Table-driven non-Qt profile coverage pins single-group, multi-group,
+  repeated Condition, and repeated Session comparison states. CI Qt coverage
+  pins compact repeated-session reflow, round-trip restoration, and unchanged
+  flat-project layouts.
 - Run `verify.py --scope figures --tier focused`, then
   `verify.py --scope publication-maps --tier focused`; add the `stats` scope
   only if implementation unexpectedly changes a numerical dependency. Do not
@@ -109,6 +121,7 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - [x] Style boundaries characterized and separated.
 - [x] Repeated-session layout updated.
 - [x] Advanced output/log workspace updated.
+- [x] Capability-driven Advanced Settings profiles and reflow added.
 - [x] Contracts and focused tests updated.
 - [x] Automated and renderer-level visual verification complete.
 - [ ] Visible 1280×900 GUI and Word-placement smoke reserved for user/CI review.
@@ -126,9 +139,17 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   and syntax compilation. Registered CI-only Qt coverage now pins equal action
   heights, the hidden valid repeated-session ready banner, and removal of the
   redundant Generate/Advanced instructional copy.
-- Six actual BioSemi64 stress renders (BCA/SNR/Z; 2-row/3-row) retain complete
-  long labels without overlap or clipping, omit the footer, and keep the
-  divider/colorbars inside exact 6.5×6.5-inch or 6.5×9-inch canvases.
+- The compact-matrix follow-up renders actual BioSemi64 two-row and three-row
+  BCA previews without clipping. It removes the internal title, shows each
+  session label once at left, keeps `(A)`/`(B)` group headers above the maps,
+  separates the main and difference colorbars at right, and reduces the exact
+  canvases to 6.5×4.2 and 6.5×5.9 inches.
+- Seven GUI-neutral profile tests pass for single-group, multi-group,
+  repeated Condition, repeated Session comparison, and invalid state inputs.
+  Registered CI-only Qt tests
+  `test_single_group_profile_hides_only_two_group_layout_option` and
+  `test_repeated_session_profile_hides_and_restores_figure_layout` pin the
+  section visibility and reversible grid reflow without starting processing.
 - The `figures` and `publication-maps` drivers stop at eight unrelated existing
   hard-coded-path findings under untracked `outputs/rcads-*`; those files were
   left untouched, and the complete registered test lists were run directly.

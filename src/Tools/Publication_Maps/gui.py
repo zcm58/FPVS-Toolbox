@@ -72,6 +72,10 @@ from Tools.Publication_Maps.session_controls import (
     publication_session_state,
 )
 from Tools.Publication_Maps.tool_info import SCALP_MAPS_TOOL_INFO
+from Tools.Publication_Maps.ui_profile import (
+    ScalpMapsUiProfile,
+    resolve_scalp_maps_ui_profile,
+)
 from Tools.Publication_Maps.worker import PublicationMapsWorker
 
 logger = logging.getLogger(__name__)
@@ -132,6 +136,7 @@ class PublicationMapsWindow(QWidget):
         self._session_state = PublicationSessionState(repeated=False)
         self._session_control_error = ""
         self._session_controls_initialized = False
+        self._ui_profile: ScalpMapsUiProfile | None = None
         self._last_run_was_session_grid = False
         self.generation_log_dialog = ScalpMapsGenerationLogDialog(self)
         # Retain the existing log sink name so worker and outcome wiring stays exact.
@@ -148,9 +153,9 @@ class PublicationMapsWindow(QWidget):
 
         selection_group = self._build_conditions_group()
         generation_group = self._build_generation_group()
-        advanced_output_group = self._build_advanced_output_group()
-        map_settings_group = self._build_map_settings_group()
-        figure_layout_group = self._build_figure_layout_group()
+        self.advanced_output_group = self._build_advanced_output_group()
+        self.map_settings_group = self._build_map_settings_group()
+        self.figure_layout_group = self._build_figure_layout_group()
 
         generation_page = QWidget(self.workflow_tabs)
         generation_layout = QGridLayout(generation_page)
@@ -162,16 +167,16 @@ class PublicationMapsWindow(QWidget):
         generation_layout.setColumnStretch(1, 1)
 
         advanced_page = QWidget(self.workflow_tabs)
-        advanced_layout = QGridLayout(advanced_page)
-        advanced_layout.setContentsMargins(0, 8, 0, 0)
-        advanced_layout.setHorizontalSpacing(8)
-        advanced_layout.setVerticalSpacing(8)
-        advanced_layout.addWidget(advanced_output_group, 0, 0, 1, 2)
-        advanced_layout.addWidget(map_settings_group, 1, 0)
-        advanced_layout.addWidget(figure_layout_group, 1, 1)
-        advanced_layout.setColumnStretch(0, 1)
-        advanced_layout.setColumnStretch(1, 1)
-        advanced_layout.setRowStretch(1, 1)
+        self.advanced_layout = QGridLayout(advanced_page)
+        self.advanced_layout.setContentsMargins(0, 8, 0, 0)
+        self.advanced_layout.setHorizontalSpacing(8)
+        self.advanced_layout.setVerticalSpacing(8)
+        self.advanced_layout.addWidget(self.advanced_output_group, 0, 0, 1, 2)
+        self.advanced_layout.addWidget(self.map_settings_group, 1, 0)
+        self.advanced_layout.addWidget(self.figure_layout_group, 1, 1)
+        self.advanced_layout.setColumnStretch(0, 1)
+        self.advanced_layout.setColumnStretch(1, 1)
+        self.advanced_layout.setRowStretch(1, 1)
 
         self.workflow_tabs.addTab(generation_page, "Generate Maps")
         self.workflow_tabs.addTab(advanced_page, "Advanced Settings")
@@ -558,9 +563,17 @@ class PublicationMapsWindow(QWidget):
         )
         group.setMinimumHeight(SCALP_MAPS_BOTTOM_ROW_MIN_HEIGHT)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.paired_figure_options_widget = QWidget(group)
+        self.paired_figure_options_widget.setObjectName(
+            "publication_maps_paired_figure_options"
+        )
+        paired_options_layout = QVBoxLayout(self.paired_figure_options_widget)
+        paired_options_layout.setContentsMargins(0, 0, 0, 0)
+        paired_options_layout.setSpacing(8)
         self.paired_figures_check = QCheckBox(
             "Create one paired-condition figure",
-            group,
+            self.paired_figure_options_widget,
         )
         self.paired_figures_check.setToolTip(
             "When at least two conditions are selected, export only one "
@@ -568,7 +581,7 @@ class PublicationMapsWindow(QWidget):
         )
         self.paired_figures_check.toggled.connect(self._on_paired_figures_toggled)
 
-        self.paired_conditions_widget = QWidget(group)
+        self.paired_conditions_widget = QWidget(self.paired_figure_options_widget)
         paired_layout = QVBoxLayout(self.paired_conditions_widget)
         paired_layout.setContentsMargins(0, 0, 0, 0)
         paired_layout.setSpacing(8)
@@ -608,9 +621,16 @@ class PublicationMapsWindow(QWidget):
         paired_selectors.addWidget(paired_b_container, 1)
         paired_layout.addLayout(paired_selectors)
 
+        self.group_comparison_options_widget = QWidget(group)
+        self.group_comparison_options_widget.setObjectName(
+            "publication_maps_group_comparison_options"
+        )
+        group_options_layout = QVBoxLayout(self.group_comparison_options_widget)
+        group_options_layout.setContentsMargins(0, 0, 0, 0)
+        group_options_layout.setSpacing(8)
         self.group_comparison_check = QCheckBox(
             "Create one two-group comparison figure",
-            group,
+            self.group_comparison_options_widget,
         )
         self.group_comparison_check.setObjectName(
             "publication_maps_group_comparison_check"
@@ -624,7 +644,9 @@ class PublicationMapsWindow(QWidget):
             self._on_group_comparison_toggled
         )
 
-        self.group_comparison_widget = QWidget(group)
+        self.group_comparison_widget = QWidget(
+            self.group_comparison_options_widget
+        )
         self.group_comparison_widget.setObjectName(
             "publication_maps_group_comparison_groups"
         )
@@ -661,10 +683,12 @@ class PublicationMapsWindow(QWidget):
         comparison_groups_layout.addWidget(comparison_a_container, 1)
         comparison_groups_layout.addWidget(comparison_b_container, 1)
 
-        group.content_layout.addWidget(self.paired_figures_check)
-        group.content_layout.addWidget(self.paired_conditions_widget)
-        group.content_layout.addWidget(self.group_comparison_check)
-        group.content_layout.addWidget(self.group_comparison_widget)
+        paired_options_layout.addWidget(self.paired_figures_check)
+        paired_options_layout.addWidget(self.paired_conditions_widget)
+        group_options_layout.addWidget(self.group_comparison_check)
+        group_options_layout.addWidget(self.group_comparison_widget)
+        group.content_layout.addWidget(self.paired_figure_options_widget)
+        group.content_layout.addWidget(self.group_comparison_options_widget)
         self.paired_figures_check.setChecked(True)
         self.paired_conditions_widget.setVisible(False)
         self.group_comparison_check.setEnabled(False)
@@ -977,6 +1001,58 @@ class PublicationMapsWindow(QWidget):
             ),
         )
 
+    def _current_ui_profile(self) -> ScalpMapsUiProfile:
+        group_count = (
+            len(self._dataset_index.ordered_groups)
+            if self._dataset_index is not None
+            else 0
+        )
+        return resolve_scalp_maps_ui_profile(
+            repeated_project=self._session_state.repeated,
+            session_comparison_active=self._session_comparison_active(),
+            canonical_group_count=group_count,
+        )
+
+    def _apply_ui_profile(self) -> None:
+        """Apply all project/workflow-specific structural presentation once."""
+
+        if not hasattr(self, "advanced_layout"):
+            return
+        profile = self._current_ui_profile()
+        self._ui_profile = profile
+        self.paired_figure_options_widget.setVisible(
+            profile.show_paired_figure_option
+        )
+        self.group_comparison_options_widget.setVisible(
+            profile.show_two_group_figure_option
+        )
+        self.figure_layout_group.setVisible(profile.show_figure_layout)
+
+        self.advanced_layout.removeWidget(self.map_settings_group)
+        self.advanced_layout.removeWidget(self.figure_layout_group)
+        if profile.compact_advanced_layout:
+            self.map_settings_group.setMinimumHeight(0)
+            self.map_settings_group.setSizePolicy(
+                QSizePolicy.Expanding,
+                QSizePolicy.Maximum,
+            )
+            self.advanced_layout.addWidget(self.map_settings_group, 1, 0, 1, 2)
+            self.advanced_layout.setRowStretch(1, 0)
+            self.advanced_layout.setRowStretch(2, 1)
+        else:
+            self.map_settings_group.setMinimumHeight(
+                SCALP_MAPS_TOP_ROW_MIN_HEIGHT
+            )
+            self.map_settings_group.setSizePolicy(
+                QSizePolicy.Expanding,
+                QSizePolicy.Expanding,
+            )
+            self.advanced_layout.addWidget(self.map_settings_group, 1, 0)
+            self.advanced_layout.addWidget(self.figure_layout_group, 1, 1)
+            self.advanced_layout.setRowStretch(1, 1)
+            self.advanced_layout.setRowStretch(2, 0)
+        self.advanced_layout.invalidate()
+
     def _on_session_mode_changed(self, _index: int | None = None) -> None:
         repeated = self._session_state.repeated
         comparison = self._session_comparison_active()
@@ -1004,6 +1080,7 @@ class PublicationMapsWindow(QWidget):
         self.group_combo.setEnabled(not comparison and not self._busy)
         self._update_paired_controls_state()
         self._update_group_comparison_controls_state()
+        self._apply_ui_profile()
         if self._dataset_index is not None:
             self._populate_conditions_from_index()
             self._set_ready_status()

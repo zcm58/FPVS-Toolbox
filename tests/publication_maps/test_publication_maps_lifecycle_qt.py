@@ -116,6 +116,26 @@ def _managed_repeated_index(tmp_path) -> ProjectDatasetIndex:
     )
 
 
+def _managed_single_group_index(tmp_path) -> ProjectDatasetIndex:
+    base = _managed_multigroup_index(tmp_path)
+    group = base.groups["control"]
+    return ProjectDatasetIndex(
+        project_root=base.project_root,
+        excel_root=base.excel_root,
+        scan_root=base.scan_root,
+        manifest=base.manifest,
+        groups={group.group_id: group},
+        participants=base.participants,
+        workbooks=tuple(
+            record
+            for record in base.workbooks
+            if record.group_id == group.group_id
+        ),
+        excluded_workbooks=base.excluded_workbooks,
+        diagnostics=base.diagnostics,
+    )
+
+
 def _build_page(qtbot, monkeypatch, tmp_path, *, dataset_index=None):
     if dataset_index is None:
         dataset_index = _managed_multigroup_index(tmp_path)
@@ -399,6 +419,9 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     assert output_card is not None
     assert appearance_card is not None
     assert layout_card is not None
+    assert not layout_card.isHidden()
+    assert not page.paired_figure_options_widget.isHidden()
+    assert not page.group_comparison_options_widget.isHidden()
     assert output_card.geometry().top() < appearance_card.geometry().top()
     assert appearance_card.geometry().top() == layout_card.geometry().top()
     assert abs(output_card.geometry().left() - appearance_card.geometry().left()) <= 1
@@ -411,6 +434,76 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     assert "exactly two canonical groups" not in (
         page.group_comparison_check.toolTip().casefold()
     )
+
+
+@pytest.mark.qt
+def test_single_group_profile_hides_only_two_group_layout_option(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=_managed_single_group_index(tmp_path),
+    )
+
+    assert page.figure_layout_group.isHidden() is False
+    assert page.paired_figure_options_widget.isHidden() is False
+    assert page.group_comparison_options_widget.isHidden() is True
+    assert page.advanced_layout.getItemPosition(
+        page.advanced_layout.indexOf(page.map_settings_group)
+    ) == (1, 0, 1, 1)
+    assert page.advanced_layout.getItemPosition(
+        page.advanced_layout.indexOf(page.figure_layout_group)
+    ) == (1, 1, 1, 1)
+
+
+@pytest.mark.qt
+def test_repeated_session_profile_hides_and_restores_figure_layout(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=_managed_repeated_index(tmp_path),
+    )
+
+    assert page.session_dimension_combo.currentData() == "session_comparison"
+    assert page.figure_layout_group.isHidden() is True
+    assert page.paired_figure_options_widget.isHidden() is True
+    assert page.group_comparison_options_widget.isHidden() is True
+    assert page.advanced_layout.getItemPosition(
+        page.advanced_layout.indexOf(page.map_settings_group)
+    ) == (1, 0, 1, 2)
+    assert page.advanced_layout.indexOf(page.figure_layout_group) == -1
+
+    page.session_dimension_combo.setCurrentIndex(
+        page.session_dimension_combo.findData("condition")
+    )
+
+    assert page.figure_layout_group.isHidden() is False
+    assert page.paired_figure_options_widget.isHidden() is False
+    assert page.group_comparison_options_widget.isHidden() is False
+    assert page.advanced_layout.getItemPosition(
+        page.advanced_layout.indexOf(page.map_settings_group)
+    ) == (1, 0, 1, 1)
+    assert page.advanced_layout.getItemPosition(
+        page.advanced_layout.indexOf(page.figure_layout_group)
+    ) == (1, 1, 1, 1)
+
+    page.session_dimension_combo.setCurrentIndex(
+        page.session_dimension_combo.findData("session_comparison")
+    )
+
+    assert page.figure_layout_group.isHidden() is True
+    assert page.advanced_layout.getItemPosition(
+        page.advanced_layout.indexOf(page.map_settings_group)
+    ) == (1, 0, 1, 2)
 
 
 @pytest.mark.qt
