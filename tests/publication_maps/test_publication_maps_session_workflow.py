@@ -636,6 +636,9 @@ def test_session_renderer_repeated_layout_artifact_contract(
                 panel_texts=tuple(ax.title.get_text() for ax in map_axes),
                 row_label_boxes=tuple(box_tuple(label) for label in row_labels),
                 row_label_texts=tuple(label.get_text() for label in row_labels),
+                row_label_weights=tuple(
+                    label.get_fontweight() for label in row_labels
+                ),
             )
     monkeypatch.setattr(session_rendering, "_save_figure", capture_save)
 
@@ -778,6 +781,9 @@ def test_session_renderer_repeated_layout_artifact_contract(
     assert tuple(
         " ".join(text.split()) for text in captured_layout["row_label_texts"]
     ) == tuple(" ".join(text.split()) for text in expected_row_labels)
+    assert captured_layout["row_label_weights"] == ("bold",) * len(
+        expected_row_labels
+    )
     assert panel_set.condition not in captured_layout["texts"]
     assert panel_set.metric.display_name not in captured_layout["texts"]
 

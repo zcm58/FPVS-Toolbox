@@ -45,8 +45,8 @@ class _RepeatedSessionLayoutProfile:
     width_in: float = 6.5
     two_row_height_in: float = 4.2
     three_row_height_in: float = 5.9
-    left: float = 0.025
-    right: float = 0.86
+    left: float = 0.02
+    right: float = 0.87
     bottom: float = 0.025
     top: float = 0.89
     hspace: float = 0.08
@@ -235,6 +235,7 @@ def _apply_repeated_session_labels(
         )
 
     label_kwargs = figure_text_kwargs("condition_label")
+    label_kwargs["fontweight"] = "bold"
     for row, (label_ax, label) in enumerate(zip(row_label_axes, row_labels, strict=True)):
         max_height_pixels = label_ax.get_position().height * fig.bbox.height
         text = label_ax.text(
