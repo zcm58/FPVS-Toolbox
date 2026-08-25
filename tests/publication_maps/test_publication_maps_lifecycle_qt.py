@@ -324,6 +324,8 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     page.group_comparison_check.setChecked(True)
 
     assert isinstance(page.workflow_tabs, QTabWidget)
+    assert page.workflow_tabs.documentMode() is True
+    assert "border: 0px" in page.workflow_tabs.styleSheet()
     assert page.findChildren(QScrollArea) == []
     assert page.workflow_tabs.currentIndex() == 0
     assert [
@@ -340,17 +342,23 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     for widget in (
         page.conditions_list,
         page.metric_bca_check,
+        page.color_low_btn,
+        page.fixed_bca_range_check,
+        page.bca_vmax_spin,
+        page.z_threshold_spin,
         page.status_label,
         page.progress,
         page.run_btn,
+        page.scalp_maps_info_btn,
     ):
         assert generation_page.isAncestorOf(widget)
     for widget in (
+        page.input_root_row,
+        page.group_combo,
+        page.refresh_btn,
         page.output_root_row,
         page.output_format_label,
         page.view_generation_log_btn,
-        page.color_low_btn,
-        page.fixed_bca_range_check,
         page.paired_figures_check,
         page.group_comparison_check,
     ):
@@ -369,10 +377,15 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     for widget in (
         page.conditions_list,
         page.metric_bca_check,
+        page.color_low_btn,
+        page.fixed_bca_range_check,
+        page.bca_vmax_spin,
+        page.z_threshold_spin,
         page.status_label,
         page.run_btn,
         page.cancel_btn,
         page.progress,
+        page.scalp_maps_info_btn,
     ):
         assert widget.visibleRegion().contains(widget.rect())
     assert page.run_btn.height() > 0
@@ -383,6 +396,12 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
             page.progress.height(),
         }
     ) == 1
+    assert abs(
+        page.bca_vmin_spin.geometry().top()
+        - page.bca_vmax_spin.geometry().top()
+    ) <= 1
+    assert page.bca_vmin_spin.width() <= 132
+    assert page.bca_vmax_spin.width() <= 132
     generation_text = " ".join(
         label.text() for label in generation_page.findChildren(QLabel)
     )
@@ -391,41 +410,58 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     qtbot.waitUntil(
         lambda: not page.group_comparison_widget.visibleRegion().isEmpty()
     )
-    qtbot.waitUntil(lambda: not page.color_low_btn.visibleRegion().isEmpty())
+    qtbot.waitUntil(lambda: not page.input_root_edit.visibleRegion().isEmpty())
     qtbot.waitUntil(lambda: not page.output_root_edit.visibleRegion().isEmpty())
     for widget in (
+        page.input_root_edit,
+        page.group_combo,
+        page.refresh_btn,
         page.output_root_edit,
         page.open_output_btn,
         page.view_generation_log_btn,
-        page.color_low_btn,
-        page.bca_vmax_spin,
         page.group_comparison_a_label,
         page.group_comparison_widget,
     ):
         assert widget.visibleRegion().contains(widget.rect())
 
-    output_card = advanced_page.findChild(
-        SectionCard,
+    assert {
+        card.objectName() for card in generation_page.findChildren(SectionCard)
+    } == {
+        "publication_maps_conditions",
+        "publication_maps_run",
+    }
+    assert {
+        card.objectName() for card in advanced_page.findChildren(SectionCard)
+    } == {
+        "publication_maps_input",
         "publication_maps_output",
-    )
-    appearance_card = advanced_page.findChild(
-        SectionCard,
-        "publication_maps_settings",
-    )
-    layout_card = advanced_page.findChild(
-        SectionCard,
         "publication_maps_figure_layout",
-    )
-    assert output_card is not None
-    assert appearance_card is not None
-    assert layout_card is not None
-    assert not layout_card.isHidden()
+    }
+    for card in page.findChildren(SectionCard):
+        parent = card.parentWidget()
+        while parent is not None and parent is not page:
+            assert not isinstance(parent, SectionCard)
+            parent = parent.parentWidget()
+    assert not isinstance(page.map_settings_section, SectionCard)
+    assert page.generation_group.isAncestorOf(page.map_settings_section)
+    assert not page.figure_layout_group.isHidden()
     assert not page.paired_figure_options_widget.isHidden()
     assert not page.group_comparison_options_widget.isHidden()
-    assert output_card.geometry().top() < appearance_card.geometry().top()
-    assert appearance_card.geometry().top() == layout_card.geometry().top()
-    assert abs(output_card.geometry().left() - appearance_card.geometry().left()) <= 1
-    assert abs(output_card.geometry().right() - layout_card.geometry().right()) <= 1
+    assert page.advanced_layout.indexOf(page.input_group) == 0
+    assert page.advanced_layout.indexOf(page.advanced_output_group) == 1
+    assert page.advanced_layout.indexOf(page.figure_layout_group) == 2
+    assert page.input_group.geometry().top() < (
+        page.advanced_output_group.geometry().top()
+    )
+    assert page.advanced_output_group.geometry().top() < (
+        page.figure_layout_group.geometry().top()
+    )
+    for card in (
+        page.advanced_output_group,
+        page.figure_layout_group,
+    ):
+        assert abs(page.input_group.geometry().left() - card.geometry().left()) <= 1
+        assert abs(page.input_group.geometry().right() - card.geometry().right()) <= 1
     advanced_text = " ".join(
         label.text() for label in advanced_page.findChildren(QLabel)
     )
@@ -434,6 +470,37 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     assert "exactly two canonical groups" not in (
         page.group_comparison_check.toolTip().casefold()
     )
+
+
+@pytest.mark.qt
+def test_fixed_bca_range_is_opt_in(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+
+    assert page.fixed_bca_range_check.isChecked() is False
+    assert page.bca_vmin_spin.isEnabled() is False
+    assert page.bca_vmax_spin.isEnabled() is False
+    assert page.fixed_snr_range_check.isChecked() is True
+    automatic_requests = page._collect_requests()
+    for request in automatic_requests:
+        bounds = request.color_bounds[publication_maps_gui.PublicationMetric.BCA]
+        assert bounds.auto_scale is True
+        assert bounds.vmin is None
+        assert bounds.vmax is None
+
+    page.fixed_bca_range_check.setChecked(True)
+
+    assert page.bca_vmin_spin.isEnabled() is True
+    assert page.bca_vmax_spin.isEnabled() is True
+    fixed_requests = page._collect_requests()
+    for request in fixed_requests:
+        bounds = request.color_bounds[publication_maps_gui.PublicationMetric.BCA]
+        assert bounds.auto_scale is False
+        assert bounds.vmin == pytest.approx(0.0)
+        assert bounds.vmax == pytest.approx(0.4)
 
 
 @pytest.mark.qt
@@ -452,12 +519,9 @@ def test_single_group_profile_hides_only_two_group_layout_option(
     assert page.figure_layout_group.isHidden() is False
     assert page.paired_figure_options_widget.isHidden() is False
     assert page.group_comparison_options_widget.isHidden() is True
-    assert page.advanced_layout.getItemPosition(
-        page.advanced_layout.indexOf(page.map_settings_group)
-    ) == (1, 0, 1, 1)
-    assert page.advanced_layout.getItemPosition(
-        page.advanced_layout.indexOf(page.figure_layout_group)
-    ) == (1, 1, 1, 1)
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
+    assert page.workflow_tabs.widget(1).isAncestorOf(page.input_group)
+    assert page.workflow_tabs.widget(1).isAncestorOf(page.figure_layout_group)
 
 
 @pytest.mark.qt
@@ -477,10 +541,10 @@ def test_repeated_session_profile_hides_and_restores_figure_layout(
     assert page.figure_layout_group.isHidden() is True
     assert page.paired_figure_options_widget.isHidden() is True
     assert page.group_comparison_options_widget.isHidden() is True
-    assert page.advanced_layout.getItemPosition(
-        page.advanced_layout.indexOf(page.map_settings_group)
-    ) == (1, 0, 1, 2)
-    assert page.advanced_layout.indexOf(page.figure_layout_group) == -1
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
+    assert page.advanced_layout.indexOf(page.figure_layout_group) == 2
+    page.fixed_bca_range_check.setChecked(True)
+    page.bca_vmax_spin.setValue(0.75)
 
     page.session_dimension_combo.setCurrentIndex(
         page.session_dimension_combo.findData("condition")
@@ -489,21 +553,20 @@ def test_repeated_session_profile_hides_and_restores_figure_layout(
     assert page.figure_layout_group.isHidden() is False
     assert page.paired_figure_options_widget.isHidden() is False
     assert page.group_comparison_options_widget.isHidden() is False
-    assert page.advanced_layout.getItemPosition(
-        page.advanced_layout.indexOf(page.map_settings_group)
-    ) == (1, 0, 1, 1)
-    assert page.advanced_layout.getItemPosition(
-        page.advanced_layout.indexOf(page.figure_layout_group)
-    ) == (1, 1, 1, 1)
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
+    assert page.advanced_layout.indexOf(page.figure_layout_group) == 2
+    assert page.fixed_bca_range_check.isChecked() is True
+    assert page.bca_vmax_spin.value() == pytest.approx(0.75)
 
     page.session_dimension_combo.setCurrentIndex(
         page.session_dimension_combo.findData("session_comparison")
     )
 
     assert page.figure_layout_group.isHidden() is True
-    assert page.advanced_layout.getItemPosition(
-        page.advanced_layout.indexOf(page.map_settings_group)
-    ) == (1, 0, 1, 2)
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
+    assert page.advanced_layout.indexOf(page.figure_layout_group) == 2
+    assert page.fixed_bca_range_check.isChecked() is True
+    assert page.bca_vmax_spin.value() == pytest.approx(0.75)
 
 
 @pytest.mark.qt

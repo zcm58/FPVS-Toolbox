@@ -116,33 +116,34 @@ Rules:
 - Keep the embedded page within the supported 1280×900 workspace without a
   page-level scroll area. Use flat purpose tabs for generation and advanced
   settings; do not nest `SectionCard` surfaces. **Generate Maps** must contain
-  condition/session selection, map types, progress, the generation action, and
-  inline status. In repeated-session mode, do not show a redundant valid-ready
-  summary; keep validation, running, cancellation, and completion status
-  visible. Do not show instructional text pointing to **Advanced Settings**.
-  Keep Generate, Cancel, and progress at one control height. **Advanced
-  Settings** owns the full-width output-folder controls, color scales, and
-  optional combined-figure configuration without a separate two-group
+  condition/session selection, map types, a compact flat map-appearance/range
+  subsection, the tool-info action, progress, the generation action, and inline
+  status. In repeated-session mode, do not show a redundant valid-ready summary;
+  keep validation, running, cancellation, and completion status visible. Do not
+  show instructional text pointing to **Advanced Settings**. Keep Generate,
+  Cancel, and progress at one control height. **Advanced Settings** owns the
+  infrequently used full-width input-data controls, output/history controls,
+  and optional combined-figure configuration without a separate two-group
   eligibility paragraph. Preserve the active-project input root, selected
-  output root, group-specific routing, and output-folder action semantics while
-  moving controls.
+  output root, group-specific routing, and folder-action semantics while moving
+  controls.
 - Derive project/workflow-specific presentation through the GUI-neutral
   `ui_profile.py` resolver and apply it in one page method. Build Scalp Maps
   widgets once; do not introduce separate single-group, multi-group, or
   repeated-project page classes. Visibility represents workflow capability,
   while existing enabled states continue to represent transient selection
-  eligibility. Session comparison hides Figure layout and lets Map appearance
-  span both Advanced Settings columns at content height. Condition workflows
-  retain Figure layout, showing paired-condition controls generally and the
-  two-group option only for exactly two canonical groups.
+  eligibility. Use one static flat tab hierarchy for every mode: Session
+  comparison hides Figure layout, while Condition workflows retain it, showing
+  paired-condition controls generally and the two-group option only for exactly
+  two canonical groups. Map appearance never moves between tabs or modes.
 - Keep generation history out of the embedded page in a focused **View
   Generation Log** modal. Closing or hiding the modal must not clear its live
   history or stop updates; reopening it during or after a run must show the
   complete accumulated history for the current or most recent run. Starting a
   new run may clear that prior run history, matching the existing workflow.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:
-  it starts checked with a `0.0` to `0.4 BCA` range; unchecked maps
-  auto-scale.
+  it starts unchecked so BCA maps auto-scale. Enabling it explicitly uses the
+  editable `0.0` to `0.4 BCA` values by default.
 - SNR uses the same color endpoints. The fixed SNR range is optional: it starts
   checked with a `1.0` to `1.5 SNR` range; unchecked maps auto-scale.
 - Shared BCA/SNR scalp-map color stops live in

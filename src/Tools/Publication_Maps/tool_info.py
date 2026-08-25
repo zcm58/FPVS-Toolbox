@@ -16,17 +16,19 @@ conditions using the significant-harmonic list saved when processing completed.
 <p>
 Open a managed project, choose one canonical group (or All groups for separate
 group outputs), then select conditions and map types on the Generate Maps tab.
-That tab keeps generation status, progress, and the
-<strong>Generate Scalp Maps</strong> action together. Advanced Settings owns
-the full-width output-folder controls, color scales, and optional
-paired-condition or two-group figure layouts. <strong>View Generation
-Log</strong> opens the live history in a focused dialog; closing and reopening
-it does not discard messages. The project&apos;s canonical processed-Excel root is
-selected automatically and cannot be narrowed to a subgroup folder. When two
-conditions are selected, the paired condition figure option creates
-side-by-side maps. In an exactly-two-group project, choose All groups and one
-condition to export a descriptive side-by-side group comparison. Each group is
-aggregated independently; the figure is not a between-group statistical test.
+That tab keeps map appearance and ranges, generation status, progress, the
+tool information action, and <strong>Generate Scalp Maps</strong> together.
+BCA uses automatic limits until you explicitly enable its fixed range.
+Advanced Settings contains the infrequently used project-input details,
+full-width output-folder controls, generation log, and optional paired-condition
+or two-group figure layouts. <strong>View Generation Log</strong> opens the live
+history in a focused dialog; closing and reopening it does not discard messages.
+The project&apos;s canonical processed-Excel root is selected automatically and
+cannot be narrowed to a subgroup folder. When two conditions are selected, the
+paired condition figure option creates side-by-side maps. In an exactly-two-group
+project, choose All groups and one condition to export a descriptive side-by-side
+group comparison. Each group is aggregated independently; the figure is not a
+between-group statistical test.
 If processing-time harmonic
 selection is missing or stale, the Post-processing Required dialog can launch
 the shared rebuild workflow; EEG preprocessing is not repeated.
@@ -35,8 +37,8 @@ the shared rebuild workflow; EEG preprocessing is not repeated.
 Repeated-session projects explicitly choose one session for the ordinary
 condition workflow or two sessions for a group-column by session-row grid.
 During Session comparison, Advanced Settings hides the inapplicable Figure
-layout section and expands Map appearance; switching to Condition restores the
-applicable ordinary layout options.
+layout section; switching to Condition restores the applicable ordinary layout
+options. Map appearance remains on Generate Maps in every mode.
 The grid shares color limits and offers an unchecked, opt-in paired
 comparison-minus-reference row. It omits the internal figure title, shows `(A)`
 and `(B)` canonical group headers once above the map columns, places canonical

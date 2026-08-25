@@ -17,13 +17,12 @@ class ScalpMapsUiMode(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ScalpMapsUiProfile:
-    """Visibility and reflow decisions that do not depend on Qt widgets."""
+    """Workflow capability decisions that do not depend on Qt widgets."""
 
     mode: ScalpMapsUiMode
     show_paired_figure_option: bool
     show_two_group_figure_option: bool
     show_figure_layout: bool
-    compact_advanced_layout: bool
 
 
 def resolve_scalp_maps_ui_profile(
@@ -59,7 +58,6 @@ def resolve_scalp_maps_ui_profile(
         show_paired_figure_option=show_paired,
         show_two_group_figure_option=show_two_group,
         show_figure_layout=show_figure_layout,
-        compact_advanced_layout=not show_figure_layout,
     )
 
 

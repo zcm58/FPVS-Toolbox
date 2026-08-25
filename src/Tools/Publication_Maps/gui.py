@@ -145,48 +145,48 @@ class PublicationMapsWindow(QWidget):
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(8, 8, 8, 8)
         outer_layout.setSpacing(8)
-        outer_layout.addWidget(self._build_input_group(), 0)
 
         self.workflow_tabs = QTabWidget(self)
         self.workflow_tabs.setObjectName("publication_maps_workflow_tabs")
         self.workflow_tabs.setAccessibleName("Scalp Maps workflow")
+        self.workflow_tabs.setDocumentMode(True)
+        self.workflow_tabs.setStyleSheet(
+            "QTabWidget#publication_maps_workflow_tabs::pane {"
+            " border: 0px; background: transparent; }"
+        )
 
-        selection_group = self._build_conditions_group()
-        generation_group = self._build_generation_group()
+        self.input_group = self._build_input_group()
+        self.selection_group = self._build_conditions_group()
+        self.generation_group = self._build_generation_group()
         self.advanced_output_group = self._build_advanced_output_group()
-        self.map_settings_group = self._build_map_settings_group()
         self.figure_layout_group = self._build_figure_layout_group()
 
         generation_page = QWidget(self.workflow_tabs)
         generation_layout = QGridLayout(generation_page)
         generation_layout.setContentsMargins(0, 8, 0, 0)
         generation_layout.setHorizontalSpacing(8)
-        generation_layout.addWidget(selection_group, 0, 0)
-        generation_layout.addWidget(generation_group, 0, 1)
+        generation_layout.addWidget(self.selection_group, 0, 0)
+        generation_layout.addWidget(self.generation_group, 0, 1)
         generation_layout.setColumnStretch(0, 1)
         generation_layout.setColumnStretch(1, 1)
 
         advanced_page = QWidget(self.workflow_tabs)
-        self.advanced_layout = QGridLayout(advanced_page)
+        self.advanced_layout = QVBoxLayout(advanced_page)
         self.advanced_layout.setContentsMargins(0, 8, 0, 0)
-        self.advanced_layout.setHorizontalSpacing(8)
-        self.advanced_layout.setVerticalSpacing(8)
-        self.advanced_layout.addWidget(self.advanced_output_group, 0, 0, 1, 2)
-        self.advanced_layout.addWidget(self.map_settings_group, 1, 0)
-        self.advanced_layout.addWidget(self.figure_layout_group, 1, 1)
-        self.advanced_layout.setColumnStretch(0, 1)
-        self.advanced_layout.setColumnStretch(1, 1)
-        self.advanced_layout.setRowStretch(1, 1)
+        self.advanced_layout.setSpacing(8)
+        self.advanced_layout.addWidget(self.input_group)
+        self.advanced_layout.addWidget(self.advanced_output_group)
+        self.advanced_layout.addWidget(self.figure_layout_group, 1)
 
         self.workflow_tabs.addTab(generation_page, "Generate Maps")
         self.workflow_tabs.addTab(advanced_page, "Advanced Settings")
         self.workflow_tabs.setTabToolTip(
             0,
-            "Select data and map types, then generate maps with the configured output.",
+            "Select maps, adjust their appearance, and generate figure files.",
         )
         self.workflow_tabs.setTabToolTip(
             1,
-            "Configure output, review the generation log, and adjust figure settings.",
+            "Review project data, configure output, and choose optional layouts.",
         )
         outer_layout.addWidget(self.workflow_tabs, 1)
 
@@ -203,15 +203,6 @@ class PublicationMapsWindow(QWidget):
 
     def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="publication_maps_input")
-        self.scalp_maps_info_btn = make_info_button(
-            parent=group,
-            tooltip="About Scalp Maps",
-            object_name="scalp_maps_tool_info_btn",
-        )
-        self.scalp_maps_info_btn.clicked.connect(
-            lambda: show_tool_info(self, SCALP_MAPS_TOOL_INFO)
-        )
-        group.header.add_action_widget(self.scalp_maps_info_btn)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         form = make_form_layout()
 
@@ -258,7 +249,6 @@ class PublicationMapsWindow(QWidget):
 
         self.conditions_list = QListWidget(group)
         self.conditions_list.setMinimumHeight(140)
-        self.conditions_list.setMaximumHeight(220)
         self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.conditions_list.itemChanged.connect(self._on_condition_item_changed)
         self.conditions_summary = QLabel("Selected conditions: 0 | Total files: 0")
@@ -369,49 +359,58 @@ class PublicationMapsWindow(QWidget):
         metrics_layout.addStretch(1)
         return metrics_row
 
-    def _build_map_settings_group(self) -> SectionCard:
-        group = SectionCard(
-            "Map appearance",
-            object_name="publication_maps_settings",
+    def _build_map_settings_section(self, parent: QWidget) -> QWidget:
+        section = QWidget(parent)
+        section.setObjectName("publication_maps_settings")
+        section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(6)
+        section_layout.addWidget(
+            SubsectionHeaderLabel("Map appearance and ranges", section)
         )
-        group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         form = make_form_layout()
 
-        self.color_low_btn = QPushButton(group)
+        self.color_low_btn = QPushButton(section)
         self.color_low_btn.setFixedSize(20, 20)
         self.color_low_btn.setToolTip("Low value color")
         self.color_low_btn.clicked.connect(lambda: self._choose_bca_color("low"))
 
-        self.color_high_btn = QPushButton(group)
+        self.color_high_btn = QPushButton(section)
         self.color_high_btn.setFixedSize(20, 20)
         self.color_high_btn.setToolTip("High value color")
         self.color_high_btn.clicked.connect(lambda: self._choose_bca_color("high"))
 
-        self.fixed_bca_range_check = QCheckBox("Use fixed BCA range", group)
+        self.fixed_bca_range_check = QCheckBox(
+            "Use fixed BCA range",
+            section,
+        )
         self.fixed_bca_range_check.setToolTip(
             "When checked, every BCA scalp map uses the same colorbar range."
         )
-        self.fixed_bca_range_check.setChecked(True)
+        self.fixed_bca_range_check.setChecked(False)
         self.fixed_bca_range_check.stateChanged.connect(
             lambda _state: self._toggle_metric_range_controls()
         )
 
-        self.bca_vmin_spin = QDoubleSpinBox(group)
+        self.bca_vmin_spin = QDoubleSpinBox(section)
         self.bca_vmin_spin.setDecimals(3)
         self.bca_vmin_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.bca_vmin_spin.setSingleStep(0.1)
         self.bca_vmin_spin.setSuffix(" BCA")
         self.bca_vmin_spin.setValue(0.0)
 
-        self.bca_vmax_spin = QDoubleSpinBox(group)
+        self.bca_vmax_spin = QDoubleSpinBox(section)
         self.bca_vmax_spin.setDecimals(3)
         self.bca_vmax_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.bca_vmax_spin.setSingleStep(0.1)
         self.bca_vmax_spin.setSuffix(" BCA")
         self.bca_vmax_spin.setValue(0.4)
 
-        self.fixed_snr_range_check = QCheckBox("Use fixed SNR range", group)
+        self.fixed_snr_range_check = QCheckBox(
+            "Use fixed SNR range",
+            section,
+        )
         self.fixed_snr_range_check.setToolTip(
             "When checked, every SNR scalp map uses the same colorbar range."
         )
@@ -420,21 +419,21 @@ class PublicationMapsWindow(QWidget):
             lambda _state: self._toggle_metric_range_controls()
         )
 
-        self.snr_vmin_spin = QDoubleSpinBox(group)
+        self.snr_vmin_spin = QDoubleSpinBox(section)
         self.snr_vmin_spin.setDecimals(3)
         self.snr_vmin_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.snr_vmin_spin.setSingleStep(0.1)
         self.snr_vmin_spin.setSuffix(" SNR")
         self.snr_vmin_spin.setValue(1.0)
 
-        self.snr_vmax_spin = QDoubleSpinBox(group)
+        self.snr_vmax_spin = QDoubleSpinBox(section)
         self.snr_vmax_spin.setDecimals(3)
         self.snr_vmax_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.snr_vmax_spin.setSingleStep(0.1)
         self.snr_vmax_spin.setSuffix(" SNR")
         self.snr_vmax_spin.setValue(1.5)
 
-        self.z_threshold_spin = QDoubleSpinBox(group)
+        self.z_threshold_spin = QDoubleSpinBox(section)
         self.z_threshold_spin.setDecimals(3)
         self.z_threshold_spin.setRange(-1_000_000.0, 1_000_000.0)
         self.z_threshold_spin.setSingleStep(0.01)
@@ -443,8 +442,14 @@ class PublicationMapsWindow(QWidget):
         self.z_threshold_spin.setToolTip(
             "Z scores below this threshold render as white; the upper limit auto-scales."
         )
+        self.z_threshold_spin.setMinimumWidth(104)
+        self.z_threshold_spin.setMaximumWidth(132)
+        self.z_threshold_spin.setSizePolicy(
+            QSizePolicy.Preferred,
+            QSizePolicy.Fixed,
+        )
 
-        color_row = QWidget(group)
+        color_row = QWidget(section)
         color_layout = QHBoxLayout(color_row)
         color_layout.setContentsMargins(0, 0, 0, 0)
         color_layout.setSpacing(8)
@@ -456,12 +461,12 @@ class PublicationMapsWindow(QWidget):
         color_layout.addStretch(1)
 
         range_row = self._build_range_control_grid(
-            group,
+            section,
             lower_spin=self.bca_vmin_spin,
             upper_spin=self.bca_vmax_spin,
         )
         snr_range_row = self._build_range_control_grid(
-            group,
+            section,
             lower_spin=self.snr_vmin_spin,
             upper_spin=self.snr_vmax_spin,
         )
@@ -472,10 +477,10 @@ class PublicationMapsWindow(QWidget):
         form.addRow("", self.fixed_snr_range_check)
         form.addRow("SNR range:", snr_range_row)
         form.addRow("Z threshold:", self.z_threshold_spin)
-        group.content_layout.addLayout(form)
+        section_layout.addLayout(form)
         self._apply_bca_color_button_styles()
         self._toggle_metric_range_controls()
-        return group
+        return section
 
     def _build_range_control_grid(
         self,
@@ -488,16 +493,16 @@ class PublicationMapsWindow(QWidget):
         layout = QGridLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(4)
         for spin in (lower_spin, upper_spin):
-            spin.setMinimumWidth(132)
-            spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            spin.setMinimumWidth(104)
+            spin.setMaximumWidth(132)
+            spin.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         layout.addWidget(QLabel("Lower", row), 0, 0)
         layout.addWidget(lower_spin, 0, 1)
-        layout.addWidget(QLabel("Upper", row), 1, 0)
-        layout.addWidget(upper_spin, 1, 1)
-        layout.setColumnStretch(1, 1)
+        layout.addWidget(QLabel("Upper", row), 0, 2)
+        layout.addWidget(upper_spin, 0, 3)
+        layout.setColumnStretch(4, 1)
         return row
 
     def _build_advanced_output_group(self) -> SectionCard:
@@ -702,10 +707,21 @@ class PublicationMapsWindow(QWidget):
         )
         group.setMinimumHeight(SCALP_MAPS_TOP_ROW_MIN_HEIGHT)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.scalp_maps_info_btn = make_info_button(
+            parent=group,
+            tooltip="About Scalp Maps",
+            object_name="scalp_maps_tool_info_btn",
+        )
+        self.scalp_maps_info_btn.clicked.connect(
+            lambda: show_tool_info(self, SCALP_MAPS_TOOL_INFO)
+        )
+        group.header.add_action_widget(self.scalp_maps_info_btn)
 
         form = make_form_layout()
         form.addRow("Map types:", self._build_metric_selection(group))
         group.content_layout.addLayout(form)
+        self.map_settings_section = self._build_map_settings_section(group)
+        group.content_layout.addWidget(self.map_settings_section)
 
         self.progress = QProgressBar(group)
         self.progress.setValue(0)
@@ -1016,7 +1032,7 @@ class PublicationMapsWindow(QWidget):
     def _apply_ui_profile(self) -> None:
         """Apply all project/workflow-specific structural presentation once."""
 
-        if not hasattr(self, "advanced_layout"):
+        if not hasattr(self, "figure_layout_group"):
             return
         profile = self._current_ui_profile()
         self._ui_profile = profile
@@ -1027,31 +1043,6 @@ class PublicationMapsWindow(QWidget):
             profile.show_two_group_figure_option
         )
         self.figure_layout_group.setVisible(profile.show_figure_layout)
-
-        self.advanced_layout.removeWidget(self.map_settings_group)
-        self.advanced_layout.removeWidget(self.figure_layout_group)
-        if profile.compact_advanced_layout:
-            self.map_settings_group.setMinimumHeight(0)
-            self.map_settings_group.setSizePolicy(
-                QSizePolicy.Expanding,
-                QSizePolicy.Maximum,
-            )
-            self.advanced_layout.addWidget(self.map_settings_group, 1, 0, 1, 2)
-            self.advanced_layout.setRowStretch(1, 0)
-            self.advanced_layout.setRowStretch(2, 1)
-        else:
-            self.map_settings_group.setMinimumHeight(
-                SCALP_MAPS_TOP_ROW_MIN_HEIGHT
-            )
-            self.map_settings_group.setSizePolicy(
-                QSizePolicy.Expanding,
-                QSizePolicy.Expanding,
-            )
-            self.advanced_layout.addWidget(self.map_settings_group, 1, 0)
-            self.advanced_layout.addWidget(self.figure_layout_group, 1, 1)
-            self.advanced_layout.setRowStretch(1, 1)
-            self.advanced_layout.setRowStretch(2, 0)
-        self.advanced_layout.invalidate()
 
     def _on_session_mode_changed(self, _index: int | None = None) -> None:
         repeated = self._session_state.repeated

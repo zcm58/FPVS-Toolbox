@@ -17,7 +17,6 @@ from Tools.Publication_Maps.ui_profile import (
         "show_paired",
         "show_two_group",
         "show_layout",
-        "compact_advanced",
     ),
     (
         (
@@ -28,7 +27,6 @@ from Tools.Publication_Maps.ui_profile import (
             True,
             False,
             True,
-            False,
         ),
         (
             False,
@@ -38,7 +36,6 @@ from Tools.Publication_Maps.ui_profile import (
             True,
             True,
             True,
-            False,
         ),
         (
             False,
@@ -48,7 +45,6 @@ from Tools.Publication_Maps.ui_profile import (
             True,
             False,
             True,
-            False,
         ),
         (
             True,
@@ -58,7 +54,6 @@ from Tools.Publication_Maps.ui_profile import (
             True,
             True,
             True,
-            False,
         ),
         (
             True,
@@ -68,7 +63,6 @@ from Tools.Publication_Maps.ui_profile import (
             False,
             False,
             False,
-            True,
         ),
     ),
 )
@@ -80,7 +74,6 @@ def test_scalp_maps_ui_profile_matrix(
     show_paired: bool,
     show_two_group: bool,
     show_layout: bool,
-    compact_advanced: bool,
 ) -> None:
     profile = resolve_scalp_maps_ui_profile(
         repeated_project=repeated_project,
@@ -92,7 +85,6 @@ def test_scalp_maps_ui_profile_matrix(
     assert profile.show_paired_figure_option is show_paired
     assert profile.show_two_group_figure_option is show_two_group
     assert profile.show_figure_layout is show_layout
-    assert profile.compact_advanced_layout is compact_advanced
 
 
 def test_scalp_maps_ui_profile_rejects_negative_group_count() -> None:

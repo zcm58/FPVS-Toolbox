@@ -19,7 +19,9 @@ project results folder unless you choose another location.
 ## Inputs
 
 Select one or more processed conditions, the metrics to draw, and the output
-folder. In a multi-group project, select one group or choose all groups to
+folder. The Generate Maps tab also provides map appearance and range controls;
+project input and output details are available under Advanced Settings. In a
+multi-group project, select one group or choose all groups to
 create a separate output set for each group. In a project with exactly two
 canonical groups, you can instead select one condition and export a descriptive
 side-by-side group comparison. Each group is averaged independently; groups are
@@ -78,27 +80,28 @@ selector adds two safe workflows:
   groups, with one shared color scale across all four maps for each metric.
 
 During **Session comparison**, Advanced Settings hides the inapplicable
-**Figure layout** section and expands **Map appearance** across the available
-width. Switching to **Condition (one session)** restores the applicable
-ordinary figure-layout options. Flat single-group projects show only the
-paired-condition option; exactly-two-group condition workflows can also show
-the two-group comparison option.
+**Figure layout** section. **Map appearance and ranges** remains on Generate
+Maps in every workflow. Switching to **Condition (one session)** restores the
+applicable ordinary figure-layout options. Flat single-group projects show
+only the paired-condition option; exactly-two-group condition workflows can
+also show the two-group comparison option.
 
 Repeated-session figures use a compact matrix without an internal figure title
 or repeated per-map titles. Canonical groups appear once as agnostic `(A)` and
 `(B)` column headers, canonical session labels appear once in a vertical rail
 to the left, and color scales sit in a separate rail to the right. The optional
-paired-difference row is calculated as comparison minus reference within each
-participant before averaging; its diverging color scale is shared across
-groups. Participant and paired counts remain part of the internal aggregation
-checks but are not printed on the figure. Missing `recording_id`, `session_id`,
-`group_id`, or visit metadata blocks the run, and Scalp Maps never guesses
-identity from paths or filenames.
+paired-difference row starts off and can be enabled explicitly. It is calculated
+as comparison minus reference within each participant before averaging; its
+diverging color scale is shared across groups. Participant and paired counts
+remain part of the internal aggregation checks but are not printed on the
+figure. Missing `recording_id`, `session_id`, `group_id`, or visit metadata
+blocks the run, and Scalp Maps never guesses identity from paths or filenames.
 
-BCA and SNR can use fixed or automatic color limits. The initial fixed ranges
-are 0.0–0.4 µV for BCA and 1.0–1.5 for SNR. Z-score maps use a configurable
-lower display threshold of 1.64 by default; values below the display threshold
-are white.
+BCA and SNR can use fixed or automatic color limits. BCA starts with automatic
+limits; explicitly enabling its fixed range starts from editable 0.0–0.4 µV
+values. SNR starts with its fixed 1.0–1.5 range enabled. Z-score maps use a
+configurable lower display threshold of 1.64 by default; values below the
+display threshold are white.
 
 Rendered BCA maps clip negative values to the low end of the color scale.
 

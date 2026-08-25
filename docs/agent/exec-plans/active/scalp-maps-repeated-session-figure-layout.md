@@ -12,7 +12,10 @@ assets fit a US Letter Word page at the full 6.5-inch text width, contain no
 bottom descriptive/confound footer, keep figure and panel titles unclipped,
 and distinguish the two canonical group columns clearly. Also reclaim the
 Generate Maps workspace by moving output controls and the full generation log
-to Advanced Settings, with the log available on demand in a modal dialog.
+to Advanced Settings, with the log available on demand in a modal dialog. The
+follow-up workspace pass keeps high-frequency map appearance/range controls on
+Generate Maps, moves low-frequency input details to Advanced Settings, and
+removes the framed-tab/card nesting effect.
 
 ## Locked Scope And Guardrails
 
@@ -45,11 +48,12 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   default so the standard repeated-session export remains the two-row grid.
 - The existing repeated-session and v3 correctness contracts remain closed:
   this is presentation-only and must not introduce inferential wording.
-- Keep condition/session selection, map types, status, progress, and
-  **Generate Scalp Maps** on the first tab. Move the unchanged output-root
-  picker/open action to a full-width Advanced Settings section; a valid saved
-  or default destination must still let repeated-session users generate from
-  the first tab without visiting Advanced Settings.
+- Keep condition/session selection, map types, compact appearance/range
+  controls, tool information, status, progress, and **Generate Scalp Maps** on
+  the first tab. Move the unchanged input-data controls alongside the
+  output-root picker/open action on Advanced Settings; a valid saved or default
+  input/output pair must still let repeated-session users generate from the
+  first tab without visiting Advanced Settings.
 - Keep the repeated-session ready state concise: omit the idle readiness banner
   and instructional Advanced Settings paragraph while retaining validation,
   running, cancellation, and completion status. Generate, Cancel, and progress
@@ -91,6 +95,9 @@ to Advanced Settings, with the log available on demand in a modal dialog.
    applicable layout options without rebuilding widgets or duplicating pages.
 8. Follow-up: make the difference row opt-in and box the repeated-session map
    matrix with outer, group-column, and full-width row dividers.
+9. Follow-up workspace pass: flatten the tab pane, fold Map appearance into the
+   Generate card as a compact non-card subsection, move Input data to a static
+   full-width Advanced stack, and make fixed BCA limits opt-in.
 
 ## Verification
 
@@ -109,6 +116,10 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - CI Qt coverage also asserts equal action-row control heights and the absence
   of the redundant Generate-tab guidance, repeated-session ready summary, and
   Advanced-tab two-group eligibility paragraph.
+- CI Qt coverage pins flat tab panes with no nested cards, Generate-tab
+  ownership of appearance/ranges and the information action, Advanced-tab
+  ownership of input/output/layout, compact horizontal range controls, and the
+  unchecked/automatic BCA default plus its explicit fixed-range path.
 - Table-driven non-Qt profile coverage pins single-group, multi-group,
   repeated Condition, and repeated Session comparison states. CI Qt coverage
   pins compact repeated-session reflow, round-trip restoration, and unchanged
@@ -128,6 +139,7 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - [x] Advanced output/log workspace updated.
 - [x] Capability-driven Advanced Settings profiles and reflow added.
 - [x] Difference-row opt-in default and map-only boxed grid added.
+- [x] Flat tab hierarchy and frequency-based control ownership added.
 - [x] Contracts and focused tests updated.
 - [x] Automated and renderer-level visual verification complete.
 - [ ] Visible 1280×900 GUI and Word-placement smoke reserved for user/CI review.
@@ -163,6 +175,15 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   without clipping. The complete registered non-Qt suite passes: 111 tests.
   CI-only Qt coverage pins the unchecked difference-row default and its
   explicit opt-in request path.
+- The flat-workspace follow-up keeps one widget tree across single-group,
+  multi-group, repeated Condition, and repeated Session comparison modes.
+  Generate Maps owns the expandable condition list, information action, compact
+  horizontal appearance/range controls, and generation actions; Advanced owns
+  full-width input, output/history, and optional layout cards. Fixed BCA starts
+  automatic and requires explicit opt-in. The seven GUI-neutral profile tests,
+  111-test registered non-Qt suite, GUI audit, Ruff, syntax compilation, TOML
+  parsing, and `git diff --check` pass. CI-only Qt coverage was updated but not
+  run locally.
 - The `figures` and `publication-maps` drivers stop at eight unrelated existing
   hard-coded-path findings under untracked `outputs/rcads-*`; those files were
   left untouched, and the complete registered test lists were run directly.
