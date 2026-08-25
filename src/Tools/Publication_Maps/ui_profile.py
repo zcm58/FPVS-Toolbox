@@ -52,12 +52,11 @@ def resolve_scalp_maps_ui_profile(
 
     show_paired = mode is not ScalpMapsUiMode.REPEATED_SESSION_COMPARISON
     show_two_group = show_paired and group_count == 2
-    show_figure_layout = show_paired or show_two_group
     return ScalpMapsUiProfile(
         mode=mode,
         show_paired_figure_option=show_paired,
         show_two_group_figure_option=show_two_group,
-        show_figure_layout=show_figure_layout,
+        show_figure_layout=show_paired,
     )
 
 

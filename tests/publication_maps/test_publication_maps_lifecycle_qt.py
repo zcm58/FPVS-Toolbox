@@ -504,26 +504,6 @@ def test_fixed_bca_range_is_opt_in(
 
 
 @pytest.mark.qt
-def test_launch_session_profile_uses_generate_map_settings_section(
-    qtbot,
-    monkeypatch,
-    tmp_path,
-) -> None:
-    _host, page = _build_page(
-        qtbot,
-        monkeypatch,
-        tmp_path,
-        dataset_index=_managed_repeated_index(tmp_path),
-    )
-
-    assert page.session_dimension_combo.currentData() == "session_comparison"
-    assert page._ui_profile == page._current_ui_profile()
-    assert not hasattr(page, "map_settings_group")
-    assert page.generation_group.isAncestorOf(page.map_settings_section)
-    assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
-
-
-@pytest.mark.qt
 def test_single_group_profile_hides_only_two_group_layout_option(
     qtbot,
     monkeypatch,
@@ -550,6 +530,21 @@ def test_repeated_session_profile_hides_and_restores_figure_layout(
     monkeypatch,
     tmp_path,
 ) -> None:
+    populate_calls = 0
+    original_populate = (
+        publication_maps_gui.PublicationMapsWindow._populate_conditions_from_index
+    )
+
+    def count_populate(page) -> None:
+        nonlocal populate_calls
+        populate_calls += 1
+        original_populate(page)
+
+    monkeypatch.setattr(
+        publication_maps_gui.PublicationMapsWindow,
+        "_populate_conditions_from_index",
+        count_populate,
+    )
     _host, page = _build_page(
         qtbot,
         monkeypatch,
@@ -558,9 +553,13 @@ def test_repeated_session_profile_hides_and_restores_figure_layout(
     )
 
     assert page.session_dimension_combo.currentData() == "session_comparison"
+    assert populate_calls == 1
+    assert page._ui_profile == page._current_ui_profile()
+    assert not hasattr(page, "map_settings_group")
     assert page.figure_layout_group.isHidden() is True
     assert page.paired_figure_options_widget.isHidden() is True
     assert page.group_comparison_options_widget.isHidden() is True
+    assert page.generation_group.isAncestorOf(page.map_settings_section)
     assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
     assert page.advanced_layout.indexOf(page.figure_layout_group) == 2
     page.fixed_bca_range_check.setChecked(True)

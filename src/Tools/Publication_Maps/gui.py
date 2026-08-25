@@ -992,7 +992,7 @@ class PublicationMapsWindow(QWidget):
             self._session_controls_initialized or state.repeated
         )
         self.session_controls_widget.setVisible(state.repeated)
-        self._on_session_mode_changed()
+        self._on_session_mode_changed(refresh_data=False)
 
     def _session_mode(self) -> str:
         return str(
@@ -1035,6 +1035,8 @@ class PublicationMapsWindow(QWidget):
         if not hasattr(self, "figure_layout_group"):
             return
         profile = self._current_ui_profile()
+        if profile == self._ui_profile:
+            return
         self._ui_profile = profile
         self.paired_figure_options_widget.setVisible(
             profile.show_paired_figure_option
@@ -1044,7 +1046,12 @@ class PublicationMapsWindow(QWidget):
         )
         self.figure_layout_group.setVisible(profile.show_figure_layout)
 
-    def _on_session_mode_changed(self, _index: int | None = None) -> None:
+    def _on_session_mode_changed(
+        self,
+        _index: int | None = None,
+        *,
+        refresh_data: bool = True,
+    ) -> None:
         repeated = self._session_state.repeated
         comparison = self._session_comparison_active()
         self.single_session_label.setVisible(repeated and not comparison)
@@ -1072,10 +1079,11 @@ class PublicationMapsWindow(QWidget):
         self._update_paired_controls_state()
         self._update_group_comparison_controls_state()
         self._apply_ui_profile()
-        if self._dataset_index is not None:
+        if refresh_data and self._dataset_index is not None:
             self._populate_conditions_from_index()
             self._set_ready_status()
-        self._update_run_state()
+        if refresh_data:
+            self._update_run_state()
 
     def _select_single_session_condition_on_mode_entry(self) -> None:
         if not self._session_comparison_active() or self.conditions_list.count() == 0:

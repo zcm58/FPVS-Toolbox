@@ -408,7 +408,7 @@ def test_session_renderer_queues_each_selected_condition_output_pair(
         )
         for condition in ("Faces", "Objects")
     )
-    rendered: list[tuple[str, str]] = []
+    rendered: list[tuple[str, tuple[str, ...]]] = []
 
     class FakeTransaction:
         def ensure_request_target(self, _request) -> None:
@@ -425,8 +425,8 @@ def test_session_renderer_queues_each_selected_condition_output_pair(
     monkeypatch.setattr(
         session_rendering,
         "_render_session_panel_set",
-        lambda panel_set, _request, *, output_path, cancel_check: rendered.append(
-            (panel_set.condition, output_path.suffix)
+        lambda panel_set, _request, *, output_paths, cancel_check: rendered.append(
+            (panel_set.condition, tuple(path.suffix for path in output_paths))
         ),
     )
 
@@ -437,10 +437,8 @@ def test_session_renderer_queues_each_selected_condition_output_pair(
     )
 
     assert rendered == [
-        ("Faces", ".png"),
-        ("Faces", ".pdf"),
-        ("Objects", ".png"),
-        ("Objects", ".pdf"),
+        ("Faces", (".png", ".pdf")),
+        ("Objects", (".png", ".pdf")),
     ]
     assert [path.name for path in paths] == [
         "Faces_birth_control_and_no_birth_control_bca_session_grid.png",
@@ -478,7 +476,11 @@ def test_session_renderer_repeated_layout_artifact_contract(
         lambda *_args, **_kwargs: (panel_set,),
     )
 
+    draw_calls = 0
+
     def draw_test_map(_frame, *, ax, cmap, vlim_override, **_kwargs):
+        nonlocal draw_calls
+        draw_calls += 1
         image = ax.imshow(
             ((0.0, 1.0), (1.0, 0.0)),
             cmap=cmap,
@@ -493,8 +495,13 @@ def test_session_renderer_repeated_layout_artifact_contract(
     captured_layout: dict[str, object] = {}
 
     def capture_save(fig, output_path, *, dpi, cancel_check=None) -> None:
+        real_save(
+            fig,
+            output_path,
+            dpi=dpi,
+            cancel_check=cancel_check,
+        )
         if output_path.suffix.lower() == ".png":
-            fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
             map_prefix = session_rendering.REPEATED_SESSION_LAYOUT.map_axis_gid_prefix
             map_axes = sorted(
@@ -630,17 +637,11 @@ def test_session_renderer_repeated_layout_artifact_contract(
                 row_label_boxes=tuple(box_tuple(label) for label in row_labels),
                 row_label_texts=tuple(label.get_text() for label in row_labels),
             )
-        real_save(
-            fig,
-            output_path,
-            dpi=dpi,
-            cancel_check=cancel_check,
-        )
-
     monkeypatch.setattr(session_rendering, "_save_figure", capture_save)
 
     paths = session_rendering.render_session_grid_figures((), requests)
 
+    assert draw_calls == (6 if include_difference else 4)
     png_path = next(path for path in paths if path.suffix == ".png")
     pdf_path = next(path for path in paths if path.suffix == ".pdf")
     with Image.open(png_path) as image:

@@ -300,7 +300,7 @@ def _render_session_panel_set(
     panel_set: SessionMapPanelSet,
     request: PublicationMapRequest,
     *,
-    output_path: Path,
+    output_paths: Sequence[Path],
     cancel_check: Callable[[], None] | None,
 ) -> None:
     if cancel_check is not None:
@@ -439,12 +439,13 @@ def _render_session_panel_set(
             panel_set,
         )
         _add_map_grid_frame(fig, axes)
-        _save_figure(
-            fig,
-            output_path,
-            dpi=request.png_dpi,
-            cancel_check=cancel_check,
-        )
+        for output_path in output_paths:
+            _save_figure(
+                fig,
+                output_path,
+                dpi=request.png_dpi,
+                cancel_check=cancel_check,
+            )
     finally:
         plt.close(fig)
 
@@ -493,6 +494,9 @@ def render_session_grid_figures(
             planned_panels.append((panel_set, stem))
 
         for panel_set, stem in planned_panels:
+            staged_paths: list[Path] = []
+            final_paths: list[Path] = []
+            # Keep PNG first: PDF export applies transparent patch styling in place.
             for suffix, enabled in (
                 (".png", request.export_png),
                 (".pdf", request.export_pdf),
@@ -502,14 +506,16 @@ def render_session_grid_figures(
                 if cancel_check is not None:
                     cancel_check()
                 final_path = base_output / f"{stem}{suffix}"
-                staged_path = active_transaction.stage_path(final_path)
+                final_paths.append(final_path)
+                staged_paths.append(active_transaction.stage_path(final_path))
+            if staged_paths:
                 _render_session_panel_set(
                     panel_set,
                     request,
-                    output_path=staged_path,
+                    output_paths=tuple(staged_paths),
                     cancel_check=cancel_check,
                 )
-                rendered.append(final_path)
+                rendered.extend(final_paths)
         if not rendered:
             raise PublicationMapInputError(
                 "No repeated-session scalp-map grids were rendered."
