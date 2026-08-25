@@ -79,7 +79,8 @@ class PlotGeneratorSessionSelectionMixin:
         self._session_controls_initialized = (
             self._session_controls_initialized or state.repeated
         )
-        self.session_caveat_label.setText(error or state.caveat)
+        self.session_error_label.setText(error)
+        self.session_error_label.setVisible(bool(error))
         self._on_session_mode_changed()
 
     def _session_mode(self) -> str:

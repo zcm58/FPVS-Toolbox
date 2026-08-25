@@ -319,7 +319,8 @@ def test_plot_generator_repeated_session_controls_build_canonical_worker_kwargs(
     assert window.session_dimension_combo.currentData() == "session_comparison"
     assert window.reference_session_combo.currentText() == "Luteal phase — Visit 1"
     assert window.comparison_session_combo.currentText() == "Follicular phase — Visit 2"
-    assert "confounded with visit order" in window.session_caveat_label.text()
+    assert window.session_error_label.text() == ""
+    assert window.session_error_label.isHidden()
     assert window.condition_combo.currentText() == "Faces"
     assert window.legend_group.isVisible() is False
 

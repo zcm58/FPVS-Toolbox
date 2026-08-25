@@ -12,7 +12,6 @@ from Main_App.projects import (
     WorkbookRecord,
 )
 from Tools.Plot_Generator.session_controls import (
-    FIXED_ORDER_CAVEAT,
     RepeatedSessionControlError,
     SESSION_MODE_COMPARISON,
     SESSION_MODE_CONDITION,
@@ -96,7 +95,6 @@ def test_repeated_session_controls_use_labels_and_visit_order(tmp_path: Path) ->
         "Luteal phase — Visit 1",
         "Follicular phase — Visit 2",
     ]
-    assert state.caveat == FIXED_ORDER_CAVEAT
     assert state.validate_selection(
         mode=SESSION_MODE_CONDITION,
         single_session_id="luteal",

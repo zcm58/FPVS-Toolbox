@@ -91,7 +91,7 @@ ALL_GROUPS_TOOLTIP = (
     "for every group."
 )
 ALL_GROUPS_COMPARISON_TOOLTIP = (
-    "Both canonical groups are selected for one descriptive comparison-only output."
+    "Both canonical groups are selected for one combined comparison output."
 )
 
 
@@ -641,8 +641,8 @@ class PublicationMapsWindow(QWidget):
             "publication_maps_group_comparison_check"
         )
         self.group_comparison_check.setToolTip(
-            "Exports a descriptive side-by-side figure for the two available "
-            "groups. Values are never pooled, and no statistical test or "
+            "Exports a side-by-side figure for the two available groups. "
+            "Values are never pooled, and no statistical test or "
             "difference map is performed."
         )
         self.group_comparison_check.toggled.connect(
@@ -1198,7 +1198,7 @@ class PublicationMapsWindow(QWidget):
             self.status_label.set_text(
                 f"Two-group comparison ready for {condition}: "
                 f"{self.group_comparison_a_label.text()} vs "
-                f"{self.group_comparison_b_label.text()}. Only the descriptive "
+                f"{self.group_comparison_b_label.text()}. Only the combined "
                 "comparison figure will be generated."
             )
             self.status_label.set_variant("info")

@@ -9,10 +9,6 @@ from Main_App.projects import ProjectDatasetIndex
 
 SESSION_MODE_CONDITION = "condition"
 SESSION_MODE_COMPARISON = "session_comparison"
-FIXED_ORDER_CAVEAT = (
-    "Descriptive view only: phase is confounded with visit order and elapsed time "
-    "because every participant completed the sessions in the same order."
-)
 
 
 class RepeatedSessionControlError(ValueError):
@@ -38,7 +34,6 @@ class RepeatedSessionControlState:
 
     repeated: bool
     sessions: tuple[SessionChoice, ...] = ()
-    caveat: str = ""
 
     @property
     def default_mode(self) -> str:
@@ -147,12 +142,10 @@ def repeated_session_control_state(
     return RepeatedSessionControlState(
         repeated=True,
         sessions=sessions,
-        caveat=FIXED_ORDER_CAVEAT,
     )
 
 
 __all__ = [
-    "FIXED_ORDER_CAVEAT",
     "RepeatedSessionControlError",
     "RepeatedSessionControlState",
     "SESSION_MODE_COMPARISON",

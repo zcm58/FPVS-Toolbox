@@ -228,7 +228,8 @@ def test_info_dialog_explains_repeated_measurement_derivation(qtbot) -> None:
     assumptions_text = dialog.browsers[2].toPlainText()
     assert "Cohen's d: 0.20 small, 0.50 medium, and 0.80 large" in assumptions_text
     assert "Cohen's f: 0.10 small, 0.25 medium, and 0.40 large" in assumptions_text
-    assert "descriptive reference points only" in assumptions_text
+    assert "conventional labels are reference points" in assumptions_text
+    assert "descriptive reference points only" not in assumptions_text
     assert "do not apply to that simulation" in assumptions_text
 
 

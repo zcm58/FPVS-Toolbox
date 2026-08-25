@@ -229,10 +229,10 @@ def test_single_condition_two_group_comparison_builds_explicit_batch_requests(
     assert page.paired_figures_check.isChecked() is False
     assert page.group_comparison_widget.isVisible() is True
     assert page.group_combo.currentText() == "All groups (comparison)"
-    assert "comparison-only" in page.group_combo.toolTip()
+    assert "combined comparison output" in page.group_combo.toolTip()
     assert page.group_comparison_a_label.text() == "Clinical"
     assert page.group_comparison_b_label.text() == "Control"
-    assert "Only the descriptive" in page.status_label.text()
+    assert "Only the combined" in page.status_label.text()
 
     requests = page._collect_requests()
 
@@ -248,10 +248,10 @@ def test_single_condition_two_group_comparison_builds_explicit_batch_requests(
     page._refresh_conditions()
     assert page.group_comparison_check.isChecked() is True
     assert page.group_combo.currentText() == "All groups (comparison)"
-    assert "Only the descriptive" in page.status_label.text()
+    assert "Only the combined" in page.status_label.text()
 
     page.output_root_edit.setText(str(tmp_path / "alternate-output"))
-    assert "Only the descriptive" in page.status_label.text()
+    assert "Only the combined" in page.status_label.text()
 
     page.group_comparison_check.setChecked(False)
     assert page.group_combo.currentText() == publication_maps_gui.ALL_GROUPS_LABEL

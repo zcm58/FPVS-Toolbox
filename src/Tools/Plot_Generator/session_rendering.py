@@ -26,7 +26,11 @@ from Tools.Plot_Generator.rendering import (
     plt,
 )
 from Tools.Plot_Generator.session_aggregation import SessionSNRAggregation
-from Tools.Plot_Generator.session_controls import FIXED_ORDER_CAVEAT
+
+FIXED_ORDER_CAVEAT = (
+    "Phase is confounded with visit order and elapsed time because every participant "
+    "completed the sessions in the same order."
+)
 
 
 def _numeric_curve(values: Sequence[float | None]) -> np.ndarray:

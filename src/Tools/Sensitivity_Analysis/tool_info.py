@@ -104,7 +104,7 @@ guarantee about the observed study outcome.
   <li><b>Cohen's f:</b> 0.10 small, 0.25 medium, and 0.40 large.</li>
 </ul>
 <p>
-These conventional labels are descriptive reference points only. They do not
+These conventional labels are reference points. They do not
 establish theoretical, clinical, or practical importance. The mixed-model
 standardized contrasts are not Cohen's d or f, so these benchmarks do not apply
 to that simulation.
