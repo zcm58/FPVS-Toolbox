@@ -491,7 +491,7 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     assert page.session_dimension_combo.currentData() == "session_comparison"
     assert page.reference_session_combo.currentText() == "Luteal phase — Visit 1"
     assert page.comparison_session_combo.currentText() == "Follicular phase — Visit 2"
-    assert "confounded with visit order" in page.session_caveat_label.text()
+    assert not hasattr(page, "session_caveat_label")
     assert page._selected_conditions() == ("Objects",)
     page._set_all_conditions(False)
     assert page._selected_conditions() == ()
@@ -565,6 +565,48 @@ def test_comparison_success_logs_and_counts_only_figure_artifacts(
 
     assert "Comparison figure: comparison.png" in page.log_box.toPlainText()
     assert "2 comparison figure file(s)" in page.status_label.text()
+
+
+@pytest.mark.qt
+def test_repeated_success_status_does_not_claim_sample_size_annotations(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=_managed_repeated_index(tmp_path),
+    )
+    monkeypatch.setattr(
+        publication_maps_gui,
+        "confirm",
+        lambda *_args, **_kwargs: False,
+    )
+    page._last_run_was_session_grid = True
+    results = tuple(
+        SimpleNamespace(
+            group_label=label,
+            diagnostics=(),
+            figure_paths=(),
+        )
+        for label in ("Clinical", "Control")
+    )
+
+    page._handle_worker_outcome(
+        PublicationMapsWorkerOutcome.success(
+            results,
+            batch_figure_paths=(
+                Path("session-grid.png"),
+                Path("session-grid.pdf"),
+            ),
+        )
+    )
+
+    assert "2 repeated-session figure file(s)" in page.status_label.text()
+    assert "participant N" not in page.status_label.text()
+    assert "paired N" not in page.status_label.text()
 
 
 @pytest.mark.qt

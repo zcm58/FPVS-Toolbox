@@ -9,12 +9,6 @@ from Main_App.projects import ProjectDatasetIndex
 
 SESSION_MODE_CONDITION = "condition"
 SESSION_MODE_COMPARISON = "session_comparison"
-FIXED_ORDER_CAVEAT = (
-    "Descriptive view only: phase is confounded with visit order and elapsed time "
-    "because every participant completed the sessions in the same order."
-)
-
-
 class PublicationSessionControlError(ValueError):
     """Raised when canonical repeated-session selections are incomplete."""
 
@@ -34,7 +28,6 @@ class PublicationSessionChoice:
 class PublicationSessionState:
     repeated: bool
     sessions: tuple[PublicationSessionChoice, ...] = ()
-    caveat: str = ""
 
     @property
     def default_mode(self) -> str:
@@ -140,15 +133,10 @@ def publication_session_state(index: ProjectDatasetIndex) -> PublicationSessionS
                 f"{record.condition!r} and session {record.session_id!r}."
             )
         seen.add(identity)
-    return PublicationSessionState(
-        repeated=True,
-        sessions=sessions,
-        caveat=FIXED_ORDER_CAVEAT,
-    )
+    return PublicationSessionState(repeated=True, sessions=sessions)
 
 
 __all__ = [
-    "FIXED_ORDER_CAVEAT",
     "PublicationSessionChoice",
     "PublicationSessionControlError",
     "PublicationSessionState",

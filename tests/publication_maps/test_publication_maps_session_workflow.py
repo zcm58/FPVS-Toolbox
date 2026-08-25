@@ -27,7 +27,6 @@ from Tools.Publication_Maps import session_rendering
 from Tools.Publication_Maps import worker as publication_worker
 from Tools.Publication_Maps.generation_outcome import PublicationMapsOutcomeStatus
 from Tools.Publication_Maps.session_controls import (
-    FIXED_ORDER_CAVEAT,
     PublicationSessionControlError,
     SESSION_MODE_COMPARISON,
     publication_session_state,
@@ -209,8 +208,6 @@ def test_publication_session_state_and_exact_session_filter(tmp_path: Path) -> N
         "Luteal phase — Visit 1",
         "Follicular phase — Visit 2",
     ]
-    assert state.caveat == FIXED_ORDER_CAVEAT
-
     entries, group = select_publication_workbooks(
         index,
         ("Faces",),
@@ -223,12 +220,11 @@ def test_publication_session_state_and_exact_session_filter(tmp_path: Path) -> N
     assert "follicular" in entries[0].path.parts
 
 
-def test_repeated_session_help_keeps_caveat_outside_figure_artwork() -> None:
+def test_repeated_session_help_omits_fixed_order_caveat() -> None:
     help_text = " ".join(SCALP_MAPS_TOOL_INFO_HTML.split())
 
-    assert "fixed-order caveat shown" in help_text
-    assert "rather than as an isolated phase effect" in help_text
-    assert "carries that caveat on the figure" not in help_text
+    assert "Descriptive view only" not in help_text
+    assert "confounds phase with visit order" not in help_text
 
 
 def test_publication_session_state_rejects_unstable_group(tmp_path: Path) -> None:
@@ -565,7 +561,6 @@ def test_session_renderer_repeated_layout_artifact_contract(
     pdf_width, pdf_height = _pdf_media_box_points(pdf_path)
     assert pdf_width == pytest.approx(6.5 * 72.0)
     assert pdf_height == pytest.approx(expected_height_in * 72.0)
-    assert FIXED_ORDER_CAVEAT not in captured_layout["texts"]
     assert captured_layout["divider_count"] == 1
     assert (
         captured_layout["gutter_left"]
@@ -626,11 +621,14 @@ def test_session_renderer_repeated_layout_artifact_contract(
         group_id = panel_set.group_ids[column]
         if row < 2:
             session_id = panel_set.session_ids[row]
-            assert panel_set.panel(group_id, session_id).session_label in panel_text
+            expected_title = panel_set.panel(group_id, session_id).session_label
         else:
             difference = panel_set.paired_difference(group_id)
-            assert difference.comparison_session_label in panel_text
-            assert difference.reference_session_label in panel_text
+            expected_title = (
+                f"{difference.comparison_session_label} − "
+                f"{difference.reference_session_label}"
+            )
+        assert panel_text == " ".join(expected_title.split())
 
 
 def test_worker_stages_all_selected_session_grids_atomically(

@@ -324,13 +324,6 @@ class PublicationMapsWindow(QWidget):
         )
         self.session_difference_check.setChecked(True)
         session_layout.addWidget(self.session_difference_check, 3, 0, 1, 4)
-        self.session_caveat_label = QLabel(self.session_controls_widget)
-        self.session_caveat_label.setObjectName(
-            "publication_maps_session_order_caveat"
-        )
-        self.session_caveat_label.setProperty("caption", True)
-        self.session_caveat_label.setWordWrap(True)
-        session_layout.addWidget(self.session_caveat_label, 4, 0, 1, 4)
         session_layout.setColumnStretch(1, 1)
         session_layout.setColumnStretch(3, 1)
         self.session_controls_widget.hide()
@@ -958,8 +951,7 @@ class PublicationMapsWindow(QWidget):
         self._session_controls_initialized = (
             self._session_controls_initialized or state.repeated
         )
-        self.session_controls_widget.setVisible(state.repeated or bool(error))
-        self.session_caveat_label.setText(error or state.caveat)
+        self.session_controls_widget.setVisible(state.repeated)
         self._on_session_mode_changed()
 
     def _session_mode(self) -> str:
@@ -2042,8 +2034,7 @@ class PublicationMapsWindow(QWidget):
         if batch_figure_paths and self._last_run_was_session_grid:
             self.status_label.set_text(
                 f"Complete: {self._last_generated_figure_count} repeated-session "
-                f"figure file(s) with participant N and paired N for "
-                f"{group_count} canonical groups."
+                f"figure file(s) for {group_count} canonical groups."
             )
         elif batch_figure_paths:
             self.status_label.set_text(

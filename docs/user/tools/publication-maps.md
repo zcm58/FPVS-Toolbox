@@ -77,16 +77,13 @@ selector adds two safe workflows:
   creates a group-column × session-row grid for the project's two stable
   groups, with one shared color scale across all four maps for each metric.
 
-Every panel title includes the canonical session label, visit index, and
-participant `n`. The optional paired-difference row is calculated as
-comparison minus reference within each participant before averaging and reports
-`paired n`; its diverging color scale is shared across groups. Missing
-`recording_id`, `session_id`, `group_id`, or visit metadata blocks the run, and
-Scalp Maps never guesses identity from paths or filenames.
-
-When all participants completed the phases in one fixed order, phase cannot be
-separated from visit order, elapsed time, retest, or drift. The session grid is
-descriptive and carries this caveat both in the page and the exported figure.
+Every panel title uses the canonical session label without visit numbers or
+sample-size annotations. The optional paired-difference row is calculated as
+comparison minus reference within each participant before averaging; its
+diverging color scale is shared across groups. Participant and paired counts
+remain part of the internal aggregation checks but are not printed on the
+figure. Missing `recording_id`, `session_id`, `group_id`, or visit metadata
+blocks the run, and Scalp Maps never guesses identity from paths or filenames.
 
 BCA and SNR can use fixed or automatic color limits. The initial fixed ranges
 are 0.0–0.4 µV for BCA and 1.0–1.5 for SNR. Z-score maps use a configurable

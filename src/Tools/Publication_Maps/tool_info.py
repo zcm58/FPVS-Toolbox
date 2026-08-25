@@ -34,12 +34,9 @@ the shared rebuild workflow; EEG preprocessing is not repeated.
 <p>
 Repeated-session projects explicitly choose one session for the ordinary
 condition workflow or two sessions for a group-column by session-row grid.
-The grid shares color limits, shows participant n, and can add a paired
-comparison-minus-reference row. Canonical recording/session identity is
-required. A fixed phase order confounds phase with visit order and elapsed
-time. The grid is descriptive; interpret it with the fixed-order caveat shown
-in the Scalp Maps workflow and described here rather than as an isolated phase
-effect.
+The grid shares color limits and can add a paired comparison-minus-reference
+row. Figure titles use the canonical session labels without visit numbers or
+sample-size annotations. Canonical recording/session identity is required.
 </p>
 
 <h3>Output Notes</h3>

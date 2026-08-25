@@ -28,16 +28,15 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - Keep exact aggregation, group/session order, participant and paired `n`,
   shared color limits, difference-map math, colorbar roles, missing-data
   handling, filenames, selected output root, transactional publication, and
-  cancellation behavior.
+  cancellation behavior. Continue calculating the counts for internal panel
+  data and validation, but omit visit indices and all sample-size annotations
+  from repeated-session figure titles.
 - Preserve matching PNG/PDF, 600 DPI, Arial figure typography, exact 6.5-inch
   width, and a conservative portrait-page height target no greater than 9
   inches. Do not change shared `_save_figure` behavior or add tight-bounding-box
   cropping.
-- Remove only the repeated-grid in-artwork `FIXED_ORDER_CAVEAT` footer. Keep
-  the fixed-order caveat in the repeated-session GUI/help, update `tool_info.py`
-  so it no longer claims the caveat appears on the figure, and revise the
-  scoped `AGENTS.md` rule to permit this while recording the repeated-session
-  6.5-inch width rule.
+- Remove the repeated-grid `FIXED_ORDER_CAVEAT` from the figure artwork, GUI,
+  help, and session state. Retain the repeated-session 6.5-inch width rule.
 - Use canonical project group labels; never hard-code birth-control names.
   Prefer a thin neutral divider derived from the actual column bounds and kept
   clear of titles, maps, and colorbars. Retain it only if visual QA confirms it
@@ -85,9 +84,9 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 
 - After drawing the canvas, assert exact 6.5-inch width, bounded height, no
   footer text, all titles inside the canvas, no suptitle/panel-title overlap,
-  correct colorbar count/labels, and repeated-only separator/header treatment.
-  At the artifact level, verify PNG pixel dimensions/DPI metadata and PDF
-  physical page size.
+  no visit/sample-size title annotations, correct colorbar count/labels, and
+  repeated-only separator/header treatment. At the artifact level, verify PNG
+  pixel dimensions/DPI metadata and PDF physical page size.
 - Keep characterization coverage green for single-group, paired-condition,
   ordinary two-group, filenames, shared limits, and repeated-mode routing.
 - CI Qt coverage asserts the page has no embedded log surface, Advanced
@@ -117,6 +116,10 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 ## Verification Result
 
 - The registered non-Qt Scalp Maps and figure-style suite passes: 104 tests.
+- The v3 follow-up title cleanup keeps visit/sample-size metadata in panel data
+  while exact rendered-title assertions prove that Visit, participant `n`, and
+  paired `n` no longer appear in repeated-session artwork. The same 104-test
+  suite remains green.
 - GUI-focused static verification, Ruff, compilation, TOML parsing, and
   `git diff --check` pass. CI-only Qt tests were updated but not run locally.
 - The follow-up Generate-tab cleanup also passes the focused GUI gate, Ruff,

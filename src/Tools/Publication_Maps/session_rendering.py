@@ -321,10 +321,7 @@ def _render_session_panel_set(
                     vlim_override=main_vlim,
                 )
                 main_images.append(image)
-                panel_title_sections[ax] = (
-                    panel.session_label,
-                    f"(Visit {panel.visit_index}, n={panel.participant_n})",
-                )
+                panel_title_sections[ax] = (panel.session_label,)
                 if missing:
                     _add_missing_note(ax, missing)
         main_cbar = fig.colorbar(
@@ -360,7 +357,6 @@ def _render_session_panel_set(
                 panel_title_sections[ax] = (
                     f"{difference.comparison_session_label} − "
                     f"{difference.reference_session_label}",
-                    f"(paired n={difference.paired_n})",
                 )
                 if missing:
                     _add_missing_note(ax, missing)

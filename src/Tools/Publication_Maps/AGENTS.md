@@ -36,13 +36,11 @@ Rules:
   `recording_id`/`session_id`/`group_id`/`visit_index` metadata. Never infer a
   visit or phase from a path. Calculate optional comparison-minus-reference
   values within participant before averaging, use a shared diverging scale,
-  and report participant `n` and paired `n`.
-- Fixed phase order is a design confound. Repeated-session GUI and help text
-  must state that phase cannot be separated from visit order, elapsed time,
-  retest, or drift. Repeated-session figures remain descriptive and must not
-  describe the difference as an isolated phase effect or statistical test, but
-  they must not repeat the long fixed-order caveat in the figure artwork or a
-  bottom footer.
+  and retain participant `n` and paired `n` in the panel data for validation.
+  Do not display visit indices, participant `n`, or paired `n` in figure
+  artwork.
+- Do not add legacy fixed-order warnings to repeated-session GUI, help text,
+  session state, figure artwork, or bottom footers.
 - Apply the shared participant, participant-condition, and frequency-domain
   exclusions before aggregation. Preserve dataset-index duplicate preference
   and diagnostics, and reject empty, unassigned, or ambiguous requested
@@ -76,8 +74,9 @@ Rules:
   mode, the selected condition is the overall title and canonical group labels
   are the two column headers. Do not add selected harmonics, subject counts, or
   cache/source provenance to visible figure titles. Repeated-session grids are
-  the exception: panel titles must also show canonical session label, visit
-  index, participant `n`, and paired `n` where applicable.
+  the exception only for canonical session identity: session-row titles show
+  the full canonical session label, and difference-row titles show comparison
+  minus reference. They must not show visit indices or sample sizes.
 - Figure geometry belongs to separate renderer-internal layout profiles for
   ordinary single-map, paired-condition, ordinary two-group comparison, and
   repeated-session figures. Their geometry must remain independently editable;
