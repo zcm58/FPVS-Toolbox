@@ -42,11 +42,11 @@ from Tools.Publication_Maps.session_workflow import (
 class _RepeatedSessionLayoutProfile:
     """Figure geometry owned only by the repeated-session renderer."""
 
-    width_in: float = 6.0
+    width_in: float = 5.8
     two_row_height_in: float = 4.2
     three_row_height_in: float = 5.9
-    left: float = 0.023
-    right: float = 0.86
+    left: float = 0.024
+    right: float = 0.855
     bottom: float = 0.025
     top: float = 0.89
     hspace: float = 0.08

@@ -87,8 +87,8 @@ Rules:
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
 - Repeated-session grids use a compact four-column matrix: external left row
   labels, the two canonical group map columns, and external right colorbars.
-  Two-session figures use four GridSpec rows and are 6.0×4.2 inches; enabling
-  the opt-in difference row uses six GridSpec rows and 6.0×5.9 inches; its GUI
+  Two-session figures use four GridSpec rows and are 5.8×4.2 inches; enabling
+  the opt-in difference row uses six GridSpec rows and 5.8×5.9 inches; its GUI
   checkbox starts unchecked. Do not use tight-bounding-box cropping or an
   explanatory footer. Prefix the measured-width wrapped canonical group
   headers with `(A)` and `(B)`. Box only the two-column map matrix with a thin

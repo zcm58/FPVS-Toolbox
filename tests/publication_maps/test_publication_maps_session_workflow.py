@@ -715,10 +715,10 @@ def test_session_renderer_repeated_layout_artifact_contract(
     png_path = next(path for path in paths if path.suffix == ".png")
     pdf_path = next(path for path in paths if path.suffix == ".pdf")
     with Image.open(png_path) as image:
-        assert image.size == (int(6.0 * test_dpi), int(expected_height_in * test_dpi))
+        assert image.size == (int(5.8 * test_dpi), int(expected_height_in * test_dpi))
         assert image.info["dpi"] == pytest.approx((test_dpi, test_dpi), abs=0.1)
     pdf_width, pdf_height = _pdf_media_box_points(pdf_path)
-    assert pdf_width == pytest.approx(6.0 * 72.0)
+    assert pdf_width == pytest.approx(5.8 * 72.0)
     assert pdf_height == pytest.approx(expected_height_in * 72.0)
     assert captured_layout["has_suptitle"] is False
     assert captured_layout["map_axis_count"] == (6 if include_difference else 4)

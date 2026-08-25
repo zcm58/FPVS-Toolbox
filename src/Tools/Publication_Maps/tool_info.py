@@ -53,7 +53,7 @@ omitted. Canonical recording/session identity is required.
 The tool writes matching high-resolution PNG and PDF figure assets only.
 Ordinary multi-group runs write each group into its own named output folder.
 Two-group comparison mode writes one combined figure at the selected base
-output. Repeated-session grids use a compact 6.0-inch width that fits a US Letter
+output. Repeated-session grids use a compact 5.8-inch width that fits a US Letter
 page with 1-inch horizontal margins, omit explanatory footers, and separate
 the session rows and canonical group columns with a neutral boxed grid. Groups
 are never pooled implicitly. Fixed color ranges are useful when comparing

@@ -8,7 +8,7 @@ pending.
 ## Goal
 
 Refine only the multi-group repeated-session scalp-map grid so its PNG/PDF
-assets fit a US Letter Word page at a compact 6.0-inch width, contain no
+assets fit a US Letter Word page at a compact 5.8-inch width, contain no
 bottom descriptive/confound footer, keep figure and panel titles unclipped,
 and distinguish the two canonical group columns clearly. Also reclaim the
 Generate Maps workspace by moving output controls and the full generation log
@@ -35,11 +35,11 @@ removes the framed-tab/card nesting effect.
   data and validation, but omit visit indices and all sample-size annotations
   from repeated-session figure titles.
 - Preserve matching PNG/PDF, 600 DPI, Arial figure typography, and exact
-  6.0-inch width. Use 4.2 inches high for two plotted rows and 5.9 inches for
+  5.8-inch width. Use 4.2 inches high for two plotted rows and 5.9 inches for
   the difference-enabled three-row layout. Do not change shared `_save_figure`
   behavior or add tight-bounding-box cropping.
 - Remove the repeated-grid `FIXED_ORDER_CAVEAT` from the figure artwork, GUI,
-  help, and session state. Retain the repeated-session 6.0-inch width rule.
+  help, and session state. Retain the repeated-session 5.8-inch width rule.
 - Use canonical project group labels; never hard-code birth-control names.
   Derive a thin neutral boxed grid from the actual map-axis bounds: retain the
   group-column divider, add full-width row-gutter dividers, and keep group
@@ -100,11 +100,11 @@ removes the framed-tab/card nesting effect.
    full-width Advanced stack, and make fixed BCA limits opt-in.
 10. Follow-up figure pass: center the visible MNE head/data bounds vertically
     without changing the rendered scale, and reduce only the repeated-session
-    canvas width to 6.0 inches.
+    canvas width to 5.8 inches.
 
 ## Verification
 
-- After drawing the canvas, assert exact 6.0×4.2-inch or 6.0×5.9-inch size, no
+- After drawing the canvas, assert exact 5.8×4.2-inch or 5.8×5.9-inch size, no
   footer or suptitle, empty per-map titles, unclipped `(A)`/`(B)` group headers,
   one external canonical label per row, correct non-overlapping external
   colorbar count/labels, a map-only outer frame, one group divider, and one
@@ -133,7 +133,7 @@ removes the framed-tab/card nesting effect.
   run offscreen Qt.
 - Visually inspect representative BCA, SNR, and Z-score PNG/PDF grids with and
   without the difference row, including long generic labels, inserted into Word
-  at 6.0 inches and 100% scale.
+  at 5.8 inches and 100% scale.
 
 ## Progress
 
@@ -143,7 +143,7 @@ removes the framed-tab/card nesting effect.
 - [x] Capability-driven Advanced Settings profiles and reflow added.
 - [x] Difference-row opt-in default and map-only boxed grid added.
 - [x] Flat tab hierarchy and frequency-based control ownership added.
-- [x] Visible head centering and compact 6.0-inch repeated-grid width added.
+- [x] Visible head centering and compact 5.8-inch repeated-grid width added.
 - [x] Contracts and focused tests updated.
 - [x] Automated and renderer-level visual verification complete.
 - [ ] Visible 1280×900 GUI and Word-placement smoke reserved for user/CI review.
