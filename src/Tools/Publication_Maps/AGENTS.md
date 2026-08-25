@@ -88,11 +88,14 @@ Rules:
 - Repeated-session grids use a compact four-column matrix: external left row
   labels, the two canonical group map columns, and external right colorbars.
   Two-session figures use four GridSpec rows and are 6.5×4.2 inches; enabling
-  the difference row uses six GridSpec rows and 6.5×5.9 inches. Do not use
-  tight-bounding-box cropping or an explanatory footer. Prefix the measured-
-  width wrapped canonical group headers with `(A)` and `(B)`, and use a thin
-  neutral divider in the actual gap between the map columns. Keep headers,
-  labels, maps, and colorbars unclipped and non-overlapping.
+  the opt-in difference row uses six GridSpec rows and 6.5×5.9 inches; its GUI
+  checkbox starts unchecked. Do not use tight-bounding-box cropping or an
+  explanatory footer. Prefix the measured-width wrapped canonical group
+  headers with `(A)` and `(B)`. Box only the two-column map matrix with a thin
+  neutral outer frame, retain the divider in the group-column gap, and span
+  each row gutter with a horizontal divider. Keep headers and row labels
+  outside that frame, keep colorbars to its right, and keep all content
+  unclipped and non-overlapping.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
   and Condition B combo boxes populated from the checked condition list.
 - Two-group comparison figures are available only when the managed project has

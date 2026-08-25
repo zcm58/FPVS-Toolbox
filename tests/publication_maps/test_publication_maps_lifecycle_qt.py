@@ -599,6 +599,7 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     assert page.group_combo.isEnabled() is False
     assert page.paired_figures_check.isChecked() is False
     assert page.group_comparison_check.isChecked() is False
+    assert page.session_difference_check.isChecked() is False
 
     requests = page._collect_requests()
     assert len(requests) == 2
@@ -609,8 +610,15 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
         request.session_comparison_ids == ("luteal", "follicular")
         for request in requests
     )
-    assert all(request.export_paired_session_difference for request in requests)
+    assert all(not request.export_paired_session_difference for request in requests)
     assert "Session grids ready" not in page.status_label.text()
+
+    page.session_difference_check.setChecked(True)
+    difference_requests = page._collect_requests()
+    assert all(
+        request.export_paired_session_difference
+        for request in difference_requests
+    )
 
     page.session_dimension_combo.setCurrentIndex(
         page.session_dimension_combo.findData("condition")
@@ -622,6 +630,10 @@ def test_repeated_project_select_all_builds_multicondition_session_grid_requests
     )
     assert all(request.session_ids == ("luteal",) for request in condition_requests)
     assert all(not request.export_session_grid_figure for request in condition_requests)
+    assert all(
+        not request.export_paired_session_difference
+        for request in condition_requests
+    )
 
 
 @pytest.mark.qt

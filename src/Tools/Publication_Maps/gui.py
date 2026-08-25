@@ -327,7 +327,7 @@ class PublicationMapsWindow(QWidget):
             "Add paired within-participant difference row",
             self.session_controls_widget,
         )
-        self.session_difference_check.setChecked(True)
+        self.session_difference_check.setChecked(False)
         session_layout.addWidget(self.session_difference_check, 3, 0, 1, 4)
         session_layout.setColumnStretch(1, 1)
         session_layout.setColumnStretch(3, 1)

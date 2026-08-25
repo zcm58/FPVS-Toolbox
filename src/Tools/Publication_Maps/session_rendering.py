@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 
@@ -56,6 +57,8 @@ class _RepeatedSessionLayoutProfile:
     divider_color: str = "#B3B3B3"
     divider_linewidth: float = 0.8
     divider_gid: str = "repeated-session-group-divider"
+    grid_frame_gid: str = "repeated-session-grid-frame"
+    row_divider_gid_prefix: str = "repeated-session-row-divider"
     column_header_gid_prefix: str = "repeated-session-group-header"
     row_label_gid_prefix: str = "repeated-session-row-label"
     map_axis_gid_prefix: str = "repeated-session-map"
@@ -241,12 +244,27 @@ def _apply_repeated_session_labels(
         )
 
 
-def _add_group_column_divider(fig, axes) -> None:
-    """Add one neutral divider centered in the rendered group-column gutter."""
+def _add_map_grid_frame(fig, axes) -> None:
+    """Box the map matrix and separate its group columns and session rows."""
 
-    divider_x = _group_column_divider_x(axes)
+    grid_left = min(ax.get_position().x0 for ax in axes.flat)
+    grid_right = max(ax.get_position().x1 for ax in axes.flat)
     grid_bottom = min(ax.get_position().y0 for ax in axes.flat)
     grid_top = max(ax.get_position().y1 for ax in axes.flat)
+    frame = Rectangle(
+        (grid_left, grid_bottom),
+        grid_right - grid_left,
+        grid_top - grid_bottom,
+        transform=fig.transFigure,
+        fill=False,
+        edgecolor=REPEATED_SESSION_LAYOUT.divider_color,
+        linewidth=REPEATED_SESSION_LAYOUT.divider_linewidth,
+        clip_on=False,
+    )
+    frame.set_gid(REPEATED_SESSION_LAYOUT.grid_frame_gid)
+    fig.add_artist(frame)
+
+    divider_x = _group_column_divider_x(axes)
     divider = Line2D(
         (divider_x, divider_x),
         (grid_bottom, grid_top),
@@ -258,6 +276,24 @@ def _add_group_column_divider(fig, axes) -> None:
     )
     divider.set_gid(REPEATED_SESSION_LAYOUT.divider_gid)
     fig.add_artist(divider)
+
+    for row in range(len(axes) - 1):
+        upper_row_bottom = min(ax.get_position().y0 for ax in axes[row, :])
+        lower_row_top = max(ax.get_position().y1 for ax in axes[row + 1, :])
+        divider_y = (upper_row_bottom + lower_row_top) / 2.0
+        row_divider = Line2D(
+            (grid_left, grid_right),
+            (divider_y, divider_y),
+            transform=fig.transFigure,
+            color=REPEATED_SESSION_LAYOUT.divider_color,
+            linewidth=REPEATED_SESSION_LAYOUT.divider_linewidth,
+            solid_capstyle="butt",
+            clip_on=False,
+        )
+        row_divider.set_gid(
+            f"{REPEATED_SESSION_LAYOUT.row_divider_gid_prefix}-{row}"
+        )
+        fig.add_artist(row_divider)
 
 
 def _render_session_panel_set(
@@ -402,7 +438,7 @@ def _render_session_panel_set(
             row_label_axes,
             panel_set,
         )
-        _add_group_column_divider(fig, axes)
+        _add_map_grid_frame(fig, axes)
         _save_figure(
             fig,
             output_path,

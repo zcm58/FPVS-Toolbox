@@ -38,9 +38,11 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - Remove the repeated-grid `FIXED_ORDER_CAVEAT` from the figure artwork, GUI,
   help, and session state. Retain the repeated-session 6.5-inch width rule.
 - Use canonical project group labels; never hard-code birth-control names.
-  Prefer a thin neutral divider derived from the actual column bounds and kept
-  clear of titles, maps, and colorbars. Retain it only if visual QA confirms it
-  improves separation; otherwise record the equivalent column-header solution.
+  Derive a thin neutral boxed grid from the actual map-axis bounds: retain the
+  group-column divider, add full-width row-gutter dividers, and keep group
+  headers, session labels, and colorbars outside the frame.
+- Keep the paired comparison-minus-reference row available but unchecked by
+  default so the standard repeated-session export remains the two-row grid.
 - The existing repeated-session and v3 correctness contracts remain closed:
   this is presentation-only and must not introduce inferential wording.
 - Keep condition/session selection, map types, status, progress, and
@@ -87,14 +89,17 @@ to Advanced Settings, with the log available on demand in a modal dialog.
    states. Apply it centrally so repeated Session comparison hides Figure
    layout and expands Map appearance, while Condition modes retain only their
    applicable layout options without rebuilding widgets or duplicating pages.
+8. Follow-up: make the difference row opt-in and box the repeated-session map
+   matrix with outer, group-column, and full-width row dividers.
 
 ## Verification
 
 - After drawing the canvas, assert exact 6.5×4.2-inch or 6.5×5.9-inch size, no
   footer or suptitle, empty per-map titles, unclipped `(A)`/`(B)` group headers,
   one external canonical label per row, correct non-overlapping external
-  colorbar count/labels, and repeated-only separator treatment. At the artifact
-  level, verify PNG pixel dimensions/DPI metadata and PDF physical page size.
+  colorbar count/labels, a map-only outer frame, one group divider, and one
+  full-width divider per row gutter. At the artifact level, verify PNG pixel
+  dimensions/DPI metadata and PDF physical page size.
 - Keep characterization coverage green for single-group, paired-condition,
   ordinary two-group, filenames, shared limits, and repeated-mode routing.
 - CI Qt coverage asserts the page has no embedded log surface, Advanced
@@ -122,6 +127,7 @@ to Advanced Settings, with the log available on demand in a modal dialog.
 - [x] Repeated-session layout updated.
 - [x] Advanced output/log workspace updated.
 - [x] Capability-driven Advanced Settings profiles and reflow added.
+- [x] Difference-row opt-in default and map-only boxed grid added.
 - [x] Contracts and focused tests updated.
 - [x] Automated and renderer-level visual verification complete.
 - [ ] Visible 1280×900 GUI and Word-placement smoke reserved for user/CI review.
@@ -150,6 +156,13 @@ to Advanced Settings, with the log available on demand in a modal dialog.
   `test_single_group_profile_hides_only_two_group_layout_option` and
   `test_repeated_session_profile_hides_and_restores_figure_layout` pin the
   section visibility and reversible grid reflow without starting processing.
+- The boxed-grid follow-up renders actual BioSemi64 two-row and opt-in
+  three-row PDF previews at the locked 6.5×4.2 and 6.5×5.9-inch sizes. The
+  neutral outer frame encloses only the maps, the row separators span both
+  group columns, and headers, vertical row labels, and colorbars remain outside
+  without clipping. The complete registered non-Qt suite passes: 111 tests.
+  CI-only Qt coverage pins the unchecked difference-row default and its
+  explicit opt-in request path.
 - The `figures` and `publication-maps` drivers stop at eight unrelated existing
   hard-coded-path findings under untracked `outputs/rcads-*`; those files were
   left untouched, and the complete registered test lists were run directly.

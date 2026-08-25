@@ -37,11 +37,13 @@ condition workflow or two sessions for a group-column by session-row grid.
 During Session comparison, Advanced Settings hides the inapplicable Figure
 layout section and expands Map appearance; switching to Condition restores the
 applicable ordinary layout options.
-The grid shares color limits and can add a paired comparison-minus-reference
-row. It omits the internal figure title, shows `(A)` and `(B)` canonical group
-headers once above the map columns, places canonical session labels vertically
-to the left, and keeps color scales outside the maps on the right. Visit numbers
-and sample sizes are omitted. Canonical recording/session identity is required.
+The grid shares color limits and offers an unchecked, opt-in paired
+comparison-minus-reference row. It omits the internal figure title, shows `(A)`
+and `(B)` canonical group headers once above the map columns, places canonical
+session labels vertically to the left, and keeps color scales outside the maps
+on the right. A neutral boxed grid separates every map cell while keeping those
+labels and color scales outside the frame. Visit numbers and sample sizes are
+omitted. Canonical recording/session identity is required.
 </p>
 
 <h3>Output Notes</h3>
@@ -51,8 +53,9 @@ Ordinary multi-group runs write each group into its own named output folder.
 Two-group comparison mode writes one combined figure at the selected base
 output. Repeated-session grids use the full 6.5-inch text width of a US Letter
 page with 1-inch horizontal margins, omit explanatory footers, and separate
-the canonical group columns with a neutral divider. Groups are never pooled
-implicitly. Fixed color ranges are useful when comparing conditions or groups.
+the session rows and canonical group columns with a neutral boxed grid. Groups
+are never pooled implicitly. Fixed color ranges are useful when comparing
+conditions or groups.
 </p>
 """
 

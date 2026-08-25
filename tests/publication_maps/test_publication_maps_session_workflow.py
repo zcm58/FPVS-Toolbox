@@ -251,11 +251,13 @@ def test_session_grid_request_contract_is_explicit_and_legacy_defaults_are_off(
         for request in requests
     )
     assert validate_session_grid_requests(all_condition_requests) is True
-    assert PublicationMapRequest(
+    default_request = PublicationMapRequest(
         input_root=tmp_path / "excel",
         output_root=tmp_path / "maps",
         conditions=("Faces",),
-    ).export_session_grid_figure is False
+    )
+    assert default_request.export_session_grid_figure is False
+    assert default_request.export_paired_session_difference is False
 
     duplicate_sessions = tuple(
         replace(
@@ -543,6 +545,23 @@ def test_session_renderer_repeated_layout_artifact_contract(
                 if artist.get_gid()
                 == session_rendering.REPEATED_SESSION_LAYOUT.divider_gid
             ]
+            grid_frames = [
+                artist
+                for artist in fig.artists
+                if artist.get_gid()
+                == session_rendering.REPEATED_SESSION_LAYOUT.grid_frame_gid
+            ]
+            row_divider_prefix = (
+                session_rendering.REPEATED_SESSION_LAYOUT.row_divider_gid_prefix
+            )
+            row_dividers = sorted(
+                (
+                    artist
+                    for artist in fig.artists
+                    if (artist.get_gid() or "").startswith(row_divider_prefix)
+                ),
+                key=lambda artist: artist.get_gid(),
+            )
             divider_x = (
                 float(dividers[0].get_xdata()[0]) if len(dividers) == 1 else None
             )
@@ -557,6 +576,25 @@ def test_session_renderer_repeated_layout_artifact_contract(
                 has_suptitle=fig._suptitle is not None,
                 divider_count=len(dividers),
                 divider_x=divider_x,
+                divider_y=(
+                    tuple(float(value) for value in dividers[0].get_ydata())
+                    if len(dividers) == 1
+                    else ()
+                ),
+                grid_frame_count=len(grid_frames),
+                grid_frame_bounds=(
+                    tuple(float(value) for value in grid_frames[0].get_bbox().bounds)
+                    if len(grid_frames) == 1
+                    else ()
+                ),
+                row_divider_count=len(row_dividers),
+                row_divider_lines=tuple(
+                    (
+                        tuple(float(value) for value in divider.get_xdata()),
+                        tuple(float(value) for value in divider.get_ydata()),
+                    )
+                    for divider in row_dividers
+                ),
                 gutter_left=map_axes[0].get_position().x1,
                 gutter_right=map_axes[1].get_position().x0,
                 map_axis_count=len(map_axes),
@@ -620,6 +658,10 @@ def test_session_renderer_repeated_layout_artifact_contract(
         lower_colorbar, upper_colorbar = captured_layout["colorbar_boxes"]
         assert lower_colorbar[3] < upper_colorbar[1]
     assert captured_layout["divider_count"] == 1
+    assert captured_layout["grid_frame_count"] == 1
+    assert captured_layout["row_divider_count"] == (
+        2 if include_difference else 1
+    )
     assert (
         captured_layout["gutter_left"]
         < captured_layout["divider_x"]
@@ -627,23 +669,47 @@ def test_session_renderer_repeated_layout_artifact_contract(
     )
     assert len(captured_layout["header_boxes"]) == 2
     canvas_left, canvas_bottom, canvas_right, canvas_top = captured_layout["canvas"]
+    canvas_width = canvas_right - canvas_left
+    canvas_height = canvas_top - canvas_bottom
+    frame_x, frame_y, frame_width, frame_height = captured_layout[
+        "grid_frame_bounds"
+    ]
+    frame_left = canvas_left + (frame_x * canvas_width)
+    frame_right = frame_left + (frame_width * canvas_width)
+    frame_bottom = canvas_bottom + (frame_y * canvas_height)
+    frame_top = frame_bottom + (frame_height * canvas_height)
     for box in (*captured_layout["map_boxes"], *captured_layout["colorbar_boxes"]):
         assert canvas_left <= box[0] < box[2] <= canvas_right
         assert canvas_bottom <= box[1] < box[3] <= canvas_top
-    divider_pixels = captured_layout["divider_x"] * (canvas_right - canvas_left)
+    assert canvas_left < frame_left < frame_right < canvas_right
+    assert canvas_bottom < frame_bottom < frame_top < canvas_top
+    assert captured_layout["divider_y"] == pytest.approx(
+        (frame_y, frame_y + frame_height)
+    )
+    divider_pixels = canvas_left + (captured_layout["divider_x"] * canvas_width)
     map_boxes = captured_layout["map_boxes"]
-    assert max(box[2] for box in captured_layout["row_label_boxes"]) < min(
-        box[0] for box in map_boxes
+    assert min(box[0] for box in map_boxes) == pytest.approx(frame_left)
+    assert max(box[2] for box in map_boxes) == pytest.approx(frame_right)
+    assert min(box[1] for box in map_boxes) == pytest.approx(frame_bottom)
+    assert max(box[3] for box in map_boxes) == pytest.approx(frame_top)
+    assert max(box[2] for box in captured_layout["row_label_boxes"]) < frame_left
+    assert min(box[1] for box in captured_layout["header_boxes"]) > frame_top
+    colorbar_left = canvas_left + (
+        captured_layout["colorbar_left"] * canvas_width
     )
-    assert min(box[1] for box in captured_layout["header_boxes"]) > max(
-        map_boxes[0][3], map_boxes[1][3]
-    )
-    map_right = max(box[2] for box in map_boxes)
-    colorbar_left = captured_layout["colorbar_left"] * (canvas_right - canvas_left)
-    assert map_right < colorbar_left
+    assert frame_right < colorbar_left
+    row_divider_lines = captured_layout["row_divider_lines"]
+    for row, (x_values, y_values) in enumerate(row_divider_lines):
+        assert x_values == pytest.approx((frame_x, frame_x + frame_width))
+        assert y_values[0] == pytest.approx(y_values[1])
+        divider_y_pixels = canvas_bottom + (y_values[0] * canvas_height)
+        upper_row_boxes = map_boxes[row * 2 : (row + 1) * 2]
+        lower_row_boxes = map_boxes[(row + 1) * 2 : (row + 2) * 2]
+        assert max(box[3] for box in lower_row_boxes) < divider_y_pixels
+        assert divider_y_pixels < min(box[1] for box in upper_row_boxes)
     column_bounds = (
-        (canvas_left, divider_pixels),
-        (divider_pixels, map_right),
+        (frame_left, divider_pixels),
+        (divider_pixels, frame_right),
     )
     all_title_boxes = (
         *captured_layout["header_boxes"],
