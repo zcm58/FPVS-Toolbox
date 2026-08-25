@@ -504,6 +504,26 @@ def test_fixed_bca_range_is_opt_in(
 
 
 @pytest.mark.qt
+def test_launch_session_profile_uses_generate_map_settings_section(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _host, page = _build_page(
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        dataset_index=_managed_repeated_index(tmp_path),
+    )
+
+    assert page.session_dimension_combo.currentData() == "session_comparison"
+    assert page._ui_profile == page._current_ui_profile()
+    assert not hasattr(page, "map_settings_group")
+    assert page.generation_group.isAncestorOf(page.map_settings_section)
+    assert page.workflow_tabs.widget(0).isAncestorOf(page.map_settings_section)
+
+
+@pytest.mark.qt
 def test_single_group_profile_hides_only_two_group_layout_option(
     qtbot,
     monkeypatch,
