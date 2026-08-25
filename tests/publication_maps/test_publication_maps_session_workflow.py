@@ -199,6 +199,51 @@ def _pdf_media_box_points(path: Path) -> tuple[float, float]:
     return x1 - x0, y1 - y0
 
 
+def test_repeated_session_topomap_vertical_view_centers_visible_content() -> None:
+    fig, ax = session_rendering.plt.subplots()
+    try:
+        image = ax.imshow(
+            ((0.0, 1.0), (1.0, 0.0)),
+            extent=(-0.095, 0.095, -0.095, 0.095),
+            interpolation="bilinear",
+            vmin=0.0,
+            vmax=1.0,
+        )
+        ax.plot(
+            (-0.019897, 0.0, 0.019897),
+            (0.092893, 0.10925, 0.092893),
+        )
+        ax.set_xlim(-0.11, 0.11)
+        ax.set_ylim(-0.095, 0.1194625)
+
+        original_xlim = ax.get_xlim()
+        original_ylim = ax.get_ylim()
+        original_position = ax.get_position().bounds
+        original_extent = image.get_extent()
+        original_clim = image.get_clim()
+        original_interpolation = image.get_interpolation()
+        original_array = image.get_array().tolist()
+
+        session_rendering._center_topomap_vertical_view(ax)
+
+        centered_ylim = ax.get_ylim()
+        content_y0, content_y1 = ax.dataLim.intervaly
+        assert sum(centered_ylim) / 2.0 == pytest.approx(
+            (content_y0 + content_y1) / 2.0
+        )
+        assert abs(centered_ylim[1] - centered_ylim[0]) == pytest.approx(
+            abs(original_ylim[1] - original_ylim[0])
+        )
+        assert ax.get_xlim() == pytest.approx(original_xlim)
+        assert ax.get_position().bounds == pytest.approx(original_position)
+        assert image.get_extent() == pytest.approx(original_extent)
+        assert image.get_clim() == pytest.approx(original_clim)
+        assert image.get_interpolation() == original_interpolation
+        assert image.get_array().tolist() == original_array
+    finally:
+        session_rendering.plt.close(fig)
+
+
 def test_publication_session_state_and_exact_session_filter(tmp_path: Path) -> None:
     index = _repeated_index(tmp_path)
     state = publication_session_state(index)
@@ -483,10 +528,17 @@ def test_session_renderer_repeated_layout_artifact_contract(
         draw_calls += 1
         image = ax.imshow(
             ((0.0, 1.0), (1.0, 0.0)),
+            extent=(-0.095, 0.095, -0.095, 0.095),
             cmap=cmap,
             vmin=vlim_override[0],
             vmax=vlim_override[1],
         )
+        ax.plot(
+            (-0.019897, 0.0, 0.019897),
+            (0.092893, 0.10925, 0.092893),
+        )
+        ax.set_xlim(-0.11, 0.11)
+        ax.set_ylim(-0.095, 0.1194625)
         ax.set_axis_off()
         return image, ()
 
@@ -614,6 +666,21 @@ def test_session_renderer_repeated_layout_artifact_contract(
                     )
                     for ax in map_axes
                 ),
+                map_content_y_bounds=tuple(
+                    tuple(
+                        sorted(
+                            (
+                                ax.transData.transform(
+                                    (0.0, float(ax.dataLim.intervaly[0]))
+                                )[1],
+                                ax.transData.transform(
+                                    (0.0, float(ax.dataLim.intervaly[1]))
+                                )[1],
+                            )
+                        )
+                    )
+                    for ax in map_axes
+                ),
                 colorbar_axis_count=len(colorbar_axes),
                 colorbar_left=min(ax.get_position().x0 for ax in colorbar_axes),
                 colorbar_boxes=tuple(
@@ -648,10 +715,10 @@ def test_session_renderer_repeated_layout_artifact_contract(
     png_path = next(path for path in paths if path.suffix == ".png")
     pdf_path = next(path for path in paths if path.suffix == ".pdf")
     with Image.open(png_path) as image:
-        assert image.size == (int(6.5 * test_dpi), int(expected_height_in * test_dpi))
+        assert image.size == (int(6.0 * test_dpi), int(expected_height_in * test_dpi))
         assert image.info["dpi"] == pytest.approx((test_dpi, test_dpi), abs=0.1)
     pdf_width, pdf_height = _pdf_media_box_points(pdf_path)
-    assert pdf_width == pytest.approx(6.5 * 72.0)
+    assert pdf_width == pytest.approx(6.0 * 72.0)
     assert pdf_height == pytest.approx(expected_height_in * 72.0)
     assert captured_layout["has_suptitle"] is False
     assert captured_layout["map_axis_count"] == (6 if include_difference else 4)
@@ -719,6 +786,14 @@ def test_session_renderer_repeated_layout_artifact_contract(
             target_x = sum(column_bounds[column]) / 2.0
             assert (box[0] + box[2]) / 2.0 == pytest.approx(target_x, abs=1.0)
             assert (box[1] + box[3]) / 2.0 == pytest.approx(target_y, abs=1.0)
+            content_bottom, content_top = captured_layout[
+                "map_content_y_bounds"
+            ][row * 2 + column]
+            assert (content_bottom + content_top) / 2.0 == pytest.approx(
+                target_y,
+                abs=1.0,
+            )
+            assert row_bounds[row + 1] < content_bottom < content_top < row_bounds[row]
         row_label_box = captured_layout["row_label_boxes"][row]
         assert (row_label_box[1] + row_label_box[3]) / 2.0 == pytest.approx(
             target_y,

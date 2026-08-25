@@ -8,7 +8,7 @@ pending.
 ## Goal
 
 Refine only the multi-group repeated-session scalp-map grid so its PNG/PDF
-assets fit a US Letter Word page at the full 6.5-inch text width, contain no
+assets fit a US Letter Word page at a compact 6.0-inch width, contain no
 bottom descriptive/confound footer, keep figure and panel titles unclipped,
 and distinguish the two canonical group columns clearly. Also reclaim the
 Generate Maps workspace by moving output controls and the full generation log
@@ -35,11 +35,11 @@ removes the framed-tab/card nesting effect.
   data and validation, but omit visit indices and all sample-size annotations
   from repeated-session figure titles.
 - Preserve matching PNG/PDF, 600 DPI, Arial figure typography, and exact
-  6.5-inch width. Use 4.2 inches high for two plotted rows and 5.9 inches for
+  6.0-inch width. Use 4.2 inches high for two plotted rows and 5.9 inches for
   the difference-enabled three-row layout. Do not change shared `_save_figure`
   behavior or add tight-bounding-box cropping.
 - Remove the repeated-grid `FIXED_ORDER_CAVEAT` from the figure artwork, GUI,
-  help, and session state. Retain the repeated-session 6.5-inch width rule.
+  help, and session state. Retain the repeated-session 6.0-inch width rule.
 - Use canonical project group labels; never hard-code birth-control names.
   Derive a thin neutral boxed grid from the actual map-axis bounds: retain the
   group-column divider, add full-width row-gutter dividers, and keep group
@@ -98,10 +98,13 @@ removes the framed-tab/card nesting effect.
 9. Follow-up workspace pass: flatten the tab pane, fold Map appearance into the
    Generate card as a compact non-card subsection, move Input data to a static
    full-width Advanced stack, and make fixed BCA limits opt-in.
+10. Follow-up figure pass: center the visible MNE head/data bounds vertically
+    without changing the rendered scale, and reduce only the repeated-session
+    canvas width to 6.0 inches.
 
 ## Verification
 
-- After drawing the canvas, assert exact 6.5×4.2-inch or 6.5×5.9-inch size, no
+- After drawing the canvas, assert exact 6.0×4.2-inch or 6.0×5.9-inch size, no
   footer or suptitle, empty per-map titles, unclipped `(A)`/`(B)` group headers,
   one external canonical label per row, correct non-overlapping external
   colorbar count/labels, a map-only outer frame, one group divider, and one
@@ -130,7 +133,7 @@ removes the framed-tab/card nesting effect.
   run offscreen Qt.
 - Visually inspect representative BCA, SNR, and Z-score PNG/PDF grids with and
   without the difference row, including long generic labels, inserted into Word
-  at 6.5 inches and 100% scale.
+  at 6.0 inches and 100% scale.
 
 ## Progress
 
@@ -140,6 +143,7 @@ removes the framed-tab/card nesting effect.
 - [x] Capability-driven Advanced Settings profiles and reflow added.
 - [x] Difference-row opt-in default and map-only boxed grid added.
 - [x] Flat tab hierarchy and frequency-based control ownership added.
+- [x] Visible head centering and compact 6.0-inch repeated-grid width added.
 - [x] Contracts and focused tests updated.
 - [x] Automated and renderer-level visual verification complete.
 - [ ] Visible 1280×900 GUI and Word-placement smoke reserved for user/CI review.
@@ -184,6 +188,11 @@ removes the framed-tab/card nesting effect.
   111-test registered non-Qt suite, GUI audit, Ruff, syntax compilation, TOML
   parsing, and `git diff --check` pass. CI-only Qt coverage was updated but not
   run locally.
+- The compact-width follow-up preserves each topomap's data, interpolation,
+  color limits, x limits, axes box, and y span while centering the visible MNE
+  head/data bounds vertically. Actual BioSemi64 two-row and three-row PNG/PDF
+  previews are unclipped at 6.0×4.2 and 6.0×5.9 inches, and the complete 108-test
+  non-Qt Scalp Maps suite passes.
 - The `figures` and `publication-maps` drivers stop at eight unrelated existing
   hard-coded-path findings under untracked `outputs/rcads-*`; those files were
   left untouched, and the complete registered test lists were run directly.

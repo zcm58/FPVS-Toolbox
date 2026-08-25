@@ -42,11 +42,11 @@ from Tools.Publication_Maps.session_workflow import (
 class _RepeatedSessionLayoutProfile:
     """Figure geometry owned only by the repeated-session renderer."""
 
-    width_in: float = 6.5
+    width_in: float = 6.0
     two_row_height_in: float = 4.2
     three_row_height_in: float = 5.9
-    left: float = 0.02
-    right: float = 0.87
+    left: float = 0.023
+    right: float = 0.86
     bottom: float = 0.025
     top: float = 0.89
     hspace: float = 0.08
@@ -257,6 +257,33 @@ def _apply_repeated_session_labels(
         )
 
 
+def _center_topomap_vertical_view(ax) -> None:
+    """Center visible topomap content without changing its vertical scale."""
+
+    view_y0, view_y1 = (float(value) for value in ax.get_ylim())
+    content_y0, content_y1 = (float(value) for value in ax.dataLim.intervaly)
+    if not np.all(np.isfinite((view_y0, view_y1, content_y0, content_y1))):
+        return
+
+    view_span = abs(view_y1 - view_y0)
+    content_low, content_high = sorted((content_y0, content_y1))
+    if view_span <= 0.0 or content_high <= content_low:
+        return
+    if content_high - content_low > view_span:
+        return
+
+    content_midpoint = (content_low + content_high) / 2.0
+    centered_limits = (
+        content_midpoint - (view_span / 2.0),
+        content_midpoint + (view_span / 2.0),
+    )
+    ax.set_ylim(
+        centered_limits
+        if view_y1 >= view_y0
+        else tuple(reversed(centered_limits))
+    )
+
+
 def _center_map_axes_in_grid_cells(axes, row_label_axes) -> _MapGridGeometry:
     """Center every map and row label within the existing framed matrix cells."""
 
@@ -427,6 +454,7 @@ def _render_session_panel_set(
                     bounds=bounds,
                     vlim_override=main_vlim,
                 )
+                _center_topomap_vertical_view(ax)
                 main_images.append(image)
                 if missing:
                     _add_missing_note(ax, missing)
@@ -461,6 +489,7 @@ def _render_session_panel_set(
                     bounds=ColorBounds(),
                     vlim_override=(-difference_limit, difference_limit),
                 )
+                _center_topomap_vertical_view(ax)
                 difference_images.append(image)
                 if missing:
                     _add_missing_note(ax, missing)

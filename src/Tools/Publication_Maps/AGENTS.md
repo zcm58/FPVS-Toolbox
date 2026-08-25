@@ -87,15 +87,16 @@ Rules:
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
 - Repeated-session grids use a compact four-column matrix: external left row
   labels, the two canonical group map columns, and external right colorbars.
-  Two-session figures use four GridSpec rows and are 6.5×4.2 inches; enabling
-  the opt-in difference row uses six GridSpec rows and 6.5×5.9 inches; its GUI
+  Two-session figures use four GridSpec rows and are 6.0×4.2 inches; enabling
+  the opt-in difference row uses six GridSpec rows and 6.0×5.9 inches; its GUI
   checkbox starts unchecked. Do not use tight-bounding-box cropping or an
   explanatory footer. Prefix the measured-width wrapped canonical group
   headers with `(A)` and `(B)`. Box only the two-column map matrix with a thin
   neutral outer frame, retain the divider in the group-column gap, and span
   each row gutter with a horizontal divider. Keep headers and row labels
   outside that frame, keep colorbars to its right, and keep all content
-  unclipped and non-overlapping.
+  unclipped and non-overlapping. Center the visible topomap data/head bounds
+  vertically in each cell while preserving the renderer's existing y span.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
   and Condition B combo boxes populated from the checked condition list.
 - Two-group comparison figures are available only when the managed project has
