@@ -12,8 +12,9 @@ current-session result while delegating long work to signal-driven workers.
 
 - The public tool title is `Free Harmonic Clustering Analysis`.
 - Expose the GUI through the Main App's default Quick Tools route without
-  requiring Beta Tools. Keep the page project-bound and discard its current-
-  session state when the active project changes.
+  requiring Beta Tools. Keep the page project-bound, discard current-session
+  results when the active project changes, and reload that project's saved FHC
+  recording exclusions.
 - Do not copy, translate, import, or redistribute the authors' restrictively
   licensed MATLAB code or `.mat` layout.
 - Read scientific inputs only from original `FullFFT Amplitude (uV)` condition
@@ -77,9 +78,10 @@ current-session result while delegating long work to signal-driven workers.
 - Resolve all writes beneath the explicit managed project root. Do not mutate
   `project.json`, silently overwrite a prior run, or derive output paths from
   the current working directory.
-- Treat the analysis as source-immutable. It may create an additive completed
-  run bundle, but it must not change project settings, participant metadata,
-  ledgers, QC decisions, or processed workbooks.
+- Treat the analysis as source-immutable. It may create or update its versioned
+  project-local FHC preference file and create additive completed run bundles,
+  but it must not change `project.json`, shared project settings, participant
+  metadata, ledgers, QC decisions, or processed workbooks.
 - Preserve exactly one ordered two-level contrast per legacy run. The
   `fhc_repeated_session_batch_v1` extension is the only all-condition batch:
   it requires two stable groups and two ordered sessions and runs the four
@@ -90,9 +92,11 @@ current-session result while delegating long work to signal-driven workers.
   condition identity canonical. Use complete pairs for all primary families;
   report missing visits as coverage and never treat recordings as independent
   participants, impute visits, or zero-fill them.
-- Analysis-specific recording exclusions are additive, batch-local, and require
-  nonempty reasons. Export them with the cohort audit without mutating project
-  QC or metadata.
+- GUI analysis-specific recording exclusions are additive, project-local FHC
+  preferences and require nonempty reasons. Persist them beneath the FHC results
+  parent, reuse them for later repeated batches until changed, and export them
+  with the cohort audit without mutating project QC or metadata. Headless CLI
+  exclusions remain explicit and batch-local.
 - Freeze one shared harmonic domain across the repeated batch. Preserve the
   versioned tensor semantics and apply run-level Holm correction across
   conditions within each of four families plus the conservative all-batch
@@ -155,12 +159,11 @@ the page implementation.
   post-processing worker itself.
 - Use one tab-free workspace. Flat and repeated projects use **Run Free
   Harmonic Clustering Analysis**. Repeated projects are recognized
-  automatically and replace the flat-project selectors with
-  the prespecified two-group/two-session all-condition batch,
-  exact later-minus-earlier direction, fixed-order warning, and a compact
-  analysis-only recording-exclusion dialog with required reasons. A concise
-  Results section appears only after completion; detailed cohort, harmonic,
-  method, and run provenance remains in the exported workbook.
+  automatically and replace the flat-project selectors with a compact stable-
+  group summary, fixed-order warning, and a project-persistent analysis-only
+  recording-exclusion dialog with required reasons. A concise Results section
+  appears only after completion; detailed cohort, contrast-family, direction,
+  harmonic, method, and run provenance remains in the exported workbook.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result
   tables may scroll internally when their data exceeds the available viewport.
 - Legacy Results shows current-session significant clusters ordered by

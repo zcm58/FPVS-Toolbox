@@ -60,8 +60,11 @@ graph is `spatial_adjacency kron I_H OR I_S kron complete_harmonic_adjacency`.
   widgets.
 - `gui/page.py`: embedded `FreeHarmonicClusteringPage` with one scroll-free
   setup/results workspace plus a compact persistent status/action footer.
-- `gui/recording_exclusions_dialog.py`: source-immutable editor for batch-local
-  canonical recording exclusions; every selected row requires an audit reason.
+- `gui/exclusion_state.py`: versioned, atomic project-local persistence for the
+  GUI's canonical recording exclusions beneath the FHC results parent.
+- `gui/recording_exclusions_dialog.py`: source-immutable editor for project-
+  persistent canonical recording exclusions; every selected row requires an
+  audit reason.
 - `gui/__init__.py`: small embedded-GUI import surface.
 
 ## Contrast Modes
@@ -90,8 +93,10 @@ all declared cells, and emits four participant-level families per condition:
   participant tensors between groups without renormalizing the difference.
 
 All primary families use complete phase-balanced pairs. Missing visits and
-analysis-specific recording exclusions with reasons remain in the cohort audit;
-there is no imputation, node-wise omission, or recording-level independence.
+analysis-specific recording exclusions with reasons remain in the cohort audit.
+The GUI reloads its project-specific exclusions for later batches until the user
+changes them; headless requests continue to provide exclusions per run. There is
+no imputation, node-wise omission, or recording-level independence.
 
 ## Method Identity
 
@@ -215,13 +220,12 @@ family, and whole-participant exchangeability.
   Beta Tools setting.
 - Flat-project Setup resolves one contrast and displays the A-minus-B direction.
   A repeated-session project is recognized from canonical inspection options
-  and replaces the legacy selector with read-only groups, ordered sessions,
-  all-condition/four-family summary, exact later-minus-earlier direction,
-  fixed-order warning, and a compact analysis-only recording-exclusion dialog
-  with required reasons. One run action starts the applicable workflow. A
-  concise Results section appears beneath Setup when complete; detailed cohort,
-  exclusion, harmonic, source-coverage, and participant x sensor x harmonic
-  provenance remains in the exported workbook.
+  and replaces the legacy selector with a compact stable-group summary, fixed-
+  order warning, and a project-persistent analysis-only recording-exclusion
+  dialog with required reasons. One run action starts the applicable workflow.
+  A concise Results section appears beneath Setup when complete; detailed
+  cohort, exclusion, contrast-family, direction, harmonic, source-coverage, and
+  participant x sensor x harmonic provenance remains in the exported workbook.
 - Prepared arrays remain worker-local while the automatic permutation and
   export phases run, so source workbooks are not read a second time. After the
   result table receives plain display strings, the page retains no prepared or

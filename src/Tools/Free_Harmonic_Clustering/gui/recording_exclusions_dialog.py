@@ -24,7 +24,7 @@ from .models import AnalysisRecordingExclusion, RecordingChoice
 
 
 class RecordingExclusionsDialog(AppDialog):
-    """Collect temporary recording exclusions with a required audit reason."""
+    """Collect project-specific recording exclusions with an audit reason."""
 
     def __init__(
         self,
@@ -43,9 +43,10 @@ class RecordingExclusionsDialog(AppDialog):
         existing = {item.recording_id.casefold(): item for item in exclusions}
 
         note = StatusBanner(
-            "These exclusions apply only to this Free Harmonic Clustering batch. "
-            "They do not change project QC, processing, or source files. Every "
-            "selected recording requires a reason in the exported audit.",
+            "These exclusions persist for this project's future Free Harmonic "
+            "Clustering batches until changed. They do not change project QC, "
+            "processing, or source files. Every selected recording requires a "
+            "reason in the exported audit.",
             self,
             variant="info",
         )

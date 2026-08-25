@@ -38,7 +38,8 @@ the Workspace Tools sidebar. The page dynamically
 reads project conditions, groups, exclusions, base and oddball frequencies,
 and FullFFT availability. It does not offer local frequency, group, session,
 condition, or participant-identity overrides. Repeated batches may add
-source-immutable recording exclusions with required audit reasons.
+source-immutable, project-persistent FHC recording exclusions with required
+audit reasons.
 
 1. For a flat project, choose Paired Conditions or Independent Groups and
    define one A-minus-B contrast. A repeated-session project is recognized
@@ -47,7 +48,8 @@ source-immutable recording exclusions with required audit reasons.
    fixed oddball harmonic. Both modes fill through and exclude all dynamically
    identified base-rate overlaps.
 3. Optionally review analysis-only recording exclusions for a repeated batch;
-   each exclusion requires an audit reason and never changes project QC.
+   each exclusion requires an audit reason, persists for later FHC batches in
+   that project until changed, and never changes project QC.
 4. Select **Run Free Harmonic Clustering Analysis** once.
    Preparation, permutations, multiplicity correction, and export continue in
    one worker pipeline.
@@ -89,7 +91,9 @@ atomic result bundle below:
 
 ```text
 <project>/3 - Statistical Analysis Results/
-  Free Harmonic Clustering Analysis/<run-id>/
+  Free Harmonic Clustering Analysis/
+    project_settings.json
+    <run-id>/
 ```
 
 Use the `paired` subcommand with `--condition-a`, `--condition-b`, and an
@@ -145,10 +149,11 @@ layers, every cluster/member/node/null table, complete-pair coverage and
 reasoned exclusions, shared-domain provenance, derived seeds, source records,
 and the fixed-order warning.
 
-The tool is source-immutable. It may add a completed result folder, but it
-never edits `project.json`, settings, participant metadata, ledgers, QC
-decisions, or processed workbooks. Failed or cancelled work does not publish a
-completed bundle.
+The tool is source-immutable. The GUI may update its versioned
+`project_settings.json` beneath the project's FHC results parent and the tool may
+add completed result folders, but it never edits `project.json`, shared project
+settings, participant metadata, ledgers, QC decisions, or processed workbooks.
+Failed or cancelled work does not publish a completed bundle.
 
 Inference is cluster-level weak FWER for the one declared sensor x harmonic
 family. A significant cluster does not make its individual sensors,

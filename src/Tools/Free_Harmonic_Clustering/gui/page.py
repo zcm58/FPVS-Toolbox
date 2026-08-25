@@ -42,6 +42,11 @@ from Tools.Free_Harmonic_Clustering.tool_info import (
 )
 
 from .backend_adapter import FreeHarmonicBackend, FreeHarmonicBackendAdapter
+from .exclusion_state import (
+    ExclusionStateError,
+    load_project_recording_exclusions,
+    save_project_recording_exclusions,
+)
 from .models import (
     AnalysisRecordingExclusion,
     AnalysisSetup,
@@ -295,21 +300,6 @@ class FreeHarmonicClusteringPage(QWidget):
         self.repeated_groups_value.setObjectName("free_harmonic_repeated_groups")
         self.repeated_groups_value.setWordWrap(True)
         repeated_form.addRow("Stable groups:", self.repeated_groups_value)
-        self.repeated_sessions_value = QLabel("Loading...", repeated_panel)
-        self.repeated_sessions_value.setObjectName("free_harmonic_repeated_sessions")
-        self.repeated_sessions_value.setWordWrap(True)
-        repeated_form.addRow("Ordered sessions:", self.repeated_sessions_value)
-        self.repeated_conditions_value = QLabel("Loading...", repeated_panel)
-        self.repeated_conditions_value.setObjectName("free_harmonic_repeated_conditions")
-        self.repeated_conditions_value.setWordWrap(True)
-        repeated_form.addRow("Conditions:", self.repeated_conditions_value)
-        self.repeated_batch_value = QLabel(
-            "Four prespecified contrast families per condition.",
-            repeated_panel,
-        )
-        self.repeated_batch_value.setObjectName("free_harmonic_repeated_families")
-        self.repeated_batch_value.setWordWrap(True)
-        repeated_form.addRow("Batch:", self.repeated_batch_value)
         self.review_exclusions_button = make_action_button(
             "Review recording exclusions...",
             compact=True,
@@ -429,9 +419,6 @@ class FreeHarmonicClusteringPage(QWidget):
             (independent_form, self.independent_group_a_combo),
             (independent_form, self.independent_group_b_combo),
             (repeated_form, self.repeated_groups_value),
-            (repeated_form, self.repeated_sessions_value),
-            (repeated_form, self.repeated_conditions_value),
-            (repeated_form, self.repeated_batch_value),
             (repeated_form, exclusion_row),
             (harmonics_form, self.harmonic_mode_combo),
             (harmonics_form, fixed_row),
@@ -478,6 +465,12 @@ class FreeHarmonicClusteringPage(QWidget):
             parent=footer,
         )
         self.open_results_button.setObjectName("free_harmonic_open_results_button")
+        action_height = max(
+            self.open_results_button.sizeHint().height(),
+            self.run_analysis_button.sizeHint().height(),
+        )
+        self.open_results_button.setFixedHeight(action_height)
+        self.run_analysis_button.setFixedHeight(action_height)
         self.workflow_actions = make_action_row(
             (
                 self.open_results_button,
@@ -702,6 +695,7 @@ class FreeHarmonicClusteringPage(QWidget):
             return
         self._options = value
         self._inspection_failed = False
+        self._load_recording_exclusions(value)
         self._populate_choice_controls(value)
         if not value.grid_compatible:
             self.workflow_status.set_variant("error")
@@ -803,8 +797,6 @@ class FreeHarmonicClusteringPage(QWidget):
     ) -> None:
         if not options.is_repeated_session:
             self.repeated_groups_value.setText("Not a repeated-session project.")
-            self.repeated_sessions_value.setText("Not applicable.")
-            self.repeated_conditions_value.setText("Not applicable.")
             self.repeated_order_warning.setText(
                 "Session/phase-at-visit is confounded with visit order and elapsed time."
             )
@@ -812,23 +804,6 @@ class FreeHarmonicClusteringPage(QWidget):
             return
         self.repeated_groups_value.setText(
             " vs ".join(f"{group.label} [{group.group_id}]" for group in options.groups)
-        )
-        ordered_sessions = tuple(
-            sorted(options.sessions, key=lambda session: session.visit_index)
-        )
-        self.repeated_sessions_value.setText(
-            " -> ".join(
-                f"{session.label} (Visit {session.visit_index})"
-                for session in ordered_sessions
-            )
-        )
-        self.repeated_conditions_value.setText(
-            f"All {len(options.conditions)} project conditions"
-        )
-        self.repeated_batch_value.setText(
-            "Group difference averaged over complete session pairs; paired "
-            "session/phase-at-visit contrast within each group; and the "
-            "between-group difference in Visit 2 - Visit 1 change."
         )
         warning = options.fixed_order_confounding or (
             "Session/phase-at-visit is perfectly aligned with visit order. "
@@ -961,22 +936,13 @@ class FreeHarmonicClusteringPage(QWidget):
 
     def _update_direction_label(self) -> None:
         design = self._selected_design()
+        self.direction_label.setVisible(
+            design is not GuiAnalysisDesign.REPEATED_SESSION_BATCH
+        )
         if design is GuiAnalysisDesign.PAIRED_CONDITIONS:
             arm_a = self.paired_condition_a_combo.currentText() or "Condition A"
             arm_b = self.paired_condition_b_combo.currentText() or "Condition B"
         elif design is GuiAnalysisDesign.REPEATED_SESSION_BATCH:
-            options = self._options
-            sessions = () if options is None else options.sessions
-            if len(sessions) == 2:
-                ordered = tuple(sorted(sessions, key=lambda item: item.visit_index))
-                delta = f"{ordered[1].label} - {ordered[0].label}"
-            else:
-                delta = "Visit 2 - Visit 1"
-            self.direction_label.setText(
-                "Prespecified batch: group comparison averaged over complete "
-                "sessions, paired session contrasts within both groups, and "
-                f"between-group difference in {delta} change."
-            )
             return
         else:
             arm_a = self.independent_group_a_combo.currentText() or "Group A"
@@ -984,6 +950,22 @@ class FreeHarmonicClusteringPage(QWidget):
         self.direction_label.setText(
             f"Contrast: {arm_a} - {arm_b}; positive clusters indicate {arm_a} > {arm_b}."
         )
+
+    def _load_recording_exclusions(self, options: ProjectAnalysisOptions) -> None:
+        if not options.is_repeated_session:
+            self._recording_exclusions = ()
+            return
+        try:
+            self._recording_exclusions = load_project_recording_exclusions(
+                self._results_parent(),
+                tuple(recording.recording_id for recording in options.recordings),
+            )
+        except ExclusionStateError as exc:
+            self._recording_exclusions = ()
+            logger.warning(
+                "fhc_recording_exclusions_load_failed",
+                extra={"project_root": str(self._project_root), "error": str(exc)},
+            )
 
     def _current_setup(self) -> AnalysisSetup:
         if self._options is None or self._frequency_snapshot is None:
@@ -1188,6 +1170,22 @@ class FreeHarmonicClusteringPage(QWidget):
         self._recording_exclusions = exclusions
         self._update_exclusion_count_label()
         self._on_setup_changed()
+        try:
+            save_project_recording_exclusions(
+                self._results_parent(),
+                self._recording_exclusions,
+            )
+        except ExclusionStateError as exc:
+            logger.exception(
+                "fhc_recording_exclusions_save_failed",
+                extra={"project_root": str(self._project_root)},
+            )
+            self._show_error(
+                "The exclusions are active for this session but could not be saved "
+                f"for the project. {exc}"
+            )
+        else:
+            self._update_results_folder_button()
 
     # -------------------------------------------------------------- workers
     def _start_operation(
@@ -1433,8 +1431,7 @@ class FreeHarmonicClusteringPage(QWidget):
             f"Repeated-session batch complete: {len(outcomes)} condition x contrast "
             f"tests; {within_family_significant} pass Holm correction within their "
             f"prespecified family and {all_batch_significant} pass the conservative "
-            "Holm correction across the full batch. Interpret session effects as "
-            "session/phase-at-visit effects because visit order was fixed."
+            "Holm correction across the full batch."
         )
 
     @staticmethod
