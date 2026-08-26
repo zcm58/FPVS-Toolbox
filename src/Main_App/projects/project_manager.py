@@ -797,6 +797,9 @@ def _start_repeated_session_preflight(
                 manifest=completed_manifest,
                 use_existing_project_folder=use_existing_project_folder,
             )
+            project_ready = getattr(self, "_on_project_ready", None)
+            if callable(project_ready):
+                project_ready()
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "repeated_session_project_creation_failed",

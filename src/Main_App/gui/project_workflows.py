@@ -58,20 +58,37 @@ def _choose_new_project_source(host: Any) -> str | None:
     return None
 
 
+def _return_to_welcome_if_no_project(host: Any) -> None:
+    """Keep cancelled project creation on the project-less welcome screen."""
+    if getattr(host, "currentProject", None) is not None:
+        return
+    stacked = getattr(host, "stacked", None)
+    landing_page = getattr(host, "landing_page", None)
+    if stacked is not None and landing_page is not None:
+        stacked.setCurrentWidget(landing_page)
+
+
 def new_project(host: Any) -> None:
+    previous_project = getattr(host, "currentProject", None)
     choice = _choose_new_project_source(host)
     if choice == NEW_PROJECT_FPVS_CONFIG:
         new_project_from_fpvs_config(host)
         return
     if choice == NEW_PROJECT_MANUAL:
         _new_project(host)
-        notify_project_ready(host)
+        current_project = getattr(host, "currentProject", None)
+        if current_project is not None and current_project is not previous_project:
+            notify_project_ready(host)
+            return
+    _return_to_welcome_if_no_project(host)
 
 
 def new_project_from_fpvs_config(host: Any) -> None:
     project = _new_project_from_fpvs_config(host, host)
     if project is not None:
         notify_project_ready(host)
+        return
+    _return_to_welcome_if_no_project(host)
 
 
 def open_existing_project(host: Any) -> None:

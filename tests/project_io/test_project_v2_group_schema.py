@@ -646,15 +646,19 @@ def test_new_project_workflow_routes_to_fpvs_config_choice(monkeypatch) -> None:
 def test_new_project_workflow_routes_to_manual_choice(monkeypatch) -> None:
     from Main_App.gui import project_workflows
 
-    host = SimpleNamespace()
+    host = SimpleNamespace(currentProject=None)
     calls: list[str] = []
+
+    def create_manual_project(_host) -> None:
+        calls.append("manual")
+        _host.currentProject = object()
 
     monkeypatch.setattr(
         project_workflows,
         "_choose_new_project_source",
         lambda _host: project_workflows.NEW_PROJECT_MANUAL,
     )
-    monkeypatch.setattr(project_workflows, "_new_project", lambda _host: calls.append("manual"))
+    monkeypatch.setattr(project_workflows, "_new_project", create_manual_project)
     monkeypatch.setattr(
         project_workflows,
         "_new_project_from_fpvs_config",
@@ -665,3 +669,30 @@ def test_new_project_workflow_routes_to_manual_choice(monkeypatch) -> None:
     project_workflows.new_project(host)
 
     assert calls == ["manual", "ready"]
+
+
+def test_new_project_workflow_manual_cancel_does_not_report_ready(monkeypatch) -> None:
+    from Main_App.gui import project_workflows
+
+    host = SimpleNamespace(currentProject=None)
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        project_workflows,
+        "_choose_new_project_source",
+        lambda _host: project_workflows.NEW_PROJECT_MANUAL,
+    )
+    monkeypatch.setattr(
+        project_workflows,
+        "_new_project",
+        lambda _host: calls.append("manual"),
+    )
+    monkeypatch.setattr(
+        project_workflows,
+        "notify_project_ready",
+        lambda _host: calls.append("ready"),
+    )
+
+    project_workflows.new_project(host)
+
+    assert calls == ["manual"]

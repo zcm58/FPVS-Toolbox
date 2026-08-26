@@ -226,6 +226,31 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert landing_actions.row_layout.indexOf(win.btn_open_project) >= 0
 
 
+def test_cancelled_manual_project_creation_returns_to_welcome(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    monkeypatch.setattr(
+        main_window_module.project_workflows,
+        "_choose_new_project_source",
+        lambda _host: main_window_module.project_workflows.NEW_PROJECT_MANUAL,
+    )
+    monkeypatch.setattr(
+        main_window_module.project_workflows,
+        "_new_project",
+        lambda _host: None,
+    )
+
+    win.new_project()
+    qtbot.wait(20)
+
+    assert win.currentProject is None
+    assert win.stacked.currentWidget() is win.landing_page
+    assert win.menuBar().isHidden()
+
+
 def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch)
     win.stacked.setCurrentIndex(1)
