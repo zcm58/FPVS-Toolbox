@@ -387,7 +387,7 @@ def test_repeated_project_uses_prespecified_batch_without_page_scroll(
     )
     assert "All 4 project conditions" in page.repeated_conditions_value.text()
     assert "Visit 2 - Visit 1" in page.repeated_batch_value.text()
-    assert "aligned with visit order" in page.repeated_order_warning.text()
+    assert not hasattr(page, "repeated_order_warning")
     assert page.review_exclusions_button.isEnabled()
     assert (
         page.run_analysis_button.text()
@@ -678,7 +678,7 @@ def test_real_qthread_inspection_keeps_gui_responsive_and_shuts_down(
     assert page.fixed_highest_combo.count() == 5
     assert not page.progress_bar.isVisible()
     assert page.run_analysis_button.isEnabled()
-    assert "Project inputs loaded" in page.workflow_status.text()
+    assert page.workflow_status.isHidden()
 
 
 def test_paired_condition_guard_invalidates_completed_result(

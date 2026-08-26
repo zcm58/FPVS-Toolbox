@@ -323,16 +323,6 @@ class FreeHarmonicClusteringPage(QWidget):
         exclusion_layout.addWidget(self.review_exclusions_button)
         exclusion_layout.addWidget(self.exclusion_count_label, 1)
         repeated_form.addRow("Run exclusions:", exclusion_row)
-        self.repeated_order_warning = StatusBanner(
-            "Session/phase-at-visit is confounded with visit order and elapsed time.",
-            repeated_panel,
-            variant="warning",
-        )
-        self.repeated_order_warning.setObjectName(
-            "free_harmonic_repeated_order_warning"
-        )
-        self.repeated_order_warning.setWordWrap(True)
-        repeated_form.addRow(self.repeated_order_warning)
         self.design_stack.addWidget(repeated_panel)
 
         for combo in (
@@ -708,25 +698,8 @@ class FreeHarmonicClusteringPage(QWidget):
                 "The repeated-session FHC batch requires exactly two stable "
                 "groups and two ordered sessions."
             )
-        elif value.diagnostics:
-            self.workflow_status.set_variant("warning")
-            self.workflow_status.set_text(
-                "Project inputs loaded with dataset diagnostics. Select Run "
-                "Analysis to continue. Exact cohort and input details will be "
-                "recorded in the completed results workbook."
-            )
-        elif value.is_repeated_session:
-            self.workflow_status.set_variant("warning")
-            self.workflow_status.set_text(
-                "Repeated-session design recognized. Review any analysis-only "
-                "recording exclusions, then run the prespecified full batch."
-            )
         else:
-            self.workflow_status.set_variant("info")
-            self.workflow_status.set_text(
-                "Project inputs loaded. Select Run Analysis once to complete the "
-                "analysis and show the results below."
-            )
+            self.workflow_status.hide()
         self._update_buttons()
 
     def _populate_choice_controls(self, options: ProjectAnalysisOptions) -> None:
@@ -797,19 +770,11 @@ class FreeHarmonicClusteringPage(QWidget):
     ) -> None:
         if not options.is_repeated_session:
             self.repeated_groups_value.setText("Not a repeated-session project.")
-            self.repeated_order_warning.setText(
-                "Session/phase-at-visit is confounded with visit order and elapsed time."
-            )
             self._update_exclusion_count_label()
             return
         self.repeated_groups_value.setText(
             " vs ".join(f"{group.label} [{group.group_id}]" for group in options.groups)
         )
-        warning = options.fixed_order_confounding or (
-            "Session/phase-at-visit is perfectly aligned with visit order. "
-            "Results cannot isolate phase from elapsed time, repetition, or habituation."
-        )
-        self.repeated_order_warning.setText(warning)
         self._update_exclusion_count_label()
 
     def _clear_choice_controls(self) -> None:

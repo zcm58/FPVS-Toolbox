@@ -196,8 +196,9 @@ Rules:
 - One harmonic domain is selected and frozen across the entire batch. Global
   run p-values receive Holm correction across conditions within each family and
   a conservative second correction across the full batch.
-- The fixed-order confounding appears in GUI, workbook, manifest, and reporting
-  guidance. The legacy powered-null receipt does not cover this extension.
+- The fixed-order confounding remains in the workbook, manifest, and reporting
+  guidance without adding a repeated warning to the compact GUI. The legacy
+  powered-null receipt does not cover this extension.
 
 ## Delivery Slices
 

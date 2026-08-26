@@ -220,12 +220,12 @@ family, and whole-participant exchangeability.
   Beta Tools setting.
 - Flat-project Setup resolves one contrast and displays the A-minus-B direction.
   A repeated-session project is recognized from canonical inspection options
-  and replaces the legacy selector with a compact stable-group summary, fixed-
-  order warning, and a project-persistent analysis-only recording-exclusion
-  dialog with required reasons. One run action starts the applicable workflow.
-  A concise Results section appears beneath Setup when complete; detailed
-  cohort, exclusion, contrast-family, direction, harmonic, source-coverage, and
-  participant x sensor x harmonic provenance remains in the exported workbook.
+  and replaces the legacy selector with a compact stable-group summary and a
+  project-persistent analysis-only recording-exclusion dialog with required
+  reasons. One run action starts the applicable workflow. A concise Results
+  section appears beneath Setup when complete; detailed cohort, exclusion,
+  contrast-family, direction, harmonic, source-coverage, and participant x
+  sensor x harmonic provenance remains in the exported workbook.
 - Prepared arrays remain worker-local while the automatic permutation and
   export phases run, so source workbooks are not read a second time. After the
   result table receives plain display strings, the page retains no prepared or

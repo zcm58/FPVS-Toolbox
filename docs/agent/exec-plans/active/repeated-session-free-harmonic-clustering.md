@@ -95,8 +95,9 @@ result.
 
 - Keep the legacy one-contrast GUI unchanged for flat projects.
 - For repeated projects, expose the two ordered groups, two ordered sessions,
-  all-condition batch, fixed-order warning, method summary, and
-  analysis-specific recording exclusions in a 1280x900-safe workflow.
+  all-condition batch, method summary, and analysis-specific recording
+  exclusions in a 1280x900-safe workflow; keep the fixed-order confounding in
+  exported provenance rather than a repeated GUI warning.
 - Run preparation, 16 permutation analyses, and export in one worker pipeline;
   widgets receive signals only.
 - Update package/user/method docs, verification registry, and CI-only

@@ -160,10 +160,10 @@ the page implementation.
 - Use one tab-free workspace. Flat and repeated projects use **Run Free
   Harmonic Clustering Analysis**. Repeated projects are recognized
   automatically and replace the flat-project selectors with a compact stable-
-  group summary, fixed-order warning, and a project-persistent analysis-only
-  recording-exclusion dialog with required reasons. A concise Results section
-  appears only after completion; detailed cohort, contrast-family, direction,
-  harmonic, method, and run provenance remains in the exported workbook.
+  group summary and a project-persistent analysis-only recording-exclusion
+  dialog with required reasons. A concise Results section appears only after
+  completion; detailed cohort, contrast-family, direction, harmonic, method,
+  and run provenance remains in the exported workbook.
 - Keep the embedded task pages free of page-level scroll areas. Bounded result
   tables may scroll internally when their data exceeds the available viewport.
 - Legacy Results shows current-session significant clusters ordered by
