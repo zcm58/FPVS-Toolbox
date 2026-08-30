@@ -11,6 +11,25 @@ The widget-free platform matrix passes 15 tests; the registered project-I/O
 bundle passes 116 tests. The path audit is separately blocked by eight existing
 machine-path findings in untracked local `outputs/`, which remain untouched.
 
+Sequence Figure recovery on 2026-08-30: independently ported the features from
+`f13c4334` and `49434bd9`: one to four conditions (default three), two oddball
+cycles per row, bounded custom labels, grayscale-safe markers, and optional
+PDF-only transparency. The current shared information and output-folder actions
+remain in use. Condition tabs replace the old branch's wide picker grid to fit
+the supported embedded workspace; long condition labels wrap without reducing
+publication font size. Existing output locations, PNG/PDF/SVG formats, 600-DPI
+defaults, and manual-image-only inputs remain unchanged. The tool's scoped
+`AGENTS.md`, user guide, and verification smoke path document the expanded UI.
+The renderer/helper/figure-style bundle passes 31 tests; the GUI focused gate,
+changed-file Ruff, compilation, and verification configuration checks pass.
+Synthetic three- and four-condition PNG exports were visually checked, including
+grayscale markers and maximum-length labels. The new
+`tests/sequence_figure/test_sequence_figure_gui_qt.py` covers condition tabs,
+bounded layout, retained hidden selections, picker cancellation, and export
+payloads, but remains CI-only; no local Qt session was run. The project-I/O,
+figures, Sequence Figure, and repo-precommit drivers stop at the same eight
+pre-existing `outputs/` path findings above, so those full gates are not green.
+
 FHC closeout progress on 2026-08-16: the five calibration-bound source files
 are Git-identical to the reviewed calibration commit, the method/protocol/
 adjacency identities and Python/NumPy/SciPy versions still match the receipt,

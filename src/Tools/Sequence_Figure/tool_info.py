@@ -7,16 +7,20 @@ from Main_App.gui.components import ToolInfoContent
 SEQUENCE_FIGURE_TOOL_INFO_HTML = """
 <h2>What This Tool Does</h2>
 <p>
-The Sequence Figure tool creates a simple FPVS stimulus-sequence illustration
-from five stimulus images. It center-crops the images, marks the fifth image as
-the oddball, and adds timing traces for the presentation and oddball rates.
+The Sequence Figure tool illustrates one to four FPVS conditions, with three
+condition rows selected by default. Each row uses four base images and one
+oddball image, repeated across two oddball cycles. Timing traces show the
+presentation and oddball rates.
 </p>
 
 <h3>Typical Workflow</h3>
 <p>
-Choose four representative base images and one oddball image, enter the rate
-labels, select an output folder, and export the figure. Every export writes a
-600-DPI PNG plus matching PDF and SVG files.
+Choose the condition count and use each condition tab to select five images
+and enter a label (up to 24 characters). Enter the rate labels, choose optional
+grayscale-safe line/frame styling or a transparent PDF background, and select
+an output folder. Every export writes a 600-DPI PNG plus matching PDF and SVG
+files. PNG and SVG backgrounds stay white; grayscale-safe styling does not
+convert the stimulus images themselves to grayscale.
 </p>
 
 <h3>Review Before Use</h3>

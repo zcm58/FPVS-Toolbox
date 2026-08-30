@@ -1,17 +1,22 @@
 # Sequence Figure
 
-Sequence Figure creates a five-image diagram of an FPVS oddball sequence for a
-manuscript, poster, presentation, preregistration, or study handout.
+Sequence Figure illustrates FPVS oddball sequences for one to four conditions
+in a single figure for a manuscript, poster, presentation, preregistration, or
+study handout. Three conditions are selected by default.
 
 Sequence Figure is currently available under **Beta Tools**. Enable Beta Tools
 in **Settings > Advanced**, then close and reopen FPVS Toolbox.
 
 ## Layout
 
-The first four slots are base images and the fifth slot is the oddball image.
-The selected images are center-cropped to squares, the oddball is outlined, and
-the figure includes separate square-wave timing traces for the presentation
-rate `F` and oddball rate `f`.
+Each condition has four base-image slots and a fifth oddball-image slot. The
+selected images are center-cropped to squares and repeated twice horizontally
+to show two oddball cycles. The figure stacks the selected conditions, labels
+each row, highlights the oddball columns, and includes separate square-wave
+timing traces for the presentation rate `F` and oddball rate `f`.
+
+The export retains the fixed 13.333 x 7.5 inch figure size. Four conditions are
+the hard limit; that layout uses slightly smaller images to keep rows separate.
 
 The tool accepts `.bmp`, `.jpg`, `.jpeg`, `.png`, `.tif`, and `.tiff` images.
 Use images that can be cropped to a square without removing important content.
@@ -20,13 +25,28 @@ the short side is sufficient for the default figure layout without a warning.
 
 ## Inputs
 
-Select exactly five images, enter the base and oddball frequencies shown in the
-timing labels, choose an output basename, and select an existing output folder.
-If the active project already contains a `Figures` folder, the tool uses it as
-the initial output location.
+Choose the condition count, then use each condition tab to select five images
+and enter a label of up to 24 characters. Long labels wrap in the exported
+figure. Reducing the count hides extra conditions without discarding their
+current-session images or labels; hidden conditions are not exported.
 
-The frequency entries are figure labels. Sequence Figure does not read EEG
-data, validate trigger timing, or alter the experiment configuration.
+Enter the base and oddball frequencies shown in the timing labels, choose an
+output basename, and select an existing output folder. If the active project
+already contains a `Figures` folder, the tool uses it as the initial output
+location. The tool does not write project settings or participant metadata.
+
+The frequency entries are figure labels. The schematic always shows four base
+images followed by one oddball; changing the labels does not change that
+pattern. Sequence Figure does not read EEG data, validate trigger timing, or
+alter the experiment configuration.
+
+Optional styling controls:
+
+- **Grayscale-safe lines and frames** distinguishes base and oddball markers
+  using tone, solid/dashed lines, and hatching. It does not recolor the stimulus
+  images themselves.
+- **Transparent PDF background** removes the PDF page background. PNG and SVG
+  exports retain a white background.
 
 ## Outputs
 
@@ -42,11 +62,12 @@ materials.
 
 ## Basic Steps
 
-1. Add four representative base images to slots 1–4.
-2. Add the representative oddball image to slot 5.
+1. Select one to four conditions.
+2. In each condition tab, enter its label and add four base images to slots
+   1–4 plus the representative oddball image in slot 5.
 3. Enter the presentation and oddball rates used by the experiment.
-4. Choose the basename and output folder.
-5. Select **Export Figure** and review all warnings.
+4. Choose any optional styling, the basename, and the output folder.
+5. Select **Export Figure** and review all warnings and exported condition rows.
 
 An example caption is: “Schematic FPVS sequence. Base stimuli were presented at
 `F` Hz, with an oddball stimulus inserted every *n*th image at `f` Hz.” Replace

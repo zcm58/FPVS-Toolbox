@@ -151,9 +151,9 @@ manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning an
 
 [scopes.sequence-figure]
 audits = ["gui", "paths"]
-tests = ["tests/sequence_figure/test_sequence_figure_renderer.py"]
+tests = ["tests/sequence_figure/test_sequence_figure_renderer.py", "tests/sequence_figure/test_sequence_figure_gui_copy.py"]
 include = ["src/Tools/Sequence_Figure/**", "tests/sequence_figure/**"]
-manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning, open Sequence Figure from the Main App, and verify the changed control or export in a visible session."]
+manual_smoke = ["With Beta Tools enabled, acknowledge the shared beta warning and open Sequence Figure in a visible 1280x900 Main App. Switch the default three conditions to one and four; verify every condition tab has five image pickers and a bounded label, hidden inputs return when the count increases, and setup/output controls fit without page-level scrolling or nested cards. Cancel image/output pickers and confirm prior selections remain. Export all active conditions with custom labels, grayscale-safe styling, and PDF transparency. Verify two oddball cycles per row, readable wrapped labels, matching 600-DPI PNG/PDF and retained SVG outputs, white PNG/SVG backgrounds, the unchanged selected output folder, and working shared information/Open Output Folder actions. Qt execution is CI-only locally unless the user explicitly approves a safe visible session."]
 
 [scopes.sensitivity-analysis]
 audits = ["gui"]

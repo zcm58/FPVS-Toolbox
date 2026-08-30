@@ -9,11 +9,15 @@ from PIL import Image
 
 from Main_App.exports.figure_style import FIGURE_FONT_FAMILY, FIGURE_TEXT_SIZE_PT, figure_text_kwargs
 from Tools.Sequence_Figure.renderer import (
+    DEFAULT_CONDITION_COUNT,
+    MAX_CONDITION_LABEL_LENGTH,
     SequenceFigureSpec,
     _IMAGE_SIZE_UNITS,
     _ODDBALL_FRAME_LINE_WIDTH_PT,
     _RATE_LABEL_FONT_SIZE_PT,
     _TIMING_LINE_WIDTH_PT,
+    _build_figure,
+    _load_slot_images,
     _rate_label_kwargs,
     render_sequence_figure,
 )
@@ -25,6 +29,7 @@ def _make_image(path: Path, size: tuple[int, int], color: tuple[int, int, int]) 
 
 
 def _image_paths(tmp_path: Path, size: tuple[int, int] = (1200, 1200)) -> tuple[Path, ...]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     colors = [
         (180, 50, 50),
         (50, 150, 70),
@@ -87,6 +92,40 @@ def test_render_sequence_figure_uses_requested_dpi_for_all_export_formats(
     assert save_calls == [(".png", 600), (".pdf", 600), (".svg", 600)]
 
 
+def test_render_sequence_figure_applies_transparency_to_pdf_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    save_calls: list[tuple[str, object, object]] = []
+
+    def savefig_spy(
+        _figure: Figure,
+        path: Path,
+        *_args: object,
+        **kwargs: object,
+    ) -> None:
+        save_calls.append(
+            (Path(path).suffix, kwargs.get("facecolor"), kwargs.get("transparent"))
+        )
+        Path(path).write_bytes(b"")
+
+    monkeypatch.setattr(Figure, "savefig", savefig_spy)
+
+    render_sequence_figure(
+        SequenceFigureSpec(
+            image_paths=_image_paths(tmp_path),
+            output_dir=tmp_path,
+            transparent_pdf=True,
+        )
+    )
+
+    assert save_calls == [
+        (".png", "white", False),
+        (".pdf", "none", True),
+        (".svg", "white", False),
+    ]
+
+
 def test_render_sequence_figure_warns_for_low_resolution_sources(tmp_path: Path) -> None:
     result = render_sequence_figure(
         SequenceFigureSpec(
@@ -126,12 +165,12 @@ def test_render_sequence_figure_svg_uses_segmented_low_state_lines(tmp_path: Pat
     )
 
     svg_text = result.svg_path.read_text(encoding="utf-8") if result.svg_path else ""
-    base_line_paths = _line_paths(svg_text, "#202020")
-    oddball_line_paths = _line_paths(svg_text, "#ff0000")
+    base_line_paths = _line_paths(svg_text, "#3e6b89", stroke_width="2.6")
+    oddball_line_paths = _line_paths(svg_text, "#ff0000", stroke_width="2.6")
 
-    assert len(base_line_paths) == 21
-    assert len(oddball_line_paths) == 5
-    assert _horizontal_y_counts(oddball_line_paths) == [1, 2]
+    assert len(base_line_paths) == 41
+    assert len(oddball_line_paths) == 9
+    assert _horizontal_y_counts(oddball_line_paths) == [2, 3]
 
 
 def test_render_sequence_figure_rate_labels_do_not_overlap_timing_lines(tmp_path: Path) -> None:
@@ -146,7 +185,7 @@ def test_render_sequence_figure_rate_labels_do_not_overlap_timing_lines(tmp_path
     )
 
     svg_text = result.svg_path.read_text(encoding="utf-8") if result.svg_path else ""
-    base_lines = _line_coordinates(svg_text, "#202020")
+    base_lines = _line_coordinates(svg_text, "#3e6b89")
     oddball_lines = _line_coordinates(svg_text, "#ff0000")
     base_line_max_x = max(max(xs) for xs, _ys in base_lines)
     oddball_line_max_x = max(max(xs) for xs, _ys in oddball_lines)
@@ -173,7 +212,7 @@ def test_render_sequence_figure_oddball_rate_uses_ppt_reference_red(tmp_path: Pa
 
     svg_text = result.svg_path.read_text(encoding="utf-8").lower() if result.svg_path else ""
 
-    assert len(_line_paths(svg_text, "#ff0000")) == 5
+    assert len(_line_paths(svg_text, "#ff0000", stroke_width="2.6")) == 9
     assert re.search(r"<!--\s*f = 1\.2 hz\s*-->.*?fill: #ff0000", svg_text, re.S)
 
 
@@ -188,10 +227,154 @@ def test_rate_label_font_uses_publication_figure_annotation_role() -> None:
 
 
 def test_render_sequence_figure_uses_publication_schematic_sizing() -> None:
-    assert _IMAGE_SIZE_UNITS == pytest.approx(2.28)
+    assert _IMAGE_SIZE_UNITS == pytest.approx(0.92)
     assert _TIMING_LINE_WIDTH_PT == pytest.approx(2.6)
     assert _ODDBALL_FRAME_LINE_WIDTH_PT == pytest.approx(2.4)
     assert _RATE_LABEL_FONT_SIZE_PT == 16
+
+
+def test_render_sequence_figure_accepts_default_three_condition_grid(tmp_path: Path) -> None:
+    result = render_sequence_figure(
+        SequenceFigureSpec(
+            image_paths=tuple(
+                _image_paths(tmp_path / f"condition_{condition}")
+                for condition in range(1, DEFAULT_CONDITION_COUNT + 1)
+            ),
+            output_dir=tmp_path,
+            basename="three-conditions",
+            png_dpi=72,
+            figure_size_in=(4.0, 2.25),
+        )
+    )
+
+    assert result.png_path.exists()
+
+
+def test_render_sequence_figure_uses_custom_condition_labels(tmp_path: Path) -> None:
+    result = render_sequence_figure(
+        SequenceFigureSpec(
+            image_paths=tuple(
+                _image_paths(tmp_path / f"condition_{condition}") for condition in range(1, 4)
+            ),
+            output_dir=tmp_path,
+            basename="custom-labels",
+            condition_labels=("Faces", "Objects", "Scenes"),
+            png_dpi=72,
+        )
+    )
+
+    svg_text = result.svg_path.read_text(encoding="utf-8") if result.svg_path else ""
+
+    assert all(f"<!-- {label} -->" in svg_text for label in ("Faces", "Objects", "Scenes"))
+
+
+def test_render_sequence_figure_grayscale_style_does_not_rely_on_color(tmp_path: Path) -> None:
+    result = render_sequence_figure(
+        SequenceFigureSpec(
+            image_paths=_image_paths(tmp_path),
+            output_dir=tmp_path,
+            basename="grayscale-safe",
+            grayscale_safe=True,
+            png_dpi=72,
+            figure_size_in=(4.0, 2.25),
+        )
+    )
+
+    svg_text = result.svg_path.read_text(encoding="utf-8").lower() if result.svg_path else ""
+    base_paths = _line_paths(svg_text, "#202020", stroke_width="2.6")
+    oddball_paths = _line_paths(svg_text, "#666666", stroke_width="2.6")
+
+    assert base_paths
+    assert oddball_paths
+    assert all("stroke-dasharray" not in path for path in base_paths)
+    assert all("stroke-dasharray" in path for path in oddball_paths)
+
+
+def test_render_sequence_figure_rejects_unsafe_condition_labels(tmp_path: Path) -> None:
+    image_paths = _image_paths(tmp_path)
+
+    with pytest.raises(ValueError, match="one condition label"):
+        render_sequence_figure(
+            SequenceFigureSpec(
+                image_paths=image_paths,
+                output_dir=tmp_path,
+                condition_labels=("First", "Second"),
+            )
+        )
+
+    with pytest.raises(ValueError, match="characters or fewer"):
+        render_sequence_figure(
+            SequenceFigureSpec(
+                image_paths=image_paths,
+                output_dir=tmp_path,
+                condition_labels=("X" * (MAX_CONDITION_LABEL_LENGTH + 1),),
+            )
+        )
+
+
+def test_render_sequence_figure_rejects_more_than_four_conditions(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at most 4 conditions"):
+        render_sequence_figure(
+            SequenceFigureSpec(
+                image_paths=tuple(
+                    _image_paths(tmp_path / f"condition_{condition}") for condition in range(1, 6)
+                ),
+                output_dir=tmp_path,
+            )
+        )
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
+def test_each_supported_condition_count_repeats_five_images_twice(tmp_path, count) -> None:
+    paths = _image_paths(tmp_path, size=(64, 64))
+    spec = SequenceFigureSpec(image_paths=(paths,) * count, output_dir=tmp_path)
+    images, _warnings = _load_slot_images(spec)
+    figure = _build_figure(spec, images)
+    try:
+        assert len(figure.axes[0].images) == count * 10
+        labels = [text.get_text() for text in figure.axes[0].texts]
+        assert all(f"Condition {index}" in labels for index in range(1, count + 1))
+    finally:
+        from matplotlib import pyplot as plt
+        plt.close(figure)
+
+
+def test_maximum_length_condition_labels_stay_inside_default_figure(tmp_path) -> None:
+    paths = _image_paths(tmp_path, size=(64, 64))
+    spec = SequenceFigureSpec(
+        image_paths=(paths,) * 4,
+        output_dir=tmp_path,
+        condition_labels=("W" * MAX_CONDITION_LABEL_LENGTH,) * 4,
+    )
+    images, _warnings = _load_slot_images(spec)
+    figure = _build_figure(spec, images)
+    try:
+        figure.canvas.draw()
+        labels = figure.axes[0].texts[:4]
+        assert len(labels) == 4
+        for label in labels:
+            bounds = label.get_window_extent(figure.canvas.get_renderer())
+            assert bounds.x0 >= 0
+            assert bounds.x1 <= figure.bbox.width
+            assert bounds.y0 >= 0
+            assert bounds.y1 <= figure.bbox.height
+    finally:
+        from matplotlib import pyplot as plt
+        plt.close(figure)
+
+
+@pytest.mark.parametrize("labels", [(" ",), ("\t",)])
+def test_blank_condition_labels_are_rejected(tmp_path, labels) -> None:
+    with pytest.raises(ValueError, match="cannot be blank"):
+        render_sequence_figure(SequenceFigureSpec(
+            image_paths=_image_paths(tmp_path), output_dir=tmp_path, condition_labels=labels,
+        ))
+
+
+def test_empty_condition_set_is_rejected_before_writing(tmp_path) -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        render_sequence_figure(SequenceFigureSpec(image_paths=(), output_dir=tmp_path))
+    assert not list(tmp_path.iterdir())
 
 
 def test_render_sequence_figure_requires_five_images(tmp_path: Path) -> None:
@@ -218,9 +401,10 @@ def test_render_sequence_figure_rejects_missing_output_folder(tmp_path: Path) ->
     assert not missing_output.exists()
 
 
-def _line_paths(svg_text: str, color: str) -> list[str]:
+def _line_paths(svg_text: str, color: str, *, stroke_width: str | None = None) -> list[str]:
+    stroke_filter = "" if stroke_width is None else rf"(?=[^>]*stroke-width: {stroke_width})"
     return re.findall(
-        rf'<path d="[^"]+"[^>]*stroke: {re.escape(color)}[^>]*>',
+        rf'<path d="[^"]+"{stroke_filter}[^>]*stroke: {re.escape(color)}[^>]*>',
         svg_text,
         re.S | re.IGNORECASE,
     )

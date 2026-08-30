@@ -44,6 +44,7 @@ tests/publication_maps/test_publication_maps_lifecycle_qt.py
 tests/ratio_calculator/test_ratio_calculator_lifecycle_qt.py
 tests/ratio_calculator/test_ratio_calculator_removed_smoke.py
 tests/ratio_calculator/test_ratio_calculator_roi_dynamic.py
+tests/sequence_figure/test_sequence_figure_gui_qt.py
 tests/stats/analysis/test_stats_dv_policy.py
 tests/stats/gui/test_stats_condition_selection.py
 tests/stats/gui/test_stats_focus_async.py
