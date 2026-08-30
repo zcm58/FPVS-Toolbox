@@ -4,6 +4,13 @@
 
 Active. This is the release ledger for the first v3 release candidate.
 
+Linux settings-path recovery on 2026-08-30: ported `185d803f` with Windows
+override and `%LOCALAPPDATA%` behavior explicitly preserved. Invalid relative
+XDG config roots now use the stable home fallback on non-Windows systems.
+The widget-free platform matrix passes 15 tests; the registered project-I/O
+bundle passes 116 tests. The path audit is separately blocked by eight existing
+machine-path findings in untracked local `outputs/`, which remain untouched.
+
 FHC closeout progress on 2026-08-16: the five calibration-bound source files
 are Git-identical to the reviewed calibration commit, the method/protocol/
 adjacency identities and Python/NumPy/SciPy versions still match the receipt,

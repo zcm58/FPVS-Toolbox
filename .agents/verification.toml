@@ -36,8 +36,9 @@ tests = [
   "tests/project_io/test_repeated_recording_preflight.py",
   "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",
+  "tests/project_io/test_settings_paths.py",
 ]
-include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
+include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
 manual_smoke = []
 
 [scopes.processing]

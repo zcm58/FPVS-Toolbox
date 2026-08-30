@@ -22,7 +22,9 @@ def app_config_home() -> Path:
 
     override = os.environ.get(ENV_CONFIG_HOME, "").strip()
     if override:
-        return Path(override).expanduser()
+        path = Path(override).expanduser()
+        # Keep the established Windows override semantics unchanged.
+        return path if os.name == "nt" else path.absolute()
 
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA", "").strip()
@@ -33,10 +35,18 @@ def app_config_home() -> Path:
             )
         return Path(base) / APP_CONFIG_DIR_NAME
 
-    base = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    if base:
-        return Path(base) / APP_CONFIG_DIR_NAME
-    return Path.home() / ".config" / APP_CONFIG_DIR_NAME
+    return _xdg_config_home() / APP_CONFIG_DIR_NAME
+
+
+def _xdg_config_home() -> Path:
+    """Return a stable XDG config root, ignoring invalid relative values."""
+
+    configured = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.is_absolute():
+            return configured_path
+    return Path.home() / ".config"
 
 
 def app_settings_dir() -> Path:

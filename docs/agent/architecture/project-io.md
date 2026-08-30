@@ -26,7 +26,11 @@ FPVS Toolbox uses a strict hybrid settings model:
 - App-level settings use `FPVS_CONFIG_HOME` when set. Otherwise they use
   `%LOCALAPPDATA%/FPVS Toolbox/settings/` on Windows and
   `$XDG_CONFIG_HOME/FPVS Toolbox/settings/` on CachyOS, falling back to
-  `~/.config/FPVS Toolbox/settings/` when `XDG_CONFIG_HOME` is unset.
+  `~/.config/FPVS Toolbox/settings/` when `XDG_CONFIG_HOME` is unset or relative.
+  Non-Windows `FPVS_CONFIG_HOME` overrides are expanded and made absolute;
+  use an absolute override to keep its location stable across launch folders.
+  Windows override expansion, relative-path handling, `%LOCALAPPDATA%` lookup,
+  and missing-variable errors remain unchanged.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
 - Harmonic Selection and Summation is project-specific scientific state in the
