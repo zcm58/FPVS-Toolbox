@@ -21,12 +21,20 @@ application settings cannot silently relabel an older processed project. A
 manually browsed unmanaged folder retains the legacy application-settings
 fallback and is identified as such in the run log.
 
-The ROI list comes from the current Toolbox settings. Define or edit an ROI in
-**Settings > ROIs**. Use **Select...** on a row to choose electrodes from the
-nose-up BioSemi64 map, optionally start from an FPVS default or custom preset,
-and choose **Use Selection** to return the draft to that row. The comma-separated
-field remains available for manual and noncanonical labels. The selector does
-not save by itself: choose **Save** on the outer Settings page to commit the ROI.
+The ROI list comes from the current Toolbox settings. Define or edit ROIs in
+**Settings > ROIs**, where the interactive nose-up BioSemi64 scalp map appears
+on the left and the ordered, color-coded ROI list appears on the right. Select
+an ROI name, then click an electrode or focus it and press Space to change that
+ROI. An electrode may belong to more than one ROI; separate color-ring segments
+show every overlapping membership. You can add a blank ROI or use an FPVS
+default or custom preset from the compact toolbar.
+
+Only ROI names use normal text entry. If older settings contain an electrode
+label that is not drawn on the BioSemi64 map, the ROI list keeps each such
+legacy occurrence visible until you explicitly remove or replace it. Map and
+list changes remain a draft. Resetting or clearing an ROI that still has legacy
+labels requires a second confirmation click. Choose **Save** on the outer
+Settings page to commit the draft, or **Cancel** to discard it.
 
 An already-open SNR Plots page refreshes after that Save. It keeps the selected
 ROI when the name still exists and otherwise returns to **(All ROIs)**. If no

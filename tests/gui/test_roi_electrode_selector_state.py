@@ -10,6 +10,11 @@ from Main_App.gui.roi_electrode_selector_state import (
     electrode_logical_position,
     split_electrode_text,
 )
+from Main_App.gui.roi_visual_editor_state import (
+    ROI_COLOR_PALETTE,
+    ROIEditorCollection,
+    roi_color_for_id,
+)
 
 
 def test_biosemi64_catalog_matches_fpvs_canonical_channels_case_insensitively() -> None:
@@ -111,3 +116,109 @@ def test_text_parser_and_canonical_identity_do_not_silently_deduplicate() -> Non
 
     with pytest.raises(ValueError, match="unique case-insensitively"):
         ROIElectrodeSelectionState(("Cz", "cz"), ())
+
+
+def test_editor_collection_preserves_duplicate_rows_identity_and_isolation() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+    collection.reset(
+        [
+            ("Shared", ("cz", "CZ", "LegacyAux")),
+            ("Shared", ("Cz", "O2")),
+        ]
+    )
+    first_id, second_id = (entry.entry_id for entry in collection.entries)
+
+    assert first_id != second_id
+    assert collection.get_pairs() == [
+        ("Shared", ["CZ", "CZ", "LEGACYAUX"]),
+        ("Shared", ["CZ", "O2"]),
+    ]
+
+    collection.entries[1].selection.set_checked("Cz", False)
+    assert collection.entries[0].selection.selected_electrodes() == (
+        "cz",
+        "CZ",
+        "LegacyAux",
+    )
+
+    result, index, created = collection.add_or_update("shared", ("P7",))
+    assert (result, index, created) == ("updated", 0, False)
+    assert collection.entries[0].entry_id == first_id
+    assert collection.entries[1].entry_id == second_id
+    assert collection.entries[1].selection.selected_electrodes() == ("O2",)
+
+    removed, new_index, appended_blank = collection.remove(0)
+    assert removed.entry_id == first_id
+    assert collection.entries[0].entry_id == second_id
+    assert (new_index, appended_blank) == (0, False)
+
+
+def test_editor_collection_reuses_blank_placeholder_and_restores_one_when_empty() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+    collection.reset([])
+    placeholder_id = collection.entries[0].entry_id
+
+    result, index, created = collection.add_or_update("Mapped", ("O1",))
+    assert (result, index, created) == ("added", 0, False)
+    assert collection.entries[0].entry_id == placeholder_id
+
+    removed, new_index, appended_blank = collection.remove(0)
+    assert removed.entry_id == placeholder_id
+    assert (new_index, appended_blank) == (0, True)
+    assert len(collection.entries) == 1
+    assert collection.entries[0].entry_id != placeholder_id
+    assert collection.entries[0].display_name == "Untitled ROI"
+
+
+def test_editor_collection_partial_validation_allows_only_wholly_blank_placeholder() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+    collection.reset([])
+    assert collection.first_partial_index() is None
+
+    collection.entries[0].selection.set_checked("O1", True)
+    assert collection.first_partial_index() == 0
+
+    collection.reset([("Named", ())])
+    assert collection.first_partial_index() == 0
+
+    collection.reset([("", ("O1",))])
+    assert collection.first_partial_index() == 0
+
+    collection.reset([("Mapped", ("O1",))])
+    assert collection.first_partial_index() is None
+
+
+def test_editor_collection_reports_only_legacy_occurrences_a_preset_drops() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+    collection.reset(
+        [("Custom", ("O1", "LegacyAux", "LegacyAux", "RetainedAux"))]
+    )
+
+    assert collection.dropped_unmapped_occurrences(
+        0,
+        ("O2", "legacyaux", "RetainedAux", "NewAux"),
+    ) == ("LegacyAux",)
+    assert collection.dropped_unmapped_occurrences(
+        0,
+        ("O2", "LegacyAux", "legacyaux", "retainedaux"),
+    ) == ()
+
+
+def test_roi_colors_are_unique_and_keep_caption_contrast_with_white() -> None:
+    colors = [roi_color_for_id(entry_id) for entry_id in range(1, 65)]
+
+    assert tuple(colors[: len(ROI_COLOR_PALETTE)]) == ROI_COLOR_PALETTE
+    assert len(set(colors)) == len(colors)
+    for color in colors:
+        components = [int(color[offset : offset + 2], 16) / 255 for offset in (1, 3, 5)]
+        linear = [
+            component / 12.92
+            if component <= 0.04045
+            else ((component + 0.055) / 1.055) ** 2.4
+            for component in components
+        ]
+        luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        assert 1.05 / (luminance + 0.05) >= 4.5
+
+    with pytest.raises(ValueError, match="positive"):
+        roi_color_for_id(0)

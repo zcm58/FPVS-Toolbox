@@ -263,10 +263,17 @@ class SettingsDialog(QDialog):
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-    def _add_settings_footer(self, tab: QWidget, layout: QVBoxLayout, object_name: str) -> None:
+    def _add_settings_footer(
+        self,
+        tab: QWidget,
+        layout: QVBoxLayout,
+        object_name: str,
+        *,
+        compact: bool = False,
+    ) -> None:
         footer = QWidget(tab)
         footer.setObjectName(object_name)
-        footer_layout = QVBoxLayout(footer)
+        footer_layout = QHBoxLayout(footer) if compact else QVBoxLayout(footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
 
@@ -274,6 +281,8 @@ class SettingsDialog(QDialog):
         change_root.setObjectName(f"{object_name}_change_root")
         change_root.clicked.connect(lambda: changeProjectsRoot(self))
         footer_layout.addWidget(change_root)
+        if compact:
+            footer_layout.addStretch(1)
         if not hasattr(self, "btn_changeRoot"):
             self.btn_changeRoot = change_root
 
@@ -849,93 +858,35 @@ class SettingsDialog(QDialog):
         self._custom_roi_presets_by_montage[current_montage] = self.manager.get_custom_roi_presets(
             current_montage
         )
-        quick_add_group = SectionCard(
-            "Quick Add",
-            tab,
-            object_name="settings_rois_quick_add_card",
-        )
-        quick_add_form = make_form_layout()
-
-        self.roi_montage_combo = QComboBox(quick_add_group)
-        self.roi_montage_combo.setObjectName("settings_rois_montage_combo")
-        for montage_key, label in supported_roi_montages():
-            self.roi_montage_combo.addItem(label, montage_key)
-        montage_index = self.roi_montage_combo.findData(current_montage)
-        if montage_index >= 0:
-            self.roi_montage_combo.setCurrentIndex(montage_index)
-        quick_add_form.addRow(QLabel("Electrode montage:", quick_add_group), self.roi_montage_combo)
-
-        self.roi_preset_combo = QComboBox(quick_add_group)
-        self.roi_preset_combo.setObjectName("settings_rois_preset_combo")
-        quick_add_form.addRow(QLabel("Quick-add ROI:", quick_add_group), self.roi_preset_combo)
-
-        self.roi_preset_electrodes_edit = QLineEdit(quick_add_group)
-        self.roi_preset_electrodes_edit.setObjectName("settings_rois_preset_electrodes")
-        self.roi_preset_electrodes_edit.setReadOnly(True)
-        quick_add_form.addRow(QLabel("Electrodes:", quick_add_group), self.roi_preset_electrodes_edit)
-        quick_add_group.content_layout.addLayout(quick_add_form)
-
-        quick_add_actions = ActionRow(quick_add_group, alignment=Qt.AlignLeft)
-        quick_add_actions.setObjectName("settings_rois_quick_add_actions")
-        add_preset_btn = make_action_button("Add ROI", compact=True, parent=quick_add_group)
-        add_preset_btn.setObjectName("settings_rois_add_preset")
-        add_preset_btn.clicked.connect(self._add_selected_roi_preset)
-        save_presets_btn = make_action_button("Save Custom Presets", compact=True, parent=quick_add_group)
-        save_presets_btn.setObjectName("settings_rois_save_custom_presets")
-        save_presets_btn.clicked.connect(self._save_roi_editor_as_custom_presets)
-        quick_add_actions.add_button(add_preset_btn)
-        quick_add_actions.add_button(save_presets_btn)
-        quick_add_group.content_layout.addWidget(quick_add_actions)
-
-        self.roi_preset_status = StatusBanner("", quick_add_group, variant="info")
-        self.roi_preset_status.setObjectName("settings_rois_preset_status")
-        self.roi_preset_status.setVisible(False)
-        quick_add_group.content_layout.addWidget(self.roi_preset_status)
-
-        self.roi_montage_combo.currentIndexChanged.connect(self._on_roi_montage_changed)
-        self.roi_preset_combo.currentIndexChanged.connect(self._update_roi_preset_preview)
-
         roi_group = SectionCard(
             "Regions of Interest",
             tab,
             object_name="settings_rois_card",
         )
         roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        roi_header = QWidget(roi_group)
-        roi_header_layout = QHBoxLayout(roi_header)
-        roi_header_layout.setContentsMargins(0, 0, 0, 0)
-        roi_header_layout.setSpacing(8)
-        roi_header_layout.addWidget(SubsectionHeaderLabel("ROI name", roi_header), 1)
-        roi_header_layout.addWidget(SubsectionHeaderLabel("Electrodes", roi_header), 1)
-        roi_header_layout.addWidget(SubsectionHeaderLabel("Visual selector", roi_header))
-        roi_header_layout.addSpacing(32)
-        roi_group.content_layout.addWidget(roi_header)
 
         self.roi_editor = ROISettingsEditor(
             self,
             self.manager.get_roi_pairs(),
             canonical_electrodes=config.DEFAULT_ELECTRODE_NAMES_64,
-            preset_provider=lambda: self._roi_preset_items(self._current_roi_montage()),
+            montage_options=supported_roi_montages(),
+            current_montage=current_montage,
+            preset_provider=self._roi_preset_items,
         )
         self.roi_editor.setObjectName("settings_rois_editor")
         self.roi_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.roi_editor.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.roi_editor.save_custom_presets_requested.connect(
+            self._save_roi_editor_as_custom_presets
+        )
+        self.roi_montage_combo = self.roi_editor.montage_combo
+        self.roi_preset_combo = self.roi_editor.preset_combo
+        self.roi_preset_status = self.roi_editor.status
         roi_group.content_layout.addWidget(self.roi_editor, 1)
 
-        add_btn = make_action_button("+ Add ROI", compact=True, parent=roi_group)
-        add_btn.setObjectName("settings_rois_add_roi")
-        add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
-        roi_actions = ActionRow(roi_group, alignment=Qt.AlignLeft)
-        roi_actions.setObjectName("settings_rois_actions")
-        roi_actions.add_button(add_btn)
-        roi_group.content_layout.addWidget(roi_actions)
-
         layout.addWidget(roi_group, 1)
-        layout.addWidget(quick_add_group)
-        self._add_settings_footer(tab, layout, "settings_rois_footer")
-        self._refresh_roi_preset_combo()
+        self._add_settings_footer(tab, layout, "settings_rois_footer", compact=True)
 
-        tabs.addTab(tab, "ROIs")
+        self._roi_tab_index = tabs.addTab(tab, "ROIs")
 
     # ------------------------------------------------------------------
     def _init_advanced_tab(self, tabs: QTabWidget) -> None:
@@ -1526,6 +1477,8 @@ class SettingsDialog(QDialog):
     def _save_analysis_inputs_for_harmonic_recalculation(self) -> bool:
         """Persist every non-project input consumed by harmonic selection."""
 
+        if not self._validate_roi_draft():
+            return False
         try:
             base_frequency = float(self.base_freq_edit.text())
             bca_upper_limit = float(self.bca_limit_edit.text())
@@ -2685,7 +2638,14 @@ class SettingsDialog(QDialog):
         )
 
     def _current_roi_montage(self) -> str:
-        return validate_roi_montage(str(self.roi_montage_combo.currentData()))
+        return validate_roi_montage(self.roi_editor.current_montage())
+
+    def _validate_roi_draft(self) -> bool:
+        if self.roi_editor.validate_draft():
+            return True
+        self.tabs.setCurrentIndex(self._roi_tab_index)
+        self.roi_editor.validate_draft()
+        return False
 
     def _custom_roi_presets(self, montage: str) -> list[tuple[str, list[str]]]:
         montage_key = validate_roi_montage(montage)
@@ -2707,52 +2667,14 @@ class SettingsDialog(QDialog):
         return items
 
     def _refresh_roi_preset_combo(self) -> None:
-        montage = self._current_roi_montage()
-        self.roi_preset_combo.blockSignals(True)
-        self.roi_preset_combo.clear()
-        for name, electrodes, is_default in self._roi_preset_items(montage):
-            source = "Default" if is_default else "Custom"
-            self.roi_preset_combo.addItem(f"{name} ({source})", (name, electrodes, is_default))
-        self.roi_preset_combo.blockSignals(False)
-        self._update_roi_preset_preview()
-
-    def _selected_roi_preset(self) -> tuple[str, list[str], bool] | None:
-        preset = self.roi_preset_combo.currentData()
-        if not isinstance(preset, tuple) or len(preset) != 3:
-            return None
-        name, electrodes, is_default = preset
-        if not isinstance(name, str) or not isinstance(electrodes, list) or not isinstance(is_default, bool):
-            return None
-        return name, electrodes, is_default
+        self.roi_editor.refresh_presets()
 
     def _set_roi_preset_status(self, text: str, variant: str = "info") -> None:
-        self.roi_preset_status.set_variant(variant)
-        self.roi_preset_status.set_text(text)
-        self.roi_preset_status.setVisible(bool(text))
-
-    def _update_roi_preset_preview(self) -> None:
-        preset = self._selected_roi_preset()
-        if preset is None:
-            self.roi_preset_electrodes_edit.clear()
-            return
-        _name, electrodes, _is_default = preset
-        self.roi_preset_electrodes_edit.setText(",".join(electrodes))
-
-    def _on_roi_montage_changed(self) -> None:
-        self._refresh_roi_preset_combo()
-        self._set_roi_preset_status("")
-
-    def _add_selected_roi_preset(self) -> None:
-        preset = self._selected_roi_preset()
-        if preset is None:
-            self._set_roi_preset_status("No ROI preset is selected.", "warning")
-            return
-        name, electrodes, _is_default = preset
-        result = self.roi_editor.add_or_update_entry(name, electrodes)
-        action = "Updated" if result == "updated" else "Added"
-        self._set_roi_preset_status(f"{action} {name}.", "success")
+        self.roi_editor.show_status(text, variant)
 
     def _save_roi_editor_as_custom_presets(self) -> None:
+        if not self._validate_roi_draft():
+            return
         montage = self._current_roi_montage()
         default_names = default_roi_name_keys(montage)
         custom_by_name = {
@@ -2963,6 +2885,8 @@ class SettingsDialog(QDialog):
 
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
+            return
+        if not self._validate_roi_draft():
             return
         if not self._confirm_parallel_worker_override(validated_preproc):
             return

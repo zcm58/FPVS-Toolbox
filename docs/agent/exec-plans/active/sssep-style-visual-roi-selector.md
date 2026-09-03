@@ -1,364 +1,325 @@
-# SSSEP-Style Visual ROI Selector for FPVS Toolbox
+# Embedded Visual ROI Editor for FPVS Toolbox
 
 ## Status
 
-Active; implementation is complete locally and awaits registered CI Qt plus
-visible installed-application acceptance. Work was performed on 2026-09-03 on
-`codex/sssep-roi-selector`, branched from FPVS
+Active. The first implementation was committed on 2026-09-03 as
+`8d84b216` on `codex/sssep-roi-selector`, branched from FPVS
 `codex/v3-release` at `f586652e0bf9920eb42ce9e8a75b5b08f2717f31`.
-The feature is explicit v3 scope in `active/v3-release-readiness.md`; the final
-installed-application acceptance pass must include the ROI workflow.
+That commit delivered the reusable BioSemi64 map, ordered selection state,
+row-launched modal editor, and cached-consumer refresh seam.
 
-Planning baseline:
+A same-branch follow-up now supersedes the first implementation's page design.
+The ROIs tab is now visual-first: the interactive scalp map is embedded on the
+left and an ordered, color-coded list of named ROIs is embedded on the right.
+The prior comma-list front page, per-row **Select...** actions, separate modal,
+and **Quick Add** card are no longer the user workflow. Follow-up implementation
+and locally safe focused verification are complete. Registered Qt execution and
+the visible installed-application smoke remain pending under repository policy.
 
-- FPVS Toolbox target: `f586652e0bf9920eb42ce9e8a75b5b08f2717f31`
+Planning baselines:
+
+- FPVS Toolbox branch point: `f586652e0bf9920eb42ce9e8a75b5b08f2717f31`
+- first ROI-selector implementation: `8d84b216`
 - SSSEP source reference: `d19d585517d0328eee965935688ba9ba161fd0d0`
-- SSSEP electrode-map provenance retained from `roi-explorer.js` commit
+- SSSEP electrode-map provenance: `roi-explorer.js` commit
   `3b797ad45fdecf688a9d82b869a6b7a908f7a555` and the BioSemi cap coordinate
-  sheet cited by the source module.
+  sheet cited by the source module
 
 ## Executive Outcome
 
-Add the SSSEP nose-up, clickable BioSemi64 electrode map to **Settings > ROIs**
-so a user can build or edit an FPVS ROI visually instead of having to type every
-comma-separated electrode name.
+Replace the contents of **Settings > ROIs** with one embedded visual editor:
 
-This is an additive visual editor for the ROI model FPVS already has. FPVS will
-continue to own persistence, presets, harmonic invalidation, downstream ROI
-averaging, and plot export. The port must not introduce an SSSEP settings file,
-change ROI mathematics, change workbook schemas, or change figure filenames.
+- a scalable, nose-up BioSemi64 scalp map on the left;
+- an ordered list of named ROIs on the right;
+- one presentation-only color per ROI;
+- segmented color rings on an electrode when it belongs to multiple ROIs;
+- direct pointer and keyboard toggling for the active ROI;
+- name-only text editing; and
+- an occurrence-preserving list for configured legacy labels that cannot be
+  drawn on the map.
 
-Expected delivery shape: three focused implementation slices plus documentation
-and release verification. Scientific risk is low because no numerical path
-changes; GUI-state and settings-compatibility risk is moderate and is addressed
-by the transaction, ordering, and live-refresh gates below.
+The editor remains an in-memory Settings draft. Only the outer **Save** action
+writes the existing ROI preferences or enters the established harmonic
+recalculation/rollback workflow. This redesign must not introduce a settings
+migration, change ROI mathematics, change scientific presets, or change any
+workbook or plot-output contract.
 
-## Executive Decisions
+## Decision History and Current Direction
 
-| Decision | Direction |
+| Decision | Current direction |
 | --- | --- |
-| What is being ported | The scalable electrode map, keyboard-accessible selection behavior, selection summary, preset application, Clear, Use, and Cancel interaction. |
-| What is not being ported | SSSEP's `.sssep_rois.json`, launcher settings, FFT loader, workers, plot math, TENS terminology, dark-theme QSS, or saved-plot output flow. |
-| Canonical ROI storage | Keep `SettingsManager` and the existing `[rois]` / `[roi_presets]` INI schema. No migration and no new project metadata. |
-| Save boundary | The selector edits a draft. Only the outer Settings Save writes preferences or enters the existing harmonic recalculation/rollback flow. |
-| Preset source | Use FPVS's existing montage-aware LOT, ROT, Central, and custom presets. Do not copy SSSEP's preset memberships or add its Fronto-central example. |
-| Channel universe | Show the canonical FPVS BioSemi64 electrodes and preserve any already-configured noncanonical labels in a separate fallback list/text field. Do not scan workbooks or run MNE from the dialog. |
-| Existing editor | Retain the current name and comma-list rows as a compatibility/fallback surface; add a compact visual-selector action for each row. |
-| Downstream behavior | Refresh cached ROI consumers after Settings commits, but do not mutate an active plot worker's snapshotted request. |
+| First implementation | Commit `8d84b216` added a map in a row-scoped modal while retaining text rows and Quick Add. Its map, ordered state, tests, and consumer-refresh work are the follow-up baseline. |
+| Follow-up surface | Embed the map as the primary ROI-tab surface; remove the visible comma-list editor, row selector buttons, modal workflow, and separate Quick Add card. |
+| Page layout | One top-level ROI section with a map-left/list-right split. A content-native scroll area may be used for the ROI list, but the Settings page must not become page-scrollable. |
+| Active ROI | Selecting a row on the right makes that ROI active. A map toggle changes only that ROI and never removes the electrode from another ROI. |
+| Overlap visualization | Draw separate ordered color-ring segments for every ROI containing an electrode. Do not blend colors, warn against overlap, or enforce exclusivity. |
+| Color persistence | Colors and internal row identities are presentation-only and deterministic within the editor. They are never written to `SettingsManager`. |
+| Text editing | Keep text entry for the ROI name only. Electrode membership is edited on the map. Existing noncanonical labels appear as individual retained occurrences with explicit removal controls, not as a comma field. |
+| Presets | Keep the exact FPVS montage-aware LOT, ROT, Central, and custom preset sources in a compact toolbar. Do not copy SSSEP preset memberships. |
+| Canonical storage | Keep `SettingsManager` and the existing `[rois]` / `[roi_presets]` INI schema. No project-metadata or color-schema additions. |
+| Save boundary | All map, name, preset, add, and remove operations edit the current Settings draft. Outer Settings **Cancel** discards them; outer **Save** commits them. |
+| Downstream behavior | Preserve the first implementation's committed Stats/SNR refresh behavior and Ratio Calculator polling. Never mutate an active worker's snapshotted request. |
 | Output contract | No changes to ROI averaging, FullSNR reads, conditions/groups/sessions, plot rendering, 600-DPI PNG/PDF pairs, names, or folders. |
 
-## Current Backbone and Actual Gap
+## Current Backbone
 
-FPVS already has the feature's data and analysis backbone:
+FPVS already has the required persistence and analysis backbone:
 
-- `src/Main_App/Shared/settings_manager.py` owns default ROI definitions,
-  active ROI pairs, montage selection, and per-montage custom presets.
+- `src/Main_App/Shared/settings_manager.py` owns active ROI pairs, montage
+  selection, and per-montage custom presets.
 - `src/Main_App/processing/roi_settings.py` is the neutral runtime read surface.
-- `src/Main_App/gui/settings_panel.py` owns the ROIs tab, Quick Add presets,
-  Settings Save, harmonic-change detection, recalculation, and rollback.
-- `src/Main_App/gui/roi_settings_editor.py` already preserves ordered ROI rows
-  and translates their comma-separated fields into `(name, electrodes)` pairs.
-- `src/Tools/Plot_Generator/` already filters FullSNR data by ROI, averages
-  electrodes within participant, averages participants within the selected
-  condition/group, and writes publication PNG/PDF pairs.
-- Stats, Ratio Calculator, processing QC, and analysis-ready exports already
-  read the same saved ROI definitions.
+- `src/Main_App/gui/settings_panel.py` owns the ROIs tab, Settings Save,
+  harmonic-change detection, recalculation, rollback, and cached-consumer
+  refresh.
+- `src/Main_App/gui/roi_settings_editor.py` owns the ordered draft collection
+  composition and its `(name, electrodes)` compatibility API.
+- `src/Main_App/gui/roi_visual_editor_state.py` owns stable draft-row identity,
+  independent selection ledgers, pair projection, partial-draft checks, and
+  deterministic contrast-safe presentation colors.
+- `src/Main_App/gui/roi_settings_widgets.py` owns the presentation-only toolbar,
+  color palette, active-ROI controls, and bounded map summary.
+- `src/Main_App/gui/roi_electrode_selector.py` owns the attributed BioSemi64
+  map geometry and accessible electrode controls.
+- `src/Main_App/gui/roi_electrode_selector_state.py` owns the ordered token
+  ledger that preserves legacy duplicates, unmapped labels, and no-op order.
+- Plot Generator, Stats, Ratio Calculator, processing QC, and analysis-ready
+  exports already consume the saved ROI mapping.
 
-The missing product surface is a visual electrode picker. The current editor is
-free text only. There is also one adjacent integration defect to close: the Main
-Window caches the SNR Plot Generator page, while that page loads `roi_map` only
-when constructed. Saving a new ROI after SNR Plots has already been opened can
-therefore leave its ROI combo and mapping stale until the page is recreated.
-
-## Source-to-Target Map
-
-| SSSEP source | FPVS target/adaptation |
-| --- | --- |
-| `sssep_batch/roi_selection_gui.py::_ElectrodeMap` | New focused GUI module, proposed as `src/Main_App/gui/roi_electrode_selector.py`; port geometry, scaling, painting, accessible toggle buttons, and keyboard behavior. |
-| `sssep_batch/roi_selection_gui.py::RoiSelectionDialog` | FPVS `AppDialog` using shared actions, status presentation, typography, and light-theme tokens; no direct persistence. |
-| SSSEP `_ELECTRODES` coordinate table | Retain with attribution and assert one-to-one case-insensitive coverage of `config.DEFAULT_ELECTRODE_NAMES_64`. It is a selection aid only, never an analysis montage. |
-| SSSEP `_PRESETS` | Do not copy. Inject default/custom preset data from the existing FPVS montage catalog. |
-| SSSEP `.sssep_rois.json` library | Do not port. Continue using `SettingsManager` and stage custom-preset changes until outer Save. |
-| SSSEP Settings ROI list | Integrate the modal into the existing `ROISettingsEditor` rows and preserve `get_pairs()`, `set_pairs()`, and `add_or_update_entry()` behavior. |
-| SSSEP saved FFT plotting stack | Do not port. FPVS Plot Generator, Stats, Ratio Calculator, and exports remain the consumers. |
-| SSSEP offscreen subprocess GUI tests | Translate into registered FPVS pytest-qt coverage for CI plus local pure-state tests and a visible manual smoke path. |
+The follow-up gap is presentation and multi-ROI coordination, not persistence
+or analysis. `ROISettingsEditor` should become the visual embedded collection
+editor while preserving `add_entry()`, `add_or_update_entry()`, `get_pairs()`,
+and `set_pairs()` for current Settings callers.
 
 ## Target User Workflow
 
-1. The user opens **Settings > ROIs** and sees the existing ordered ROI rows and
-   Quick Add preset controls.
-2. Each row has a compact **Select electrodes...** action. The existing
-   `+ Add ROI` action still creates a row; the same selector can open immediately
-   for a newly added row if that does not disturb the established object-name
-   and keyboard order contracts.
-3. The modal opens with the row's current name and electrodes. The map is
-   nose-up, shows all 64 canonical BioSemi positions, and supports pointer and
-   keyboard activation. Selection state must remain understandable without
-   relying on color alone.
-4. Choosing an existing FPVS default or custom preset updates the draft map and
-   reports any unavailable/unmapped members. Existing Quick Add behavior remains
-   available in this first release; consolidating duplicate preset affordances
-   is a separate polish decision.
-5. **Use Selection** updates only the targeted Settings row. **Cancel**, window
-   close, or Escape is a strict no-op. **Clear** changes only the modal draft.
-6. The user may still type or retain a noncanonical electrode label in the
-   comma-list field. Reopening and accepting the map must not silently delete it.
-7. Only **Save** on the outer Settings surface persists ROI pairs and custom
-   presets. If the ROI change affects the current Legacy harmonic-selection
-   signature, the established recalculate/decline/rollback workflow remains in
-   control.
-8. Existing SNR Plots, Stats, and Ratio Calculator pages refresh their ROI
-   options after the commit. A newly selected ROI is usable in the same app
-   session without a restart.
+1. Open **Settings > ROIs**. The BioSemi64 scalp map is immediately available
+   on the left; the saved ROIs appear in order on the right with a color swatch,
+   membership summary, selection control, and remove action. The selected ROI's
+   name is edited in the single **Edit active ROI** field below the list.
+2. Select an ROI row. Its mapped electrodes receive the active ROI fill and
+   persistent non-color selection cue. Every electrode also shows the ordered
+   color-ring segments for all ROIs that contain it.
+3. Click an electrode or focus it and press Space to toggle membership in the
+   active ROI only. Membership in other ROIs is unchanged.
+4. Add a blank ROI or add/update one from the compact FPVS preset toolbar. The
+   existing montage catalog and default/custom preset memberships remain the
+   sole preset source of truth.
+5. Edit only the ROI name as text. If a loaded ROI contains labels not present
+   on the BioSemi64 map, review those labels as separate occurrences on the
+   right and remove an occurrence explicitly if desired. Duplicate occurrences
+   remain distinct.
+6. Use the outer **Cancel** to abandon the full draft, or outer **Save** to
+   commit all ROI names and membership lists through the existing Settings
+   workflow.
+7. After a successful commit, cached Stats and SNR pages refresh and Ratio
+   Calculator observes the same committed mapping through its existing polling
+   path.
 
 ## Locked Compatibility Rules
 
 - Preserve the existing app-level settings location and INI keys:
   `rois.montage`, `rois.names`, `rois.electrodes`, and montage-keyed custom
   presets. ROI settings do not move into `project.json`.
-- Preserve ROI order, ROI display names, and electrode order when the user makes
-  no effective change. The harmonic settings signature contains ordered tuples;
-  a visual round trip must not create a false recalculation prompt.
+- Preserve ROI row order, display names, and electrode order when the user
+  makes no effective change. The harmonic signature contains ordered tuples;
+  opening the visual tab must not create a false recalculation prompt.
+- Give every draft row an opaque internal identity. Do not use the ROI name as
+  identity because duplicate ROI names are valid legacy data.
+- Use one independent `ROIElectrodeSelectionState` per row. Different ROIs may
+  overlap, and a map toggle must never deduplicate or remove membership across
+  rows.
 - When a selection changes, retain surviving electrodes in their prior order
   and append newly selected canonical electrodes in deterministic BioSemi64
   order. Persist through the existing uppercase normalization contract.
-- The selector requires a nonblank name and at least one electrode before it can
-  apply a draft. It must not normalize or deduplicate existing row content as a
-  side effect: legacy duplicate ROI names or electrode entries must survive a
-  no-op visual round trip. Stricter uniqueness rules would be a separate data-
-  compatibility change and are outside this plan.
-- Different ROIs may overlap; overlap is scientifically valid and must not be
-  warned away or deduplicated across ROIs.
-- Existing noncanonical/unmapped labels must remain visible, editable, and
-  selected until the user explicitly removes them. The visual picker must never
-  silently narrow old settings to the 64 drawn nodes.
+- Preserve duplicate electrode occurrences within an ROI. The map shows one
+  position for that ROI, while its summary distinguishes total stored entries
+  from unique mapped positions.
+- Preserve every existing noncanonical/unmapped label, including repeated
+  labels and original occurrence order, until that occurrence is explicitly
+  removed or the user explicitly replaces/clears the ROI.
+- A preset replacement or Clear action must not silently discard retained
+  unmapped labels. A same-name preset reset or **Clear Active ROI** requires a
+  second activation after warning about affected labels, then reports the
+  completed removal in the draft status.
 - The map defines intended ROI membership. Do not disable nodes based on a
-  participant's removed electrodes, current QC exclusions, or one workbook's
+  participant's removed electrodes, current QC exclusions, or workbook
   coverage.
-- Keep the current FPVS LOT, ROT, and Central definitions exactly as stored in
-  `Main_App.Shared.roi_presets`. SSSEP's Central membership differs and must not
-  overwrite the FPVS scientific defaults.
-- No runtime dependency on the SSSEP repository. Copy/adapt the reviewed code
-  into FPVS with attribution.
-- No `QThread` is needed: this is bounded, in-memory UI state. Do not add file
-  discovery, MNE montage construction, processing, or export work to the dialog.
+- Keep the FPVS LOT, ROT, and Central definitions exactly as stored in
+  `Main_App.Shared.roi_presets`. SSSEP's Central membership differs and must
+  not replace the FPVS definition.
+- Colors, swatches, overlap segments, active-row state, and internal row IDs
+  are UI metadata only. `get_pairs()` must return only the current ordered
+  `(name, electrodes)` contract.
+- A wholly blank placeholder is valid and omitted from persistence. A partially
+  defined ROI blocks outer Save and custom-preset staging, activates the row,
+  and focuses the missing name or map input instead of silently dropping work.
+  Do not introduce uniqueness rules for names or electrodes.
+- No runtime dependency on the SSSEP repository. Retain the reviewed source
+  attribution with the copied/adapted coordinate geometry.
+- No `QThread` is needed. This is bounded, in-memory UI state; do not add file
+  discovery, MNE construction, processing, or export work to the editor.
 - Keep `src/Main_App/gui/main_window.py` unchanged unless implementation
-  evidence proves unavoidable; it must not receive new functions for this work.
-- The modal may use content-native scrolling, but the Settings page must still
-  fit the supported 1280x900 workspace without page-level scrolling or nested
-  cards.
+  evidence proves unavoidable.
+- Fit the supported 1280x900 workspace without a page-level scroll area or
+  card-within-card layout. A focused ROI-list scroll area is allowed.
 
 ## Non-Goals
 
+- Persisting ROI colors, user-selected palettes, internal row IDs, or overlap
+  display metadata.
 - Changing ROI means, participant weighting, condition/group/session behavior,
   missing-electrode handling, or harmonic-selection methods.
-- Changing the FPVS default ROIs or adding new scientifically endorsed presets.
+- Changing FPVS default ROIs or adding new scientifically endorsed presets.
 - Adding arbitrary montage design, cap import, sensor-coordinate editing, or
   per-project ROI definitions.
-- Moving or redesigning the Settings system, `SettingsManager`, or project
-  manifest.
+- Adding a general free-text route for new noncanonical electrode labels. This
+  follow-up preserves and explicitly removes existing legacy occurrences; it
+  removes the prior comma-entry workflow.
+- Moving or redesigning `SettingsManager` or the project manifest.
 - Changing Plot Generator workers, workbook discovery, renderers, filenames,
   output folders, or figure formats.
 - Changing SSSEP code.
 
 ## Implementation Plan
 
-### Milestone 0 — Activate and Characterize
+### Milestone 0 — First-Phase Baseline
 
-Status: complete. Existing schema/order behavior and the cached-consumer gap
-are covered by focused tests and code-path receipts; no local Qt session was
-used for the pre-change reproduction.
+Status: complete in commit `8d84b216`.
 
-1. Move this plan to `docs/agent/exec-plans/active/` and record the working
-   branch and current revisions.
-2. Characterize current ROI round trips for ordering, casing, duplicate names,
-   incomplete rows, custom presets, outer Save/Cancel, and Legacy harmonic dirty
-   detection before modifying the GUI.
-3. Add the missing ROI-focused tests to the verification registry:
-   - `tests/settings/test_roi_preset_settings.py` under `project-io`;
-   - `tests/processing/test_roi_settings.py` under `processing`.
-4. Record the pre-change visible workflow at 1280x900 and confirm the SNR page
-   stale-ROI reproduction: open SNR Plots, save a changed ROI, return to the
-   cached SNR page, and observe its old selection state.
+- Characterized the settings schema, ordered ROI round trip, duplicate and
+  unmapped labels, outer Save/Cancel behavior, and cached SNR gap.
+- Added the reusable BioSemi64 map, pure ordered selection state, row-scoped
+  modal editor, focused tests, and cached-consumer refresh seam.
+- Preserved the original text-row and Quick Add UI as required by the first
+  plan revision. That presentation choice is now explicitly superseded.
 
-Exit gate: the current settings schema and the stale-consumer bug are covered by
-tests or an explicit reproducible receipt.
+### Milestone 1 — Embed the Multi-ROI Editor
 
-### Milestone 1 — Port the Selector as a Focused FPVS Component
+Status: complete; locally safe verification recorded below.
 
-Status: implementation and pure-state verification complete; registered CI Qt
-interaction/layout verification remains pending.
+1. Refactor `ROISettingsEditor` in place into a horizontal map/list editor and
+   retain its current Settings-facing API.
+2. Maintain one ordered row record with an opaque ID, draft name, independent
+   `ROIElectrodeSelectionState`, and UI-only color assignment.
+3. Extend `ElectrodeMapWidget` with an atomic presentation update for the
+   active selection, aggregate memberships, active color, and accessible
+   membership description.
+4. Draw ordered segmented rings around electrodes with multiple ROI
+   memberships. Keep the native checkable button and non-color active-selection
+   cue.
+5. Build a right-side list with active selection, swatches, entry and
+   unique-position counts, one active-name field, retained legacy-label
+   occurrences, and remove actions. Preserve duplicate names and occurrences.
+6. Remove the per-row selector action and retire the modal-only UI when no
+   active caller remains.
 
-1. Add `src/Main_App/gui/roi_electrode_selector.py`, kept below the repository's
-   500-line module target. Split a pure selection-state/catalog helper only if
-   needed to stay focused and locally testable.
-2. Port the SSSEP 64-node polar geometry, scalable head outline, orientation
-   labels, and native checkable `QToolButton` hit targets. Preserve the source
-   attribution in code.
-3. Build the modal on `Main_App.gui.components.AppDialog`, `SurfaceSize`, shared
-   action rows/buttons, `StatusBanner`, typography, and style tokens. Adapt the
-   presentation to the FPVS light theme rather than copying SSSEP's dark QSS.
-4. Accept constructor data rather than reading settings:
-   - available/canonical channel labels;
-   - current name and ordered electrode tuple;
-   - FPVS default/custom presets for the active montage;
-   - configured noncanonical labels that require preservation.
-5. Expose a small draft API such as `selected_electrodes()` and
-   `selection_name()`. Public results change only when the dialog is accepted.
-6. Keep map selection, preset selection, summary text, missing/unmapped text,
-   Clear, validation, and action enabled states synchronized.
-7. Add pure state tests for canonical coverage, case-insensitive identity,
-   stable no-op order, deterministic appended order, unknown-label preservation,
-   legacy duplicate preservation, and preset subset behavior. Register
-   `tests/gui/test_roi_electrode_selector_state.py` explicitly in
-   `[scopes.gui].tests` in `.agents/verification.toml`.
+Exit gate: selecting, naming, adding, removing, overlapping, and switching ROIs
+works entirely in the embedded draft without schema or order changes.
 
-Exit gate: the dialog is settings-agnostic, theme-compliant, accessible, and
-proven not to reorder or discard an unchanged ROI.
+### Milestone 2 — Consolidate Presets and Settings Integration
 
-### Milestone 2 — Integrate Settings Without Replacing Its Model
+Status: complete; locally safe verification recorded below.
 
-Status: implementation complete; Settings Save/Cancel/reopen coverage is
-registered for CI Qt and remains pending there.
+1. Replace the separate Quick Add card with a compact montage/preset toolbar in
+   the single ROI surface.
+2. Preserve `default_roi_presets()` and staged custom presets as the only
+   membership sources.
+3. Preserve first case-insensitive name-match behavior in
+   `add_or_update_entry()` and exact ordered preset input; never convert preset
+   membership to a set for storage.
+4. Preserve outer Settings Save/Cancel, harmonic dirty detection,
+   recalculation, rollback, and page retirement.
+5. Preserve `_refresh_roi_consumers()` and current worker-snapshot boundaries.
 
-1. Extend `ROISettingsEditor` with one selector action per row. Seed the modal
-   from the row's current fields and update that row only on accept.
-2. Keep typed comma lists and the visual map bidirectionally compatible. The
-   text field remains the route for a new noncanonical label; the dialog lists
-   and preserves such labels on later edits.
-3. Have `SettingsDialog` supply canonical BioSemi64 labels and the existing
-   montage-aware default/custom preset collection. Do not duplicate preset
-   membership inside the selector module.
-4. Preserve `get_pairs()`, `set_pairs()`, `add_or_update_entry()`, ROI order,
-   remove behavior, object names relied on by tests, and the current Quick Add
-   preset workflow.
-5. Add inline validation for blank names and empty selections. Preserve the
-   current manual editor/storage semantics for duplicate ROI names and duplicate
-   electrodes, including no-op round trips; do not silently omit, normalize, or
-   deduplicate a row created or edited through the selector.
-6. Confirm selector Cancel does not alter the row, Settings Cancel does not
-   alter the manager/disk, and Settings Save continues through the existing
-   persistence and harmonic recalculation/rollback code.
+Exit gate: blank add, preset add/update, custom-preset staging, outer Cancel,
+outer Save, and rollback retain the established behavior through the new page.
 
-Exit gate: add, edit, preset, manual fallback, remove, cancel, save, reopen, and
-rollback all preserve the existing settings contract.
+### Milestone 3 — Focused Tests and Documentation
 
-### Milestone 3 — Refresh Cached Consumers and Prove End-to-End Use
+Status: implementation complete. Local non-Qt results are recorded below; CI Qt
+execution and visible cross-platform smoke remain pending.
 
-Status: implementation and locally safe consumer regressions complete; cached
-page interaction coverage remains pending in CI Qt.
+1. Replace modal-centric Qt expectations with embedded-editor coverage.
+2. Add pure tests for ordered row identity, duplicate names, overlap isolation,
+   aggregate membership presentation data, UI-only colors, and occurrence-level
+   unmapped removal.
+3. Add registered CI Qt coverage for pointer and Space toggling, active-row
+   switching, overlap rings, right-list behavior, preset controls, layout, and
+   accessibility.
+4. Retain existing settings, processing, Stats, SNR, Ratio, and harmonic
+   rollback regressions.
+5. Update GUI architecture and user documentation to describe the embedded
+   workflow.
 
-1. Add a focused public ROI-refresh method to the Plot Generator page or its
-   selection mixin. It must reload through `Main_App.processing.roi_settings`,
-   rebuild the combo, preserve the selected ROI when still valid, otherwise
-   fall back to `(All ROIs)`, and rerun readiness validation.
-2. Invoke the refresh after a successful outer Settings commit and when the
-   cached SNR page is reactivated if needed for resilience. Do not update an
-   already-running worker request.
-3. Preserve the existing Stats refresh path and confirm Ratio Calculator's
-   existing dynamic refresh still sees the same mapping. Do not add parallel
-   ROI caches.
-4. Characterize one single ROI and `(All ROIs)` through Plot Generator using
-   the pre-existing worker and output tests. The only changed input should be
-   the saved ROI mapping.
-5. Confirm a no-ROI configuration produces actionable readiness feedback rather
-   than launching a meaningless SNR job; do not invent a fallback ROI.
-
-Exit gate: a saved ROI is available to every current consumer in the same app
-session, while worker payloads, calculations, and output identities are
-unchanged.
-
-### Milestone 4 — Documentation and Release Closeout
-
-Status: in progress. Documentation, local safe gates, and independent code
-review are complete. CI Qt, visible 1280x900 Windows smoke, packaged-app
-acceptance, and the optional CachyOS smoke remain.
-
-1. Update `docs/agent/architecture/gui.md` with ownership of the focused
-   selector module, its draft-only boundary, and the cached-consumer refresh
-   contract. Root `ARCHITECTURE.md` need not change if ownership stays entirely
-   inside the existing `Main_App.gui` and `Main_App.processing` boundaries;
-   record that decision in the handoff.
-2. Update `docs/user/tools/snr-plot-generator.md` to direct users to the visual
-   selector in Settings and explain that ROIs are app-level definitions used by
-   one/all-ROI plots.
-3. Update Stats and Ratio Calculator user guidance only where it currently
-   explains ROI definition. Do not imply that visual selection changes raw EEG
-   preprocessing.
-4. Add a concise note to `src/Tools/Plot_Generator/AGENTS.md` only if the new
-   live-refresh method becomes part of its durable public contract.
-5. Complete local safe gates, CI Qt coverage, visible smoke, and the final plan
-   progress/verification record before moving or removing the completed plan
-   according to repository policy.
+Exit gate: locally safe gates pass, registered Qt coverage passes in CI, and the
+visible 1280x900 workflow is accepted.
 
 ## Expected File Surface
 
 Primary implementation:
 
-- `src/Main_App/gui/roi_electrode_selector.py` — new visual map/dialog owner.
-- `src/Main_App/gui/roi_settings_editor.py` — row-level launch and accepted-draft
-  synchronization.
-- `src/Main_App/gui/settings_panel.py` — inject catalog/presets and refresh
-  existing consumers after commit; do not add selector implementation here.
-- `src/Tools/Plot_Generator/gui.py` and/or `selection_state.py` — focused
-  `refresh_rois()` seam only.
-- `.agents/verification.toml` — add the pure selector-state test to
-  `[scopes.gui].tests` and register the existing ROI settings tests in their
-  focused scopes.
-- `tests/qt_test_files.txt` — register only the new CI Qt interaction test.
+- `src/Main_App/gui/roi_settings_editor.py` — embedded map/list coordination
+  and Settings compatibility API.
+- `src/Main_App/gui/roi_visual_editor_state.py` — GUI-neutral row identity,
+  ordered collection behavior, pair projection, partial-draft validation, and
+  UI-only color allocation.
+- `src/Main_App/gui/roi_settings_widgets.py` — compact preset toolbar,
+  right-side controls, presentation colors, and keyboard-order helpers.
+- `src/Main_App/gui/roi_electrode_selector.py` — reusable map rendering,
+  overlap-ring presentation, and accessible electrode controls; retire
+  modal-only composition when unused.
+- `src/Main_App/gui/roi_electrode_selector_state.py` — BioSemi64 geometry,
+  parser helpers, and the ordered per-ROI token ledger.
+- `src/Main_App/gui/settings_panel.py` — single ROI surface, compact preset
+  toolbar, and unchanged Save/rollback/consumer-refresh orchestration.
 
-Primary tests:
+Focused tests and docs:
 
-- `tests/gui/test_roi_electrode_selector_state.py` — new locally safe pure-state
-  contract.
-- `tests/gui/test_roi_electrode_selector_qt.py` — new CI-only interaction and
-  layout smoke, or equivalent focused additions to the existing registered
-  Settings test.
-- `tests/gui/test_gui_preproc_dialog.py` — row integration, Quick Add parity,
-  harmonic dirty/recalculation, and rollback.
-- `tests/settings/test_roi_preset_settings.py` — unchanged schema and preset
-  round trip.
-- `tests/processing/test_roi_settings.py` — neutral consumer contract.
-- `tests/plot_generator/test_plot_generator_gui.py` or a focused sibling —
-  cached-page ROI refresh.
-- Existing Plot Generator aggregation/rendering tests remain regression gates,
-  not rewrite targets.
-
-Documentation:
-
+- `tests/gui/test_roi_electrode_selector_state.py`
+- `tests/gui/test_roi_electrode_selector_qt.py`
+- `tests/gui/test_gui_preproc_dialog.py`
+- existing ROI settings, processing, Plot Generator, Stats, and Ratio tests
 - `docs/agent/architecture/gui.md`
 - `docs/user/tools/snr-plot-generator.md`
-- narrowly relevant Stats/Ratio guidance if needed
-- this execution plan while active
+- `docs/user/tools/statistics.md`
+- `docs/user/tools/ratio-calculator.md`
+- this active plan
 
 ## Acceptance Criteria
 
+- The ROI tab opens directly to a nose-up map on the left and an ordered named
+  ROI list on the right; no comma-list electrode editor, row-level selector
+  button, separate selector modal, or Quick Add card remains in the normal
+  workflow.
 - All 64 `DEFAULT_ELECTRODE_NAMES_64` channels appear exactly once at the
-  expected nose-up coordinates, with a test that the map catalog and canonical
-  FPVS channel catalog are set-equal case-insensitively.
-- Every map node is pointer- and keyboard-operable and has an accessible name,
-  tooltip/description, focus indication, and non-color selected indication.
-- Opening and accepting an unchanged ROI preserves its name, electrode order,
-  effective casing contract, and harmonic signature.
-- Existing duplicate ROI names or duplicate electrode entries survive an
-  unchanged visual round trip; this feature does not migrate legacy settings.
-- Add/Edit updates only the intended row. Selector Cancel, Escape, and close are
-  no-ops. Outer Settings Cancel leaves persisted settings unchanged.
-- FPVS default/custom presets populate the map from one existing source of
-  truth. No SSSEP preset silently replaces an FPVS definition.
-- Existing noncanonical labels survive open/accept/save; users can still edit
-  them through the retained text fallback.
-- Saving a real ROI change uses the existing settings location/schema and the
-  existing Legacy harmonic recalculation, decline, stale, and rollback paths.
-- A cached SNR page sees committed ROI additions, edits, and removals without a
-  restart. Its current selection is preserved when valid and safely reset when
-  removed.
-- Stats, Ratio Calculator, processing QC, and analysis-ready exports read the
-  same committed mapping without new adapters or divergent caches.
-- No Plot Generator worker, ROI calculation, workbook sheet/schema, output
-  directory, filename, DPI, PNG/PDF pairing, or participant weighting changes.
-- Settings and the focused modal fit and remain usable at 1280x900 on Windows;
-  the shared implementation remains compatible with CachyOS.
+  expected coordinates.
+- Every node is pointer- and keyboard-operable and has an accessible name,
+  tooltip/description, focus indication, and non-color active-selection cue.
+- Selecting an ROI row changes only the active editing context. Clicking a map
+  node changes membership only in that active ROI.
+- Overlapping electrodes show one ordered color segment for every containing
+  ROI, and their accessible description identifies every membership without
+  relying on color alone.
+- Duplicate ROI names remain independent through stable internal identities.
+  Duplicate electrode and unmapped-label occurrences survive a no-op round
+  trip.
+- Existing noncanonical labels remain visible as distinct occurrences and are
+  removed only through an explicit occurrence action or explicit ROI
+  replacement/clear.
+- Presentation colors and internal IDs never enter `get_pairs()`, the INI file,
+  the harmonic signature, processing, or outputs.
+- Distinct draft IDs do not cycle through the base palette, and every generated
+  node fill keeps at least 4.5:1 contrast with its white electrode label.
+- FPVS default/custom presets use the existing catalog and preserve existing
+  add/update and staging behavior.
+- Outer Settings Cancel leaves persisted settings unchanged. Outer Save uses
+  the current schema and harmonic recalculation/rollback path.
+- Cached SNR and Stats pages refresh after a committed change; Ratio Calculator
+  sees the same mapping; active worker requests remain snapshots.
+- No ROI calculation, workbook schema, output directory, filename, DPI,
+  PNG/PDF pairing, participant weighting, or scientific default changes.
+- The page fits and remains usable at 1280x900 on Windows; the shared
+  implementation remains compatible with CachyOS.
 
 ## Verification Plan
 
@@ -370,12 +331,12 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 ```
 
-The current path audit may report unrelated untracked files under `outputs/`.
-Do not clean, edit, or treat those user files as part of this feature.
+The path audit may report unrelated untracked files under `outputs/`. Do not
+clean, edit, or treat those user files as part of this feature.
 
 ### Local safe gates
 
-Run in order, letting the verification driver choose `.venv1` or `.venv`:
+Run after the embedded follow-up is implemented:
 
 ```console
 python .agents/scripts/verify.py --scope gui --tier focused
@@ -388,144 +349,140 @@ python .agents/scripts/verify.py --scope repo --tier precommit
 git diff --check
 ```
 
-Do not run the `figures` scope unless implementation touches a renderer or
-figure-style contract; that would be scope expansion and must be called out.
+Do not record these as passing until they have run against the follow-up. Do not
+run pytest-qt or an offscreen Qt subprocess locally unless the user explicitly
+approves a safe visible environment.
 
-### CI Qt coverage
+### Registered CI Qt coverage
 
-Register the selector interaction test in `tests/qt_test_files.txt`. CI must
-cover:
+The follow-up coverage must verify:
 
-- pointer and Space-key toggling;
-- accessible names and checked/focus state;
-- map geometry and responsive dialog layout;
-- current-row targeting and manual/map synchronization;
-- FPVS default and custom preset application;
-- unknown-label preservation;
-- blank-name/empty-selection validation and legacy duplicate preservation;
-- Use versus Cancel semantics;
-- Settings Save/Cancel/reopen;
-- cached SNR-page refresh.
-
-Per repository policy, do not run pytest-qt or an offscreen Qt subprocess on a
-local development machine unless the user explicitly approves a safe visible
-environment.
+- pointer and Space-key toggling for the active ROI;
+- active-row selection and duplicate-name isolation;
+- overlap segments and accessible multi-membership descriptions;
+- color/ID exclusion from persistence;
+- exact no-op ordering and legacy duplicate preservation;
+- occurrence-level noncanonical-label removal;
+- blank add, remove fallback, preset add/update, and custom-preset staging;
+- outer Settings Save/Cancel/reopen and rollback;
+- cached SNR-page refresh; and
+- usable geometry at the supported workspace size.
 
 ### Visible manual smoke
 
 1. Launch FPVS Toolbox normally on Windows 11 at 1280x900.
-2. Open **Settings > ROIs**, edit LOT visually, cancel, and confirm the row is
-   unchanged.
-3. Reopen the selector, toggle electrodes with both pointer and Space, apply,
-   and confirm the row summary changes without clipping or losing focus cues.
-4. Exercise Quick Add, a custom preset, a typed unmapped label, Add, Edit, and
-   Remove. Confirm the unmapped label survives a visual round trip.
-5. Cancel Settings and reopen it; confirm nothing was persisted.
-6. Save a no-op edit and confirm there is no false harmonic recalculation
-   prompt. Save a real ROI edit in a processed project and exercise the existing
-   recalculate/decline/rollback choices.
-7. Open SNR Plots before and after the Settings change. Confirm the cached page
-   refreshes its ROI list and mapping without restarting the app.
-8. Open Stats and Ratio Calculator and confirm they show the same ROI names and
-   membership.
+2. Open **Settings > ROIs** and confirm the embedded map/list layout fits
+   without a page scrollbar or clipping.
+3. Switch among LOT, ROT, and Central. Toggle nodes with pointer and Space and
+   confirm only the active ROI changes.
+4. Put one electrode in multiple ROIs and confirm every ring segment, legend
+   color, tooltip membership, and active non-color cue remains understandable.
+5. Exercise blank add, name editing, duplicate names, preset add/update, custom
+   preset staging, remove, and removal of one repeated legacy-label occurrence.
+6. Cancel Settings and reopen it; confirm no draft persisted.
+7. Save a no-op and confirm there is no false harmonic recalculation prompt.
+   Save a real edit in a processed project and exercise existing
+   recalculate/decline/rollback behavior.
+8. Confirm cached SNR and Stats pages and Ratio Calculator show the committed
+   mapping in the same app session.
 9. Generate one `(All ROIs)` SNR run from representative data and confirm the
-   existing plot names and matching PNG/PDF files are written directly to the
-   established SNR output folder.
-10. Repeat the selector layout/accessibility smoke on CachyOS when that
-    environment is available; otherwise record it as the remaining platform
-    risk.
+   existing names, folder, and matching PNG/PDF outputs.
+10. Repeat the layout/accessibility smoke on CachyOS when available; otherwise
+    record that remaining platform risk.
 
 ## Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Visual round trip reorders electrodes and triggers unnecessary recalculation | Lock no-op tuple identity; retain prior order and append only new nodes deterministically. |
-| SSSEP presets overwrite FPVS defaults | Inject only the FPVS preset catalog and add exact-membership regression tests. |
-| Existing custom/noncanonical labels disappear | Keep the comma-list fallback and a visible unmapped-selection list; test open/accept/save preservation. |
-| Cached Plot Generator uses stale ROI data | Add and test an explicit refresh seam after commit/reactivation. |
-| Selector creates a second settings store | Keep the component persistence-free; all writes remain in outer `SettingsManager.save()`. |
-| Dark SSSEP styling clashes with FPVS | Rebuild presentation with `AppDialog`, shared components, typography, and FPVS tokens; port behavior and geometry only. |
-| UI becomes too dense | Keep the 64-node map in a focused modal and retain the page's existing top-level cards and 1280x900 fit. |
-| Cross-platform/DPI geometry drift | Use scalable coordinates, native controls, pure geometry tests, CI Qt tests, and visible Windows/CachyOS smoke. |
-| Scope expands into scientific/output code | Treat any worker, aggregation, renderer, schema, or filename edit as a stop-and-review event. |
+| Duplicate names target the wrong ROI | Use an opaque row identity everywhere inside the draft; names remain editable display/storage values only. |
+| A node toggle removes membership from another ROI | Give every row an independent selection state and route map changes only to the active row. |
+| Overlap is hidden by one fill color | Draw ordered segmented membership rings and list all memberships in tooltip/accessibility text. |
+| Colors accidentally become data | Keep color allocation in the GUI presentation model and assert that pairs, INI, signature, and processing payloads contain no color or row ID. |
+| Visual round trip reorders electrodes | Retain the existing ordered token ledger; append only newly selected map nodes in canonical order. |
+| Legacy labels disappear without a text field | Render each configured occurrence explicitly and require an occurrence-level remove or explicit replace/clear action. |
+| Preset replacement silently drops legacy entries | Warn before an explicit replacement when retained unmapped occurrences would be removed. |
+| Page becomes too dense | Use one flat split surface, a compact toolbar and one-row ROI footer, bounded summaries, and scrolling only within the ROI list. Paint membership arcs inside disjoint native node bounds. |
+| Scope expands into scientific/output code | Treat worker, aggregation, renderer, schema, filename, or default-membership edits as stop-and-review events. |
 
-Rollback is straightforward because the persisted ROI schema is unchanged. A
-revert of the new dialog, row action, and consumer refresh returns FPVS to the
-manual editor without migrating or rewriting user data.
+Rollback remains schema-free: reverting the embedded follow-up to commit
+`8d84b216` restores the modal/text-row presentation without migrating or
+rewriting saved ROI data.
 
 ## Progress
 
-- [x] Cross-repo architecture and behavior comparison completed.
-- [x] FPVS persistence, preset, downstream consumer, and output backbones
-      confirmed.
-- [x] SSSEP selector source, coordinate provenance, draft behavior, and tests
-      identified.
-- [x] FPVS-specific preset mismatch and cached SNR-page refresh gap identified.
-- [x] Plan promoted to `active/` and implementation branch created.
-- [x] Current settings and stale-consumer behavior characterized.
-- [x] Visual selector implemented and locally safe state tests passing.
-- [x] Settings integration and transactional behavior implemented, including
-      cached-page retirement so canceled drafts cannot leak into a later Save.
-- [x] Cached Stats and SNR consumers refresh after commits/rollbacks; Ratio
-      Calculator's existing signature watcher remains the live refresh owner.
-- [x] Documentation, focused local gates, strict docs build, and independent
-      selector/integration reviews complete.
-- [ ] Registered CI Qt coverage and visible installed-app smoke complete.
+First implementation:
 
-## Implementation Receipt — 2026-09-03
+- [x] Persistence, preset, consumer, and output backbones characterized.
+- [x] Attributed BioSemi64 map and ordered selection state implemented.
+- [x] Row-modal integration and cached Stats/SNR refresh committed in
+      `8d84b216`.
+- [x] First-implementation documentation, local safe gates, and independent
+      review completed as recorded below.
 
-- Added the attributed, settings-agnostic BioSemi64 selector and pure ordered
-  state helper. No runtime dependency on the SSSEP repository was introduced.
-- Preserved no-op name/electrode text exactly at the row boundary. The state
-  ledger preserves original order, case, canonical/noncanonical duplicates,
-  and unknown labels; real selection additions use deterministic BioSemi64
-  order before existing uppercase persistence normalization.
-- Added row-scoped visual actions, FPVS montage-aware default/custom preset
-  injection, plain-text legacy-label presentation, keyboard/focus metadata,
-  and a persistent non-color selected-node cue. Selector dialogs are disposed
-  after use, and the embedded Settings page is rebuilt from committed settings
-  after Save or Cancel.
-- Added `PlotGeneratorWindow.refresh_rois(manager=None)`, actionable empty-ROI
-  readiness, independent cached Stats/SNR refresh after commit or rollback,
-  and preserved Ratio Calculator's existing signature polling. Worker ROI
-  requests remain copied snapshots.
-- Schema, ROI averaging/math, scientific defaults, workbook formats, figure
-  rendering, output folders/names, DPI, and PNG/PDF pairing are unchanged.
+Embedded visual-first follow-up:
 
-Local verification:
+- [x] Product direction and compatibility constraints recorded.
+- [x] Embedded map-left/list-right ROI editor implemented.
+- [x] Color-coded ROI rows and overlap-ring presentation implemented.
+- [x] Name-only text editing and occurrence-preserving legacy-label controls
+      implemented.
+- [x] Compact preset toolbar replaces Quick Add.
+- [x] Partial drafts block Save instead of being silently omitted.
+- [x] Follow-up local safe gates completed and recorded.
+- [x] Follow-up registered CI Qt coverage authored and registered.
+- [ ] Follow-up registered CI Qt coverage executed.
+- [ ] Visible installed-application smoke completed.
+
+## Historical Receipt — First Implementation (`8d84b216`)
+
+The following results apply to the first row-modal implementation only; they
+must not be represented as verification of the embedded follow-up:
 
 - GUI focused gate: passed; 8 selector-state tests passed.
 - Processing focused gate: 375 passed, 1 skipped.
 - Stats focused gate: 384 passed.
 - Direct project-I/O, Plot Generator, and Ratio Calculator safe bundles: 121,
-  110, and 7 tests passed respectively (their drivers stop before tests at the
-  pre-existing path-audit findings below).
-- ROI/state/settings focused bundle: 15 passed; verification registry validation,
-  changed-file Ruff/compilation, strict MkDocs build, protected/source-localization
-  audits, and `git diff --check` passed.
+  110, and 7 tests passed respectively.
+- ROI/state/settings focused bundle: 15 passed.
+- Verification registry validation, changed-file Ruff/compilation, strict
+  MkDocs build, protected/source-localization audits, and `git diff --check`
+  passed.
 - Full locally safe suite: 1,930 passed and 3 skipped; one unrelated
-  Publication Maps difference-layout assertion failed by 0.190 pixels and
-  failed again in isolation, while its non-difference sibling passed. No
-  Publication Maps source or test was changed for this feature.
-- Project-I/O, Plot Generator, Ratio Calculator, and repo-precommit drivers are
-  blocked by the same eight pre-existing machine-path findings in the untracked
-  `outputs/` tree. Those user files were left untouched.
-- `tests/gui/test_roi_electrode_selector_qt.py` and the expanded registered GUI
-  tests cover map interaction/accessibility/layout, presets and duplicates,
-  unknown-label editing, transactional dismissal, Settings Save/Cancel/reopen,
-  cached SNR refresh, and active-worker snapshot behavior. They were not run
-  locally under the repository's Qt policy.
+  Publication Maps layout assertion failed by 0.190 pixels and reproduced in
+  isolation. No Publication Maps source or test was changed.
+- Several drivers were blocked by eight pre-existing machine-path findings in
+  the untracked `outputs/` tree; those user files were left untouched.
+- Registered pytest-qt coverage was not run locally under repository policy.
 
-## Implementation Reporting Requirements
+## Follow-up Verification Receipt
 
-Each implementation handoff must report:
+Implementation is complete on `codex/sssep-roi-selector`.
 
-- exact files changed;
-- whether the settings schema, ROI math, scientific defaults, or output contract
-  changed (expected answer: no);
-- how no-op order and noncanonical labels were preserved;
-- how cached SNR, Stats, and Ratio Calculator state was refreshed or verified;
-- commands run and their results;
-- CI-only Qt tests registered;
-- visible/manual smoke completed or skipped, with residual risk;
-- any unrelated pre-existing working-tree changes left untouched.
+- `.venv\Scripts\python.exe .agents/scripts/verify.py --scope gui --tier
+  focused` passed the GUI audit, changed-file Ruff, compilation, and 13
+  GUI-neutral selector/collection tests.
+- Verification configuration passed for all 15 scopes. Both changed Qt files
+  remain registered in `tests/qt_test_files.txt`.
+- Direct locally safe bundles passed: project I/O/settings, 159; processing,
+  375 with 1 skip; Plot Generator, 110; Stats, 384; Ratio Calculator, 7; and
+  the combined ROI state/settings bundle, 18.
+- The exact-tree non-Qt suite completed with 1,935 passed and 3 skipped. Its
+  only failure was the pre-existing Publication Maps repeated-layout assertion
+  whose left text edge is `-0.190014` pixels; the same unrelated failure was
+  present before this follow-up, and no Publication Maps file was changed.
+- The repository precommit driver stopped before its static/test stages on the
+  same eight pre-existing hard-coded machine paths under the untracked
+  `outputs/` tree. Those user files were not edited or staged; the equivalent
+  changed-file static checks and full locally safe pytest run were executed
+  directly.
+- Strict MkDocs, protected/source-localization audits, Stats audits,
+  `git diff --check`, and three independent final reviews passed.
+- Registered pytest-qt coverage was not executed locally under repository
+  policy. It defines the embedded pointer/keyboard workflow, stable duplicate
+  rows, overlap presentation, destructive confirmations, Save/Cancel behavior,
+  disjoint minimum-size hit targets, and worst-case 1280x900 shell containment.
+- The visible Windows 11/DPI/theme smoke and CachyOS smoke remain pending. The
+  manual path above is the residual visual acceptance gate.
+- Unrelated working-tree changes in the execution-plan index/future plans and
+  `outputs/` remain outside this feature and are intentionally excluded from
+  the follow-up commit.

@@ -9,8 +9,20 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QToolButton,
+    QWidget,
+)
 
+from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
@@ -21,7 +33,6 @@ from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrode
 from Main_App.gui.recording_qc_identity import QcRecordingIdentity
 from Main_App.gui import processing_inputs
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
-from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
@@ -316,9 +327,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
 
-    cards = {
-        card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
-    }
+    section_cards = dlg.findChildren(SectionCard)
+    cards = {card.header.title_label.text(): card for card in section_cards}
     assert "Preprocessing Parameters" in cards
     assert "Harmonic Selection and Summation" in cards
     assert "Application Options" in cards
@@ -326,8 +336,12 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "Diagnostics" not in cards
     assert "Tool Visibility" not in cards
     assert "Analysis Defaults" in cards
-    assert "Quick Add" in cards
+    assert "Quick Add" not in cards
     assert "Regions of Interest" in cards
+    assert sum(
+        card.header.title_label.text() == "Regions of Interest"
+        for card in section_cards
+    ) == 1
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
         "Preprocessing",
         "Harmonics",
@@ -437,22 +451,21 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Regions of Interest"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
-    remove_buttons = dlg.roi_editor.findChildren(QPushButton, "settings_rois_remove_roi")
-    selector_buttons = dlg.roi_editor.findChildren(
-        QPushButton,
-        "settings_rois_select_electrodes",
-    )
-    assert remove_buttons
-    assert selector_buttons
-    assert len(selector_buttons) == len(remove_buttons)
-    assert all(button.text() == "Select..." for button in selector_buttons)
-    assert all(button.isEnabled() for button in selector_buttons)
-    assert all(button.text() == "x" for button in remove_buttons)
-    assert all(button.property("variant") == "secondary" for button in remove_buttons)
-    assert all(button.property("compact") is True for button in remove_buttons)
-    assert all(button.property("iconButton") is True for button in remove_buttons)
-    assert all(button.width() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
-    assert all(button.height() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
+    roi_splitter = dlg.roi_editor.findChild(QSplitter, "settings_rois_splitter")
+    assert roi_splitter is dlg.roi_editor.splitter
+    assert roi_splitter.orientation() == Qt.Orientation.Horizontal
+    assert roi_splitter.childrenCollapsible() is False
+    assert roi_splitter.indexOf(dlg.roi_editor.map_pane) == 0
+    assert roi_splitter.indexOf(dlg.roi_editor.roi_pane) == 1
+    assert dlg.roi_editor.map_pane.isAncestorOf(dlg.roi_editor.map_widget)
+    assert dlg.roi_editor.roi_pane.isAncestorOf(dlg.roi_editor.roi_list)
+    assert dlg.roi_editor.roi_list.objectName() == "settings_rois_list"
+    map_buttons = dlg.roi_editor.map_widget.findChildren(QToolButton)
+    assert len(map_buttons) == 64
+    assert len(dlg.roi_editor.map_widget.electrode_buttons) == 64
+    roi_line_edits = dlg.roi_editor.findChildren(QLineEdit)
+    assert roi_line_edits == [dlg.roi_editor.name_edit]
+    assert dlg.roi_editor.name_edit.objectName() == "settings_rois_name"
     assert dlg.btn_changeRoot.property("secondary") is True
     preproc_tab = dlg.tabs.widget(dlg._preproc_tab_index)
     harmonics_tab_index = next(
@@ -478,10 +491,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert advanced_tab.isAncestorOf(cards["Application Options"])
     assert advanced_tab.isAncestorOf(cards["Processing QC"])
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])
-    assert rois_tab.isAncestorOf(cards["Quick Add"])
     assert not stats_tab.isAncestorOf(cards["Regions of Interest"])
-    rois_layout = rois_tab.layout()
-    assert rois_layout.indexOf(cards["Regions of Interest"]) < rois_layout.indexOf(cards["Quick Add"])
     assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
     assert harmonics_tab.findChild(ActionRow, "settings_harmonic_footer_actions") is not None
     assert stats_tab.findChild(ActionRow, "settings_stats_footer_actions") is not None
@@ -492,15 +502,21 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
     assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
     assert advanced_tab.findChild(QWidget, "settings_advanced_footer") is not None
-    assert rois_tab.findChild(ActionRow, "settings_rois_actions") is not None
-    assert rois_tab.findChild(ActionRow, "settings_rois_quick_add_actions") is not None
+    assert rois_tab.findChild(QWidget, "settings_rois_toolbar") is dlg.roi_editor.toolbar
+    assert dlg.roi_montage_combo is dlg.roi_editor.montage_combo
+    assert dlg.roi_preset_combo is dlg.roi_editor.preset_combo
     assert dlg.roi_montage_combo.count() == 1
     assert dlg.roi_montage_combo.currentData() == "10-10"
     assert dlg.roi_preset_combo.findText("LOT (Default)") >= 0
     assert dlg.roi_preset_combo.findText("ROT (Default)") >= 0
-    assert dlg.roi_preset_electrodes_edit.isReadOnly()
+    assert dlg.roi_editor.add_preset_button.objectName() == "settings_rois_add_preset"
+    assert (
+        dlg.roi_editor.save_presets_button.objectName()
+        == "settings_rois_save_custom_presets"
+    )
+    assert dlg.roi_editor.findChild(QLineEdit, "settings_rois_preset_electrodes") is None
     dlg.roi_preset_combo.setCurrentIndex(dlg.roi_preset_combo.findText("ROT (Default)"))
-    dlg._add_selected_roi_preset()
+    dlg.roi_editor.add_preset_button.click()
     assert ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]) in dlg.roi_editor.get_pairs()
     dlg.roi_editor.set_pairs([
         ("Custom Occipito Temporal", ["PO7", "PO8"]),
@@ -514,7 +530,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         label.text()
         for label in cards["Regions of Interest"].findChildren(SubsectionHeaderLabel)
     }
-    assert {"ROI name", "Electrodes", "Visual selector"} <= roi_headers
+    assert {"Interactive scalp map", "Regions of interest", "Edit active ROI"} <= roi_headers
 
     panel = settings_panel.SettingsPanel(controller=SimpleNamespace(save_settings=lambda _values: None))
     qtbot.addWidget(panel)
@@ -610,6 +626,8 @@ def test_settings_save_refreshes_cached_stats_and_plot_roi_consumers(
     win = MainWindow()
     qtbot.addWidget(win)
     manager = SettingsManager(str(tmp_path / "settings.ini"))
+    manager.set_roi_pairs([("Visual ROI", ["O1"])])
+    manager.save()
     observed: list[tuple[str, list[tuple[str, list[str]]]]] = []
 
     win._stats_page = SimpleNamespace(
@@ -622,13 +640,18 @@ def test_settings_save_refreshes_cached_stats_and_plot_roi_consumers(
     )
     dlg = SettingsDialog(manager, win)
     qtbot.addWidget(dlg)
-    dlg.roi_editor.set_pairs([("Visual ROI", ["o1", "O2"])])
+    dlg.roi_editor.select_roi(0)
+    dlg.roi_editor.name_edit.setText("Visual ROI Edited")
+    dlg.roi_editor.map_widget.electrode_buttons["O2"].click()
+
+    assert manager.get_roi_pairs() == [("Visual ROI", ["O1"])]
 
     dlg._save()
 
-    assert manager.get_roi_pairs() == [("Visual ROI", ["O1", "O2"])]
-    assert ("stats", [("Visual ROI", ["O1", "O2"])]) in observed
-    assert ("plot", [("Visual ROI", ["O1", "O2"])]) in observed
+    committed = [("Visual ROI Edited", ["O1", "O2"])]
+    assert manager.get_roi_pairs() == committed
+    assert ("stats", committed) in observed
+    assert ("plot", committed) in observed
 
 
 def test_embedded_settings_cancel_discards_roi_draft_before_reopen(
@@ -646,7 +669,12 @@ def test_embedded_settings_cancel_discards_roi_draft_before_reopen(
     win.open_settings_window()
     canceled_page = win._settings_page
     assert canceled_page is not None
-    canceled_page.roi_editor.set_pairs([("Canceled Draft", ["OZ"])])
+    canceled_page.roi_editor.select_roi(0)
+    canceled_page.roi_editor.name_edit.setText("Canceled Draft")
+    canceled_page.roi_editor.map_widget.electrode_buttons["Oz"].click()
+    assert canceled_page.roi_editor.get_pairs() == [
+        ("Canceled Draft", ["O1", "O2", "OZ"]),
+    ]
     canceled_page.reject()
 
     assert win._settings_page is None
@@ -657,6 +685,77 @@ def test_embedded_settings_cancel_discards_roi_draft_before_reopen(
     assert reloaded_page is not None
     assert reloaded_page is not canceled_page
     assert reloaded_page.roi_editor.get_pairs() == [("Committed", ["O1", "O2"])]
+
+
+def test_settings_save_blocks_a_partially_defined_visual_roi(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    manager.set_roi_pairs([("Committed", ["O1"])])
+    manager.save()
+    dlg = SettingsDialog(manager)
+    qtbot.addWidget(dlg)
+
+    dlg.roi_editor.add_button.click()
+    dlg.roi_editor.map_widget.electrode_buttons["Oz"].click()
+    assert dlg.roi_editor.validate_draft() is False
+
+    stats_index = next(
+        index
+        for index in range(dlg.tabs.count())
+        if dlg.tabs.tabText(index) == "Stats"
+    )
+    dlg.tabs.setCurrentIndex(stats_index)
+    dlg._save()
+
+    assert manager.get_roi_pairs() == [("Committed", ["O1"])]
+    assert dlg.tabs.currentIndex() == dlg._roi_tab_index
+    assert dlg.roi_editor.status.property("statusVariant") == "warning"
+    assert "ROI 2 is incomplete" in dlg.roi_editor.status.text()
+
+    dlg.roi_editor.name_edit.setText("Completed Visually")
+    dlg._save()
+
+    assert manager.get_roi_pairs() == [
+        ("Committed", ["O1"]),
+        ("Completed Visually", ["OZ"]),
+    ]
+
+
+def test_embedded_visual_roi_editor_fits_the_supported_workspace(tmp_path, qtbot, monkeypatch):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.resize(1280, 900)
+    win.show()
+    qtbot.waitExposed(win)
+    win.open_settings_window()
+    page = win._settings_page
+    assert page is not None
+    page.roi_editor.set_pairs(
+        [("All Scalp", [*DEFAULT_ELECTRODE_NAMES_64, "LegacyAux"])]
+    )
+    page.roi_editor.show_status("Visible layout verification status.", "info")
+    page.tabs.setCurrentIndex(page._roi_tab_index)
+    qtbot.wait(1)
+
+    roi_tab = page.tabs.widget(page._roi_tab_index)
+    footer = roi_tab.findChild(QWidget, "settings_rois_footer")
+    assert win.size().width() == 1280
+    assert win.size().height() == 900
+    assert roi_tab.findChildren(QScrollArea) == []
+    assert "+52 more" in page.roi_editor.selection_summary.text()
+    assert page.roi_editor.unmapped_pane.isVisibleTo(roi_tab)
+    assert page.roi_editor.status.isVisibleTo(roi_tab)
+    for widget in (page.roi_editor.map_widget, page.roi_editor.roi_pane, footer):
+        assert widget is not None
+        assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().topLeft()))
+        assert roi_tab.rect().contains(widget.mapTo(roi_tab, widget.rect().bottomRight()))
 
 
 def test_explicit_harmonic_recalculation_persists_all_selection_inputs(
