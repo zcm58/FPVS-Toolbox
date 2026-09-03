@@ -88,6 +88,12 @@ Primary paths:
 - `src/Main_App/gui/processing_log_dialog.py`: focused modal viewer for the
   persistent Main App processing log. The home page keeps only a **View Log**
   action so the Conditions editor can use the full remaining height.
+- `src/Main_App/gui/roi_electrode_selector.py`: focused, settings-agnostic
+  BioSemi64 visual ROI editor. It owns the scalable nose-up map and modal draft
+  interaction; `roi_electrode_selector_state.py` owns ordered membership state
+  that preserves legacy duplicates and unmapped labels. The dialog receives
+  canonical channels and montage-aware FPVS presets from Settings and never
+  reads or writes settings itself.
 - `src/Main_App/updates/`: non-GUI updater backend. It owns GitHub Release
   selection, typed update contracts, installer downloads, and installer launch.
   This package must not import Qt widgets or create windows.
@@ -115,6 +121,19 @@ thresholds and active frequency-domain exclusions; changing manual
 frequency-domain exclusions marks downstream frequency-domain outputs stale and
 requires regeneration. Do not put app-level visibility or diagnostics toggles
 in the Preprocessing tab.
+
+The ROIs tab keeps the ordered name/comma-list rows as the compatibility and
+noncanonical-label surface. Each row may open the visual selector, whose
+**Use Selection** action changes only that row's in-memory draft. Selector
+Cancel, Escape, and window close are no-ops; only the outer Settings Save uses
+`SettingsManager` and the existing harmonic recalculation/rollback workflow.
+The embedded Settings page is retired on Save or Cancel so an abandoned draft
+cannot survive into a later Settings session.
+After a committed ROI change or rollback, Settings refreshes the cached Stats
+and SNR pages independently. SNR reloads through
+`Main_App.processing.roi_settings`, preserves a still-valid selected ROI, and
+otherwise returns to `(All ROIs)`; active worker requests remain snapshotted.
+Ratio Calculator retains its existing signature-based live refresh.
 
 The project-specific **Harmonic Selection and Summation** card on the dedicated
 Harmonics tab edits

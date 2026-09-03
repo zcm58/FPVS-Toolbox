@@ -438,7 +438,15 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     remove_buttons = dlg.roi_editor.findChildren(QPushButton, "settings_rois_remove_roi")
+    selector_buttons = dlg.roi_editor.findChildren(
+        QPushButton,
+        "settings_rois_select_electrodes",
+    )
     assert remove_buttons
+    assert selector_buttons
+    assert len(selector_buttons) == len(remove_buttons)
+    assert all(button.text() == "Select..." for button in selector_buttons)
+    assert all(button.isEnabled() for button in selector_buttons)
     assert all(button.text() == "x" for button in remove_buttons)
     assert all(button.property("variant") == "secondary" for button in remove_buttons)
     assert all(button.property("compact") is True for button in remove_buttons)
@@ -506,7 +514,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         label.text()
         for label in cards["Regions of Interest"].findChildren(SubsectionHeaderLabel)
     }
-    assert {"ROI name", "Electrodes"} <= roi_headers
+    assert {"ROI name", "Electrodes", "Visual selector"} <= roi_headers
 
     panel = settings_panel.SettingsPanel(controller=SimpleNamespace(save_settings=lambda _values: None))
     qtbot.addWidget(panel)
@@ -592,6 +600,65 @@ def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
     assert dlg._harmonic_settings_changed_after_processing(validated) is True
 
 
+def test_settings_save_refreshes_cached_stats_and_plot_roi_consumers(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    observed: list[tuple[str, list[tuple[str, list[str]]]]] = []
+
+    win._stats_page = SimpleNamespace(
+        refresh_rois=lambda: observed.append(("stats", manager.get_roi_pairs()))
+    )
+    win._plot_generator_page = SimpleNamespace(
+        refresh_rois=lambda committed_manager: observed.append(
+            ("plot", committed_manager.get_roi_pairs())
+        )
+    )
+    dlg = SettingsDialog(manager, win)
+    qtbot.addWidget(dlg)
+    dlg.roi_editor.set_pairs([("Visual ROI", ["o1", "O2"])])
+
+    dlg._save()
+
+    assert manager.get_roi_pairs() == [("Visual ROI", ["O1", "O2"])]
+    assert ("stats", [("Visual ROI", ["O1", "O2"])]) in observed
+    assert ("plot", [("Visual ROI", ["O1", "O2"])]) in observed
+
+
+def test_embedded_settings_cancel_discards_roi_draft_before_reopen(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.settings.set_roi_pairs([("Committed", ["O1", "O2"])])
+    win.settings.save()
+
+    win.open_settings_window()
+    canceled_page = win._settings_page
+    assert canceled_page is not None
+    canceled_page.roi_editor.set_pairs([("Canceled Draft", ["OZ"])])
+    canceled_page.reject()
+
+    assert win._settings_page is None
+    assert win.settings.get_roi_pairs() == [("Committed", ["O1", "O2"])]
+
+    win.open_settings_window()
+    reloaded_page = win._settings_page
+    assert reloaded_page is not None
+    assert reloaded_page is not canceled_page
+    assert reloaded_page.roi_editor.get_pairs() == [("Committed", ["O1", "O2"])]
+
+
 def test_explicit_harmonic_recalculation_persists_all_selection_inputs(
     tmp_path,
     qtbot,
@@ -642,6 +709,17 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     qtbot.addWidget(dlg)
     original_base = win.settings.get("analysis", "base_freq", "6.0")
     original_rois = win.settings.get_roi_pairs()
+    observed_rois: list[tuple[str, list[tuple[str, list[str]]]]] = []
+    win._stats_page = SimpleNamespace(
+        refresh_rois=lambda: observed_rois.append(
+            ("stats", win.settings.get_roi_pairs())
+        )
+    )
+    win._plot_generator_page = SimpleNamespace(
+        refresh_rois=lambda manager: observed_rois.append(
+            ("plot", manager.get_roi_pairs())
+        )
+    )
     original_condition_exclusions = {
         "P01": ["Condition A"],
     }
@@ -670,6 +748,8 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
     assert win.settings.get("analysis", "base_freq", "") == original_base
     assert win.settings.get_roi_pairs() == original_rois
+    assert ("plot", [("Temporary", ["OZ"])]) in observed_rois
+    assert observed_rois[-1] == ("plot", original_rois)
     assert (
         dlg._manual_excluded_participant_conditions
         == original_condition_exclusions

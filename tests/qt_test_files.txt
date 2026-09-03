@@ -13,6 +13,7 @@ tests/gui/test_main_window_processing.py
 tests/gui/test_nonblocking_qmessagebox.py
 tests/gui/test_participant_condition_exclusions_dialog.py
 tests/gui/test_qc_group_membership.py
+tests/gui/test_roi_electrode_selector_qt.py
 tests/gui/test_sensitivity_analysis_gui.py
 tests/gui/test_settings_and_status.py
 tests/gui/test_sidebar_vector_icons.py

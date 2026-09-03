@@ -21,8 +21,18 @@ application settings cannot silently relabel an older processed project. A
 manually browsed unmanaged folder retains the legacy application-settings
 fallback and is identified as such in the run log.
 
-The ROI list comes from the current Toolbox settings. Confirm the ROI electrode
-definitions before generating figures.
+The ROI list comes from the current Toolbox settings. Define or edit an ROI in
+**Settings > ROIs**. Use **Select...** on a row to choose electrodes from the
+nose-up BioSemi64 map, optionally start from an FPVS default or custom preset,
+and choose **Use Selection** to return the draft to that row. The comma-separated
+field remains available for manual and noncanonical labels. The selector does
+not save by itself: choose **Save** on the outer Settings page to commit the ROI.
+
+An already-open SNR Plots page refreshes after that Save. It keeps the selected
+ROI when the name still exists and otherwise returns to **(All ROIs)**. If no
+valid ROIs are configured, generation remains disabled and directs you back to
+Settings. Visual selection changes only the shared ROI definition; it does not
+change preprocessing or the ROI averaging described below.
 
 ## Single-Group Projects
 

@@ -907,10 +907,16 @@ class SettingsDialog(QDialog):
         roi_header_layout.setSpacing(8)
         roi_header_layout.addWidget(SubsectionHeaderLabel("ROI name", roi_header), 1)
         roi_header_layout.addWidget(SubsectionHeaderLabel("Electrodes", roi_header), 1)
+        roi_header_layout.addWidget(SubsectionHeaderLabel("Visual selector", roi_header))
         roi_header_layout.addSpacing(32)
         roi_group.content_layout.addWidget(roi_header)
 
-        self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
+        self.roi_editor = ROISettingsEditor(
+            self,
+            self.manager.get_roi_pairs(),
+            canonical_electrodes=config.DEFAULT_ELECTRODE_NAMES_64,
+            preset_provider=lambda: self._roi_preset_items(self._current_roi_montage()),
+        )
         self.roi_editor.setObjectName("settings_rois_editor")
         self.roi_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.roi_editor.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1549,7 +1555,43 @@ class SettingsDialog(QDialog):
         except Exception as exc:  # pragma: no cover - settings I/O failure
             QMessageBox.critical(self, "Save Error", str(exc))
             return False
+        self._refresh_roi_consumers()
         return True
+
+    def _refresh_roi_consumers(self) -> None:
+        """Refresh committed ROI state in compatibility modules and cached pages."""
+
+        try:
+            from Tools.Stats.data.shared_rois import (
+                apply_rois_to_modules,
+                load_rois_from_settings,
+            )
+
+            apply_rois_to_modules(load_rois_from_settings(self.manager))
+        except Exception:  # Consumer boundary: committed settings remain authoritative.
+            logger.exception("roi_compatibility_module_refresh_failed")
+
+        host = getattr(self, "host", None) or self.parent()
+        if host is None:
+            return
+        for page_attribute, pass_manager in (
+            ("_stats_page", False),
+            ("_plot_generator_page", True),
+        ):
+            page = getattr(host, page_attribute, None)
+            refresh_rois = getattr(page, "refresh_rois", None)
+            if not callable(refresh_rois):
+                continue
+            try:
+                if pass_manager:
+                    refresh_rois(self.manager)
+                else:
+                    refresh_rois()
+            except Exception:  # Cached-page boundary: refresh failures stay isolated.
+                logger.exception(
+                    "roi_cached_consumer_refresh_failed",
+                    extra={"consumer": page_attribute},
+                )
 
     def _capture_harmonic_settings_rollback(self) -> None:
         """Snapshot settings that must survive a cancelled FFT-grid review."""
@@ -1597,15 +1639,7 @@ class SettingsDialog(QDialog):
                 self.manager.save()
             except Exception as exc:  # pragma: no cover - settings I/O failure
                 restore_errors.append(f"application analysis settings ({exc})")
-            try:
-                from Tools.Stats.data.shared_rois import (
-                    apply_rois_to_modules,
-                    load_rois_from_settings,
-                )
-
-                apply_rois_to_modules(load_rois_from_settings(self.manager))
-            except Exception:  # Rollback cache-refresh boundary: saved settings remain authoritative.
-                pass
+            self._refresh_roi_consumers()
             try:
                 from config import update_target_frequencies
 
@@ -3050,6 +3084,7 @@ class SettingsDialog(QDialog):
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.set_beta_tools_enabled(self.beta_tools_check.isChecked())
         self.manager.save()
+        self._refresh_roi_consumers()
 
         if using_project and frequency_analysis_changed:
             try:
@@ -3076,24 +3111,6 @@ class SettingsDialog(QDialog):
                 "Tool Visibility Updated",
                 "Please close and reopen FPVS Toolbox for your changes to take effect.",
             )
-
-        try:
-            from Tools.Stats.data.shared_rois import (
-                load_rois_from_settings,
-                apply_rois_to_modules,
-            )
-
-            rois = load_rois_from_settings(self.manager)
-            apply_rois_to_modules(rois)
-
-            host = getattr(self, "host", None) or self.parent()
-            stats_page = getattr(host, "_stats_page", None)
-            if stats_page is not None:
-                refresh_rois = getattr(stats_page, "refresh_rois", None)
-                if callable(refresh_rois):
-                    refresh_rois()
-        except Exception:
-            pass
 
         try:
             from config import update_target_frequencies
@@ -3276,3 +3293,9 @@ class EmbeddedSettingsPage(SettingsDialog):
         show_home_page = getattr(host, "show_home_page", None)
         if callable(show_home_page):
             show_home_page()
+        if getattr(host, "_settings_page", None) is self:
+            workspace_stack = getattr(host, "workspace_stack", None)
+            if workspace_stack is not None:
+                workspace_stack.removeWidget(self)
+            host._settings_page = None
+            self.deleteLater()

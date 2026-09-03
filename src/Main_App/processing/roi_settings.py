@@ -39,11 +39,13 @@ def load_rois_from_settings(manager: Any = None) -> dict[str, list[str]]:
         name = str(raw_name).strip()
         if not name or not isinstance(raw_values, (list, tuple)):
             continue
-        cleaned[name] = [
+        electrodes = [
             str(electrode).strip()
             for electrode in raw_values
             if str(electrode).strip()
         ]
+        if electrodes:
+            cleaned[name] = electrodes
     return cleaned
 
 

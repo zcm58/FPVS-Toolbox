@@ -22,6 +22,7 @@ def test_neutral_roi_settings_clean_runtime_values() -> None:
                 (" Occipital ", [" O1 ", "", "Oz"]),
                 ("", ["Cz"]),
                 ("Invalid", "Cz"),
+                ("Empty", ["", "  "]),
             ]
         )
     ) == {"Occipital": ["O1", "Oz"]}

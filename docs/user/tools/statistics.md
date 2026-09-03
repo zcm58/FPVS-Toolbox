@@ -54,6 +54,12 @@ can:
 - review quality-control and non-finite/outlier flags; and
 - choose optional robustness or leave-one-out sensitivity checks.
 
+ROI definitions are app-level settings managed under **Settings > ROIs**. Use
+the visual BioSemi64 selector or the retained comma-list field, then save the
+outer Settings page. The Stats page refreshes its loaded ROI definitions and
+context from that committed mapping; using the visual selector does not alter
+raw EEG preprocessing.
+
 Project metadata determines the mode:
 
 - a single-group project runs single-group screening;

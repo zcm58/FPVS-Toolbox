@@ -43,6 +43,25 @@ def test_10_10_default_roi_presets_are_available() -> None:
     ]
 
 
+def test_roi_pair_schema_preserves_row_and_duplicate_electrode_order(tmp_path) -> None:
+    path = tmp_path / "settings.ini"
+    manager = SettingsManager(str(path))
+    manager.set_roi_pairs(
+        [
+            ("First", ["o2", "O1", "o2", "CustomAux"]),
+            ("First", ["cz"]),
+        ]
+    )
+    manager.save()
+
+    restored = SettingsManager(str(path))
+
+    assert restored.get_roi_pairs() == [
+        ("First", ["O2", "O1", "O2", "CUSTOMAUX"]),
+        ("First", ["CZ"]),
+    ]
+
+
 def test_legacy_lobe_roi_defaults_migrate_to_semantic_defaults(tmp_path) -> None:
     path = tmp_path / "settings.ini"
     path.write_text(

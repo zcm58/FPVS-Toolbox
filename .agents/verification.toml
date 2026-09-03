@@ -13,7 +13,7 @@ manual_smoke = []
 
 [scopes.gui]
 audits = ["gui"]
-tests = []
+tests = ["tests/gui/test_roi_electrode_selector_state.py"]
 include = ["src/Main_App/gui/**", "src/Tools/**/gui*.py", "tests/gui/**"]
 manual_smoke = ["Launch the Main App at 1280x900 and verify the home Conditions editor fills the available vertical workspace, Start Processing stays anchored beneath it, no Log card appears, and View Log opens the retained processing messages in a modal with working Clear Log and Close actions. With Beta Tools disabled, verify only Free Harmonic Clustering and SNR Plots appear under Quick Tools. Enable Beta Tools, restart, and verify Scalp Maps, Standard FPVS Screening, Sensitivity Analysis, LORETA Visualizer, Sequence Figure, Ratio Calculator, and Individual Detectability appear under Beta Tools. Verify each beta tool shows the shared warning before its first display in that app session, does not repeat for that same tool, and the two default tools show no beta warning."]
 
@@ -37,6 +37,7 @@ tests = [
   "tests/project_io/test_repeated_session_project_setup.py",
   "tests/project_io/test_main_app_xlsx_selected_reader.py",
   "tests/project_io/test_settings_paths.py",
+  "tests/settings/test_roi_preset_settings.py",
 ]
 include = ["src/Main_App/projects/**", "src/Main_App/io/**", "src/Main_App/Shared/settings_paths.py", "src/Main_App/gui/project_workflows.py", "src/Main_App/gui/tool_workflows.py", "tests/project_io/**"]
 manual_smoke = []
@@ -68,6 +69,7 @@ tests = [
   "tests/processing/test_raw_channel_qc.py",
   "tests/processing/test_raw_channel_qc_v2.py",
   "tests/processing/test_removed_electrode_detection.py",
+  "tests/processing/test_roi_settings.py",
   "tests/processing/test_shared_load_utils.py",
   "tests/workers/test_post_processing_pipeline_worker.py",
 ]

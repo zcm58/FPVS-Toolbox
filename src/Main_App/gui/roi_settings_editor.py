@@ -1,23 +1,39 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import cast
 
 from PySide6.QtWidgets import (
-    QWidget,
-    QScrollArea,
-    QVBoxLayout,
+    QDialog,
     QHBoxLayout,
     QLineEdit,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from Main_App.gui.components import make_remove_button
+from Main_App.gui.components import make_action_button, make_remove_button
+from Main_App.gui.roi_electrode_selector import ROIElectrodeSelectorDialog
+from Main_App.gui.roi_electrode_selector_state import split_electrode_text
+
+
+ROIPresetProvider = Callable[[], Sequence[tuple[str, Sequence[str], bool]]]
 
 
 class ROISettingsEditor(QWidget):
     """Widget for editing Regions of Interest mappings."""
 
-    def __init__(self, parent: QWidget | None = None, pairs: list[tuple[str, list[str]]] | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        pairs: list[tuple[str, list[str]]] | None = None,
+        *,
+        canonical_electrodes: Sequence[str] = (),
+        preset_provider: ROIPresetProvider | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._canonical_electrodes = tuple(canonical_electrodes)
+        self._preset_provider = preset_provider or (lambda: ())
         self.entries: list[dict[str, object]] = []
         layout = QVBoxLayout(self)
         self.scroll = QScrollArea()
@@ -47,6 +63,16 @@ class ROISettingsEditor(QWidget):
         elec_edit = QLineEdit()
         elec_edit.setPlaceholderText("Electrodes comma sep")
         elec_edit.setText(electrodes)
+        select_btn = make_action_button("Select...", compact=True, parent=row)
+        select_btn.setObjectName("settings_rois_select_electrodes")
+        select_btn.setToolTip("Select electrodes on the visual BioSemi64 map")
+        select_btn.setEnabled(bool(self._canonical_electrodes))
+        select_btn.clicked.connect(
+            lambda _checked=False, name=name_edit, electrode=elec_edit: self._open_selector(
+                name,
+                electrode,
+            )
+        )
         remove_btn = make_remove_button(
             parent=row,
             tooltip="Remove ROI",
@@ -56,10 +82,50 @@ class ROISettingsEditor(QWidget):
 
         row_layout.addWidget(name_edit)
         row_layout.addWidget(elec_edit)
+        row_layout.addWidget(select_btn)
         row_layout.addWidget(remove_btn)
 
         self.container_layout.addWidget(row)
-        self.entries.append({"frame": row, "name": name_edit, "elec": elec_edit})
+        self.entries.append(
+            {
+                "frame": row,
+                "name": name_edit,
+                "elec": elec_edit,
+                "select": select_btn,
+            }
+        )
+        name_edit.textChanged.connect(lambda _text: self._refresh_row_accessibility())
+        self._refresh_row_accessibility()
+
+    def _refresh_row_accessibility(self) -> None:
+        for row_number, entry in enumerate(self.entries, start=1):
+            name_edit = cast(QLineEdit, entry["name"])
+            select_button = cast(QWidget, entry["select"])
+            roi_name = name_edit.text().strip() or "unnamed ROI"
+            select_button.setAccessibleName(
+                f"Select electrodes visually for ROI row {row_number}: {roi_name}"
+            )
+            select_button.setAccessibleDescription(
+                f"Open the nose-up BioSemi64 map for ROI row {row_number}, {roi_name}."
+            )
+
+    def _open_selector(self, name_edit: QLineEdit, electrode_edit: QLineEdit) -> None:
+        dialog = ROIElectrodeSelectorDialog(
+            canonical_electrodes=self._canonical_electrodes,
+            current_name=name_edit.text(),
+            current_electrodes=split_electrode_text(electrode_edit.text()),
+            presets=self._preset_provider(),
+            parent=self,
+        )
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            if dialog.name_changed():
+                name_edit.setText(dialog.selection_name())
+            if dialog.electrodes_changed():
+                electrode_edit.setText(",".join(dialog.selected_electrodes()))
+        finally:
+            dialog.deleteLater()
 
     def add_or_update_entry(self, name: str, electrodes: list[str]) -> str:
         clean_name = name.strip()
@@ -87,6 +153,7 @@ class ROISettingsEditor(QWidget):
             if ent["frame"] is frame:
                 frame.deleteLater()
                 self.entries.pop(i)
+                self._refresh_row_accessibility()
                 break
         if not self.entries:
             self.add_entry()
