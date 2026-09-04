@@ -2,6 +2,8 @@
 # ruff: noqa: F405
 from __future__ import annotations
 
+import math
+
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 from Tools.Stats.analysis.prepared_analysis import AnalysisMode
 from Tools.Stats.reporting.logging_policy import stats_ide_log_level
@@ -134,10 +136,21 @@ class StatsWindowPipelineMixin:
 
     def _get_analysis_settings(self) -> Optional[Tuple[float, float]]:
         """Handle the get analysis settings step for the Stats workflow."""
-        ok1, bf = self._safe_settings_get("analysis", "base_freq", 6.0)
         ok2, a = self._safe_settings_get("analysis", "alpha", 0.05)
         try:
-            base_freq = float(bf)
+            if self._project_manifest_path().is_file():
+                selection = getattr(self, "_canonical_harmonic_selection", None)
+                if selection is None:
+                    selection = self._load_canonical_harmonic_selection()
+                base_freq = float(selection.metadata["base_frequency_hz"])
+                if not math.isfinite(base_freq) or base_freq <= 0:
+                    raise ValueError(
+                        "accepted project harmonic metadata has an invalid base frequency"
+                    )
+                ok1 = True
+            else:
+                ok1, bf = self._safe_settings_get("analysis", "base_freq", 6.0)
+                base_freq = float(bf)
             alpha = float(a)
         except Exception as e:
             QMessageBox.critical(self, "Settings Error", f"Invalid analysis settings: {e}")
