@@ -11,8 +11,15 @@ from PySide6.QtCore import QObject, Signal
 from .core import (
     ConditionInfo,
     DetectabilitySettings,
+    ManagedDetectabilityInputError,
     generate_condition_figure,
+    prevalidate_managed_conditions,
     sanitize_filename_stem,
+)
+from .project_coverage import (
+    ManagedWorkbookCoverage,
+    load_managed_workbook_coverage,
+    require_selected_workbooks_released,
 )
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
@@ -55,19 +62,31 @@ class IndividualDetectabilityWorker(QObject):
 
             matplotlib.use("Agg", force=True)
             self._run()
-        except CanonicalHarmonicSelectionError as exc:
+        except (CanonicalHarmonicSelectionError, ManagedDetectabilityInputError) as exc:
             self.error.emit(str(exc))
         except Exception:
             self.error.emit(traceback.format_exc())
 
     def _run(self) -> None:
         req = self._request
-        self._require_current_project_inputs(req)
+        managed_coverage = self._require_current_project_inputs(req)
         total_conditions = len(req.conditions)
         if total_conditions == 0:
             self._emit_log("No conditions selected.")
             self.finished.emit(str(req.output_root))
             return
+
+        preflight_log: list[str] = []
+        effective_settings = self._resolve_effective_settings(
+            preflight_log.append,
+            req,
+        )
+        if managed_coverage is not None:
+            prevalidate_managed_conditions(
+                req.conditions,
+                effective_settings,
+                managed_coverage,
+            )
 
         log_path = req.output_root / self._log_filename(req.settings)
         req.output_root.mkdir(parents=True, exist_ok=True)
@@ -78,9 +97,20 @@ class IndividualDetectabilityWorker(QObject):
                 log_file.flush()
                 self._emit_log(message)
 
-            effective_settings = self._resolve_effective_settings(write_log, req)
-            self._write_run_metadata(req.output_root, req, effective_settings)
-            self._log_header(write_log, req, effective_settings)
+            for message in preflight_log:
+                write_log(message)
+            self._write_run_metadata(
+                req.output_root,
+                req,
+                effective_settings,
+                managed_coverage,
+            )
+            self._log_header(
+                write_log,
+                req,
+                effective_settings,
+                managed_coverage,
+            )
 
             for idx, condition in enumerate(req.conditions, start=1):
                 write_log(f"Processing condition: {condition.name}")
@@ -98,6 +128,7 @@ class IndividualDetectabilityWorker(QObject):
                     settings=effective_settings,
                     export_png=True,
                     log=write_log,
+                    managed_coverage_by_workbook=managed_coverage,
                 )
                 write_log(
                     f"Condition {condition.name}: processed {processed} of {total} files."
@@ -110,16 +141,19 @@ class IndividualDetectabilityWorker(QObject):
         self.finished.emit(str(req.output_root))
 
     @staticmethod
-    def _require_current_project_inputs(req: RunRequest) -> None:
+    def _require_current_project_inputs(
+        req: RunRequest,
+    ) -> dict[Path, ManagedWorkbookCoverage] | None:
         """Bind managed runs to the current canonical FullFFT source family."""
 
         if req.project_root is None:
-            return
+            return None
         from Main_App.processing.full_fft_provenance import (
             FullFftProvenanceError,
             require_current_project_full_fft_provenance,
         )
         from Main_App.projects import DatasetIndexError, load_project_dataset_index
+        from Main_App.processing.roi_coverage import RoiCoverageGateError
 
         try:
             dataset_index = load_project_dataset_index(req.input_root)
@@ -127,11 +161,21 @@ class IndividualDetectabilityWorker(QObject):
                 req.project_root,
                 dataset_index=dataset_index,
             )
-        except (DatasetIndexError, FullFftProvenanceError) as exc:
+            managed_coverage = load_managed_workbook_coverage(req.project_root)
+            require_selected_workbooks_released(
+                [path for condition in req.conditions for path in condition.files],
+                managed_coverage,
+            )
+        except (
+            DatasetIndexError,
+            FullFftProvenanceError,
+            RoiCoverageGateError,
+        ) as exc:
             raise CanonicalHarmonicSelectionError(
                 str(exc),
-                reason="stale_full_fft_provenance",
+                reason="stale_project_qc_release",
             ) from exc
+        return managed_coverage
 
     @staticmethod
     def _log_filename(settings: DetectabilitySettings) -> str:
@@ -180,9 +224,15 @@ class IndividualDetectabilityWorker(QObject):
         output_root: Path,
         req: RunRequest,
         settings: DetectabilitySettings,
+        managed_coverage: dict[Path, ManagedWorkbookCoverage] | None,
     ) -> None:
         suffix = "_custom_harmonics" if settings.harmonic_source == CUSTOM_HARMONIC_SOURCE else ""
         metadata_path = output_root / f"individual_detectability{suffix}_metadata.json"
+        selected_workbooks = {
+            path.expanduser().resolve(strict=False)
+            for condition in req.conditions
+            for path in condition.files
+        }
         payload = {
             "input_root": str(req.input_root),
             "output_root": str(req.output_root),
@@ -193,6 +243,17 @@ class IndividualDetectabilityWorker(QObject):
             "exploratory": settings.harmonic_source == CUSTOM_HARMONIC_SOURCE,
             "selected_harmonics_hz": list(settings.oddball_harmonics_hz),
             "harmonic_selection_fingerprint": settings.harmonic_fingerprint,
+            "final_release_receipt_fingerprint": (
+                _managed_release_fingerprint(managed_coverage)
+            ),
+            "managed_source_coverage_fingerprints": {
+                str(path): coverage.source_evidence_fingerprint
+                for path, coverage in sorted(
+                    (managed_coverage or {}).items(),
+                    key=lambda item: str(item[0]).casefold(),
+                )
+                if path in selected_workbooks
+            },
             "settings": asdict(settings),
         }
         metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -202,11 +263,15 @@ class IndividualDetectabilityWorker(QObject):
         log: Callable[[str], None],
         req: RunRequest,
         settings: DetectabilitySettings,
+        managed_coverage: dict[Path, ManagedWorkbookCoverage] | None,
     ) -> None:
         log("Individual Detectability run")
         log(f"Input root: {req.input_root}")
         log(f"Output root: {req.output_root}")
         log(f"Project root: {req.project_root or ''}")
+        release_fingerprint = _managed_release_fingerprint(managed_coverage)
+        if release_fingerprint:
+            log(f"QC-20/QC-21 final release: {release_fingerprint}")
         log("Selected conditions:")
         for cond in req.conditions:
             log(f" - {cond.name} ({len(cond.files)} files)")
@@ -236,3 +301,17 @@ def _participant_sort_key(participant_id: str) -> tuple[int, str]:
         return (int(digits), text)
     except ValueError:
         return (10**9, text)
+
+
+def _managed_release_fingerprint(
+    managed_coverage: dict[Path, ManagedWorkbookCoverage] | None,
+) -> str:
+    fingerprints = {
+        coverage.final_release_receipt_fingerprint
+        for coverage in (managed_coverage or {}).values()
+    }
+    if len(fingerprints) > 1:
+        raise RuntimeError(
+            "Individual Detectability received workbooks from multiple final releases."
+        )
+    return next(iter(fingerprints), "")

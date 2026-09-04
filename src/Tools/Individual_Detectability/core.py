@@ -5,8 +5,9 @@ from pathlib import Path
 import hashlib
 import math
 import re
+import statistics
 import traceback
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, Mapping, Sequence, TYPE_CHECKING
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
 from Main_App.exports.figure_style import (
@@ -19,6 +20,11 @@ from Main_App.exports.figure_style import (
 )
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
+)
+from Tools.Individual_Detectability.project_coverage import (
+    ManagedWorkbookCoverage,
+    require_managed_workbook_coverage as lookup_managed_workbook_coverage,
+    validate_managed_fullfft_rows,
 )
 
 if TYPE_CHECKING:
@@ -135,6 +141,7 @@ class FullFftHarmonicPlan:
     harmonic_columns: tuple[str, ...]
     usecols: tuple[str, ...]
     column_bin_pairs: tuple[tuple[str, int], ...]
+    frequency_column_pairs: tuple[tuple[str, float], ...]
 
 
 @dataclass(frozen=True)
@@ -165,6 +172,11 @@ class _ParticipantResult:
     snr_y: "np.ndarray | None" = None
     err: str | None = None
     tb: str | None = None
+    fatal_integrity_error: bool = False
+
+
+class ManagedDetectabilityInputError(ValueError):
+    """A released managed workbook cannot safely contribute to a figure."""
 
 
 def parse_participant_id(filename: str) -> str | None:
@@ -367,8 +379,113 @@ def build_fullfft_harmonic_plan(
         harmonic_bins=tuple(harmonic_bins),
         harmonic_columns=tuple(harmonic_columns),
         usecols=tuple(usecols),
-        column_bin_pairs=tuple((by_bin[bin_index], int(bin_index)) for bin_index in sorted(needed_bins)),
+        column_bin_pairs=tuple(
+            (by_bin[bin_index], int(bin_index))
+            for bin_index in sorted(needed_bins)
+        ),
+        frequency_column_pairs=tuple(
+            (column, float(frequency)) for _bin, frequency, column in entries
+        ),
     )
+
+
+def require_complete_harmonic_noise_support(
+    plan: FullFftHarmonicPlan,
+    *,
+    window_size: int = 10,
+) -> None:
+    """Require every locked summed-Z neighbor on the physical frequency grid."""
+
+    window = int(window_size)
+    if window < 2:
+        raise ValueError(
+            "Summed-harmonic noise support requires a window of at least 2 bins."
+        )
+    ordered_frequencies = tuple(
+        float(frequency) for _column, frequency in plan.frequency_column_pairs
+    )
+    adjacent_differences = tuple(
+        right - left
+        for left, right in zip(
+            ordered_frequencies,
+            ordered_frequencies[1:],
+            strict=False,
+        )
+    )
+    if (
+        len(ordered_frequencies) < 2
+        or not math.isclose(
+            ordered_frequencies[0],
+            0.0,
+            rel_tol=0.0,
+            abs_tol=0.00011,
+        )
+        or any(difference <= 0.0 for difference in adjacent_differences)
+    ):
+        raise ValueError(
+            "Managed Individual Detectability requires a strictly increasing, "
+            "zero-based FullFFT frequency grid."
+        )
+    median_difference = float(statistics.median(adjacent_differences))
+    ordinary_differences = tuple(
+        difference
+        for difference in adjacent_differences
+        if 0.5 * median_difference <= difference <= 1.5 * median_difference
+    )
+    if not ordinary_differences:
+        raise ValueError(
+            "Managed Individual Detectability could not identify the FullFFT "
+            "frequency resolution."
+        )
+    resolution_hz = sum(ordinary_differences) / len(ordinary_differences)
+    label_tolerance_hz = min(0.00011, resolution_hz / 4.0)
+    planned_columns = {column for column, _bin in plan.column_bin_pairs}
+    frequency_by_column = dict(plan.frequency_column_pairs)
+    available_frequencies = tuple(plan.frequency_column_pairs)
+    missing: list[str] = []
+    for harmonic_hz, target_bin, target_column in zip(
+        plan.harmonic_list,
+        plan.harmonic_bins,
+        plan.harmonic_columns,
+        strict=True,
+    ):
+        target_frequency = frequency_by_column.get(target_column)
+        if target_frequency is None or int(target_bin) <= 0:
+            missing_offsets = [
+                offset
+                for offset in range(-window, window + 1)
+                if offset not in {-1, 0, 1}
+            ]
+        else:
+            missing_offsets = []
+            for offset in range(-window, window + 1):
+                if offset in {-1, 0, 1}:
+                    continue
+                expected_hz = float(target_frequency) + offset * resolution_hz
+                matching_columns = [
+                    column
+                    for column, frequency in available_frequencies
+                    if math.isclose(
+                        float(frequency),
+                        expected_hz,
+                        rel_tol=0.0,
+                        abs_tol=label_tolerance_hz,
+                    )
+                ]
+                if len(matching_columns) != 1 or matching_columns[0] not in planned_columns:
+                    missing_offsets.append(offset)
+        if missing_offsets:
+            missing.append(
+                f"{float(harmonic_hz):g} Hz: "
+                + ", ".join(f"{offset:+d}" for offset in missing_offsets)
+            )
+    if missing:
+        raise ValueError(
+            "Managed Individual Detectability requires complete summed-Z noise "
+            "support at offsets -10..-2 and +2..+10 for every target; missing "
+            + "; ".join(missing)
+            + ". Choose harmonics inside the project spectral eligibility range."
+        )
 
 
 def summed_harmonic_z_from_bin_amplitudes(
@@ -630,7 +747,10 @@ def _plot_topomap_compat(
 # -----------------------------------------------------------------------------
 # Caching helpers
 # -----------------------------------------------------------------------------
-def _settings_fingerprint(settings: DetectabilitySettings) -> str:
+def _settings_fingerprint(
+    settings: DetectabilitySettings,
+    managed_coverage: ManagedWorkbookCoverage | None = None,
+) -> str:
     # Stable, explicit token (don’t rely on Python hash randomization)
     parts = [
         _CACHE_VERSION,
@@ -641,6 +761,11 @@ def _settings_fingerprint(settings: DetectabilitySettings) -> str:
         f"bh={int(bool(settings.use_bh_fdr))}",
         f"alpha={float(settings.fdr_alpha):.6f}",
         f"hw={float(settings.half_window_hz):.6f}",
+        "coverage=" + (
+            managed_coverage.cache_fingerprint
+            if managed_coverage is not None
+            else "projectless"
+        ),
     ]
     s = "|".join(parts).encode("utf-8")
     return hashlib.sha1(s).hexdigest()[:16]
@@ -652,9 +777,34 @@ def _source_fingerprint(path: Path) -> str:
     return hashlib.sha1(token).hexdigest()[:16]
 
 
-def _cache_path_for(excel_path: Path, settings: DetectabilitySettings, cache_dir: Path) -> Path:
-    key = f"{excel_path.stem}__{_source_fingerprint(excel_path)}__{_settings_fingerprint(settings)}.npz"
+def _cache_path_for(
+    excel_path: Path,
+    settings: DetectabilitySettings,
+    cache_dir: Path,
+    managed_coverage: ManagedWorkbookCoverage | None = None,
+) -> Path:
+    key = (
+        f"{excel_path.stem}__{_source_fingerprint(excel_path)}__"
+        f"{_settings_fingerprint(settings, managed_coverage)}.npz"
+    )
     return cache_dir / key
+
+
+def _managed_workbook_coverage_or_input_error(
+    excel_path: Path,
+    coverage_by_workbook: Mapping[Path, ManagedWorkbookCoverage],
+) -> ManagedWorkbookCoverage:
+    """Translate a managed release lookup failure into concise tool feedback."""
+
+    from Main_App.processing.roi_coverage import RoiCoverageGateError
+
+    try:
+        return lookup_managed_workbook_coverage(
+            excel_path,
+            coverage_by_workbook,
+        )
+    except RoiCoverageGateError as error:
+        raise ManagedDetectabilityInputError(str(error)) from error
 
 
 def _load_cache_npz(cache_path: Path) -> _ParticipantResult:
@@ -704,15 +854,16 @@ def _save_cache_npz(
         snr_y_arr = np.asarray(snr_y, dtype=float)
 
     tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    np.savez_compressed(
-        tmp,
-        pid=np.asarray(pid),
-        n_sig=np.asarray(int(n_sig)),
-        z_topo=np.asarray(z_topo, dtype=float),
-        has_snr=np.asarray(int(has_snr)),
-        snr_x=snr_x_arr,
-        snr_y=snr_y_arr,
-    )
+    with tmp.open("wb") as stream:
+        np.savez_compressed(
+            stream,
+            pid=np.asarray(pid),
+            n_sig=np.asarray(int(n_sig)),
+            z_topo=np.asarray(z_topo, dtype=float),
+            has_snr=np.asarray(int(has_snr)),
+            snr_x=snr_x_arr,
+            snr_y=snr_y_arr,
+        )
     try:
         tmp.replace(cache_path)
     except Exception:
@@ -781,6 +932,61 @@ def _excel_minimal_read(excel_path: Path, settings: DetectabilitySettings):
     return df_fft, df_snr, plan
 
 
+def _require_managed_fullfft_noise_support(
+    excel_path: Path,
+    settings: DetectabilitySettings,
+    coverage: ManagedWorkbookCoverage,
+) -> None:
+    """Validate the managed FullFFT grid and frozen source rows before cache reuse."""
+
+    import pandas as pd
+
+    xl = pd.ExcelFile(excel_path)
+    if SHEET_FULLFFT not in xl.sheet_names:
+        raise ValueError(f"Missing required sheet '{SHEET_FULLFFT}'.")
+    fft_head = xl.parse(SHEET_FULLFFT, nrows=0)
+    if ELECTRODE_COL not in fft_head.columns:
+        raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_FULLFFT}'.")
+    plan = build_fullfft_harmonic_plan(
+        fft_head.columns,
+        settings.oddball_harmonics_hz,
+    )
+    require_complete_harmonic_noise_support(plan)
+    df_fft = xl.parse(SHEET_FULLFFT, usecols=list(plan.usecols))
+    validate_managed_fullfft_rows(
+        df_fft,
+        coverage=coverage,
+        required_columns=plan.usecols[1:],
+        electrode_column=ELECTRODE_COL,
+    )
+
+
+def prevalidate_managed_conditions(
+    conditions: Sequence[ConditionInfo],
+    settings: DetectabilitySettings,
+    coverage_by_workbook: Mapping[Path, ManagedWorkbookCoverage],
+) -> None:
+    """Validate every selected managed source before a run writes outputs."""
+
+    for condition in conditions:
+        for excel_path in condition.files:
+            coverage = _managed_workbook_coverage_or_input_error(
+                excel_path,
+                coverage_by_workbook,
+            )
+            try:
+                _require_managed_fullfft_noise_support(
+                    excel_path,
+                    settings,
+                    coverage,
+                )
+            except Exception as error:
+                raise ManagedDetectabilityInputError(
+                    "Managed Individual Detectability cannot validate "
+                    f"{excel_path.name}: {error}"
+                ) from error
+
+
 def _load_summed_z_from_df(df, plan: FullFftHarmonicPlan, settings: DetectabilitySettings):
     """
     Returns:
@@ -814,7 +1020,11 @@ def _build_topomap_vector_finite(
     """
     Build montage-aligned vector with NO NaNs:
       - significant: summed-harmonic Z
-      - non-significant/missing: Z_THRESHOLD (renders white)
+      - non-significant: Z_THRESHOLD (renders white)
+
+    Managed-project callers validate the exact frozen scalp rows before this
+    function. Projectless compatibility callers retain the historical behavior
+    of placing absent montage rows at the threshold.
     """
     import numpy as np
 
@@ -926,12 +1136,34 @@ def _process_one_participant(
     pid: str,
     settings: DetectabilitySettings,
     cache_dir_str: str,
+    managed_coverage: ManagedWorkbookCoverage | None = None,
 ) -> _ParticipantResult:
     import numpy as np
 
     excel_path = Path(excel_path_str)
     cache_dir = Path(cache_dir_str)
-    cache_path = _cache_path_for(excel_path, settings, cache_dir)
+    cache_path = _cache_path_for(
+        excel_path,
+        settings,
+        cache_dir,
+        managed_coverage,
+    )
+
+    if managed_coverage is not None:
+        try:
+            _require_managed_fullfft_noise_support(
+                excel_path,
+                settings,
+                managed_coverage,
+            )
+        except Exception as error:
+            return _ParticipantResult(
+                pid=pid,
+                ok=False,
+                err=str(error),
+                tb=traceback.format_exc(),
+                fatal_integrity_error=True,
+            )
 
     try:
         if cache_path.exists():
@@ -944,7 +1176,6 @@ def _process_one_participant(
 
     try:
         df_fft, df_snr, plan = _excel_minimal_read(excel_path, settings)
-
         electrodes_raw, z_sum, sig_mask = _load_summed_z_from_df(df_fft, plan, settings)
         n_sig = int(np.sum(sig_mask))
 
@@ -988,6 +1219,7 @@ def _process_one_participant(
             ok=False,
             err=str(e),
             tb=traceback.format_exc(),
+            fatal_integrity_error=managed_coverage is not None,
         )
 
 
@@ -999,6 +1231,9 @@ def generate_condition_figure(
     settings: DetectabilitySettings,
     export_png: bool,
     log: Callable[[str], None],
+    managed_coverage_by_workbook: Mapping[
+        Path, ManagedWorkbookCoverage
+    ] | None = None,
 ) -> tuple[int, int]:
     """
     Generates the grid figure for a condition, matching the original output style:
@@ -1047,7 +1282,7 @@ def generate_condition_figure(
         cache_dir = output_dir / _CACHE_DIRNAME
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-    tasks: list[tuple[Path, str]] = []
+    tasks: list[tuple[Path, str, ManagedWorkbookCoverage | None]] = []
     records: list[tuple[str, int, np.ndarray, np.ndarray | None, np.ndarray | None]] = []
 
     for excel_path in condition.files:
@@ -1059,8 +1294,19 @@ def generate_condition_figure(
             log(f"Skipping {excel_path.name}: excluded participant {pid}.")
             continue
 
-        cache_path = _cache_path_for(excel_path, settings, cache_dir)
-        if cache_path.exists():
+        managed_coverage = None
+        if managed_coverage_by_workbook is not None:
+            managed_coverage = _managed_workbook_coverage_or_input_error(
+                excel_path,
+                managed_coverage_by_workbook,
+            )
+        cache_path = _cache_path_for(
+            excel_path,
+            settings,
+            cache_dir,
+            managed_coverage,
+        )
+        if managed_coverage is None and cache_path.exists():
             try:
                 cached = _load_cache_npz(cache_path)
                 if cached.ok and cached.z_topo is not None:
@@ -1072,7 +1318,7 @@ def generate_condition_figure(
                 except Exception:
                     pass
 
-        tasks.append((excel_path, pid))
+        tasks.append((excel_path, pid, managed_coverage))
 
     if tasks:
         try:
@@ -1083,23 +1329,42 @@ def generate_condition_figure(
 
             with ProcessPoolExecutor(max_workers=max_workers) as ex:
                 futs = [
-                    ex.submit(_process_one_participant, str(p), pid, settings, str(cache_dir))
-                    for (p, pid) in tasks
+                    ex.submit(
+                        _process_one_participant,
+                        str(path),
+                        pid,
+                        settings,
+                        str(cache_dir),
+                        managed_coverage,
+                    )
+                    for path, pid, managed_coverage in tasks
                 ]
                 for fut in as_completed(futs):
                     res = fut.result()
                     if not res.ok:
+                        if res.fatal_integrity_error:
+                            raise ManagedDetectabilityInputError(res.err)
                         log(f"Error processing participant file: {res.pid} | {res.err}")
                         continue
                     if res.z_topo is None:
                         log(f"Error processing participant file: {res.pid} | Missing z_topo")
                         continue
                     records.append((res.pid, res.n_sig, res.z_topo, res.snr_x, res.snr_y))
+        except ManagedDetectabilityInputError:
+            raise
         except Exception as e:
             log(f"Parallel processing unavailable; falling back to sequential. Reason: {e}")
-            for p, pid in tasks:
-                res = _process_one_participant(str(p), pid, settings, str(cache_dir))
+            for path, pid, managed_coverage in tasks:
+                res = _process_one_participant(
+                    str(path),
+                    pid,
+                    settings,
+                    str(cache_dir),
+                    managed_coverage,
+                )
                 if not res.ok:
+                    if res.fatal_integrity_error:
+                        raise ManagedDetectabilityInputError(res.err)
                     log(f"Error processing participant file: {res.pid} | {res.err}")
                     continue
                 if res.z_topo is None:

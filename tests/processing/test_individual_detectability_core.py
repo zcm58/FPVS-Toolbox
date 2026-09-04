@@ -205,6 +205,9 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
         settings = kwargs["settings"]
         seen_settings["source"] = settings.harmonic_source
         seen_settings["harmonics"] = list(settings.oddball_harmonics_hz)
+        seen_settings["managed_coverage"] = kwargs[
+            "managed_coverage_by_workbook"
+        ]
         output_dir = kwargs["output_dir"]
         stem = sanitize_filename_stem(kwargs["output_stem"])
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -213,6 +216,7 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
         return (1, 1)
 
     seen_settings: dict[str, object] = {}
+    prevalidation_calls: list[tuple[object, object, object]] = []
     dataset_index = object()
     provenance_calls: list[tuple[Path, object]] = []
     monkeypatch.setattr(
@@ -223,6 +227,23 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
         "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
         lambda root, *, dataset_index: provenance_calls.append(
             (Path(root), dataset_index)
+        ),
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "load_managed_workbook_coverage",
+        lambda root: {} if Path(root) == tmp_path else None,
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "require_selected_workbooks_released",
+        lambda paths, coverage: None,
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "prevalidate_managed_conditions",
+        lambda conditions, settings, coverage: prevalidation_calls.append(
+            (conditions, settings, coverage)
         ),
     )
     monkeypatch.setattr(
@@ -242,6 +263,11 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
     assert provenance_calls == [(tmp_path, dataset_index)]
     assert seen_settings["source"] == CANONICAL_HARMONIC_SOURCE
     assert seen_settings["harmonics"] == [1.2, 2.4]
+    assert seen_settings["managed_coverage"] == {}
+    assert len(prevalidation_calls) == 1
+    assert prevalidation_calls[0][0] == request.conditions
+    assert prevalidation_calls[0][1].oddball_harmonics_hz == [1.2, 2.4]
+    assert prevalidation_calls[0][2] == {}
     metadata = tmp_path / "out" / "individual_detectability_metadata.json"
     assert metadata.exists()
     assert "FPVS Toolbox significant harmonics" in metadata.read_text(encoding="utf-8")

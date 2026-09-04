@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from functools import partial
 import hashlib
 import json
@@ -22,7 +22,10 @@ from Main_App.processing.frequency_domain_qc import (
     FREQUENCY_DOMAIN_QC_METHOD_VERSION,
     active_frequency_domain_exclusions,
 )
-from Tools.Stats.analysis.canonical_harmonics import load_project_processing_harmonics
+from Tools.Stats.analysis.canonical_harmonics import (
+    CanonicalHarmonicSelectionError,
+    load_project_processing_harmonics,
+)
 from Tools.Publication_Maps.excel_inputs import (
     ELECTRODE_COLUMN,
     load_publication_dataset_index,
@@ -94,6 +97,22 @@ _CONDITION_SCOPED_FATAL_DATASET_DIAGNOSTIC_CODES = frozenset(
 _HASH_CHUNK_BYTES = 1024 * 1024
 
 
+@dataclass(frozen=True, slots=True)
+class _ReleasedPublicationSource:
+    workbook_path: Path
+    retained_scalp_channels: tuple[str, ...]
+    allowed_auxiliary_rows: tuple[str, ...]
+    observed_auxiliary_rows: tuple[str, ...]
+    source_evidence_fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ManagedPublicationRelease:
+    sources_by_workbook: Mapping[Path, _ReleasedPublicationSource]
+    final_coverage_fingerprint: str
+    final_release_receipt_fingerprint: str
+
+
 def build_publication_map_result(
     request: PublicationMapRequest,
     *,
@@ -102,6 +121,7 @@ def build_publication_map_result(
     """Build selected metric frames using Stats-selected harmonics."""
 
     _cancellation_checkpoint(cancel_check)
+    managed_release = _require_managed_publication_release(request.project_root)
     diagnostics: list[Diagnostic] = []
     requested_metrics = _request_metrics(request)
     frequency_exclusions = active_frequency_domain_exclusions(request.project_root)
@@ -147,6 +167,10 @@ def build_publication_map_result(
         )
     except DatasetIndexError as exc:
         raise PublicationMapCohortError(str(exc)) from exc
+    released_sources = _require_released_publication_workbooks(
+        workbooks,
+        managed_release,
+    )
     group_id = None if group is None else group.group_id
     group_label = None if group is None else group.label
     group_folder = None if group is None else group.folder_name
@@ -164,7 +188,14 @@ def build_publication_map_result(
     selected_harmonics, selection_metadata = _select_stats_significant_harmonics(
         request=request,
         diagnostics=diagnostics,
+        managed_release=managed_release,
     )
+    release_metadata = _managed_publication_release_metadata(
+        managed_release,
+        released_sources,
+    )
+    selection_metadata.update(release_metadata)
+    qc_provenance.update(release_metadata)
     _cancellation_checkpoint(cancel_check)
     workbooks = _capture_workbook_identities(
         workbooks,
@@ -180,6 +211,9 @@ def build_publication_map_result(
                 harmonics_hz=selected_harmonics,
                 diagnostics=diagnostics,
                 excluded_electrodes_by_subject=frequency_exclusions.auto_excluded_electrodes_by_participant,
+                managed_sources_by_workbook=(
+                    released_sources if managed_release is not None else None
+                ),
                 cancel_check=cancel_check,
             )
         )
@@ -504,9 +538,15 @@ def _select_stats_significant_harmonics(
     *,
     request: PublicationMapRequest,
     diagnostics: list[Diagnostic],
+    managed_release: _ManagedPublicationRelease | None = None,
 ) -> tuple[tuple[float, ...], dict[str, object]]:
     def log_func(message: str) -> None:
         diagnostics.append(Diagnostic(level="info", message=message))
+
+    if request.project_root is not None and managed_release is None:
+        managed_release = _require_managed_publication_release(
+            request.project_root,
+        )
 
     selection = load_project_processing_harmonics(
         project_root=request.project_root,
@@ -529,6 +569,107 @@ def _select_stats_significant_harmonics(
     return selected, metadata
 
 
+def _require_managed_publication_release(
+    project_root: Path | None,
+) -> _ManagedPublicationRelease | None:
+    """Require and retain the current QC-20/QC-21 managed release."""
+
+    if project_root is None:
+        return None
+    from Main_App.processing.roi_coverage import (
+        RoiCoverageGateError,
+        require_project_final_release,
+    )
+
+    try:
+        _outcomes, final_coverage, receipt = require_project_final_release(
+            project_root
+        )
+        sources: dict[Path, _ReleasedPublicationSource] = {}
+        for cell in final_coverage.cells:
+            source = cell.source_evidence
+            if (
+                source is None
+                or not cell.workbook_path
+                or bool(getattr(cell, "downstream_cell_excluded", False))
+            ):
+                continue
+            workbook_path = (
+                Path(cell.workbook_path).expanduser().resolve(strict=False)
+            )
+            if workbook_path in sources:
+                raise RoiCoverageGateError(
+                    "Scalp Maps found duplicate final QC-21 coverage for "
+                    f"workbook {workbook_path}."
+                )
+            sources[workbook_path] = _ReleasedPublicationSource(
+                workbook_path=workbook_path,
+                retained_scalp_channels=tuple(
+                    source.retained_scalp_identity.channels
+                ),
+                allowed_auxiliary_rows=tuple(source.allowed_auxiliary_rows),
+                observed_auxiliary_rows=tuple(source.observed_auxiliary_rows),
+                source_evidence_fingerprint=str(source.fingerprint),
+            )
+        return _ManagedPublicationRelease(
+            sources_by_workbook=sources,
+            final_coverage_fingerprint=str(final_coverage.fingerprint),
+            final_release_receipt_fingerprint=str(receipt.fingerprint),
+        )
+    except RoiCoverageGateError as exc:
+        raise CanonicalHarmonicSelectionError(
+            str(exc),
+            reason="stale_final_release",
+        ) from exc
+
+
+def _require_released_publication_workbooks(
+    workbooks: tuple[WorkbookEntry, ...],
+    managed_release: _ManagedPublicationRelease | None,
+) -> dict[Path, _ReleasedPublicationSource]:
+    """Bind every selected managed workbook to an available released cell."""
+
+    if managed_release is None:
+        return {}
+    selected: dict[Path, _ReleasedPublicationSource] = {}
+    for workbook in workbooks:
+        path = workbook.path.expanduser().resolve(strict=False)
+        source = managed_release.sources_by_workbook.get(path)
+        if source is None:
+            raise PublicationMapInputError(
+                "Scalp Maps selected a workbook that is not an available "
+                f"QC-20/QC-21 released contributor: {path}. Rerun reviewed "
+                "post-processing before generating this figure."
+            )
+        selected[path] = source
+    return selected
+
+
+def _managed_publication_release_metadata(
+    managed_release: _ManagedPublicationRelease | None,
+    selected_sources: Mapping[Path, _ReleasedPublicationSource],
+) -> dict[str, object]:
+    """Return the release identities retained with a managed result."""
+
+    if managed_release is None:
+        return {}
+    return {
+        "final_roi_coverage_fingerprint": (
+            managed_release.final_coverage_fingerprint
+        ),
+        "final_release_receipt_fingerprint": (
+            managed_release.final_release_receipt_fingerprint
+        ),
+        "selected_source_coverage_fingerprints": {
+            str(path): source.source_evidence_fingerprint
+            for path, source in sorted(
+                selected_sources.items(),
+                key=lambda item: str(item[0]).casefold(),
+            )
+        },
+    }
+
+
 def _collect_metric_rows(
     *,
     metric: PublicationMetric,
@@ -536,6 +677,9 @@ def _collect_metric_rows(
     harmonics_hz: tuple[float, ...],
     diagnostics: list[Diagnostic],
     excluded_electrodes_by_subject: dict[str, frozenset[str]],
+    managed_sources_by_workbook: Mapping[
+        Path, _ReleasedPublicationSource
+    ] | None = None,
     cancel_check: Callable[[], None] | None = None,
 ) -> list[dict[str, object]]:
     montage_names = biosemi64_names_upper()
@@ -576,6 +720,22 @@ def _collect_metric_rows(
                 f"Missing exact selected {metric.display_name} harmonic columns "
                 f"in {workbook.path.name} ({workbook.subject_id} / "
                 f"{workbook.condition}): {', '.join(missing_columns)}"
+            )
+        if managed_sources_by_workbook is not None:
+            source = managed_sources_by_workbook.get(
+                workbook.path.expanduser().resolve(strict=False)
+            )
+            if source is None:
+                raise PublicationMapInputError(
+                    "Scalp Maps cannot bind the selected workbook to its "
+                    f"QC-21 source evidence: {workbook.path}."
+                )
+            _validate_released_metric_source_rows(
+                df_metric,
+                metric=metric,
+                workbook=workbook,
+                selected_columns=selected_columns,
+                released_source=source,
             )
         normalized_electrodes = df_metric[ELECTRODE_COLUMN].map(normalize_electrode_name)
         duplicate_electrodes = sorted(
@@ -655,6 +815,46 @@ def _collect_metric_rows(
                 f"{workbook.condition})."
             )
     return rows
+
+
+def _validate_released_metric_source_rows(
+    rows: pd.DataFrame,
+    *,
+    metric: PublicationMetric,
+    workbook: WorkbookEntry,
+    selected_columns: list[str],
+    released_source: _ReleasedPublicationSource,
+) -> None:
+    """Require exact frozen rows before condition-scoped electrode exclusions."""
+
+    from Main_App.processing.roi_coverage import (
+        RoiSourceCoverageError,
+        validate_roi_source_rows,
+    )
+
+    try:
+        observed = validate_roi_source_rows(
+            rows,
+            retained_scalp=released_source.retained_scalp_channels,
+            required_columns=selected_columns,
+            electrode_column=ELECTRODE_COLUMN,
+            allowed_auxiliary_rows=released_source.allowed_auxiliary_rows,
+            unavailable_columns=selected_columns,
+        )
+    except RoiSourceCoverageError as exc:
+        raise PublicationMapInputError(
+            f"Requested {metric.source_sheet} source rows do not match the "
+            "frozen QC-21 electrode set in "
+            f"{workbook.path.name} ({workbook.subject_id} / "
+            f"{workbook.condition}): {exc}"
+        ) from exc
+    if observed.observed_auxiliary_rows != released_source.observed_auxiliary_rows:
+        raise PublicationMapInputError(
+            f"Requested {metric.source_sheet} auxiliary rows do not match the "
+            "frozen QC-21 source identity in "
+            f"{workbook.path.name} ({workbook.subject_id} / "
+            f"{workbook.condition})."
+        )
 
 
 def _rows_for_frequency(
