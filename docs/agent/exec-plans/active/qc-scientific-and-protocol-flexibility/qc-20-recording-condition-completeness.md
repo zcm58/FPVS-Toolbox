@@ -9,10 +9,12 @@ ledger; only afterward does QC-20's pre-review gate consume the QC-21 result.
 For the final release gate, additionally load QC-03, QC-17, and QC-21 final
 coverage.
 
-**Status:** wave-1 ledger implemented on 2026-09-04; wave-3 receipts and wave-4
-gates remain. Every recording and condition expected by
-the project must be accounted for. A workbook is not required for a condition
-that is explicitly excluded or unavailable.
+**Status:** wave-1 ledger, wave-3 receipts, and the wave-4 final-release
+ledger/validator and downstream enforcement were implemented on 2026-09-04.
+The concurrent QC-03/QC-17 review integration owns the pre-review/final gate
+orchestration call sites. Every recording and condition expected by the project
+must be accounted for. A workbook is not required for a condition that is
+explicitly excluded or unavailable.
 
 ## Accepted State Model
 

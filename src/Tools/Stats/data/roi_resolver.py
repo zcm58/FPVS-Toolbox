@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 import pandas as pd
+import numpy as np
 from Main_App import SettingsManager
 
 logger = logging.getLogger(__name__)
@@ -58,17 +59,42 @@ def apply_roi_aggregation(
     ROIs are taken from current Settings at runtime via resolve_active_rois().
     """
     other_cols = [c for c in df.columns if c not in {ch_col, val_col}]
+    source = df.copy()
+    source[ch_col] = source[ch_col].astype(str).str.strip().str.upper()
+    source[val_col] = pd.to_numeric(source[val_col], errors="coerce")
+    groups = source.loc[:, other_cols].drop_duplicates()
     out_frames: List[pd.DataFrame] = []
     for roi in rois:
-        mask = df[ch_col].str.upper().isin(roi.channels)
-        if not mask.any():
-            continue
-        grouped = (
-            df.loc[mask]
-            .groupby(other_cols, dropna=False)[val_col]
-            .mean()
-            .reset_index()
+        channels = [str(channel).strip().upper() for channel in roi.channels]
+        if not channels or len(channels) != len(set(channels)):
+            raise ValueError(
+                f"ROI {roi.name!r} must contain a nonempty unique electrode set."
+            )
+        selected = source.loc[source[ch_col].isin(channels)].copy()
+        duplicate_keys = [*other_cols, ch_col]
+        if selected.duplicated(duplicate_keys, keep=False).any():
+            raise ValueError(
+                f"ROI {roi.name!r} has duplicate electrode rows within an analysis cell."
+            )
+        expected = groups.assign(_join=1).merge(
+            pd.DataFrame({ch_col: channels, "_join": 1}),
+            on="_join",
+            how="inner",
+        ).drop(columns="_join")
+        checked = expected.merge(
+            selected.loc[:, [*other_cols, ch_col, val_col]],
+            on=[*other_cols, ch_col],
+            how="left",
+            validate="one_to_one",
         )
+        if not np.isfinite(checked[val_col].to_numpy(dtype=float)).all():
+            raise ValueError(
+                f"ROI {roi.name!r} lacks one finite value for every configured "
+                "electrode in an analysis cell."
+            )
+        grouped = checked.groupby(other_cols, dropna=False, sort=False)[
+            val_col
+        ].mean().reset_index()
         grouped["roi"] = roi.name
         out_frames.append(grouped)
     if out_frames:

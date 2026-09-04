@@ -9,6 +9,7 @@ processed data.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -24,20 +25,24 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from Main_App import SettingsManager
 from Main_App.io import read_xlsx_sheet_selected_columns
 from Main_App.processing.frequency_domain_qc import load_frequency_domain_qc_state
+from Main_App.processing.roi_coverage import (
+    ROI_VALUE_AVAILABLE,
+    RecordingConditionRoiCoverage,
+    RoiCoverageLedger,
+    require_canonical_released_dataset_index,
+    require_project_final_release,
+)
 from Main_App.projects import (
     ProjectDatasetIndex,
     STATS_SUBFOLDER_NAME,
-    load_project_dataset_index,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recording_conditions,
     normalize_manual_excluded_recordings,
 )
 from Tools.Stats.io.harmonic_selection_export import (
-    HARMONIC_SELECTION_QC_WORKBOOK_NAME,
     build_harmonic_selection_frames,
 )
 
@@ -56,6 +61,7 @@ WHOLE_SCALP_SHEET = "Whole Scalp Values"
 RMS_HARMONIC_SCALES_SHEET = "RMS Harmonic Scales"
 QC_FLAGS_SHEET = "QC Flags"
 ROI_DEFINITIONS_SHEET = "ROI Definitions"
+ROI_COVERAGE_SHEET = "ROI Coverage"
 SELECTION_SUMMARY_SHEET = "Selection Summary"
 HARMONIC_SELECTION_SHEET = "Harmonic Selection"
 ANALYSIS_NOTES_SHEET = "Analysis Notes"
@@ -118,6 +124,27 @@ _QC_FLAG_COLUMNS = [
     "Flag Scope",
     "Current Toolbox Exclusion",
     "QC Notes",
+]
+_ROI_COVERAGE_COLUMNS = [
+    "PID",
+    "Recording ID",
+    "Condition",
+    "Coverage Type",
+    "ROI",
+    "Status",
+    "Decision Reasons",
+    "Expected Electrodes",
+    "Observed Electrodes",
+    "Excluded Electrodes",
+    "Interpolated Electrodes",
+    "Used Electrodes",
+    "Expected Count",
+    "Observed Count",
+    "Excluded Count",
+    "Interpolated Count",
+    "Used Count",
+    "All Members Interpolated Warning",
+    "Coverage Fingerprint",
 ]
 _REPEATED_IDENTITY_COLUMNS = [
     "PID",
@@ -201,29 +228,39 @@ def write_analysis_ready_workbook(
     selection_metadata: Mapping[str, object] | None = None,
     log_callback: Callable[[str], None] | None = None,
 ) -> AnalysisReadyWorkbookResult:
-    """Write the project's complete observed Summed BCA audit workbook.
+    """Write the project's final-release-authorized Summed BCA audit workbook.
 
-    Harmonics are consumed from processing-time selection metadata when it is
-    supplied. Otherwise the saved harmonic-selection QC workbook is used. This
-    function never performs harmonic selection or removes observations based on
-    current Toolbox QC decisions.
+    Harmonics always come from the current persisted canonical processing
+    selection; caller-supplied metadata must match it exactly. Reviewed
+    exclusions blank canonical ROI and normalized derivatives, while raw
+    electrode values remain available as explicitly labeled audit evidence.
     """
 
     root = Path(project_root).expanduser().resolve(strict=False)
-    index = dataset_index or load_project_dataset_index(root)
-    indexed_root = Path(index.project_root).expanduser().resolve(strict=False)
-    if indexed_root != root:
+    if dataset_index is not None and (
+        Path(dataset_index.project_root).expanduser().resolve(strict=False) != root
+    ):
         raise ValueError(
-            f"The supplied dataset index belongs to a different project root: {indexed_root} (expected {root})."
+            "The supplied dataset index belongs to a different project root."
         )
 
-    records = _full_audit_records(index)
+    final_coverage, release_fingerprint = _require_analysis_ready_release(root)
+    index = require_canonical_released_dataset_index(
+        root,
+        dataset_index,
+        final_coverage=final_coverage,
+    )
+    records = _full_audit_records(index, final_coverage=final_coverage)
     if not records:
-        raise RuntimeError("Analysis-ready export found no observed processed workbooks.")
-    rois = _load_active_rois()
+        raise RuntimeError("Analysis-ready export found no released processed workbooks.")
+    rois = {
+        roi.name: list(roi.electrodes)
+        for roi in final_coverage.roi_snapshot.rois
+    }
     selection_frames, selection_source = _load_selection_frames(
         root,
         selection_metadata=selection_metadata,
+        expected_release_fingerprint=release_fingerprint,
     )
     selected_harmonics = _selected_harmonics_from_frames(selection_frames)
     if not selected_harmonics:
@@ -265,6 +302,7 @@ def write_analysis_ready_workbook(
         )
         _append_record_rows(
             record=record,
+            coverage_cell=_coverage_cell_for_record(final_coverage, record),
             rois=rois,
             selected_columns=selected_columns,
             exclusion_context=exclusion_context,
@@ -353,6 +391,7 @@ def write_analysis_ready_workbook(
             repeated_session=repeated_session,
         ),
         ROI_DEFINITIONS_SHEET: _build_roi_definitions_frame(rois),
+        ROI_COVERAGE_SHEET: _build_roi_coverage_frame(final_coverage),
         SELECTION_SUMMARY_SHEET: _clean_selection_summary_frame(selection_frames),
         HARMONIC_SELECTION_SHEET: _clean_harmonic_selection_frame(selection_frames),
         ANALYSIS_NOTES_SHEET: _build_analysis_notes_frame(
@@ -402,7 +441,18 @@ def write_analysis_ready_workbook(
 export_analysis_ready_workbook = write_analysis_ready_workbook
 
 
-def _full_audit_records(index: ProjectDatasetIndex) -> list[Any]:
+def _require_analysis_ready_release(
+    project_root: Path,
+) -> tuple[RoiCoverageLedger, str]:
+    _outcomes, coverage, receipt = require_project_final_release(project_root)
+    return coverage, receipt.fingerprint
+
+
+def _full_audit_records(
+    index: ProjectDatasetIndex,
+    *,
+    final_coverage: RoiCoverageLedger,
+) -> list[Any]:
     combined = [*index.workbooks, *index.excluded_workbooks]
     ordered = sorted(
         combined,
@@ -420,7 +470,37 @@ def _full_audit_records(index: ProjectDatasetIndex) -> list[Any]:
             (identity.casefold(), record.condition.casefold()),
             record,
         )
-    records = list(unique.values())
+    released = {
+        (cell.recording_id.casefold(), cell.condition_label.casefold()): cell
+        for cell in final_coverage.cells
+        if cell.source_evidence is not None
+    }
+    missing = sorted(set(released).difference(unique))
+    if missing:
+        raise RuntimeError(
+            "Analysis-ready export could not find the QC-20 released workbook "
+            f"for recording-condition cell(s): {missing!r}."
+        )
+    records = [unique[key] for key in released]
+    for record in records:
+        key = (
+            str(record.recording_id or record.participant_id).casefold(),
+            str(record.condition).casefold(),
+        )
+        expected_path = Path(released[key].workbook_path).resolve(strict=False)
+        if Path(record.path).resolve(strict=False) != expected_path:
+            raise RuntimeError(
+                "Analysis-ready export found a workbook path different from the "
+                f"QC-20 release receipt for {key[0]}/{key[1]}."
+            )
+    records.sort(
+        key=lambda record: (
+            _natural_key(record.participant_id),
+            record.visit_index if record.visit_index is not None else 0,
+            record.condition.casefold(),
+            str(record.path).casefold(),
+        )
+    )
     if index.has_group_metadata:
         missing = sorted(
             {record.participant_id for record in records if not str(record.group_label or "").strip()},
@@ -429,6 +509,20 @@ def _full_audit_records(index: ProjectDatasetIndex) -> list[Any]:
         if missing:
             raise RuntimeError("Canonical group labels are missing for observed participant(s): " + ", ".join(missing))
     return records
+
+
+def _coverage_cell_for_record(
+    coverage: RoiCoverageLedger,
+    record: Any,
+) -> RecordingConditionRoiCoverage:
+    identity = record.recording_id or record.participant_id
+    cell = coverage.cell_for(identity, record.condition)
+    if cell is None or cell.source_evidence is None:
+        raise RuntimeError(
+            "Analysis-ready export lacks final QC-21 coverage for "
+            f"{identity}/{record.condition}."
+        )
+    return cell
 
 
 def _record_session_identity(record: Any) -> dict[str, object]:
@@ -449,46 +543,58 @@ def _record_session_identity(record: Any) -> dict[str, object]:
     }
 
 
-def _load_active_rois() -> dict[str, list[str]]:
-    pairs = SettingsManager().get_roi_pairs()
-    cleaned: dict[str, list[str]] = {}
-    names_seen: set[str] = set()
-    for raw_name, raw_electrodes in pairs:
-        name = str(raw_name or "").strip()
-        if not name:
-            continue
-        name_key = name.casefold()
-        if name_key in names_seen:
-            raise RuntimeError(f"Duplicate active ROI name in Settings: {name}")
-        electrodes = _ordered_unique(
-            str(electrode or "").strip().upper() for electrode in (raw_electrodes or []) if str(electrode or "").strip()
-        )
-        if not electrodes:
-            continue
-        names_seen.add(name_key)
-        cleaned[name] = electrodes
-    if not cleaned:
-        raise RuntimeError("Analysis-ready export requires at least one active ROI in Settings.")
-    return cleaned
-
-
 def _load_selection_frames(
     project_root: Path,
     *,
     selection_metadata: Mapping[str, object] | None,
+    expected_release_fingerprint: str,
 ) -> tuple[dict[str, pd.DataFrame], str]:
-    if selection_metadata:
-        frames = build_harmonic_selection_frames(selection_metadata)
-        return {str(name): frame.copy() for name, frame in frames.items()}, "processing-time metadata"
-
-    fallback = project_root / "Quality Check" / HARMONIC_SELECTION_QC_WORKBOOK_NAME
-    if not fallback.is_file():
+    accepted_metadata = _load_current_processing_selection_metadata(project_root)
+    source = "processing-time metadata"
+    if selection_metadata is None:
+        selection_metadata = accepted_metadata
+        source = "saved processing-time metadata"
+    elif _semantic_metadata_json(selection_metadata) != _semantic_metadata_json(
+        accepted_metadata
+    ):
         raise RuntimeError(
-            "No processing-time harmonic selection was supplied and the saved "
-            f"harmonic-selection workbook is missing: {fallback}"
+            "Analysis-ready export rejected caller-supplied harmonic metadata "
+            "because it differs from the current persisted accepted selection."
         )
-    raw_frames = pd.read_excel(fallback, sheet_name=None)
-    return {str(name): frame for name, frame in raw_frames.items()}, "saved Quality Check workbook"
+    recorded_release = str(
+        selection_metadata.get("final_release_receipt_fingerprint") or ""
+    )
+    if recorded_release != expected_release_fingerprint:
+        raise RuntimeError(
+            "Analysis-ready export requires harmonic selection produced from "
+            "the current QC-20 final-release receipt. Recalculate harmonics."
+        )
+    frames = build_harmonic_selection_frames(selection_metadata)
+    return {str(name): frame.copy() for name, frame in frames.items()}, source
+
+
+def _load_current_processing_selection_metadata(
+    project_root: Path,
+) -> dict[str, object]:
+    from Main_App.processing.harmonic_selection_qc import (
+        load_processing_harmonic_selection_metadata,
+    )
+    from Main_App.projects.project import Project
+
+    return load_processing_harmonic_selection_metadata(Project.load(project_root))
+
+
+def _semantic_metadata_json(value: Mapping[str, object]) -> str:
+    try:
+        return json.dumps(
+            dict(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=True,
+        )
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("Harmonic selection metadata is not serializable.") from error
 
 
 def _selection_frame(
@@ -552,9 +658,22 @@ def _selected_harmonics_from_frames(
     return sorted({round(float(value), 4) for value in frequencies})
 
 
+def _coverage_cell_decision_note(
+    coverage_cell: RecordingConditionRoiCoverage,
+) -> str:
+    reasons = [str(reason) for reason in coverage_cell.decision_reason_codes if reason]
+    if reasons:
+        return (
+            "reviewed whole-cell exclusion; decision reason code(s): "
+            + ", ".join(reasons)
+        )
+    return "reviewed whole-cell exclusion"
+
+
 def _append_record_rows(
     *,
     record: Any,
+    coverage_cell: RecordingConditionRoiCoverage,
     rois: Mapping[str, list[str]],
     selected_columns: Sequence[str],
     exclusion_context: _ExclusionContext,
@@ -570,12 +689,27 @@ def _append_record_rows(
     pid_key = pid.casefold()
     condition_key = condition.casefold()
     recording_key = str(record.recording_id or "").casefold()
-    base_notes, base_excluded = _record_exclusion_notes(
+    base_notes, _legacy_context_excluded = _record_exclusion_notes(
         exclusion_context,
         pid_key=pid_key,
         condition_key=condition_key,
         recording_key=recording_key,
     )
+    cell_excluded = bool(coverage_cell.downstream_cell_excluded)
+    decision_note = _coverage_cell_decision_note(coverage_cell)
+    if cell_excluded:
+        base_notes.append(decision_note)
+        _append_flag(
+            issue_flag_rows,
+            pid=pid,
+            group=group,
+            condition=condition,
+            flag_type="Reviewed recording-condition exclusion",
+            flag_scope="Participant-condition",
+            current_exclusion=True,
+            notes=decision_note,
+        )
+    base_excluded = cell_excluded
     participant_auto_electrodes = exclusion_context.auto_electrodes_by_participant.get(
         pid_key,
         frozenset(),
@@ -584,85 +718,45 @@ def _append_record_rows(
         recording_key,
         frozenset(),
     )
-    auto_electrodes = participant_auto_electrodes | recording_auto_electrodes
+    reviewed_excluded_electrodes = frozenset(
+        coverage_cell.whole_scalp_normalization.excluded_channels
+        if coverage_cell.whole_scalp_normalization is not None
+        else ()
+    )
+    auto_electrodes = (
+        participant_auto_electrodes
+        | recording_auto_electrodes
+        | reviewed_excluded_electrodes
+    )
 
-    try:
-        frame = read_xlsx_sheet_selected_columns(
-            record.path,
-            sheet_name="BCA (uV)",
-            required_columns=["Electrode", *selected_columns],
-            require_all=True,
+    if coverage_cell.source_evidence is None:
+        raise RuntimeError(
+            f"Final QC-21 source evidence is missing for {pid}/{condition}."
         )
-        prepared, record_issue_notes, harmonic_scales = _prepare_electrode_values(
-            frame,
-            selected_columns=selected_columns,
+    normalization_coverage = coverage_cell.whole_scalp_normalization
+    if normalization_coverage is None:
+        raise RuntimeError(
+            f"Final QC-21 normalization coverage is missing for {pid}/{condition}."
         )
-    except Exception as exc:  # Workbook boundary: one malformed input becomes an audit flag.
-        logger.warning(
-            "analysis_ready_source_workbook_read_failed",
-            extra={
-                "participant_id": pid,
-                "condition": condition,
-                "workbook": str(record.path),
-                "error": str(exc),
-            },
-            exc_info=True,
-        )
-        note = f"Unable to read exact selected BCA columns: {exc}"
-        _append_flag(
-            issue_flag_rows,
-            pid=pid,
-            group=group,
-            condition=condition,
-            flag_type="Source workbook read error",
-            flag_scope="Participant-condition",
-            current_exclusion=False,
-            notes=note,
-        )
-        combined_notes = _combine_notes(base_notes, [note])
-        for roi in rois:
-            roi_rows.append(
-                _roi_row(
-                    pid=pid,
-                    group=group,
-                    condition=condition,
-                    roi=roi,
-                    raw=math.nan,
-                    rms_normalized=math.nan,
-                    signed_normalized=math.nan,
-                    excluded=base_excluded,
-                    notes=combined_notes,
-                )
-            )
-        whole_scalp_rows.append(
-            _whole_scalp_row(
-                pid=pid,
-                group=group,
-                condition=condition,
-                source_count=0,
-                finite_count=0,
-                descriptive_rms=math.nan,
-                signed_mean=math.nan,
-                excluded=base_excluded,
-                notes=combined_notes,
-            )
-        )
-        for selected_column in selected_columns:
-            rms_harmonic_scale_rows.append(
-                _rms_harmonic_scale_row(
-                    pid=pid,
-                    group=group,
-                    condition=condition,
-                    selected_column=selected_column,
-                    source_count=0,
-                    finite_count=0,
-                    vector_length=math.nan,
-                    used=False,
-                    excluded=base_excluded or bool(auto_electrodes),
-                    notes=[*combined_notes, "Source workbook could not be normalized."],
-                )
-            )
-        return
+    normalization_available = (
+        normalization_coverage.status == ROI_VALUE_AVAILABLE
+        and not cell_excluded
+    )
+    frame = read_xlsx_sheet_selected_columns(
+        record.path,
+        sheet_name="BCA (uV)",
+        required_columns=["Electrode", *selected_columns],
+        require_all=True,
+    )
+    prepared, record_issue_notes, harmonic_scales = _prepare_electrode_values(
+        frame,
+        selected_columns=selected_columns,
+        expected_scalp_channels=normalization_coverage.expected_channels,
+        normalization_available=normalization_available,
+    )
+    if cell_excluded:
+        prepared["RMS Normalized BCA"] = math.nan
+        prepared["Signed Mean Normalized BCA"] = math.nan
 
     if record_issue_notes:
         _append_flag(
@@ -683,13 +777,34 @@ def _append_record_rows(
     )
     signed_mean = float(finite_raw.mean()) if not finite_raw.empty else math.nan
     normalization_notes: list[str] = []
+    if not normalization_available:
+        if cell_excluded:
+            normalization_notes.append(
+                "Whole-scalp-normalized values were not calculated because "
+                + decision_note
+            )
+        elif normalization_coverage.excluded_channels:
+            normalization_notes.append(
+                "Whole-scalp-normalized ROI values were not calculated because "
+                "the frozen whole-scalp set has a reviewed unavailable member: "
+                + ", ".join(normalization_coverage.excluded_channels)
+            )
+        else:
+            normalization_notes.append(
+                "Whole-scalp-normalized ROI values were not calculated; QC-21 "
+                "coverage reason code(s): "
+                + ", ".join(normalization_coverage.reason_codes)
+            )
     if not all(bool(scale["Used for RMS Normalization"]) for scale in harmonic_scales):
         normalization_notes.append(
             "At least one selected harmonic lacked a complete, positive "
             "whole-scalp vector length; publication-style RMS-normalized "
             "values are blank."
         )
-    if not math.isfinite(signed_mean) or signed_mean == 0.0:
+    if not normalization_available:
+        signed_mean = math.nan
+        prepared["Signed Mean Normalized BCA"] = math.nan
+    elif not math.isfinite(signed_mean) or signed_mean == 0.0:
         normalization_notes.append(
             "Whole-scalp signed mean was zero or unavailable; signed-mean-normalized values are blank."
         )
@@ -713,14 +828,22 @@ def _append_record_rows(
         electrode_key = electrode.upper()
         electrode_notes = list(base_notes)
         electrode_excluded = base_excluded
-        if electrode_key in auto_electrodes:
+        if electrode_key in reviewed_excluded_electrodes:
             electrode_excluded = True
+            electrode_notes.append(
+                "Reviewed frequency-domain exclusion for this recording-condition."
+            )
         if electrode_key in participant_auto_electrodes:
             electrode_notes.append(
                 exclusion_context.auto_electrode_notes.get(
                     (pid_key, electrode_key),
                     "Automatic frequency-domain electrode exclusion.",
                 )
+            )
+        if cell_excluded:
+            electrode_notes.append(
+                "Audit-only raw electrode value; canonical ROI and normalized "
+                "values are blank for this excluded recording-condition."
             )
         if electrode_key in recording_auto_electrodes:
             electrode_notes.append(
@@ -762,9 +885,14 @@ def _append_record_rows(
                 selected_column=str(scale["Selected Column"]),
                 source_count=int(scale["Source Electrode Count"]),
                 finite_count=int(scale["Finite Electrode Count"]),
-                vector_length=scale["Scalp Vector Length"],
-                used=bool(scale["Used for RMS Normalization"]),
-                excluded=base_excluded or bool(auto_electrodes),
+                vector_length=(
+                    math.nan if cell_excluded else scale["Scalp Vector Length"]
+                ),
+                used=(
+                    bool(scale["Used for RMS Normalization"])
+                    and not cell_excluded
+                ),
+                excluded=base_excluded or not normalization_available,
                 notes=[
                     *base_notes,
                     *record_issue_notes,
@@ -779,64 +907,78 @@ def _append_record_rows(
             condition=condition,
             source_count=len(prepared),
             finite_count=len(finite_raw),
-            descriptive_rms=descriptive_rms,
-            signed_mean=signed_mean,
-            excluded=base_excluded or bool(auto_electrodes),
+            descriptive_rms=(math.nan if cell_excluded else descriptive_rms),
+            signed_mean=(math.nan if cell_excluded else signed_mean),
+            excluded=base_excluded or not normalization_available,
             notes=all_record_notes,
         )
     )
 
     indexed = prepared.set_index("Electrode", drop=False)
     indexed.index = indexed.index.astype(str).str.upper()
+    coverage_by_roi = {
+        membership.roi_name.casefold(): membership
+        for membership in coverage_cell.roi_memberships
+    }
     for roi, configured_electrodes in rois.items():
-        matching = [electrode for electrode in configured_electrodes if electrode in indexed.index]
+        membership = coverage_by_roi.get(roi.casefold())
+        if membership is None:
+            raise RuntimeError(
+                f"Final QC-21 coverage is missing ROI {roi!r} for {pid}/{condition}."
+            )
+        if tuple(configured_electrodes) != membership.expected_channels:
+            raise RuntimeError(
+                f"Frozen ROI membership changed for {roi!r} in {pid}/{condition}."
+            )
         roi_notes = list(base_notes)
-        roi_excluded = base_excluded
-        if not matching:
-            roi_notes.append("No configured ROI electrodes were present in the source workbook.")
+        roi_excluded = base_excluded or membership.status != ROI_VALUE_AVAILABLE
+        if membership.status != ROI_VALUE_AVAILABLE:
+            if cell_excluded:
+                roi_notes.append(
+                    "Primary ROI value was not calculated because " + decision_note
+                )
+            elif membership.excluded_channels:
+                roi_notes.append(
+                    "Primary ROI value was not calculated because reviewed required "
+                    "electrode(s) were unavailable: "
+                    + ", ".join(membership.excluded_channels)
+                )
+            else:
+                roi_notes.append(
+                    "Primary ROI value was not calculated; QC-21 coverage reason "
+                    "code(s): " + ", ".join(membership.reason_codes)
+                )
             _append_flag(
                 issue_flag_rows,
                 pid=pid,
                 group=group,
                 condition=condition,
                 roi=roi,
-                flag_type="ROI electrodes unavailable",
+                flag_type="Required ROI electrode unavailable",
                 flag_scope="Participant-condition-ROI",
-                current_exclusion=False,
+                current_exclusion=True,
                 notes=roi_notes[-1],
             )
             raw = rms_normalized = signed_normalized = math.nan
         else:
-            roi_frame = indexed.loc[matching]
+            roi_frame = indexed.loc[list(membership.used_channels)]
             if isinstance(roi_frame, pd.Series):
                 roi_frame = roi_frame.to_frame().T
-            raw = _finite_mean(roi_frame["Raw Summed BCA"])
-            rms_normalized = _finite_mean(roi_frame["RMS Normalized BCA"])
-            signed_normalized = _finite_mean(roi_frame["Signed Mean Normalized BCA"])
-            missing_configured = [electrode for electrode in configured_electrodes if electrode not in indexed.index]
-            if missing_configured:
-                roi_notes.append("Configured ROI electrode(s) absent: " + ", ".join(missing_configured))
-            roi_auto_electrodes = sorted(set(matching).intersection(auto_electrodes))
-            if roi_auto_electrodes:
-                roi_excluded = True
+            raw = float(roi_frame["Raw Summed BCA"].mean(skipna=False))
+            rms_normalized = float(
+                roi_frame["RMS Normalized BCA"].mean(skipna=False)
+            )
+            signed_normalized = float(
+                roi_frame["Signed Mean Normalized BCA"].mean(skipna=False)
+            )
+            if membership.interpolated_channels:
                 roi_notes.append(
-                    "Includes current Toolbox automatic electrode exclusion(s): " + ", ".join(roi_auto_electrodes)
+                    "Successfully interpolated configured electrode(s) were "
+                    "included: " + ", ".join(membership.interpolated_channels)
                 )
-            roi_missing_values = roi_frame["Missing Selected Harmonics"].astype(str)
-            if roi_missing_values.str.len().gt(0).any():
-                roi_notes.append("One or more ROI electrodes contained non-finite selected BCA cells.")
-            if not math.isfinite(raw):
-                roi_notes.append("No finite electrode-level Summed BCA value was available for this ROI.")
-                _append_flag(
-                    issue_flag_rows,
-                    pid=pid,
-                    group=group,
-                    condition=condition,
-                    roi=roi,
-                    flag_type="Non-finite ROI value",
-                    flag_scope="Participant-condition-ROI",
-                    current_exclusion=False,
-                    notes=roi_notes[-1],
+            if membership.all_members_interpolated_warning:
+                roi_notes.append(
+                    "Manual review warning: every configured ROI electrode was interpolated."
                 )
         roi_rows.append(
             _roi_row(
@@ -857,6 +999,8 @@ def _prepare_electrode_values(
     frame: pd.DataFrame,
     *,
     selected_columns: Sequence[str],
+    expected_scalp_channels: Sequence[str],
+    normalization_available: bool,
 ) -> tuple[pd.DataFrame, list[str], list[dict[str, object]]]:
     if "Electrode" not in frame.columns:
         raise RuntimeError("The BCA (uV) sheet is missing the exact 'Electrode' column.")
@@ -865,42 +1009,56 @@ def _prepare_electrode_values(
     source = source[source["Electrode"].ne("") & source["Electrode"].ne("NAN")]
     if source.empty:
         raise RuntimeError("The BCA (uV) sheet contains no electrode rows.")
-    numeric = source.loc[:, selected_columns].apply(pd.to_numeric, errors="coerce")
-    numeric = numeric.replace([np.inf, -np.inf], np.nan)
-    notes: list[str] = []
-    source_missing_mask = numeric.isna()
-    nonfinite_count = int(source_missing_mask.to_numpy().sum())
-    if nonfinite_count:
-        affected_electrodes = int(source_missing_mask.any(axis=1).sum())
-        notes.append(
-            f"{nonfinite_count} selected BCA cell(s) were non-finite across "
-            f"{affected_electrodes} electrode row(s); available finite harmonics "
-            "were retained in Raw Summed BCA, but complete whole-scalp coverage "
-            "is required for RMS normalization."
+    expected = tuple(str(channel).strip().upper() for channel in expected_scalp_channels)
+    if not expected or len(expected) != len(set(expected)):
+        raise RuntimeError(
+            "Analysis-ready export requires a nonempty unique frozen scalp set."
         )
     duplicate_mask = source["Electrode"].duplicated(keep=False)
     if duplicate_mask.any():
         duplicate_names = sorted(set(source.loc[duplicate_mask, "Electrode"]))
-        notes.append(
-            "Duplicate source electrode row(s) were averaged separately at each harmonic: " + ", ".join(duplicate_names)
+        raise RuntimeError(
+            "Analysis-ready export forbids duplicate source electrode rows: "
+            + ", ".join(duplicate_names)
         )
-        numeric.insert(0, "Electrode", source["Electrode"].to_numpy())
-        numeric = numeric.groupby("Electrode", sort=False, as_index=True).mean()
-    else:
-        numeric.index = source["Electrode"].to_numpy()
-        numeric.index.name = "Electrode"
+    indexed = source.set_index("Electrode")
+    missing_electrodes = [channel for channel in expected if channel not in indexed.index]
+    if missing_electrodes:
+        raise RuntimeError(
+            "Analysis-ready export requires every frozen scalp electrode row. Missing: "
+            + ", ".join(missing_electrodes)
+        )
+    numeric = indexed.loc[list(expected), list(selected_columns)].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    numeric = numeric.replace([np.inf, -np.inf], np.nan)
+    if not np.isfinite(numeric.to_numpy(dtype=float)).all():
+        raise RuntimeError(
+            "Analysis-ready export requires finite BCA values for every selected "
+            "harmonic and frozen scalp electrode; partial harmonic sums are forbidden."
+        )
+    notes: list[str] = []
 
     missing_mask = numeric.isna()
     prepared = pd.DataFrame({"Electrode": numeric.index.astype(str)})
     prepared["Missing Selected Harmonics"] = [
         ", ".join(column for column in selected_columns if bool(mask[column])) for _, mask in missing_mask.iterrows()
     ]
-    prepared["Raw Summed BCA"] = numeric.sum(axis=1, min_count=1).to_numpy()
+    prepared["Raw Summed BCA"] = numeric.sum(
+        axis=1,
+        min_count=len(selected_columns),
+    ).to_numpy()
 
     source_count = len(numeric)
     finite_counts = numeric.notna().sum(axis=0)
     vector_lengths = np.sqrt(np.square(numeric).sum(axis=0, min_count=1))
-    valid_scales = finite_counts.eq(source_count) & np.isfinite(vector_lengths) & vector_lengths.gt(0.0)
+    valid_scales = (
+        bool(normalization_available)
+        & finite_counts.eq(source_count)
+        & np.isfinite(vector_lengths)
+        & vector_lengths.gt(0.0)
+    )
     safe_scales = vector_lengths.where(valid_scales)
     normalized = numeric.div(safe_scales, axis="columns")
     prepared["RMS Normalized BCA"] = normalized.sum(
@@ -920,6 +1078,10 @@ def _prepare_electrode_values(
             )
         if not math.isfinite(vector_length) or vector_length <= 0.0:
             scale_notes.append("Scalp vector length was zero or non-finite.")
+        if not normalization_available:
+            scale_notes.append(
+                "Frozen whole-scalp normalization set has a reviewed unavailable member."
+            )
         harmonic_scales.append(
             {
                 "Selected Column": selected_column,
@@ -1474,11 +1636,109 @@ def _build_roi_definitions_frame(rois: Mapping[str, list[str]]) -> pd.DataFrame:
                 "ROI": name,
                 "Electrode Count": len(electrodes),
                 "Electrodes": ", ".join(electrodes),
-                "Aggregation": "Arithmetic mean of finite electrode-level values",
+                "Aggregation": "Arithmetic mean of the complete frozen electrode set",
             }
             for name, electrodes in rois.items()
         ]
     )
+
+
+def _build_roi_coverage_frame(coverage: RoiCoverageLedger) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for cell in coverage.cells:
+        if not cell.roi_memberships:
+            rows.append(
+                {
+                    "PID": cell.participant_id,
+                    "Recording ID": cell.recording_id,
+                    "Condition": cell.condition_label,
+                    "Coverage Type": "Recording-condition",
+                    "ROI": "",
+                    "Status": f"not_calculated:{cell.outcome_status}",
+                    "Decision Reasons": ", ".join(cell.decision_reason_codes),
+                    "Expected Electrodes": "",
+                    "Observed Electrodes": "",
+                    "Excluded Electrodes": "",
+                    "Interpolated Electrodes": "",
+                    "Used Electrodes": "",
+                    "Expected Count": 0,
+                    "Observed Count": 0,
+                    "Excluded Count": 0,
+                    "Interpolated Count": 0,
+                    "Used Count": 0,
+                    "All Members Interpolated Warning": "No",
+                    "Coverage Fingerprint": cell.fingerprint,
+                }
+            )
+            continue
+        for membership in cell.roi_memberships:
+            rows.append(
+                {
+                    "PID": cell.participant_id,
+                    "Recording ID": cell.recording_id,
+                    "Condition": cell.condition_label,
+                    "Coverage Type": "ROI",
+                    "ROI": membership.roi_name,
+                    "Status": membership.status,
+                    "Decision Reasons": ", ".join(
+                        (*cell.decision_reason_codes, *membership.reason_codes)
+                    ),
+                    "Expected Electrodes": ", ".join(membership.expected_channels),
+                    "Observed Electrodes": ", ".join(membership.observed_channels),
+                    "Excluded Electrodes": ", ".join(membership.excluded_channels),
+                    "Interpolated Electrodes": ", ".join(
+                        membership.interpolated_channels
+                    ),
+                    "Used Electrodes": ", ".join(membership.used_channels),
+                    "Expected Count": len(membership.expected_channels),
+                    "Observed Count": len(membership.observed_channels),
+                    "Excluded Count": len(membership.excluded_channels),
+                    "Interpolated Count": membership.interpolated_count,
+                    "Used Count": len(membership.used_channels),
+                    "All Members Interpolated Warning": _yes_no(
+                        membership.all_members_interpolated_warning
+                    ),
+                    "Coverage Fingerprint": membership.fingerprint,
+                }
+            )
+        normalization = cell.whole_scalp_normalization
+        if normalization is not None:
+            rows.append(
+                {
+                    "PID": cell.participant_id,
+                    "Recording ID": cell.recording_id,
+                    "Condition": cell.condition_label,
+                    "Coverage Type": "Whole-scalp normalization",
+                    "ROI": "",
+                    "Status": normalization.status,
+                    "Decision Reasons": ", ".join(
+                        (*cell.decision_reason_codes, *normalization.reason_codes)
+                    ),
+                    "Expected Electrodes": ", ".join(
+                        normalization.expected_channels
+                    ),
+                    "Observed Electrodes": ", ".join(
+                        normalization.observed_channels
+                    ),
+                    "Excluded Electrodes": ", ".join(
+                        normalization.excluded_channels
+                    ),
+                    "Interpolated Electrodes": ", ".join(
+                        normalization.interpolated_channels
+                    ),
+                    "Used Electrodes": ", ".join(normalization.used_channels),
+                    "Expected Count": len(normalization.expected_channels),
+                    "Observed Count": len(normalization.observed_channels),
+                    "Excluded Count": len(normalization.excluded_channels),
+                    "Interpolated Count": len(
+                        normalization.interpolated_channels
+                    ),
+                    "Used Count": len(normalization.used_channels),
+                    "All Members Interpolated Warning": "No",
+                    "Coverage Fingerprint": normalization.fingerprint,
+                }
+            )
+    return pd.DataFrame(rows, columns=_ROI_COVERAGE_COLUMNS)
 
 
 def _clean_selection_summary_frame(
@@ -1552,15 +1812,15 @@ def _build_analysis_notes_frame(
         ),
         (
             "Data scope",
-            f"All {workbook_count} observed canonical {observed_grain} workbooks were included; current Toolbox exclusions were flagged, not removed.",
+            f"All {workbook_count} current QC-20 released {observed_grain} workbooks were included; reviewed exclusions remain visible in coverage and audit columns.",
         ),
         (
             "ROI Long grain",
-            f"One row per observed {roi_grain} workbook and each of {roi_count} active Settings ROIs. Unobserved conditions are absent in long format and blank in wide format.",
+            f"One row per released {roi_grain} workbook and each of {roi_count} frozen ROIs. Accounted no-output conditions are recorded in ROI Coverage and remain blank in numerical tables.",
         ),
         (
             "Raw Summed BCA",
-            "Electrode BCA values were summed across the saved selected harmonics, then averaged across finite electrodes within each ROI.",
+            "Every frozen scalp electrode required a finite BCA value at every saved selected harmonic. Harmonics were summed per electrode, then the complete frozen ROI set was averaged without dropping members.",
         ),
         (
             "RMS Normalized BCA",

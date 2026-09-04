@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Stats.analysis.dv_policy_fixed_predefined import (
     build_fixed_harmonic_selection,
 )
@@ -14,6 +15,7 @@ from Tools.Stats.analysis.dv_policy_group_significant import (
     build_group_significant_harmonic_selection,
 )
 from Tools.Stats.analysis.dv_policy_settings import (
+    GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
     FIXED_HARMONIC_INPUT_UPPER_FREQUENCY,
     FIXED_HARMONIC_INPUT_UPPER_HARMONIC,
     GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN,
@@ -321,7 +323,10 @@ def test_frozen_mask_requires_every_non_qc_excluded_channel_per_workbook(
         }
     )
 
-    with pytest.raises(RuntimeError, match=r"missing: O2.*QC electrode exclusion"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"missing before QC exclusions: O2",
+    ):
         build_group_significant_harmonic_selection(
             subjects=["S1"],
             conditions=["C1"],
@@ -331,6 +336,82 @@ def test_frozen_mask_requires_every_non_qc_excluded_channel_per_workbook(
             log_func=lambda _message: None,
             settings=settings,
             max_freq=4.8,
+        )
+
+
+def test_fullfft_source_membership_is_validated_before_scoped_exclusions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "exact_source_rows.xlsx"
+    frame = pd.DataFrame(
+        {
+            "Electrode": ["O1", "O2"],
+            "0.0000_Hz": [1.0, 9.0],
+            "0.3000_Hz": [2.0, 10.0],
+        }
+    )
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        frame.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+
+    used_electrodes: set[str] = set()
+    series, columns, electrode_count = group_policy._load_mean_amplitude_series(
+        str(path),
+        rois={"Posterior": ["O1", "O2"]},
+        electrode_scope=GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+        reference_frequency_columns=[
+            (0.0, "0.0000_Hz", 0),
+            (0.3, "0.3000_Hz", 1),
+        ],
+        required_indices=[0, 1],
+        expected_scalp_channels=["O1", "O2"],
+        excluded_electrodes_upper={"O2"},
+        used_electrodes_out=used_electrodes,
+    )
+
+    assert columns == ["0.0000_Hz", "0.3000_Hz"]
+    assert series.to_dict() == pytest.approx({0.0: 1.0, 0.3: 2.0})
+    assert electrode_count == 1
+    assert used_electrodes == {"O1"}
+
+
+@pytest.mark.parametrize(
+    ("electrodes", "expected", "excluded", "message"),
+    [
+        (["O1"], ["O1", "O2"], {"O2"}, "missing retained row\\(s\\): O2"),
+        (
+            ["O1", "O2", "UNKNOWN"],
+            ["O1", "O2"],
+            set(),
+            "extra or unknown row\\(s\\): UNKNOWN",
+        ),
+    ],
+)
+def test_fullfft_source_membership_rejects_missing_or_extra_rows_before_exclusions(
+    tmp_path: Path,
+    electrodes: list[str],
+    expected: list[str],
+    excluded: set[str],
+    message: str,
+) -> None:
+    path = tmp_path / "invalid_source_rows.xlsx"
+    frame = pd.DataFrame(
+        {
+            "Electrode": electrodes,
+            "0.0000_Hz": np.arange(1, len(electrodes) + 1, dtype=float),
+        }
+    )
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        frame.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+
+    with pytest.raises(RuntimeError, match=message):
+        group_policy._load_mean_amplitude_series(
+            str(path),
+            rois={"Posterior": ["O1", "O2"]},
+            electrode_scope=GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
+            reference_frequency_columns=[(0.0, "0.0000_Hz", 0)],
+            required_indices=[0],
+            expected_scalp_channels=expected,
+            excluded_electrodes_upper=excluded,
         )
 
 

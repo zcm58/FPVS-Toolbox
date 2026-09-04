@@ -17,7 +17,7 @@ from Tools.LORETA_Visualizer import stats_ready_workbook as stats_ready_workbook
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     _read_selected_harmonics,
 )
-from Tools.Stats.analysis import dv_policies
+from Tools.Stats.analysis import dv_policies, dv_policy_fixed_predefined
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_NAME,
     HARMONIC_PROFILE_FIXED_ID,
@@ -58,6 +58,52 @@ def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _project, _root: TEST_FREQUENCY_PROTOCOL,
     )
 
+    def _released_context(_root):
+        rois = harmonic_selection_qc.load_rois_from_settings()
+        snapshot = SimpleNamespace(
+            fingerprint="test-roi-definition",
+            rois=tuple(
+                SimpleNamespace(name=name, electrodes=tuple(electrodes))
+                for name, electrodes in rois.items()
+            ),
+        )
+        normalization = SimpleNamespace(excluded_channels=())
+        coverage = SimpleNamespace(
+            fingerprint="test-roi-coverage",
+            decision_fingerprint="test-frequency-decisions",
+            roi_snapshot=snapshot,
+            cells=(),
+            cell_for=lambda _identity, _condition: SimpleNamespace(
+                source_evidence=object(),
+                whole_scalp_normalization=normalization,
+                downstream_cell_excluded=False,
+                workbook_path="synthetic-test-workbook",
+            ),
+        )
+        return (
+            SimpleNamespace(fingerprint="test-outcomes"),
+            coverage,
+            SimpleNamespace(fingerprint="test-final-release"),
+        )
+
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_current_final_release_context",
+        _released_context,
+    )
+    from Main_App.processing import roi_coverage
+
+    monkeypatch.setattr(
+        roi_coverage,
+        "require_project_final_release",
+        _released_context,
+    )
+    monkeypatch.setattr(
+        dv_policy_fixed_predefined,
+        "_require_matching_coverage_workbook",
+        lambda _cell, supplied_path, *, context: str(supplied_path),
+    )
+
 
 def test_processing_harmonic_entry_rejects_legacy_geometry_before_workbook_math(
     tmp_path: Path,
@@ -87,6 +133,46 @@ def test_processing_harmonic_entry_rejects_legacy_geometry_before_workbook_math(
         harmonic_selection_qc.run_processing_harmonic_selection_qc(
             SimpleNamespace(project_root=tmp_path)
         )
+
+
+def test_processing_harmonic_entry_requires_final_release_before_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_processing_harmonic_selection_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(project_root=tmp_path),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_current_final_release_context",
+        lambda _root: (_ for _ in ()).throw(
+            RuntimeError("QC-20 final release is missing")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="QC-20 final release is missing"):
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(
+            SimpleNamespace(project_root=tmp_path)
+        )
+
+
+def test_managed_harmonic_selection_requires_explicit_canonical_oddball_rate() -> None:
+    assert harmonic_selection_qc._require_canonical_oddball_frequency(
+        SimpleNamespace(oddball_frequency_hz=0.3)
+    ) == pytest.approx(0.3)
+
+    with pytest.raises(RuntimeError, match="explicit canonical project oddball"):
+        harmonic_selection_qc._require_canonical_oddball_frequency(SimpleNamespace())
+    with pytest.raises(RuntimeError, match="explicit positive canonical"):
+        harmonic_selection_qc._require_canonical_oddball_frequency(
+            SimpleNamespace(oddball_frequency_hz=0.0)
+        )
+    with pytest.raises(ValueError, match="lacks its project oddball frequency"):
+        _ = harmonic_selection_qc.PersistedFixedHarmonicSelection(
+            selection_metadata={}
+        ).oddball_frequency_hz
 
 
 def test_processing_spectral_domain_intersects_verified_workbook_eligibility(
@@ -341,6 +427,7 @@ def test_processing_harmonic_selection_method_upgrade_error_is_actionable(
         conditions=("Faces",),
         subject_data={"S1": {"Faces": str(tmp_path / "S1_Faces_Results.xlsx")}},
         base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
         max_frequency_hz=8.4,
         settings=SimpleNamespace(name=harmonic_selection_qc.GROUP_SIGNIFICANT_POLICY_NAME),
         rois={"Posterior": ["O1", "O2"]},
@@ -384,6 +471,7 @@ def test_processing_harmonic_selection_does_not_report_success_without_saved_cac
         conditions=("Faces",),
         subject_data={"S1": {"Faces": str(tmp_path / "S1_Faces_Results.xlsx")}},
         base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
         max_frequency_hz=8.4,
         settings=SimpleNamespace(name=harmonic_selection_qc.GROUP_SIGNIFICANT_POLICY_NAME),
         rois={"Posterior": ["O1", "O2"]},

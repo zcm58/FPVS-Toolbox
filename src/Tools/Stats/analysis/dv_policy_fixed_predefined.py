@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -441,6 +441,69 @@ def build_fixed_predefined_preview_payload(
     return selection.to_metadata()
 
 
+def _require_matching_coverage_workbook(
+    coverage_cell: Any,
+    supplied_path: object,
+    *,
+    context: str,
+) -> str:
+    if not supplied_path:
+        raise RuntimeError(
+            f"{context} requires the released workbook path for "
+            f"{coverage_cell.recording_id}/{coverage_cell.condition_label}."
+        )
+    expected = Path(str(coverage_cell.workbook_path)).expanduser().resolve(
+        strict=False
+    )
+    supplied = Path(str(supplied_path)).expanduser().resolve(strict=False)
+    if supplied != expected:
+        raise RuntimeError(
+            f"{context} received a workbook path different from final QC-21 "
+            f"coverage for {coverage_cell.recording_id}/"
+            f"{coverage_cell.condition_label}."
+        )
+    if not expected.is_file():
+        raise RuntimeError(
+            f"{context} released workbook is missing: {expected}"
+        )
+    return str(expected)
+
+
+def _unavailable_coverage_provenance(
+    coverage_cell: Any,
+    *,
+    rois: Mapping[str, Sequence[str]],
+    selected_columns: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    reasons = tuple(coverage_cell.decision_reason_codes) or (
+        f"recording_condition_{coverage_cell.outcome_status}",
+    )
+    membership_by_name = {
+        membership.roi_name.casefold(): membership
+        for membership in coverage_cell.roi_memberships
+    }
+    result: dict[str, dict[str, object]] = {}
+    for roi_name, channels in rois.items():
+        expected = [str(channel).strip().upper() for channel in channels]
+        membership = membership_by_name.get(str(roi_name).casefold())
+        result[str(roi_name)] = {
+            "source_file": coverage_cell.workbook_path or None,
+            "sheet": "BCA (uV)",
+            "row_label": expected,
+            "col_label": list(selected_columns),
+            "raw_cell": None,
+            "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
+            "roi_coverage_status": "unavailable",
+            "expected_electrodes": expected,
+            "excluded_electrodes": list(
+                membership.excluded_channels if membership is not None else ()
+            ),
+            "used_electrodes": [],
+            "decision_reason_codes": list(reasons),
+        }
+    return result
+
+
 def _prepare_fixed_predefined_bca_data(
     *,
     subjects: List[str],
@@ -457,6 +520,7 @@ def _prepare_fixed_predefined_bca_data(
     electrode_exclusions_by_subject: Mapping[str, frozenset[str]] | None = None,
     oddball_frequency_hz: float | None = None,
     eligible_harmonic_orders: Sequence[int] | None = None,
+    final_roi_coverage: Any = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
@@ -472,7 +536,36 @@ def _prepare_fixed_predefined_bca_data(
         )
         for subject, electrodes in (electrode_exclusions_by_subject or {}).items()
     }
-    if project_root not in (None, "") and not resolved_electrode_exclusions:
+    final_coverage = final_roi_coverage
+    if (
+        final_coverage is None
+        and project_root not in (None, "")
+        and use_accepted_processing_selection
+    ):
+        from Main_App.processing.roi_coverage import require_project_final_release
+
+        _outcomes, final_coverage, _receipt = require_project_final_release(
+            project_root
+        )
+    if final_coverage is not None:
+        frozen_rois = {
+            roi.name: list(roi.electrodes)
+            for roi in final_coverage.roi_snapshot.rois
+        }
+        normalized_rois = {
+            str(name): [str(channel).strip().upper() for channel in channels]
+            for name, channels in rois_map.items()
+        }
+        if normalized_rois != frozen_rois:
+            raise RuntimeError(
+                "Fixed Summed BCA ROI definitions differ from the current frozen "
+                "QC-21 snapshot. Rerun post-processing."
+            )
+    if (
+        final_coverage is None
+        and project_root not in (None, "")
+        and not resolved_electrode_exclusions
+    ):
         from Main_App.processing.frequency_domain_qc import active_frequency_domain_exclusions
 
         resolved_electrode_exclusions = (
@@ -480,6 +573,33 @@ def _prepare_fixed_predefined_bca_data(
                 project_root
             ).auto_excluded_electrodes_by_participant
         )
+
+    coverage_cells: dict[tuple[str, str], Any] = {}
+    released_subject_data: dict[str, dict[str, str]] = {}
+    if final_coverage is not None:
+        for pid in subjects:
+            for cond_name in conditions:
+                coverage_cell = final_coverage.cell_for(pid, cond_name)
+                if coverage_cell is None:
+                    raise RuntimeError(
+                        "Fixed Summed BCA lacks final QC-21 coverage for "
+                        f"{pid}/{cond_name}."
+                    )
+                coverage_cells[(str(pid).casefold(), str(cond_name).casefold())] = (
+                    coverage_cell
+                )
+                if (
+                    coverage_cell.source_evidence is None
+                    or coverage_cell.downstream_cell_excluded
+                ):
+                    continue
+                released_subject_data.setdefault(pid, {})[cond_name] = (
+                    _require_matching_coverage_workbook(
+                        coverage_cell,
+                        subject_data.get(pid, {}).get(cond_name),
+                        context="Fixed Summed BCA",
+                    )
+                )
 
     if use_accepted_processing_selection:
         if project_root in (None, ""):
@@ -511,9 +631,10 @@ def _prepare_fixed_predefined_bca_data(
         columns = _find_first_bca_columns(
             subjects,
             conditions,
-            subject_data,
+            released_subject_data if final_coverage is not None else subject_data,
             base_freq,
             log_func,
+            strict_source=final_coverage is not None,
         )
         if columns is None:
             log_func("Unable to read any BCA columns to validate fixed harmonics.")
@@ -565,19 +686,65 @@ def _prepare_fixed_predefined_bca_data(
             all_subject_data[pid].setdefault(cond_name, {})
             roi_values = {roi_name: np.nan for roi_name in rois_map.keys()}
             roi_provenance: dict[str, dict[str, object]] = {}
-            if file_path and Path(file_path).exists():
+            coverage_cell = coverage_cells.get(
+                (str(pid).casefold(), str(cond_name).casefold())
+            )
+            if final_coverage is not None and coverage_cell is not None:
+                if (
+                    coverage_cell.source_evidence is None
+                    or coverage_cell.downstream_cell_excluded
+                ):
+                    roi_provenance = _unavailable_coverage_provenance(
+                        coverage_cell,
+                        rois=rois_map,
+                        selected_columns=list(selection.included_columns),
+                    )
+                    log_func(
+                        "Fixed Summed BCA did not read an unavailable released "
+                        f"cell: {pid}/{cond_name}."
+                    )
+                    file_path = coverage_cell.workbook_path or file_path
+                else:
+                    file_path = released_subject_data[pid][cond_name]
+            if (
+                file_path
+                and Path(file_path).exists()
+                and not (
+                    final_coverage is not None
+                    and coverage_cell is not None
+                    and (
+                        coverage_cell.source_evidence is None
+                        or coverage_cell.downstream_cell_excluded
+                    )
+                )
+            ):
+                cell_exclusions = resolved_electrode_exclusions.get(
+                    str(pid).upper(),
+                    frozenset(),
+                )
+                if final_coverage is not None:
+                    if (
+                        coverage_cell is None
+                        or coverage_cell.source_evidence is None
+                        or coverage_cell.whole_scalp_normalization is None
+                    ):
+                        raise RuntimeError(
+                            "Fixed Summed BCA lacks final QC-21 coverage for "
+                            f"{pid}/{cond_name}."
+                        )
+                    cell_exclusions = frozenset(
+                        coverage_cell.whole_scalp_normalization.excluded_channels
+                    )
                 roi_values, roi_provenance = _aggregate_bca_sum_harmonics_for_all_rois(
                     file_path=file_path,
                     rois=rois_map,
                     log_func=log_func,
                     harmonic_freqs=list(selection.included_frequencies_hz),
                     provenance_enabled=provenance_map is not None,
-                    excluded_electrodes_upper=resolved_electrode_exclusions.get(
-                        str(pid).upper(),
-                        frozenset(),
-                    ),
+                    excluded_electrodes_upper=cell_exclusions,
+                    strict_source=final_coverage is not None,
                 )
-            else:
+            elif final_coverage is None:
                 log_func(f"Missing file for {pid} {cond_name}: {file_path}")
             for roi_name in rois_map.keys():
                 sum_val = roi_values.get(roi_name, np.nan)
@@ -639,6 +806,8 @@ def _find_first_bca_columns(
     subject_data: Dict[str, Dict[str, str]],
     _base_freq: float,
     log_func: Callable[[str], None],
+    *,
+    strict_source: bool = False,
 ) -> Optional[pd.Index]:
     for pid in subjects:
         for cond_name in conditions:
@@ -652,6 +821,11 @@ def _find_first_bca_columns(
                 )
                 return pd.Index(column for column in header if column != "Electrode")
             except Exception as exc:  # noqa: BLE001
+                if strict_source:
+                    raise RuntimeError(
+                        "Fixed Summed BCA could not read the released BCA "
+                        f"header {file_path}: {exc}"
+                    ) from exc
                 log_func(f"Failed to read BCA columns from {file_path}: {exc}")
     return None
 
@@ -744,6 +918,7 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
     harmonic_freqs: List[float],
     provenance_enabled: bool,
     excluded_electrodes_upper: Iterable[str] = (),
+    strict_source: bool = False,
 ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
     values = {roi_name: np.nan for roi_name in rois.keys()}
     provenance: dict[str, dict[str, object]] = {}
@@ -762,13 +937,25 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
                 f"columns in every included workbook. Missing columns in {file_path}: "
                 f"{missing_columns[:8]}"
             ) from exc
+        if strict_source:
+            raise RuntimeError(
+                f"Fixed Summed BCA could not read the released BCA source {file_path}: {exc}"
+            ) from exc
         log_func(f"Error reading BCA sheet for {file_path}: {exc}")
         return values, provenance
     except Exception as exc:  # noqa: BLE001
+        if strict_source:
+            raise RuntimeError(
+                f"Fixed Summed BCA could not read the released BCA source {file_path}: {exc}"
+            ) from exc
         log_func(f"Error reading BCA sheet for {file_path}: {exc}")
         return values, provenance
 
     if "Electrode" not in df_bca.columns:
+        if strict_source:
+            raise RuntimeError(
+                f"Fixed Summed BCA released source lacks the Electrode column: {file_path}"
+            )
         log_func(f"Error reading BCA sheet for {file_path}: missing Electrode column")
         return values, provenance
 

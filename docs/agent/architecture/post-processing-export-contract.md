@@ -160,19 +160,22 @@ run-scoped XLSX-read cache.
 
 This workbook is deliberately distinct from the filtered
 `Stats_Ready_Summed_BCA.xlsx` compatibility artifact. It uses the canonical
-union of `ProjectDatasetIndex.workbooks` and `excluded_workbooks`, includes all
-available electrodes when computing each value, and converts current manual,
-participant-condition, frequency-domain participant, and frequency-domain
-electrode exclusions into explicit flags. It must never recompute harmonics on
-that expanded cohort: the accepted processing-time harmonic metadata is the
-only selection source.
+QC-20 released recording-condition matrix and the QC-21 frozen ROI/scalp
+snapshot. Direct callers must present the current final-release receipt; a
+saved Quality Check workbook cannot bypass that gate. Only current validated
+workbooks enter numerical tables, while reviewed exclusions and explicitly
+accounted no-output cells remain visible in coverage/audit fields. The export
+must never recompute harmonics: accepted processing-time metadata bound to the
+same final-release receipt is the only selection source.
 
 The primary `ROI Long` sheet provides one observed participant x condition x
 configured-ROI row with raw Summed BCA, RMS-normalized BCA, signed-mean-
 normalized BCA, canonical group label, and concise QC fields. Supporting wide,
-electrode-level, whole-scalp, harmonic-scale, QC, ROI-definition, and harmonic
-selection sheets make the aggregation auditable without adding source paths or
-file hashes to the statistical table.
+electrode-level, whole-scalp, harmonic-scale, QC, ROI-definition, ROI-coverage,
+and harmonic-selection sheets make the aggregation auditable without adding
+source paths or file hashes to the statistical table. ROI Coverage records the
+expected, observed, excluded, successfully interpolated, and used electrode
+sets and counts for each released cell.
 
 RMS-normalized BCA follows the topographic normalization order described by
 Dzhelyova et al. (2017) and McCarthy and Wood (1985). For every participant x
@@ -187,12 +190,15 @@ description only; it is not used for normalization. Signed-mean normalization
 remains post-summation: each raw electrode harmonic sum is divided by the
 whole-scalp signed mean before ROI averaging.
 
-Missing values remain blank and are not imputed or replaced by zero. A
-harmonic with incomplete electrode coverage, a zero vector length, or a
-non-finite vector length invalidates publication-style RMS values for that
-participant-condition and is recorded in the harmonic-scale and QC sheets. The
-writer publishes through a same-directory temporary workbook and atomic
-replacement so a failed rebuild cannot leave a partially written XLSX file.
+A primary raw ROI value requires every unique member of its frozen configured
+set and every selected-harmonic value. A reviewed exclusion of one member makes
+only that recording-condition-ROI value blank; successfully interpolated
+members remain present and are reported. Any unavailable member of the frozen
+whole-scalp set makes every normalized ROI derivative for that recording-
+condition blank. Duplicate/missing source rows and nonfinite computable values
+are technical failures rather than partial sums. The writer publishes through
+a same-directory temporary workbook and atomic replacement so a failed rebuild
+cannot replace a prior complete XLSX file.
 
 ## Project Protocol And Spectral Eligibility
 

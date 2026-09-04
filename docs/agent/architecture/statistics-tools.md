@@ -187,6 +187,22 @@ Rules:
   tool-specific replacement. A missing or stale cache is a user-actionable
   post-process/recalculate error; it does not imply that raw EEG preprocessing
   must be repeated.
+- Harmonic selection, Stats DV aggregation, and primary analysis-ready exports
+  require the current processing-owned QC-20 final-release receipt. The receipt
+  binds the exact recording-condition outcome ledger, reviewed QC-03/QC-17
+  decision fingerprint, QC-21 final coverage, frozen ROI definition, and
+  current workbook artifacts. A changed workbook, review decision, ROI
+  definition, or coverage record invalidates the release and its saved
+  harmonic selection.
+- QC-21 requires exactly one finite source row for every frozen eligible scalp
+  electrode before downstream exclusions. A primary raw ROI value uses every
+  configured unique ROI member; it never averages an available subset.
+  Successful interpolation restores a member and remains visible in
+  provenance. A reviewed condition-specific electrode exclusion makes only
+  an affected raw ROI cell unavailable. If any member of the frozen
+  whole-scalp normalization set is unavailable, every whole-scalp-normalized
+  ROI derivative for that recording-condition is unavailable. Summed BCA also
+  requires every canonical selected harmonic to be finite before summing.
 - The Stats page may link users to
   `Settings > Harmonics`, but
   it must not clear the
@@ -318,14 +334,13 @@ Rules:
   tool-local interpretation. A recorded `current` state is insufficient when the
   canonical target has been removed; downstream readiness also verifies that
   the recorded file or directory still exists.
-- Frequency-domain QC exclusions are applied before final harmonic selection,
+- Reviewed frequency-domain QC exclusions are applied before final harmonic selection,
   Summed BCA DV aggregation, Stats-ready export, SNR Plot ROI collection, Scalp
-  Maps metric collection, and source-map input preparation. Full participant
-  exclusions remove the participant project-wide from downstream
-  frequency-domain outputs. Automatic participant-electrode exclusions remove
-  that electrode for that participant across conditions; source-map preparation
-  conservatively skips participants with automatic electrode-level exclusions
-  because inverse payloads require complete topographies.
+  Maps metric collection, and source-map input preparation. Full participant or
+  recording exclusions retain their accepted scope. Electrode exclusions stay
+  scoped to the reviewed participant/recording and condition; QC-21 final
+  coverage supplies that exact map to harmonic selection and ROI aggregation
+  without widening it across other conditions.
 - Adaptive harmonic-selection profiles must fail fast from workbook headers
   when exact nominal oddball-harmonic columns are missing. Header
   preflight happens in the Stats worker before QC screening, grand-average

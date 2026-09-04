@@ -576,7 +576,8 @@ def aggregate_bca_sum(
            - compute ROI-mean Z at that harmonic (same channel set used for BCA)
            - include harmonic if mean(Z_ROI) > Z_THRESHOLD
            - apply consecutive non-significant stop rule (optionally armed only after first sig)
-      4) Sum BCA across selected harmonics per electrode (min_count=1), then mean across ROI electrodes.
+      4) Require every selected BCA value to be finite, sum the complete
+         selected set per electrode, then mean the complete configured ROI.
     """
     try:
         if diag_meta is not None:
@@ -593,6 +594,16 @@ def aggregate_bca_sum(
         # Normalize electrode labels
         df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
         df_z.index = df_z.index.astype(str).str.upper().str.strip()
+        duplicate_bca = sorted(
+            set(df_bca.index[df_bca.index.duplicated(keep=False)])
+        )
+        duplicate_z = sorted(set(df_z.index[df_z.index.duplicated(keep=False)]))
+        if duplicate_bca or duplicate_z:
+            raise RuntimeError(
+                "Legacy-compatible Summed BCA requires one source row per "
+                f"electrode (BCA duplicates={duplicate_bca[:8]}, "
+                f"Z duplicates={duplicate_z[:8]})."
+            )
 
         # --- Resolve ROI map safely ---
         if rois is not None:
@@ -609,20 +620,24 @@ def aggregate_bca_sum(
         if not roi_channels:
             log_func(f"ROI {roi_name} not defined.")
             return np.nan
+        if len(set(roi_channels)) != len(roi_channels):
+            raise RuntimeError(
+                f"ROI {roi_name!r} repeats an electrode and cannot be averaged."
+            )
 
-        # Use the SAME channel set for Z gating + BCA summation: intersection of available channels
-        roi_chans = [ch for ch in roi_channels if (ch in df_bca.index and ch in df_z.index)]
-        if not roi_chans:
-            log_func(f"No overlapping BCA+Z data for ROI {roi_name} in {file_path}.")
-            return np.nan
+        missing_bca = [ch for ch in roi_channels if ch not in df_bca.index]
+        missing_z = [ch for ch in roi_channels if ch not in df_z.index]
+        if missing_bca or missing_z:
+            raise RuntimeError(
+                f"ROI {roi_name!r} requires its complete electrode set in both "
+                f"BCA and Z sheets (missing BCA={missing_bca}, missing Z={missing_z})."
+            )
+        roi_chans = list(roi_channels)
         if diag_meta is not None:
             diag_meta["row_label"] = roi_chans
 
-        df_bca_roi = df_bca.loc[roi_chans].dropna(how="all")
-        df_z_roi = df_z.loc[roi_chans].dropna(how="all")
-        if df_bca_roi.empty or df_z_roi.empty:
-            log_func(f"No data for ROI {roi_name} in {file_path}.")
-            return np.nan
+        df_bca_roi = df_bca.loc[roi_chans]
+        df_z_roi = df_z.loc[roi_chans]
 
         # --- Candidate freqs: exclude base-rate multiples, then restrict to oddball harmonics ---
         included_freq_values = get_included_freqs(
@@ -657,7 +672,11 @@ def aggregate_bca_sum(
                 continue
 
             z_series = pd.to_numeric(df_z_roi[col_z], errors="coerce").replace([np.inf, -np.inf], np.nan)
-            mean_z = float(z_series.mean(skipna=True)) if z_series.notna().any() else np.nan
+            if not np.isfinite(z_series.to_numpy(dtype=float)).all():
+                raise RuntimeError(
+                    f"ROI {roi_name!r} has a nonfinite harmonic-selection Z value."
+                )
+            mean_z = float(z_series.mean(skipna=False))
             is_sig = bool(np.isfinite(mean_z) and (mean_z > SUMMED_BCA_Z_THRESHOLD_DEFAULT))
 
             if is_sig:
@@ -691,22 +710,28 @@ def aggregate_bca_sum(
             .apply(pd.to_numeric, errors="coerce")
             .replace([np.inf, -np.inf], np.nan)
         )
-        # min_count=1 prevents "all-NaN -> 0.0" behavior
-        bca_vals = bca_block.sum(axis=1, min_count=1)
+        if not np.isfinite(bca_block.to_numpy(dtype=float)).all():
+            raise RuntimeError(
+                f"ROI {roi_name!r} has a nonfinite selected-harmonic BCA value; "
+                "partial harmonic sums are forbidden."
+            )
+        bca_vals = bca_block.sum(axis=1, min_count=len(cols_to_sum))
 
         # Mean across electrodes with at least one finite value
         bca_vals = pd.to_numeric(bca_vals, errors="coerce").replace([np.inf, -np.inf], np.nan)
-        if not bca_vals.notna().any():
-            log_func(
-                f"Warning: All-NaN BCA values after summation for ROI {roi_name} "
-                f"({os.path.basename(file_path)})."
+        if len(bca_vals) != len(roi_chans) or not np.isfinite(
+            bca_vals.to_numpy(dtype=float)
+        ).all():
+            raise RuntimeError(
+                f"ROI {roi_name!r} did not produce one finite complete-harmonic "
+                "sum per configured electrode."
             )
-            return np.nan
-
-        out = float(bca_vals.mean(skipna=True))
+        out = float(bca_vals.mean(skipna=False))
         return out if np.isfinite(out) else np.nan
 
     except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise
         log_func(f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}")
         return np.nan
 

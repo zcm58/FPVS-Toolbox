@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -435,6 +435,12 @@ class GroupSignificantSelectionCacheKey:
     declared_session_ids: tuple[str, ...] = ()
     eligible_harmonic_orders: tuple[int, ...] = ()
     spectral_eligibility_fingerprint: str | None = None
+    electrode_exclusions_by_subject_condition: tuple[
+        tuple[str, str, tuple[str, ...]], ...
+    ] = ()
+    expected_scalp_channels_by_subject_condition: tuple[
+        tuple[str, str, tuple[str, ...]], ...
+    ] = ()
 
 
 def clear_group_significant_selection_cache() -> None:
@@ -578,6 +584,14 @@ def _group_significant_selection_cache_key(
     oddball_frequency_hz: float | None = None,
     eligible_harmonic_orders: Sequence[int] | None = None,
     spectral_eligibility_fingerprint: str | None = None,
+    electrode_exclusions_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+    expected_scalp_channels_by_subject_condition: Mapping[
+        tuple[str, str], Sequence[str]
+    ]
+    | None = None,
 ) -> GroupSignificantSelectionCacheKey:
     subject_key = tuple(str(subject) for subject in subjects)
     condition_key = tuple(str(condition) for condition in conditions)
@@ -664,6 +678,30 @@ def _group_significant_selection_cache_key(
             str(spectral_eligibility_fingerprint).strip()
             if spectral_eligibility_fingerprint
             else None
+        ),
+        electrode_exclusions_by_subject_condition=tuple(
+            sorted(
+                (
+                    str(subject).upper(),
+                    str(condition).casefold(),
+                    tuple(sorted(str(channel).upper() for channel in channels)),
+                )
+                for (subject, condition), channels in (
+                    electrode_exclusions_by_subject_condition or {}
+                ).items()
+            )
+        ),
+        expected_scalp_channels_by_subject_condition=tuple(
+            sorted(
+                (
+                    str(subject).upper(),
+                    str(condition).casefold(),
+                    tuple(str(channel).upper() for channel in channels),
+                )
+                for (subject, condition), channels in (
+                    expected_scalp_channels_by_subject_condition or {}
+                ).items()
+            )
         ),
     )
 
@@ -1186,6 +1224,14 @@ def build_group_significant_harmonic_selection(
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     declared_session_ids: Sequence[str] | None = None,
     electrode_exclusions_by_subject: Mapping[str, frozenset[str]] | None = None,
+    electrode_exclusions_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+    expected_scalp_channels_by_subject_condition: Mapping[
+        tuple[str, str], Sequence[str]
+    ]
+    | None = None,
     oddball_frequency_hz: float | None = None,
     eligible_harmonic_orders: Sequence[int] | None = None,
     spectral_eligibility_fingerprint: str | None = None,
@@ -1198,6 +1244,30 @@ def build_group_significant_harmonic_selection(
         )
         for subject, electrodes in (electrode_exclusions_by_subject or {}).items()
     }
+    resolved_condition_electrode_exclusions: dict[
+        tuple[str, str], frozenset[str]
+    ] = {
+        (str(subject).upper(), str(condition).casefold()): frozenset(
+            str(electrode).upper() for electrode in electrodes
+        )
+        for (subject, condition), electrodes in (
+            electrode_exclusions_by_subject_condition or {}
+        ).items()
+    }
+    resolved_expected_scalp_channels: dict[tuple[str, str], tuple[str, ...]] = {
+        (str(subject).upper(), str(condition).casefold()): tuple(
+            str(electrode).strip().upper() for electrode in electrodes
+        )
+        for (subject, condition), electrodes in (
+            expected_scalp_channels_by_subject_condition or {}
+        ).items()
+    }
+    for key, expected_channels in resolved_expected_scalp_channels.items():
+        if not expected_channels or len(expected_channels) != len(set(expected_channels)):
+            raise RuntimeError(
+                "Harmonic-selection QC-21 source membership must be a nonempty "
+                f"unique scalp set for {key[0]}/{key[1]}."
+            )
     if project_root not in (None, ""):
         from Main_App.processing.frequency_domain_qc import (
             active_frequency_domain_exclusions,
@@ -1233,12 +1303,15 @@ def build_group_significant_harmonic_selection(
                 + " exclusions applied before group "
                 "harmonic selection: " + ", ".join(frequency_excluded)
             )
-        if not resolved_electrode_exclusions:
+        if (
+            not resolved_electrode_exclusions
+            and not resolved_condition_electrode_exclusions
+        ):
             exclusions = active_frequency_domain_exclusions(project_root)
-            resolved_electrode_exclusions = dict(
-                exclusions.auto_excluded_electrodes_by_recording
+            resolved_condition_electrode_exclusions = dict(
+                exclusions.excluded_electrodes_by_recording_condition
                 if repeated_session
-                else exclusions.auto_excluded_electrodes_by_participant
+                else exclusions.excluded_electrodes_by_participant_condition
             )
     if repeated_session and settings.harmonic_selection_profile != HARMONIC_PROFILE_LEGACY_ID:
         selected_participants = tuple(
@@ -1290,6 +1363,12 @@ def build_group_significant_harmonic_selection(
         oddball_frequency_hz=oddball_frequency_hz,
         eligible_harmonic_orders=eligible_harmonic_orders,
         spectral_eligibility_fingerprint=spectral_eligibility_fingerprint,
+        electrode_exclusions_by_subject_condition=(
+            resolved_condition_electrode_exclusions
+        ),
+        expected_scalp_channels_by_subject_condition=(
+            resolved_expected_scalp_channels
+        ),
         project_processing_signature_hash=(
             cache_request.project_processing_signature_hash
             if cache_request is not None
@@ -1410,6 +1489,14 @@ def build_group_significant_harmonic_selection(
                 frequency_columns=required.frequency_columns,
                 required_indices=required.required_indices,
                 excluded_electrodes_by_subject=resolved_electrode_exclusions,
+                excluded_electrodes_by_subject_condition=(
+                    resolved_condition_electrode_exclusions
+                ),
+                expected_scalp_channels_by_subject_condition=(
+                    resolved_expected_scalp_channels
+                    if expected_scalp_channels_by_subject_condition is not None
+                    else None
+                ),
                 selection_electrodes=(
                     settings.group_significant_selection_electrodes
                 ),
@@ -1436,6 +1523,14 @@ def build_group_significant_harmonic_selection(
             frequency_columns=required.frequency_columns,
             required_indices=required.required_indices,
             excluded_electrodes_by_subject=resolved_electrode_exclusions,
+            excluded_electrodes_by_subject_condition=(
+                resolved_condition_electrode_exclusions
+            ),
+            expected_scalp_channels_by_subject_condition=(
+                resolved_expected_scalp_channels
+                if expected_scalp_channels_by_subject_condition is not None
+                else None
+            ),
             recording_assignments=recording_assignments,
             declared_session_ids=declared_session_ids,
         )
@@ -2283,6 +2378,7 @@ def _prepare_group_significant_bca_data(
         log_func("No subject data. Scan folder first.")
         return None
     electrode_exclusions_by_subject: dict[str, frozenset[str]] = {}
+    final_coverage = None
     if project_root not in (None, ""):
         from Main_App.processing.frequency_domain_qc import (
             active_frequency_domain_exclusions,
@@ -2304,11 +2400,57 @@ def _prepare_group_significant_bca_data(
                 project_root
             ).auto_excluded_electrodes_by_participant
         )
+        from Main_App.processing.roi_coverage import require_project_final_release
+
+        _outcomes, final_coverage, _receipt = require_project_final_release(
+            project_root
+        )
 
     rois_map = rois if rois is not None else _current_rois_map()
     if not rois_map:
         log_func("No ROIs defined or available.")
         return None
+    if final_coverage is not None:
+        frozen_rois = {
+            roi.name: list(roi.electrodes)
+            for roi in final_coverage.roi_snapshot.rois
+        }
+        normalized_rois = {
+            str(name): [str(channel).strip().upper() for channel in channels]
+            for name, channels in rois_map.items()
+        }
+        if normalized_rois != frozen_rois:
+            raise RuntimeError(
+                "Group Summed BCA ROI definitions differ from the current frozen "
+                "QC-21 snapshot. Rerun post-processing."
+            )
+
+    coverage_cells: dict[tuple[str, str], object] = {}
+    released_subject_data: dict[str, dict[str, str]] = {}
+    if final_coverage is not None:
+        for pid in subjects:
+            for cond_name in conditions:
+                coverage_cell = final_coverage.cell_for(pid, cond_name)
+                if coverage_cell is None:
+                    raise RuntimeError(
+                        "Group Summed BCA lacks final QC-21 coverage for "
+                        f"{pid}/{cond_name}."
+                    )
+                coverage_cells[(str(pid).casefold(), str(cond_name).casefold())] = (
+                    coverage_cell
+                )
+                if (
+                    coverage_cell.source_evidence is None
+                    or coverage_cell.downstream_cell_excluded
+                ):
+                    continue
+                released_subject_data.setdefault(pid, {})[cond_name] = (
+                    _require_matching_coverage_workbook(
+                        coverage_cell,
+                        subject_data.get(pid, {}).get(cond_name),
+                        context="Group Summed BCA",
+                    )
+                )
 
     started = perf_counter()
     if project_root in (None, ""):
@@ -2371,16 +2513,57 @@ def _prepare_group_significant_bca_data(
         all_subject_data.setdefault(pid, {})
         all_subject_data[pid].setdefault(cond_name, {})
         read_started = perf_counter()
+        coverage_cell = coverage_cells.get(
+            (str(pid).casefold(), str(cond_name).casefold())
+        )
+        if final_coverage is not None and coverage_cell is not None:
+            if (
+                coverage_cell.source_evidence is None
+                or coverage_cell.downstream_cell_excluded
+            ):
+                roi_values = {roi_name: np.nan for roi_name in rois_map}
+                roi_provenance = _unavailable_coverage_provenance(
+                    coverage_cell,
+                    rois=rois_map,
+                    selected_columns=list(selection.selected_columns),
+                )
+                log_func(
+                    "Group Summed BCA did not read an unavailable released cell: "
+                    f"{pid}/{cond_name}."
+                )
+                for roi_name in rois_map:
+                    all_subject_data[pid][cond_name][roi_name] = np.nan
+                    if provenance_map is not None:
+                        provenance_map[(pid, cond_name, roi_name)] = (
+                            roi_provenance[roi_name]
+                        )
+                continue
+            file_path = released_subject_data[pid][cond_name]
+        cell_exclusions = electrode_exclusions_by_subject.get(
+            str(pid).upper(),
+            frozenset(),
+        )
+        if final_coverage is not None:
+            if (
+                coverage_cell is None
+                or coverage_cell.source_evidence is None
+                or coverage_cell.whole_scalp_normalization is None
+            ):
+                raise RuntimeError(
+                    "Group Summed BCA lacks final QC-21 coverage for "
+                    f"{pid}/{cond_name}."
+                )
+            cell_exclusions = frozenset(
+                coverage_cell.whole_scalp_normalization.excluded_channels
+            )
         roi_values, roi_provenance = _aggregate_bca_for_all_rois(
             file_path=file_path,
             rois=rois_map,
             log_func=log_func,
             harmonic_freqs=list(selection.selected_harmonics_hz),
             provenance_enabled=provenance_map is not None,
-            excluded_electrodes_upper=electrode_exclusions_by_subject.get(
-                str(pid).upper(),
-                frozenset(),
-            ),
+            excluded_electrodes_upper=cell_exclusions,
+            strict_source=final_coverage is not None,
         )
         read_elapsed = perf_counter() - read_started
         for roi_name in rois_map.keys():
@@ -2459,6 +2642,14 @@ def _build_grand_average_amplitude(
     frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
     excluded_electrodes_by_subject: Mapping[str, frozenset[str]] | None = None,
+    excluded_electrodes_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+    expected_scalp_channels_by_subject_condition: Mapping[
+        tuple[str, str], Sequence[str]
+    ]
+    | None = None,
     selection_electrodes: Sequence[str] = (),
     used_electrodes_out: set[str] | None = None,
 ) -> tuple[pd.Series, list[str], list[int], int, int]:
@@ -2481,19 +2672,45 @@ def _build_grand_average_amplitude(
         f"{len(required_indices)} planned frequency columns per reference grid."
     )
     for task_index, (pid, cond_name, file_path) in enumerate(fft_tasks, start=1):
+        cell_key = (str(pid).upper(), str(cond_name).casefold())
         if not file_path or not Path(file_path).exists():
+            if (
+                expected_scalp_channels_by_subject_condition is not None
+                and cell_key in expected_scalp_channels_by_subject_condition
+            ):
+                raise RuntimeError(
+                    f"Released harmonic-selection workbook is missing for {pid}/{cond_name}."
+                )
             log_func(f"Missing file for {pid} {cond_name}: {file_path}")
             continue
+        expected_scalp_channels = (
+            expected_scalp_channels_by_subject_condition or {}
+        ).get(cell_key)
+        if expected_scalp_channels_by_subject_condition is not None and (
+            cell_key not in expected_scalp_channels_by_subject_condition
+        ):
+            raise RuntimeError(
+                "Harmonic selection lacks released QC-21 source membership for "
+                f"{pid}/{cond_name}."
+            )
         read_started = perf_counter()
+        cell_exclusions = (
+            excluded_electrodes_by_subject_condition or {}
+        ).get(
+            (str(pid).upper(), str(cond_name).casefold()),
+            (excluded_electrodes_by_subject or {}).get(
+                str(pid).upper(),
+                frozenset(),
+            ),
+        )
         series, file_columns, n_electrodes = _load_mean_amplitude_series(
             file_path,
             rois=rois,
             electrode_scope=electrode_scope,
             reference_frequency_columns=frequency_columns,
             required_indices=required_indices,
-            excluded_electrodes_upper=(
-                excluded_electrodes_by_subject or {}
-            ).get(str(pid).upper(), frozenset()),
+            excluded_electrodes_upper=cell_exclusions,
+            expected_scalp_channels=expected_scalp_channels,
             selection_electrodes=selection_electrodes,
             used_electrodes_out=used_electrodes_out,
         )
@@ -2580,6 +2797,14 @@ def _build_balanced_condition_amplitudes(
     frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
     excluded_electrodes_by_subject: Mapping[str, frozenset[str]] | None = None,
+    excluded_electrodes_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+    expected_scalp_channels_by_subject_condition: Mapping[
+        tuple[str, str], Sequence[str]
+    ]
+    | None = None,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
     declared_session_ids: Sequence[str] | None = None,
 ) -> tuple[BalancedHarmonicPool, list[str], list[int], int, set[str]]:
@@ -2600,19 +2825,45 @@ def _build_balanced_condition_amplitudes(
         f"{len(fft_tasks)} planned workbook reads."
     )
     for task_index, (pid, condition, file_path) in enumerate(fft_tasks, start=1):
+        cell_key = (pid.upper(), condition.casefold())
         if not file_path or not Path(file_path).exists():
+            if (
+                expected_scalp_channels_by_subject_condition is not None
+                and cell_key in expected_scalp_channels_by_subject_condition
+            ):
+                raise RuntimeError(
+                    f"Released harmonic-selection workbook is missing for {pid}/{condition}."
+                )
             log_func(f"Missing file for {pid} {condition}: {file_path}")
             continue
+        expected_scalp_channels = (
+            expected_scalp_channels_by_subject_condition or {}
+        ).get(cell_key)
+        if expected_scalp_channels_by_subject_condition is not None and (
+            cell_key not in expected_scalp_channels_by_subject_condition
+        ):
+            raise RuntimeError(
+                "Harmonic selection lacks released QC-21 source membership for "
+                f"{pid}/{condition}."
+            )
         read_started = perf_counter()
+        cell_exclusions = (
+            excluded_electrodes_by_subject_condition or {}
+        ).get(
+            (pid.upper(), condition.casefold()),
+            (excluded_electrodes_by_subject or {}).get(
+                pid.upper(),
+                frozenset(),
+            ),
+        )
         series, _file_columns, n_electrodes = _load_mean_amplitude_series(
             file_path,
             rois=rois,
             electrode_scope=electrode_scope,
             reference_frequency_columns=frequency_columns,
             required_indices=required_indices,
-            excluded_electrodes_upper=(
-                excluded_electrodes_by_subject or {}
-            ).get(pid.upper(), frozenset()),
+            excluded_electrodes_upper=cell_exclusions,
+            expected_scalp_channels=expected_scalp_channels,
             selection_electrodes=selection_electrodes,
             used_electrodes_out=used_electrodes,
         )
@@ -2792,6 +3043,67 @@ def _plan_required_full_fft_columns(
         oddball_frequency_hz=oddball,
         canonical_eligibility_domain=canonical_domain,
     )
+
+
+def _require_matching_coverage_workbook(
+    coverage_cell: Any,
+    supplied_path: object,
+    *,
+    context: str,
+) -> str:
+    if not supplied_path:
+        raise RuntimeError(
+            f"{context} requires the released workbook path for "
+            f"{coverage_cell.recording_id}/{coverage_cell.condition_label}."
+        )
+    expected = Path(str(coverage_cell.workbook_path)).expanduser().resolve(
+        strict=False
+    )
+    supplied = Path(str(supplied_path)).expanduser().resolve(strict=False)
+    if supplied != expected:
+        raise RuntimeError(
+            f"{context} received a workbook path different from final QC-21 "
+            f"coverage for {coverage_cell.recording_id}/"
+            f"{coverage_cell.condition_label}."
+        )
+    if not expected.is_file():
+        raise RuntimeError(f"{context} released workbook is missing: {expected}")
+    return str(expected)
+
+
+def _unavailable_coverage_provenance(
+    coverage_cell: Any,
+    *,
+    rois: Mapping[str, Sequence[str]],
+    selected_columns: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    reasons = tuple(coverage_cell.decision_reason_codes) or (
+        f"recording_condition_{coverage_cell.outcome_status}",
+    )
+    membership_by_name = {
+        membership.roi_name.casefold(): membership
+        for membership in coverage_cell.roi_memberships
+    }
+    result: dict[str, dict[str, object]] = {}
+    for roi_name, channels in rois.items():
+        expected = [str(channel).strip().upper() for channel in channels]
+        membership = membership_by_name.get(str(roi_name).casefold())
+        result[str(roi_name)] = {
+            "source_file": coverage_cell.workbook_path or None,
+            "sheet": "BCA (uV)",
+            "row_label": expected,
+            "col_label": list(selected_columns),
+            "raw_cell": None,
+            "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
+            "roi_coverage_status": "unavailable",
+            "expected_electrodes": expected,
+            "excluded_electrodes": list(
+                membership.excluded_channels if membership is not None else ()
+            ),
+            "used_electrodes": [],
+            "decision_reason_codes": list(reasons),
+        }
+    return result
 
 
 def _resolve_group_oddball_frequency(
@@ -3057,6 +3369,7 @@ def _load_mean_amplitude_series(
     reference_frequency_columns: list[tuple[float, str, int]],
     required_indices: list[int],
     excluded_electrodes_upper: Iterable[str] = (),
+    expected_scalp_channels: Sequence[str] | None = None,
     selection_electrodes: Sequence[str] = (),
     used_electrodes_out: set[str] | None = None,
 ) -> tuple[pd.Series, list[str], int]:
@@ -3128,7 +3441,6 @@ def _load_mean_amplitude_series(
             file_path,
             sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
             required_columns=["Electrode", *ordered_local_columns],
-            included_electrodes_upper=wanted_electrodes,
         )
     except MissingXlsxColumnsError as exc:
         raise RuntimeError(
@@ -3151,30 +3463,71 @@ def _load_mean_amplitude_series(
         .str.upper()
         .str.strip()
     )
-    excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
-    if electrode_scope == GROUP_SIGNIFICANT_ELECTRODE_SCOPE_FROZEN:
-        requested = {
+    duplicate_electrodes = sorted(
+        set(electrodes[electrodes.ne("") & electrodes.duplicated(keep=False)])
+    )
+    if duplicate_electrodes:
+        raise RuntimeError(
+            "Harmonic-selection source validation found duplicate electrode "
+            f"rows in {file_path}: {duplicate_electrodes[:8]}"
+        )
+    observed = {electrode for electrode in electrodes.tolist() if electrode}
+    if expected_scalp_channels is not None:
+        expected = tuple(
             str(electrode).strip().upper()
-            for electrode in selection_electrodes
-            if str(electrode).strip()
-        }
-        required_after_qc = requested.difference(excluded)
-        observed = {electrode for electrode in electrodes.tolist() if electrode}
-        missing = sorted(required_after_qc.difference(observed))
+            for electrode in expected_scalp_channels
+        )
+        if not expected or len(expected) != len(set(expected)):
+            raise RuntimeError(
+                "Harmonic-selection QC-21 source membership must be nonempty and unique."
+            )
+        missing = sorted(set(expected).difference(observed))
+        extra = sorted(observed.difference(expected))
+        blank_count = int(electrodes.eq("").sum())
+        if missing or extra or blank_count:
+            details: list[str] = []
+            if missing:
+                details.append("missing retained row(s): " + ", ".join(missing))
+            if extra:
+                details.append("extra or unknown row(s): " + ", ".join(extra))
+            if blank_count:
+                details.append(f"blank electrode row(s): {blank_count}")
+            raise RuntimeError(
+                "Harmonic-selection source validation failed before QC exclusions "
+                f"for {file_path}: " + "; ".join(details)
+            )
+    excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
+    if wanted_electrodes is not None:
+        requested = set(wanted_electrodes)
+        missing = sorted(requested.difference(observed))
         if missing:
             raise RuntimeError(
-                "Frozen harmonic-selection mask validation failed for "
-                f"{file_path}: requested non-QC-excluded electrode(s) are missing: "
+                "Harmonic-selection source validation failed for "
+                f"{file_path}: frozen electrode row(s) are missing before QC exclusions: "
                 + ", ".join(missing)
-                + ". Regenerate the workbook with the frozen channels, correct "
-                "the a-priori mask, or record a valid frequency-domain QC "
-                "electrode exclusion before recalculating harmonics."
+                + ". Regenerate the workbook or correct the frozen mask."
             )
     include_mask = electrodes != ""
+    if wanted_electrodes is not None:
+        include_mask = include_mask & electrodes.isin(wanted_electrodes)
     if excluded:
         include_mask = include_mask & ~electrodes.isin(excluded)
     df_fft = df_fft.loc[include_mask].copy()
     electrode_count = len(df_fft)
+    if electrode_count == 0:
+        raise RuntimeError(
+            f"Harmonic selection has no eligible electrode rows in {file_path}."
+        )
+    numeric_block = df_fft.loc[:, ordered_local_columns].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    if not np.isfinite(numeric_block.to_numpy(dtype=float)).all():
+        raise RuntimeError(
+            "Harmonic-selection source validation requires finite FullFFT "
+            f"values for every eligible electrode and planned bin: {file_path}"
+        )
+    df_fft.loc[:, ordered_local_columns] = numeric_block
     if used_electrodes_out is not None:
         used_electrodes_out.update(
             electrode
@@ -3257,10 +3610,15 @@ def _aggregate_bca_for_all_rois(
     harmonic_freqs: List[float],
     provenance_enabled: bool,
     excluded_electrodes_upper: Iterable[str] = (),
+    strict_source: bool = False,
 ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
     values = {roi_name: np.nan for roi_name in rois.keys()}
     provenance: dict[str, dict[str, object]] = {}
     if not file_path or not Path(file_path).exists():
+        if strict_source:
+            raise RuntimeError(
+                f"Group Summed BCA released source is missing: {file_path}"
+            )
         log_func(f"Missing file: {file_path}")
         return values, provenance
 
@@ -3280,18 +3638,38 @@ def _aggregate_bca_for_all_rois(
                 f"BCA harmonic columns in every included workbook. Missing columns in {file_path}: "
                 f"{missing_bca_columns[:8]}"
             ) from exc
+        if strict_source:
+            raise RuntimeError(
+                f"Group Summed BCA could not read the released BCA source {file_path}: {exc}"
+            ) from exc
         log_func(f"Error reading BCA sheet for {file_path}: {exc}")
         return values, provenance
     except Exception as exc:  # noqa: BLE001
+        if strict_source:
+            raise RuntimeError(
+                f"Group Summed BCA could not read the released BCA source {file_path}: {exc}"
+            ) from exc
         log_func(f"Error reading BCA sheet for {file_path}: {exc}")
         return values, provenance
 
     read_elapsed = perf_counter() - started
     if "Electrode" not in df_bca.columns:
+        if strict_source:
+            raise RuntimeError(
+                f"Group Summed BCA released source lacks the Electrode column: {file_path}"
+            )
         log_func(f"Error reading BCA sheet for {file_path}: missing Electrode column")
         return values, provenance
+    df_bca["Electrode"] = df_bca["Electrode"].astype(str).str.upper().str.strip()
+    duplicate_electrodes = sorted(
+        set(df_bca.loc[df_bca["Electrode"].duplicated(keep=False), "Electrode"])
+    )
+    if duplicate_electrodes:
+        raise RuntimeError(
+            "Group harmonic summation requires one source row per electrode. "
+            f"Duplicate rows in {file_path}: {duplicate_electrodes[:8]}"
+        )
     df_bca = df_bca.set_index("Electrode")
-    df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
     missing_bca_columns = [column for column in cols_to_sum if column not in df_bca.columns]
     if missing_bca_columns:
         raise RuntimeError(
@@ -3306,32 +3684,64 @@ def _aggregate_bca_for_all_rois(
         .replace([np.inf, -np.inf], np.nan)
     )
     excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
-    if excluded:
-        numeric_bca = numeric_bca.loc[
-            [electrode for electrode in numeric_bca.index if electrode not in excluded]
-        ]
     for roi_name, roi_channels in rois.items():
         roi_chans = [
             str(ch).strip().upper()
             for ch in (roi_channels or [])
-            if str(ch).strip().upper() in numeric_bca.index
+            if str(ch).strip()
         ]
         if not roi_chans:
-            log_func(f"No overlapping BCA data for ROI {roi_name} in {file_path}.")
-            if provenance_enabled:
-                provenance[roi_name] = _empty_provenance(file_path, row_label=[], col_label=cols_to_sum)
+            log_func(f"ROI {roi_name} not defined.")
             continue
-        df_roi = numeric_bca.loc[roi_chans].dropna(how="all")
-        if df_roi.empty:
-            log_func(f"No data for ROI {roi_name} in {file_path}.")
+        if len(set(roi_chans)) != len(roi_chans):
+            raise RuntimeError(
+                f"ROI {roi_name!r} repeats an electrode and cannot be averaged."
+            )
+        missing_members = [
+            channel for channel in roi_chans if channel not in numeric_bca.index
+        ]
+        if missing_members:
+            raise RuntimeError(
+                f"ROI {roi_name!r} requires its complete electrode set in "
+                f"{file_path}. Missing: {missing_members}"
+            )
+        excluded_members = [channel for channel in roi_chans if channel in excluded]
+        if excluded_members:
+            log_func(
+                f"ROI {roi_name} was not calculated for {file_path}; reviewed "
+                "required-electrode exclusion(s): " + ", ".join(excluded_members)
+            )
             if provenance_enabled:
-                provenance[roi_name] = _empty_provenance(file_path, row_label=roi_chans, col_label=cols_to_sum)
+                provenance[roi_name] = _empty_provenance(
+                    file_path,
+                    row_label=roi_chans,
+                    col_label=cols_to_sum,
+                )
+                provenance[roi_name].update(
+                    {
+                        "roi_coverage_status": "unavailable",
+                        "expected_electrodes": roi_chans,
+                        "excluded_electrodes": excluded_members,
+                        "used_electrodes": [],
+                    }
+                )
             continue
-        bca_vals = df_roi.sum(axis=1, min_count=1)
+        df_roi = numeric_bca.loc[roi_chans]
+        if not np.isfinite(df_roi.to_numpy(dtype=float)).all():
+            raise RuntimeError(
+                f"ROI {roi_name!r} has a nonfinite computable selected-harmonic "
+                f"BCA value in {file_path}; partial harmonic sums are forbidden."
+            )
+        bca_vals = df_roi.sum(axis=1, min_count=len(cols_to_sum))
         bca_vals = pd.to_numeric(bca_vals, errors="coerce").replace([np.inf, -np.inf], np.nan)
-        if bca_vals.notna().any():
-            out = float(bca_vals.mean(skipna=True))
-            values[roi_name] = out if np.isfinite(out) else np.nan
+        if len(bca_vals) != len(roi_chans) or not np.isfinite(
+            bca_vals.to_numpy(dtype=float)
+        ).all():
+            raise RuntimeError(
+                f"ROI {roi_name!r} did not produce one finite complete-harmonic "
+                f"sum per configured electrode in {file_path}."
+            )
+        values[roi_name] = float(bca_vals.mean(skipna=False))
         if provenance_enabled:
             provenance[roi_name] = {
                 "source_file": file_path,
@@ -3340,6 +3750,10 @@ def _aggregate_bca_for_all_rois(
                 "col_label": cols_to_sum,
                 "raw_cell": df_roi.to_dict(orient="index"),
                 "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
+                "roi_coverage_status": "available",
+                "expected_electrodes": roi_chans,
+                "excluded_electrodes": [],
+                "used_electrodes": roi_chans,
             }
     logger.debug(
         "stats_group_harmonics_bca_workbook_done",

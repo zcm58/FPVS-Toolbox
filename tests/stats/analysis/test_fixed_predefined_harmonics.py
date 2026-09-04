@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -1175,8 +1176,240 @@ def test_group_significant_policy_requires_exact_selected_bca_columns(
     group_policy.clear_group_significant_selection_cache()
 
 
+def test_managed_fixed_coverage_skips_whole_cell_and_blanks_only_affected_roi(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "S1_C1.xlsx"
+    _write_workbook(path, subject_idx=1, condition_idx=1)
+    rois = {"Excluded": ["O1"], "Available": ["O2"]}
+    coverage = _managed_coverage_fixture(
+        path=path,
+        rois=rois,
+        excluded_channels=("O1",),
+    )
+
+    result = fixed_policy._prepare_fixed_predefined_bca_data(
+        subjects=["S1"],
+        conditions=["C1", "C2"],
+        subject_data={"S1": {"C1": str(path)}},
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois=rois,
+        settings=normalize_dv_policy(
+            {
+                "name": FIXED_PREDEFINED_POLICY_NAME,
+                "fixed_harmonic_frequencies_hz": "1.2",
+            }
+        ),
+        oddball_frequency_hz=1.2,
+        final_roi_coverage=coverage,
+    )
+
+    assert result is not None
+    assert np.isnan(result["S1"]["C1"]["Excluded"])
+    assert result["S1"]["C1"]["Available"] == pytest.approx(2.0)
+    assert all(np.isnan(value) for value in result["S1"]["C2"].values())
+
+
+def test_managed_group_coverage_skips_whole_cell_and_blanks_only_affected_roi(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Main_App.processing import frequency_domain_qc, roi_coverage
+
+    _write_stats_project_manifest(tmp_path)
+    path = tmp_path / "S1_C1.xlsx"
+    _write_workbook(path, subject_idx=1, condition_idx=1)
+    rois = {"Excluded": ["O1"], "Available": ["O2"]}
+    coverage = _managed_coverage_fixture(
+        path=path,
+        rois=rois,
+        excluded_channels=("O1",),
+    )
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "filter_frequency_domain_subjects",
+        lambda _root, subjects, subject_data: (subjects, subject_data, ()),
+    )
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "active_frequency_domain_exclusions",
+        lambda _root: SimpleNamespace(
+            auto_excluded_electrodes_by_participant={}
+        ),
+    )
+    monkeypatch.setattr(
+        roi_coverage,
+        "require_project_final_release",
+        lambda _root: (
+            SimpleNamespace(),
+            coverage,
+            SimpleNamespace(),
+        ),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_processing_harmonic_selection",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            detected_significant_harmonics_hz=[1.2],
+            selected_harmonics_hz=[1.2],
+            selected_columns=["1.2000_Hz"],
+            oddball_frequency_hz=1.2,
+            to_metadata=lambda: {"included_harmonics_hz": [1.2]},
+        ),
+    )
+
+    result = group_policy._prepare_group_significant_bca_data(
+        subjects=["S1"],
+        conditions=["C1", "C2"],
+        subject_data={"S1": {"C1": str(path)}},
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois=rois,
+        settings=normalize_dv_policy(
+            {
+                "name": GROUP_SIGNIFICANT_POLICY_NAME,
+                "harmonic_selection_profile": "significant_only_exploratory",
+            }
+        ),
+        project_root=tmp_path,
+    )
+
+    assert result is not None
+    assert np.isnan(result["S1"]["C1"]["Excluded"])
+    assert result["S1"]["C1"]["Available"] == pytest.approx(2.0)
+    assert all(np.isnan(value) for value in result["S1"]["C2"].values())
+
+
+def test_managed_stats_rejects_workbook_path_different_from_final_coverage(
+    tmp_path: Path,
+) -> None:
+    released = tmp_path / "released.xlsx"
+    supplied = tmp_path / "supplied.xlsx"
+    released.write_bytes(b"released")
+    supplied.write_bytes(b"supplied")
+    cell = SimpleNamespace(
+        recording_id="S1",
+        condition_label="C1",
+        workbook_path=str(released),
+    )
+
+    for helper, context in (
+        (fixed_policy._require_matching_coverage_workbook, "Fixed Summed BCA"),
+        (group_policy._require_matching_coverage_workbook, "Group Summed BCA"),
+    ):
+        with pytest.raises(RuntimeError, match="different from final QC-21"):
+            helper(cell, supplied, context=context)
+
+
+def test_managed_stats_propagates_unreadable_released_workbook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "released.xlsx"
+    path.write_bytes(b"malformed")
+
+    for module, aggregate, message in (
+        (
+            fixed_policy,
+            fixed_policy._aggregate_bca_sum_harmonics_for_all_rois,
+            "Fixed Summed BCA could not read the released",
+        ),
+        (
+            group_policy,
+            group_policy._aggregate_bca_for_all_rois,
+            "Group Summed BCA could not read the released",
+        ),
+    ):
+        monkeypatch.setattr(
+            module,
+            "read_xlsx_sheet_selected_columns",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("synthetic unreadable workbook")
+            ),
+        )
+        with pytest.raises(RuntimeError, match=message):
+            aggregate(
+                file_path=str(path),
+                rois={"Posterior": ["O1"]},
+                log_func=lambda _message: None,
+                harmonic_freqs=[1.2],
+                provenance_enabled=False,
+                strict_source=True,
+            )
+
+
 def _project_workbook_path(project_root: Path, subject: str, condition: str) -> Path:
     return project_root / "1 - Excel Data Files" / condition / f"{subject}_{condition}.xlsx"
+
+
+def _managed_coverage_fixture(
+    *,
+    path: Path,
+    rois: dict[str, list[str]],
+    excluded_channels: tuple[str, ...],
+):
+    snapshot = SimpleNamespace(
+        rois=tuple(
+            SimpleNamespace(name=name, electrodes=tuple(channels))
+            for name, channels in rois.items()
+        )
+    )
+
+    def _memberships(*, unavailable: bool):
+        return tuple(
+            SimpleNamespace(
+                roi_name=name,
+                expected_channels=tuple(channels),
+                excluded_channels=(
+                    tuple(
+                        channel
+                        for channel in channels
+                        if channel in excluded_channels
+                    )
+                    if not unavailable
+                    else ()
+                ),
+            )
+            for name, channels in rois.items()
+        )
+
+    available = SimpleNamespace(
+        recording_id="S1",
+        participant_id="S1",
+        condition_label="C1",
+        outcome_status="ready",
+        workbook_path=str(path.resolve()),
+        source_evidence=object(),
+        downstream_cell_excluded=False,
+        decision_reason_codes=(),
+        roi_memberships=_memberships(unavailable=False),
+        whole_scalp_normalization=SimpleNamespace(
+            excluded_channels=excluded_channels,
+        ),
+    )
+    unavailable = SimpleNamespace(
+        recording_id="S1",
+        participant_id="S1",
+        condition_label="C2",
+        outcome_status="excluded",
+        workbook_path="",
+        source_evidence=None,
+        downstream_cell_excluded=True,
+        decision_reason_codes=("reviewed_recording_condition_exclusion",),
+        roi_memberships=_memberships(unavailable=True),
+        whole_scalp_normalization=None,
+    )
+    by_key = {
+        ("s1", "c1"): available,
+        ("s1", "c2"): unavailable,
+    }
+    return SimpleNamespace(
+        roi_snapshot=snapshot,
+        cell_for=lambda identity, condition: by_key.get(
+            (str(identity).casefold(), str(condition).casefold())
+        ),
+    )
 
 
 def _persist_processing_harmonics(
@@ -1201,6 +1434,49 @@ def _patch_processing_harmonic_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(harmonic_selection_qc, "load_rois_from_settings", lambda: rois)
+    snapshot = SimpleNamespace(
+        fingerprint="test-roi-definition",
+        rois=tuple(
+            SimpleNamespace(name=name, electrodes=tuple(electrodes))
+            for name, electrodes in rois.items()
+        ),
+    )
+    normalization = SimpleNamespace(excluded_channels=())
+    coverage = SimpleNamespace(
+        fingerprint="test-roi-coverage",
+        decision_fingerprint="test-frequency-decisions",
+        roi_snapshot=snapshot,
+        cells=(),
+        cell_for=lambda _identity, _condition: SimpleNamespace(
+            source_evidence=object(),
+            whole_scalp_normalization=normalization,
+            downstream_cell_excluded=False,
+            workbook_path="synthetic-test-workbook",
+        ),
+    )
+    release_context = (
+        SimpleNamespace(fingerprint="test-outcomes"),
+        coverage,
+        SimpleNamespace(fingerprint="test-final-release"),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_current_final_release_context",
+        lambda _root: release_context,
+    )
+    from Main_App.processing import roi_coverage
+
+    monkeypatch.setattr(
+        roi_coverage,
+        "require_project_final_release",
+        lambda _root: release_context,
+    )
+    for policy_module in (fixed_policy, group_policy):
+        monkeypatch.setattr(
+            policy_module,
+            "_require_matching_coverage_workbook",
+            lambda _cell, supplied_path, *, context: str(supplied_path),
+        )
     protocol = FrequencyProtocol.from_recurrence(
         6,
         5,

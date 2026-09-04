@@ -970,6 +970,144 @@ class RoiCoverageLedger:
         return result
 
 
+def _dataset_index_identity_payload(dataset_index: Any) -> dict[str, object]:
+    def _path(value: object) -> str:
+        return str(Path(str(value)).expanduser().resolve(strict=False))
+
+    def _workbook_rows(values: object, *, disposition: str) -> list[dict[str, object]]:
+        return sorted(
+            [
+                {
+                    "disposition": disposition,
+                    "participant_id": str(getattr(row, "participant_id", "")),
+                    "recording_id": str(getattr(row, "recording_id", "") or ""),
+                    "condition": str(getattr(row, "condition", "")),
+                    "group_id": str(getattr(row, "group_id", "") or ""),
+                    "session_id": str(getattr(row, "session_id", "") or ""),
+                    "visit_index": getattr(row, "visit_index", None),
+                    "path": _path(getattr(row, "path", "")),
+                }
+                for row in values or ()
+            ],
+            key=lambda row: (
+                str(row["recording_id"] or row["participant_id"]).casefold(),
+                str(row["condition"]).casefold(),
+                str(row["path"]).casefold(),
+                str(row["disposition"]),
+            ),
+        )
+
+    groups = sorted(
+        (
+            str(getattr(row, "group_id", "")),
+            str(getattr(row, "label", "")),
+        )
+        for row in (getattr(dataset_index, "groups", {}) or {}).values()
+    )
+    participants = sorted(
+        (
+            str(getattr(row, "participant_id", "")),
+            str(getattr(row, "group_id", "") or ""),
+        )
+        for row in (getattr(dataset_index, "participants", {}) or {}).values()
+    )
+    sessions = sorted(
+        (
+            str(getattr(row, "session_id", "")),
+            str(getattr(row, "label", "")),
+            getattr(row, "visit_index", None),
+        )
+        for row in (getattr(dataset_index, "sessions", {}) or {}).values()
+    )
+    recordings = sorted(
+        (
+            str(getattr(row, "recording_id", "")),
+            str(getattr(row, "participant_id", "")),
+            str(getattr(row, "session_id", "")),
+            str(getattr(row, "source_id", "")),
+            getattr(row, "visit_index", None),
+        )
+        for row in (getattr(dataset_index, "recordings", {}) or {}).values()
+    )
+    return {
+        "project_root": _path(getattr(dataset_index, "project_root", "")),
+        "groups": groups,
+        "participants": participants,
+        "sessions": sessions,
+        "recordings": recordings,
+        "workbooks": [
+            *_workbook_rows(
+                getattr(dataset_index, "workbooks", ()),
+                disposition="included",
+            ),
+            *_workbook_rows(
+                getattr(dataset_index, "excluded_workbooks", ()),
+                disposition="excluded",
+            ),
+        ],
+    }
+
+
+def require_canonical_released_dataset_index(
+    project_root: str | Path,
+    dataset_index: Any | None = None,
+    *,
+    final_coverage: RoiCoverageLedger | None = None,
+) -> Any:
+    """Return a fresh canonical index after rejecting stale same-root identity."""
+
+    from Main_App.projects import load_project_dataset_index
+
+    root = _resolved_project_root(project_root)
+    canonical = load_project_dataset_index(root)
+    if dataset_index is not None:
+        supplied_root = Path(dataset_index.project_root).expanduser().resolve(
+            strict=False
+        )
+        if supplied_root != root:
+            raise ValueError(
+                "The supplied dataset index belongs to a different project root."
+            )
+        if _dataset_index_identity_payload(dataset_index) != (
+            _dataset_index_identity_payload(canonical)
+        ):
+            raise RoiCoverageGateError(
+                "The supplied dataset index has stale participant, group, session, "
+                "recording, condition, or workbook identity. Reload the project."
+            )
+
+    if final_coverage is not None:
+        records = [*canonical.workbooks, *canonical.excluded_workbooks]
+        for cell in final_coverage.cells:
+            if cell.source_evidence is None:
+                continue
+            matches = [
+                record
+                for record in records
+                if str(record.recording_id or record.participant_id).casefold()
+                == cell.recording_id.casefold()
+                and str(record.condition).casefold()
+                == cell.condition_label.casefold()
+            ]
+            if len(matches) != 1:
+                raise RoiCoverageGateError(
+                    "The canonical dataset index does not uniquely match released "
+                    f"coverage for {cell.recording_id}/{cell.condition_label}."
+                )
+            record = matches[0]
+            if (
+                str(record.participant_id).casefold()
+                != cell.participant_id.casefold()
+                or Path(record.path).resolve(strict=False)
+                != Path(cell.workbook_path).resolve(strict=False)
+            ):
+                raise RoiCoverageGateError(
+                    "The canonical dataset index identity differs from released "
+                    f"coverage for {cell.recording_id}/{cell.condition_label}."
+                )
+    return canonical
+
+
 @dataclass(frozen=True, slots=True)
 class FinalReleaseReceipt:
     """QC-20 proof that reviewed coverage may enter numerical consumers."""
@@ -1747,6 +1885,26 @@ def require_current_final_release(
         raise RoiCoverageGateError(
             "QC-20 final release requires a current recording-condition output ledger."
         )
+    for cell in outcomes.cells:
+        if cell.status not in {CELL_READY, CELL_PARTIALLY_RETAINED}:
+            continue
+        receipt = cell.export_receipt
+        workbook_write = (
+            receipt.get("workbook_write") if isinstance(receipt, Mapping) else None
+        )
+        recorded_artifact = (
+            workbook_write.get("artifact")
+            if isinstance(workbook_write, Mapping)
+            else None
+        )
+        workbook_path = Path(str(receipt.get("path") or "")) if receipt else Path()
+        if not isinstance(recorded_artifact, Mapping) or (
+            _current_workbook_artifact(workbook_path) != dict(recorded_artifact)
+        ):
+            raise RoiCoverageGateError(
+                "QC-20 final release is stale because its workbook changed or "
+                f"is missing: {cell.processing_id}/{cell.condition_label}."
+            )
     coverage = load_roi_coverage(root, stage=ROI_COVERAGE_STAGE_FINAL)
     if coverage is None:
         raise RoiCoverageGateError("QC-21 final ROI coverage has not been recorded.")
@@ -1761,6 +1919,49 @@ def require_current_final_release(
             "QC-20 final-release receipt is missing or stale; rerun reviewed post-processing."
         )
     return outcomes, coverage, receipt
+
+
+def require_project_final_release(
+    project_root: str | Path,
+) -> tuple[
+    RecordingConditionOutcomeLedger,
+    RoiCoverageLedger,
+    FinalReleaseReceipt,
+]:
+    """Resolve current reviewed decisions and require their release receipt."""
+
+    from Main_App.processing.frequency_domain_qc import (
+        resolve_frequency_qc_coverage_decisions,
+    )
+
+    decisions = resolve_frequency_qc_coverage_decisions(project_root)
+    outcomes, coverage, receipt = require_current_final_release(
+        project_root,
+        expected_decision_fingerprint=decisions.decision_fingerprint,
+    )
+    current_decision_payload = _decision_payload(decisions)
+    if current_decision_payload != dict(coverage.decision_payload):
+        raise RoiCoverageGateError(
+            "QC-20 final release is stale because its durable QC-03/QC-17 "
+            "decision evidence changed. Rerun reviewed post-processing."
+        )
+    return outcomes, coverage, receipt
+
+
+def _current_workbook_artifact(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    stat = path.stat()
+    return {
+        "path": str(path.resolve()),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "sha256": digest.hexdigest(),
+    }
 
 
 __all__ = [
@@ -1792,7 +1993,9 @@ __all__ = [
     "persist_final_release_receipt",
     "persist_roi_coverage",
     "record_final_release_readiness",
+    "require_canonical_released_dataset_index",
     "require_current_final_release",
     "require_final_release_readiness",
+    "require_project_final_release",
     "validate_roi_source_rows",
 ]

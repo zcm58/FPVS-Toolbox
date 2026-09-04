@@ -332,11 +332,18 @@ def _frequency_domain_qc_signature(manifest: Mapping[str, object]) -> dict[str, 
         "manual_participant_exclusions": _json_safe(
             state.get("manual_participant_exclusions") or []
         ),
+        "review_complete": bool(state.get("review_complete")),
+        "review_decisions": _json_safe(state.get("review_decisions") or []),
+        "last_review": _json_safe(state.get("last_review") or {}),
     }
     for key in (
         "auto_recording_electrode_exclusions",
         "auto_recording_exclusions",
         "manual_recording_exclusions",
+        "manual_participant_condition_exclusions",
+        "manual_recording_condition_exclusions",
+        "manual_participant_condition_electrode_exclusions",
+        "manual_recording_condition_electrode_exclusions",
     ):
         if key in state:
             signature[key] = _json_safe(state.get(key) or [])

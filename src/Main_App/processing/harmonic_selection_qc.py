@@ -17,12 +17,10 @@ import pandas as pd
 
 from Main_App.projects import (
     ProjectDatasetIndex,
-    load_project_dataset_index,
     normalize_frequency_protocol,
 )
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.processing.frequency_domain_qc import (
-    active_frequency_domain_exclusions,
     filter_frequency_domain_recordings,
     filter_frequency_domain_subjects,
 )
@@ -90,8 +88,8 @@ class ProcessingHarmonicSelectionInputs:
     rois: dict[str, list[str]]
     settings: DVPolicySettings
     base_frequency_hz: float
+    oddball_frequency_hz: float
     max_frequency_hz: float | None
-    oddball_frequency_hz: float = 1.2
     frequency_protocol_fingerprint: str = ""
     eligible_harmonic_orders: tuple[int, ...] = ()
     spectral_eligibility_fingerprint: str = ""
@@ -101,6 +99,15 @@ class ProcessingHarmonicSelectionInputs:
     participant_group_ids: dict[str, str] = field(default_factory=dict)
     declared_group_ids: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        oddball = float(self.oddball_frequency_hz)
+        if not math.isfinite(oddball) or oddball <= 0.0:
+            raise ValueError(
+                "Processing harmonic selection requires an explicit positive "
+                "canonical project oddball frequency."
+            )
+        object.__setattr__(self, "oddball_frequency_hz", oddball)
+
     @property
     def is_repeated_session(self) -> bool:
         return bool(self.recording_assignments)
@@ -108,6 +115,23 @@ class ProcessingHarmonicSelectionInputs:
 
 def _inputs_are_repeated(inputs: object) -> bool:
     return bool(getattr(inputs, "recording_assignments", {}))
+
+
+def _require_canonical_oddball_frequency(inputs: object) -> float:
+    raw_value = getattr(inputs, "oddball_frequency_hz", None)
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise RuntimeError(
+            "Managed harmonic selection requires an explicit canonical project "
+            "oddball frequency."
+        ) from error
+    if not math.isfinite(value) or value <= 0.0:
+        raise RuntimeError(
+            "Managed harmonic selection requires an explicit positive canonical "
+            "project oddball frequency."
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -152,7 +176,10 @@ class PersistedFixedHarmonicSelection:
 
     @property
     def oddball_frequency_hz(self) -> float:
-        value = float(self.selection_metadata.get("oddball_frequency_hz", 1.2))
+        raw_value = self.selection_metadata.get("oddball_frequency_hz")
+        if raw_value is None:
+            raise ValueError("Saved harmonic selection lacks its project oddball frequency.")
+        value = float(raw_value)
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError("Saved oddball frequency must be positive and finite.")
         return value
@@ -209,6 +236,14 @@ def run_processing_harmonic_selection_qc(
         project_root,
         dataset_index=dataset_index,
     )
+    release_outcomes, release_coverage, release_receipt = (
+        _current_final_release_context(project_root)
+    )
+    release_metadata = _final_release_metadata(
+        release_outcomes,
+        release_coverage,
+        release_receipt,
+    )
     subjects = list(inputs.subjects)
     ordered_conditions = list(inputs.conditions)
     subject_data = inputs.subject_data
@@ -216,7 +251,7 @@ def run_processing_harmonic_selection_qc(
     settings = inputs.settings
     base_frequency_hz = inputs.base_frequency_hz
     max_frequency_hz = inputs.max_frequency_hz
-    oddball_frequency_hz = float(getattr(inputs, "oddball_frequency_hz", 1.2))
+    oddball_frequency_hz = _require_canonical_oddball_frequency(inputs)
     spectral_eligibility_fingerprint = str(
         getattr(inputs, "spectral_eligibility_fingerprint", "") or ""
     )
@@ -226,6 +261,14 @@ def run_processing_harmonic_selection_qc(
         else None
     )
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
+        expected_scalp_channels_by_subject_condition = {
+            (cell.recording_id, cell.condition_label): tuple(
+                cell.source_evidence.expected_scalp_channels
+            )
+            for cell in release_coverage.cells
+            if cell.source_evidence is not None
+            and not cell.downstream_cell_excluded
+        }
         selection = build_group_significant_harmonic_selection(
             subjects=subjects,
             conditions=ordered_conditions,
@@ -251,12 +294,16 @@ def run_processing_harmonic_selection_qc(
             declared_session_ids=(
                 inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
             ),
-            electrode_exclusions_by_subject=(
-                active_frequency_domain_exclusions(
-                    project_root
-                ).auto_excluded_electrodes_by_recording
-                if _inputs_are_repeated(inputs)
-                else None
+            electrode_exclusions_by_subject_condition={
+                (cell.recording_id, cell.condition_label): frozenset(
+                    cell.whole_scalp_normalization.excluded_channels
+                )
+                for cell in release_coverage.cells
+                if cell.source_evidence is not None
+                and cell.whole_scalp_normalization is not None
+            },
+            expected_scalp_channels_by_subject_condition=(
+                expected_scalp_channels_by_subject_condition or None
             ),
             oddball_frequency_hz=oddball_frequency_hz,
             eligible_harmonic_orders=eligible_harmonic_orders,
@@ -291,13 +338,7 @@ def run_processing_harmonic_selection_qc(
             use_accepted_processing_selection=False,
             oddball_frequency_hz=oddball_frequency_hz,
             eligible_harmonic_orders=eligible_harmonic_orders,
-            electrode_exclusions_by_subject=(
-                active_frequency_domain_exclusions(
-                    project_root
-                ).auto_excluded_electrodes_by_recording
-                if _inputs_are_repeated(inputs)
-                else None
-            ),
+            final_roi_coverage=release_coverage,
         )
         if fixed_data is None:
             raise RuntimeError("Harmonic selection QC could not build fixed harmonics.")
@@ -305,7 +346,11 @@ def run_processing_harmonic_selection_qc(
         if not isinstance(fixed_metadata, Mapping):
             raise RuntimeError("Harmonic selection QC could not build fixed harmonic metadata.")
         metadata = dict(fixed_metadata)
-    metadata = _canonical_selection_metadata(inputs, metadata)
+    metadata = _canonical_selection_metadata(
+        inputs,
+        metadata,
+        final_release_metadata=release_metadata,
+    )
     qc_folder = project_root / QUALITY_CHECK_FOLDER
     qc_folder.mkdir(parents=True, exist_ok=True)
     workbook_path = write_harmonic_selection_workbook(
@@ -338,7 +383,7 @@ def _require_persisted_group_harmonic_selection(
         declared_session_ids=(
             inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
         ),
-        oddball_frequency_hz=float(getattr(inputs, "oddball_frequency_hz", 1.2)),
+        oddball_frequency_hz=_require_canonical_oddball_frequency(inputs),
     )
     lookup = lookup_cached_group_harmonic_selection(cache_request)
     if lookup.hit is not None:
@@ -354,15 +399,26 @@ def _require_persisted_group_harmonic_selection(
 def _canonical_selection_metadata(
     inputs: ProcessingHarmonicSelectionInputs,
     metadata: Mapping[str, object],
+    *,
+    final_release_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Return one portable metadata payload shared by every policy profile."""
 
     canonical = copy.deepcopy(dict(metadata))
+    release = dict(
+        final_release_metadata
+        if final_release_metadata is not None
+        else _current_final_release_metadata(inputs.project_root)
+    )
+    canonical.update(release)
     canonical["harmonic_selection_profile"] = (
         inputs.settings.harmonic_selection_profile
     )
     canonical["harmonic_selection_profile_version"] = (
         inputs.settings.harmonic_selection_profile_version
+    )
+    canonical["oddball_frequency_hz"] = _require_canonical_oddball_frequency(
+        inputs
     )
     spectral_fingerprint = str(
         getattr(inputs, "spectral_eligibility_fingerprint", "") or ""
@@ -372,9 +428,6 @@ def _canonical_selection_metadata(
             {
             "frequency_protocol_fingerprint": str(
                 getattr(inputs, "frequency_protocol_fingerprint", "") or ""
-            ),
-            "oddball_frequency_hz": float(
-                getattr(inputs, "oddball_frequency_hz", 1.2)
             ),
             "eligible_harmonic_orders": list(
                 getattr(inputs, "eligible_harmonic_orders", ()) or ()
@@ -449,7 +502,7 @@ def _processing_cache_request(
         declared_session_ids=(
             inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
         ),
-        oddball_frequency_hz=float(getattr(inputs, "oddball_frequency_hz", 1.2)),
+        oddball_frequency_hz=_require_canonical_oddball_frequency(inputs),
     )
     if request is None:
         raise RuntimeError(
@@ -484,6 +537,7 @@ def _processing_selection_input_fingerprint(
             "eligible_harmonic_orders": list(
                 getattr(inputs, "eligible_harmonic_orders", ()) or ()
             ),
+            "final_release": _current_final_release_metadata(inputs.project_root),
         }
     )
 
@@ -708,7 +762,7 @@ def load_processing_harmonic_selection(
         declared_session_ids=(
             inputs.declared_session_ids if _inputs_are_repeated(inputs) else None
         ),
-        oddball_frequency_hz=float(getattr(inputs, "oddball_frequency_hz", 1.2)),
+        oddball_frequency_hz=_require_canonical_oddball_frequency(inputs),
     )
     try:
         selection = group_significant_selection_from_metadata(
@@ -734,6 +788,27 @@ def load_processing_harmonic_selection(
     return loaded
 
 
+def load_processing_harmonic_selection_metadata(
+    project: Any,
+    *,
+    log_func: Callable[[str], None] | None = None,
+) -> dict[str, object]:
+    """Return the exact validated canonical metadata persisted for the project."""
+
+    loaded = load_processing_harmonic_selection(project, log_func=log_func)
+    project_root = Path(project.project_root).resolve()
+    saved = _load_processing_harmonic_selection_record(project_root)
+    metadata = saved.get("selection_metadata") if isinstance(saved, Mapping) else None
+    if not isinstance(metadata, Mapping):
+        raise _invalid_processing_selection_error(
+            "The validated saved selection has no canonical metadata payload."
+        )
+    # Keep the loaded object live through validation above; return the durable
+    # payload rather than its presentation-only cache-source annotations.
+    _ = loaded
+    return copy.deepcopy(dict(metadata))
+
+
 def _processing_harmonic_selection_inputs(
     project: Any,
     *,
@@ -743,12 +818,14 @@ def _processing_harmonic_selection_inputs(
     """Resolve the canonical project-wide inputs used during processing."""
 
     project_root = Path(project.project_root).resolve()
-    if dataset_index is None:
-        dataset_index = load_project_dataset_index(project_root)
-    elif dataset_index.project_root.resolve() != project_root:
-        raise ValueError(
-            "The supplied dataset index belongs to a different project root."
-        )
+    from Main_App.processing.roi_coverage import (
+        require_canonical_released_dataset_index,
+    )
+
+    dataset_index = require_canonical_released_dataset_index(
+        project_root,
+        dataset_index,
+    )
     conditions = list(dataset_index.conditions)
     repeated_session = dataset_index.is_repeated_session
     if repeated_session:
@@ -866,6 +943,53 @@ def _processing_harmonic_selection_inputs(
         participant_group_ids=participant_group_ids,
         declared_group_ids=declared_group_ids,
     )
+
+
+def resolve_processing_harmonic_selection_inputs(
+    project: Any,
+    log_func: Callable[[str], None] | None = None,
+    dataset_index: ProjectDatasetIndex | None = None,
+) -> ProcessingHarmonicSelectionInputs:
+    """Return the side-effect-free canonical inputs used by frequency review.
+
+    Frequency review and final harmonic selection must resolve the same cohort,
+    conditions, protocol, eligible harmonics, ROIs, and policy.  This public
+    wrapper keeps that resolution in one processing-owned implementation.
+    """
+
+    return _processing_harmonic_selection_inputs(
+        project,
+        log_func=log_func,
+        dataset_index=dataset_index,
+    )
+
+
+def _current_final_release_metadata(project_root: Path) -> dict[str, object]:
+    """Require and describe the current reviewed QC-20/QC-21 release chain."""
+
+    return _final_release_metadata(*_current_final_release_context(project_root))
+
+
+def _current_final_release_context(project_root: Path) -> tuple[Any, Any, Any]:
+    """Load the one processing-owned final-release chain."""
+
+    from Main_App.processing.roi_coverage import require_project_final_release
+
+    return require_project_final_release(project_root)
+
+
+def _final_release_metadata(
+    outcomes: Any,
+    coverage: Any,
+    receipt: Any,
+) -> dict[str, object]:
+    return {
+        "recording_condition_outcome_fingerprint": outcomes.fingerprint,
+        "roi_definition_fingerprint": coverage.roi_snapshot.fingerprint,
+        "roi_coverage_fingerprint": coverage.fingerprint,
+        "frequency_review_decision_fingerprint": coverage.decision_fingerprint,
+        "final_release_receipt_fingerprint": receipt.fingerprint,
+    }
 
 
 def _dv_policy_payload(settings: DVPolicySettings) -> dict[str, object]:
@@ -1362,5 +1486,7 @@ __all__ = [
     "ProcessingHarmonicSelectionInputs",
     "ProcessingHarmonicSelectionReport",
     "load_processing_harmonic_selection",
+    "load_processing_harmonic_selection_metadata",
+    "resolve_processing_harmonic_selection_inputs",
     "run_processing_harmonic_selection_qc",
 ]

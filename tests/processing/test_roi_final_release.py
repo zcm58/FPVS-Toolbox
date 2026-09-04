@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ import pytest
 
 from Main_App.io import BIOSEMI64_CHANNELS, biosemi64_geometry_identity
 from Main_App.processing.preprocessing_outcome import build_preprocessing_outcome
+from Main_App.processing import frequency_domain_qc
 from Main_App.processing.recording_condition_outcomes import (
     CELL_EXCLUDED,
     CELL_READY,
@@ -26,8 +28,11 @@ from Main_App.processing.roi_coverage import (
     load_final_release_receipt,
     load_roi_coverage,
     record_final_release_readiness,
+    require_current_final_release,
     require_final_release_readiness,
+    require_project_final_release,
 )
+from Main_App.processing.processing_ledger import save_ledger
 from Main_App.processing.roi_settings import build_roi_definition_snapshot
 
 
@@ -59,6 +64,15 @@ def _cell(
     status: str = CELL_READY,
 ) -> RecordingConditionCellOutcome:
     contributing = status == CELL_READY
+    artifact = None
+    if contributing:
+        stat = path.stat()
+        artifact = {
+            "path": str(path.resolve()),
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
     return RecordingConditionCellOutcome(
         cell_id=f"{recording}:{condition}",
         processing_id=recording,
@@ -79,6 +93,7 @@ def _cell(
             {
                 "path": str(path.resolve()),
                 "geometry": biosemi64_geometry_identity(),
+                "workbook_write": {"artifact": artifact},
             }
             if contributing
             else None
@@ -311,3 +326,88 @@ def test_final_release_rejects_a_different_review_fingerprint(tmp_path):
             final,
             expected_decision_fingerprint="different-review",
         )
+
+
+def test_current_final_release_rejects_a_changed_source_workbook(tmp_path):
+    source = tmp_path / "Faces.xlsx"
+    _write_source(source)
+    outcomes = _outcomes(_cell(source))
+    save_ledger(
+        tmp_path,
+        {"recording_condition_outcomes": outcomes.to_payload()},
+    )
+    pre = build_pre_review_roi_coverage(
+        tmp_path,
+        outcome_ledger=outcomes,
+        processing_ledger=_processing_ledger("P01__visit_1"),
+        roi_snapshot=_snapshot(),
+    )
+    final = build_final_roi_coverage(
+        tmp_path,
+        outcome_ledger=outcomes,
+        frequency_decisions=_Decisions(),
+        pre_review_coverage=pre,
+    )
+    record_final_release_readiness(
+        tmp_path,
+        outcomes,
+        final,
+        expected_decision_fingerprint="review-fingerprint",
+    )
+
+    assert require_current_final_release(
+        tmp_path,
+        expected_decision_fingerprint="review-fingerprint",
+    )[1] == final
+
+    source.write_bytes(source.read_bytes() + b"changed after release")
+    with pytest.raises(RoiCoverageGateError, match="workbook changed or is missing"):
+        require_current_final_release(
+            tmp_path,
+            expected_decision_fingerprint="review-fingerprint",
+        )
+
+
+def test_project_final_release_rejects_changed_decision_payload_with_same_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "Faces.xlsx"
+    _write_source(source)
+    outcomes = _outcomes(_cell(source))
+    save_ledger(
+        tmp_path,
+        {"recording_condition_outcomes": outcomes.to_payload()},
+    )
+    pre = build_pre_review_roi_coverage(
+        tmp_path,
+        outcome_ledger=outcomes,
+        processing_ledger=_processing_ledger("P01__visit_1"),
+        roi_snapshot=_snapshot(),
+    )
+    decisions = _Decisions()
+    final = build_final_roi_coverage(
+        tmp_path,
+        outcome_ledger=outcomes,
+        frequency_decisions=decisions,
+        pre_review_coverage=pre,
+    )
+    record_final_release_readiness(
+        tmp_path,
+        outcomes,
+        final,
+        expected_decision_fingerprint=decisions.decision_fingerprint,
+    )
+    changed_payload = decisions.to_payload()
+    changed_payload["decision_count"] = 1
+    monkeypatch.setattr(
+        frequency_domain_qc,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: SimpleNamespace(
+            decision_fingerprint=decisions.decision_fingerprint,
+            to_payload=lambda: changed_payload,
+        ),
+    )
+
+    with pytest.raises(RoiCoverageGateError, match="decision evidence changed"):
+        require_project_final_release(tmp_path)
