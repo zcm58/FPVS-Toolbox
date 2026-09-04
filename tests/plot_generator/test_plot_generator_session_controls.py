@@ -164,6 +164,7 @@ def test_session_workflow_collects_visits_separately_before_aggregation(
 
         def __init__(self) -> None:
             self.collection_sessions: list[str] = []
+            self.clamped_frequencies = None
             self.prepared = None
             self.rendered = None
 
@@ -204,6 +205,9 @@ def test_session_workflow_collects_visits_separately_before_aggregation(
         def _selected_roi_names(self):
             return ("Posterior",)
 
+        def _clamp_x_max_to_observed_frequency_grid(self, frequencies):
+            self.clamped_frequencies = tuple(frequencies)
+
         def _revalidate_analysis_context_for_output(self):
             return None
 
@@ -224,6 +228,7 @@ def test_session_workflow_collects_visits_separately_before_aggregation(
     worker._run_session_comparison()
 
     assert worker.collection_sessions == ["luteal", "follicular"]
+    assert worker.clamped_frequencies == (1.0, 2.0)
     assert worker.prepared is not None
     aggregation = worker.prepared[1]
     assert aggregation.cell(

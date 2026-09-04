@@ -8,7 +8,10 @@ if importlib.util.find_spec("PySide6") is None:
     pytest.skip("PySide6 not available", allow_module_level=True)
 
 from Main_App.projects.project import Project
-from Main_App.projects.preprocessing_settings import PREPROCESSING_CANONICAL_KEYS
+from Main_App.projects.preprocessing_settings import (
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+    PREPROCESSING_CANONICAL_KEYS,
+)
 from Main_App.Shared.settings_manager import SettingsManager
 
 
@@ -60,6 +63,7 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["max_bad_chans"] == 4
     assert normalized["auto_detect_removed_electrodes"] is False
     assert normalized["removed_electrode_detection_mode"] == "off"
+    assert normalized[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is False
     assert normalized["manual_removed_electrodes"] == {}
     assert normalized["manual_excluded_participants"] == []
     assert normalized["manual_excluded_participant_conditions"] == {}
@@ -99,7 +103,8 @@ def test_normalization_and_roundtrip(tmp_path):
     assert saved["preprocessing"]["line_noise_filter_enabled"] is False
     assert saved["preprocessing"]["line_noise_frequency_hz"] == 50
     assert saved["preprocessing"]["auto_detect_removed_electrodes"] is False
-    assert saved["preprocessing"]["removed_electrode_detection_mode"] == "manual"
+    assert saved["preprocessing"]["removed_electrode_detection_mode"] == "off"
+    assert saved["preprocessing"][MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is True
     assert saved["preprocessing"]["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert saved["preprocessing"]["manual_excluded_participants"] == ["P12"]
     assert saved["preprocessing"]["manual_excluded_participant_conditions"] == {
@@ -133,6 +138,8 @@ def test_normalization_and_roundtrip(tmp_path):
         fresh.preprocessing["electrode_mapping_profile"]
         == "biosemi64_1020_ab_v1"
     )
+    assert fresh.preprocessing["removed_electrode_detection_mode"] == "off"
+    assert fresh.preprocessing[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is True
     assert fresh.preprocessing["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert fresh.preprocessing["manual_excluded_participants"] == ["P12"]
     assert fresh.preprocessing["manual_excluded_participant_conditions"] == {

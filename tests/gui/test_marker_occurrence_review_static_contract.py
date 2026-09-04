@@ -47,15 +47,18 @@ def test_marker_review_rescans_only_affected_files_and_blocks_unresolved() -> No
     assert 'params["_fpvs_marker_review_decisions_by_file"]' in review
 
 
-def test_successful_workflow_hands_full_event_plans_to_runner() -> None:
+def test_successful_workflow_hands_full_event_plans_to_analyzed_signal_qc() -> None:
     source = _workflow_source()
     workflow = source[source.index("def run_preprocessing_qc_workflow(") :]
 
     assert 'params["_fpvs_preflight_event_plans_by_file"]' in workflow
-    assert "canonical_event_plans_by_file(" in workflow
-    assert workflow.index("canonical_event_plans_by_file(") > workflow.index(
-        "_show_suspicious_remainder("
+    event_plans = workflow.index("canonical_event_plans_by_file(")
+    kurtosis_review = workflow.index("_run_kurtosis_review_scan_embedded(")
+    remaining_review = workflow.index("_show_suspicious_remainder(")
+    assert event_plans > workflow.index(
+        "accepted_hard_exclusions = _confirm_hard_exclusions("
     )
+    assert event_plans < kurtosis_review < remaining_review
 
 
 def test_occurrence_review_offers_all_scientific_dispositions() -> None:
