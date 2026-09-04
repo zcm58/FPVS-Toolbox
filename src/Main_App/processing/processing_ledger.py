@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -896,7 +898,22 @@ def save_ledger(project_root: Path, ledger: Mapping[str, Any]) -> None:
     path = ledger_path(project_root)
     tmp_path = path.with_suffix(".json.tmp")
     tmp_path.write_text(json.dumps(ledger, indent=2, default=str), encoding="utf-8")
-    tmp_path.replace(path)
+    _replace_ledger_with_retry(tmp_path, path)
+
+
+def _replace_ledger_with_retry(temporary_path: Path, ledger_path: Path) -> None:
+    """Tolerate brief Windows scanner/indexer locks around the ledger."""
+
+    delays_s = (0.0, 0.01, 0.02, 0.05, 0.1, 0.1)
+    for attempt, delay_s in enumerate(delays_s, start=1):
+        if delay_s:
+            time.sleep(delay_s)
+        try:
+            os.replace(temporary_path, ledger_path)
+            return
+        except PermissionError:
+            if attempt == len(delays_s):
+                raise
 
 
 def append_run_log(project_root: Path, record: Mapping[str, Any]) -> None:

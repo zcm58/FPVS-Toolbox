@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import Main_App.processing.processing_ledger as processing_ledger_module
 from Main_App.Shared.post_process import _create_output_subfolder
 from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS, biosemi64_geometry_identity
 from Main_App.processing.processing_controller import RawFileInfo
@@ -21,6 +22,7 @@ from Main_App.processing.processing_ledger import (
     output_group_folder_by_file,
     record_processing_results,
     refresh_skipped_ledger_fingerprints,
+    save_ledger,
     with_processing_choice,
 )
 from Main_App.projects.frequency_protocol import (
@@ -65,6 +67,61 @@ def _settings() -> dict[str, object]:
         "oddball_freq": 1.2,
         "bca_upper_limit": 14.4,
     }
+
+
+def test_save_ledger_retries_transient_permission_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual_replace = processing_ledger_module.os.replace
+    attempts: list[tuple[object, object]] = []
+    delays: list[float] = []
+
+    def _replace_after_two_locks(source: object, target: object) -> None:
+        attempts.append((source, target))
+        if len(attempts) <= 2:
+            raise PermissionError("transient scanner lock")
+        actual_replace(source, target)
+
+    monkeypatch.setattr(processing_ledger_module.os, "replace", _replace_after_two_locks)
+    monkeypatch.setattr(processing_ledger_module.time, "sleep", delays.append)
+
+    save_ledger(tmp_path, {"schema_version": 1, "entries": {"P01": {}}})
+
+    ledger = json.loads(
+        (tmp_path / ".fpvs_processing" / "processing_ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert ledger["entries"] == {"P01": {}}
+    assert len(attempts) == 3
+    assert delays == [0.01, 0.02]
+
+
+def test_save_ledger_reraises_persistent_permission_error_without_replacing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    save_ledger(tmp_path, {"schema_version": 1, "entries": {"before": {}}})
+    path = tmp_path / ".fpvs_processing" / "processing_ledger.json"
+    original = path.read_text(encoding="utf-8")
+    attempts = 0
+    delays: list[float] = []
+
+    def _deny_replace(_source: object, _target: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise PermissionError("persistent scanner lock")
+
+    monkeypatch.setattr(processing_ledger_module.os, "replace", _deny_replace)
+    monkeypatch.setattr(processing_ledger_module.time, "sleep", delays.append)
+
+    with pytest.raises(PermissionError, match="persistent scanner lock"):
+        save_ledger(tmp_path, {"schema_version": 1, "entries": {"after": {}}})
+
+    assert attempts == 6
+    assert delays == [0.01, 0.02, 0.05, 0.1, 0.1]
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_detector_choice_provenance_does_not_change_processing_fingerprint(
