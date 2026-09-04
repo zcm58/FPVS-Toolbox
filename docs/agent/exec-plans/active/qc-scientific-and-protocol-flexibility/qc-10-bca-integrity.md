@@ -8,9 +8,12 @@ workbooks so intentional method-unavailable frequencies are distinguished from
 corrupt numeric cells.
 
 
-**Status:** accepted on 2026-09-03. This is a defensive technical safeguard for
-an abnormal derived output, not a routine bad-electrode or manual artifact-
-review policy. Implementation waits for the completed cumulative plan.
+**Status:** implemented on the active QC branch in `d1d5ea30`. New outputs fail
+before publication when a method-computable retained BCA cell is nonfinite;
+consumers require every selected computable cell and never compare a partial
+sum with a review threshold. Structured QC-12/QC-14 unavailability remains a
+separate technical state. This is a defensive integrity safeguard, not a
+routine bad-electrode or manual artifact-review policy.
 
 ### Problem and Accepted Boundary
 
@@ -27,9 +30,10 @@ Post-processing currently has no explicit finite-array gate before writing the
 BCA workbook. If an abnormal NaN/Inf value propagates through averaging, FFT,
 or interpolation without raising, pandas/XlsxWriter can represent the derived
 nonfinite value as a blank. Old, damaged, or externally edited workbooks are
-additional possible inputs. `frequency_domain_qc.py` then coerces invalid cells
-to missing and sums remaining harmonics with `min_count=1`; an all-missing row
-is skipped. That partial result is not scientifically comparable with a
+additional possible inputs. Before this action, `frequency_domain_qc.py`
+coerced invalid cells to missing and summed remaining harmonics with
+`min_count=1`; an all-missing row was skipped. That partial result is not
+scientifically comparable with a
 complete summed-BCA threshold. There is no evidence from this audit that this
 state is routine in current project outputs.
 

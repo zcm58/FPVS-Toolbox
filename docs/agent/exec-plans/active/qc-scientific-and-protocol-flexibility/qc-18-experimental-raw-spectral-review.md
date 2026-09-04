@@ -8,12 +8,13 @@ QC-13, QC-15, QC-19, and the project-settings portions of QC-04/QC-17. The
 wave-4 deterministic availability step additionally uses finalized QC-12 and
 QC-14.
 
-**Status:** accepted on 2026-09-03 and finalized for notch collisions on
-2026-09-04. Keep the condition-aware raw-spectral screen as a project-owned
-experimental review aid. Retain its current values as provisional defaults;
-the screen itself must not exclude or alter data automatically. The configured
-notch remains active on overlap, and QC-12/QC-14 deterministically mark affected
-standard frequencies or scores unavailable.
+**Status:** implemented on the active QC branch in `50dfb839`. The
+condition-aware raw-spectral screen is a project-owned experimental review aid
+with locked provisional defaults, explicit disabled/not-evaluated states, and
+no automatic data or cohort change. The configured notch remains active on
+overlap, and QC-12/QC-14 deterministically mark affected standard frequencies
+or scores unavailable. Representative external calibration remains evidence
+work rather than a software completion gate.
 
 ## Accepted Behavior
 
