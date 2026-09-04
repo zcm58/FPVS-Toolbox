@@ -1047,15 +1047,11 @@ def test_loreta_stats_ready_workbook_path_uses_source_map_prerequisite_location(
     assert stats_ready_workbook_exists(tmp_path)
 
 
-def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, monkeypatch) -> None:
+def test_write_loreta_stats_ready_workbook_uses_project_canonical_rate(tmp_path, monkeypatch) -> None:
     from Tools.LORETA_Visualizer import stats_ready_workbook as workbook_mod
 
     class FakeSettings:
-        def get(self, _section, option, fallback=""):
-            return {
-                "base_freq": "6.0",
-                "bca_upper_limit": "16.8",
-            }.get(option, fallback)
+        pass
 
     captured: dict[str, object] = {}
 
@@ -1070,6 +1066,11 @@ def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, 
         return FakeExport()
 
     monkeypatch.setattr(workbook_mod, "SettingsManager", FakeSettings)
+    monkeypatch.setattr(
+        workbook_mod,
+        "load_project_processing_harmonics",
+        lambda **_kwargs: SimpleNamespace(metadata={"base_frequency_hz": 3.0}),
+    )
     monkeypatch.setattr(
         workbook_mod,
         "load_project_dataset_index",
@@ -1106,8 +1107,8 @@ def test_write_loreta_stats_ready_workbook_uses_stats_export_defaults(tmp_path, 
     assert result.condition_count == 2
     assert captured["subjects"] == ["P1", "P2"]
     assert captured["conditions"] == ["Color", "Semantic"]
-    assert captured["base_freq"] == 6.0
-    assert captured["max_freq"] == 16.8
+    assert captured["base_freq"] == 3.0
+    assert captured["max_freq"] is None
     assert captured["rois"] == {"LOT": ["P7", "PO7"]}
     assert captured["selection_conditions"] == ["Color", "Semantic"]
     assert captured["group_map"] == {"P1": "control_id", "P2": "patient_id"}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import math
 from pathlib import Path
 
 from Main_App import SettingsManager
@@ -16,6 +17,10 @@ from Main_App.projects import (
     ProjectDatasetIndex,
     STATS_SUBFOLDER_NAME,
     load_project_dataset_index,
+)
+from Tools.Stats.analysis.canonical_harmonics import (
+    CanonicalHarmonicSelectionError,
+    load_project_processing_harmonics,
 )
 from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Stats.io.stats_ready_export import STATS_READY_WORKBOOK_NAME, prepare_stats_ready_export
@@ -95,8 +100,23 @@ def write_loreta_stats_ready_workbook(
     if not rois:
         raise RuntimeError("No ROI definitions were found in Settings. Add at least one ROI before generating the report.")
 
-    base_freq = _settings_float(manager, "analysis", "base_freq", default=6.0)
-    max_freq = _settings_float(manager, "analysis", "bca_upper_limit", default=None)
+    try:
+        canonical_harmonics = load_project_processing_harmonics(
+            project_root=root,
+            log_func=log,
+        )
+        base_freq = float(canonical_harmonics.metadata["base_frequency_hz"])
+    except (CanonicalHarmonicSelectionError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "The LORETA summary report requires the current project harmonic "
+            "selection and its presentation rate. Recalculate Harmonics before "
+            "generating the report."
+        ) from exc
+    if not math.isfinite(base_freq) or base_freq <= 0:
+        raise RuntimeError(
+            "The accepted project harmonic selection has an invalid presentation rate. "
+            "Recalculate Harmonics before generating the LORETA summary report."
+        )
     group_ids = dataset_index.participant_group_id_map(
         uppercase_keys=True,
         include_legacy_aliases=True,
@@ -129,7 +149,9 @@ def write_loreta_stats_ready_workbook(
         group_label_map=group_label_map,
         log_func=log,
         save_path=workbook_path,
-        max_freq=max_freq,
+        # Managed projects consume the exact processing-owned harmonic list.
+        # A second application-level frequency ceiling must not narrow it.
+        max_freq=None,
         selection_conditions=list(conditions),
         project_root=str(root),
     )
@@ -143,20 +165,3 @@ def write_loreta_stats_ready_workbook(
         subject_count=len(subjects),
         condition_count=len(conditions),
     )
-
-
-def _settings_float(
-    manager: SettingsManager,
-    section: str,
-    option: str,
-    *,
-    default: float | None,
-) -> float | None:
-    fallback = "" if default is None else str(default)
-    raw_value = manager.get(section, option, fallback)
-    if raw_value in (None, ""):
-        return default
-    value = float(raw_value)
-    if value <= 0:
-        return default
-    return value
