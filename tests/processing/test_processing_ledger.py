@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.Shared.post_process import _create_output_subfolder
-from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS, biosemi64_geometry_identity
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
@@ -60,6 +60,63 @@ def _settings() -> dict[str, object]:
         "oddball_freq": 1.2,
         "bca_upper_limit": 14.4,
     }
+
+
+def test_classification_fingerprint_uses_canonical_limit_when_alias_is_none(
+    tmp_path,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    reduced_settings = {
+        **_settings(),
+        "max_idx_keep": None,
+        "max_chan_idx_keep": 16,
+    }
+
+    reduced_plan = classify_processing_inputs(
+        project,
+        [info],
+        reduced_settings,
+        project.event_map,
+    )
+    full_plan = classify_processing_inputs(
+        project,
+        [info],
+        {
+            **_settings(),
+            "max_idx_keep": None,
+            "max_chan_idx_keep": 64,
+        },
+        project.event_map,
+    )
+
+    assert reduced_plan.geometry_identity == biosemi64_geometry_identity(
+        retained_channels=BIOSEMI64_CHANNELS[:16]
+    )
+    assert reduced_plan.fingerprint == build_processing_fingerprint(
+        project,
+        reduced_settings,
+        project.event_map,
+    )
+    assert reduced_plan.fingerprint != full_plan.fingerprint
+
+
+@pytest.mark.parametrize("invalid_limit", [True, 0, 65, 2.5, "invalid"])
+def test_processing_fingerprint_rejects_invalid_channel_limit(
+    tmp_path,
+    invalid_limit,
+) -> None:
+    project, _info = _project_with_raw(tmp_path)
+
+    with pytest.raises(ValueError, match="integer from 1 through 64"):
+        build_processing_fingerprint(
+            project,
+            {
+                **_settings(),
+                "max_idx_keep": invalid_limit,
+                "max_chan_idx_keep": 16,
+            },
+            project.event_map,
+        )
 
 
 @pytest.mark.parametrize(
@@ -985,6 +1042,45 @@ def test_record_results_marks_missing_run_file_failed(tmp_path) -> None:
     )
 
     assert ledger["entries"]["P01"]["status"] == "failed"
+
+
+def test_record_results_keeps_failed_interpolation_provenance(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    record_processing_results(
+        project,
+        plan,
+        [
+            {
+                "status": "error",
+                "file": str(info.path),
+                "stage": "preprocess",
+                "geometry": biosemi64_geometry_identity(),
+                "audit": {
+                    "interpolation_status": "failed",
+                    "interpolation_requested_channels": ["P9", "P10"],
+                    "interpolated_channels": [],
+                    "interpolation_error": "spline solve failed",
+                },
+            }
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    ledger = json.loads(
+        (project.project_root / ".fpvs_processing" / "processing_ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    entry = ledger["entries"]["P01"]
+    assert entry["status"] == "failed"
+    assert entry["interpolation_status"] == "failed"
+    assert entry["interpolation_requested_channels"] == ["P9", "P10"]
+    assert entry["interpolated_channels"] == []
+    assert entry["interpolation_error"] == "spline solve failed"
 
 
 def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_path) -> None:

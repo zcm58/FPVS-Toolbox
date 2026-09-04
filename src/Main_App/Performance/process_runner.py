@@ -117,6 +117,27 @@ def _string_list(value: Any) -> list[str]:
     return []
 
 
+def _interpolation_provenance_from_settings(
+    settings: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the truthful interpolation outcome accumulated by preprocessing."""
+
+    return {
+        "interpolation_status": str(
+            settings.get("_fpvs_interpolation_status") or ""
+        ),
+        "interpolation_requested_channels": _string_list(
+            settings.get("_fpvs_interpolation_requested_channels")
+        ),
+        "interpolated_channels": _string_list(
+            settings.get("_fpvs_interpolated_channels")
+        ),
+        "interpolation_error": str(
+            settings.get("_fpvs_interpolation_error") or ""
+        ),
+    }
+
+
 def _float_or_zero(value: Any) -> float:
     try:
         return float(value)
@@ -628,6 +649,31 @@ def _preproc_cache_enabled(settings: Dict[str, object]) -> bool:
     return bool(value)
 
 
+def _configured_biosemi64_channel_limit(
+    settings: Mapping[str, object],
+) -> int:
+    """Resolve the project-owned canonical first-N scalp limit."""
+
+    raw_limit = settings.get("max_idx_keep")
+    if raw_limit is None:
+        raw_limit = settings.get("max_chan_idx_keep")
+    if raw_limit is None:
+        return BDF_FIRST_N_CHANNELS
+    if isinstance(raw_limit, bool):
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    try:
+        channel_limit = int(raw_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "BioSemi64 channel limit must be an integer from 1 through 64."
+        ) from exc
+    if isinstance(raw_limit, float) and not raw_limit.is_integer():
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    if not 1 <= channel_limit <= BDF_FIRST_N_CHANNELS:
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    return channel_limit
+
+
 def _geometry_identity_for_channels(
     settings: Mapping[str, object],
     channel_names: Optional[List[str]] = None,
@@ -641,18 +687,8 @@ def _geometry_identity_for_channels(
             f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
         )
     if channel_names is None:
-        raw_limit = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
-        try:
-            channel_limit = (
-                int(raw_limit) if raw_limit is not None else len(BIOSEMI64_CHANNELS)
-            )
-        except (TypeError, ValueError):
-            channel_limit = len(BIOSEMI64_CHANNELS)
-        retained = (
-            list(BIOSEMI64_CHANNELS[:channel_limit])
-            if 0 < channel_limit < len(BIOSEMI64_CHANNELS)
-            else list(BIOSEMI64_CHANNELS)
-        )
+        channel_limit = _configured_biosemi64_channel_limit(settings)
+        retained = list(BIOSEMI64_CHANNELS[:channel_limit])
     else:
         present = {str(name) for name in channel_names}
         retained = [name for name in BIOSEMI64_CHANNELS if name in present]
@@ -690,6 +726,7 @@ def _preproc_cache_payload(
     mne_version: str,
 ) -> Dict[str, object]:
     stat = file_path.stat()
+    channel_limit = _configured_biosemi64_channel_limit(settings)
     relevant_settings = {
         "high_pass": settings.get("high_pass"),
         "low_pass": settings.get("low_pass"),
@@ -706,7 +743,7 @@ def _preproc_cache_payload(
         "line_noise_filter_method_version": FFT_MULTINOTCH_METHOD_VERSION,
         "line_noise_filter_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
         "line_noise_filter_component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
-        "max_idx_keep": settings.get("max_idx_keep"),
+        "max_idx_keep": channel_limit,
         "max_bad_chans": settings.get(
             "max_bad_chans",
             settings.get("max_bad_channels_alert_thresh"),
@@ -730,7 +767,7 @@ def _preproc_cache_payload(
         "source_size": int(stat.st_size),
         "source_mtime_ns": int(stat.st_mtime_ns),
         "loader_profile": {
-            "bdf_first_n_channels": BDF_FIRST_N_CHANNELS,
+            "bdf_first_n_channels": channel_limit,
             "ref_channels": [
                 relevant_settings["ref_channel1"],
                 relevant_settings["ref_channel2"],
@@ -1347,7 +1384,7 @@ def _run_full_pipeline_for_file(
                 _App(),
                 str(file_path),
                 ref_pair=ref_pair,
-                first_n_channels=BDF_FIRST_N_CHANNELS,
+                first_n_channels=_configured_biosemi64_channel_limit(settings),
                 stim_channel=str(settings.get("stim_channel") or "Status"),
                 electrode_mapping_profile=settings.get(
                     "electrode_mapping_profile"
@@ -2102,15 +2139,38 @@ def _run_full_pipeline_for_file(
             "source_derivative_outputs": source_derivative_outputs,
             "source_derivative_warning": source_derivative_warning,
             "geometry": geometry_identity,
+            **_interpolation_provenance_from_settings(settings),
         }
     except Exception as e:  # pragma: no cover - worker error path
         crop_logger.exception("file=%s stage=%s worker_error=%s", file_path.name, stage, str(e))
-        return _make_error_result(
+        error_result = _make_error_result(
             file_path=file_path,
             stage=stage,
             exc=e,
             start_time=t0,
         )
+        interpolation = _interpolation_provenance_from_settings(settings)
+        failure_audit = dict(interpolation)
+        geometry = settings.get("_fpvs_geometry")
+        if isinstance(geometry, Mapping):
+            geometry_identity = dict(geometry)
+            retained = _string_list(
+                settings.get("_fpvs_retained_scalp_channels")
+            )
+            retained_fingerprint = str(
+                settings.get("_fpvs_retained_scalp_set_fingerprint") or ""
+            )
+            error_result["geometry"] = geometry_identity
+            failure_audit.update(
+                {
+                    "geometry": geometry_identity,
+                    "retained_scalp_channels": retained,
+                    "retained_scalp_set_fingerprint": retained_fingerprint,
+                }
+            )
+        error_result.update(interpolation)
+        error_result["audit"] = failure_audit
+        return error_result
     finally:
         _close_worker_logger(crop_logger)
 

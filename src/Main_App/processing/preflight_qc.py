@@ -18,7 +18,10 @@ import mne
 import numpy as np
 
 from Main_App.io import load_utils
-from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    biosemi64_geometry_identity,
+)
 from Main_App.io.load_utils import BDF_RECORDING_NOT_STARTED_REASON, BdfPreflightInfo
 from Main_App.Shared.fft_crop_utils import ODDBALL_FREQ
 from Main_App.processing.processing_controller import RawFileInfo
@@ -666,7 +669,7 @@ def _load_raw_for_preflight(
         _LogShim(),
         str(file_path),
         ref_pair=(str(ref_ch1), str(ref_ch2)),
-        first_n_channels=64,
+        first_n_channels=_configured_biosemi64_channel_limit(settings),
         stim_channel=_configured_stim_channel(settings),
         electrode_mapping_profile=settings.get("electrode_mapping_profile"),
         electrode_montage=settings.get("electrode_montage"),
@@ -726,6 +729,29 @@ def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, 
     return events_array, source
 
 
+def _configured_biosemi64_channel_limit(settings: Mapping[str, Any]) -> int:
+    """Resolve the project-owned canonical first-N scalp limit."""
+
+    raw_limit = settings.get("max_idx_keep")
+    if raw_limit is None:
+        raw_limit = settings.get("max_chan_idx_keep")
+    if raw_limit is None:
+        return len(BIOSEMI64_CHANNELS)
+    if isinstance(raw_limit, bool):
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    try:
+        channel_limit = int(raw_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "BioSemi64 channel limit must be an integer from 1 through 64."
+        ) from exc
+    if isinstance(raw_limit, float) and not raw_limit.is_integer():
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    if not 1 <= channel_limit <= len(BIOSEMI64_CHANNELS):
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    return channel_limit
+
+
 def _preflight_scalp_picks(
     raw: Any,
     *,
@@ -733,10 +759,14 @@ def _preflight_scalp_picks(
 ) -> tuple[tuple[int, ...], tuple[str, ...]]:
     stim_channel = _configured_stim_channel(settings)
     ref_channels = set(_configured_ref_pair(settings))
+    retained_scalp = set(
+        BIOSEMI64_CHANNELS[:_configured_biosemi64_channel_limit(settings)]
+    )
     picks = tuple(
         index
         for index, channel in enumerate(getattr(raw, "ch_names", ()))
         if str(channel) in SCALP_CHANNELS
+        and str(channel) in retained_scalp
         and str(channel) != stim_channel
         and str(channel) not in ref_channels
     )
@@ -907,6 +937,8 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "oddball_freq",
         "line_noise_filter_enabled",
         "line_noise_frequency_hz",
+        "max_chan_idx_keep",
+        "max_idx_keep",
         "electrode_montage",
         "electrode_mapping_profile",
     )
@@ -916,7 +948,9 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         if settings.get(key) is not None
     }
     payload["analysis"] = analysis_payload
-    payload["channel_subset_first_n"] = 64
+    payload["channel_subset_first_n"] = _configured_biosemi64_channel_limit(
+        settings
+    )
     payload["reference_pair"] = list(_configured_ref_pair(settings))
     return payload
 
@@ -925,6 +959,7 @@ def _preflight_cache_method(
     settings: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     settings = settings or {}
+    channel_limit = _configured_biosemi64_channel_limit(settings)
     return {
         "name": PREFLIGHT_QC_METHOD_NAME,
         "version": PREFLIGHT_QC_METHOD_VERSION,
@@ -934,6 +969,7 @@ def _preflight_cache_method(
         "condition_completion_policy": "locked_fft_span_v1",
         "geometry": biosemi64_geometry_identity(
             electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+            retained_channels=BIOSEMI64_CHANNELS[:channel_limit],
         ),
         "numpy_version": str(np.__version__),
         "mne_version": str(mne.__version__),
@@ -1131,7 +1167,7 @@ def _scan_one_preflight_file_v2(
         _LogShim(),
         str(file_path),
         ref_pair=_configured_ref_pair(qc_settings),
-        first_n_channels=64,
+        first_n_channels=_configured_biosemi64_channel_limit(qc_settings),
         stim_channel=_configured_stim_channel(qc_settings),
         electrode_mapping_profile=qc_settings.get("electrode_mapping_profile"),
         electrode_montage=qc_settings.get("electrode_montage"),

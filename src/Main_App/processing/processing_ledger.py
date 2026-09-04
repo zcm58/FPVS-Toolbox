@@ -479,16 +479,27 @@ def _recording_identity_payload(info: RawFileInfo) -> dict[str, Any]:
 def _configured_geometry_identity(settings: Mapping[str, Any]) -> dict[str, object]:
     """Return the geometry expected from the current project processing inputs."""
 
-    raw_limit = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
-    try:
-        channel_limit = int(raw_limit) if raw_limit is not None else len(BIOSEMI64_CHANNELS)
-    except (TypeError, ValueError):
+    raw_limit = settings.get("max_idx_keep")
+    if raw_limit is None:
+        raw_limit = settings.get("max_chan_idx_keep")
+    if raw_limit is None:
         channel_limit = len(BIOSEMI64_CHANNELS)
-    retained_channels = (
-        BIOSEMI64_CHANNELS[:channel_limit]
-        if 0 < channel_limit < len(BIOSEMI64_CHANNELS)
-        else BIOSEMI64_CHANNELS
-    )
+    elif isinstance(raw_limit, bool):
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    else:
+        try:
+            channel_limit = int(raw_limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "BioSemi64 channel limit must be an integer from 1 through 64."
+            ) from exc
+        if isinstance(raw_limit, float) and not raw_limit.is_integer():
+            raise ValueError(
+                "BioSemi64 channel limit must be an integer from 1 through 64."
+            )
+    if not 1 <= channel_limit <= len(BIOSEMI64_CHANNELS):
+        raise ValueError("BioSemi64 channel limit must be an integer from 1 through 64.")
+    retained_channels = BIOSEMI64_CHANNELS[:channel_limit]
     return biosemi64_geometry_identity(
         electrode_mapping_profile=settings.get("electrode_mapping_profile"),
         retained_channels=retained_channels,
@@ -1596,6 +1607,17 @@ def record_processing_results(
             previous_entry if isinstance(previous_entry, Mapping) else None,
         )
         failed_result = results_by_path.get(raw_path)
+        failed_audit = (
+            failed_result.get("audit")
+            if isinstance(failed_result, Mapping)
+            and isinstance(failed_result.get("audit"), Mapping)
+            else {}
+        )
+        failed_provenance = dict(failed_result or {})
+        failed_provenance.update(failed_audit)
+        interpolated_channels = _string_list(
+            failed_provenance.get("interpolated_channels")
+        )
         entries[state.processing_id] = {
             **_recording_identity_payload(state.info),
             "group_id": state.info.group,
@@ -1617,8 +1639,8 @@ def record_processing_results(
             **_raw_qc_extra_payload({}),
             **_removed_electrode_review_payload({}),
             "kurtosis_bad_channels": [],
-            "interpolated_channels": [],
-            **_interpolation_payload({}),
+            "interpolated_channels": interpolated_channels,
+            **_interpolation_payload(failed_provenance),
             "n_rejected": 0,
             **_source_derivative_result_payload(failed_result),
         }

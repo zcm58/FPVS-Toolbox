@@ -585,6 +585,125 @@ def test_parallel_runner_skips_preflight_header_only_files_before_pool(
     assert queue.messages[-1]["excluded_count"] == 1
 
 
+def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _capture_loader(_app, _filepath, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop after loader argument capture")
+
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.load_eeg_file",
+        _capture_loader,
+    )
+    monkeypatch.setattr(process_runner, "inspect_bdf_header", lambda _path: None)
+    fake_bdf = tmp_path / "reduced.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            "max_idx_keep": None,
+            "max_chan_idx_keep": 16,
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "error"
+    assert result["stage"] == "load"
+    assert captured["first_n_channels"] == 16
+    payload = process_runner._preproc_cache_payload(
+        fake_bdf,
+        {
+            "max_idx_keep": None,
+            "max_chan_idx_keep": 16,
+        },
+        mne_version=str(mne.__version__),
+    )
+    assert payload["loader_profile"]["bdf_first_n_channels"] == 16
+    assert payload["geometry"]["retained_scalp_channels"] == list(
+        process_runner.BIOSEMI64_CHANNELS[:16]
+    )
+
+
+def test_interpolation_failure_keeps_requested_and_error_provenance(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    info = mne.create_info(
+        ["Fp1", "AF7", "Status"],
+        sfreq=256.0,
+        ch_types=["eeg", "eeg", "stim"],
+    )
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((3, 128), dtype=float), info, verbose=False)
+    )
+
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.load_eeg_file",
+        lambda _app, _filepath, **_kwargs: raw.copy(),
+    )
+    monkeypatch.setattr(process_runner, "inspect_bdf_header", lambda _path: None)
+
+    def _failed_interpolation(raw_input, params, *_args, **_kwargs):
+        geometry = process_runner._attach_processed_geometry(raw_input, params)
+        params["_fpvs_geometry"] = geometry
+        params["_fpvs_retained_scalp_channels"] = ["Fp1", "AF7"]
+        params["_fpvs_retained_scalp_set_fingerprint"] = geometry[
+            "retained_scalp_set_fingerprint"
+        ]
+        params["_fpvs_interpolation_status"] = "failed"
+        params["_fpvs_interpolation_requested_channels"] = ["Fp1"]
+        params["_fpvs_interpolated_channels"] = []
+        params["_fpvs_interpolation_error"] = "spline solve failed"
+        return None, 0
+
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "perform_preprocessing",
+        _failed_interpolation,
+    )
+    fake_bdf = tmp_path / "interpolation-failure.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            "max_idx_keep": 2,
+            "auto_detect_removed_electrodes": False,
+            "removed_electrode_detection_mode": "off",
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "error"
+    assert result["stage"] == "preprocess"
+    assert result["interpolation_status"] == "failed"
+    assert result["interpolation_requested_channels"] == ["Fp1"]
+    assert result["interpolated_channels"] == []
+    assert result["interpolation_error"] == "spline solve failed"
+    assert result["audit"]["interpolation_status"] == "failed"
+    assert result["audit"]["interpolation_requested_channels"] == ["Fp1"]
+    assert result["audit"]["interpolated_channels"] == []
+    assert result["audit"]["interpolation_error"] == "spline solve failed"
+    assert result["geometry"] == result["audit"]["geometry"]
+
+
 def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
     monkeypatch,
     tmp_path: Path,

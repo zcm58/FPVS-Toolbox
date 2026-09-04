@@ -8,6 +8,7 @@ import time
 import numpy as np
 import pytest
 
+from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
 from Main_App.processing.raw_channel_qc import SCALP_CHANNELS
@@ -75,12 +76,20 @@ def _raw_data() -> tuple[np.ndarray, list[str]]:
     return data, names
 
 
-def _install_lazy_fakes(monkeypatch, raws: list[_LazyRaw], events: np.ndarray) -> list[str]:
+def _install_lazy_fakes(
+    monkeypatch,
+    raws: list[_LazyRaw],
+    events: np.ndarray,
+    *,
+    first_n_arguments: list[int] | None = None,
+) -> list[str]:
     stim_arguments: list[str] = []
 
     @contextmanager
-    def _open(*_args, stim_channel=None, **_kwargs):
+    def _open(*_args, stim_channel=None, first_n_channels=None, **_kwargs):
         stim_arguments.append(str(stim_channel))
+        if first_n_arguments is not None:
+            first_n_arguments.append(int(first_n_channels))
         yield raws.pop(0)
 
     monkeypatch.setattr(preflight_qc.load_utils, "inspect_bdf_header", lambda _path: None)
@@ -107,6 +116,77 @@ def test_v3_accepts_canonical_project_reference_keys() -> None:
     assert method["geometry"]["montage_id"] == "biosemi64"
     assert method["condition_completion_policy"] == "locked_fft_span_v1"
     assert "condition_minimum_completion_s" not in method
+
+
+def test_legacy_preflight_loader_uses_project_channel_limit(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    sentinel = object()
+
+    def _load(_app, _path, **kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(preflight_qc.load_utils, "load_eeg_file", _load)
+    settings = _settings()
+    settings["max_idx_keep"] = None
+    settings["max_chan_idx_keep"] = 24
+
+    loaded = preflight_qc._load_raw_for_preflight(
+        tmp_path / "P24.bdf",
+        settings,
+    )
+
+    assert loaded is sentinel
+    assert captured["first_n_channels"] == 24
+
+
+def test_reduced_project_channel_limit_controls_preflight_loader_qc_and_geometry(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P16.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    first_n_arguments: list[int] = []
+    _install_lazy_fakes(
+        monkeypatch,
+        [raw],
+        _event_rows(),
+        first_n_arguments=first_n_arguments,
+    )
+    settings = _settings()
+    settings["max_idx_keep"] = None
+    settings["max_chan_idx_keep"] = 16
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P16", "control")],
+        settings,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    result = scan.results[0]
+    geometry = result.condition_qc["geometry"]
+    expected_retained = list(BIOSEMI64_CHANNELS[:16])
+    assert first_n_arguments == [16]
+    assert geometry["retained_scalp_channels"] == expected_retained
+    assert geometry["retained_scalp_channel_count"] == 16
+    assert preflight_qc._preflight_cache_settings(settings)[
+        "channel_subset_first_n"
+    ] == 16
+    assert preflight_qc._preflight_cache_method(settings)["geometry"][
+        "retained_scalp_channels"
+    ] == expected_retained
+    assert raw.reads
+    assert all(
+        names[pick_index] in expected_retained
+        for pick_indices, _start, _stop in raw.reads
+        for pick_index in pick_indices
+    )
 
 
 def test_v3_reads_exact_locked_condition_samples_and_reuses_cache(
