@@ -11,11 +11,41 @@ from openpyxl import Workbook
 import pytest
 
 from Main_App.processing.full_fft_provenance import (
+    FullFftProvenanceError,
     FullFftProvenanceStaleError,
+    require_current_project_workbook_geometry,
     require_current_project_full_fft_provenance,
     validate_project_full_fft_provenance,
     write_project_full_fft_provenance,
 )
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    biosemi64_geometry_identity,
+)
+from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
+
+
+def _write_geometry_ledger(
+    root: Path,
+    geometry_by_participant: dict[str, dict[str, object]],
+) -> None:
+    path = root / ".fpvs_processing" / "processing_ledger.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entries = {
+        participant: {
+            "participant_id": participant,
+            "status": "completed",
+            "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+            "processing_fingerprint": "fixture-processing-fingerprint",
+            "condition_completeness": "complete",
+            "geometry": geometry,
+        }
+        for participant, geometry in geometry_by_participant.items()
+    }
+    path.write_text(
+        json.dumps({"schema_version": 1, "entries": entries}, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _managed_full_fft_project(tmp_path: Path) -> Path:
@@ -49,6 +79,8 @@ def _managed_full_fft_project(tmp_path: Path) -> Path:
         sheet.append(header)
         sheet.append(["Fp1", *(1.0 for _ in frequencies)])
         workbook.save(path)
+    geometry = biosemi64_geometry_identity()
+    _write_geometry_ledger(root, {"P1": geometry, "P2": geometry})
     return root
 
 
@@ -76,6 +108,10 @@ def test_full_fft_provenance_rebases_when_managed_project_is_copied(
     assert validated.project_root == copied.resolve()
     assert validated.source_fingerprint == written.source_fingerprint
     assert copied_manifest["tools"]["unrelated"] == {"preserved": True}
+    assert written.geometry_identity == biosemi64_geometry_identity()
+    assert written.geometry_fingerprint == written.geometry_identity[
+        "geometry_identity_fingerprint"
+    ]
     assert all(not Path(value).is_absolute() for value in validated.source_paths)
 
 
@@ -148,3 +184,113 @@ def test_rate_mismatch_wins_when_saved_full_fft_inputs_are_also_stale(
             base_frequency_hz=7.5,
             oddball_frequency_hz=1.2,
         )
+
+
+def test_full_fft_provenance_rejects_unknown_legacy_geometry(tmp_path: Path) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    (root / ".fpvs_processing" / "processing_ledger.json").unlink()
+
+    with pytest.raises(FullFftProvenanceError, match="Legacy or unknown geometry"):
+        write_project_full_fft_provenance(
+            root,
+            base_frequency_hz=6.0,
+            oddball_frequency_hz=1.2,
+        )
+
+
+def test_processing_time_geometry_gate_accepts_current_geometry_without_saved_record(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+
+    geometry = require_current_project_workbook_geometry(root)
+
+    assert geometry == biosemi64_geometry_identity()
+    manifest = json.loads((root / "project.json").read_text(encoding="utf-8"))
+    assert "processing" not in manifest.get("tools", {})
+
+
+def test_processing_time_geometry_gate_rejects_missing_geometry_ledger(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    (root / ".fpvs_processing" / "processing_ledger.json").unlink()
+
+    with pytest.raises(FullFftProvenanceError, match="Legacy or unknown geometry"):
+        require_current_project_workbook_geometry(root)
+
+
+def test_processing_time_geometry_gate_rejects_standard_1005_identity(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    legacy = biosemi64_geometry_identity()
+    legacy["montage_id"] = "standard_1005"
+    _write_geometry_ledger(root, {"P1": legacy, "P2": legacy})
+
+    with pytest.raises(FullFftProvenanceError, match="unknown or legacy"):
+        require_current_project_workbook_geometry(root)
+
+
+def test_full_fft_provenance_rejects_mixed_retained_geometry(tmp_path: Path) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"]["max_chan_idx_keep"] = 63
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _write_geometry_ledger(
+        root,
+        {
+            "P1": biosemi64_geometry_identity(
+                retained_channels=BIOSEMI64_CHANNELS[:63]
+            ),
+            "P2": biosemi64_geometry_identity(
+                retained_channels=BIOSEMI64_CHANNELS[1:]
+            ),
+        },
+    )
+
+    with pytest.raises(FullFftProvenanceError, match="mixed electrode geometries"):
+        write_project_full_fft_provenance(
+            root,
+            base_frequency_hz=6.0,
+            oddball_frequency_hz=1.2,
+        )
+
+
+def test_geometry_gate_rejects_uniform_wrong_subset_with_expected_count(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["preprocessing"]["max_chan_idx_keep"] = 63
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    wrong_subset = biosemi64_geometry_identity(
+        retained_channels=BIOSEMI64_CHANNELS[1:]
+    )
+    _write_geometry_ledger(root, {"P1": wrong_subset, "P2": wrong_subset})
+
+    with pytest.raises(FullFftProvenanceError, match="exact retained scalp set"):
+        require_current_project_workbook_geometry(root)
+
+
+def test_saved_legacy_full_fft_schema_requires_eeg_reprocessing(
+    tmp_path: Path,
+) -> None:
+    root = _managed_full_fft_project(tmp_path)
+    write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["tools"]["processing"]["full_fft_provenance"]["schema_version"] = 1
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    with pytest.raises(
+        FullFftProvenanceStaleError,
+        match="predates the BioSemi64 geometry contract",
+    ):
+        require_current_project_full_fft_provenance(root)

@@ -57,6 +57,24 @@ Primary paths:
   BCA colorbar label is
   `Baseline-corrected amplitude (µV)`.
 
+**BioSemi64 geometry eligibility.**
+
+Current FullFFT analysis starts from processing-owned neutral provenance that
+contains the complete canonical BioSemi64 geometry identity. Every active
+workbook must match a completed processing-ledger row with the same montage,
+geometry version, coordinate fingerprint, mapping profile, retained sensor set,
+and geometry fingerprint. Missing pre-QC-15 metadata, legacy `standard_1005`
+identity, or mixed geometry/retained-set inputs blocks analysis and calls for
+EEG reprocessing. An analysis tool must not infer current geometry from a
+workbook's channel-name column or silently relabel old outputs.
+
+This eligibility gate applies to Free Harmonic Clustering through its existing
+neutral FullFFT provenance validation. It does not alter that method's frozen
+197-edge FieldTrip-style BioSemi64 spatial graph, cluster statistic, adjacency,
+or numerical algorithm. Standard harmonic selection and its downstream Stats,
+map, and source consumers continue to use the separately locked canonical
+selection contract after geometry-valid FullFFT inputs are established.
+
 Publication-ready table figures:
 
 - Use `.agents/skills/publication-table-export/` for reusable table-only

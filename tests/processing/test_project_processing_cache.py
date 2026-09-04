@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+
 import Main_App.processing.project_processing_cache as cache_module
 from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.processing_controller import RawFileInfo
@@ -125,7 +127,7 @@ def test_cache_reset_makes_completed_inputs_new_without_removing_outputs_or_hist
     record_processing_results(
         project,
         initial,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,

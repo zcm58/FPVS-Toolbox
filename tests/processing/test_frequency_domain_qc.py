@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
-from Main_App.processing import harmonic_selection_qc
+from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.processing.frequency_domain_qc import (
     WARNING_REASON_UNUSUAL_VALUES,
     active_frequency_domain_exclusions,
@@ -15,6 +16,20 @@ from Main_App.processing.frequency_domain_qc import (
 from Main_App.projects.project import Project
 from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
 from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
+
+
+@pytest.fixture(autouse=True)
+def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_workbook_geometry",
+        lambda _root, *, dataset_index=None: {},
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda _root, *, dataset_index=None: object(),
+    )
 
 
 def test_frequency_domain_qc_persists_hard_electrode_and_reuses_review(tmp_path):

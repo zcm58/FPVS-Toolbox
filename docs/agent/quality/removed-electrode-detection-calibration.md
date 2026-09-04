@@ -43,6 +43,41 @@ Keep raw spectral preflight threshold tuning in `raw_spectral_qc.py`. This
 screen is intentionally conservative and should prioritize participant-level
 review of extreme artifacts over channel-level automatic removal.
 
+## Canonical Geometry Boundary
+
+The load-time BioSemi64 header gate and this experimental signal detector answer
+different questions. The loader requires a complete, unambiguous supported cap
+identity and canonical coordinates; missing labels, unsupported layouts, or
+CMS/DRL presented as data channels are technical failures. A physically
+disconnected electrode normally remains as a named BDF signal, so the loader
+can accept its identity while this detector evaluates its recorded signal for
+low variance, extreme amplitude, rare bursts, or poor prediction from nearby
+sensors.
+
+Spatial predictability and connected-channel rules must use the canonical MNE
+`biosemi64` coordinates supplied by `Main_App.io.eeg_geometry`. The explicit
+`biosemi64_1020_ab_v1` mapping is limited to the standard BioSemi 64-channel
+10/20 A1-A32/B1-B32 wiring; BioSemi ABC/equiradial and custom layouts are not
+supported. Do not infer positions from ordinal channel order or fall back to
+`standard_1005`.
+
+The QC-15 synthetic sensitivity diagnostic establishes that template choice
+can change interpolation and downstream near-threshold values. It held the bad-
+channel list fixed, so it did not measure this detector's sensitivity,
+specificity, positive predictive value, or changed spatial nominations. The
+reported approximately 60% sensitivity, greater-than-99% specificity, and
+99.7% positive predictive value remain development-lab dataset results only.
+Reproduce them with the final analyzed-interval sampling and BioSemi64 geometry
+before shipping the detailed claim, with denominators, uncertainty, detector
+version, and threshold-development/evaluation design. Dataset publication can
+enable independent validation; it is not itself external validation.
+
+Use the
+[BioSemi64 geometry sensitivity diagnostic](biosemi64-geometry-sensitivity.md)
+as the geometry-isolation receipt. A representative labeled lab-data rerun is
+still required to estimate how often the geometry correction changes detector
+nominations or historical scientific conclusions.
+
 ## Calibration Data
 
 Build calibration sets from labeled raw recordings, not from processed Excel

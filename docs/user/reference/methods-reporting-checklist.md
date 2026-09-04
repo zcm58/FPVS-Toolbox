@@ -34,6 +34,38 @@ testing, or another specialized estimand.
   screening supports exactly two groups; use a planned custom model for three
   or more groups.
 
+### Sensor geometry and interpolation
+
+- Report the project-owned electrode montage as MNE `biosemi64`, the Toolbox
+  geometry version/fingerprint, and the retained canonical scalp set. State
+  whether all 64 sensors were retained or an explicit channel limit produced a
+  reduced analysis, and identify the coordinates as a standard cap template
+  rather than participant-specific digitization.
+- Report the channel-label profile. `anatomical_labels` means the BDF carried
+  the canonical anatomical names. `biosemi64_1020_ab_v1` means the explicit
+  standard BioSemi 64-channel 10/20 A1-A32/B1-B32 wiring; it must not be
+  described as support for BioSemi ABC/equiradial or custom caps.
+- State that the complete acquisition header was checked before any reduced
+  load, that selected EXG mastoid references remained coordinate-free until
+  initial reference, and that CMS/DRL were not treated as recorded scalp/data
+  channels.
+- Report bad-channel decision sources separately, the requested interpolation
+  channels, successful interpolation channels, and the recorded interpolation
+  status for each recording. A failed or unavailable interpolation is not zero
+  interpolated channels and must not enter downstream analysis as a completed
+  recording.
+- Do not pool outputs with missing, legacy `standard_1005`, or mixed geometry
+  provenance. Reprocess historical recordings before new analysis or
+  publication when any channel was interpolated or a geometry-based rule
+  informed channel decisions. Regenerate legacy scalp maps even when no
+  interpolation occurred because the sensor plotting positions changed.
+- If the QC-15 synthetic sensitivity run is cited, label it as a deterministic
+  geometry-isolation test. It showed identical signal-derived metrics in its
+  no-bad-channel control and changed interpolation/downstream near-threshold
+  results in its fixed-bad scenarios; it did not estimate prevalence or effect
+  size in representative lab recordings. Retain the representative-data rerun
+  and reprocessing inventory when those become available.
+
 ### Summed BCA and selection provenance
 
 - Report the named harmonic-selection profile, stable method ID/version,
@@ -261,6 +293,9 @@ Keep the following with the analysis record:
 - `Stats_Ready_Summed_BCA.xlsx` if external analyses were run;
 - `Quality Check/Harmonic_Selection_Summary.xlsx` and the corresponding
   project metadata;
+- the processing ledger, preflight/QC report, canonical geometry identity, and
+  per-recording interpolation outcomes used to establish current BioSemi64
+  inputs;
 - model warnings, sensitivity settings, random seed, and the FPVS Toolbox
   release/commit; and
 - the analysis plan or preregistration that establishes ROI, harmonic,

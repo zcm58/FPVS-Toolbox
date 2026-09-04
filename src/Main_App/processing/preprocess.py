@@ -32,6 +32,14 @@ from Main_App.diagnostics.audit import (
     end_preproc_audit,
     compare_preproc,
 )
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    BIOSEMI64_COORDINATE_FINGERPRINT,
+    BIOSEMI64_GEOMETRY_VERSION,
+    attach_raw_biosemi64_geometry,
+    read_raw_biosemi64_geometry,
+    validate_raw_biosemi64_geometry,
+)
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -71,13 +79,116 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
     stim = params.get("stim_channel")
     line_noise_enabled = bool(params.get("line_noise_filter_enabled", True))
     line_noise_frequency = params.get("line_noise_frequency_hz", 60)
+    electrode_montage = params.get("electrode_montage", "biosemi64")
+    electrode_mapping_profile = params.get(
+        "electrode_mapping_profile",
+        "anatomical_labels",
+    )
     return (
         f"order={PREPROCESSING_ORDER_VERSION}|hp={hp}|lp={lp}|ds={ds}|"
         f"rz={rz}|ref={r1},{r2}|stim={stim}|"
+        f"montage={electrode_montage}|mapping={electrode_mapping_profile}|"
+        f"geometry={BIOSEMI64_GEOMETRY_VERSION},{BIOSEMI64_COORDINATE_FINGERPRINT}|"
         f"fft_multinotch={line_noise_enabled},{line_noise_frequency},"
         f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
         f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
     )
+
+
+def _freeze_retained_biosemi64_geometry(
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+    *,
+    stim_channel: str,
+) -> dict[str, Any]:
+    """Validate and freeze the retained scalp set after intentional drops."""
+
+    loaded_identity = read_raw_biosemi64_geometry(raw)
+    if loaded_identity is None:
+        raise RuntimeError(
+            "Preprocessing requires a Raw loaded through the validated BioSemi64 "
+            "geometry boundary."
+        )
+    retained = tuple(
+        channel for channel in BIOSEMI64_CHANNELS if channel in raw.ch_names
+    )
+    if not retained:
+        raise RuntimeError("No canonical BioSemi64 scalp channels remain for preprocessing.")
+    identity = attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile=loaded_identity.get("electrode_mapping_profile"),
+        retained_channels=retained,
+        stim_channel=stim_channel if stim_channel in raw.ch_names else None,
+    )
+    params["_fpvs_geometry"] = dict(identity)
+    params["_fpvs_retained_scalp_channels"] = list(retained)
+    params["_fpvs_retained_scalp_set_fingerprint"] = identity[
+        "retained_scalp_set_fingerprint"
+    ]
+    return identity
+
+
+def _interpolate_current_bads(
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+    log_func: Callable[[str], None],
+    *,
+    filename_for_log: str,
+    description: str,
+) -> None:
+    """Interpolate current canonical scalp bads and record the actual outcome."""
+
+    targets = list(dict.fromkeys(str(name) for name in raw.info.get("bads", [])))
+    params["_fpvs_interpolation_requested_channels"] = list(targets)
+    params["_fpvs_interpolated_channels"] = []
+    params["_fpvs_interpolation_error"] = ""
+    if not targets:
+        params["_fpvs_interpolation_status"] = "not_needed"
+        log_func(f"No bads to interpolate in {filename_for_log}.")
+        return
+
+    geometry = validate_raw_biosemi64_geometry(raw, require_runtime_identity=True)
+    retained = set(geometry["retained_scalp_channels"])
+    invalid_targets = [name for name in targets if name not in retained]
+    if invalid_targets:
+        message = (
+            "Interpolation target(s) are outside the retained BioSemi64 scalp set: "
+            + ", ".join(invalid_targets)
+        )
+        params["_fpvs_interpolation_status"] = "failed"
+        params["_fpvs_interpolation_error"] = message
+        raise RuntimeError(message)
+
+    log_func(
+        f"Interpolating {description} in {filename_for_log}: "
+        f"{targets}"
+    )
+    try:
+        raw.interpolate_bads(
+            reset_bads=True,
+            mode="accurate",
+            verbose=False,
+        )
+    except Exception as exc:
+        message = f"Interpolation failed for {filename_for_log}: {exc}"
+        params["_fpvs_interpolation_status"] = "failed"
+        params["_fpvs_interpolation_error"] = str(exc)
+        log_func(f"Warn: {message}")
+        raise RuntimeError(message) from exc
+
+    remaining = [name for name in targets if name in raw.info.get("bads", [])]
+    if remaining:
+        message = (
+            f"Interpolation did not clear target(s) for {filename_for_log}: "
+            + ", ".join(remaining)
+        )
+        params["_fpvs_interpolation_status"] = "failed"
+        params["_fpvs_interpolation_error"] = message
+        raise RuntimeError(message)
+
+    params["_fpvs_interpolation_status"] = "succeeded"
+    params["_fpvs_interpolated_channels"] = list(targets)
+    log_func(f"Interpolation OK for {filename_for_log}.")
 
 
 def _scaled_filter_length(
@@ -124,7 +235,13 @@ def begin_preproc_audit(
     params.pop("_fpvs_initial_ref_ok", None)
     params.pop("_fpvs_initial_ref_pair", None)
     params.pop("_fpvs_kurtosis_bad_channels", None)
+    params.pop("_fpvs_geometry", None)
+    params.pop("_fpvs_retained_scalp_channels", None)
+    params.pop("_fpvs_retained_scalp_set_fingerprint", None)
+    params.pop("_fpvs_interpolation_requested_channels", None)
     params.pop("_fpvs_interpolated_channels", None)
+    params.pop("_fpvs_interpolation_status", None)
+    params.pop("_fpvs_interpolation_error", None)
     params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_applied_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_skipped_centers", None)
@@ -458,16 +575,22 @@ def perform_preprocessing(
                 f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
                 f"({len(current_names_before_drop)}): {current_names_before_drop}"
             )
-        if max_keep is not None and 0 < max_keep < len(current_names_before_drop):
-            channels_to_keep_by_index = current_names_before_drop[:max_keep]
-            final_keep = list(channels_to_keep_by_index)
-            if stim_ch in current_names_before_drop and stim_ch not in final_keep:
-                final_keep.append(stim_ch)
-                if debug_enabled:
-                    log_func(
-                        f"DEBUG [preprocess for {filename_for_log}]: Stim_ch '{stim_ch}' "
-                        f"added to keep list."
-                    )
+        current_scalp_channels = [
+            channel
+            for channel in current_names_before_drop
+            if channel in BIOSEMI64_CHANNELS
+        ]
+        if max_keep is not None and 0 < max_keep < len(current_scalp_channels):
+            present_scalp = set(current_scalp_channels)
+            canonical_scalp_order = [
+                channel for channel in BIOSEMI64_CHANNELS if channel in present_scalp
+            ]
+            retained_scalp = set(canonical_scalp_order[:max_keep])
+            final_keep = [
+                channel
+                for channel in current_names_before_drop
+                if channel in retained_scalp or channel == stim_ch
+            ]
             unique_keep = set(final_keep)
 
             if debug_enabled:
@@ -529,6 +652,26 @@ def perform_preprocessing(
                 "preprocess_stage_after_channel_limit_logging_failed",
                 extra={"file": filename_for_log},
             )
+
+        geometry_identity = _freeze_retained_biosemi64_geometry(
+            raw,
+            params,
+            stim_channel=str(stim_ch),
+        )
+        logger.debug(
+            "preprocess_geometry_frozen",
+            extra={
+                "file": filename_for_log,
+                "montage_id": geometry_identity["montage_id"],
+                "geometry_version": geometry_identity["geometry_version"],
+                "retained_scalp_channel_count": geometry_identity[
+                    "retained_scalp_channel_count"
+                ],
+                "retained_scalp_set_fingerprint": geometry_identity[
+                    "retained_scalp_set_fingerprint"
+                ],
+            },
+        )
 
         # 4) FILTER before downsampling
         l_freq = hp if (hp is not None and hp > 0) else None
@@ -931,95 +1074,26 @@ def perform_preprocessing(
             if new_bads:
                 raw.info["bads"].extend(new_bads)
 
-            if raw.info["bads"] and raw.get_montage():
-                try:
-                    interp_targets = list(raw.info["bads"])
-                    params["_fpvs_interpolated_channels"] = list(interp_targets)
-                    log_func(
-                        f"Interpolating bads in {filename_for_log}: "
-                        f"{interp_targets}"
-                    )
-                    if debug_enabled:
-                        print(
-                            f"[INTERP] {filename_for_log}: "
-                            f"interpolated_chs={interp_targets}"
-                        )
-                    raw.interpolate_bads(
-                        reset_bads=True,
-                        mode="accurate",
-                        verbose=False,
-                    )
-                    log_func(f"Interpolation OK for {filename_for_log}.")
-                except Exception as e:
-                    log_func(
-                        f"Warn: Interpolation failed for {filename_for_log}: {e}"
-                    )
-                    if debug_enabled:
-                        print(
-                            f"[INTERP] {filename_for_log}: FAILED "
-                            f"bads={raw.info.get('bads', [])}"
-                        )
-            elif raw.info["bads"]:
-                log_func(
-                    f"Warn: No montage for {filename_for_log}, "
-                    f"cannot interpolate. Bads remain: {raw.info['bads']}"
-                )
-                if debug_enabled:
-                    print(
-                        f"[INTERP] {filename_for_log}: no montage; "
-                        f"bads={raw.info['bads']}"
-                    )
-            else:
-                log_func(f"No bads to interpolate in {filename_for_log}.")
-                if debug_enabled:
-                    print(f"[INTERP] {filename_for_log}: no bads")
+            _interpolate_current_bads(
+                raw,
+                params,
+                log_func,
+                filename_for_log=filename_for_log,
+                description="bads",
+            )
         else:
             log_func(
                 f"Skip Kurtosis for {filename_for_log} (no threshold)."
             )
             if debug_enabled:
                 print(f"[KURTOSIS] {filename_for_log}: skip (no threshold)")
-            if raw.info["bads"] and raw.get_montage():
-                try:
-                    interp_targets = list(raw.info["bads"])
-                    params["_fpvs_interpolated_channels"] = list(interp_targets)
-                    log_func(
-                        f"Interpolating pre-marked bads in {filename_for_log}: "
-                        f"{interp_targets}"
-                    )
-                    if debug_enabled:
-                        logger.debug(
-                            "[INTERP] %s: interpolated_chs=%s",
-                            filename_for_log,
-                            interp_targets,
-                        )
-                    raw.interpolate_bads(
-                        reset_bads=True,
-                        mode="accurate",
-                        verbose=False,
-                    )
-                    log_func(f"Interpolation OK for {filename_for_log}.")
-                except Exception as e:
-                    log_func(
-                        f"Warn: Interpolation failed for {filename_for_log}: {e}"
-                    )
-                    if debug_enabled:
-                        logger.debug(
-                            "[INTERP] %s: FAILED bads=%s",
-                            filename_for_log,
-                            raw.info.get("bads", []),
-                        )
-            elif raw.info["bads"]:
-                log_func(
-                    f"Warn: No montage for {filename_for_log}, "
-                    f"cannot interpolate. Bads remain: {raw.info['bads']}"
-                )
-                if debug_enabled:
-                    logger.debug(
-                        "[INTERP] %s: no montage; bads=%s",
-                        filename_for_log,
-                        raw.info["bads"],
-                    )
+            _interpolate_current_bads(
+                raw,
+                params,
+                log_func,
+                filename_for_log=filename_for_log,
+                description="pre-marked bads",
+            )
         try:
             logger.debug(
                 "preprocess_stage_after_kurtosis",

@@ -7,10 +7,22 @@ import mne
 import numpy as np
 import pytest
 
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    BIOSEMI64_CHANNEL_SET,
+    BIOSEMI64_RUNTIME_ATTRIBUTE,
+    BioSemi64GeometryError,
+    attach_raw_biosemi64_geometry,
+    biosemi64_geometry_identity,
+    cached_biosemi64_montage,
+)
 import Main_App.processing.raw_channel_qc as raw_channel_qc_module
 from Main_App.processing.raw_channel_qc import (
     LEFT_HEMISPHERE_CHANNELS,
+    RAW_CHANNEL_QC_METHOD_VERSION,
     RIGHT_HEMISPHERE_CHANNELS,
+    SCALP_CHANNEL_ORDER,
+    SCALP_CHANNELS,
     _channel_metric_values,
     evaluate_raw_channel_qc,
 )
@@ -161,22 +173,32 @@ def test_channel_metric_values_preserve_pathological_outcome_and_warnings(
     assert capture(_channel_metric_values) == capture(warning_reference)
 
 
+def _attach_canonical_geometry(raw: mne.io.RawArray) -> mne.io.RawArray:
+    retained = tuple(channel for channel in BIOSEMI64_CHANNELS if channel in raw.ch_names)
+    raw.set_montage(cached_biosemi64_montage())
+    attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile="anatomical_labels",
+        retained_channels=retained,
+    )
+    return raw
+
+
 def _raw_with_left_failure() -> mne.io.RawArray:
-    left = list(LEFT_HEMISPHERE_CHANNELS)
-    right = list(RIGHT_HEMISPHERE_CHANNELS)
-    midline = ["Iz", "Oz", "POz", "Pz", "CPz", "AFz", "Fz", "FCz", "Cz", "Fpz"]
-    names = [*left, *midline, *right]
+    names = list(BIOSEMI64_CHANNELS)
     rng = np.random.default_rng(42)
     data = rng.normal(scale=500e-6, size=(len(names), 2048))
 
-    left_lookup = set(left)
+    left_lookup = set(LEFT_HEMISPHERE_CHANNELS)
     for index, name in enumerate(names):
         if name in left_lookup:
             data[index] = rng.normal(scale=2e-6, size=data.shape[1])
-    return mne.io.RawArray(
-        data,
-        mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
-        verbose=False,
+    return _attach_canonical_geometry(
+        mne.io.RawArray(
+            data,
+            mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
+            verbose=False,
+        )
     )
 
 
@@ -191,8 +213,7 @@ def _raw_with_clustered_removed_channels(removed: list[str]) -> mne.io.RawArray:
         mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
         verbose=False,
     )
-    raw.set_montage(mne.channels.make_standard_montage("biosemi64"))
-    return raw
+    return _attach_canonical_geometry(raw)
 
 
 def _raw_with_spatial_outlier_channel(channel: str) -> mne.io.RawArray:
@@ -222,8 +243,7 @@ def _raw_with_spatial_outlier_channel(channel: str) -> mne.io.RawArray:
         mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
         verbose=False,
     )
-    raw.set_montage(montage)
-    return raw
+    return _attach_canonical_geometry(raw)
 
 
 def _raw_with_high_amplitude_channel(channel: str) -> mne.io.RawArray:
@@ -246,8 +266,7 @@ def _raw_with_global_baseline(scale_uv: float = 20_000.0) -> mne.io.RawArray:
         mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
         verbose=False,
     )
-    raw.set_montage(montage)
-    return raw
+    return _attach_canonical_geometry(raw)
 
 
 def _raw_with_rare_burst_channel(channel: str) -> mne.io.RawArray:
@@ -263,8 +282,84 @@ def _raw_with_rare_burst_channel(channel: str) -> mne.io.RawArray:
         mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
         verbose=False,
     )
-    raw.set_montage(montage)
-    return raw
+    return _attach_canonical_geometry(raw)
+
+
+def test_raw_channel_qc_uses_public_canonical_biosemi64_universe() -> None:
+    assert SCALP_CHANNEL_ORDER == BIOSEMI64_CHANNELS
+    assert SCALP_CHANNELS == BIOSEMI64_CHANNEL_SET
+    assert (
+        LEFT_HEMISPHERE_CHANNELS | RIGHT_HEMISPHERE_CHANNELS
+    ).isdisjoint(raw_channel_qc_module.MIDLINE_CHANNELS)
+    assert (
+        LEFT_HEMISPHERE_CHANNELS
+        | RIGHT_HEMISPHERE_CHANNELS
+        | raw_channel_qc_module.MIDLINE_CHANNELS
+    ) == BIOSEMI64_CHANNEL_SET
+
+
+def test_spatial_raw_channel_qc_rejects_missing_geometry_identity() -> None:
+    raw = _raw_with_clustered_removed_channels([])
+    delattr(raw, BIOSEMI64_RUNTIME_ATTRIBUTE)
+
+    with pytest.raises(BioSemi64GeometryError, match="no FPVS geometry identity"):
+        evaluate_raw_channel_qc(
+            raw,
+            {"stim_channel": "Status", "max_bad_chans": 20},
+            filename="missing-geometry.bdf",
+        )
+
+
+def test_spatial_raw_channel_qc_rejects_legacy_standard_1005_coordinates() -> None:
+    names = list(BIOSEMI64_CHANNELS)
+    data = np.random.default_rng(1024).normal(
+        scale=500e-6,
+        size=(len(names), 2048),
+    )
+    raw = mne.io.RawArray(
+        data,
+        mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
+        verbose=False,
+    )
+    raw.set_montage(mne.channels.make_standard_montage("standard_1005"))
+    setattr(
+        raw,
+        BIOSEMI64_RUNTIME_ATTRIBUTE,
+        biosemi64_geometry_identity(
+            electrode_mapping_profile="anatomical_labels",
+            retained_channels=BIOSEMI64_CHANNELS,
+        ),
+    )
+
+    with pytest.raises(BioSemi64GeometryError, match="does not match canonical BioSemi64"):
+        evaluate_raw_channel_qc(
+            raw,
+            {"stim_channel": "Status", "max_bad_chans": 20},
+            filename="legacy-geometry.bdf",
+        )
+
+
+def test_spatial_raw_channel_qc_accepts_valid_reduced_retained_subset() -> None:
+    names = list(BIOSEMI64_CHANNELS[:16])
+    data = np.random.default_rng(2048).normal(
+        scale=500e-6,
+        size=(len(names), 2048),
+    )
+    raw = _attach_canonical_geometry(
+        mne.io.RawArray(
+            data,
+            mne.create_info(names, sfreq=256.0, ch_types=["eeg"] * len(names)),
+            verbose=False,
+        )
+    )
+
+    result = evaluate_raw_channel_qc(
+        raw,
+        {"stim_channel": "Status", "max_bad_chans": 20},
+        filename="reduced-valid.bdf",
+    )
+
+    assert result.n_channels == 16
 
 
 def test_raw_channel_qc_excludes_hemisphere_failure_at_exact_half_channels() -> None:
@@ -371,6 +466,9 @@ def test_raw_channel_qc_flags_spatial_outlier_without_interpolation() -> None:
     assert result.bad_channels == ("FT7",)
     assert result.channels_to_interpolate == ()
     assert result.triggered_rules == ()
+    assert result.thresholds["spatial_predictability_experimental"] is True
+    assert result.thresholds["bad_channel_cluster_experimental"] is True
+    assert result.to_payload()["method_version"] == RAW_CHANNEL_QC_METHOD_VERSION
 
 
 def test_raw_channel_qc_flags_high_amplitude_outlier_without_interpolation() -> None:
@@ -436,6 +534,7 @@ def test_raw_channel_qc_flags_rare_burst_without_interpolation() -> None:
 
 def test_raw_channel_qc_toggle_disables_auto_interpolation_candidates() -> None:
     raw = _raw_with_clustered_removed_channels(["P9"])
+    delattr(raw, BIOSEMI64_RUNTIME_ATTRIBUTE)
 
     result = evaluate_raw_channel_qc(
         raw,

@@ -69,6 +69,9 @@ _DATASET_PATH_NAMES = {
     "resolve_project_excel_root",
 }
 _PREPROCESSING_NAMES = {
+    "ELECTRODE_MAPPING_PROFILE_ANATOMICAL",
+    "ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1",
+    "ELECTRODE_MONTAGE_BIOSEMI64",
     "HARMONIC_SELECTION_PROFILE_VERSION",
     "FIXED_HARMONIC_SELECTION_PROFILE",
     "LEGACY_HARMONIC_SELECTION_PROFILE",
@@ -77,12 +80,16 @@ _PREPROCESSING_NAMES = {
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
     "REPEATED_SESSION_PREPROCESSING_KEYS",
+    "SUPPORTED_ELECTRODE_MAPPING_PROFILES",
+    "SUPPORTED_ELECTRODE_MONTAGES",
     "is_recording_condition_excluded",
     "is_participant_condition_excluded",
     "normalize_manual_excluded_participant_conditions",
     "normalize_manual_excluded_participants",
     "normalize_manual_excluded_recording_conditions",
     "normalize_manual_excluded_recordings",
+    "normalize_electrode_mapping_profile",
+    "normalize_electrode_montage",
     "normalize_preprocessing_settings",
     "new_project_preprocessing_settings",
 }

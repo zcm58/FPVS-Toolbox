@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.Shared.post_process import _create_output_subfolder
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
     PROCESSING_FINGERPRINT_VERSION,
@@ -146,7 +147,7 @@ def test_completed_legacy_epoch_window_entry_remains_reusable(
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -251,7 +252,7 @@ def test_record_results_creates_completed_ledger_and_run_log(tmp_path) -> None:
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -272,6 +273,22 @@ def test_record_results_creates_completed_ledger_and_run_log(tmp_path) -> None:
     assert '"successful_files": 1' in runs
 
 
+def test_record_results_rejects_success_without_observed_geometry(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+
+    with pytest.raises(ValueError, match="no worker-observed BioSemi64 geometry"):
+        record_processing_results(
+            project,
+            plan,
+            [{"status": "ok", "file": str(info.path)}],
+            run_mode="Batch",
+            user_choice="incremental",
+            cancelled=False,
+        )
+
+
 def test_record_results_persists_complete_source_derivative_contract(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
@@ -281,7 +298,7 @@ def test_record_results_persists_complete_source_derivative_contract(tmp_path) -
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path), **source_result}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path), **source_result}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -293,7 +310,11 @@ def test_record_results_persists_complete_source_derivative_contract(tmp_path) -
         )
     )
     entry = ledger["entries"]["P01"]
-    assert PROCESSING_FINGERPRINT_VERSION == "processing_fingerprint_v9_source_ready_time_domain"
+    assert (
+        PROCESSING_FINGERPRINT_VERSION
+        == "processing_fingerprint_v10_biosemi64_geometry"
+    )
+    assert entry["geometry"] == plan.geometry_identity
     assert entry["source_derivative_status"] == "complete"
     assert entry["source_derivative_manifest"] == source_result["source_derivative_manifest"]
     assert entry["source_derivative_outputs"] == source_result["source_derivative_outputs"]
@@ -318,7 +339,7 @@ def test_classify_complete_source_derivative_with_missing_file_is_stale(
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path), **source_result}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path), **source_result}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -347,6 +368,7 @@ def test_classify_explicitly_incomplete_source_derivative_is_stale(tmp_path) -> 
         [
             {
                 "status": "ok",
+                "geometry": biosemi64_geometry_identity(),
                 "file": str(info.path),
                 "source_derivative_status": "incomplete",
                 "source_derivative_manifest": "",
@@ -372,7 +394,7 @@ def test_classify_completed_requires_ledger_and_expected_outputs(tmp_path) -> No
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -391,7 +413,7 @@ def test_classify_missing_expected_output_is_stale(tmp_path) -> None:
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -411,7 +433,7 @@ def test_classify_settings_change_stales_completed_entry(tmp_path) -> None:
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -441,7 +463,7 @@ def test_classify_fft_multinotch_change_stales_completed_entry(tmp_path) -> None
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -479,7 +501,7 @@ def test_pre_qc_completed_state_survives_new_participant_qc_metadata(tmp_path) -
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -540,7 +562,7 @@ def test_pre_qc_carry_forward_does_not_hide_raw_file_changes(tmp_path) -> None:
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -572,7 +594,7 @@ def test_classify_old_processing_fingerprint_version_is_stale(tmp_path) -> None:
     record_processing_results(
         project,
         initial_plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -586,6 +608,34 @@ def test_classify_old_processing_fingerprint_version_is_stale(tmp_path) -> None:
 
     assert plan.states[0].status == "changed_settings"
     assert plan.states[0].reason == "Processing fingerprint version changed."
+
+
+def test_classify_missing_or_tampered_geometry_is_stale(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    initial_plan = classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    )
+    _write_expected_outputs(initial_plan)
+    record_processing_results(
+        project,
+        initial_plan,
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(path.read_text(encoding="utf-8"))
+    ledger["entries"]["P01"]["geometry"]["coordinate_fingerprint"] = "legacy"
+    path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert plan.states[0].status == "changed_settings"
+    assert plan.states[0].reason == "Electrode geometry identity changed or is missing."
 
 
 def test_record_results_locks_multigroup_project_after_success(tmp_path) -> None:
@@ -605,7 +655,7 @@ def test_record_results_locks_multigroup_project_after_success(tmp_path) -> None
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -647,7 +697,7 @@ def test_partial_current_run_output_locks_group_layout(tmp_path, cancelled) -> N
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=cancelled,
@@ -691,10 +741,11 @@ def test_record_results_does_not_lock_multigroup_without_successful_output(
                 "status": "excluded",
                 "file": str(info.path),
                 "reason": "raw_qc_exclusion",
+                "geometry": biosemi64_geometry_identity(),
             }
         ]
     elif outcome == "ok_without_outputs":
-        results = [{"status": "ok", "file": str(info.path)}]
+        results = [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}]
     else:
         results = []
 
@@ -798,8 +849,8 @@ def test_repeated_sessions_use_distinct_recording_ledger_and_output_identity(
         project,
         plan,
         [
-            {"status": "ok", "file": str(luteal_file.resolve()), "audit": {}},
-            {"status": "ok", "file": str(follicular_file.resolve()), "audit": {}},
+            {"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(luteal_file.resolve()), "audit": {}},
+            {"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(follicular_file.resolve()), "audit": {}},
         ],
         run_mode="batch",
         user_choice="incremental",
@@ -953,6 +1004,7 @@ def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_pa
         [
             {
                 "status": "ok",
+                "geometry": biosemi64_geometry_identity(),
                 "file": str(info.path),
                 "audit": {
                     "n_rejected": 2,
@@ -1014,7 +1066,7 @@ def test_classify_legacy_missing_condition_failure_as_completed_partial(tmp_path
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -1087,6 +1139,106 @@ def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path
     assert changed_plan.incremental_files == (info.path,)
 
 
+def test_geometry_dependent_exclusion_without_current_geometry_is_recomputed(
+    tmp_path,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    record_processing_results(
+        project,
+        plan,
+        [
+            {
+                "status": "excluded",
+                "file": str(info.path),
+                "reason": "raw_channel_qc_failure",
+                "geometry": biosemi64_geometry_identity(),
+            }
+        ],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(path.read_text(encoding="utf-8"))
+    ledger["entries"]["P01"].pop("geometry")
+    path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    current = classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    )
+
+    assert current.states[0].status == "changed_settings"
+    assert "missing or stale electrode geometry" in current.states[0].reason
+    assert current.incremental_files == (info.path,)
+
+
+def test_geometry_dependent_exclusion_requires_observed_geometry(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(plan)
+
+    with pytest.raises(ValueError, match="no worker-observed BioSemi64 geometry"):
+        record_processing_results(
+            project,
+            plan,
+            [
+                {
+                    "status": "excluded",
+                    "file": str(info.path),
+                    "reason": "raw_channel_qc_failure",
+                }
+            ],
+            run_mode="Batch",
+            user_choice="incremental",
+            cancelled=False,
+        )
+    assert all(path.exists() for path in plan.states[0].expected_outputs)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "manual_participant_exclusion",
+        "manual_recording_exclusion",
+        "recording_not_started",
+    ],
+)
+def test_geometry_independent_exclusion_does_not_require_observed_geometry(
+    tmp_path,
+    reason,
+) -> None:
+    project, info = _project_with_raw(tmp_path)
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    record_processing_results(
+        project,
+        plan,
+        [{"status": "excluded", "file": str(info.path), "reason": reason}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(path.read_text(encoding="utf-8"))
+    entry = ledger["entries"]["P01"]
+    entry.pop("geometry")
+    entry["processing_fingerprint_version"] = "legacy"
+    path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    current = classify_processing_inputs(
+        project,
+        [info],
+        _settings(),
+        project.event_map,
+    )
+
+    assert current.states[0].status == "excluded"
+    assert current.incremental_files == ()
+
+
 
 def test_record_results_requires_at_least_one_expected_output_for_completed_status(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
@@ -1095,7 +1247,7 @@ def test_record_results_requires_at_least_one_expected_output_for_completed_stat
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -1165,7 +1317,7 @@ def test_clean_participant_outputs_deletes_only_planned_participant(tmp_path) ->
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}, {"status": "ok", "file": str(info2.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}, {"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info2.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -1212,8 +1364,8 @@ def test_clean_participant_outputs_deletes_only_recorded_source_derivatives(tmp_
         project,
         plan,
         [
-            {"status": "ok", "file": str(info.path), **p01_source},
-            {"status": "ok", "file": str(info2.path), **p02_source},
+            {"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path), **p01_source},
+            {"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info2.path), **p02_source},
         ],
         run_mode="Batch",
         user_choice="incremental",
@@ -1251,7 +1403,7 @@ def test_clean_participant_outputs_refuses_external_ledger_derivative_path(tmp_p
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path), **source_result}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path), **source_result}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -1383,7 +1535,7 @@ def test_reprocess_all_choice_runs_completed_files(tmp_path) -> None:
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "file": str(info.path)}],
+        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,

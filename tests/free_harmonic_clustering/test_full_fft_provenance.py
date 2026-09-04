@@ -16,6 +16,8 @@ from Main_App.processing.full_fft_provenance import (
     validate_project_full_fft_provenance,
     write_project_full_fft_provenance,
 )
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 from Tools.Free_Harmonic_Clustering.preparation import (
     build_available_frequency_window_plan,
 )
@@ -61,6 +63,29 @@ def _write_project(
     )
     _write_full_fft_workbook(paths[0], _header())
     _write_full_fft_workbook(paths[1], second_header or _header())
+    ledger_path = root / ".fpvs_processing" / "processing_ledger.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry = biosemi64_geometry_identity()
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    participant: {
+                        "participant_id": participant,
+                        "status": "completed",
+                        "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+                        "processing_fingerprint": "fixture-processing-fingerprint",
+                        "condition_completeness": "complete",
+                        "geometry": geometry,
+                    }
+                    for participant in ("P1", "P2")
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     return root, paths
 
 
@@ -81,9 +106,10 @@ def test_neutral_provenance_round_trip_is_stats_independent_and_project_relative
 
     assert metadata["method_version"] == FULL_FFT_PROVENANCE_METHOD_VERSION
     assert "stats" not in manifest["tools"]
-    assert metadata["cohort_state"]["ledger_filter_applied"] is False
+    assert metadata["cohort_state"]["ledger_filter_applied"] is True
     assert metadata["frequency_qc_state"]["excluded_participants"] == []
-    assert metadata["processing_export_state"] == []
+    assert len(metadata["processing_export_state"]) == 2
+    assert metadata["geometry"] == biosemi64_geometry_identity()
     assert written.source_workbook_count == 2
     assert written.source_paths == metadata_paths
     assert all(not Path(value).is_absolute() for value in metadata_paths)

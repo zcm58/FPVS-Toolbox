@@ -8,6 +8,7 @@ import pytest
 
 import Main_App.processing.preflight_qc_cache as cache_module
 from Main_App.processing.preflight_qc_cache import (
+    PREFLIGHT_QC_CACHE_METHOD_DIRECTORY,
     PREFLIGHT_QC_CACHE_SCHEMA_VERSION,
     build_preflight_qc_cache_fingerprint,
     load_preflight_qc_cache,
@@ -128,7 +129,12 @@ def test_fingerprint_changes_with_each_input_category(
 
 def test_cache_path_is_project_local_and_read_does_not_create_it(tmp_path: Path) -> None:
     parts = _key_parts()
-    expected_directory = tmp_path / ".fpvs_processing" / "preflight_qc" / "v2"
+    expected_directory = (
+        tmp_path
+        / ".fpvs_processing"
+        / "preflight_qc"
+        / PREFLIGHT_QC_CACHE_METHOD_DIRECTORY
+    )
 
     path = preflight_qc_cache_path(tmp_path, **parts)
 
@@ -154,7 +160,12 @@ def test_cache_round_trip_uses_atomic_project_local_json(tmp_path: Path) -> None
 
     path = save_preflight_qc_cache(tmp_path, result=result, **parts)
 
-    assert path.parent == tmp_path / ".fpvs_processing" / "preflight_qc" / "v2"
+    assert path.parent == (
+        tmp_path
+        / ".fpvs_processing"
+        / "preflight_qc"
+        / PREFLIGHT_QC_CACHE_METHOD_DIRECTORY
+    )
     assert not list(path.parent.glob("*.tmp"))
     envelope = json.loads(path.read_text(encoding="utf-8"))
     assert envelope["schema_version"] == PREFLIGHT_QC_CACHE_SCHEMA_VERSION

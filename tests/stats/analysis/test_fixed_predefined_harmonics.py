@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from Main_App.processing import harmonic_selection_qc
+from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.projects.project import Project
 from Tools.Stats.analysis import dv_policies
 from Tools.Stats.analysis import dv_policy_fixed_predefined as fixed_policy
@@ -22,6 +22,20 @@ from Tools.Stats.analysis.dv_policy_settings import (
 )
 from Tools.Stats.analysis.stats_analysis import filter_to_oddball_harmonics
 from Tools.Stats.workers import stats_workers
+
+
+@pytest.fixture(autouse=True)
+def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_workbook_geometry",
+        lambda _root, *, dataset_index=None: {},
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda _root, *, dataset_index=None: object(),
+    )
 
 
 def _bca_columns() -> list[str]:

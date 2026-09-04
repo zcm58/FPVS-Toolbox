@@ -33,6 +33,14 @@ FPVS Toolbox uses a strict hybrid settings model:
   and missing-variable errors remain unchanged.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
+- Electrode geometry is project-specific scientific state in the
+  `preprocessing` namespace. `electrode_montage` currently accepts only
+  `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The default
+  `electrode_mapping_profile` is `anatomical_labels`; the alternative
+  `biosemi64_1020_ab_v1` means only the standard BioSemi 64-channel 10/20
+  A1-A32/B1-B32 wiring. It does not support BioSemi ABC/equiradial or custom
+  layouts. Both values normalize and round-trip with the project and are
+  passed into workers rather than reread from app-global settings.
 - Harmonic Selection and Summation is project-specific scientific state in the
   `preprocessing` namespace. New projects persist the
   `dzhelyova_poncet_two_consecutive_failures` v1 profile with all retained
@@ -60,9 +68,12 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Neutral FullFFT provenance lives at
   `tools.processing.full_fft_provenance`. It stores only project-relative
   source identity, rates, grid/resolution, cohort/QC, processing/export
-  identity, and their fingerprints. It contains no Stats profile, selected
-  harmonic list, or Summed-BCA freshness state. Copied projects therefore
-  resolve every recorded source beneath the copied active project root.
+  identity, the validated canonical BioSemi64 geometry identity, and their
+  fingerprints. It contains no Stats profile, selected harmonic list, or
+  Summed-BCA freshness state. Copied projects therefore resolve every recorded
+  source beneath the copied active project root. Missing, legacy, or mixed
+  geometry records make this provenance stale and block downstream FullFFT
+  analysis until the affected EEG is reprocessed under one project geometry.
 - Per-artifact selection freshness lives at
   `tools.post_processing.artifact_freshness`. Its active selection fingerprint
   and project-relative records use `current`, `stale`, or `failed` status. The
@@ -116,16 +127,20 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Generated incremental-processing state lives under the active project root at
   `.fpvs_processing/processing_ledger.json` and
   `.fpvs_processing/processing_runs.jsonl`. This folder is recoverable state,
-  not canonical project configuration.
+  not canonical project configuration. Each current ledger result records the
+  canonical/retained BioSemi64 geometry identity and interpolation request,
+  outcome, successful channels, and error text. A missing or mismatched
+  geometry identity classifies an otherwise completed input as changed/stale.
 - Condition-aware preflight QC stores recoverable, atomically written JSON
-  entries under `.fpvs_processing/preflight_qc/v2`. The GUI must pass the
-  active absolute project root explicitly; the cache helper rejects relative
-  roots and never derives a location from the current working directory. Cache
-  entries contain derived QC payloads only, are safe to delete, and are treated
-  as misses when missing, corrupt, schema-incompatible, or fingerprint-stale.
+  entries under `.fpvs_processing/preflight_qc/v4_biosemi64_geometry`. The GUI
+  must pass the active absolute project root explicitly; the cache helper
+  rejects relative roots and never derives a location from the current working
+  directory. Cache entries contain derived QC payloads only, are safe to
+  delete, and are treated as misses when missing, corrupt, schema-incompatible,
+  fingerprint-stale, or built for another geometry identity.
 - **File > Reset Project Processing Cache...** makes the next data-quality,
   raw-preprocessing, and incremental-planning run cold by deleting only
-  `.fpvs_processing/preflight_qc/v2`,
+  `.fpvs_processing/preflight_qc/v4_biosemi64_geometry`,
   `.fpvs_cache/preprocessed`, `.fpvs_processing/processing_ledger.json.tmp`, and
   `.fpvs_processing/processing_ledger.json` beneath the active absolute project
   root. `Main_App.processing.project_processing_cache` owns this exact deletion
@@ -186,11 +201,14 @@ FPVS Toolbox uses a strict hybrid settings model:
   Studio stimulus assets or runtime artifacts.
 - The preprocessing runner may create a generated cache under the active project
   root at `.fpvs_cache/preprocessed/`. Cache keys include source file path,
-  size, mtime, MNE version, loader profile, and preprocessing settings. Cache
-  files are generated artifacts, not project configuration, and are ignored by
-  git when a project root is inside the repo. After a new preprocessed cache
-  entry is written, older cache entries whose metadata points at the same source
-  file are pruned.
+  size, mtime, MNE version, loader profile, preprocessing settings, and the
+  canonical BioSemi64 geometry identity. Cache metadata records the retained
+  scalp set and interpolation outcome. A cached FIF is accepted only after its
+  channels and canonical coordinates are revalidated and its runtime geometry
+  identity is reattached. Cache files are generated artifacts, not project
+  configuration, and are ignored by git when a project root is inside the repo.
+  After a new preprocessed cache entry is written, older cache entries whose
+  metadata points at the same source file are pruned.
 - Multi-group Excel output layout is condition-first/group-second:
   `1 - Excel Data Files/<Condition>/<Group>/<Participant>_<Condition>_Results.xlsx`.
   Single-group output remains flat under each condition folder.

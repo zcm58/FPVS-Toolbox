@@ -10,6 +10,8 @@ import pytest
 from Main_App.processing.full_fft_provenance import (
     write_project_full_fft_provenance,
 )
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 from Tools.Plot_Generator import analysis_context
 from Tools.Plot_Generator.generation_outcome import (
     format_completion_summary,
@@ -44,6 +46,32 @@ def _write_full_snr(path: Path, values: list[float]) -> None:
             sheet_name="FullFFT Amplitude (uV)",
             index=False,
         )
+
+
+def _write_geometry_ledger(root: Path, participants: tuple[str, ...]) -> None:
+    path = root / ".fpvs_processing" / "processing_ledger.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    geometry = biosemi64_geometry_identity()
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    participant: {
+                        "participant_id": participant,
+                        "status": "completed",
+                        "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+                        "processing_fingerprint": "fixture-processing-fingerprint",
+                        "condition_completeness": "complete",
+                        "geometry": geometry,
+                    }
+                    for participant in participants
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_group_overlay_completion_outcome_helpers() -> None:
@@ -178,6 +206,7 @@ def test_group_overlay_matches_project_participant_ids_from_excel_names(
         / "E2P1initial_Angry_Results.xlsx",
         [1.0, 3.0],
     )
+    _write_geometry_ledger(project_root, ("e2p2final", "E2P1INITIAL"))
     write_project_full_fft_provenance(
         project_root,
         base_frequency_hz=6.0,
@@ -261,6 +290,7 @@ def test_worker_uses_shared_index_preference_for_grouped_workbook(
         excel_root / condition / "Control" / "P01_Faces_Results.xlsx",
         [2.0, 4.0],
     )
+    _write_geometry_ledger(project_root, ("P01",))
     write_project_full_fft_provenance(
         project_root,
         base_frequency_hz=6.0,

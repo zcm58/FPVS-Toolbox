@@ -69,6 +69,12 @@ The canonical file-level process runner is
 12. Finalize the preprocessing audit with `finalize_preproc_audit`.
 13. Clean up worker memory and temporary memmap paths.
 
+The loader and preprocessed-Raw cache must supply a validated canonical
+BioSemi64 runtime identity before raw QC or preprocessing continues. Cache
+identity includes the montage, mapping profile, geometry/coordinate
+fingerprints, and retained scalp set; an older or mismatched cache entry is a
+miss and is not relabeled as current.
+
 GUI processing must route through the active process runner. Single-file runs use
 the same runner with `max_workers=1`. Do not add a fallback path that bypasses
 the process runner or calls retired legacy preprocessing.
@@ -137,9 +143,8 @@ result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
 The preprocessed Raw cache version is
-`preprocessed-raw-v9-fft-multinotch`.
-The project processing-ledger and Stats group-harmonic cache processing
-fingerprints use `processing_fingerprint_v9_source_ready_time_domain`. The
+`preprocessed-raw-v10-biosemi64-geometry`, and the project processing ledger
+uses `processing_fingerprint_v10_biosemi64_geometry`. The
 raw channel-health QC threshold, removed-electrode QC mode, per-file manual
 removed-electrode list, baseline raw-amplitude metadata, and rare-burst
 candidate list are part of the cache payload so changes to those settings
@@ -150,10 +155,13 @@ workbook generation. It remains part of the Stats harmonic-cache signature so
 changing the included workbook cohort requires harmonic recalculation. The
 cache identity also includes the
 line-noise-filter enabled state, selected 50 or 60 Hz mains frequency, method
-version, half-width, and component count. The v9 cache metadata also persists
+version, half-width, and component count. It also includes the project-owned
+BioSemi64 montage and mapping profile plus the canonical coordinate and
+retained-scalp-set identity. Current cache metadata persists
 raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
-plus requested, applied, and skipped FFT multi-notch centers so cache-hit runs
-can still produce complete participant QC and preprocessing provenance.
+plus the interpolation request/status/error, requested/applied/skipped FFT
+multi-notch centers, and complete geometry identity so cache-hit runs can still
+produce complete participant QC and preprocessing provenance.
 
 After frequency-domain QC is accepted, processing completion calculates the
 project-wide significant-harmonic list once through
@@ -166,6 +174,48 @@ calculating another list. Settings recalculation must force a fresh calculation
 from the current FullFFT workbooks without deleting the previous durable entry
 at startup; the current fingerprint is replaced only after the recalculation
 and project-metadata write succeed.
+
+## Canonical BioSemi64 Geometry
+
+The supported acquisition geometry is the MNE `biosemi64` template. The full
+BDF header must first resolve to all 64 canonical anatomical sensors through
+either direct anatomical labels or the explicit `biosemi64_1020_ab_v1`
+standard 10/20 A1-A32/B1-B32 wiring profile. That profile does not support
+BioSemi ABC/equiradial or custom layouts. CMS/DRL remain outside recorded data;
+the selected EXG mastoid signals remain coordinate-free through the initial
+reference and are then dropped. `biosemi64` is a standard cap-template
+geometry; it does not claim participant-specific digitized electrode locations.
+
+After the optional channel limit, preprocessing freezes the retained canonical
+scalp set and validates the Raw coordinates and runtime identity. The ordinary
+path retains 64 sensors. A configured reduced path retains the first N members
+of the frozen canonical BioSemi order while preserving their source data order;
+its reduced-set fingerprint prevents it from masquerading as a complete
+64-channel result. Geometry validation is metadata/eligibility enforcement at
+the existing boundary after step 3; it is not an added signal transform and
+does not change the locked order below.
+
+Historical processing that used `standard_1005` has a different geometry
+identity. It cannot reuse the current preflight or preprocessed-Raw cache, and
+processed cohorts with missing, legacy, or mixed geometry provenance cannot
+publish current FullFFT provenance. Reprocess a historical recording before a
+new analysis or publication when interpolation occurred or a geometry-based
+rule informed its channel decisions. Even without interpolation, regenerate
+scalp maps so values are drawn at the BioSemi64 positions.
+
+The deterministic synthetic QC-15 diagnostic held signals and bad-channel
+lists fixed while changing only `standard_1005` versus `biosemi64`. With no bad
+channels, voltage and FFT/BCA/SNR/local-z values were identical, although plot
+coordinates still differed. With interpolation, the repaired channel changed;
+the following average reference spread part of that difference to other
+channels. The largest frozen-scenario differences were 1.4691 microvolts in a
+sample, 0.0693 microvolts in exact-bin FFT amplitude, 0.0677 microvolts in BCA,
+0.3221 in SNR, and 1.3269 in local z, with six threshold-decision changes
+across the reported pre- and post-reference stages. These are synthetic
+sensitivity results, not an estimate of effects in representative lab data.
+See
+`docs/agent/quality/biosemi64-geometry-sensitivity.md` for the reproducible
+protocol, limits, and required lab-data follow-up.
 
 ## Raw QC Hard Exclusions
 
@@ -184,10 +234,10 @@ those defaults.
 `src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
 scan without importing Qt. The normal GUI route supplies an explicit active
 project root and condition event map, which enables condition-aware preflight
-QC v3. The compatibility v1 route remains available to callers that do not
+QC `v4_biosemi64_geometry`. The compatibility v1 route remains available to callers that do not
 supply both inputs.
 
-V3 reads the complete configured Status channel to plan events, then requests
+The v4 path reads the complete configured Status channel to plan events, then requests
 EEG samples only from each shared marker-derived locked FFT span. The
 time-domain and spectral intervals are identical to the samples that normal
 processing will analyze; there is no fixed minimum or maximum condition
@@ -215,7 +265,7 @@ values, project loading moves them to
 ledger and source-ready sidecar identities. That compatibility metadata must
 never control extraction, preprocessing, or QC.
 
-V3 spectral QC uses the same shared per-condition, shortest-repetition,
+The v4 spectral QC uses the same shared per-condition, shortest-repetition,
 integer-oddball-cycle FFT span planner as normal processing. It evaluates the
 Hann-windowed FFT for every channel in deterministic memory-bounded batches;
 focused parity tests require byte-identical per-channel amplitudes relative to
@@ -229,24 +279,24 @@ minimum and maximum, leaving 20 bins for the mean and population standard
 deviation. Expected FPVS harmonics, effective configured mains-notch centers,
 their collisions, and unexpected off-harmonic peaks are reported separately.
 
-Condition-aware findings are review-only in preflight v3. They do not create a
+Condition-aware findings are review-only in preflight v4. They do not create a
 new hard-exclusion rule; the established hard raw-channel rules remain
 unchanged in the normal process runner. A review-only condition finding can
 therefore be deferred to the existing processing-time decision rather than
-silently changing that calibrated rule. V3 caps participant workers at four,
+silently changing that calibrated rule. V4 caps participant workers at four,
 simultaneous BDF reads at two, and simultaneous spectral evaluators at two. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
-created. V3 preserves deterministic result order and checks cancellation
+created. V4 preserves deterministic result order and checks cancellation
 between condition reads, time blocks, FFT channel batches, and cache writes.
 Successful participant results
 are cached atomically under the active project root at
-`.fpvs_processing/preflight_qc/v2`; a missing, corrupt, or fingerprint-stale
-entry is a cache miss. The key includes raw path/size/mtime, relevant settings,
-method and dependency versions, and the resolved event/span plan. The stable
-cache directory name is retained, while the v3 method identity and
-`locked_fft_span_v1` completion policy invalidate results produced under the
-former fixed-minimum coverage.
+`.fpvs_processing/preflight_qc/v4_biosemi64_geometry`; a missing, corrupt, or
+fingerprint-stale entry is a cache miss. The key includes raw path/size/mtime,
+relevant settings, method and dependency versions, the canonical BioSemi64
+geometry identity, and the resolved event/span plan. The v4 directory/method identity,
+`locked_fft_span_v1` completion policy, and geometry fingerprint invalidate
+results produced under earlier geometry or fixed-minimum coverage.
 
 The project lifecycle action **File > Reset Project Processing Cache...**
 forces the next run through a cold data-quality, raw-preprocessing, and
@@ -449,6 +499,10 @@ documentation refactors:
 7. Kurtosis-based bad-channel rejection and interpolation.
 8. Final average reference.
 
+The retained BioSemi64 identity is frozen after step 3 and checked before
+geometry-dependent QC/interpolation. This validation boundary does not move or
+renumber the eight signal-processing stages.
+
 The order is part of the app contract. A refactor that preserves each individual
 operation but reorders stages is a statistical-method behavior change. Any
 future reorder requires an explicit user request, a fingerprint/cache version
@@ -480,11 +534,13 @@ Several stage failures currently warn and continue instead of aborting:
 - Initial selected-pair reference failure.
 - Resampling failure.
 - FIR filter failure.
-- Bad-channel interpolation failure.
 - Final average-reference failure.
 
 That continuation behavior is historical pipeline behavior. Do not convert it to
 fail-fast behavior without an explicit behavior-change request and focused tests.
+Canonical geometry validation and bad-channel interpolation are deliberate
+exceptions: either failure aborts that recording so an unsuccessful repair
+cannot be reported or exported as processed data.
 
 ## Stage Details
 
@@ -499,15 +555,20 @@ Reference handling:
 
 Channel limiting:
 
-- `max_idx_keep` limits channels by current channel order after reference-channel
-  drop.
+- `max_idx_keep` selects the first N members of the frozen canonical BioSemi64
+  order after reference-channel drop; the loader has already validated all 64
+  acquisition identities.
 - The configured stim channel is appended to the keep list when it would
   otherwise be dropped.
 - Current behavior uses `raw.pick_channels(final_keep, ordered=False)`.
-- The process runner requests a loader subset of the first 64 BDF channels plus
-  the selected reference pair and stim channel. This keeps the current BioSemi
-  64-channel EEG surface plus `EXG1`/`EXG2` references and avoids loading
-  unused `EXG3` through `EXG8` before the existing channel-drop stage.
+- Selection membership follows canonical order while `ordered=False` preserves
+  the recorded source order of retained data.
+- The process runner requests a 64-sensor loader subset plus the selected
+  reference pair and stim channel. After complete-header validation, the loader
+  selects all canonical BioSemi64 sensors by identity and preserves their BDF
+  source order; it does not assume that the first 64 header entries define
+  anatomy. This avoids loading unused `EXG3` through `EXG8` before the existing
+  channel-drop stage.
 
 Filtering:
 
@@ -587,9 +648,15 @@ Kurtosis rejection and interpolation:
   enough channels are available.
 - Bad channels are selected with `abs(z_score) > reject_thresh`.
 - Newly detected bads are appended to `raw.info["bads"]`.
-- Interpolation runs only when bads exist and a montage is present, using
+- Pre-marked bads are also sent through the same interpolation boundary when
+  kurtosis is disabled or finds no additional channels.
+- Interpolation requires a validated runtime BioSemi64 identity and accepts
+  only retained canonical scalp sensors, using
   `raw.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)`.
-- If no montage is present, bads remain and a warning is logged.
+- Requested targets are recorded before the call. The successful-interpolation
+  list is populated only after MNE returns and clears every requested bad.
+  Missing/mismatched geometry, an invalid target, an MNE interpolation error,
+  or an uncleared target records a failed status and aborts the recording.
 
 Final average reference:
 
@@ -617,6 +684,11 @@ Audit payload behavior currently covered by tests:
 - `sha256_head` is populated.
 - `fif_written` is reported as an integer flag.
 - `save_preprocessed_fif` is not copied into the audit payload.
+- Geometry provenance contains the canonical montage/version, coordinate and
+  scalp-set fingerprints, mapping profile, and retained scalp set.
+- Interpolation provenance distinguishes requested channels, successfully
+  interpolated channels, `not_needed`/`succeeded`/`failed` status, and any
+  error. Failed or unknown interpolation is never represented as zero burden.
 - A clean synthetic round trip reports no audit problems.
 
 Audit logging should not change pipeline behavior. Existing defensive logging
@@ -654,6 +726,18 @@ python .agents/scripts/verify.py --scope processing --tier focused
 
 Processing-window pytest-qt coverage runs in CI only by default. For GUI wiring
 changes, also document a visible/manual processing smoke path.
+
+For the QC-15 Settings smoke path, launch the application normally, open a
+project, and visit **Settings > Preprocessing**. Confirm that **Electrode
+montage** shows the single disabled choice **BioSemi ActiveTwo 64**, that
+**Channel mapping profile** offers anatomical labels and the explicitly named
+standard 10/20 A1-A32/B1-B32 profile, and that its tooltip excludes
+ABC/equiradial/custom caps. Save each applicable profile, close and reopen the
+project, and confirm the selection round-trips through `project.json`. With a
+matching BDF, start preflight and processing and confirm the log reports a
+validated BioSemi64 montage; a deliberately mismatched profile must stop at
+loading with a clear geometry error. Do not run this visible path through an
+offscreen Qt platform.
 
 For documentation-only edits to this contract, confirm the diff only touches
 docs unless the user explicitly asked for implementation changes.

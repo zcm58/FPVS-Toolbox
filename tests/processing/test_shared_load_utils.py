@@ -3,35 +3,47 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
+import mne
+import numpy as np
 import pytest
 
 import Main_App.Shared.load_utils as shared_load_utils
 import Main_App.io.load_utils as load_utils
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_1020_AB_CHANNEL_MAP,
+    BIOSEMI64_CHANNELS,
+    BIOSEMI64_COORDINATE_FINGERPRINT,
+    read_raw_biosemi64_geometry,
+)
+from Main_App.projects.preprocessing_settings import (
+    ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
+)
 
 
-class _FakeRaw:
-    def __init__(self) -> None:
-        self.ch_names = ["Cz", "EXG1", "EXG2", "EXG3", "Status"]
-        self.info = {"sfreq": 512.0}
-        self.channel_type_calls = []
-        self.montage_kwargs = None
-        self.montage = None
-        self.load_data_calls = 0
-        self.close_calls = 0
+def _raw(channel_names=None):
+    names = list(channel_names or [*BIOSEMI64_CHANNELS, "EXG1", "EXG2", "EXG3", "Status"])
+    channel_types = ["stim" if name == "Status" else "eeg" for name in names]
+    raw = mne.io.RawArray(
+        np.zeros((len(names), 8), dtype=float),
+        mne.create_info(names, 512.0, channel_types),
+        verbose=False,
+    )
+    raw.close_calls = 0
+    raw.load_data_calls = 0
+    original_close = raw.close
+    original_load_data = raw.load_data
 
-    def load_data(self) -> None:
-        self.load_data_calls += 1
-        return None
+    def _close():
+        raw.close_calls += 1
+        return original_close()
 
-    def close(self) -> None:
-        self.close_calls += 1
+    def _load_data(*args, **kwargs):
+        raw.load_data_calls += 1
+        return original_load_data(*args, **kwargs)
 
-    def set_channel_types(self, mapping):
-        self.channel_type_calls.append(mapping)
-
-    def set_montage(self, montage, **kwargs):
-        self.montage = montage
-        self.montage_kwargs = kwargs
+    raw.close = _close
+    raw.load_data = _load_data
+    return raw
 
 
 def _app(logs: list[str]):
@@ -94,16 +106,15 @@ def test_shared_load_eeg_file_excludes_header_only_bdf_without_mne(monkeypatch, 
 
 
 def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeypatch, tmp_path):
-    fake_raw = _FakeRaw()
-    captured = {}
+    header_raw = _raw()
+    loaded_raw = _raw()
+    calls = []
 
     def _fake_read_raw_bdf(filepath, **kwargs):
-        captured["filepath"] = filepath
-        captured.update(kwargs)
-        return fake_raw
+        calls.append((filepath, dict(kwargs)))
+        return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
     monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
 
     logs: list[str] = []
@@ -111,21 +122,20 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
 
     raw = load_utils.load_eeg_file(_app(logs), str(path))
 
-    assert raw is fake_raw
-    assert captured["filepath"] == str(path)
-    assert captured["preload"] == str(tmp_path / "sample_raw.dat")
-    assert captured["stim_channel"] == "Status"
-    assert fake_raw.load_data_calls == 1
-    assert fake_raw.channel_type_calls == [
-        {"EXG3": "misc"},
-        {"EXG1": "eeg", "EXG2": "eeg"},
-        {"Status": "stim"},
-    ]
-    assert fake_raw.montage_kwargs == {
-        "on_missing": "warn",
-        "match_case": False,
-        "verbose": False,
-    }
+    assert raw is loaded_raw
+    assert calls[0][0] == str(path)
+    assert calls[0][1]["preload"] is False
+    assert calls[1][1]["preload"] == str(tmp_path / "sample_raw.dat")
+    assert calls[1][1]["stim_channel"] == "Status"
+    assert loaded_raw.load_data_calls == 1
+    types = dict(zip(loaded_raw.ch_names, loaded_raw.get_channel_types()))
+    assert types["EXG1"] == types["EXG2"] == "eeg"
+    assert types["EXG3"] == "misc"
+    assert types["Status"] == "stim"
+    identity = read_raw_biosemi64_geometry(loaded_raw)
+    assert identity is not None
+    assert identity["coordinate_fingerprint"] == BIOSEMI64_COORDINATE_FINGERPRINT
+    assert identity["retained_scalp_channel_count"] == 64
     assert "BDF loaded successfully." in logs
 
 
@@ -134,15 +144,15 @@ def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
     tmp_path,
     caplog,
 ):
-    fake_raw = _FakeRaw()
+    header_raw = _raw()
+    loaded_raw = _raw(["Fp1", "EXG1", "EXG2", "Status"])
     calls = []
 
     def _fake_read_raw_bdf(filepath, **kwargs):
         calls.append(dict(kwargs))
-        return fake_raw
+        return header_raw if len(calls) == 1 else loaded_raw
 
     monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
     monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
 
     logs: list[str] = []
@@ -156,13 +166,13 @@ def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
             first_n_channels=1,
         )
 
-    assert raw is fake_raw
+    assert raw is loaded_raw
     assert calls[0]["preload"] is False
     assert "include" not in calls[0]
-    assert calls[1]["include"] == ["Cz", "EXG1", "EXG2", "Status"]
+    assert calls[1]["include"] == ["Fp1", "EXG1", "EXG2", "Status"]
     assert calls[1]["preload"] == str(tmp_path / "sample_raw.dat")
     assert any("[LOADER CHANNEL SUBSET]" in message for message in logs)
-    assert "stage=header_read_start" in caplog.text
+    assert "stage=header_geometry_validation_start" in caplog.text
     assert "stage=read_raw_bdf_start" in caplog.text
     assert "stage=load_data_done" in caplog.text
     assert "stage=montage_apply_done" in caplog.text
@@ -172,15 +182,14 @@ def test_open_preflight_eeg_file_is_lazy_subsetted_and_context_managed(
     monkeypatch,
     tmp_path,
 ):
-    header_raw = _FakeRaw()
-    lazy_raw = _FakeRaw()
+    header_raw = _raw()
+    lazy_raw = _raw(["Fp1", "EXG1", "EXG2", "Status"])
     calls = []
 
     def _fake_read_raw_bdf(filepath, **kwargs):
         calls.append((filepath, dict(kwargs)))
         return header_raw if len(calls) == 1 else lazy_raw
 
-    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
     monkeypatch.setattr(
         shared_load_utils,
         "_resolve_stim",
@@ -213,33 +222,25 @@ def test_open_preflight_eeg_file_is_lazy_subsetted_and_context_managed(
     assert calls[0][1]["preload"] is False
     assert "include" not in calls[0][1]
     assert calls[1][1]["preload"] is False
-    assert calls[1][1]["include"] == ["Cz", "EXG1", "EXG2", "Status"]
+    assert calls[1][1]["include"] == ["Fp1", "EXG1", "EXG2", "Status"]
     assert header_raw.close_calls == 1
     assert lazy_raw.close_calls == 1
-    assert lazy_raw.channel_type_calls == [
-        {"EXG3": "misc"},
-        {"EXG1": "eeg", "EXG2": "eeg"},
-        {"Status": "stim"},
-    ]
-    assert lazy_raw.montage_kwargs == {
-        "on_missing": "warn",
-        "match_case": False,
-        "verbose": False,
-    }
+    assert read_raw_biosemi64_geometry(lazy_raw)["retained_scalp_channels"] == ["Fp1"]
     assert any("[PREFLIGHT LAZY LOADER READY]" in message for message in logs)
     assert any("[PREFLIGHT LAZY LOADER CLOSED]" in message for message in logs)
     assert shared_load_utils.open_preflight_eeg_file is load_utils.open_preflight_eeg_file
 
 
 def test_open_preflight_eeg_file_closes_when_caller_raises(monkeypatch, tmp_path):
-    lazy_raw = _FakeRaw()
+    header_raw = _raw()
+    lazy_raw = _raw()
+    calls = []
 
-    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
-    monkeypatch.setattr(
-        shared_load_utils.mne.io,
-        "read_raw_bdf",
-        lambda *_args, **_kwargs: lazy_raw,
-    )
+    def _read(*_args, **_kwargs):
+        calls.append(dict(_kwargs))
+        return header_raw if len(calls) == 1 else lazy_raw
+
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
 
     with pytest.raises(RuntimeError, match="caller failed"):
         with load_utils.open_preflight_eeg_file(
@@ -269,23 +270,136 @@ def test_shared_load_eeg_file_unsupported_extension_warns_and_returns_none(monke
     assert warnings == [("Unsupported File", "Format '.set' not supported. Only '.bdf' is supported.")]
 
 
-def test_shared_loader_uses_standard_1005_for_1010_coverage(monkeypatch):
-    montage_calls = []
+def test_shared_loader_compatibility_alias_returns_biosemi64():
+    assert tuple(load_utils._cached_1010().ch_names) == BIOSEMI64_CHANNELS
+    assert load_utils._cached_1020 is load_utils._cached_1010
 
-    def _fake_make_standard_montage(name):
-        montage_calls.append(name)
-        return object()
 
-    shared_load_utils._cached_1010.cache_clear()
-    monkeypatch.setattr(
-        shared_load_utils.mne.channels,
-        "make_standard_montage",
-        _fake_make_standard_montage,
+def test_shared_loader_applies_explicit_ab_1020_mapping_without_reordering_data(
+    monkeypatch,
+    tmp_path,
+):
+    source_scalp = list(reversed(tuple(BIOSEMI64_1020_AB_CHANNEL_MAP)))
+    source_names = [*source_scalp, "EXG1", "EXG2", "Status"]
+    header_raw = _raw(source_names)
+    loaded_raw = _raw(source_names)
+    loaded_raw._data[:, :] = np.arange(len(source_names), dtype=float)[:, np.newaxis]
+    calls = []
+
+    def _read(*_args, **kwargs):
+        calls.append(dict(kwargs))
+        return header_raw if len(calls) == 1 else loaded_raw
+
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+
+    raw = load_utils.load_eeg_file(
+        _app([]),
+        str(tmp_path / "ab.bdf"),
+        electrode_mapping_profile=ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
+        electrode_montage="biosemi64",
     )
 
-    try:
-        assert load_utils._cached_1010() is not None
-    finally:
-        shared_load_utils._cached_1010.cache_clear()
+    assert raw is loaded_raw
+    assert raw.ch_names[:3] == ["O2", "PO4", "PO8"]
+    assert raw.ch_names[63] == "Fp1"
+    assert np.array_equal(raw._data[:64, 0], np.arange(64, dtype=float))
+    identity = read_raw_biosemi64_geometry(raw)
+    assert identity["electrode_mapping_profile"] == "biosemi64_1020_ab_v1"
 
-    assert montage_calls == ["standard_1005"]
+
+def test_shared_loader_rejects_ab_header_without_explicit_profile(monkeypatch, tmp_path):
+    header_raw = _raw([*BIOSEMI64_1020_AB_CHANNEL_MAP, "EXG1", "EXG2", "Status"])
+    calls = []
+    errors = []
+
+    def _read(*_args, **kwargs):
+        calls.append(dict(kwargs))
+        return header_raw
+
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    monkeypatch.setattr(
+        shared_load_utils.user_messages,
+        "show_error",
+        lambda title, message: errors.append((title, message)),
+    )
+
+    raw = load_utils.load_eeg_file(_app([]), str(tmp_path / "ab.bdf"))
+
+    assert raw is None
+    assert len(calls) == 1
+    assert errors and "Select the tested" in errors[0][1]
+
+
+def test_channel_limit_never_hides_incomplete_full_acquisition(monkeypatch, tmp_path):
+    header_raw = _raw([*BIOSEMI64_CHANNELS[:-1], "EXG1", "EXG2", "Status"])
+    calls = []
+
+    def _read(*_args, **kwargs):
+        calls.append(dict(kwargs))
+        return header_raw
+
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    monkeypatch.setattr(shared_load_utils.user_messages, "show_error", lambda *_args: None)
+
+    raw = load_utils.load_eeg_file(
+        _app([]),
+        str(tmp_path / "incomplete.bdf"),
+        first_n_channels=1,
+    )
+
+    assert raw is None
+    assert len(calls) == 1
+    assert calls[0]["preload"] is False
+
+
+def test_shared_loader_rejects_unsupported_project_montage_before_read(monkeypatch, tmp_path):
+    errors = []
+    monkeypatch.setattr(
+        shared_load_utils.mne.io,
+        "read_raw_bdf",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unsupported montage must fail before reading the BDF")
+        ),
+    )
+    monkeypatch.setattr(
+        shared_load_utils.user_messages,
+        "show_error",
+        lambda title, message: errors.append((title, message)),
+    )
+
+    raw = load_utils.load_eeg_file(
+        _app([]),
+        str(tmp_path / "sample.bdf"),
+        electrode_montage="standard_1005",
+    )
+
+    assert raw is None
+    assert errors and "Unsupported electrode montage" in errors[0][1]
+
+
+def test_preflight_and_full_loader_attach_identical_geometry(monkeypatch, tmp_path):
+    queue = [_raw(), _raw(), _raw(), _raw()]
+
+    def _read(*_args, **_kwargs):
+        return queue.pop(0)
+
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _read)
+    app = _app([])
+    path = str(tmp_path / "sample.bdf")
+
+    full_raw = load_utils.load_eeg_file(app, path)
+    with load_utils.open_preflight_eeg_file(app, path) as preflight_raw:
+        assert preflight_raw is not None
+        assert read_raw_biosemi64_geometry(preflight_raw) == read_raw_biosemi64_geometry(
+            full_raw
+        )
+        for channel in BIOSEMI64_CHANNELS:
+            full_loc = full_raw.info["chs"][full_raw.ch_names.index(channel)]["loc"][:3]
+            preflight_loc = preflight_raw.info["chs"][preflight_raw.ch_names.index(channel)][
+                "loc"
+            ][:3]
+            assert np.array_equal(full_loc, preflight_loc)

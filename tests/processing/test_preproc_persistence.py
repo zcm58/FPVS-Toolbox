@@ -76,6 +76,8 @@ def test_normalization_and_roundtrip(tmp_path):
             "rejection_z": 3.0,
             "ref_chan1": "EXG1",
             "ref_chan2": "EXG2",
+            "electrode_montage": "biosemi64",
+            "electrode_mapping_profile": "biosemi64_1020_ab_v1",
             "max_chan_idx_keep": 64,
             "max_bad_chans": 8,
             "auto_detect_removed_electrodes": True,
@@ -103,6 +105,11 @@ def test_normalization_and_roundtrip(tmp_path):
     assert saved["preprocessing"]["manual_excluded_participant_conditions"] == {
         "P01": ["Negative Valence"]
     }
+    assert saved["preprocessing"]["electrode_montage"] == "biosemi64"
+    assert (
+        saved["preprocessing"]["electrode_mapping_profile"]
+        == "biosemi64_1020_ab_v1"
+    )
     assert "downsample_rate" not in saved["preprocessing"]
     assert _RETIRED_EPOCH_KEYS.isdisjoint(saved["preprocessing"])
     assert saved["compatibility"]["processing_fingerprint_v9"] == {
@@ -121,6 +128,11 @@ def test_normalization_and_roundtrip(tmp_path):
     assert fresh.preprocessing["line_noise_filter_enabled"] is False
     assert fresh.preprocessing["line_noise_frequency_hz"] == 50
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
+    assert fresh.preprocessing["electrode_montage"] == "biosemi64"
+    assert (
+        fresh.preprocessing["electrode_mapping_profile"]
+        == "biosemi64_1020_ab_v1"
+    )
     assert fresh.preprocessing["manual_removed_electrodes"] == {"P01": ["P9"]}
     assert fresh.preprocessing["manual_excluded_participants"] == ["P12"]
     assert fresh.preprocessing["manual_excluded_participant_conditions"] == {

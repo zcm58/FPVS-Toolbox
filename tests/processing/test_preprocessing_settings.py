@@ -3,6 +3,9 @@ import pytest
 pytest.importorskip("PySide6")
 
 from Main_App.projects.preprocessing_settings import (
+    ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+    ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
+    ELECTRODE_MONTAGE_BIOSEMI64,
     HARMONIC_SELECTION_PROFILE_VERSION,
     LEGACY_HARMONIC_SELECTION_PROFILE,
     NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
@@ -30,6 +33,11 @@ def test_defaults_use_expected_bandpass():
     assert normalized["low_pass"] == 50.0
     assert normalized["line_noise_filter_enabled"] is True
     assert normalized["line_noise_frequency_hz"] == 60
+    assert normalized["electrode_montage"] == ELECTRODE_MONTAGE_BIOSEMI64
+    assert (
+        normalized["electrode_mapping_profile"]
+        == ELECTRODE_MAPPING_PROFILE_ANATOMICAL
+    )
     assert normalized["auto_detect_removed_electrodes"] is True
     assert normalized["removed_electrode_detection_mode"] == "auto"
     assert normalized["manual_removed_electrodes"] == {}
@@ -42,6 +50,47 @@ def test_defaults_use_expected_bandpass():
     assert normalized["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
     assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
     assert _RETIRED_EPOCH_KEYS.isdisjoint(PREPROCESSING_CANONICAL_KEYS)
+
+
+def test_biosemi64_montage_and_mapping_profile_normalize_to_canonical_ids():
+    normalized = normalize_preprocessing_settings(
+        {
+            "electrode_montage": " BioSemi64 ",
+            "electrode_mapping_profile": " BIOSEMI64_1020_AB_V1 ",
+        }
+    )
+
+    assert normalized["electrode_montage"] == ELECTRODE_MONTAGE_BIOSEMI64
+    assert (
+        normalized["electrode_mapping_profile"]
+        == ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1
+    )
+
+
+@pytest.mark.parametrize("montage", ["standard_1005", "biosemi32", "custom", 64])
+def test_unsupported_electrode_montage_is_rejected(montage):
+    with pytest.raises(ValueError, match="Unsupported electrode montage|Invalid electrode montage"):
+        normalize_preprocessing_settings({"electrode_montage": montage})
+
+
+@pytest.mark.parametrize(
+    "mapping_profile",
+    ["a1_b32", "biosemi64_abc", "equiradial", "infer_from_order", 1],
+)
+def test_unsupported_electrode_mapping_profile_is_rejected(mapping_profile):
+    with pytest.raises(
+        ValueError,
+        match="Unsupported electrode mapping profile|Invalid electrode mapping profile",
+    ):
+        normalize_preprocessing_settings(
+            {"electrode_mapping_profile": mapping_profile}
+        )
+
+
+@pytest.mark.parametrize("channel_limit", [0, -1, 65])
+def test_biosemi64_channel_limit_must_be_between_one_and_64(channel_limit):
+    with pytest.raises(ValueError, match="between 1 and 64"):
+        normalize_preprocessing_settings({"max_chan_idx_keep": channel_limit})
 
 
 def test_new_projects_explicitly_use_publication_aligned_harmonic_profile():

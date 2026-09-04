@@ -17,7 +17,7 @@ from Main_App.Shared.fft_crop_utils import (
 )
 
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
-PREFLIGHT_QC_METHOD_VERSION = "v3"
+PREFLIGHT_QC_METHOD_VERSION = "v4_biosemi64_geometry"
 PREFLIGHT_QC_BLOCK_DURATION_S = 10.0
 PREFLIGHT_QC_MAX_WORKERS = 4
 PREFLIGHT_QC_MAX_IO_READERS = 2
@@ -131,7 +131,9 @@ def plan_preflight_qc_events(
             continue
         labels_by_code[int(value)].append(clean_label)
     if not labels_by_code:
-        raise ValueError("A non-empty condition event map is required for preflight QC v3.")
+        raise ValueError(
+            "A non-empty condition event map is required for preflight QC v4."
+        )
 
     normalized_events = _normalized_events(events)
     onset_ids = set(labels_by_code)

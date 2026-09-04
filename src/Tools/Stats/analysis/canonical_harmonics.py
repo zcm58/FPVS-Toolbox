@@ -53,6 +53,18 @@ def load_project_processing_harmonics(
             reason="missing_project",
         )
     root = Path(project_root).resolve()
+    from Main_App.processing.full_fft_provenance import (
+        FullFftProvenanceError,
+        require_current_project_full_fft_provenance,
+    )
+
+    try:
+        require_current_project_full_fft_provenance(root)
+    except FullFftProvenanceError as exc:
+        raise CanonicalHarmonicSelectionError(
+            str(exc),
+            reason="stale_full_fft_provenance",
+        ) from exc
     try:
         from Main_App.processing.harmonic_selection_qc import (
             load_processing_harmonic_selection,

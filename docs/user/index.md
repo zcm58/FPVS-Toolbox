@@ -74,9 +74,36 @@ fact but cannot statistically separate those effects.
 ### Data Compatibility
 
 The currently validated workflow targets BioSemi ActiveTwo 64-channel BDF
-recordings using the standard BioSemi64 electrode names. Other recording
-systems, file formats, channel layouts, or custom montages have not been
-validated and may fail or produce incomplete analyses or figures.
+recordings with the MNE BioSemi64 sensor geometry. **Settings >
+Preprocessing > Electrode montage** therefore shows one fixed choice: **BioSemi
+ActiveTwo 64**. Other recording systems, file formats, channel layouts, and
+custom montages are not supported by the current processing path.
+
+The default channel mapping expects the 64 anatomical electrode names. If a
+BDF instead uses A1-A32/B1-B32, select the mapping profile only when the file
+came from the standard BioSemi 64-channel 10/20 wiring. That profile does not
+support BioSemi ABC/equiradial or custom cap layouts. The Toolbox checks the
+complete header before preflight or processing and stops with a clear error for
+missing, duplicate, mixed, or unsupported channel identities. It does not
+guess positions from channel order.
+
+The geometry check is separate from signal-quality QC. A physically removed or
+disconnected electrode can still have a valid channel name in the BDF, so it
+may pass the header check and then be flagged from its recorded signal. CMS and
+DRL are part of the BioSemi acquisition loop and should not appear as recorded
+scalp/data channels; selected EXG mastoid signals remain reference channels.
+See BioSemi's
+[headcap documentation](https://www.biosemi.com/headcap.htm) and
+[CMS/DRL explanation](https://www.biosemi.com/faq/cms%26drl.htm).
+
+Projects processed by older Toolbox builds may contain outputs made with the
+generic `standard_1005` coordinates. Reprocess before new analysis or
+publication when those recordings used interpolation or a geometry-based
+channel decision, and do not combine them with current BioSemi64 outputs.
+Scalp maps should be regenerated even when no interpolation occurred because
+the plotted sensor positions changed. The current synthetic comparison shows
+that interpolation can also change FFT/BCA/SNR/local-z values near a decision
+boundary, but it does not estimate the effect in representative lab data.
 
 ### Experiment Assumptions
 

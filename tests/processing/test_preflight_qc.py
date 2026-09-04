@@ -7,6 +7,7 @@ import time
 import mne
 import numpy as np
 
+from Main_App.io.eeg_geometry import attach_raw_biosemi64_geometry
 from Main_App.io.load_utils import BdfPreflightInfo
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
@@ -32,6 +33,11 @@ def _raw_with_removed_channel(channel: str) -> mne.io.RawArray:
         verbose=False,
     )
     raw.set_montage(montage)
+    attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile="anatomical_labels",
+        retained_channels=names,
+    )
     return raw
 
 
@@ -111,6 +117,42 @@ def test_scan_preprocessing_qc_preserves_group_id_on_load_error(
 
     assert scan.results[0].group_id == "patient"
     assert scan.results[0].load_error == "load failed"
+
+
+def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def _fake_load(_app, path, **kwargs):
+        observed["path"] = path
+        observed.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(preflight_qc.load_utils, "load_eeg_file", _fake_load)
+    raw_path = tmp_path / "ab_labels.bdf"
+
+    loaded = preflight_qc._load_raw_for_preflight(
+        raw_path,
+        {
+            "ref_channel1": "EXG3",
+            "ref_channel2": "EXG4",
+            "stim_channel": "Trigger",
+            "electrode_montage": "biosemi64",
+            "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+        },
+    )
+
+    assert loaded is not None
+    assert observed == {
+        "path": str(raw_path),
+        "ref_pair": ("EXG3", "EXG4"),
+        "first_n_channels": 64,
+        "stim_channel": "Trigger",
+        "electrode_montage": "biosemi64",
+        "electrode_mapping_profile": "biosemi64_1020_ab_v1",
+    }
 
 
 def test_preflight_suggestions_include_review_only_removed_electrode_classes(

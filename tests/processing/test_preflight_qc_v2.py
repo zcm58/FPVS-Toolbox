@@ -103,7 +103,8 @@ def test_v3_accepts_canonical_project_reference_keys() -> None:
     ]
     assert "epoch_end" not in preflight_qc._preflight_cache_settings(settings)
     method = preflight_qc._preflight_cache_method()
-    assert method["version"] == "v3"
+    assert method["version"] == "v4_biosemi64_geometry"
+    assert method["geometry"]["montage_id"] == "biosemi64"
     assert method["condition_completion_policy"] == "locked_fft_span_v1"
     assert "condition_minimum_completion_s" not in method
 
@@ -189,7 +190,7 @@ def test_v3_invalid_locked_crop_is_a_file_error_without_sample_read_or_cache(
     assert "insufficient_55" in result.load_error
     assert result.condition_qc == {
         "method_name": "condition_aware_preflight_qc",
-        "method_version": "v3",
+        "method_version": "v4_biosemi64_geometry",
         "cache_status": "error",
     }
     assert raw.reads == []

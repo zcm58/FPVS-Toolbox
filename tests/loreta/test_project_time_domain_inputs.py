@@ -12,6 +12,7 @@ import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.exports.source_time_domain_export import write_source_ready_time_domain_derivatives
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Tools.LORETA_Visualizer.source_producers.project_time_domain_inputs import (
     ExpectedProjectTimeDomainInput,
     PROJECT_TIME_DOMAIN_INPUT_FOLDER,
@@ -90,6 +91,7 @@ def test_load_project_time_domain_inputs_accepts_processing_writer_output(tmp_pa
         processing_provenance={
             "processing_fingerprint": PROCESSING_FINGERPRINT,
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+            "geometry": biosemi64_geometry_identity(),
         },
     )
 

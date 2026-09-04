@@ -9,6 +9,8 @@ from Main_App.processing.full_fft_provenance import (
     REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION,
     write_project_full_fft_provenance,
 )
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 
 
 def test_repeated_full_fft_provenance_keeps_recording_and_session_identity(
@@ -74,6 +76,37 @@ def test_repeated_full_fft_provenance_keeps_recording_and_session_identity(
             / f"P1__{session_id}_Faces_Results.xlsx"
         )
         _write_full_fft(path)
+    ledger_path = project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry = biosemi64_geometry_identity()
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    f"P1__{session_id}": {
+                        "participant_id": "P1",
+                        "recording_id": f"P1__{session_id}",
+                        "session_id": session_id,
+                        "source_id": f"treated_{session_id}",
+                        "visit_index": index,
+                        "days_from_baseline": days,
+                        "status": "completed",
+                        "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+                        "processing_fingerprint": "fixture-processing-fingerprint",
+                        "condition_completeness": "complete",
+                        "geometry": geometry,
+                    }
+                    for session_id, index, days in (
+                        ("visit_1", 1, 0.0),
+                        ("visit_2", 2, 14.0),
+                    )
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     provenance = write_project_full_fft_provenance(
         project_root,

@@ -21,7 +21,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 PREFLIGHT_QC_CACHE_SCHEMA_VERSION = 1
-PREFLIGHT_QC_CACHE_METHOD_DIRECTORY = "v2"
+PREFLIGHT_QC_CACHE_METHOD_DIRECTORY = "v4_biosemi64_geometry"
 PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY = (
     Path(".fpvs_processing")
     / "preflight_qc"
@@ -31,7 +31,7 @@ _CACHE_WRITE_LOCK = threading.Lock()
 
 
 def preflight_qc_cache_directory(project_root: Path) -> Path:
-    """Return the v2 cache directory beneath an explicit absolute project root."""
+    """Return the current cache directory beneath an explicit project root."""
 
     root = Path(project_root)
     if not root.is_absolute():

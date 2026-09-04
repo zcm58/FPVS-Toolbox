@@ -1,0 +1,41 @@
+"""Public Main App import surface for canonical EEG geometry."""
+
+from Main_App.Shared.eeg_geometry import (
+    BIOSEMI64_1020_AB_CHANNEL_MAP,
+    BIOSEMI64_CHANNELS,
+    BIOSEMI64_CHANNEL_SET,
+    BIOSEMI64_COORDINATE_FINGERPRINT,
+    BIOSEMI64_GEOMETRY_VERSION,
+    BIOSEMI64_MONTAGE_ID,
+    BIOSEMI64_RUNTIME_ATTRIBUTE,
+    BIOSEMI64_SCALP_SET_FINGERPRINT,
+    BioSemi64AcquisitionGeometry,
+    BioSemi64GeometryError,
+    attach_raw_biosemi64_geometry,
+    biosemi64_geometry_identity,
+    canonical_biosemi64_head_coordinates,
+    cached_biosemi64_montage,
+    read_raw_biosemi64_geometry,
+    validate_biosemi64_acquisition_channels,
+    validate_raw_biosemi64_geometry,
+)
+
+__all__ = [
+    "BIOSEMI64_1020_AB_CHANNEL_MAP",
+    "BIOSEMI64_CHANNELS",
+    "BIOSEMI64_CHANNEL_SET",
+    "BIOSEMI64_COORDINATE_FINGERPRINT",
+    "BIOSEMI64_GEOMETRY_VERSION",
+    "BIOSEMI64_MONTAGE_ID",
+    "BIOSEMI64_RUNTIME_ATTRIBUTE",
+    "BIOSEMI64_SCALP_SET_FINGERPRINT",
+    "BioSemi64AcquisitionGeometry",
+    "BioSemi64GeometryError",
+    "attach_raw_biosemi64_geometry",
+    "biosemi64_geometry_identity",
+    "canonical_biosemi64_head_coordinates",
+    "cached_biosemi64_montage",
+    "read_raw_biosemi64_geometry",
+    "validate_biosemi64_acquisition_channels",
+    "validate_raw_biosemi64_geometry",
+]

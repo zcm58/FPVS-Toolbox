@@ -213,6 +213,18 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
         return (1, 1)
 
     seen_settings: dict[str, object] = {}
+    dataset_index = object()
+    provenance_calls: list[tuple[Path, object]] = []
+    monkeypatch.setattr(
+        "Main_App.projects.load_project_dataset_index",
+        lambda root: dataset_index if Path(root) == tmp_path else None,
+    )
+    monkeypatch.setattr(
+        "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
+        lambda root, *, dataset_index: provenance_calls.append(
+            (Path(root), dataset_index)
+        ),
+    )
     monkeypatch.setattr(
         worker_mod,
         "load_project_processing_harmonics",
@@ -227,11 +239,63 @@ def test_worker_loads_processing_harmonics_before_generating_figures(
     worker._run()
 
     assert captured["project_root"] == tmp_path
+    assert provenance_calls == [(tmp_path, dataset_index)]
     assert seen_settings["source"] == CANONICAL_HARMONIC_SOURCE
     assert seen_settings["harmonics"] == [1.2, 2.4]
     metadata = tmp_path / "out" / "individual_detectability_metadata.json"
     assert metadata.exists()
     assert "FPVS Toolbox significant harmonics" in metadata.read_text(encoding="utf-8")
+
+
+def test_managed_custom_detectability_rejects_legacy_geometry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from Main_App.processing.full_fft_provenance import FullFftProvenanceError
+
+    condition = ConditionInfo(
+        name="CondA",
+        path=tmp_path / "CondA",
+        files=[tmp_path / "CondA" / "P1_CondA_Results.xlsx"],
+    )
+    request = RunRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "out",
+        project_root=tmp_path,
+        conditions=[condition],
+        output_stems={"CondA": "cond_a_grid"},
+        excluded_participants=set(),
+        settings=DetectabilitySettings(
+            harmonic_source=CUSTOM_HARMONIC_SOURCE,
+            oddball_harmonics_hz=[1.2],
+        ),
+    )
+    dataset_index = object()
+    monkeypatch.setattr(
+        "Main_App.projects.load_project_dataset_index",
+        lambda _root: dataset_index,
+    )
+
+    def reject_geometry(_root, *, dataset_index):
+        assert dataset_index is not None
+        raise FullFftProvenanceError(
+            "Legacy or unknown geometry cannot be analyzed; reprocess the EEG."
+        )
+
+    monkeypatch.setattr(
+        "Main_App.processing.full_fft_provenance.require_current_project_full_fft_provenance",
+        reject_geometry,
+    )
+
+    worker = IndividualDetectabilityWorker(request)
+    errors: list[str] = []
+    worker.error.connect(errors.append)
+    worker.run()
+
+    assert errors == [
+        "Legacy or unknown geometry cannot be analyzed; reprocess the EEG."
+    ]
+    assert not request.output_root.exists()
 
 
 def _amplitude_by_bin(harmonic_bins: tuple[int, ...], target_value: float) -> dict[int, float]:

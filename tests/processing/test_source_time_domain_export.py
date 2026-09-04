@@ -17,6 +17,7 @@ from Main_App.exports.source_time_domain_export import (
     SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT,
     write_source_ready_time_domain_derivatives,
 )
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 
 
 def _epochs(*, scale: float = 1.0) -> mne.EpochsArray:
@@ -25,7 +26,7 @@ def _epochs(*, scale: float = 1.0) -> mne.EpochsArray:
         sfreq=8.0,
         ch_types=["eeg", "eeg", "stim"],
     )
-    info.set_montage(mne.channels.make_standard_montage("standard_1020"))
+    info.set_montage(mne.channels.make_standard_montage("biosemi64"))
     data = np.asarray(
         [
             [
@@ -72,6 +73,17 @@ def _epochs(*, scale: float = 1.0) -> mne.EpochsArray:
     return epochs
 
 
+def _processing_provenance() -> dict[str, object]:
+    return {
+        "processing_fingerprint": "processing-hash",
+        "processing_fingerprint_version": "processing-v1",
+        "preprocessing_order": "locked",
+        "geometry": biosemi64_geometry_identity(
+            retained_channels=("Fz", "Cz"),
+        ),
+    }
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -99,11 +111,7 @@ def test_export_writes_signed_eeg_mean_sidecar_and_commit_manifest(tmp_path: Pat
                 "fs": 8.0,
             }
         },
-        processing_provenance={
-            "processing_fingerprint": "processing-hash",
-            "processing_fingerprint_version": "processing-v1",
-            "preprocessing_order": "locked",
-        },
+        processing_provenance=_processing_provenance(),
         source_signature={"raw_file": "Input/P01.bdf", "raw_size": 1234},
         resolved_protocol_by_condition={
             "Condition A": {
@@ -176,6 +184,7 @@ def test_export_writes_signed_eeg_mean_sidecar_and_commit_manifest(tmp_path: Pat
     assert sidecar["crop"]["N_mod_step"] == 0
     assert sidecar["processing"]["fingerprint"] == "processing-hash"
     assert sidecar["processing"]["fingerprint_version"] == "processing-v1"
+    assert sidecar["geometry"] == _processing_provenance()["geometry"]
     assert sidecar["source_signature"] == {"raw_file": "Input/P01.bdf", "raw_size": 1234}
     assert sidecar["resolved_protocol"] == {
         "contrast_modulation": {"kind": "sinusoidal", "phase_deg": 0.0},
@@ -213,6 +222,7 @@ def test_export_defaults_future_protocol_fields_to_null(tmp_path: Path) -> None:
         participant_id="P02",
         condition_epochs={"Condition A": _epochs(scale=1e-6)},
         condition_ids={"Condition A": "condition-a"},
+        processing_provenance=_processing_provenance(),
     )
 
     sidecar = json.loads(result.artifacts[0].sidecar_path.read_text(encoding="utf-8"))
@@ -302,6 +312,7 @@ def test_crop_mismatch_fails_before_any_artifact_is_committed(tmp_path: Path) ->
             participant_id="P01",
             condition_epochs={"Condition A": _epochs()},
             crop_provenance_by_condition={"Condition A": {"N": 12}},
+            processing_provenance=_processing_provenance(),
         )
 
     output_root = project_root / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT
@@ -337,6 +348,7 @@ def test_partial_condition_failure_removes_artifacts_and_never_commits_manifest(
                 "Condition B": _epochs(scale=2e-6),
             },
             condition_ids={"Condition A": "a", "Condition B": "b"},
+            processing_provenance=_processing_provenance(),
         )
 
     output_root = project_root / SOURCE_READY_TIME_DOMAIN_RELATIVE_ROOT

@@ -18,6 +18,7 @@ import mne
 import numpy as np
 
 from Main_App.io import load_utils
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Main_App.io.load_utils import BDF_RECORDING_NOT_STARTED_REASON, BdfPreflightInfo
 from Main_App.Shared.fft_crop_utils import ODDBALL_FREQ
 from Main_App.processing.processing_controller import RawFileInfo
@@ -666,6 +667,9 @@ def _load_raw_for_preflight(
         str(file_path),
         ref_pair=(str(ref_ch1), str(ref_ch2)),
         first_n_channels=64,
+        stim_channel=_configured_stim_channel(settings),
+        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        electrode_montage=settings.get("electrode_montage"),
     )
 
 
@@ -738,7 +742,7 @@ def _preflight_scalp_picks(
     )
     names = tuple(str(raw.ch_names[index]) for index in picks)
     if not picks:
-        raise RuntimeError("Preflight QC v3 found no scalp EEG channels.")
+        raise RuntimeError("Preflight QC v4 found no scalp EEG channels.")
     return picks, names
 
 
@@ -903,6 +907,8 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "oddball_freq",
         "line_noise_filter_enabled",
         "line_noise_frequency_hz",
+        "electrode_montage",
+        "electrode_mapping_profile",
     )
     payload: dict[str, object] = {
         key: settings.get(key)
@@ -915,7 +921,10 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
     return payload
 
 
-def _preflight_cache_method() -> dict[str, object]:
+def _preflight_cache_method(
+    settings: Mapping[str, Any] | None = None,
+) -> dict[str, object]:
+    settings = settings or {}
     return {
         "name": PREFLIGHT_QC_METHOD_NAME,
         "version": PREFLIGHT_QC_METHOD_VERSION,
@@ -923,6 +932,9 @@ def _preflight_cache_method() -> dict[str, object]:
         "raw_spectral_method": CONDITION_SPECTRAL_QC_METHOD_VERSION,
         "condition_block_duration_s": PREFLIGHT_QC_BLOCK_DURATION_S,
         "condition_completion_policy": "locked_fft_span_v1",
+        "geometry": biosemi64_geometry_identity(
+            electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        ),
         "numpy_version": str(np.__version__),
         "mne_version": str(mne.__version__),
     }
@@ -1121,6 +1133,8 @@ def _scan_one_preflight_file_v2(
         ref_pair=_configured_ref_pair(qc_settings),
         first_n_channels=64,
         stim_channel=_configured_stim_channel(qc_settings),
+        electrode_mapping_profile=qc_settings.get("electrode_mapping_profile"),
+        electrode_montage=qc_settings.get("electrode_montage"),
     )
     raw = None
     context_entered = False
@@ -1149,14 +1163,14 @@ def _scan_one_preflight_file_v2(
         )
         _record_timing("events_and_plan", event_started)
         if not event_plan.spans:
-            raise RuntimeError("Preflight QC v3 planned no relevant condition intervals.")
+            raise RuntimeError("Preflight QC v4 planned no relevant condition intervals.")
 
         file_identity = _preflight_file_identity(
             file_path,
             recording_id=recording_id,
         )
         cache_settings = _preflight_cache_settings(qc_settings)
-        cache_method = _preflight_cache_method()
+        cache_method = _preflight_cache_method(qc_settings)
         event_plan_payload = event_plan.to_payload()
         cache_started = time.perf_counter()
         cached = load_preflight_qc_cache(
@@ -1344,8 +1358,14 @@ def _scan_one_preflight_file_v2(
             "spectral_lower_frequency_hz": lower_hz,
             "spectral_upper_frequency_hz": upper_hz,
             "timings_ms": dict(timings_ms),
+            "geometry": biosemi64_geometry_identity(
+                electrode_mapping_profile=qc_settings.get(
+                    "electrode_mapping_profile"
+                ),
+                retained_channels=channel_names,
+            ),
             "hard_exclusion_policy": (
-                "review_only_in_preflight_v3; established hard rules remain "
+                "review_only_in_preflight_v4; established hard rules remain "
                 "unchanged in the normal processing runner"
             ),
         }
@@ -1675,9 +1695,9 @@ def scan_preprocessing_qc(
     project_root: Path | None = None,
     event_map: Mapping[str, int] | None = None,
 ) -> PreflightQcScan:
-    """Run deterministic preflight QC, using condition-aware v3 when scoped.
+    """Run deterministic preflight QC, using condition-aware v4 when scoped.
 
-    The v3 path is opt-in and requires both an explicit project root and event
+    The v4 path is opt-in and requires both an explicit project root and event
     map. Existing callers without either input retain the legacy scan behavior.
     """
 

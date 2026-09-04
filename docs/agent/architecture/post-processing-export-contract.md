@@ -69,8 +69,11 @@ Original FullFFT sheets are upstream source artifacts, not Summed-BCA
 derivatives. `Main_App.processing.full_fft_provenance` records their separate
 neutral identity under `tools.processing.full_fft_provenance`: project-relative
 source workbooks, base/oddball rates, exact grid and resolution, active cohort
-and frequency-QC state, processing-ledger/export identity, and independent
-fingerprints. The full post-processing run writes this record only after
+and frequency-QC state, processing-ledger/export identity, the complete
+canonical BioSemi64 geometry identity, and independent fingerprints. The
+geometry payload includes montage and geometry versions, coordinate and scalp-
+set fingerprints, mapping profile, retained scalp channels, and a composite
+fingerprint. The full post-processing run writes this record only after
 frequency-domain QC is accepted and marked current, before harmonic selection
 and all of its standard derivatives. This ordering keeps valid FullFFT inputs
 available to Free Harmonic Clustering even if selection or a sibling export
@@ -79,6 +82,15 @@ does not rewrite it because neither the FullFFT sources nor their cohort
 changed. Stale standard Summed-BCA derivatives therefore do not block Free
 Harmonic Clustering; stale FullFFT, cohort/QC, rate, grid, or processing-export
 provenance does.
+
+Every active FullFFT workbook must match one completed processing-ledger entry
+with the project geometry identity and the expected retained channel count.
+Missing pre-QC-15 geometry, `standard_1005` legacy identity, an unknown
+coordinate definition, or mixed retained/geometry fingerprints blocks creation
+or reuse of neutral FullFFT provenance. Geometry staleness requires EEG
+reprocessing before post-processing; a selection-only rebuild cannot repair
+it. Existing legacy files remain audit artifacts and must not be silently
+relabeled or pooled with canonical BioSemi64 outputs.
 
 ## Source-Ready Time-Domain Sibling Export
 
@@ -92,6 +104,12 @@ Artifact pairs use
 `<condition label>/[<group>/]<participant>_<condition_id>_avg_raw.fif` and a
 sibling `_avg_raw.json`; participant commit manifests use
 `manifests/[<group>/]<participant>.json` and are published last.
+
+The source-ready writer requires the processing-owned canonical geometry
+payload, verifies that the averaged Raw contains exactly its retained scalp
+set, and writes that payload into every JSON sidecar and participant commit
+manifest. Missing, stale, or mismatched geometry fails publication; the writer
+does not infer a montage from channel names at export time.
 
 Downstream source-map orchestration may mark a completed participant as
 source-ineligible when any canonical condition is missing or the processing
@@ -291,6 +309,9 @@ an intervening metadata write.
 ## Preservation Rules
 
 - Do not change metric formulas, FFT bin selection, noise-window logic, sheet names, column names, filename/folder naming, channel ordering, logging semantics, or completion/error behavior.
+- Do not bypass the processing-ledger-to-FullFFT geometry match, accept a
+  geometry-less legacy provenance record, or combine different geometry or
+  retained-set fingerprints in one downstream analysis.
 - Do not change workbook formatting, freeze panes, writer engine behavior, or the rule that omits `FFT and neighbors` when no neighbor rows exist.
 - Do not change the 55-on-bin metadata handling; see `docs/agent/architecture/fft-crop-method.md`. Missing locked FFT crop metadata, `fixed_epoch_fallback`, or off-bin target frequencies must be hard failures, not warnings or nearest-bin fallbacks.
 - Legacy compatibility wrappers have been deleted; runtime callers should use the current shared owner.

@@ -6,10 +6,15 @@ import hashlib
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
+
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    biosemi64_geometry_identity,
+)
 
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
@@ -30,7 +35,14 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v9_source_ready_time_domain"
+PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v10_biosemi64_geometry"
+_GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
+    {
+        "manual_participant_exclusion",
+        "manual_recording_exclusion",
+        "recording_not_started",
+    }
+)
 _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
     {
         "manual_excluded_participant_conditions",
@@ -112,6 +124,7 @@ class ProcessingPlan:
     fingerprint: str
     condition_labels: tuple[str, ...]
     choice: str = "incremental"
+    geometry_identity: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def completed_count(self) -> int:
@@ -222,6 +235,17 @@ def _raw_qc_extra_payload(source: Mapping[str, Any] | None) -> dict[str, object]
         "raw_qc_baseline_excluded": bool(
             source.get("raw_qc_baseline_excluded", source.get("raw_baseline_excluded"))
         ),
+    }
+
+
+def _interpolation_payload(source: Mapping[str, Any] | None) -> dict[str, object]:
+    source = source or {}
+    return {
+        "interpolation_status": str(source.get("interpolation_status") or ""),
+        "interpolation_requested_channels": _string_list(
+            source.get("interpolation_requested_channels")
+        ),
+        "interpolation_error": str(source.get("interpolation_error") or ""),
     }
 
 
@@ -452,6 +476,76 @@ def _recording_identity_payload(info: RawFileInfo) -> dict[str, Any]:
     return payload
 
 
+def _configured_geometry_identity(settings: Mapping[str, Any]) -> dict[str, object]:
+    """Return the geometry expected from the current project processing inputs."""
+
+    raw_limit = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
+    try:
+        channel_limit = int(raw_limit) if raw_limit is not None else len(BIOSEMI64_CHANNELS)
+    except (TypeError, ValueError):
+        channel_limit = len(BIOSEMI64_CHANNELS)
+    retained_channels = (
+        BIOSEMI64_CHANNELS[:channel_limit]
+        if 0 < channel_limit < len(BIOSEMI64_CHANNELS)
+        else BIOSEMI64_CHANNELS
+    )
+    return biosemi64_geometry_identity(
+        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        retained_channels=retained_channels,
+    )
+
+
+def _result_geometry_identity(
+    result: Mapping[str, Any] | None,
+    fallback: Mapping[str, object],
+    *,
+    require_observed: bool = False,
+) -> dict[str, object]:
+    """Validate worker-observed geometry while preserving error records."""
+
+    candidate = (result or {}).get("geometry")
+    audit = (result or {}).get("audit")
+    audit_candidate = audit.get("geometry") if isinstance(audit, Mapping) else None
+    if candidate is None and isinstance(audit_candidate, Mapping):
+        candidate = audit_candidate
+    if not isinstance(candidate, Mapping):
+        if require_observed:
+            raise ValueError(
+                "Successful processing result has no worker-observed BioSemi64 "
+                "geometry identity."
+            )
+        return dict(fallback)
+    retained = candidate.get("retained_scalp_channels")
+    retained_channels = (
+        [str(value) for value in retained]
+        if isinstance(retained, Sequence) and not isinstance(retained, (str, bytes))
+        else None
+    )
+    normalized = biosemi64_geometry_identity(
+        electrode_mapping_profile=candidate.get("electrode_mapping_profile"),
+        retained_channels=retained_channels,
+    )
+    if dict(candidate) != normalized:
+        raise ValueError(
+            "Processing worker returned a geometry identity that does not match "
+            "the canonical BioSemi64 definition."
+        )
+    if isinstance(audit_candidate, Mapping) and dict(audit_candidate) != normalized:
+        raise ValueError(
+            "Processing worker result and audit disagree about the BioSemi64 "
+            "geometry identity."
+        )
+    return normalized
+
+
+def _ledger_geometry_matches(
+    entry: Mapping[str, Any],
+    expected: Mapping[str, object],
+) -> bool:
+    candidate = entry.get("geometry")
+    return isinstance(candidate, Mapping) and dict(candidate) == dict(expected)
+
+
 def build_processing_fingerprint(
     project: Any,
     settings: Mapping[str, Any],
@@ -514,8 +608,10 @@ def build_processing_fingerprint(
             "epoch_end": replay_values["epoch_end_s"],
         }
     )
+    geometry_identity = _configured_geometry_identity(settings)
     payload = {
         "version": PROCESSING_FINGERPRINT_VERSION,
+        "geometry": geometry_identity,
         "settings": fingerprint_settings,
         "fft_multinotch": {
             "enabled": settings.get("line_noise_filter_enabled", True),
@@ -584,6 +680,7 @@ def classify_processing_inputs(
 ) -> ProcessingPlan:
     condition_labels = tuple(str(label) for label in event_map.keys())
     fingerprint = build_processing_fingerprint(project, settings, event_map)
+    geometry_identity = _configured_geometry_identity(settings)
     ledger = load_ledger(Path(project.project_root))
     entries = ledger.get("entries", {})
     if not isinstance(entries, Mapping):
@@ -625,6 +722,57 @@ def classify_processing_inputs(
                     )
                 )
                 continue
+
+            exclusion_reason = str(entry.get("exclusion_reason") or "").strip().casefold()
+            geometry_independent = (
+                exclusion_reason in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS
+            )
+            if not geometry_independent:
+                if (
+                    entry.get("processing_fingerprint_version")
+                    != PROCESSING_FINGERPRINT_VERSION
+                ):
+                    states.append(
+                        ProcessingInputState(
+                            info=info,
+                            participant_id=participant_id,
+                            status="changed_settings",
+                            reason=(
+                                "The prior automatic QC exclusion predates the current "
+                                "processing and geometry contract."
+                            ),
+                            expected_outputs=expected_outputs,
+                        )
+                    )
+                    continue
+                if entry.get("processing_fingerprint") != fingerprint:
+                    states.append(
+                        ProcessingInputState(
+                            info=info,
+                            participant_id=participant_id,
+                            status="changed_settings",
+                            reason=(
+                                "Project processing settings changed after the prior "
+                                "automatic QC exclusion."
+                            ),
+                            expected_outputs=expected_outputs,
+                        )
+                    )
+                    continue
+                if not _ledger_geometry_matches(entry, geometry_identity):
+                    states.append(
+                        ProcessingInputState(
+                            info=info,
+                            participant_id=participant_id,
+                            status="changed_settings",
+                            reason=(
+                                "The prior automatic QC exclusion has missing or stale "
+                                "electrode geometry."
+                            ),
+                            expected_outputs=expected_outputs,
+                        )
+                    )
+                    continue
 
             states.append(
                 ProcessingInputState(
@@ -683,6 +831,18 @@ def classify_processing_inputs(
                     participant_id=participant_id,
                     status="changed_settings",
                     reason="Project processing settings changed.",
+                    expected_outputs=expected_outputs,
+                )
+            )
+            continue
+
+        if not _ledger_geometry_matches(entry, geometry_identity):
+            states.append(
+                ProcessingInputState(
+                    info=info,
+                    participant_id=participant_id,
+                    status="changed_settings",
+                    reason="Electrode geometry identity changed or is missing.",
                     expected_outputs=expected_outputs,
                 )
             )
@@ -759,7 +919,12 @@ def classify_processing_inputs(
                 expected_outputs=expected_outputs,
             )
         )
-    return ProcessingPlan(states=tuple(states), fingerprint=fingerprint, condition_labels=condition_labels)
+    return ProcessingPlan(
+        states=tuple(states),
+        fingerprint=fingerprint,
+        condition_labels=condition_labels,
+        geometry_identity=geometry_identity,
+    )
 
 
 def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
@@ -768,6 +933,7 @@ def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
         fingerprint=plan.fingerprint,
         condition_labels=plan.condition_labels,
         choice=choice,
+        geometry_identity=plan.geometry_identity,
     )
 
 
@@ -862,6 +1028,7 @@ def carry_forward_pre_qc_completed_states(
         fingerprint=current_plan.fingerprint,
         condition_labels=current_plan.condition_labels,
         choice=current_plan.choice,
+        geometry_identity=current_plan.geometry_identity,
     )
 
 
@@ -1219,6 +1386,11 @@ def record_processing_results(
         successful_paths.add(raw_path)
         raw_meta = raw_file_metadata(state.info.path)
         audit = result.get("audit") if isinstance(result.get("audit"), Mapping) else {}
+        geometry_identity = _result_geometry_identity(
+            result,
+            plan.geometry_identity,
+            require_observed=True,
+        )
         raw_qc_bad_channels = _string_list(audit.get("raw_qc_bad_channels"))
         raw_qc_low_variance_channels = _string_list(
             audit.get("raw_qc_low_variance_channels")
@@ -1234,9 +1406,7 @@ def record_processing_results(
         )
         raw_qc_warning_rules = _string_list(audit.get("raw_qc_warning_rules"))
         kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
-        interpolated_channels = _string_list(
-            audit.get("interpolated_channels")
-        ) or list(kurtosis_bad_channels)
+        interpolated_channels = _string_list(audit.get("interpolated_channels"))
         n_rejected = _int_or_default(audit.get("n_rejected"), len(kurtosis_bad_channels))
         entries[state.processing_id] = {
             **_recording_identity_payload(state.info),
@@ -1244,6 +1414,7 @@ def record_processing_results(
             **raw_meta,
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
+            "geometry": geometry_identity,
             "expected_outputs": [str(path) for path in state.expected_outputs],
             "status": "completed",
             "completed_at": _now_iso(),
@@ -1258,6 +1429,7 @@ def record_processing_results(
             **_removed_electrode_review_payload(audit),
             "kurtosis_bad_channels": kurtosis_bad_channels,
             "interpolated_channels": interpolated_channels,
+            **_interpolation_payload(audit),
             "n_rejected": n_rejected,
             "condition_completeness": "partial" if missing_outputs else "complete",
             "completion_warning": (
@@ -1277,6 +1449,16 @@ def record_processing_results(
             continue
         excluded_result = excluded_by_path.get(raw_path)
         if excluded_result is not None:
+            exclusion_reason = str(excluded_result.get("reason") or "excluded")
+            geometry_independent = (
+                exclusion_reason.strip().casefold()
+                in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS
+            )
+            geometry_identity = _result_geometry_identity(
+                excluded_result,
+                plan.geometry_identity,
+                require_observed=not geometry_independent,
+            )
             previous_entry = entries.get(state.processing_id)
             removed_outputs = _remove_expected_outputs_for_state(
                 project,
@@ -1312,11 +1494,12 @@ def record_processing_results(
                 **raw_file_metadata(state.info.path),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
                 "processing_fingerprint": plan.fingerprint,
+                "geometry": geometry_identity,
                 "expected_outputs": [str(path) for path in state.expected_outputs],
                 "status": "excluded",
                 "completed_at": None,
                 "run_mode": run_mode,
-                "exclusion_reason": str(excluded_result.get("reason") or "excluded"),
+                "exclusion_reason": exclusion_reason,
                 "exclusion_message": str(
                     excluded_result.get("message") or "Raw file was excluded from processing."
                 ),
@@ -1332,6 +1515,7 @@ def record_processing_results(
                 **_removed_electrode_review_payload(qc_payload),
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
+                **_interpolation_payload(qc_payload),
                 "n_rejected": n_rejected,
                 **_source_derivative_result_payload(excluded_result),
             }
@@ -1359,9 +1543,7 @@ def record_processing_results(
             )
             raw_qc_warning_rules = _string_list(audit.get("raw_qc_warning_rules"))
             kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
-            interpolated_channels = _string_list(
-                audit.get("interpolated_channels")
-            ) or list(kurtosis_bad_channels)
+            interpolated_channels = _string_list(audit.get("interpolated_channels"))
             n_rejected = _int_or_default(
                 audit.get("n_rejected"),
                 len(interpolated_channels) or len(kurtosis_bad_channels),
@@ -1379,6 +1561,7 @@ def record_processing_results(
                 **raw_file_metadata(state.info.path),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
                 "processing_fingerprint": plan.fingerprint,
+                "geometry": _result_geometry_identity(result, plan.geometry_identity),
                 "expected_outputs": [str(path) for path in state.expected_outputs],
                 "status": "failed",
                 "completed_at": None,
@@ -1401,6 +1584,7 @@ def record_processing_results(
                 **_removed_electrode_review_payload(audit),
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
+                **_interpolation_payload(audit),
                 "n_rejected": n_rejected,
                 **_source_derivative_result_payload(result),
             }
@@ -1418,6 +1602,7 @@ def record_processing_results(
             **raw_file_metadata(state.info.path),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
+            "geometry": _result_geometry_identity(failed_result, plan.geometry_identity),
             "expected_outputs": [str(path) for path in state.expected_outputs],
             "status": "incomplete" if cancelled else "failed",
             "completed_at": None,
@@ -1433,6 +1618,7 @@ def record_processing_results(
             **_removed_electrode_review_payload({}),
             "kurtosis_bad_channels": [],
             "interpolated_channels": [],
+            **_interpolation_payload({}),
             "n_rejected": 0,
             **_source_derivative_result_payload(failed_result),
         }
@@ -1465,5 +1651,6 @@ def record_processing_results(
             "condition_warning_files": len(partial_condition_paths),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
+            "geometry": dict(plan.geometry_identity),
         },
     )

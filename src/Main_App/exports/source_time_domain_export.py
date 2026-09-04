@@ -21,6 +21,8 @@ from typing import Any, Mapping, Sequence
 import mne
 import numpy as np
 
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
+
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,7 @@ def write_source_ready_time_domain_derivatives(
     crop_lookup = crop_provenance_by_condition or {}
     protocol_lookup = resolved_protocol_by_condition or {}
     processing = _json_value(dict(processing_provenance or {}))
+    geometry = _validated_processing_geometry(processing)
     signature = _json_value(dict(source_signature or {})) if source_signature is not None else None
     written_paths: list[Path] = []
     artifacts: list[SourceReadyTimeDomainArtifact] = []
@@ -152,6 +155,7 @@ def write_source_ready_time_domain_derivatives(
         for plan in plans:
             plan.fif_path.parent.mkdir(parents=True, exist_ok=True)
             average_raw, repetition_count = _averaged_eeg_raw(plan.epochs)
+            _assert_geometry_matches_raw(geometry, average_raw)
             crop = _crop_payload(
                 epochs=plan.epochs,
                 explicit=crop_lookup.get(plan.condition_label),
@@ -176,6 +180,7 @@ def write_source_ready_time_domain_derivatives(
                 fif_sha256=fif_sha256,
                 crop=crop,
                 processing=processing,
+                geometry=geometry,
                 source_signature=signature,
                 resolved_protocol=protocol,
             )
@@ -201,6 +206,7 @@ def write_source_ready_time_domain_derivatives(
             "group_id": normalized_group_id,
             "group_folder": normalized_group_folder,
             "artifact_count": len(artifacts),
+            "geometry": geometry,
             "artifacts": [
                 {
                     "condition_id": artifact.condition_id,
@@ -419,6 +425,53 @@ def _resolved_protocol(value: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _validated_processing_geometry(processing: Any) -> dict[str, Any]:
+    """Require a complete canonical geometry identity for new derivatives."""
+
+    if not isinstance(processing, Mapping):
+        raise ValueError("processing_provenance must be a mapping")
+    candidate = processing.get("geometry")
+    if not isinstance(candidate, Mapping):
+        raise ValueError(
+            "processing_provenance must include the canonical BioSemi64 geometry"
+        )
+    retained = candidate.get("retained_scalp_channels")
+    if not isinstance(retained, Sequence) or isinstance(retained, (str, bytes)):
+        raise ValueError(
+            "BioSemi64 geometry provenance must include retained scalp channels"
+        )
+    try:
+        expected = biosemi64_geometry_identity(
+            electrode_mapping_profile=candidate.get(
+                "electrode_mapping_profile"
+            ),
+            retained_channels=[str(value) for value in retained],
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid BioSemi64 geometry provenance: {exc}") from exc
+    if dict(candidate) != expected:
+        raise ValueError(
+            "BioSemi64 geometry provenance is stale or does not match the "
+            "current coordinate definition"
+        )
+    return expected
+
+
+def _assert_geometry_matches_raw(
+    geometry: Mapping[str, Any],
+    raw: Any,
+) -> None:
+    expected = {
+        str(value) for value in geometry.get("retained_scalp_channels", ())
+    }
+    observed = {str(value) for value in raw.ch_names}
+    if observed != expected or len(raw.ch_names) != len(expected):
+        raise ValueError(
+            "Source-ready EEG channels do not match the retained BioSemi64 "
+            "geometry provenance"
+        )
+
+
 def _sidecar_payload(
     *,
     root: Path,
@@ -433,6 +486,7 @@ def _sidecar_payload(
     fif_sha256: str,
     crop: Mapping[str, Any],
     processing: Any,
+    geometry: Mapping[str, Any],
     source_signature: Any,
     resolved_protocol: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -457,6 +511,7 @@ def _sidecar_payload(
         "fif_path": _relative_project_path(root, plan.fif_path),
         "fif_sha256": fif_sha256,
         "source_signature": source_signature,
+        "geometry": _json_value(dict(geometry)),
         "processing": {
             "fingerprint": processing_mapping.get("processing_fingerprint"),
             "fingerprint_version": processing_mapping.get("processing_fingerprint_version"),

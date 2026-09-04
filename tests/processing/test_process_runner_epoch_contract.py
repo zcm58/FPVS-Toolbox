@@ -12,6 +12,12 @@ import pytest
 
 import Main_App.Shared.processing_mixin as compatibility_processing
 from Main_App.Shared.fft_crop_utils import CropResult
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    attach_raw_biosemi64_geometry,
+    biosemi64_geometry_identity,
+    cached_biosemi64_montage,
+)
 from Main_App.processing.raw_channel_qc import (
     LEFT_HEMISPHERE_CHANNELS,
     RAW_CHANNEL_QC_EXCLUSION_REASON,
@@ -33,6 +39,21 @@ def _compatibility_raw() -> mne.io.RawArray:
         ch_types=["eeg", "stim"],
     )
     return mne.io.RawArray(np.zeros((2, 3_000)), info, verbose=False)
+
+
+def _with_biosemi64_montage(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
+    raw.set_montage(
+        cached_biosemi64_montage(),
+        on_missing="raise",
+    )
+    retained = [name for name in BIOSEMI64_CHANNELS if name in raw.ch_names]
+    attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile="anatomical_labels",
+        retained_channels=retained,
+        stim_channel="Status" if "Status" in raw.ch_names else None,
+    )
+    return raw
 
 
 def _run_compatibility_worker(
@@ -582,14 +603,16 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
         sfreq=256.0,
         ch_types=["eeg"] * (len(names) - 1) + ["stim"],
     )
-    raw = mne.io.RawArray(data, info, verbose=False)
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(data, info, verbose=False)
+    )
 
     preprocess_calls: list[str] = []
     export_calls: list[str] = []
 
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+        lambda _app, _filepath, **_kwargs: raw.copy(),
     )
 
     def _unexpected_preprocessing(*_args, **_kwargs):
@@ -628,6 +651,7 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
     assert result["status"] == "excluded"
     assert result["stage"] == "raw_qc"
     assert result["reason"] == RAW_CHANNEL_QC_EXCLUSION_REASON
+    assert result["geometry"] == biosemi64_geometry_identity()
     assert result["raw_channel_qc"]["n_channels"] == 64
     assert result["raw_channel_qc"]["n_bad_channels"] == 27
     assert "left_hemisphere_failure" in result["raw_channel_qc"]["triggered_rules"]
@@ -653,11 +677,11 @@ def test_run_full_pipeline_auto_marks_removed_electrode_before_preprocessing(
         ),
         verbose=False,
     )
-    raw.set_montage(montage)
+    raw = _with_biosemi64_montage(raw)
 
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+        lambda _app, _filepath, **_kwargs: raw.copy(),
     )
     monkeypatch.setattr(
         process_runner.backend_preprocess,
@@ -718,11 +742,11 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
         ),
         verbose=False,
     )
-    raw.set_montage(montage)
+    raw = _with_biosemi64_montage(raw)
 
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+        lambda _app, _filepath, **_kwargs: raw.copy(),
     )
     monkeypatch.setattr(
         process_runner.backend_preprocess,
@@ -783,7 +807,9 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     tmp_path: Path,
 ) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=8.0, ch_types=["eeg", "eeg", "stim"])
-    raw = mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
+    )
     events = np.asarray([[8, 0, 21], [32, 0, 21]], dtype=int)
     crop_results = {
         (21, 0): CropResult(
@@ -832,7 +858,7 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     )
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+        lambda _app, _filepath, **_kwargs: raw.copy(),
     )
     monkeypatch.setattr(
         "Main_App.exports.post_export_adapter.LegacyCtx",
@@ -924,6 +950,9 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         "processing_fingerprint_version": "fixture-version",
         "preprocessing_order_version": process_runner.backend_preprocess.PREPROCESSING_ORDER_VERSION,
         "preprocessed_raw_cache_version": process_runner.PREPROC_CACHE_VERSION,
+        "geometry": biosemi64_geometry_identity(
+            retained_channels=("Cz", "Pz")
+        ),
     }
     assert result["source_derivative_status"] == "complete"
     assert result["source_derivative_warning"] == ""
@@ -941,7 +970,9 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
     tmp_path: Path,
 ) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=256.0, ch_types=["eeg", "eeg", "stim"])
-    raw = mne.io.RawArray(np.zeros((3, 5000), dtype=float), info, verbose=False)
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((3, 5000), dtype=float), info, verbose=False)
+    )
     events = np.asarray(
         [
             [100, 0, 1],
@@ -974,7 +1005,7 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
     )
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+        lambda _app, _filepath, **_kwargs: raw.copy(),
     )
     monkeypatch.setattr(
         "Main_App.exports.post_export_adapter.LegacyCtx",
@@ -1038,7 +1069,9 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
     tmp_path: Path,
 ) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=8.0, ch_types=["eeg", "eeg", "stim"])
-    raw = mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
+    )
     events = np.asarray([[8, 0, 21], [32, 0, 21]], dtype=int)
     crop_results = {
         (21, 0): CropResult(
@@ -1086,7 +1119,7 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
     )
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
+        lambda _app, _filepath, **_kwargs: raw.copy(),
     )
     monkeypatch.setattr(
         "Main_App.exports.post_export_adapter.LegacyCtx",
@@ -1133,8 +1166,10 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
 
 
 def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) -> None:
-    info = mne.create_info(["Cz", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
-    raw = mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    info = mne.create_info(["Fp1", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    )
     fake_bdf = tmp_path / "fake.bdf"
     fake_bdf.write_bytes(b"raw source")
     settings = {
@@ -1142,6 +1177,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "ref_channel1": "EXG1",
         "ref_channel2": "EXG2",
         "downsample_rate": 8,
+        "max_idx_keep": 1,
         "enable_preprocessed_cache": True,
         "auto_detect_removed_electrodes": True,
         "_fpvs_raw_qc_bad_channels": ["P9"],
@@ -1163,7 +1199,10 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "_fpvs_removed_electrode_auto_manual_overlap": ["FT7"],
         "_fpvs_removed_electrode_agreement_status": "partial",
         "_fpvs_kurtosis_bad_channels": ["Cz"],
+        "_fpvs_interpolation_status": "succeeded",
+        "_fpvs_interpolation_requested_channels": ["P9", "Cz"],
         "_fpvs_interpolated_channels": ["P9", "Cz"],
+        "_fpvs_interpolation_error": "",
         "_fpvs_fft_multinotch_requested_centers_hz": [60.0, 120.0, 180.0],
         "_fpvs_fft_multinotch_applied_centers_hz": [60.0],
         "_fpvs_fft_multinotch_skipped_centers": [
@@ -1191,7 +1230,10 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     load_settings.pop("_fpvs_removed_electrode_auto_manual_overlap")
     load_settings.pop("_fpvs_removed_electrode_agreement_status")
     load_settings.pop("_fpvs_kurtosis_bad_channels")
+    load_settings.pop("_fpvs_interpolation_status")
+    load_settings.pop("_fpvs_interpolation_requested_channels")
     load_settings.pop("_fpvs_interpolated_channels")
+    load_settings.pop("_fpvs_interpolation_error")
     load_settings.pop("_fpvs_fft_multinotch_requested_centers_hz")
     load_settings.pop("_fpvs_fft_multinotch_applied_centers_hz")
     load_settings.pop("_fpvs_fft_multinotch_skipped_centers")
@@ -1219,7 +1261,10 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v9-fft-multinotch"
+    assert payload["version"] == "preprocessed-raw-v10-biosemi64-geometry"
+    assert payload["geometry"] == biosemi64_geometry_identity(
+        retained_channels=("Fp1",)
+    )
     assert payload["preprocessing_settings"]["line_noise_filter_enabled"] is True
     assert payload["preprocessing_settings"]["line_noise_frequency_hz"] == 60
     assert payload["preprocessing_settings"]["line_noise_filter_method_version"]
@@ -1254,7 +1299,15 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_removed_electrode_auto_manual_overlap"] == ["FT7"]
     assert load_settings["_fpvs_removed_electrode_agreement_status"] == "partial"
     assert load_settings["_fpvs_kurtosis_bad_channels"] == ["Cz"]
+    assert load_settings["_fpvs_interpolation_status"] == "succeeded"
+    assert load_settings["_fpvs_interpolation_requested_channels"] == ["P9", "Cz"]
     assert load_settings["_fpvs_interpolated_channels"] == ["P9", "Cz"]
+    assert load_settings["_fpvs_interpolation_error"] == ""
+    assert load_settings["_fpvs_geometry"] == biosemi64_geometry_identity(
+        retained_channels=("Fp1",)
+    )
+    assert load_settings["_fpvs_retained_scalp_channels"] == ["Fp1"]
+    assert load_settings["_fpvs_retained_scalp_set_fingerprint"]
     assert load_settings["_fpvs_fft_multinotch_requested_centers_hz"] == [
         60.0,
         120.0,
@@ -1303,8 +1356,10 @@ def test_preprocessed_cache_key_tracks_fft_multinotch_settings(tmp_path: Path) -
 
 
 def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -> None:
-    info = mne.create_info(["Cz", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
-    raw = mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    info = mne.create_info(["Fp1", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    )
     fake_bdf = tmp_path / "fake.bdf"
     fake_bdf.write_bytes(b"raw source")
     project_root = tmp_path / "project"
@@ -1313,6 +1368,7 @@ def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -
         "ref_channel1": "EXG1",
         "ref_channel2": "EXG2",
         "downsample_rate": 8,
+        "max_idx_keep": 1,
         "enable_preprocessed_cache": True,
     }
     old_settings = dict(base_settings, high_pass=0.1)

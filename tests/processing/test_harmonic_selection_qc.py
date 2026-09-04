@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from Main_App.processing import harmonic_selection_qc
+from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.projects import Project
 from Tools.LORETA_Visualizer import stats_ready_workbook as stats_ready_workbook_mod
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
@@ -28,6 +28,50 @@ from Tools.Stats.data.group_harmonic_cache import (
     clear_cached_group_harmonic_selections,
 )
 from Tools.Stats.io.stats_ready_export import HARMONIC_SELECTION_COLUMNS
+
+
+@pytest.fixture(autouse=True)
+def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_workbook_geometry",
+        lambda _root, *, dataset_index=None: {},
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda _root, *, dataset_index=None: object(),
+    )
+
+
+def test_processing_harmonic_entry_rejects_legacy_geometry_before_workbook_math(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_processing_harmonic_selection_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(project_root=tmp_path),
+    )
+
+    def reject_geometry(_root, *, dataset_index=None):
+        raise full_fft_provenance.FullFftProvenanceError(
+            "Legacy or unknown geometry cannot be analyzed; reprocess the EEG."
+        )
+
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_workbook_geometry",
+        reject_geometry,
+    )
+
+    with pytest.raises(
+        full_fft_provenance.FullFftProvenanceError,
+        match="Legacy or unknown geometry",
+    ):
+        harmonic_selection_qc.run_processing_harmonic_selection_qc(
+            SimpleNamespace(project_root=tmp_path)
+        )
 
 
 def test_processing_harmonic_selection_qc_writes_quality_check_workbook_and_cache(

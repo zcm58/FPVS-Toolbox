@@ -13,6 +13,7 @@ from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.exports.source_time_domain_export import (
     write_source_ready_time_domain_derivatives,
 )
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 from Main_App.projects.project import Project
 from Tools.LORETA_Visualizer.source_producers.eloreta_volume import (
@@ -468,6 +469,7 @@ def _write_time_domain_derivative(
         processing_provenance={
             "processing_fingerprint": PROCESSING_FINGERPRINT,
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
+            "geometry": biosemi64_geometry_identity(),
         },
     )
 

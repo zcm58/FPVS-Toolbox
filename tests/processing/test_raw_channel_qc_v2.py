@@ -6,6 +6,10 @@ import mne
 import numpy as np
 import pytest
 
+from Main_App.io.eeg_geometry import (
+    attach_raw_biosemi64_geometry,
+    cached_biosemi64_montage,
+)
 import Main_App.processing.raw_channel_qc as raw_channel_qc
 from Main_App.processing.raw_channel_qc import (
     ConditionRawChannelQCBlock,
@@ -376,6 +380,12 @@ def test_v1_raw_channel_qc_result_is_unchanged_after_v2_evaluation() -> None:
         data,
         mne.create_info(CHANNELS, sfreq=256.0, ch_types=["eeg"] * len(CHANNELS)),
         verbose=False,
+    )
+    raw.set_montage(cached_biosemi64_montage())
+    attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile="anatomical_labels",
+        retained_channels=CHANNELS,
     )
     before = evaluate_raw_channel_qc(raw, SETTINGS, filename="p07.bdf")
 

@@ -1,0 +1,485 @@
+{
+  "coordinate_summary": {
+    "channel_count": 64,
+    "fitted_sphere_angular_difference_deg_max": 14.10722996447578,
+    "fitted_sphere_angular_difference_deg_median": 7.381045016664665,
+    "fitted_sphere_angular_difference_deg_min": 1.744643869197931,
+    "head_space_distance_mm_max": 30.97100732574205,
+    "head_space_distance_mm_median": 23.513489101629535,
+    "head_space_distance_mm_min": 5.939871202208048
+  },
+  "fitted_spheres": {
+    "biosemi64": {
+      "origin_head_m": [
+        3.124776161121921e-08,
+        -2.1636193662711604e-08,
+        0.04014887477400841
+      ],
+      "radius_m": 0.09499996139641832
+    },
+    "standard_1005": {
+      "origin_head_m": [
+        -0.0008060181548090376,
+        0.014437717016407947,
+        0.04313286033975594
+      ],
+      "radius_m": 0.09618853186735807
+    }
+  },
+  "limitations": [
+    "Synthetic results isolate montage geometry and do not estimate effects in a representative lab sample.",
+    "Direct-BDF mode compares one caller-selected interval and fixed caller-supplied bad channels; it is not the complete FPVS processing pipeline.",
+    "The deterministic synthetic field is spatially smooth and cannot cover every physiological or artifact topology.",
+    "Threshold comparisons report local-z crossings at 1.64 and 3.29; they do not by themselves establish participant or group-level result changes.",
+    "Template coordinates are generic cap locations, not participant-digitized electrode positions."
+  ],
+  "output_files_sha256": {
+    "coordinate_differences.csv": "918a1aeed8ced3d97ff003142928e50441220a914d2eef55be6fe503c403158a",
+    "target_metric_differences.csv": "8f58af0f9965a12f2a9ae0cf68e77b45fdd8471c890c58c8df5a59c14f767f40",
+    "target_metrics.csv": "9b4e72e0c901e35ea211c9ef10b834695982133f12aa93a9c0ed39d579f071d5",
+    "threshold_decision_changes.csv": "8d78dbb898705fc9fbd5560e6afed51ff4265604516fd899292c55ddbde97944",
+    "time_domain_differences.csv": "bbfc57a407e230f70d4fc87b7101e1f7b6103e0600f1ca21400dc9407084a60f"
+  },
+  "overall": {
+    "max_abs_local_z_difference": 1.326933211492804,
+    "max_abs_snr_difference": 0.3221100040671585,
+    "max_bca_absolute_difference_uv": 0.06768379924659418,
+    "max_fft_amplitude_absolute_difference_uv": 0.06925538882987792,
+    "max_time_domain_difference_uv": 1.4691250907842859,
+    "scenario_count": 9,
+    "threshold_decision_change_count": 6,
+    "zero_bad_control_exactly_equal": true
+  },
+  "protocol": {
+    "canonical_channel_names": [
+      "Fp1",
+      "AF7",
+      "AF3",
+      "F1",
+      "F3",
+      "F5",
+      "F7",
+      "FT7",
+      "FC5",
+      "FC3",
+      "FC1",
+      "C1",
+      "C3",
+      "C5",
+      "T7",
+      "TP7",
+      "CP5",
+      "CP3",
+      "CP1",
+      "P1",
+      "P3",
+      "P5",
+      "P7",
+      "P9",
+      "PO7",
+      "PO3",
+      "O1",
+      "Iz",
+      "Oz",
+      "POz",
+      "Pz",
+      "CPz",
+      "Fpz",
+      "Fp2",
+      "AF8",
+      "AF4",
+      "AFz",
+      "Fz",
+      "F2",
+      "F4",
+      "F6",
+      "F8",
+      "FT8",
+      "FC6",
+      "FC4",
+      "FC2",
+      "FCz",
+      "Cz",
+      "C2",
+      "C4",
+      "C6",
+      "T8",
+      "TP8",
+      "CP6",
+      "CP4",
+      "CP2",
+      "P2",
+      "P4",
+      "P6",
+      "P8",
+      "P10",
+      "PO8",
+      "PO4",
+      "O2"
+    ],
+    "comparison_montages": [
+      "standard_1005",
+      "biosemi64"
+    ],
+    "exact_fft_bin_required": true,
+    "fft_amplitude_scaling": "abs(fft) / N * 2",
+    "final_reference": "average",
+    "input": {
+      "duration_sec": 40.0,
+      "sample_count": 10240,
+      "sampling_frequency_hz": 256.0,
+      "seed": 150064,
+      "source": "deterministic_synthetic"
+    },
+    "interpolation": {
+      "method": "spline",
+      "mne_call": "Raw.interpolate_bads",
+      "mode": "accurate",
+      "origin": "auto",
+      "reset_bads": true
+    },
+    "local_noise": {
+      "drop_one_finite_maximum": true,
+      "drop_one_finite_minimum": true,
+      "excluded_bins": [
+        "target-1",
+        "target",
+        "target+1"
+      ],
+      "half_width_bins": 10,
+      "standard_deviation_ddof": 0
+    },
+    "protocol_id": "qc15_biosemi64_geometry_sensitivity_v1",
+    "reported_local_z_thresholds": [
+      1.64,
+      3.29
+    ],
+    "schema_version": 1,
+    "target_frequencies_hz": [
+      1.2,
+      2.4,
+      3.6,
+      4.8,
+      7.2
+    ]
+  },
+  "protocol_id": "qc15_biosemi64_geometry_sensitivity_v1",
+  "runtime": {
+    "git_worktree_dirty": true,
+    "mne": "1.9.0",
+    "numpy": "2.3.1",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "production_noise_helper_sha256": "66391ece9d07492a00a5be70363734b696cd057cadc8b04fd3163e7909a35bdc",
+    "python": "3.13.9",
+    "script_sha256": "d1b77bc92419b9989f110837f5ea9d202fb442c2cdba3cff19f42672c52e9b3d",
+    "toolbox_commit": "7381406949c6d57b79efcbe6deb65eff027f590d"
+  },
+  "scenario_summaries": [
+    {
+      "bad_channel_count": 0,
+      "bad_channels": [],
+      "scenario": "zero_bad_control",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.0,
+          "all_channel_rms_difference_uv": 0.0,
+          "biosemi64_bad_channel_truth_rms_uv": null,
+          "interpolated_channel_rms_difference_uv": 0.0,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.0,
+          "max_abs_fft_amplitude_difference_uv": 0.0,
+          "max_abs_local_z_difference": 0.0,
+          "max_abs_snr_difference": 0.0,
+          "standard_1005_bad_channel_truth_rms_uv": null
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.0,
+          "all_channel_rms_difference_uv": 0.0,
+          "biosemi64_bad_channel_truth_rms_uv": null,
+          "interpolated_channel_rms_difference_uv": 0.0,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.0,
+          "max_abs_fft_amplitude_difference_uv": 0.0,
+          "max_abs_local_z_difference": 0.0,
+          "max_abs_snr_difference": 0.0,
+          "standard_1005_bad_channel_truth_rms_uv": null
+        }
+      }
+    },
+    {
+      "bad_channel_count": 1,
+      "bad_channels": [
+        "Fp1"
+      ],
+      "scenario": "isolated_frontal",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.5753071962150783,
+          "all_channel_rms_difference_uv": 0.01919501030831465,
+          "biosemi64_bad_channel_truth_rms_uv": 0.8854105888522219,
+          "interpolated_channel_rms_difference_uv": 0.15235567106736544,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.00917716611801743,
+          "max_abs_fft_amplitude_difference_uv": 0.008032403290827786,
+          "max_abs_local_z_difference": 0.1518663868454675,
+          "max_abs_snr_difference": 0.057937153720008405,
+          "standard_1005_bad_channel_truth_rms_uv": 0.8350346333258253
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.5844390564724606,
+          "all_channel_rms_difference_uv": 0.019346751881570215,
+          "biosemi64_bad_channel_truth_rms_uv": 0.8994647251832096,
+          "interpolated_channel_rms_difference_uv": 0.15477401505256172,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.011987309624115039,
+          "max_abs_fft_amplitude_difference_uv": 0.011596442939347688,
+          "max_abs_local_z_difference": 0.3484958188647247,
+          "max_abs_snr_difference": 0.07612040357053279,
+          "standard_1005_bad_channel_truth_rms_uv": 0.8482891513151241
+        }
+      }
+    },
+    {
+      "bad_channel_count": 1,
+      "bad_channels": [
+        "T7"
+      ],
+      "scenario": "isolated_temporal",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.45325673319497517,
+          "all_channel_rms_difference_uv": 0.011756412559983404,
+          "biosemi64_bad_channel_truth_rms_uv": 0.600037765369029,
+          "interpolated_channel_rms_difference_uv": 0.09331363183197694,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.011116982399576897,
+          "max_abs_fft_amplitude_difference_uv": 0.008421865909399862,
+          "max_abs_local_z_difference": 0.1691182259794557,
+          "max_abs_snr_difference": 0.07731611469928057,
+          "standard_1005_bad_channel_truth_rms_uv": 0.6066838402986168
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.46045128451553047,
+          "all_channel_rms_difference_uv": 0.011849350073901832,
+          "biosemi64_bad_channel_truth_rms_uv": 0.6095621743431405,
+          "interpolated_channel_rms_difference_uv": 0.09479480059121466,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.005368560445651344,
+          "max_abs_fft_amplitude_difference_uv": 0.005289310567246047,
+          "max_abs_local_z_difference": 0.14959329246593328,
+          "max_abs_snr_difference": 0.04224884125213846,
+          "standard_1005_bad_channel_truth_rms_uv": 0.6163137425255789
+        }
+      }
+    },
+    {
+      "bad_channel_count": 1,
+      "bad_channels": [
+        "Cz"
+      ],
+      "scenario": "isolated_central",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.197102479871516,
+          "all_channel_rms_difference_uv": 0.006215294351438639,
+          "biosemi64_bad_channel_truth_rms_uv": 0.5702416695717668,
+          "interpolated_channel_rms_difference_uv": 0.049332369536913376,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.010015851620855831,
+          "max_abs_fft_amplitude_difference_uv": 0.007900262196574748,
+          "max_abs_local_z_difference": 0.1628415306620865,
+          "max_abs_snr_difference": 0.06551543773020185,
+          "standard_1005_bad_channel_truth_rms_uv": 0.5720290981354617
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.20023109066312697,
+          "all_channel_rms_difference_uv": 0.006264427877703285,
+          "biosemi64_bad_channel_truth_rms_uv": 0.5792931246443345,
+          "interpolated_channel_rms_difference_uv": 0.05011542302162628,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.009174529876564863,
+          "max_abs_fft_amplitude_difference_uv": 0.007754433306423891,
+          "max_abs_local_z_difference": 0.09955258175836545,
+          "max_abs_snr_difference": 0.03953730848820125,
+          "standard_1005_bad_channel_truth_rms_uv": 0.5811089250899928
+        }
+      }
+    },
+    {
+      "bad_channel_count": 1,
+      "bad_channels": [
+        "Oz"
+      ],
+      "scenario": "isolated_posterior",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.40988729011768626,
+          "all_channel_rms_difference_uv": 0.013689587509838477,
+          "biosemi64_bad_channel_truth_rms_uv": 0.578480597319589,
+          "interpolated_channel_rms_difference_uv": 0.10865773230626577,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.06542282952290035,
+          "max_abs_fft_amplitude_difference_uv": 0.06820381619476024,
+          "max_abs_local_z_difference": 1.326933211492804,
+          "max_abs_snr_difference": 0.3221100040671585,
+          "standard_1005_bad_channel_truth_rms_uv": 0.5805485013586115
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.41639343757987174,
+          "all_channel_rms_difference_uv": 0.01379780727698613,
+          "biosemi64_bad_channel_truth_rms_uv": 0.5876628290230744,
+          "interpolated_channel_rms_difference_uv": 0.11038245821588905,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.06768379924659418,
+          "max_abs_fft_amplitude_difference_uv": 0.06925538882987792,
+          "max_abs_local_z_difference": 0.6165022069663202,
+          "max_abs_snr_difference": 0.2978109379328755,
+          "standard_1005_bad_channel_truth_rms_uv": 0.5897635569357323
+        }
+      }
+    },
+    {
+      "bad_channel_count": 3,
+      "bad_channels": [
+        "Fp1",
+        "AF7",
+        "AF3"
+      ],
+      "scenario": "cluster_frontal",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 1.4417762326251464,
+          "all_channel_rms_difference_uv": 0.059172980049501646,
+          "biosemi64_bad_channel_truth_rms_uv": 1.0149885366406994,
+          "interpolated_channel_rms_difference_uv": 0.26909529421558237,
+          "local_z_threshold_change_count": 1,
+          "max_abs_bca_difference_uv": 0.02321098167688243,
+          "max_abs_fft_amplitude_difference_uv": 0.02881254911275466,
+          "max_abs_local_z_difference": 0.3959151984244713,
+          "max_abs_snr_difference": 0.1723267012638362,
+          "standard_1005_bad_channel_truth_rms_uv": 1.130809429686928
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 1.4691250907842859,
+          "all_channel_rms_difference_uv": 0.0601151032392528,
+          "biosemi64_bad_channel_truth_rms_uv": 1.0529722465962614,
+          "interpolated_channel_rms_difference_uv": 0.27765976830035805,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.023989499569552653,
+          "max_abs_fft_amplitude_difference_uv": 0.024298273057921108,
+          "max_abs_local_z_difference": 0.5250077333157745,
+          "max_abs_snr_difference": 0.1441732069271393,
+          "standard_1005_bad_channel_truth_rms_uv": 1.1761331816931
+        }
+      }
+    },
+    {
+      "bad_channel_count": 3,
+      "bad_channels": [
+        "FT7",
+        "T7",
+        "TP7"
+      ],
+      "scenario": "cluster_temporal",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.6817861697671918,
+          "all_channel_rms_difference_uv": 0.0304314718815161,
+          "biosemi64_bad_channel_truth_rms_uv": 0.7800044861823872,
+          "interpolated_channel_rms_difference_uv": 0.13785367527124515,
+          "local_z_threshold_change_count": 1,
+          "max_abs_bca_difference_uv": 0.032758595081815,
+          "max_abs_fft_amplitude_difference_uv": 0.02734810128389137,
+          "max_abs_local_z_difference": 0.5157807747675899,
+          "max_abs_snr_difference": 0.16923625919039442,
+          "standard_1005_bad_channel_truth_rms_uv": 0.7972624060163128
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.7065808588795488,
+          "all_channel_rms_difference_uv": 0.031033668324998893,
+          "biosemi64_bad_channel_truth_rms_uv": 0.8044599747700585,
+          "interpolated_channel_rms_difference_uv": 0.1433383740910374,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.03268510204235192,
+          "max_abs_fft_amplitude_difference_uv": 0.03742561217083651,
+          "max_abs_local_z_difference": 0.4466735860634074,
+          "max_abs_snr_difference": 0.1713933299676773,
+          "standard_1005_bad_channel_truth_rms_uv": 0.8221585831378664
+        }
+      }
+    },
+    {
+      "bad_channel_count": 3,
+      "bad_channels": [
+        "C3",
+        "Cz",
+        "C4"
+      ],
+      "scenario": "cluster_central",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.2702042210917954,
+          "all_channel_rms_difference_uv": 0.014043076634657578,
+          "biosemi64_bad_channel_truth_rms_uv": 0.6527845354254743,
+          "interpolated_channel_rms_difference_uv": 0.06449196045594897,
+          "local_z_threshold_change_count": 1,
+          "max_abs_bca_difference_uv": 0.009219325038129167,
+          "max_abs_fft_amplitude_difference_uv": 0.011375145059876635,
+          "max_abs_local_z_difference": 0.15171845059273759,
+          "max_abs_snr_difference": 0.06073561487873702,
+          "standard_1005_bad_channel_truth_rms_uv": 0.6379132661666211
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.2718481365184119,
+          "all_channel_rms_difference_uv": 0.01412668749850365,
+          "biosemi64_bad_channel_truth_rms_uv": 0.6628214175789555,
+          "interpolated_channel_rms_difference_uv": 0.06524837464015043,
+          "local_z_threshold_change_count": 0,
+          "max_abs_bca_difference_uv": 0.00847390004616605,
+          "max_abs_fft_amplitude_difference_uv": 0.01018858423770426,
+          "max_abs_local_z_difference": 0.10654293649541602,
+          "max_abs_snr_difference": 0.047242769414180596,
+          "standard_1005_bad_channel_truth_rms_uv": 0.6479200213975413
+        }
+      }
+    },
+    {
+      "bad_channel_count": 3,
+      "bad_channels": [
+        "PO7",
+        "Oz",
+        "PO8"
+      ],
+      "scenario": "cluster_posterior",
+      "stages": {
+        "average_referenced": {
+          "all_channel_max_abs_difference_uv": 0.41978716023629997,
+          "all_channel_rms_difference_uv": 0.017487149881625114,
+          "biosemi64_bad_channel_truth_rms_uv": 0.6604613128482416,
+          "interpolated_channel_rms_difference_uv": 0.0801215498690839,
+          "local_z_threshold_change_count": 2,
+          "max_abs_bca_difference_uv": 0.05819050914270929,
+          "max_abs_fft_amplitude_difference_uv": 0.061139472084924096,
+          "max_abs_local_z_difference": 1.1450391804239395,
+          "max_abs_snr_difference": 0.269372624304101,
+          "standard_1005_bad_channel_truth_rms_uv": 0.6719569955264031
+        },
+        "interpolated": {
+          "all_channel_max_abs_difference_uv": 0.4254433037784189,
+          "all_channel_rms_difference_uv": 0.017633176216555666,
+          "biosemi64_bad_channel_truth_rms_uv": 0.6706304748921732,
+          "interpolated_channel_rms_difference_uv": 0.08144415228237216,
+          "local_z_threshold_change_count": 1,
+          "max_abs_bca_difference_uv": 0.06157343238220814,
+          "max_abs_fft_amplitude_difference_uv": 0.0632036296542755,
+          "max_abs_local_z_difference": 0.5454164143742659,
+          "max_abs_snr_difference": 0.26548406296826244,
+          "standard_1005_bad_channel_truth_rms_uv": 0.6822958251906887
+        }
+      }
+    }
+  ],
+  "schema_version": 1,
+  "scientific_results_sha256": "fc776d270b54fd6bad2fca8b1bcae0da51a8a082b0979e58b7128f6f928c76b5",
+  "status": "complete"
+}

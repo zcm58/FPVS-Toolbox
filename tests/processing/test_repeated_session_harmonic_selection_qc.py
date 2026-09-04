@@ -6,12 +6,21 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from Main_App.processing import harmonic_selection_qc
+from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.projects import Project
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_NAME,
     HARMONIC_PROFILE_FIXED_ID,
 )
+
+
+@pytest.fixture(autouse=True)
+def _current_workbook_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_workbook_geometry",
+        lambda _root, *, dataset_index=None: {},
+    )
 
 
 def test_fixed_selection_fingerprints_every_recording_without_visit_collision(

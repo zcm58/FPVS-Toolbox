@@ -11,6 +11,11 @@ from Main_App.processing.preprocess import (  # noqa: E402
     perform_preprocessing,
 )
 from Main_App.processing import preprocess as preprocess_module  # noqa: E402
+from Main_App.io.eeg_geometry import (  # noqa: E402
+    BIOSEMI64_CHANNELS,
+    attach_raw_biosemi64_geometry,
+    cached_biosemi64_montage,
+)
 
 
 def _comparison_raw() -> mne.io.RawArray:
@@ -18,7 +23,8 @@ def _comparison_raw() -> mne.io.RawArray:
     samples = int(sfreq * 40)
     rng = np.random.RandomState(20260526)
     t = np.arange(samples) / sfreq
-    ch_names = ["EXG1", "EXG2", "E1", "E2", "E3", "E4", "Status"]
+    scalp_names = list(BIOSEMI64_CHANNELS[:4])
+    ch_names = ["EXG1", "EXG2", *scalp_names, "Status"]
     ch_types = ["eeg", "eeg", "eeg", "eeg", "eeg", "eeg", "stim"]
     data = np.zeros((len(ch_names), samples), dtype=float)
     data[0] = 0.03 * np.sin(2 * np.pi * 0.7 * t) + 0.004 * rng.randn(samples)
@@ -31,7 +37,16 @@ def _comparison_raw() -> mne.io.RawArray:
         )
     data[-1, [512, 2048, 4096, 8192, 12288, 16384]] = [21, 22, 21, 22, 21, 22]
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
-    return mne.io.RawArray(data, info, verbose=False)
+    raw = mne.io.RawArray(data, info, verbose=False)
+    raw.set_montage(cached_biosemi64_montage(), on_missing="ignore", verbose=False)
+    attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile="anatomical_labels",
+        retained_channels=scalp_names,
+        reference_channels=("EXG1", "EXG2"),
+        stim_channel="Status",
+    )
+    return raw
 
 
 def _params() -> dict[str, object]:
@@ -54,7 +69,7 @@ def _legacy_downsample_then_filter(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
     raw = raw.copy()
     raw.set_eeg_reference(ref_channels=["EXG1", "EXG2"], projection=False, verbose=False)
     raw.drop_channels(["EXG1", "EXG2"])
-    raw.pick_channels(["E1", "E2", "E3", "E4", "Status"], ordered=False)
+    raw.pick_channels([*BIOSEMI64_CHANNELS[:4], "Status"], ordered=False)
     raw.resample(256, npad="auto", window="hann", verbose=False)
     raw.filter(
         0.1,

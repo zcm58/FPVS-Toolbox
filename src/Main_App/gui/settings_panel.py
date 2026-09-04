@@ -64,7 +64,11 @@ from Main_App.projects import DatasetIndexError, load_project_dataset_index
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import (
+    ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+    ELECTRODE_MONTAGE_BIOSEMI64,
     PREPROCESSING_DEFAULTS,
+    SUPPORTED_ELECTRODE_MAPPING_PROFILES,
+    SUPPORTED_ELECTRODE_MONTAGES,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recording_conditions,
@@ -413,6 +417,62 @@ class SettingsDialog(QDialog):
         )
         grid.addWidget(line_noise_frequency_label, line_noise_row, 2)
         grid.addWidget(self.line_noise_frequency_combo, line_noise_row, 3)
+
+        montage_row = line_noise_row + 1
+        montage_tooltip = (
+            "FPVS Toolbox currently supports only the BioSemi ActiveTwo "
+            "64-channel 10-20 cap. This project setting is reserved for "
+            "validated future montage support."
+        )
+        montage_label = QLabel("Electrode montage:", self.group_preproc)
+        montage_label.setToolTip(montage_tooltip)
+        self.electrode_montage_combo = QComboBox(self.group_preproc)
+        self.electrode_montage_combo.setObjectName(
+            "settings_electrode_montage"
+        )
+        self.electrode_montage_combo.setToolTip(montage_tooltip)
+        for montage_id, montage_name in SUPPORTED_ELECTRODE_MONTAGES:
+            self.electrode_montage_combo.addItem(montage_name, montage_id)
+        montage_index = self.electrode_montage_combo.findData(
+            str(
+                (project_pp or PREPROCESSING_DEFAULTS).get(
+                    "electrode_montage",
+                    ELECTRODE_MONTAGE_BIOSEMI64,
+                )
+            )
+        )
+        self.electrode_montage_combo.setCurrentIndex(max(0, montage_index))
+        self.electrode_montage_combo.setEnabled(False)
+        grid.addWidget(montage_label, montage_row, 0)
+        grid.addWidget(self.electrode_montage_combo, montage_row, 1)
+
+        mapping_tooltip = (
+            "Use anatomical labels when the BDF already names scalp electrodes. "
+            "Choose the A/B profile only for the standard BioSemi 64-channel "
+            "10-20 A1-A32/B1-B32 wiring. It does not support BioSemi ABC, "
+            "equiradial, or custom cap layouts."
+        )
+        mapping_label = QLabel("Channel mapping profile:", self.group_preproc)
+        mapping_label.setToolTip(mapping_tooltip)
+        self.electrode_mapping_profile_combo = QComboBox(self.group_preproc)
+        self.electrode_mapping_profile_combo.setObjectName(
+            "settings_electrode_mapping_profile"
+        )
+        self.electrode_mapping_profile_combo.setToolTip(mapping_tooltip)
+        for profile_id, profile_name in SUPPORTED_ELECTRODE_MAPPING_PROFILES:
+            self.electrode_mapping_profile_combo.addItem(profile_name, profile_id)
+        mapping_index = self.electrode_mapping_profile_combo.findData(
+            str(
+                (project_pp or PREPROCESSING_DEFAULTS).get(
+                    "electrode_mapping_profile",
+                    ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+                )
+            )
+        )
+        self.electrode_mapping_profile_combo.setCurrentIndex(max(0, mapping_index))
+        self.electrode_mapping_profile_combo.setEnabled(self.project is not None)
+        grid.addWidget(mapping_label, montage_row, 2)
+        grid.addWidget(self.electrode_mapping_profile_combo, montage_row, 3)
 
         layout.addWidget(self.group_preproc)
 
@@ -3173,6 +3233,14 @@ class SettingsDialog(QDialog):
         )
         values["line_noise_frequency_hz"] = int(
             self.line_noise_frequency_combo.currentData()
+        )
+        values["electrode_montage"] = (
+            self.electrode_montage_combo.currentData()
+            or ELECTRODE_MONTAGE_BIOSEMI64
+        )
+        values["electrode_mapping_profile"] = (
+            self.electrode_mapping_profile_combo.currentData()
+            or ELECTRODE_MAPPING_PROFILE_ANATOMICAL
         )
         mode = self._removed_electrode_detection_mode()
         values["removed_electrode_detection_mode"] = mode

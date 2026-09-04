@@ -17,7 +17,7 @@ from Main_App.exports.figure_style import (
     FIGURE_TEXT_SIZE_PT,
     figure_text_kwargs,
 )
-from Main_App.processing import harmonic_selection_qc
+from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.projects.project import Project
 from Tools.Publication_Maps import metrics as publication_map_metrics
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
@@ -64,6 +64,16 @@ def _stable_processing_harmonic_settings(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
     monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_workbook_geometry",
+        lambda _root, *, dataset_index=None: {},
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda _root, *, dataset_index=None: object(),
+    )
 
 
 def test_ordinary_figure_layout_families_have_independent_frozen_styles() -> None:

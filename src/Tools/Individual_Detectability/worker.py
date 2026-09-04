@@ -62,6 +62,7 @@ class IndividualDetectabilityWorker(QObject):
 
     def _run(self) -> None:
         req = self._request
+        self._require_current_project_inputs(req)
         total_conditions = len(req.conditions)
         if total_conditions == 0:
             self._emit_log("No conditions selected.")
@@ -107,6 +108,30 @@ class IndividualDetectabilityWorker(QObject):
         self.status.emit("Individual detectability export complete.")
         self.progress.emit(100)
         self.finished.emit(str(req.output_root))
+
+    @staticmethod
+    def _require_current_project_inputs(req: RunRequest) -> None:
+        """Bind managed runs to the current canonical FullFFT source family."""
+
+        if req.project_root is None:
+            return
+        from Main_App.processing.full_fft_provenance import (
+            FullFftProvenanceError,
+            require_current_project_full_fft_provenance,
+        )
+        from Main_App.projects import DatasetIndexError, load_project_dataset_index
+
+        try:
+            dataset_index = load_project_dataset_index(req.input_root)
+            require_current_project_full_fft_provenance(
+                req.project_root,
+                dataset_index=dataset_index,
+            )
+        except (DatasetIndexError, FullFftProvenanceError) as exc:
+            raise CanonicalHarmonicSelectionError(
+                str(exc),
+                reason="stale_full_fft_provenance",
+            ) from exc
 
     @staticmethod
     def _log_filename(settings: DetectabilitySettings) -> str:

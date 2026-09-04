@@ -32,6 +32,8 @@ _INT = "int"
 _STR = "str"
 _BOOL = "bool"
 _LINE_NOISE_FREQUENCY = "line_noise_frequency"
+_ELECTRODE_MONTAGE = "electrode_montage"
+_ELECTRODE_MAPPING_PROFILE = "electrode_mapping_profile"
 _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
 _MANUAL_REMOVED_ELECTRODES_BY_RECORDING = (
@@ -63,6 +65,20 @@ NEW_PROJECT_HARMONIC_SELECTION_PROFILE = (
 )
 HARMONIC_SELECTION_PROFILE_VERSION = "1.0"
 
+ELECTRODE_MONTAGE_BIOSEMI64 = "biosemi64"
+ELECTRODE_MAPPING_PROFILE_ANATOMICAL = "anatomical_labels"
+ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1 = "biosemi64_1020_ab_v1"
+SUPPORTED_ELECTRODE_MONTAGES: tuple[tuple[str, str], ...] = (
+    (ELECTRODE_MONTAGE_BIOSEMI64, "BioSemi ActiveTwo 64"),
+)
+SUPPORTED_ELECTRODE_MAPPING_PROFILES: tuple[tuple[str, str], ...] = (
+    (ELECTRODE_MAPPING_PROFILE_ANATOMICAL, "Anatomical BDF labels (default)"),
+    (
+        ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
+        "BioSemi standard 64 10-20 A1-A32 / B1-B32 wiring (v1)",
+    ),
+)
+
 
 _FIELDS: tuple[_Field, ...] = (
     _Field("low_pass", ("low_pass",), 50.0, _FLOAT),
@@ -83,6 +99,18 @@ _FIELDS: tuple[_Field, ...] = (
     _Field("rejection_z", ("rejection_z", "reject_thresh", "rejection_thresh"), 5.0, _FLOAT),
     _Field("ref_chan1", ("ref_chan1", "ref_channel1"), "EXG1", _STR),
     _Field("ref_chan2", ("ref_chan2", "ref_channel2"), "EXG2", _STR),
+    _Field(
+        "electrode_montage",
+        ("electrode_montage",),
+        ELECTRODE_MONTAGE_BIOSEMI64,
+        _ELECTRODE_MONTAGE,
+    ),
+    _Field(
+        "electrode_mapping_profile",
+        ("electrode_mapping_profile",),
+        ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+        _ELECTRODE_MAPPING_PROFILE,
+    ),
     _Field(
         "max_chan_idx_keep",
         ("max_chan_idx_keep", "max_idx_keep", "max_chan_idx"),
@@ -373,6 +401,53 @@ def _coerce_line_noise_frequency(value: Any, *, default: int) -> int:
     return int(numeric)
 
 
+def _coerce_supported_choice(
+    value: Any,
+    *,
+    default: str,
+    field: str,
+    supported: Iterable[str],
+    description: str,
+) -> str:
+    if value in (None, ""):
+        return default
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid {description} for '{field}': {value!r}")
+    normalized = value.strip().casefold()
+    allowed = tuple(supported)
+    if normalized not in allowed:
+        allowed_text = ", ".join(allowed)
+        raise ValueError(
+            f"Unsupported {description} {value!r}. Supported value(s): "
+            f"{allowed_text}."
+        )
+    return normalized
+
+
+def normalize_electrode_montage(value: Any) -> str:
+    """Return the sole supported project-owned EEG montage identifier."""
+
+    return _coerce_supported_choice(
+        value,
+        default=ELECTRODE_MONTAGE_BIOSEMI64,
+        field="electrode_montage",
+        supported=(item[0] for item in SUPPORTED_ELECTRODE_MONTAGES),
+        description="electrode montage",
+    )
+
+
+def normalize_electrode_mapping_profile(value: Any) -> str:
+    """Return a supported explicit BioSemi64 channel-label mapping profile."""
+
+    return _coerce_supported_choice(
+        value,
+        default=ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+        field="electrode_mapping_profile",
+        supported=(item[0] for item in SUPPORTED_ELECTRODE_MAPPING_PROFILES),
+        description="electrode mapping profile",
+    )
+
+
 def _coerce_removed_electrode_mode(value: Any, *, default: str) -> str:
     return normalize_removed_electrode_detection_mode(
         value,
@@ -599,6 +674,10 @@ def normalize_preprocessing_settings(
                 raw_value,
                 default=int(field.default),
             )
+        elif field.type == _ELECTRODE_MONTAGE:
+            normalized[field.name] = normalize_electrode_montage(raw_value)
+        elif field.type == _ELECTRODE_MAPPING_PROFILE:
+            normalized[field.name] = normalize_electrode_mapping_profile(raw_value)
         elif field.type == _REMOVED_ELECTRODE_MODE:
             normalized[field.name] = _coerce_removed_electrode_mode(
                 raw_value,
@@ -695,6 +774,13 @@ def normalize_preprocessing_settings(
             "max_parallel_workers_override must be zero or a positive integer."
         )
 
+    channel_limit = int(normalized["max_chan_idx_keep"])
+    if not 1 <= channel_limit <= 64:
+        raise ValueError(
+            "max_chan_idx_keep must be between 1 and 64 for the supported "
+            "BioSemi ActiveTwo 64 montage."
+        )
+
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():
         for alias in aliases:
@@ -704,12 +790,17 @@ def normalize_preprocessing_settings(
 
 
 __all__ = [
+    "ELECTRODE_MAPPING_PROFILE_ANATOMICAL",
+    "ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1",
+    "ELECTRODE_MONTAGE_BIOSEMI64",
     "HARMONIC_SELECTION_PROFILE_VERSION",
     "FIXED_HARMONIC_SELECTION_PROFILE",
     "LEGACY_HARMONIC_SELECTION_PROFILE",
     "NEW_PROJECT_HARMONIC_SELECTION_PROFILE",
     "SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE",
     "new_project_preprocessing_settings",
+    "normalize_electrode_mapping_profile",
+    "normalize_electrode_montage",
     "normalize_preprocessing_settings",
     "normalize_manual_excluded_participants",
     "normalize_manual_excluded_recordings",
@@ -720,4 +811,6 @@ __all__ = [
     "PREPROCESSING_CANONICAL_KEYS",
     "REPEATED_SESSION_PREPROCESSING_KEYS",
     "PREPROCESSING_DEFAULTS",
+    "SUPPORTED_ELECTRODE_MAPPING_PROFILES",
+    "SUPPORTED_ELECTRODE_MONTAGES",
 ]

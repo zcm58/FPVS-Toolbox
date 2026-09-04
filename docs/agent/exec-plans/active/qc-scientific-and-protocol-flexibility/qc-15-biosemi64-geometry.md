@@ -29,9 +29,11 @@ potentially affected and require an explicit compatibility assessment.
    data-channel montage and keep the selected EXG mastoid references
    coordinate-free through initial reference and their existing removal.
 3. Anatomical BDF headers map directly by name. If A1-A32/B1-B32 headers are
-   encountered, accept them only through an explicit, tested BioSemi64 wiring
-   profile stored in project/protocol provenance. Never infer anatomy from
-   ordinal order or silently accept an unknown/custom cap arrangement.
+   encountered, accept them only through the explicit
+   `biosemi64_1020_ab_v1` profile stored in project/protocol provenance. That
+   profile means the standard BioSemi 64-channel 10/20 A1-A32/B1-B32 wiring;
+   it does not support BioSemi ABC/equiradial layouts or another custom cap.
+   Never infer anatomy from ordinal order.
 4. Give the geometry a versioned processing identity. Invalidate relevant QC,
    interpolation, processed-data, FullFFT/BCA, and downstream-analysis cache
    reuse when geometry differs. Retain old files for audit, label their legacy

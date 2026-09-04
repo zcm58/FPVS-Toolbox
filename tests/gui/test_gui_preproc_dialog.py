@@ -159,6 +159,16 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert dlg.line_noise_filter_enabled_check.isChecked() is True
     assert dlg.line_noise_frequency_combo.currentData() == 60
     assert dlg.line_noise_frequency_combo.isEnabled() is True
+    assert dlg.electrode_montage_combo.count() == 1
+    assert dlg.electrode_montage_combo.currentText() == "BioSemi ActiveTwo 64"
+    assert dlg.electrode_montage_combo.currentData() == "biosemi64"
+    assert dlg.electrode_montage_combo.isEnabled() is False
+    assert (
+        dlg.electrode_mapping_profile_combo.currentData() == "anatomical_labels"
+    )
+    assert dlg.electrode_mapping_profile_combo.isEnabled() is True
+    assert "ABC" in dlg.electrode_mapping_profile_combo.toolTip()
+    assert dlg.roi_montage_combo is not dlg.electrode_montage_combo
 
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[3].setText("3.5")
@@ -176,6 +186,11 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.line_noise_filter_enabled_check.setChecked(False)
     assert dlg.line_noise_frequency_combo.isEnabled() is False
     assert dlg.line_noise_frequency_combo.currentData() == 50
+    ab_profile_index = dlg.electrode_mapping_profile_combo.findData(
+        "biosemi64_1020_ab_v1"
+    )
+    assert ab_profile_index >= 0
+    dlg.electrode_mapping_profile_combo.setCurrentIndex(ab_profile_index)
 
     dlg._save()
 
@@ -185,6 +200,11 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert _RETIRED_EPOCH_KEYS.isdisjoint(reloaded.preprocessing)
     assert reloaded.preprocessing["line_noise_filter_enabled"] is False
     assert reloaded.preprocessing["line_noise_frequency_hz"] == 50
+    assert reloaded.preprocessing["electrode_montage"] == "biosemi64"
+    assert (
+        reloaded.preprocessing["electrode_mapping_profile"]
+        == "biosemi64_1020_ab_v1"
+    )
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
     assert reloaded.preprocessing["manual_excluded_participants"] == []
@@ -215,6 +235,13 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert dlg2.line_noise_filter_enabled_check.isChecked() is False
     assert dlg2.line_noise_frequency_combo.currentData() == 50
     assert dlg2.line_noise_frequency_combo.isEnabled() is False
+    assert dlg2.electrode_montage_combo.count() == 1
+    assert dlg2.electrode_montage_combo.currentData() == "biosemi64"
+    assert dlg2.electrode_montage_combo.isEnabled() is False
+    assert (
+        dlg2.electrode_mapping_profile_combo.currentData()
+        == "biosemi64_1020_ab_v1"
+    )
 
     win.loadProject(reloaded)
     first_row = win.event_rows[0].findChildren(QLineEdit)
@@ -242,6 +269,12 @@ def test_dialog_loads_saves_app_line_noise_settings_without_project(tmp_path, qt
     qtbot.addWidget(dlg)
     assert dlg.line_noise_filter_enabled_check.isChecked() is True
     assert dlg.line_noise_frequency_combo.currentData() == 60
+    assert dlg.electrode_montage_combo.currentData() == "biosemi64"
+    assert dlg.electrode_montage_combo.isEnabled() is False
+    assert (
+        dlg.electrode_mapping_profile_combo.currentData() == "anatomical_labels"
+    )
+    assert dlg.electrode_mapping_profile_combo.isEnabled() is False
 
     dlg.line_noise_frequency_combo.setCurrentIndex(
         dlg.line_noise_frequency_combo.findData(50)

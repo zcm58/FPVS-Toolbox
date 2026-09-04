@@ -8,13 +8,19 @@ harmonic-selection state and does not depend on a Summed-BCA cache.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
+
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    BIOSEMI64_MONTAGE_ID,
+    biosemi64_geometry_identity,
+)
 
 from Main_App.processing.frequency_domain_qc import (
     active_frequency_domain_exclusions,
@@ -28,10 +34,12 @@ from Main_App.projects import (
 )
 
 
-FULL_FFT_PROVENANCE_SCHEMA_VERSION = 1
-FULL_FFT_PROVENANCE_METHOD_VERSION = "project_full_fft_provenance_v1"
+FULL_FFT_PROVENANCE_SCHEMA_VERSION = 2
+FULL_FFT_PROVENANCE_METHOD_VERSION = (
+    "project_full_fft_provenance_v2_biosemi64_geometry"
+)
 REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION = (
-    "project_full_fft_provenance_recording_session_v1"
+    "project_full_fft_provenance_recording_session_v2_biosemi64_geometry"
 )
 FULL_FFT_PROVENANCE_MANIFEST_PATH = (
     "tools",
@@ -80,6 +88,8 @@ class FullFftProvenance:
     source_fingerprint: str
     frequency_qc_fingerprint: str
     processing_export_fingerprint: str
+    geometry_identity: Mapping[str, object] = field(default_factory=dict)
+    geometry_fingerprint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +103,8 @@ class _SourceSnapshot:
     source_fingerprint: str
     frequency_qc_fingerprint: str
     processing_export_fingerprint: str
+    geometry_identity: dict[str, object]
+    geometry_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +239,11 @@ def _completed_ledger_state(
                 "condition_completeness": str(
                     entry.get("condition_completeness") or ""
                 ),
+                "geometry": (
+                    dict(entry["geometry"])
+                    if isinstance(entry.get("geometry"), Mapping)
+                    else None
+                ),
             }
         if repeated_session:
             row.update(
@@ -247,6 +264,122 @@ def _completed_ledger_state(
         )
     )
     return completed_keys, tuple(completed_rows), bool(completed_keys)
+
+
+def _validated_geometry_identity(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise FullFftProvenanceError(
+            "Active processed workbooks have no BioSemi64 geometry identity. "
+            "Reprocess the EEG before post-processing or analysis."
+        )
+    retained = value.get("retained_scalp_channels")
+    if not isinstance(retained, Sequence) or isinstance(retained, (str, bytes)):
+        raise FullFftProvenanceError(
+            "Active processed workbooks have incomplete BioSemi64 geometry "
+            "provenance. Reprocess the EEG before analysis."
+        )
+    try:
+        expected = biosemi64_geometry_identity(
+            electrode_mapping_profile=value.get("electrode_mapping_profile"),
+            retained_channels=[str(channel) for channel in retained],
+        )
+    except (TypeError, ValueError) as exc:
+        raise FullFftProvenanceError(
+            f"Active processed workbooks have invalid BioSemi64 geometry: {exc}"
+        ) from exc
+    if dict(value) != expected:
+        raise FullFftProvenanceError(
+            "Active processed workbooks use an unknown or legacy electrode "
+            "geometry. Reprocess the EEG before analysis."
+        )
+    return expected
+
+
+def _active_geometry_identity(
+    index: ProjectDatasetIndex,
+    active_records: Sequence[object],
+    processing_rows: Sequence[Mapping[str, object]],
+    *,
+    ledger_filter_applied: bool,
+) -> dict[str, object]:
+    """Require one current geometry across every active workbook owner."""
+
+    if not ledger_filter_applied:
+        raise FullFftProvenanceError(
+            "Active FullFFT workbooks have no current processing ledger geometry. "
+            "Legacy or unknown geometry cannot be analyzed; reprocess the EEG."
+        )
+
+    manifest = index.manifest if isinstance(index.manifest, Mapping) else {}
+    raw_preprocessing = manifest.get("preprocessing")
+    try:
+        preprocessing = normalize_preprocessing_settings(
+            raw_preprocessing if isinstance(raw_preprocessing, Mapping) else {}
+        )
+        montage_id = str(preprocessing.get("electrode_montage") or "")
+        mapping_profile = preprocessing.get("electrode_mapping_profile")
+        expected_limit = int(preprocessing.get("max_chan_idx_keep") or 64)
+        expected_count = expected_limit if 0 < expected_limit < 64 else 64
+        project_geometry = biosemi64_geometry_identity(
+            electrode_mapping_profile=mapping_profile,
+            retained_channels=BIOSEMI64_CHANNELS[:expected_count],
+        )
+    except (TypeError, ValueError) as exc:
+        raise FullFftProvenanceError(
+            f"Project electrode geometry settings are invalid: {exc}"
+        ) from exc
+    if montage_id != BIOSEMI64_MONTAGE_ID:
+        raise FullFftProvenanceError(
+            f"Unsupported project electrode montage {montage_id!r}; only "
+            f"{BIOSEMI64_MONTAGE_ID!r} is valid for current processing."
+        )
+
+    identity_key = "recording_id" if index.is_repeated_session else "participant_id"
+    active_ids = {
+        str(getattr(record, identity_key, "") or "").strip().casefold()
+        for record in active_records
+    }
+    active_ids.discard("")
+    rows_by_id = {
+        str(row.get(identity_key) or "").strip().casefold(): row
+        for row in processing_rows
+        if str(row.get(identity_key) or "").strip()
+    }
+    missing = sorted(active_ids.difference(rows_by_id))
+    if missing:
+        raise FullFftProvenanceError(
+            "Active FullFFT workbook owner(s) have no completed processing "
+            "geometry record: " + ", ".join(missing)
+        )
+
+    validated: list[tuple[str, dict[str, object]]] = []
+    for processing_id in sorted(active_ids):
+        geometry = _validated_geometry_identity(
+            rows_by_id[processing_id].get("geometry")
+        )
+        validated.append((processing_id, geometry))
+
+    geometry_fingerprints = {
+        str(value["geometry_identity_fingerprint"])
+        for _processing_id, value in validated
+    }
+    if len(geometry_fingerprints) != 1:
+        raise FullFftProvenanceError(
+            "Active FullFFT workbooks contain mixed electrode geometries or retained "
+            "scalp sets. Reprocess them under one project geometry before analysis."
+        )
+    if not validated:
+        raise FullFftProvenanceError(
+            "No active processing geometry could be matched to FullFFT workbooks."
+        )
+    for processing_id, geometry in validated:
+        if geometry != project_geometry:
+            raise FullFftProvenanceError(
+                "Active FullFFT workbook geometry or exact retained scalp set does "
+                "not match current project settings for "
+                f"{processing_id}. Reprocess the EEG."
+            )
+    return validated[0][1]
 
 
 def _source_snapshot(
@@ -316,6 +449,12 @@ def _source_snapshot(
         raise FullFftProvenanceError(
             "No active indexed FullFFT workbooks remain after project cohort filters."
         )
+    geometry_identity = _active_geometry_identity(
+        index,
+        active_records,
+        processing_rows,
+        ledger_filter_applied=ledger_filter_applied,
+    )
 
     source_rows: list[dict[str, object]] = []
     for record in active_records:
@@ -450,6 +589,10 @@ def _source_snapshot(
         source_fingerprint=_hash_payload(source_rows),
         frequency_qc_fingerprint=_hash_payload(frequency_qc_payload),
         processing_export_fingerprint=_hash_payload(processing_rows),
+        geometry_identity=geometry_identity,
+        geometry_fingerprint=str(
+            geometry_identity["geometry_identity_fingerprint"]
+        ),
     )
 
 
@@ -576,6 +719,29 @@ def _load_dataset_index(
         ) from exc
 
 
+def require_current_project_workbook_geometry(
+    project_root: str | Path,
+    *,
+    dataset_index: ProjectDatasetIndex | None = None,
+) -> dict[str, object]:
+    """Require one current BioSemi64 geometry for active processed workbooks.
+
+    This check deliberately does not require a saved neutral FullFFT provenance
+    record.  It is the processing-time gate for consumers, such as final
+    harmonic selection, that may run before that record has been published.  It
+    uses the same canonical dataset-index, cohort, processing-ledger, and
+    geometry checks that build and revalidate the neutral FullFFT record.
+    """
+
+    root = Path(project_root).expanduser().resolve(strict=False)
+    if not root.is_dir() or not (root / "project.json").is_file():
+        raise FullFftProvenanceError(
+            "project_root must be an existing managed project containing project.json."
+        )
+    index = _load_dataset_index(root, dataset_index)
+    return dict(_source_snapshot(root, index).geometry_identity)
+
+
 def _read_manifest(project_root: Path) -> dict[str, object]:
     manifest_path = project_root / "project.json"
     try:
@@ -642,12 +808,40 @@ def _record_from_metadata(
         schema_version = int(metadata.get("schema_version"))
         method_version = str(metadata.get("method_version") or "")
         status = str(metadata.get("status") or "")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise FullFftProvenanceStaleError(
+            "The saved neutral FullFFT provenance header is invalid. Rerun "
+            "EEG preprocessing and post-processing."
+        ) from exc
+    if schema_version != FULL_FFT_PROVENANCE_SCHEMA_VERSION:
+        raise FullFftProvenanceStaleError(
+            "The saved neutral FullFFT provenance predates the BioSemi64 "
+            "geometry contract. Reprocess the EEG before analysis."
+        )
+    if method_version not in {
+        FULL_FFT_PROVENANCE_METHOD_VERSION,
+        REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION,
+    }:
+        raise FullFftProvenanceStaleError(
+            "The saved neutral FullFFT provenance uses an unsupported geometry "
+            "method. Reprocess the EEG before analysis."
+        )
+    if status != "current":
+        reason = str(metadata.get("stale_reason") or "FullFFT inputs changed")
+        raise FullFftProvenanceStaleError(
+            f"Neutral FullFFT provenance is stale ({reason}). Rerun "
+            "post-processing; EEG preprocessing is not required unless the "
+            "reason identifies electrode geometry."
+        )
+
+    try:
         saved_at = str(metadata.get("saved_at") or "")
         base_hz = float(metadata.get("base_frequency_hz"))
         oddball_hz = float(metadata.get("oddball_frequency_hz"))
         grid = metadata["grid"]
         sources = metadata["source_workbooks"]
         fingerprints = metadata["fingerprints"]
+        geometry = _validated_geometry_identity(metadata.get("geometry"))
         if not isinstance(grid, Mapping):
             raise TypeError("grid")
         if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
@@ -677,31 +871,16 @@ def _record_from_metadata(
             processing_export_fingerprint=str(
                 fingerprints["processing_export"]
             ),
+            geometry_identity=geometry,
+            geometry_fingerprint=str(fingerprints["geometry"]),
         )
+    except FullFftProvenanceError as exc:
+        raise FullFftProvenanceStaleError(str(exc)) from exc
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise FullFftProvenanceStaleError(
-            "The saved neutral FullFFT provenance is invalid. Rerun "
-            "post-processing; EEG preprocessing is not required."
+            "The saved neutral FullFFT provenance is incomplete or invalid. "
+            "Reprocess the EEG before analysis."
         ) from exc
-    if schema_version != FULL_FFT_PROVENANCE_SCHEMA_VERSION:
-        raise FullFftProvenanceStaleError(
-            "The saved neutral FullFFT provenance schema is unsupported. Rerun "
-            "post-processing in the current Toolbox version."
-        )
-    if method_version not in {
-        FULL_FFT_PROVENANCE_METHOD_VERSION,
-        REPEATED_FULL_FFT_PROVENANCE_METHOD_VERSION,
-    }:
-        raise FullFftProvenanceStaleError(
-            "The saved neutral FullFFT provenance method is unsupported. Rerun "
-            "post-processing in the current Toolbox version."
-        )
-    if status != "current":
-        reason = str(metadata.get("stale_reason") or "FullFFT inputs changed")
-        raise FullFftProvenanceStaleError(
-            f"Neutral FullFFT provenance is stale ({reason}). Rerun "
-            "post-processing; EEG preprocessing is not required."
-        )
     if (
         not saved_at
         or not record.grid_fingerprint
@@ -716,6 +895,9 @@ def _record_from_metadata(
         or not record.source_fingerprint
         or not record.frequency_qc_fingerprint
         or not record.processing_export_fingerprint
+        or not record.geometry_fingerprint
+        or record.geometry_fingerprint
+        != record.geometry_identity.get("geometry_identity_fingerprint")
         or not math.isfinite(record.base_frequency_hz)
         or record.base_frequency_hz <= 0.0
         or not math.isfinite(record.oddball_frequency_hz)
@@ -783,6 +965,7 @@ def write_project_full_fft_provenance(
             "upper_frequency_hz": grid.upper_frequency_hz,
             "frequency_column_count": grid.frequency_column_count,
         },
+        "geometry": dict(snapshot.geometry_identity),
         "source_workbooks": [dict(row) for row in snapshot.source_rows],
         "cohort_state": dict(snapshot.cohort_state),
         "frequency_qc_state": dict(snapshot.frequency_qc_state),
@@ -794,6 +977,7 @@ def write_project_full_fft_provenance(
             "sources": snapshot.source_fingerprint,
             "frequency_qc": snapshot.frequency_qc_fingerprint,
             "processing_export": snapshot.processing_export_fingerprint,
+            "geometry": snapshot.geometry_fingerprint,
         },
     }
     manifest = _read_manifest(root)
@@ -839,6 +1023,8 @@ def _require_current_full_fft_record(
         differences.append("frequency-domain cohort/QC exclusions changed")
     if current.processing_export_fingerprint != record.processing_export_fingerprint:
         differences.append("processing/export ledger identity changed")
+    if current.geometry_fingerprint != record.geometry_fingerprint:
+        differences.append("electrode geometry identity changed")
     if current.source_paths != record.source_paths:
         differences.append("active FullFFT workbook set changed")
     if differences:
@@ -949,6 +1135,7 @@ __all__ = [
     "FullFftProvenanceMissingError",
     "FullFftProvenanceStaleError",
     "mark_project_full_fft_provenance_stale",
+    "require_current_project_workbook_geometry",
     "require_current_project_full_fft_provenance",
     "validate_project_full_fft_provenance",
     "write_project_full_fft_provenance",

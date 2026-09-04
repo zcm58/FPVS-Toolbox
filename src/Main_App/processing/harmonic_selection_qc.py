@@ -184,6 +184,14 @@ def run_processing_harmonic_selection_qc(
             dataset_index=dataset_index,
         )
     project_root = inputs.project_root
+    from Main_App.processing.full_fft_provenance import (
+        require_current_project_workbook_geometry,
+    )
+
+    require_current_project_workbook_geometry(
+        project_root,
+        dataset_index=dataset_index,
+    )
     subjects = list(inputs.subjects)
     ordered_conditions = list(inputs.conditions)
     subject_data = inputs.subject_data

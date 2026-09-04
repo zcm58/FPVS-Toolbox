@@ -9,26 +9,28 @@ from __future__ import annotations
 
 import logging
 import os
-import ast
-import re
 import tempfile
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional, Sequence, Set, Tuple
 
 import mne
+import numpy as np
 
 from Main_App.Shared import user_messages
+from Main_App.Shared.eeg_geometry import (
+    BIOSEMI64_CHANNEL_SET,
+    BIOSEMI64_MONTAGE_ID,
+    BioSemi64AcquisitionGeometry,
+    attach_raw_biosemi64_geometry,
+    cached_biosemi64_montage,
+    validate_biosemi64_acquisition_channels,
+)
 
 logger = logging.getLogger(__name__)
 BDF_RECORDING_NOT_STARTED_REASON = "recording_not_started"
-_MONTAGE_MISSING_RE = re.compile(
-    r"The channels missing from the montage are:\s*\n\n(?P<channels>\[[^\]]*\])",
-    re.MULTILINE,
-)
 
 
 @dataclass(frozen=True)
@@ -145,17 +147,8 @@ def _memmap_dir_for_pid() -> Path:
     return d
 
 
-@lru_cache(maxsize=1)
-def _cached_1010() -> mne.channels.DigMontage:
-    """Cached once per process to avoid repeated montage builds.
-
-    MNE does not expose a builtin named ``standard_1010``; ``standard_1005`` is
-    the denser standard montage that includes 10-10 positions.
-    """
-    return mne.channels.make_standard_montage("standard_1005")
-
-
-_cached_1020 = _cached_1010  # temporary compatibility alias for stale imports
+_cached_1010 = cached_biosemi64_montage
+_cached_1020 = _cached_1010  # temporary compatibility aliases for stale imports
 
 
 def _resolve_ref_pair(app: Any) -> Tuple[str, str]:
@@ -188,6 +181,69 @@ def _resolve_stim(app: Any) -> str:
         return "Status"
 
 
+def _resolve_electrode_mapping_profile(app: Any) -> str:
+    """Resolve the project-owned BioSemi64 channel-label mapping profile."""
+
+    from Main_App.projects.preprocessing_settings import (
+        ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
+        normalize_electrode_mapping_profile,
+    )
+
+    try:
+        preprocessing = getattr(app.currentProject, "preprocessing", {}) or {}
+    except Exception:
+        preprocessing = {}
+    return normalize_electrode_mapping_profile(
+        preprocessing.get("electrode_mapping_profile", ELECTRODE_MAPPING_PROFILE_ANATOMICAL)
+    )
+
+
+def _resolve_electrode_montage(app: Any) -> str:
+    """Resolve and validate the project-owned electrode montage identifier."""
+
+    from Main_App.projects.preprocessing_settings import (
+        ELECTRODE_MONTAGE_BIOSEMI64,
+        normalize_electrode_montage,
+    )
+
+    if ELECTRODE_MONTAGE_BIOSEMI64 != BIOSEMI64_MONTAGE_ID:
+        raise RuntimeError("Project and loader BioSemi64 montage identifiers disagree.")
+
+    try:
+        preprocessing = getattr(app.currentProject, "preprocessing", {}) or {}
+    except Exception:
+        preprocessing = {}
+    montage_id = normalize_electrode_montage(preprocessing.get("electrode_montage"))
+    if montage_id != BIOSEMI64_MONTAGE_ID:
+        raise ValueError(f"Unsupported electrode montage {montage_id!r}.")
+    return montage_id
+
+
+def _normalize_electrode_montage(value: Any) -> str:
+    from Main_App.projects.preprocessing_settings import (
+        ELECTRODE_MONTAGE_BIOSEMI64,
+        normalize_electrode_montage,
+    )
+
+    if ELECTRODE_MONTAGE_BIOSEMI64 != BIOSEMI64_MONTAGE_ID:
+        raise RuntimeError("Project and loader BioSemi64 montage identifiers disagree.")
+
+    montage_id = normalize_electrode_montage(value)
+    if montage_id != BIOSEMI64_MONTAGE_ID:
+        raise ValueError(f"Unsupported electrode montage {montage_id!r}.")
+    return montage_id
+
+
+def _normalize_electrode_mapping_profile(value: Any) -> str:
+    """Normalize through the project contract without creating an import cycle."""
+
+    from Main_App.projects.preprocessing_settings import (
+        normalize_electrode_mapping_profile,
+    )
+
+    return normalize_electrode_mapping_profile(value)
+
+
 def _map_present_case_insensitive(names: Iterable[str]) -> Dict[str, str]:
     """Build a case-insensitive lookup: UPPER -> actual name present."""
     return {n.upper(): n for n in names}
@@ -212,16 +268,32 @@ def _resolve_channel_subset(
     stim_name: str,
     ref_pair: Tuple[str, str],
     first_n_channels: Optional[int],
+    electrode_mapping_profile: Any = None,
 ) -> Optional[list[str]]:
-    """Return first-N channels plus ref/stim names, preserving file order."""
-    if not first_n_channels or first_n_channels <= 0:
-        return None
+    """Validate the full header, then return a source-order reduced include list."""
+
+    geometry = _read_biosemi64_header_geometry(
+        filepath,
+        stim_name=stim_name,
+        ref_pair=ref_pair,
+        electrode_mapping_profile=electrode_mapping_profile,
+    )
+    return geometry.included_source_names(first_n_channels)
+
+
+def _read_biosemi64_header_geometry(
+    filepath: str,
+    *,
+    stim_name: str,
+    ref_pair: Tuple[str, str],
+    electrode_mapping_profile: Any,
+) -> BioSemi64AcquisitionGeometry:
+    """Open only the BDF header and validate all acquisition identities."""
 
     base = os.path.basename(filepath)
     logger.debug(
-        "[LOADER STAGE] file=%s stage=header_read_start first_n_channels=%s",
+        "[LOADER STAGE] file=%s stage=header_geometry_validation_start",
         base,
-        first_n_channels,
     )
     with mne.utils.use_log_level("WARNING"):
         header = mne.io.read_raw_bdf(
@@ -231,28 +303,25 @@ def _resolve_channel_subset(
             verbose=False,
         )
     try:
-        names = list(header.ch_names)
+        geometry = validate_biosemi64_acquisition_channels(
+            header.ch_names,
+            ref_pair=ref_pair,
+            stim_name=stim_name,
+            electrode_mapping_profile=electrode_mapping_profile,
+        )
     finally:
         try:
             header.close()
         except (AttributeError, RuntimeError, OSError, ValueError):
             pass
 
-    keep_names = list(names[: int(first_n_channels)])
-    present = _map_present_case_insensitive(names)
-    for candidate in (*ref_pair, stim_name):
-        if not candidate:
-            continue
-        actual = present.get(str(candidate).upper())
-        if actual and actual not in keep_names:
-            keep_names.append(actual)
     logger.debug(
-        "[LOADER STAGE] file=%s stage=header_read_done total_channels=%d selected_channels=%d",
+        "[LOADER STAGE] file=%s stage=header_geometry_validation_done total_channels=%d profile=%s",
         base,
-        len(names),
-        len(keep_names),
+        len(geometry.source_channel_names),
+        geometry.electrode_mapping_profile,
     )
-    return keep_names
+    return geometry
 
 
 def _try_warning_log(app: Any, message: str) -> bool:
@@ -286,48 +355,6 @@ def _emit_reader_warnings(
             logger.warning(detailed)
 
 
-def _missing_montage_channels(message: str) -> Set[str]:
-    """Extract channel names from MNE's missing-DigMontage warning."""
-    match = _MONTAGE_MISSING_RE.search(message)
-    if not match:
-        return set()
-    try:
-        parsed = ast.literal_eval(match.group("channels"))
-    except (SyntaxError, ValueError):
-        return set()
-    if not isinstance(parsed, list):
-        return set()
-    return {str(channel) for channel in parsed}
-
-
-def _apply_montage_suppressing_expected_ref_warnings(
-    raw: mne.io.BaseRaw,
-    montage: mne.channels.DigMontage,
-    *,
-    expected_missing_refs: Set[str],
-) -> None:
-    """Apply montage while suppressing expected missing reference positions only."""
-    with warnings.catch_warnings(record=True) as caught_montage_warnings:
-        warnings.simplefilter("always")
-        raw.set_montage(
-            montage,
-            on_missing="warn",
-            match_case=False,
-            verbose=False,
-        )
-
-    for caught in caught_montage_warnings:
-        warning_text = str(caught.message)
-        missing = _missing_montage_channels(warning_text)
-        if missing and missing.issubset(expected_missing_refs):
-            continue
-        warnings.warn(
-            caught.message,
-            category=caught.category,
-            stacklevel=2,
-        )
-
-
 def _apply_preflight_channel_and_montage_contract(
     app: Any,
     raw: mne.io.BaseRaw,
@@ -335,60 +362,96 @@ def _apply_preflight_channel_and_montage_contract(
     base: str,
     ref_pair: Tuple[str, str],
     stim_name: str,
-) -> None:
-    """Apply the existing EXG/stim and montage policy to a lazy preflight Raw."""
-    ref_keep: Set[str] = set()
-    try:
-        logger.debug("[LOADER STAGE] file=%s stage=channel_typing_start", base)
-        ref_keep = _canon_present(raw.ch_names, ref_pair)
-        exg_labels = [f"EXG{i}" for i in range(1, 9)]
-        exg_present = _canon_present(raw.ch_names, exg_labels)
+    acquisition_geometry: BioSemi64AcquisitionGeometry,
+    retained_scalp_channels: Sequence[str],
+) -> dict[str, Any]:
+    """Apply strict BioSemi64 names, roles, coordinates, and runtime identity."""
 
-        app.log(
-            f"[LOADER DEBUG] {base}: exg_present={sorted(exg_present)} "
-            f"ref_keep={sorted(ref_keep)}"
+    logger.debug("[LOADER STAGE] file=%s stage=channel_identity_start", base)
+    source_mapping = acquisition_geometry.source_to_canonical
+    source_mapping_by_case = {
+        source.casefold(): canonical for source, canonical in source_mapping.items()
+    }
+    rename_mapping = {
+        name: source_mapping_by_case[name.casefold()]
+        for name in raw.ch_names
+        if name.casefold() in source_mapping_by_case
+        and name != source_mapping_by_case[name.casefold()]
+    }
+    if rename_mapping:
+        raw.rename_channels(rename_mapping)
+
+    retained_set = set(retained_scalp_channels)
+    actual_scalp = {name for name in raw.ch_names if name in BIOSEMI64_CHANNEL_SET}
+    if actual_scalp != retained_set or len(actual_scalp) != len(retained_scalp_channels):
+        raise ValueError(
+            "Loaded BDF scalp channels do not match the full-header BioSemi64 validation."
         )
 
-        to_misc = {ch: "misc" for ch in exg_present if ch not in ref_keep}
-        to_eeg = {ch: "eeg" for ch in ref_keep}
+    present = _map_present_case_insensitive(raw.ch_names)
+    resolved_refs: list[str] = []
+    for reference in ref_pair:
+        actual = present.get(str(reference).upper())
+        if actual is None:
+            raise ValueError(f"Loaded BDF is missing reference channel {reference!r}.")
+        resolved_refs.append(actual)
+    resolved_stim = present.get(str(stim_name).upper())
+    if resolved_stim is None:
+        raise ValueError(f"Loaded BDF is missing stimulation channel {stim_name!r}.")
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message=r"The unit for channel\(s\) .* has changed from .* to .*\.",
-                category=RuntimeWarning,
-            )
-            if to_misc:
-                raw.set_channel_types(to_misc)
-            if to_eeg:
-                raw.set_channel_types(to_eeg)
-            if stim_name in raw.ch_names:
-                raw.set_channel_types({stim_name: "stim"})
-
-        kept = sorted(ref_keep)
-        demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
-        app.log(f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}")
-        logger.debug(
-            "[LOADER STAGE] file=%s stage=channel_typing_done ref_keep=%s demoted=%s",
-            base,
-            kept,
-            demoted,
+    scalp_to_eeg = {name: "eeg" for name in raw.ch_names if name in retained_set}
+    auxiliary_to_misc = {
+        name: "misc"
+        for name in raw.ch_names
+        if name not in retained_set and name != resolved_stim
+    }
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The unit for channel\(s\) .* has changed from .* to .*\.",
+            category=RuntimeWarning,
         )
-    except Exception as e:
-        app.log(f"Warning: EXG/stim typing adjustment failed: {e}")
+        if auxiliary_to_misc:
+            raw.set_channel_types(auxiliary_to_misc)
+        if scalp_to_eeg:
+            raw.set_channel_types(scalp_to_eeg)
+        raw.set_channel_types({resolved_stim: "stim"})
 
-    app.log("Applying standard_1005 montage for 10-10 coverage...")
-    try:
-        logger.debug("[LOADER STAGE] file=%s stage=montage_apply_start", base)
-        _apply_montage_suppressing_expected_ref_warnings(
-            raw,
-            _cached_1010(),
-            expected_missing_refs=ref_keep,
+    app.log("Applying canonical BioSemi ActiveTwo 64 montage...")
+    logger.debug("[LOADER STAGE] file=%s stage=montage_apply_start", base)
+    raw.set_montage(
+        _cached_1010(),
+        on_missing="raise",
+        match_case=True,
+        verbose=False,
+    )
+
+    # References remain signals through the initial mastoid reference, but
+    # they are not scalp sensors and must never acquire template coordinates.
+    for reference in resolved_refs:
+        channel_index = raw.ch_names.index(reference)
+        raw.info["chs"][channel_index]["loc"][:] = np.nan
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The unit for channel\(s\) .* has changed from .* to .*\.",
+            category=RuntimeWarning,
         )
-        logger.debug("[LOADER STAGE] file=%s stage=montage_apply_done", base)
-        app.log("Montage applied.")
-    except Exception as e:
-        app.log(f"Warning: Montage error: {e}")
+        raw.set_channel_types({reference: "eeg" for reference in resolved_refs})
+
+    identity = attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile=acquisition_geometry.electrode_mapping_profile,
+        retained_channels=retained_scalp_channels,
+        reference_channels=resolved_refs,
+        stim_channel=resolved_stim,
+    )
+    logger.debug("[LOADER STAGE] file=%s stage=montage_apply_done", base)
+    app.log(
+        "BioSemi64 montage applied and validated "
+        f"({len(retained_scalp_channels)} retained scalp channels)."
+    )
+    return identity
 
 
 @contextmanager
@@ -398,6 +461,8 @@ def open_preflight_eeg_file(
     ref_pair: Optional[Tuple[str, str]] = None,
     first_n_channels: Optional[int] = None,
     stim_channel: Optional[str] = None,
+    electrode_mapping_profile: Optional[str] = None,
+    electrode_montage: Optional[str] = None,
 ) -> Iterator[Optional[mne.io.BaseRaw]]:
     """Open a BDF lazily for preflight QC and always close it on context exit.
 
@@ -421,9 +486,20 @@ def open_preflight_eeg_file(
     try:
         stim_name = str(stim_channel or "").strip() or _resolve_stim(app)
         resolved_ref_pair = ref_pair or _resolve_ref_pair(app)
+        resolved_montage = (
+            _normalize_electrode_montage(electrode_montage)
+            if electrode_montage is not None
+            else _resolve_electrode_montage(app)
+        )
+        resolved_mapping_profile = (
+            _normalize_electrode_mapping_profile(electrode_mapping_profile)
+            if electrode_mapping_profile is not None
+            else _resolve_electrode_mapping_profile(app)
+        )
         app.log(
             f"[PREFLIGHT LAZY LOADER DEBUG] {base}: stim='{stim_name}' "
-            f"ref_pair={resolved_ref_pair}"
+            f"ref_pair={resolved_ref_pair} montage='{resolved_montage}' "
+            f"mapping_profile='{resolved_mapping_profile}'"
         )
 
         preflight = inspect_bdf_header(filepath)
@@ -445,26 +521,23 @@ def open_preflight_eeg_file(
                 preflight.data_records,
             )
         else:
-            include_channels = None
-            if first_n_channels:
-                try:
-                    include_channels = _resolve_channel_subset(
-                        filepath,
-                        stim_name=stim_name,
-                        ref_pair=resolved_ref_pair,
-                        first_n_channels=first_n_channels,
-                    )
-                    app.log(
-                        f"[LOADER CHANNEL SUBSET] {base}: opening "
-                        f"{len(include_channels or [])} channels lazily "
-                        f"(first_n={first_n_channels}, refs={resolved_ref_pair}, "
-                        f"stim='{stim_name}')"
-                    )
-                except Exception as subset_err:
-                    app.log(
-                        f"[LOADER CHANNEL SUBSET WARNING] {base}: failed to resolve "
-                        f"first_n={first_n_channels}; falling back to full load: {subset_err}"
-                    )
+            acquisition_geometry = _read_biosemi64_header_geometry(
+                filepath,
+                stim_name=stim_name,
+                ref_pair=resolved_ref_pair,
+                electrode_mapping_profile=resolved_mapping_profile,
+            )
+            retained_scalp_channels = acquisition_geometry.retained_scalp_names(
+                first_n_channels
+            )
+            include_channels = acquisition_geometry.included_source_names(first_n_channels)
+            if include_channels is not None:
+                app.log(
+                    f"[LOADER CHANNEL SUBSET] {base}: opening "
+                    f"{len(include_channels)} channels lazily after validating all 64 scalp "
+                    f"identities (first_n={first_n_channels}, refs={resolved_ref_pair}, "
+                    f"stim='{stim_name}')"
+                )
 
             with warnings.catch_warnings(record=True) as caught_read_warnings:
                 warnings.simplefilter("always")
@@ -502,6 +575,8 @@ def open_preflight_eeg_file(
                 base=base,
                 ref_pair=resolved_ref_pair,
                 stim_name=stim_name,
+                acquisition_geometry=acquisition_geometry,
+                retained_scalp_channels=retained_scalp_channels,
             )
             app.log(f"[PREFLIGHT LAZY LOADER READY] {base}")
     except Exception as e:
@@ -536,22 +611,38 @@ def load_eeg_file(
     filepath: str,
     ref_pair: Optional[Tuple[str, str]] = None,
     first_n_channels: Optional[int] = None,
+    stim_channel: Optional[str] = None,
+    electrode_mapping_profile: Optional[str] = None,
+    electrode_montage: Optional[str] = None,
 ) -> Optional[mne.io.BaseRaw]:
     """Load an EEG file with disk-backed memmap and apply montage without resampling."""
     ext = os.path.splitext(filepath)[1].lower()
     base = os.path.basename(filepath)
     app.log(f"[LOADER START] {base}: ext='{ext}'")
+    raw: Optional[mne.io.BaseRaw] = None
     try:
         memmap_dir = _memmap_dir_for_pid()
         memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
 
-        stim_name = _resolve_stim(app)
+        stim_name = str(stim_channel or "").strip() or _resolve_stim(app)
         if not ref_pair:
             ref_pair = _resolve_ref_pair(app)
+        resolved_montage = (
+            _normalize_electrode_montage(electrode_montage)
+            if electrode_montage is not None
+            else _resolve_electrode_montage(app)
+        )
+        resolved_mapping_profile = (
+            _normalize_electrode_mapping_profile(electrode_mapping_profile)
+            if electrode_mapping_profile is not None
+            else _resolve_electrode_mapping_profile(app)
+        )
 
         app.log(
             f"[LOADER DEBUG] {base}: stim='{stim_name}' "
-            f"ref_pair={ref_pair} memmap_path='{memmap_path}'"
+            f"ref_pair={ref_pair} montage='{resolved_montage}' "
+            f"mapping_profile='{resolved_mapping_profile}' "
+            f"memmap_path='{memmap_path}'"
         )
 
         if ext == ".bdf":
@@ -575,25 +666,23 @@ def load_eeg_file(
                 )
                 return None
 
-            include_channels = None
-            if first_n_channels:
-                try:
-                    include_channels = _resolve_channel_subset(
-                        filepath,
-                        stim_name=stim_name,
-                        ref_pair=ref_pair,
-                        first_n_channels=first_n_channels,
-                    )
-                    app.log(
-                        f"[LOADER CHANNEL SUBSET] {base}: loading "
-                        f"{len(include_channels or [])} channels "
-                        f"(first_n={first_n_channels}, refs={ref_pair}, stim='{stim_name}')"
-                    )
-                except Exception as subset_err:
-                    app.log(
-                        f"[LOADER CHANNEL SUBSET WARNING] {base}: failed to resolve "
-                        f"first_n={first_n_channels}; falling back to full load: {subset_err}"
-                    )
+            acquisition_geometry = _read_biosemi64_header_geometry(
+                filepath,
+                stim_name=stim_name,
+                ref_pair=ref_pair,
+                electrode_mapping_profile=resolved_mapping_profile,
+            )
+            retained_scalp_channels = acquisition_geometry.retained_scalp_names(
+                first_n_channels
+            )
+            include_channels = acquisition_geometry.included_source_names(first_n_channels)
+            if include_channels is not None:
+                app.log(
+                    f"[LOADER CHANNEL SUBSET] {base}: loading "
+                    f"{len(include_channels)} channels after validating all 64 scalp "
+                    f"identities (first_n={first_n_channels}, refs={ref_pair}, "
+                    f"stim='{stim_name}')"
+                )
             with warnings.catch_warnings(record=True) as caught_read_warnings:
                 warnings.simplefilter("always")
                 with mne.utils.use_log_level("WARNING"):
@@ -633,63 +722,26 @@ def load_eeg_file(
 
         app.log(f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz.")
 
-        try:
-            logger.debug("[LOADER STAGE] file=%s stage=channel_typing_start", base)
-            ref_keep = _canon_present(raw.ch_names, ref_pair or ())
-            exg_labels = [f"EXG{i}" for i in range(1, 9)]
-            exg_present = _canon_present(raw.ch_names, exg_labels)
-
-            app.log(
-                f"[LOADER DEBUG] {base}: exg_present={sorted(exg_present)} "
-                f"ref_keep={sorted(ref_keep)}"
-            )
-
-            to_misc = {ch: "misc" for ch in exg_present if ch not in ref_keep}
-            to_eeg = {ch: "eeg" for ch in ref_keep}
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message=r"The unit for channel\(s\) .* has changed from .* to .*\.",
-                    category=RuntimeWarning,
-                )
-                if to_misc:
-                    raw.set_channel_types(to_misc)
-                if to_eeg:
-                    raw.set_channel_types(to_eeg)
-                if stim_name in raw.ch_names:
-                    raw.set_channel_types({stim_name: "stim"})
-
-            kept = sorted(ref_keep)
-            demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
-            app.log(f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}")
-            logger.debug(
-                "[LOADER STAGE] file=%s stage=channel_typing_done ref_keep=%s demoted=%s",
-                base,
-                kept,
-                demoted,
-            )
-        except Exception as e:
-            app.log(f"Warning: EXG/stim typing adjustment failed: {e}")
-
-        app.log("Applying standard_1005 montage for 10-10 coverage...")
-        try:
-            logger.debug("[LOADER STAGE] file=%s stage=montage_apply_start", base)
-            _apply_montage_suppressing_expected_ref_warnings(
-                raw,
-                _cached_1010(),
-                expected_missing_refs=ref_keep,
-            )
-            logger.debug("[LOADER STAGE] file=%s stage=montage_apply_done", base)
-            app.log("Montage applied.")
-        except Exception as e:
-            app.log(f"Warning: Montage error: {e}")
+        _apply_preflight_channel_and_montage_contract(
+            app,
+            raw,
+            base=base,
+            ref_pair=ref_pair,
+            stim_name=stim_name,
+            acquisition_geometry=acquisition_geometry,
+            retained_scalp_channels=retained_scalp_channels,
+        )
 
         app.log(f"[LOADER END] {base}")
         return raw
 
     except Exception as e:
         app.log(f"!!! Load Error {base}: {e}")
+        if raw is not None:
+            try:
+                raw.close()
+            except (AttributeError, RuntimeError, OSError, ValueError):
+                pass
         try:
             user_messages.show_error("Loading Error", f"Could not load: {base}\nError: {e}")
         except Exception:

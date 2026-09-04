@@ -130,7 +130,7 @@ beyond QC-02 and the existing freshness contracts.
 | Stage | Status | Current evidence / next gate |
 | --- | --- | --- |
 | Plan activation and v3 branch baseline | Complete | Active plan moved onto `codex/qc-scientific-protocol-v3` at the exact v3 release base; documentation validation precedes the first source change. |
-| Wave 0: QC-15 BioSemi64 geometry | Not started | Must complete and pass focused processing/legacy checks before all other actions. |
+| Wave 0: QC-15 BioSemi64 geometry | In progress | Baseline protected-boundary audit passes; implementing the canonical loader/settings/provenance identity before focused processing and legacy-impact checks. |
 | Wave 1: protocol and identity foundation | Not started | Blocked by Wave 0. |
 | Wave 2: analyzed-interval signal QC | Not started | Blocked by Waves 0-1. |
 | Wave 3: outcomes and integrity | Not started | Blocked by required earlier foundations. |

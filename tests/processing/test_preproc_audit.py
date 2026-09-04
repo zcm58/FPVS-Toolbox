@@ -9,12 +9,18 @@ from Main_App.processing.preprocess import (  # noqa: E402
     finalize_preproc_audit,
     perform_preprocessing,
 )
+from Main_App.io.eeg_geometry import (  # noqa: E402
+    BIOSEMI64_CHANNELS,
+    attach_raw_biosemi64_geometry,
+    cached_biosemi64_montage,
+)
 
 
 def _synth_raw():
     sfreq = 512.0
     samples = int(sfreq * 2)
-    ch_names = ["EXG1", "EXG2"] + [f"E{i}" for i in range(1, 9)] + ["Status"]
+    scalp_names = list(BIOSEMI64_CHANNELS[:8])
+    ch_names = ["EXG1", "EXG2", *scalp_names, "Status"]
     ch_types = ["eeg", "eeg"] + ["eeg"] * 8 + ["stim"]
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
     data = np.random.RandomState(42).randn(len(ch_names), samples)
@@ -23,7 +29,16 @@ def _synth_raw():
     stim[100] = 5
     stim[400] = 7
     data[stim_idx] = stim
-    return mne.io.RawArray(data, info)
+    raw = mne.io.RawArray(data, info)
+    raw.set_montage(cached_biosemi64_montage(), on_missing="ignore", verbose=False)
+    attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile="anatomical_labels",
+        retained_channels=scalp_names,
+        reference_channels=("EXG1", "EXG2"),
+        stim_channel="Status",
+    )
+    return raw
 
 
 def test_preproc_audit_round_trip():

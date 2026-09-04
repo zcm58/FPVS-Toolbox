@@ -30,6 +30,7 @@ from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.processing_log_dialog import ProcessingLogDialog
 from Main_App.gui.sidebar import SidebarButton
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
+from Main_App.processing.preflight_qc_cache import preflight_qc_cache_directory
 from Main_App.processing.project_processing_cache import ProjectProcessingCacheUsage
 import Main_App.gui.update_manager as update_manager
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
@@ -486,7 +487,7 @@ def test_reset_project_processing_cache_action_requires_confirmation_and_is_scop
     preprocessed_cache = project_root / ".fpvs_cache" / "preprocessed"
     preprocessed_cache.mkdir(parents=True)
     (preprocessed_cache / "P01_raw.fif").write_bytes(b"cached-raw")
-    preflight_cache = project_root / ".fpvs_processing" / "preflight_qc" / "v2"
+    preflight_cache = preflight_qc_cache_directory(project_root)
     preflight_cache.mkdir(parents=True)
     (preflight_cache / "P01.json").write_bytes(b"cached-qc")
     ledger = project_root / ".fpvs_processing" / "processing_ledger.json"

@@ -8,6 +8,12 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    BIOSEMI64_CHANNEL_SET,
+    BioSemi64GeometryError,
+    validate_raw_biosemi64_geometry,
+)
 from Main_App.processing.removed_electrode_detection import (
     DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION,
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -21,74 +27,31 @@ from Main_App.processing.removed_electrode_detection import (
 )
 
 RAW_CHANNEL_QC_EXCLUSION_REASON = "raw_channel_qc_failure"
+RAW_CHANNEL_QC_METHOD_VERSION = "sampled_windows_v2_biosemi64_geometry"
 _CALIBRATION = DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION
 
+SCALP_CHANNEL_ORDER: tuple[str, ...] = BIOSEMI64_CHANNELS
+SCALP_CHANNELS: frozenset[str] = BIOSEMI64_CHANNEL_SET
+MIDLINE_CHANNELS: frozenset[str] = frozenset(
+    channel for channel in SCALP_CHANNEL_ORDER if channel.endswith("z")
+)
 LEFT_HEMISPHERE_CHANNELS: frozenset[str] = frozenset(
-    {
-        "Fp1",
-        "AF7",
-        "AF3",
-        "F1",
-        "F3",
-        "F5",
-        "F7",
-        "FT7",
-        "FC5",
-        "FC3",
-        "FC1",
-        "C1",
-        "C3",
-        "C5",
-        "T7",
-        "TP7",
-        "CP5",
-        "CP3",
-        "CP1",
-        "P1",
-        "P3",
-        "P5",
-        "P7",
-        "P9",
-        "PO7",
-        "PO3",
-        "O1",
-    }
+    channel
+    for channel in SCALP_CHANNEL_ORDER
+    if channel not in MIDLINE_CHANNELS and int(channel[-1]) % 2 == 1
 )
 RIGHT_HEMISPHERE_CHANNELS: frozenset[str] = frozenset(
-    {
-        "Fp2",
-        "AF8",
-        "AF4",
-        "F2",
-        "F4",
-        "F6",
-        "F8",
-        "FT8",
-        "FC6",
-        "FC4",
-        "FC2",
-        "C2",
-        "C4",
-        "C6",
-        "T8",
-        "TP8",
-        "CP6",
-        "CP4",
-        "CP2",
-        "P2",
-        "P4",
-        "P6",
-        "P8",
-        "P10",
-        "PO8",
-        "PO4",
-        "O2",
-    }
+    channel
+    for channel in SCALP_CHANNEL_ORDER
+    if channel not in MIDLINE_CHANNELS and int(channel[-1]) % 2 == 0
 )
-MIDLINE_CHANNELS: frozenset[str] = frozenset(
-    {"Fpz", "AFz", "Fz", "FCz", "Cz", "CPz", "Pz", "POz", "Oz", "Iz"}
-)
-SCALP_CHANNELS: frozenset[str] = LEFT_HEMISPHERE_CHANNELS | RIGHT_HEMISPHERE_CHANNELS | MIDLINE_CHANNELS
+
+if (
+    LEFT_HEMISPHERE_CHANNELS
+    | RIGHT_HEMISPHERE_CHANNELS
+    | MIDLINE_CHANNELS
+) != SCALP_CHANNELS:
+    raise RuntimeError("BioSemi64 hemisphere groups do not partition the scalp set.")
 
 
 @dataclass(frozen=True)
@@ -186,6 +149,7 @@ class RawChannelQCResult:
 
     def to_payload(self) -> dict[str, object]:
         return {
+            "method_version": RAW_CHANNEL_QC_METHOD_VERSION,
             "n_channels": self.n_channels,
             "n_bad_channels": self.n_bad_channels,
             "bad_fraction": self.bad_fraction,
@@ -286,7 +250,7 @@ def _channel_metric_values(
     return std_uv, p2p_99_uv, p2p_999_uv, full_p2p_uv
 
 
-CONDITION_RAW_CHANNEL_QC_METHOD_VERSION = "condition_blocks_v4"
+CONDITION_RAW_CHANNEL_QC_METHOD_VERSION = "condition_blocks_v5_biosemi64_geometry"
 
 
 class ConditionRawChannelQCCancelled(RuntimeError):
@@ -764,30 +728,83 @@ def _robust_median(values: Sequence[float]) -> float:
     return float(np.median(finite))
 
 
-def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarray]:
-    positions: dict[str, np.ndarray] = {}
-    try:
-        montage = raw.get_montage()
-        montage_positions = montage.get_positions().get("ch_pos", {}) if montage else {}
-    except (AttributeError, TypeError, ValueError):
-        montage_positions = {}
+def _configured_geometry_roles(
+    raw: Any,
+    settings: Mapping[str, Any],
+) -> tuple[tuple[str, ...], str | None]:
+    """Return only configured reference/stim roles that remain in ``raw``."""
 
-    for index, channel in enumerate(getattr(raw, "ch_names", [])):
-        name = str(channel)
-        if name not in channels:
-            continue
-        coord = montage_positions.get(name)
-        if coord is None:
-            try:
-                coord = raw.info["chs"][index]["loc"][:3]
-            except (AttributeError, KeyError, IndexError, TypeError):
-                coord = None
-        if coord is None:
-            continue
-        arr = np.asarray(coord, dtype=float)
-        if arr.shape != (3,) or not np.all(np.isfinite(arr)) or np.allclose(arr, 0.0):
-            continue
-        positions[name] = arr
+    raw_name_lookup = {
+        str(channel).casefold(): str(channel)
+        for channel in getattr(raw, "ch_names", ())
+    }
+    references = (
+        str(
+            settings.get("ref_channel1")
+            or settings.get("ref_chan1")
+            or settings.get("ref_ch1")
+            or "EXG1"
+        ),
+        str(
+            settings.get("ref_channel2")
+            or settings.get("ref_chan2")
+            or settings.get("ref_ch2")
+            or "EXG2"
+        ),
+    )
+    retained_references = tuple(
+        raw_name_lookup[channel.casefold()]
+        for channel in references
+        if channel.casefold() in raw_name_lookup
+    )
+    stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
+    return retained_references, raw_name_lookup.get(stim.casefold())
+
+
+def _validate_spatial_geometry(
+    raw: Any,
+    channels: Sequence[str],
+    settings: Mapping[str, Any],
+) -> None:
+    """Require the loader-attached BioSemi64 identity for spatial QC."""
+
+    references, stim = _configured_geometry_roles(raw, settings)
+    validate_raw_biosemi64_geometry(
+        raw,
+        expected_retained_channels=channels,
+        reference_channels=references,
+        stim_channel=stim,
+        require_runtime_identity=True,
+    )
+
+
+def _channel_positions(raw: Any, channels: Sequence[str]) -> dict[str, np.ndarray]:
+    """Read validated head coordinates without a missing-position fallback."""
+
+    raw_names = tuple(str(channel) for channel in getattr(raw, "ch_names", ()))
+    index_by_name = {channel: index for index, channel in enumerate(raw_names)}
+    positions: dict[str, np.ndarray] = {}
+    for channel in channels:
+        index = index_by_name.get(str(channel))
+        if index is None:
+            raise BioSemi64GeometryError(
+                f"Spatial raw-channel QC cannot locate retained channel {channel!r}."
+            )
+        try:
+            coordinate = np.asarray(raw.info["chs"][index]["loc"][:3], dtype=float)
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError) as error:
+            raise BioSemi64GeometryError(
+                f"Spatial raw-channel QC cannot read the coordinate for {channel!r}."
+            ) from error
+        if (
+            coordinate.shape != (3,)
+            or not np.isfinite(coordinate).all()
+            or np.allclose(coordinate, 0.0)
+        ):
+            raise BioSemi64GeometryError(
+                f"Spatial raw-channel QC requires a finite BioSemi64 coordinate for {channel!r}."
+            )
+        positions[str(channel)] = coordinate
     return positions
 
 
@@ -1016,6 +1033,8 @@ def evaluate_raw_channel_qc(
         "max_hemisphere_bad_fraction": config.max_hemisphere_bad_fraction,
         "min_channels_for_hard_qc": config.min_channels_for_hard_qc,
         "auto_detect_removed_electrodes": config.auto_detect_removed_electrodes,
+        "spatial_predictability_experimental": True,
+        "bad_channel_cluster_experimental": True,
         **removed_electrode_threshold_payload(config),
     }
     if n_channels == 0:
@@ -1065,6 +1084,25 @@ def evaluate_raw_channel_qc(
             triggered_rules=("no_samples",),
             warning_rules=(),
             thresholds=thresholds,
+        )
+
+    cluster_rules_enabled = (
+        config.auto_detect_removed_electrodes
+        or config.removed_electrode_detection_mode
+        == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    )
+    spatial_predictability_enabled = (
+        config.auto_detect_removed_electrodes and config.spatial_qc_enabled
+    )
+    if cluster_rules_enabled or spatial_predictability_enabled:
+        # These geometry-dependent rules remain experimental pending
+        # revalidation on external BioSemi64 datasets. A canonical geometry
+        # gate prevents legacy or missing coordinates from changing their
+        # neighborhoods silently.
+        _validate_spatial_geometry(
+            raw,
+            [str(raw.ch_names[index]) for index in picks],
+            settings,
         )
 
     chunks = [
@@ -1247,13 +1285,13 @@ def evaluate_raw_channel_qc(
     )
 
     cluster_candidates = set(_raw_bads(raw))
-    cluster_rules_enabled = (
-        config.auto_detect_removed_electrodes
-        or config.removed_electrode_detection_mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
-    )
     if cluster_rules_enabled:
         cluster_candidates.update(candidate_channels)
-    clusters = _bad_channel_clusters(raw, sorted(cluster_candidates), config=config)
+    clusters = (
+        _bad_channel_clusters(raw, sorted(cluster_candidates), config=config)
+        if cluster_rules_enabled
+        else []
+    )
     largest_cluster = clusters[0] if clusters else ()
 
     triggered: list[str] = []
@@ -1899,6 +1937,9 @@ def combine_condition_raw_channel_qc_v2(
 __all__ = [
     "CONDITION_RAW_CHANNEL_QC_METHOD_VERSION",
     "RAW_CHANNEL_QC_EXCLUSION_REASON",
+    "RAW_CHANNEL_QC_METHOD_VERSION",
+    "SCALP_CHANNEL_ORDER",
+    "SCALP_CHANNELS",
     "ConditionRawChannelQCBlock",
     "ConditionRawChannelQCCancelled",
     "ConditionRawChannelQCResult",

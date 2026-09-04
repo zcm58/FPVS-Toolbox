@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+from Main_App.io.eeg_geometry import biosemi64_geometry_identity
 from openpyxl import load_workbook
 from openpyxl import Workbook
 
@@ -66,6 +68,7 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
     results = [
         {
             "status": "ok",
+            "geometry": biosemi64_geometry_identity(),
             "file": str(infos[0].path),
             "audit": {
                 "n_rejected": 4,
@@ -212,6 +215,7 @@ def test_repeated_session_qc_is_recording_keyed_and_exports_session_identity(
     results = [
         {
             "status": "ok",
+            "geometry": biosemi64_geometry_identity(),
             "file": str(info.path),
             "audit": {
                 "n_rejected": 1,
@@ -324,6 +328,7 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
         [
             {
                 "status": "ok",
+                "geometry": biosemi64_geometry_identity(),
                 "file": str(infos[0].path),
                 "audit": {
                     "n_rejected": 3,
@@ -394,6 +399,7 @@ def test_processing_qc_summary_merges_saved_preflight_review_flags(
         [
             {
                 "status": "ok",
+                "geometry": biosemi64_geometry_identity(),
                 "file": str(infos[0].path),
                 "audit": {
                     "n_rejected": 1,
@@ -450,6 +456,7 @@ def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Pat
     results = [
         {
             "status": "ok",
+            "geometry": biosemi64_geometry_identity(),
             "file": str(infos[0].path),
             "audit": {
                 "n_rejected": 3,

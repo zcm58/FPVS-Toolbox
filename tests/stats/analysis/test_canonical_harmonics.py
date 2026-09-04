@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Main_App.processing import harmonic_selection_qc
+import pytest
+
+from Main_App.processing import full_fft_provenance, harmonic_selection_qc
+from Main_App.processing.full_fft_provenance import FullFftProvenanceError
 from Tools.Stats.analysis.canonical_harmonics import (
     CANONICAL_HARMONIC_SOURCE,
     CanonicalHarmonicSelectionError,
@@ -49,6 +52,11 @@ def test_load_project_processing_harmonics_returns_shared_fingerprint(
         "load_processing_harmonic_selection",
         fake_load_processing_harmonic_selection,
     )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda _root: object(),
+    )
 
     result = load_project_processing_harmonics(
         project_root=tmp_path,
@@ -81,6 +89,11 @@ def test_load_project_processing_harmonics_reports_missing_cache(
         "load_processing_harmonic_selection",
         fake_load_processing_harmonic_selection,
     )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        lambda _root: object(),
+    )
 
     try:
         load_project_processing_harmonics(
@@ -92,3 +105,47 @@ def test_load_project_processing_harmonics_reports_missing_cache(
         assert "No current processing-time significant-harmonic selection" in str(exc)
     else:
         raise AssertionError("Expected CanonicalHarmonicSelectionError")
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Legacy or unknown geometry cannot be analyzed.",
+        "Active processed workbooks have no BioSemi64 geometry identity.",
+        "Active FullFFT workbooks contain mixed electrode geometries.",
+    ),
+)
+def test_stats_harmonic_entry_rejects_noncurrent_geometry_before_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    selection_loaded = False
+
+    def reject_geometry(_root: Path) -> None:
+        raise FullFftProvenanceError(message)
+
+    def unexpected_selection(*_args, **_kwargs):
+        nonlocal selection_loaded
+        selection_loaded = True
+        raise AssertionError("selection must not load after a geometry failure")
+
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "require_current_project_full_fft_provenance",
+        reject_geometry,
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "load_processing_harmonic_selection",
+        unexpected_selection,
+    )
+
+    with pytest.raises(CanonicalHarmonicSelectionError, match=message.split(".")[0]) as exc_info:
+        load_project_processing_harmonics(
+            project_root=tmp_path,
+            log_func=lambda _message: None,
+        )
+
+    assert exc_info.value.reason == "stale_full_fft_provenance"
+    assert selection_loaded is False

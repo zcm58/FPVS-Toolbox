@@ -41,6 +41,12 @@ from Main_App.io.load_utils import (
     format_bdf_recording_not_started_message,
     inspect_bdf_header,
 )
+from Main_App.io.eeg_geometry import (
+    BIOSEMI64_CHANNELS,
+    attach_raw_biosemi64_geometry,
+    biosemi64_geometry_identity,
+    read_raw_biosemi64_geometry,
+)
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
@@ -55,6 +61,8 @@ from Main_App.processing.removed_electrode_detection import (
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
 from Main_App.projects.grouping import validate_group_folder_name
 from Main_App.projects.preprocessing_settings import (
+    ELECTRODE_MONTAGE_BIOSEMI64,
+    normalize_electrode_montage,
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recordings,
 )
@@ -71,7 +79,7 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v9-fft-multinotch"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v10-biosemi64-geometry"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
@@ -550,6 +558,7 @@ def _make_excluded_result(
     start_time: Optional[float] = None,
     preflight_info: Optional[Any] = None,
     qc_info: Optional[Dict[str, object]] = None,
+    geometry: Optional[Mapping[str, object]] = None,
 ) -> Dict[str, object]:
     elapsed_ms: Optional[int] = None
     if start_time is not None:
@@ -579,6 +588,8 @@ def _make_excluded_result(
         }
     if qc_info is not None:
         payload["raw_channel_qc"] = qc_info
+    if geometry is not None:
+        payload["geometry"] = dict(geometry)
     return payload
 
 
@@ -615,6 +626,61 @@ def _preproc_cache_enabled(settings: Dict[str, object]) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"0", "false", "no", "off"}
     return bool(value)
+
+
+def _geometry_identity_for_channels(
+    settings: Mapping[str, object],
+    channel_names: Optional[List[str]] = None,
+) -> Dict[str, object]:
+    """Return canonical geometry with the retained scalp set made explicit."""
+
+    montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
+    if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
+        raise ValueError(
+            f"Unsupported electrode montage {montage_id!r}; only "
+            f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
+        )
+    if channel_names is None:
+        raw_limit = settings.get("max_idx_keep", settings.get("max_chan_idx_keep"))
+        try:
+            channel_limit = (
+                int(raw_limit) if raw_limit is not None else len(BIOSEMI64_CHANNELS)
+            )
+        except (TypeError, ValueError):
+            channel_limit = len(BIOSEMI64_CHANNELS)
+        retained = (
+            list(BIOSEMI64_CHANNELS[:channel_limit])
+            if 0 < channel_limit < len(BIOSEMI64_CHANNELS)
+            else list(BIOSEMI64_CHANNELS)
+        )
+    else:
+        present = {str(name) for name in channel_names}
+        retained = [name for name in BIOSEMI64_CHANNELS if name in present]
+    return biosemi64_geometry_identity(
+        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        retained_channels=retained,
+    )
+
+
+def _attach_processed_geometry(
+    raw: Any,
+    settings: Mapping[str, object],
+) -> Dict[str, object]:
+    montage_id = normalize_electrode_montage(settings.get("electrode_montage"))
+    if montage_id != ELECTRODE_MONTAGE_BIOSEMI64:
+        raise ValueError(
+            f"Unsupported electrode montage {montage_id!r}; only "
+            f"{ELECTRODE_MONTAGE_BIOSEMI64!r} is supported."
+        )
+    present = {str(name) for name in raw.ch_names}
+    retained = [name for name in BIOSEMI64_CHANNELS if name in present]
+    stim_name = str(settings.get("stim_channel") or "Status")
+    return attach_raw_biosemi64_geometry(
+        raw,
+        electrode_mapping_profile=settings.get("electrode_mapping_profile"),
+        retained_channels=retained,
+        stim_channel=stim_name if stim_name in present else None,
+    )
 
 
 def _preproc_cache_payload(
@@ -671,6 +737,7 @@ def _preproc_cache_payload(
             ],
             "stim_channel": relevant_settings["stim_channel"],
         },
+        "geometry": _geometry_identity_for_channels(settings),
         "preprocessing_settings": relevant_settings,
     }
 
@@ -777,6 +844,16 @@ def _load_preprocessed_cache(
             preload=memmap_path,
             verbose=False,
         )
+        observed_geometry = _attach_processed_geometry(raw, settings)
+        cached_geometry = metadata.get("geometry")
+        if (
+            not isinstance(cached_geometry, Mapping)
+            or dict(cached_geometry) != observed_geometry
+        ):
+            close = getattr(raw, "close", None)
+            if callable(close):
+                close()
+            return None, None, 0, "miss_geometry_mismatch"
         audit_before = metadata.get("audit_before")
         if not isinstance(audit_before, dict):
             return None, None, 0, "miss_missing_audit"
@@ -830,6 +907,22 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_baseline_excluded"] = bool(
             metadata.get("raw_qc_baseline_excluded")
         )
+        settings["_fpvs_geometry"] = observed_geometry
+        settings["_fpvs_retained_scalp_channels"] = list(
+            observed_geometry["retained_scalp_channels"]
+        )
+        settings["_fpvs_retained_scalp_set_fingerprint"] = str(
+            observed_geometry["retained_scalp_set_fingerprint"]
+        )
+        settings["_fpvs_interpolation_status"] = str(
+            metadata.get("interpolation_status") or ""
+        )
+        settings["_fpvs_interpolation_requested_channels"] = _string_list(
+            metadata.get("interpolation_requested_channels")
+        )
+        settings["_fpvs_interpolation_error"] = str(
+            metadata.get("interpolation_error") or ""
+        )
         for key in REMOVED_ELECTRODE_REVIEW_LIST_KEYS:
             settings[f"_fpvs_{key}"] = _string_list(metadata.get(key))
         for key in REMOVED_ELECTRODE_REVIEW_SCALAR_KEYS:
@@ -869,10 +962,25 @@ def _store_preprocessed_cache(
     tmp_meta_path = meta_path.with_suffix(".json.tmp")
 
     try:
+        geometry_identity = _attach_processed_geometry(raw, settings)
+        settings["_fpvs_geometry"] = geometry_identity
+        settings["_fpvs_retained_scalp_channels"] = list(
+            geometry_identity["retained_scalp_channels"]
+        )
+        settings["_fpvs_retained_scalp_set_fingerprint"] = str(
+            geometry_identity["retained_scalp_set_fingerprint"]
+        )
         raw.save(str(raw_path), overwrite=True, verbose=False)
         metadata = {
             "cache_key": cache_key,
             "payload": payload,
+            "geometry": geometry_identity,
+            "retained_scalp_channels": list(
+                geometry_identity["retained_scalp_channels"]
+            ),
+            "retained_scalp_set_fingerprint": str(
+                geometry_identity["retained_scalp_set_fingerprint"]
+            ),
             "audit_before": audit_before,
             "n_rejected": int(n_rejected),
             "kurtosis_bad_channels": _string_list(
@@ -880,6 +988,15 @@ def _store_preprocessed_cache(
             ),
             "interpolated_channels": _string_list(
                 settings.get("_fpvs_interpolated_channels")
+            ),
+            "interpolation_status": str(
+                settings.get("_fpvs_interpolation_status") or ""
+            ),
+            "interpolation_requested_channels": _string_list(
+                settings.get("_fpvs_interpolation_requested_channels")
+            ),
+            "interpolation_error": str(
+                settings.get("_fpvs_interpolation_error") or ""
             ),
             "fft_multinotch_requested_centers_hz": _float_list(
                 settings.get("_fpvs_fft_multinotch_requested_centers_hz")
@@ -1231,6 +1348,11 @@ def _run_full_pipeline_for_file(
                 str(file_path),
                 ref_pair=ref_pair,
                 first_n_channels=BDF_FIRST_N_CHANNELS,
+                stim_channel=str(settings.get("stim_channel") or "Status"),
+                electrode_mapping_profile=settings.get(
+                    "electrode_mapping_profile"
+                ),
+                electrode_montage=settings.get("electrode_montage"),
             )
             _record_timing("load", section_started)
             if raw is None:
@@ -1311,6 +1433,7 @@ def _run_full_pipeline_for_file(
                         raw_qc_result.to_payload(),
                         settings,
                     ),
+                    geometry=read_raw_biosemi64_geometry(raw),
                 )
             logger.debug(
                 "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",
@@ -1481,6 +1604,15 @@ def _run_full_pipeline_for_file(
             gc.collect()
         elif audit_before is None:
             raise RuntimeError("preprocessed cache hit missing audit metadata")
+
+        geometry_identity = _attach_processed_geometry(raw_proc, settings)
+        settings["_fpvs_geometry"] = geometry_identity
+        settings["_fpvs_retained_scalp_channels"] = list(
+            geometry_identity["retained_scalp_channels"]
+        )
+        settings["_fpvs_retained_scalp_set_fingerprint"] = str(
+            geometry_identity["retained_scalp_set_fingerprint"]
+        )
 
         # 4) Events — prefer explicit stim channel (BioSemi 'Status')
         stage = "events"
@@ -1816,6 +1948,7 @@ def _run_full_pipeline_for_file(
                     "processing_fingerprint_version": processing_fingerprint_version,
                     "preprocessing_order_version": backend_preprocess.PREPROCESSING_ORDER_VERSION,
                     "preprocessed_raw_cache_version": PREPROC_CACHE_VERSION,
+                    "geometry": geometry_identity,
                 },
                 source_signature={
                     "raw_file": str(file_path.resolve()),
@@ -1864,6 +1997,22 @@ def _run_full_pipeline_for_file(
             events_info=events_info,
             fif_written=fif_written,
             n_rejected=n_rejected,
+        )
+        audit_after["geometry"] = geometry_identity
+        audit_after["retained_scalp_channels"] = list(
+            geometry_identity["retained_scalp_channels"]
+        )
+        audit_after["retained_scalp_set_fingerprint"] = str(
+            geometry_identity["retained_scalp_set_fingerprint"]
+        )
+        audit_after["interpolation_status"] = str(
+            settings.get("_fpvs_interpolation_status") or ""
+        )
+        audit_after["interpolation_requested_channels"] = _string_list(
+            settings.get("_fpvs_interpolation_requested_channels")
+        )
+        audit_after["interpolation_error"] = str(
+            settings.get("_fpvs_interpolation_error") or ""
         )
 
         logger.debug(
@@ -1952,6 +2101,7 @@ def _run_full_pipeline_for_file(
             "source_derivative_manifest": source_derivative_manifest,
             "source_derivative_outputs": source_derivative_outputs,
             "source_derivative_warning": source_derivative_warning,
+            "geometry": geometry_identity,
         }
     except Exception as e:  # pragma: no cover - worker error path
         crop_logger.exception("file=%s stage=%s worker_error=%s", file_path.name, stage, str(e))
