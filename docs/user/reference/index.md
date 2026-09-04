@@ -14,7 +14,8 @@ For raw EEG preprocessing, the active order is:
 4. apply the configured FIR filter;
 5. optionally apply the smart FFT Hann multi-notch line-noise filter;
 6. downsample;
-7. detect high-kurtosis channels and interpolate them; and
+7. screen channels by kurtosis, require a GUI decision for kurtosis-only
+   findings, and interpolate only authorized channels; and
 8. apply the final average reference.
 
 The line-noise option is enabled at 60 Hz by default and can instead target

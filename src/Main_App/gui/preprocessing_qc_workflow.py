@@ -42,6 +42,10 @@ from Main_App.gui.marker_occurrence_review import (
     merge_rescanned_results,
     resolved_path_text,
 )
+from Main_App.gui.kurtosis_review_dialog import (
+    KurtosisReviewDialog,
+    KurtosisReviewDialogError,
+)
 from Main_App.gui.recording_qc_identity import (
     participant_sort_key,
     project_recording_coverage_rows,
@@ -60,6 +64,11 @@ from Main_App.processing.preflight_qc import (
     scan_recording_not_started_files,
 )
 from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
+from Main_App.processing.kurtosis_review_scan import (
+    KurtosisReviewScan,
+    reconcile_kurtosis_review_decisions,
+    scan_kurtosis_review,
+)
 from Main_App.processing.raw_channel_qc import (
     BIOSEMI_SHARED_NOISE_HELP_URL,
     SEVERE_RAW_AMPLITUDE_HELP_TEXT,
@@ -74,6 +83,7 @@ from Main_App.processing.removed_electrode_detection import (
 )
 from Main_App.projects.grouping import project_group_context
 from Main_App.projects.preprocessing_settings import (
+    KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
@@ -114,13 +124,14 @@ _HARD_EXCLUSION_DECISION_EXCLUDE = "exclude"
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
 _CONDITION_EXCLUSION_CHECK_COLUMN = 6
-_DATA_QUALITY_STEP_TOTAL = 6
+_DATA_QUALITY_STEP_TOTAL = 7
 _SCAN_SIGNAL_HEALTH_STEP = 1
 _REVIEW_MARKER_OCCURRENCES_STEP = 2
 _CONFIRM_CONDITION_EXCLUSIONS_STEP = 3
 _CONFIRM_REMOVED_ELECTRODES_STEP = 4
 _CONFIRM_PARTICIPANT_EXCLUSIONS_STEP = 5
-_REVIEW_OTHER_FLAGS_STEP = 6
+_REVIEW_KURTOSIS_STEP = 6
+_REVIEW_OTHER_FLAGS_STEP = 7
 
 
 class _PreflightQcWorker(QObject):
@@ -197,6 +208,55 @@ class _PreflightQcWorker(QObject):
                 )
         except Exception as exc:  # pragma: no cover - defensive signal bridge
             logger.exception("Preprocessing QC scan failed.")
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(scan)
+
+
+class _KurtosisReviewWorker(QObject):
+    """Prepare QC-16 evidence outside the GUI thread."""
+
+    progress = Signal(str, int, int)
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        raw_file_infos: Sequence[Any],
+        settings: Mapping[str, Any],
+        *,
+        event_map: Mapping[str, int],
+        reviewed_event_plans_by_file: Mapping[str, Any],
+        raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]],
+    ) -> None:
+        super().__init__()
+        self._raw_file_infos = list(raw_file_infos)
+        self._settings = dict(settings)
+        self._event_map = dict(event_map)
+        self._reviewed_event_plans_by_file = dict(reviewed_event_plans_by_file)
+        self._raw_channel_qc_by_recording = {
+            str(recording_id): dict(payload)
+            for recording_id, payload in raw_channel_qc_by_recording.items()
+        }
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            scan = scan_kurtosis_review(
+                self._raw_file_infos,
+                self._settings,
+                event_map=self._event_map,
+                reviewed_event_plans_by_file=self._reviewed_event_plans_by_file,
+                raw_channel_qc_by_recording=self._raw_channel_qc_by_recording,
+                progress=self.progress.emit,
+                should_cancel=lambda: self._cancelled,
+            )
+        except Exception as exc:  # pragma: no cover - defensive signal bridge
+            logger.exception("Kurtosis review scan failed.")
             self.failed.emit(str(exc))
             return
         self.finished.emit(scan)
@@ -1015,6 +1075,48 @@ class _PreflightQcEmbeddedBridge(QObject):
         self._loop.quit()
 
 
+class _KurtosisReviewEmbeddedBridge(QObject):
+    """Marshal the QC-16 worker's results and progress to the GUI thread."""
+
+    def __init__(
+        self,
+        host: Any,
+        thread: QThread,
+        result_holder: dict[str, Any],
+        loop: QEventLoop,
+    ) -> None:
+        super().__init__(host)
+        self._host = host
+        self._thread = thread
+        self._result_holder = result_holder
+        self._loop = loop
+
+    @Slot(str, int, int)
+    def on_progress(self, message: str, completed: int, total: int) -> None:
+        _set_progress(self._host, completed, total)
+        _set_label(
+            self._host,
+            "processing_summary_label",
+            f"Checked {completed} of {total} recording(s) for kurtosis evidence.",
+        )
+        _set_label(self._host, "processing_current_file_label", message)
+
+    @Slot(object)
+    def on_finished(self, scan: object) -> None:
+        self._result_holder["scan"] = scan
+        _set_progress(self._host, 1, 1)
+        self._thread.quit()
+
+    @Slot(str)
+    def on_failed(self, message: str) -> None:
+        self._result_holder["error"] = message
+        self._thread.quit()
+
+    @Slot()
+    def on_thread_finished(self) -> None:
+        self._loop.quit()
+
+
 def _confirm_recording_not_started(
     host: Any,
     flagged: Sequence[HeaderOnlyPreflight],
@@ -1257,6 +1359,340 @@ def _run_scan_embedded(
 
     scan = result_holder.get("scan")
     return scan if isinstance(scan, PreflightQcScan) else None
+
+
+def _raw_channel_qc_by_recording(
+    scan: PreflightQcScan,
+) -> dict[str, dict[str, object]]:
+    """Expose already-scored raw-QC findings to QC-16 for display only."""
+
+    result: dict[str, dict[str, object]] = {}
+    canonical_keys: dict[str, str] = {}
+    for file_result in scan.results:
+        recording_id = str(
+            file_result.recording_id or file_result.participant_id
+        ).strip()
+        if not recording_id or file_result.raw_channel_qc is None:
+            continue
+        folded = recording_id.casefold()
+        previous = canonical_keys.get(folded)
+        if previous is not None and previous != recording_id:
+            raise ValueError(
+                "Raw-channel QC contains ambiguous recording identifiers "
+                f"{previous!r} and {recording_id!r}."
+            )
+        if previous is not None:
+            raise ValueError(
+                f"Raw-channel QC contains duplicate recording {recording_id!r}."
+            )
+        canonical_keys[folded] = recording_id
+        result[recording_id] = dict(file_result.raw_channel_qc)
+    return result
+
+
+def _run_kurtosis_review_scan_embedded(
+    host: Any,
+    raw_file_infos: Sequence[Any],
+    params: dict[str, Any],
+    *,
+    reviewed_event_plans_by_file: Mapping[str, Any],
+    raw_channel_qc_by_recording: Mapping[str, Mapping[str, object]],
+) -> KurtosisReviewScan | None:
+    """Run the shared QC-16 evidence preparation without blocking the GUI."""
+
+    if not raw_file_infos:
+        return KurtosisReviewScan(results=())
+    raw_event_map = params.get("event_id_map")
+    event_map = (
+        {str(label): int(code) for label, code in raw_event_map.items()}
+        if isinstance(raw_event_map, Mapping)
+        else {}
+    )
+    _begin_preflight_page(
+        host,
+        step=_REVIEW_KURTOSIS_STEP,
+        title="Review Kurtosis Findings",
+        message=(
+            "FPVS Toolbox is preparing current kurtosis evidence from the exact "
+            "analyzed intervals."
+        ),
+        busy=True,
+        review_visible=False,
+        checklist=(
+            "Apply the same filter and downsample stages used by processing",
+            "Calculate kurtosis from included analyzed occurrences",
+            "Reuse only decisions whose evidence fingerprint is still current",
+        ),
+    )
+    _set_label(
+        host,
+        "processing_summary_label",
+        "Checking whether any kurtosis-only electrode findings need review...",
+    )
+    _set_progress(host, 0, len(raw_file_infos))
+
+    thread = QThread(host)
+    worker = _KurtosisReviewWorker(
+        raw_file_infos,
+        params,
+        event_map=event_map,
+        reviewed_event_plans_by_file=reviewed_event_plans_by_file,
+        raw_channel_qc_by_recording=raw_channel_qc_by_recording,
+    )
+    worker.moveToThread(thread)
+    result_holder: dict[str, Any] = {}
+    loop = QEventLoop(host)
+    bridge = _KurtosisReviewEmbeddedBridge(host, thread, result_holder, loop)
+    host._kurtosis_review_thread = thread
+    host._kurtosis_review_worker = worker
+    host._kurtosis_review_bridge = bridge
+
+    def _request_cancel(_choice: str) -> None:
+        result_holder["cancelled"] = True
+        worker.cancel()
+        _clear_preflight_actions(host)
+        _set_label(
+            host,
+            "processing_current_file_label",
+            "Cancelling after the active recording stage finishes...",
+        )
+
+    _install_preflight_actions(
+        host,
+        (("Cancel Check", "cancel", "secondary"),),
+        _request_cancel,
+    )
+    worker.progress.connect(bridge.on_progress)
+    worker.finished.connect(bridge.on_finished)
+    worker.failed.connect(bridge.on_failed)
+    thread.started.connect(worker.run)
+    worker.finished.connect(worker.deleteLater)
+    worker.failed.connect(worker.deleteLater)
+    thread.finished.connect(bridge.on_thread_finished)
+    thread.finished.connect(thread.deleteLater)
+    thread.start()
+    loop.exec()
+
+    _clear_preflight_actions(host)
+    host._kurtosis_review_thread = None
+    host._kurtosis_review_worker = None
+    host._kurtosis_review_bridge = None
+    error = result_holder.get("error")
+    if error:
+        _set_label(
+            host,
+            "processing_summary_label",
+            "Kurtosis evidence could not be prepared.",
+        )
+        _set_label(host, "processing_current_file_label", str(error))
+        _await_preflight_choice(
+            host,
+            (("Cancel Processing", "cancel", "primary"),),
+        )
+        return None
+    if result_holder.get("cancelled"):
+        return None
+    scan = result_holder.get("scan")
+    return scan if isinstance(scan, KurtosisReviewScan) else None
+
+
+def _merge_kurtosis_review_receipts(
+    existing: object,
+    *,
+    scanned_recording_ids: Sequence[str],
+    current_scanned_receipts: Mapping[str, Mapping[str, Mapping[str, object]]],
+) -> dict[str, dict[str, dict[str, object]]]:
+    """Replace active receipts only for the recordings rescored in this run."""
+
+    scanned_keys = {
+        str(recording_id).strip().casefold()
+        for recording_id in scanned_recording_ids
+        if str(recording_id).strip()
+    }
+    merged: dict[str, dict[str, dict[str, object]]] = {}
+    if isinstance(existing, Mapping):
+        for raw_recording, raw_channels in existing.items():
+            recording_id = str(raw_recording).strip()
+            if not recording_id or recording_id.casefold() in scanned_keys:
+                continue
+            if not isinstance(raw_channels, Mapping):
+                continue
+            merged[recording_id] = {
+                str(channel): dict(receipt)
+                for channel, receipt in raw_channels.items()
+                if str(channel).strip() and isinstance(receipt, Mapping)
+            }
+    for recording_id, channels in current_scanned_receipts.items():
+        normalized_recording = str(recording_id).strip()
+        if normalized_recording.casefold() not in scanned_keys:
+            raise ValueError(
+                "QC-16 produced a decision for an unscanned recording: "
+                f"{normalized_recording!r}."
+            )
+        merged[normalized_recording] = {
+            str(channel): dict(receipt)
+            for channel, receipt in channels.items()
+            if str(channel).strip() and isinstance(receipt, Mapping)
+        }
+    return merged
+
+
+def _save_kurtosis_review_receipts(
+    host: Any,
+    params: dict[str, Any],
+    receipts: Mapping[str, Mapping[str, Mapping[str, object]]],
+) -> bool:
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        QMessageBox.critical(
+            host,
+            "Project Save Error",
+            "Kurtosis review decisions require an active project.",
+        )
+        return False
+    previous = dict(
+        (getattr(project, "preprocessing", {}) or {}).get(
+            KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+            {},
+        )
+        or {}
+    )
+    updated_preprocessing = dict(getattr(project, "preprocessing", {}) or {})
+    updated_preprocessing[KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY] = {
+        str(recording_id): {
+            str(channel): dict(receipt)
+            for channel, receipt in channels.items()
+        }
+        for recording_id, channels in receipts.items()
+    }
+    try:
+        normalized = project.update_preprocessing(updated_preprocessing)
+        project.save()
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
+        logger.exception("Failed to save kurtosis review decisions.")
+        QMessageBox.critical(
+            host,
+            "Project Save Error",
+            f"Could not save kurtosis review decisions: {exc}",
+        )
+        return False
+    saved = dict(
+        normalized.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY) or {}
+    )
+    params[KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY] = saved
+    host.validated_params = params
+    if saved != previous:
+        try:
+            mark_frequency_domain_outputs_stale(
+                project.project_root,
+                reason="Kurtosis review decisions changed.",
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            logger.exception(
+                "Kurtosis decisions were saved but downstream state could not "
+                "be marked stale."
+            )
+            QMessageBox.warning(
+                host,
+                "Decisions Saved With Warning",
+                "The kurtosis decisions were saved, but FPVS Toolbox could not "
+                f"mark downstream frequency outputs stale: {exc}",
+            )
+    return True
+
+
+def _review_kurtosis_findings(
+    host: Any,
+    params: dict[str, Any],
+    scan: KurtosisReviewScan,
+) -> bool:
+    """Require current explicit receipts for every kurtosis-only finding."""
+
+    if scan.cancelled:
+        return False
+    if scan.errors:
+        rows = [
+            (
+                result.participant_id,
+                result.recording_id,
+                result.path.name,
+                result.error or "Unknown evidence error",
+            )
+            for result in scan.errors
+        ]
+        _begin_preflight_page(
+            host,
+            step=_REVIEW_KURTOSIS_STEP,
+            title="Kurtosis Evidence Incomplete",
+            message="Processing cannot continue without current QC-16 evidence.",
+            busy=False,
+            review_visible=True,
+            review_title="Recordings That Need Attention",
+            progress_visible=False,
+            checklist=(
+                "Review the recording and error below",
+                "Correct the source or project settings",
+                "Run preprocessing again to produce current evidence",
+            ),
+        )
+        _set_preflight_table(
+            host,
+            ("Participant", "Recording", "File", "Evidence error"),
+            rows,
+            stretch_column=3,
+        )
+        _await_preflight_choice(
+            host,
+            (("Cancel Processing", "cancel", "primary"),),
+        )
+        return False
+
+    project = getattr(host, "currentProject", None)
+    existing = (
+        (getattr(project, "preprocessing", {}) or {}).get(
+            KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+            {},
+        )
+        if project is not None
+        else params.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY, {})
+    )
+    try:
+        reconciliation = reconcile_kurtosis_review_decisions(scan, existing)
+    except (TypeError, ValueError) as exc:
+        logger.exception("Kurtosis decision reconciliation failed.")
+        QMessageBox.critical(
+            host,
+            "Kurtosis Review Error",
+            f"Saved kurtosis decisions could not be reconciled: {exc}",
+        )
+        return False
+
+    scanned_receipts = reconciliation.processing_decisions_by_recording
+    if reconciliation.pending_items:
+        try:
+            dialog = KurtosisReviewDialog(reconciliation, parent=host)
+        except KurtosisReviewDialogError as exc:
+            QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
+            return False
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        try:
+            scanned_receipts = dialog.review_decisions_by_recording()
+        except KurtosisReviewDialogError as exc:
+            QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
+            return False
+
+    scanned_recordings = [result.recording_id for result in scan.results]
+    try:
+        merged = _merge_kurtosis_review_receipts(
+            existing,
+            scanned_recording_ids=scanned_recordings,
+            current_scanned_receipts=scanned_receipts,
+        )
+    except ValueError as exc:
+        QMessageBox.critical(host, "Kurtosis Review Error", str(exc))
+        return False
+    return _save_kurtosis_review_receipts(host, params, merged)
 
 
 def _marker_review_actions() -> tuple[tuple[str, str, str], ...]:
@@ -3705,19 +4141,35 @@ def run_preprocessing_qc_workflow(
         scan,
         group_labels,
     )
+    try:
+        current_event_plans = canonical_event_plans_by_file(scan)
+        existing_event_plans.update(current_event_plans)
+        params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans
+        display_only_raw_qc = _raw_channel_qc_by_recording(scan)
+    except (MarkerOccurrenceReviewError, ValueError) as exc:
+        _show_marker_review_error(host, str(exc))
+        return False
+
+    kurtosis_scan = _run_kurtosis_review_scan_embedded(
+        host,
+        active_infos,
+        params,
+        reviewed_event_plans_by_file=current_event_plans,
+        raw_channel_qc_by_recording=display_only_raw_qc,
+    )
+    if kurtosis_scan is None or not _review_kurtosis_findings(
+        host,
+        params,
+        kurtosis_scan,
+    ):
+        return False
+
     if not _show_suspicious_remainder(
         host,
         scan,
         accepted_hard_exclusions,
         group_labels,
     ):
-        return False
-    try:
-        current_event_plans = canonical_event_plans_by_file(scan)
-        existing_event_plans.update(current_event_plans)
-        params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans
-    except MarkerOccurrenceReviewError as exc:
-        _show_marker_review_error(host, str(exc))
         return False
     return True
 

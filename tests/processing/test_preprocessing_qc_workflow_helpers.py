@@ -46,32 +46,37 @@ class _TableStub:
         (
             workflow._SCAN_SIGNAL_HEALTH_STEP,
             "Scan Signal Health",
-            "Step 1 of 6: Scan Signal Health",
+            "Step 1 of 7: Scan Signal Health",
         ),
         (
             workflow._REVIEW_MARKER_OCCURRENCES_STEP,
             "Review Marker Occurrence",
-            "Step 2 of 6: Review Marker Occurrence",
+            "Step 2 of 7: Review Marker Occurrence",
         ),
         (
             workflow._CONFIRM_CONDITION_EXCLUSIONS_STEP,
             "Confirm Condition Exclusions",
-            "Step 3 of 6: Confirm Condition Exclusions",
+            "Step 3 of 7: Confirm Condition Exclusions",
         ),
         (
             workflow._CONFIRM_REMOVED_ELECTRODES_STEP,
             "Confirm Removed Electrodes",
-            "Step 4 of 6: Confirm Removed Electrodes",
+            "Step 4 of 7: Confirm Removed Electrodes",
         ),
         (
             workflow._CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
             "Confirm Participant Exclusions",
-            "Step 5 of 6: Confirm Participant Exclusions",
+            "Step 5 of 7: Confirm Participant Exclusions",
+        ),
+        (
+            workflow._REVIEW_KURTOSIS_STEP,
+            "Review Kurtosis Findings",
+            "Step 6 of 7: Review Kurtosis Findings",
         ),
         (
             workflow._REVIEW_OTHER_FLAGS_STEP,
             "Review Other Flags",
-            "Step 6 of 6: Review Other Flags",
+            "Step 7 of 7: Review Other Flags",
         ),
     ),
 )
@@ -99,6 +104,27 @@ def test_data_quality_step_labels_are_contiguous(
     assert label.text == expected
     assert label.visible is True
     assert section_title.text == title
+
+
+def test_kurtosis_receipt_merge_replaces_only_scanned_recordings() -> None:
+    existing = {
+        "sub-01_ses-01": {"A1": {"decision": "legacy-stale"}},
+        "sub-02_ses-01": {"B2": {"decision": "keep-current"}},
+    }
+    current = {
+        "SUB-01_SES-01": {"A2": {"decision": "approve"}},
+    }
+
+    merged = workflow._merge_kurtosis_review_receipts(
+        existing,
+        scanned_recording_ids=("sub-01_ses-01",),
+        current_scanned_receipts=current,
+    )
+
+    assert merged == {
+        "sub-02_ses-01": {"B2": {"decision": "keep-current"}},
+        "SUB-01_SES-01": {"A2": {"decision": "approve"}},
+    }
 
 
 def test_data_quality_preparation_hides_step_label() -> None:

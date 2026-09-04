@@ -15,7 +15,7 @@ FPVS-EEG research.
 ## Features
 
 - Automated batch preprocessing: referencing, filtering, resampling,
-  kurtosis-based channel rejection, and channel interpolation
+  reviewed kurtosis-based channel screening, and authorized channel interpolation
 - Epoch extraction and frequency-domain metrics, including FFT amplitude,
   signal-to-noise ratio (SNR), baseline-corrected amplitude (BCA), and z-scores
 - Structured Excel outputs for statistical analysis

@@ -559,7 +559,7 @@ documentation refactors:
 4. FIR filter using the current PySide6/legacy-parity cutoff mapping.
 5. Optional smart FFT Hann multi-notch filtering of retained mains components.
 6. Downsample when requested.
-7. Kurtosis-based bad-channel rejection and interpolation.
+7. Kurtosis evidence, its decision gate, and authorized bad-channel interpolation.
 8. Final average reference.
 
 The retained BioSemi64 identity is frozen after step 3 and checked before
@@ -700,17 +700,35 @@ Downsampling:
   frequency is greater than the requested target.
 - It uses MNE `raw.resample(..., npad="auto", window="hann", verbose=False)`.
 
-Kurtosis rejection and interpolation:
+Kurtosis review and interpolation:
 
 - Kurtosis runs only when `reject_thresh` is truthy.
 - EEG picks exclude existing bads and exclude the stim channel when the stim
   channel exists and is not typed as EEG.
-- Kurtosis uses `scipy.stats.kurtosis(data, axis=1, fisher=True, bias=False)`.
-- NaN values are normalized with `np.nan_to_num`.
-- The current trimmed normalization removes 10 percent from each side when
-  enough channels are available.
-- Bad channels are selected with `abs(z_score) > reject_thresh`.
-- Newly detected bads are appended to `raw.info["bads"]`.
+- Scoring uses only the union of current marker-reviewed, included analyzed
+  occurrences after filtering and downsampling. Interpolation itself remains a
+  fixed repair on the continuous processed recording.
+- The versioned EEGLAB-inspired variant uses
+  `scipy.stats.kurtosis(..., fisher=True, bias=False, nan_policy="propagate")`,
+  removes 10 percent from each tail of the finite channel distribution, and
+  normalizes with its trimmed mean and population standard deviation.
+- A nonfinite input/statistic, too few valid reference channels, or degenerate
+  reference scale remains unavailable and blocks unsupported automatic action;
+  it is never converted to a zero score.
+- `abs(signed_normalized_score) > reject_thresh` creates evidence. Confirmed
+  manual/physical bad channels retain direct authority. The initial eligible
+  corroborator registry is empty, so every otherwise non-manual kurtosis-only
+  finding requires an explicit Approve or Reject decision in the GUI.
+- The GUI displays recording/session, electrode, analyzed condition and
+  occurrence scope, raw kurtosis, signed normalized score, threshold,
+  corroborator status, review-only raw-channel context, and a compact trace.
+  It has no default choice, requires a reason, and states that approval repairs
+  the electrode throughout the processed recording. Cancel, close, missing or
+  stale evidence, and non-GUI execution do not authorize interpolation.
+- A decision receipt is valid only for its recording, channel, evidence
+  fingerprint, processing settings, analyzed spans, and BioSemi64 geometry.
+  Changed evidence requires review again. Only authorized channels are appended
+  to `raw.info["bads"]`.
 - Pre-marked bads are also sent through the same interpolation boundary when
   kurtosis is disabled or finds no additional channels.
 - Interpolation requires a validated runtime BioSemi64 identity and accepts

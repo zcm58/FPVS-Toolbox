@@ -4,9 +4,11 @@
 
 Load this module with the parent index, shared contracts, QC-06, and QC-15.
 
-**Status:** accepted on 2026-09-03. Kurtosis plus an eligible independent
-channel-health method permits automatic interpolation. Kurtosis alone requires
-manual review in the GUI before interpolation.
+**Status:** implemented on the active QC branch. Kurtosis plus an eligible
+independent channel-health method permits automatic interpolation. The initial
+registry is empty, so kurtosis alone requires manual review in the GUI before
+interpolation. Representative-data calibration remains follow-up evidence and
+does not expand automatic authority.
 
 ## Accepted Behavior
 
@@ -100,3 +102,24 @@ outperform kurtosis alone
 [EEGLAB channel guidance](https://eeglab.org/tutorials/06_RejectArtifacts/Channel_rejection.html),
 [PREP](https://doi.org/10.3389/fninf.2015.00016),
 [Kumaravel et al., 2022](https://doi.org/10.3390/s22197314)).
+
+## Implementation Evidence
+
+`processing/kurtosis_qc.py` owns the numerical evidence, empty corroborator
+registry, decision receipts, and fail-closed authority check.
+`processing/kurtosis_review_scan.py` runs the shared preprocessing stages to
+the review boundary in a worker-safe scanner. The preprocessing QC workflow
+runs that scanner in a `QThread`, reuses only fingerprint-current receipts,
+opens `KurtosisReviewDialog` for every new or stale kurtosis-only finding, and
+persists only the current recording/channel decisions before processing.
+Cancel, close, scan error, missing receipt, or changed evidence blocks the run.
+
+Focused numerical and static GUI tests cover approve/reject receipts,
+staleness, invalid evidence, cancellation, display-only raw-QC context,
+zero-based occurrence storage with one-based display, fixed repair wording,
+and the no-default/reason-required dialog contract. Qt execution remains the
+CI gate. The visible smoke path is: open a project containing a recording with
+a known kurtosis-only channel; start preprocessing; verify the review lists its
+recording, analyzed occurrences, metrics, raw-QC context, trace, and full-recording
+repair scope; verify close/cancel stops; then rerun Approve and Reject choices
+separately and confirm only the accepted, current receipt reaches processing.

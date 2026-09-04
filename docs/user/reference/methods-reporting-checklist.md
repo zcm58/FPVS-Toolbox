@@ -91,6 +91,22 @@ testing, or another specialized estimand.
   participant-level development/holdout split, denominators, and uncertainty.
   Describe current percentages as in-lab validation until an independent
   dataset or lab reproduces them.
+- Report kurtosis screening as the versioned EEGLAB-inspired trimmed variant,
+  including its threshold, analyzed-occurrence scope, filter/downsample and
+  BioSemi64 identities, finite reference-channel count, 10-percent tail trim,
+  trimmed mean, and population standard deviation. Do not describe it as an
+  exact EEGLAB implementation.
+- For every kurtosis finding, report raw kurtosis, signed normalized score,
+  validity, and final authority separately. Identify confirmed upstream bads,
+  eligible corroborated automatic repairs, GUI-approved repairs, GUI-rejected
+  repairs, and unresolved or stale evidence. The initial corroborator registry
+  is empty, so a non-manual kurtosis-only finding requires an explicit GUI
+  Approve or Reject decision with a reason.
+- State that kurtosis is scored only from included analyzed intervals, while an
+  approved interpolation is applied once to the continuous processed recording
+  and therefore affects every retained condition in that recording. Report the
+  attempted, successful, and failed interpolation sets; calculate burden from
+  successful repairs only.
 
 ### Summed BCA and selection provenance
 

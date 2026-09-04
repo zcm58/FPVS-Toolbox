@@ -31,6 +31,7 @@ shell-specific setup is needed.
 | Main App package layout, ownership, folder naming, retired package boundaries | `legacy-boundary-review` | `docs/agent/architecture/main-app-target-layout.md`; `docs/agent/architecture/legacy-boundaries.md` |
 | EEG preprocessing ownership, entry points, or processing order | `legacy-boundary-review` + `pyside6-gui-cleanup` | `docs/agent/architecture/preprocessing-contract.md` |
 | Removed-electrode auto-detection thresholds, QC calibration, or accuracy testing | `legacy-boundary-review` | `docs/agent/quality/removed-electrode-detection-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
+| Kurtosis screening, QC-16 decisions, or corroborator calibration | `legacy-boundary-review` | `docs/agent/quality/kurtosis-screening-calibration.md`; `docs/agent/architecture/preprocessing-contract.md` |
 | BDF loading, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `docs/agent/architecture/eeg-loading-contract.md` |
 | Post-processing, FFT crop, or Excel export behavior | `legacy-boundary-review` | `docs/agent/architecture/post-processing-export-contract.md`; `docs/agent/architecture/fft-crop-method.md` |
 | Project manifests, project roots, file dialogs, exports, imports | `project-path-audit` | `docs/agent/architecture/project-io.md` |
