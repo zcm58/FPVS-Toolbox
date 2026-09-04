@@ -125,6 +125,7 @@ audits = ["gui", "paths"]
 tests = [
   "tests/publication_maps/test_bca_publication_maps.py",
   "tests/publication_maps/test_publication_maps_cohort.py",
+  "tests/publication_maps/test_publication_release_gate.py",
   "tests/publication_maps/test_publication_output_contract.py",
   "tests/publication_maps/test_publication_maps_session_panels.py",
   "tests/publication_maps/test_publication_maps_session_workflow.py",
