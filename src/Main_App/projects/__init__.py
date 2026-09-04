@@ -38,6 +38,27 @@ _RECORDING_PREFLIGHT_NAMES = {
 _RAW_IDENTITY_NAMES = {"infer_raw_participant_id"}
 _SESSION_COMPATIBILITY_NAMES = {"repeated_session_tool_block_reason"}
 _PROJECT_CONTEXT_NAMES = {"resolve_active_project_root"}
+_FREQUENCY_PROTOCOL_NAMES = {
+    "DEFAULT_ODDBALL_EVERY_N",
+    "DEFAULT_PRESENTATION_RATE_HZ",
+    "DIRECT_HZ_DISPLAY_DECIMAL_PLACES",
+    "DIRECT_HZ_DISPLAY_TOLERANCE_HZ",
+    "EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT",
+    "EXPECTED_CYCLES_SOURCE_MANUAL",
+    "FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED",
+    "FREQUENCY_PROTOCOL_STATUS_INCOMPLETE",
+    "FREQUENCY_PROTOCOL_STATUS_READY",
+    "FREQUENCY_PROTOCOL_VERSION",
+    "FrequencyProtocol",
+    "FrequencyProtocolError",
+    "HarmonicTarget",
+    "ODDBALL_INPUT_MODE_DIRECT_HZ",
+    "ODDBALL_INPUT_MODE_RECURRENCE",
+    "enumerate_exact_harmonics",
+    "enumerate_protocol_harmonics",
+    "new_manual_frequency_protocol",
+    "normalize_frequency_protocol",
+}
 _GROUPING_NAMES = {
     "GroupConfigurationError",
     "GroupInfo",
@@ -97,6 +118,7 @@ _PREPROCESSING_NAMES = {
 __all__ = sorted(
     _DATASET_INDEX_NAMES
     | _DATASET_PATH_NAMES
+    | _FREQUENCY_PROTOCOL_NAMES
     | _GROUPING_NAMES
     | _PROJECT_NAMES
     | _PREPROCESSING_NAMES
@@ -121,6 +143,12 @@ def __getattr__(name: str) -> Any:
         grouping = importlib.import_module("Main_App.projects.grouping")
 
         return getattr(grouping, name)
+    if name in _FREQUENCY_PROTOCOL_NAMES:
+        frequency_protocol = importlib.import_module(
+            "Main_App.projects.frequency_protocol"
+        )
+
+        return getattr(frequency_protocol, name)
     if name in _PROJECT_NAMES:
         project = importlib.import_module("Main_App.projects.project")
 

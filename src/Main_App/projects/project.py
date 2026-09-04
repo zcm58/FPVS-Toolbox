@@ -9,6 +9,12 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
+from .frequency_protocol import (
+    FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED,
+    FrequencyProtocol,
+    new_manual_frequency_protocol,
+    normalize_frequency_protocol,
+)
 from .grouping import (
     make_group_id as make_group_id,
     normalize_project_groups,
@@ -318,6 +324,7 @@ class Project:
       - subfolders: Dict[str, Path] (absolute paths under results_folder)
       - options: Dict[str, Any]
       - preprocessing: Dict[str, Any]
+      - frequency_protocol: FrequencyProtocol
       - event_map: Dict[str, Any]
       - groups: Dict[str, Dict[str, Any]]
       - participants: Dict[str, Dict[str, Any]]
@@ -340,6 +347,14 @@ class Project:
             manifest_path.resolve() if manifest_path is not None else self.project_root / "project.json"
         )
         self.manifest = manifest
+
+        self._frequency_protocol_was_persisted = "frequency_protocol" in manifest
+        raw_frequency_protocol = manifest.get("frequency_protocol")
+        self.frequency_protocol = (
+            normalize_frequency_protocol(raw_frequency_protocol)
+            if self._frequency_protocol_was_persisted
+            else FrequencyProtocol.confirmation_required()
+        )
 
         # Friendly name
         raw_name = manifest.get("name")
@@ -564,6 +579,12 @@ class Project:
                 continue
         data["event_map"] = ev_map
 
+        # A directory with no manifest is a new project. Seed canonical rates,
+        # but leave the required analyzed-cycle count explicitly incomplete.
+        # Existing manifests remain unconfirmed when the record is absent.
+        if "frequency_protocol" not in data and not resolved_manifest_path.exists():
+            data["frequency_protocol"] = new_manual_frequency_protocol().to_manifest()
+
         # Shallow-merge defaults with existing data
         merged: Dict[str, Any] = dict(DEFAULTS)
         merged.update(data)
@@ -665,6 +686,27 @@ class Project:
             data,
             self.processing_fingerprint_v9_compatibility,
         )
+
+        live_frequency_protocol = getattr(
+            self,
+            "frequency_protocol",
+            FrequencyProtocol.confirmation_required(),
+        )
+        normalized_frequency_protocol = normalize_frequency_protocol(
+            live_frequency_protocol
+        )
+        self.frequency_protocol = normalized_frequency_protocol
+        if (
+            normalized_frequency_protocol.status
+            == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
+            and not self._frequency_protocol_was_persisted
+        ):
+            # Do not silently label an older project's historical outputs with
+            # guessed defaults merely because another setting was saved.
+            data.pop("frequency_protocol", None)
+        else:
+            data["frequency_protocol"] = normalized_frequency_protocol.to_manifest()
+            self._frequency_protocol_was_persisted = True
 
         # Persist the live event map from runtime state, normalized to {str: int}
         live_map: Dict[str, Any] = getattr(self, "event_map", {}) or {}
@@ -915,4 +957,16 @@ class Project:
                 or getattr(self, "recordings", {})
             ),
         )
+        return normalized
+
+    def update_frequency_protocol(
+        self,
+        value: FrequencyProtocol | Mapping[str, Any],
+    ) -> FrequencyProtocol:
+        """Replace the project protocol with one validated immutable value."""
+
+        normalized = normalize_frequency_protocol(value)
+        self.frequency_protocol = normalized
+        self.manifest["frequency_protocol"] = normalized.to_manifest()
+        self._frequency_protocol_was_persisted = True
         return normalized

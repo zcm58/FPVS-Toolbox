@@ -33,6 +33,21 @@ FPVS Toolbox uses a strict hybrid settings model:
   and missing-variable errors remain unchanged.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
+- Project-wide FPVS timing lives in the top-level, versioned
+  `frequency_protocol` record. Protocol v1 stores exact rational identities for
+  the presentation rate, integer oddball recurrence, canonical oddball rate,
+  and one expected analyzed oddball-cycle count. The cycle source is `manual`
+  or `fpvs_studio_import`; analyzed seconds are derived as cycles divided by
+  oddball rate and are never stored as an independent setting. Direct-Hz entry
+  is accepted only within half of one four-decimal display unit (0.00005 Hz) of
+  an exact whole-stimulus recurrence, then canonicalized to presentation rate
+  divided by that recurrence. The direct value as entered is retained for
+  audit but is excluded from the canonical scientific fingerprint. A new
+  project seeds 6 Hz/every 5 but remains
+  `incomplete` until a positive expected cycle count is supplied. An existing
+  manifest with no protocol loads as `confirmation_required` and a routine
+  save keeps the record absent, so historical outputs are not silently
+  relabeled with guessed defaults.
 - Electrode geometry is project-specific scientific state in the
   `preprocessing` namespace. `electrode_montage` currently accepts only
   `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The default
