@@ -10,3 +10,13 @@ Use this directory for durable plans that need to survive across agent runs.
 - `tech-debt-tracker.md`: known debt that is not yet promoted to an active plan.
 
 Keep plans compact and current. Record phase status, decisions, touched areas, required doc updates, and verification commands. Small one-off changes do not need an execution plan.
+
+## Active QC Implementation
+
+- [QC scientific review and protocol flexibility](active/qc-scientific-and-protocol-flexibility.md):
+  active v3-based implementation plan with 21 approved actions. During each
+  action, load its shared contracts, its module, and only the dependencies named
+  there. QC-15 is execution priority 1.
+- [Analysis-window scope of preprocessing](future/analysis-window-preprocessing-scope.md):
+  separate future evidence investigation. It does not authorize a temporal
+  preprocessing change in the active QC implementation.
