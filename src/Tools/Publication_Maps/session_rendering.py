@@ -45,7 +45,7 @@ class _RepeatedSessionLayoutProfile:
     width_in: float = 5.8
     two_row_height_in: float = 4.2
     three_row_height_in: float = 5.9
-    left: float = 0.024
+    left: float = 0.028
     right: float = 0.855
     bottom: float = 0.025
     top: float = 0.89

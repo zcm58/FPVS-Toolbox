@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex
@@ -19,6 +20,7 @@ from Main_App.exports.figure_style import (
 )
 from Main_App.processing import full_fft_provenance, harmonic_selection_qc
 from Main_App.projects.project import Project
+from Main_App.projects.frequency_protocol import FrequencyProtocol
 from Tools.Publication_Maps import metrics as publication_map_metrics
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
@@ -62,8 +64,30 @@ def _stable_processing_harmonic_settings(monkeypatch: pytest.MonkeyPatch) -> Non
         "load_rois_from_settings",
         lambda: {"Posterior": ["O1", "O2"], "Central": ["FZ"]},
     )
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_base_frequency_hz", lambda: 6.0)
-    monkeypatch.setattr(harmonic_selection_qc, "_analysis_bca_upper_limit_hz", lambda: 8.4)
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_project_spectral_eligibility_domain",
+        lambda **_kwargs: (tuple(range(1, 8)), "eligibility-fingerprint", ()),
+    )
+    monkeypatch.setattr(
+        harmonic_selection_qc,
+        "_current_final_release_context",
+        lambda _root: (
+            SimpleNamespace(fingerprint="outcome-fingerprint"),
+            SimpleNamespace(
+                cells=(),
+                fingerprint="coverage-fingerprint",
+                decision_fingerprint="decision-fingerprint",
+                roi_snapshot=SimpleNamespace(fingerprint="roi-fingerprint"),
+            ),
+            SimpleNamespace(fingerprint="release-fingerprint"),
+        ),
+    )
+    monkeypatch.setattr(
+        publication_map_metrics,
+        "_require_managed_publication_release",
+        _test_managed_release,
+    )
     monkeypatch.setattr(
         full_fft_provenance,
         "require_current_project_workbook_geometry",
@@ -1049,6 +1073,13 @@ def _write_project_workbooks(
     project_root = tmp_path / "Project"
     excel_root = project_root / "1 - Excel Data Files"
     project_root.mkdir(parents=True)
+    frequency_protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=12,
+        expected_analyzed_oddball_cycles_source="manual",
+        oddball_marker_code=55,
+    )
     (project_root / "project.json").write_text(
         json.dumps(
             {
@@ -1059,6 +1090,7 @@ def _write_project_workbooks(
                 },
                 "participants": {subject: {} for subject in subjects},
                 "preprocessing": {},
+                "frequency_protocol": frequency_protocol.to_manifest(),
             },
             indent=2,
         ),
@@ -1077,11 +1109,32 @@ def _write_project_workbooks(
     return project_root, excel_root
 
 
+def _test_managed_release(project_root: Path | None):
+    if project_root is None:
+        return None
+    excel_root = Path(project_root) / "1 - Excel Data Files"
+    sources = {
+        path.resolve(strict=False): publication_map_metrics._ReleasedPublicationSource(
+            workbook_path=path.resolve(strict=False),
+            retained_scalp_channels=("O1", "O2", "FZ", "F3"),
+            allowed_auxiliary_rows=(),
+            observed_auxiliary_rows=(),
+            source_evidence_fingerprint=f"released:{path.name}",
+        )
+        for path in excel_root.rglob("*.xlsx")
+    }
+    return publication_map_metrics._ManagedPublicationRelease(
+        sources_by_workbook=sources,
+        final_coverage_fingerprint="coverage-fingerprint",
+        final_release_receipt_fingerprint="release-fingerprint",
+    )
+
+
 def _write_group_policy_workbook(
     path: Path,
     *,
     scale: int,
-    frequency_step: float = 0.3,
+    frequency_step: float = 0.1,
     peak_targets: set[float] | None = None,
 ) -> None:
     if peak_targets is None:

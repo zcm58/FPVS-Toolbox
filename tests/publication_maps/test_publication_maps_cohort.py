@@ -33,6 +33,11 @@ def _fixed_processing_harmonics(monkeypatch: pytest.MonkeyPatch) -> None:
             },
         ),
     )
+    monkeypatch.setattr(
+        publication_map_metrics,
+        "_require_managed_publication_release",
+        _test_managed_release,
+    )
 
 
 def test_ungrouped_project_uses_registered_canonical_participants(
@@ -322,12 +327,12 @@ def test_duplicate_normalized_electrode_rows_are_fatal(tmp_path: Path) -> None:
 
     with pytest.raises(
         PublicationMapInputError,
-        match="Duplicate normalized electrode rows.*O1",
+        match="frozen QC-21 electrode set.*repeat.*O1",
     ):
         build_publication_map_result(_request(project_root, excel_root))
 
 
-def test_blank_electrode_rows_are_ignored_without_fake_labels(tmp_path: Path) -> None:
+def test_managed_release_rejects_blank_electrode_identity_rows(tmp_path: Path) -> None:
     project_root, excel_root = _write_project(
         tmp_path,
         groups={},
@@ -340,14 +345,11 @@ def test_blank_electrode_rows_are_ignored_without_fake_labels(tmp_path: Path) ->
         values=[1.0, 1.0, 1.0, 1.0, 99.0, 99.0],
     )
 
-    result = build_publication_map_result(_request(project_root, excel_root))
-
-    assert set(result.long_values["electrode"]) == {"O1", "O2", "FZ", "F3"}
-    assert not {
-        "NONE",
-        "NAN",
-        "<NA>",
-    }.intersection(result.long_values["electrode"])
+    with pytest.raises(
+        PublicationMapInputError,
+        match="frozen QC-21 electrode set.*blank or non-text electrode identity",
+    ):
+        build_publication_map_result(_request(project_root, excel_root))
 
 
 @pytest.mark.parametrize("missing_label", [None, float("nan"), pd.NA])
@@ -516,6 +518,27 @@ def _write_bca_frame(
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name="BCA (uV)", index=False)
     return path
+
+
+def _test_managed_release(project_root: Path | None):
+    if project_root is None:
+        return None
+    excel_root = Path(project_root) / "1 - Excel Data Files"
+    sources = {
+        path.resolve(strict=False): publication_map_metrics._ReleasedPublicationSource(
+            workbook_path=path.resolve(strict=False),
+            retained_scalp_channels=("O1", "O2", "FZ", "F3"),
+            allowed_auxiliary_rows=(),
+            observed_auxiliary_rows=(),
+            source_evidence_fingerprint=f"released:{path.name}",
+        )
+        for path in excel_root.rglob("*.xlsx")
+    }
+    return publication_map_metrics._ManagedPublicationRelease(
+        sources_by_workbook=sources,
+        final_coverage_fingerprint="coverage-fingerprint",
+        final_release_receipt_fingerprint="release-fingerprint",
+    )
 
 
 def _electrode_value(result, electrode: str) -> float:
