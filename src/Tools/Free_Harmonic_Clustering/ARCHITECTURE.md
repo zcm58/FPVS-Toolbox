@@ -133,7 +133,12 @@ GUI does not offer local overrides.
 `Main_App.processing.full_fft_provenance` records project-relative FullFFT
 source identity, exact grid/resolution, base and oddball rates, canonical
 cohort/frequency-QC state, and processing/export ledger identity. GUI option
-inspection and direct preparation both validate this record. Standard profile
+inspection and direct preparation both validate this record. Reviewed whole-
+condition exclusions remove only their participant/recording condition cell;
+reviewed condition-electrode exclusions on any selected cell block preparation
+because this analysis requires the complete BioSemi64 graph. Decisions outside
+the selected contrast do not widen that scope, and legacy `auto_*` suggestions
+have no authority here. Standard profile
 IDs, detected/included harmonics, Summed-BCA selection fingerprints, and the
 freshness of Stats-ready/full-audit workbooks are intentionally absent. A
 standard profile change therefore cannot change this tool's candidates or

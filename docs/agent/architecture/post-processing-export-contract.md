@@ -88,7 +88,12 @@ The current neutral FullFFT provenance schema is v3. Loading or writing it
 requires the rates and fingerprint to match the managed project's canonical
 frequency protocol. A protocol change makes the record explicitly stale and
 requires post-processing; no application-wide 6/1.2 fallback may be stamped as
-managed provenance.
+managed provenance. Its cohort/QC fingerprint uses only reviewed frequency-
+domain decisions, including participant- and recording-condition exclusions
+and their condition-scoped electrode exclusions. Historical `auto_*` values
+remain audit suggestions in project state but do not own cohort identity or
+neutral provenance. Changing a reviewed condition decision invalidates the
+record and requires post-processing to rebuild it.
 
 Every active FullFFT workbook must match one completed processing-ledger entry
 with the project geometry identity and the expected retained channel count.

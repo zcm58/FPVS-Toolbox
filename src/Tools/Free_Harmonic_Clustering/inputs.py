@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
@@ -19,7 +19,9 @@ from Main_App.io import (
     read_xlsx_sheet_selected_columns,
 )
 from Main_App.processing.frequency_domain_qc import (
-    active_frequency_domain_exclusions,
+    FrequencyDomainCoverageDecisions,
+    load_frequency_domain_qc_state,
+    resolve_frequency_qc_coverage_decisions,
 )
 from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceError,
@@ -82,6 +84,7 @@ class _SelectedCohort:
     manual_excluded_participants: tuple[str, ...]
     frequency_qc_excluded_participants: tuple[str, ...]
     incomplete_pair_participants: tuple[str, ...]
+    participant_condition_exclusions: tuple[ParticipantConditionExclusion, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +150,67 @@ def _sort_ids(values: Sequence[object] | set[str]) -> tuple[str, ...]:
     return tuple(sorted(unique, key=lambda value: (value.casefold(), value)))
 
 
+def _condition_identity_keys(
+    values: Iterable[tuple[str, str]],
+) -> set[tuple[str, str]]:
+    """Normalize participant/recording condition identities for exact matching."""
+
+    return {
+        (str(identity).strip().casefold(), str(condition).strip().casefold())
+        for identity, condition in values
+        if str(identity).strip() and str(condition).strip()
+    }
+
+
+def _condition_electrode_map(
+    values: Mapping[tuple[str, str], frozenset[str]],
+) -> dict[tuple[str, str], tuple[str, ...]]:
+    """Normalize reviewed condition-electrode exclusions without widening scope."""
+
+    normalized: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
+    for (identity, condition), electrodes in values.items():
+        key = (
+            str(identity).strip().casefold(),
+            str(condition).strip().casefold(),
+        )
+        if not all(key):
+            continue
+        normalized[key].update(
+            str(electrode).strip()
+            for electrode in electrodes
+            if str(electrode).strip()
+        )
+    return {
+        key: tuple(sorted(electrodes, key=lambda value: (value.casefold(), value)))
+        for key, electrodes in normalized.items()
+        if electrodes
+    }
+
+
+def _reviewed_frequency_qc(
+    project_root: Path,
+) -> FrequencyDomainCoverageDecisions:
+    """Resolve only fingerprint-valid reviewed decisions for FHC cohort use."""
+
+    state = load_frequency_domain_qc_state(project_root)
+    decisions = resolve_frequency_qc_coverage_decisions(project_root)
+    if bool(state.get("downstream_outputs_stale", False)):
+        raise FreeHarmonicInputError(
+            "Frequency-domain QC marks downstream outputs stale; rerun the "
+            "required processing/QC workflow before this analysis."
+        )
+    if not decisions.review_complete:
+        if bool(state.get("review_complete", False)):
+            detail = "no longer has valid decision provenance"
+        else:
+            detail = "has not been completed with valid review evidence"
+        raise FreeHarmonicInputError(
+            f"The frequency-domain QC review {detail}. Repeat the review "
+            "before this analysis."
+        )
+    return decisions
+
+
 def _manifest_manual_exclusions(index: ProjectDatasetIndex) -> tuple[str, ...]:
     manifest = index.manifest if isinstance(index.manifest, Mapping) else {}
     raw = manifest.get("preprocessing")
@@ -157,24 +221,54 @@ def _manifest_manual_exclusions(index: ProjectDatasetIndex) -> tuple[str, ...]:
 def _relevant_participant_condition_exclusions(
     index: ProjectDatasetIndex,
     request: ProjectContrastRequest,
+    *,
+    frequency_qc: FrequencyDomainCoverageDecisions,
+    relevant_records: Sequence[WorkbookRecord],
 ) -> tuple[ParticipantConditionExclusion, ...]:
     conditions = {request.condition_a.casefold()}
     if request.condition_b is not None:
         conditions.add(request.condition_b.casefold())
     group_keys = {group_id.casefold() for group_id in request.group_ids}
     rows = {
-        (record.participant_id, record.condition)
+        (record.participant_id.casefold(), record.condition.casefold()): (
+            record.participant_id,
+            record.condition,
+            "Project participant-condition exclusion",
+        )
         for record in index.excluded_workbooks
         if record.condition.casefold() in conditions
         and (not group_keys or (record.group_id is not None and record.group_id.casefold() in group_keys))
     }
+    relevant_lookup = {
+        (record.participant_id.casefold(), record.condition.casefold()): (
+            record.participant_id,
+            record.condition,
+        )
+        for record in relevant_records
+    }
+    for participant_id, condition in frequency_qc.excluded_participant_conditions:
+        key = (
+            str(participant_id).strip().casefold(),
+            str(condition).strip().casefold(),
+        )
+        canonical = relevant_lookup.get(key)
+        if canonical is not None:
+            rows.setdefault(
+                key,
+                (
+                    canonical[0],
+                    canonical[1],
+                    "Reviewed frequency-domain condition exclusion",
+                ),
+            )
     return tuple(
         ParticipantConditionExclusion(
             participant_id=participant_id,
             condition=condition,
+            reason=reason,
         )
-        for participant_id, condition in sorted(
-            rows,
+        for participant_id, condition, reason in sorted(
+            rows.values(),
             key=lambda row: (
                 row[1].casefold(),
                 row[0].casefold(),
@@ -254,14 +348,16 @@ def _select_cohort(
     completed_keys = _casefold_ids(completed)
     manual = _manifest_manual_exclusions(index)
     manual_keys = _casefold_ids(manual)
-    frequency_qc = active_frequency_domain_exclusions(project_root)
-    if frequency_qc.downstream_outputs_stale:
-        raise FreeHarmonicInputError(
-            "Frequency-domain QC marks downstream outputs stale; rerun the "
-            "required processing/QC workflow before this analysis."
-        )
+    frequency_qc = _reviewed_frequency_qc(project_root)
     frequency_excluded = _sort_ids(frequency_qc.excluded_participants)
     frequency_keys = _casefold_ids(frequency_excluded)
+    frequency_recording_keys = _casefold_ids(frequency_qc.excluded_recordings)
+    frequency_participant_condition_keys = _condition_identity_keys(
+        frequency_qc.excluded_participant_conditions
+    )
+    frequency_recording_condition_keys = _condition_identity_keys(
+        frequency_qc.excluded_recording_conditions
+    )
 
     requested_group_ids = request.group_ids
     if request.design is AnalysisDesign.INDEPENDENT_GROUPS:
@@ -295,6 +391,12 @@ def _select_cohort(
         raise FreeHarmonicInputError("No indexed FullFFT workbooks matched the requested contrast.")
     relevant_participants = {record.participant_id.casefold() for record in relevant}
     ledger_excluded_keys = relevant_participants - completed_keys if ledger_filter_applied else set()
+    participant_condition_exclusions = _relevant_participant_condition_exclusions(
+        index,
+        request,
+        frequency_qc=frequency_qc,
+        relevant_records=relevant,
+    )
 
     active_records = tuple(
         record
@@ -302,6 +404,14 @@ def _select_cohort(
         if (not ledger_filter_applied or record.participant_id.casefold() in completed_keys)
         and record.participant_id.casefold() not in manual_keys
         and record.participant_id.casefold() not in frequency_keys
+        and str(record.recording_id or "").casefold() not in frequency_recording_keys
+        and (record.participant_id.casefold(), record.condition.casefold())
+        not in frequency_participant_condition_keys
+        and (
+            str(record.recording_id or "").casefold(),
+            record.condition.casefold(),
+        )
+        not in frequency_recording_condition_keys
     )
 
     if request.design is AnalysisDesign.INDEPENDENT_GROUPS:
@@ -358,18 +468,41 @@ def _select_cohort(
             f"each analysis arm after exclusions ({detail})."
         )
 
-    included_keys = {record.participant_id.casefold() for record in (*ordered_a, *ordered_b)}
+    participant_electrodes = _condition_electrode_map(
+        frequency_qc.excluded_electrodes_by_participant_condition
+    )
+    recording_electrodes = _condition_electrode_map(
+        frequency_qc.excluded_electrodes_by_recording_condition
+    )
+    electrode_exclusions: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for record in (*ordered_a, *ordered_b):
+        condition_key = record.condition.casefold()
+        electrode_exclusions[(record.participant_id, record.condition)].update(
+            participant_electrodes.get(
+                (record.participant_id.casefold(), condition_key),
+                (),
+            )
+        )
+        electrode_exclusions[(record.participant_id, record.condition)].update(
+            recording_electrodes.get(
+                (str(record.recording_id or "").casefold(), condition_key),
+                (),
+            )
+        )
     electrode_exclusions = {
-        str(participant_id): tuple(sorted(str(value) for value in electrodes))
-        for participant_id, electrodes in (frequency_qc.auto_excluded_electrodes_by_participant or {}).items()
-        if str(participant_id).casefold() in included_keys and electrodes
+        identity: electrodes
+        for identity, electrodes in electrode_exclusions.items()
+        if electrodes
     }
     if electrode_exclusions:
         details = "; ".join(
-            f"{participant}: {', '.join(electrodes)}"
-            for participant, electrodes in sorted(
+            f"{participant} / {condition}: {', '.join(sorted(electrodes))}"
+            for (participant, condition), electrodes in sorted(
                 electrode_exclusions.items(),
-                key=lambda row: row[0].casefold(),
+                key=lambda row: (
+                    row[0][0].casefold(),
+                    row[0][1].casefold(),
+                ),
             )
         )
         raise FreeHarmonicInputError(
@@ -391,6 +524,7 @@ def _select_cohort(
         manual_excluded_participants=manual,
         frequency_qc_excluded_participants=frequency_excluded,
         incomplete_pair_participants=incomplete_pairs,
+        participant_condition_exclusions=participant_condition_exclusions,
     )
 
 
@@ -482,12 +616,7 @@ def _select_repeated_batch_cohort(
             + "."
         )
 
-    frequency_qc = active_frequency_domain_exclusions(project_root)
-    if frequency_qc.downstream_outputs_stale:
-        raise FreeHarmonicInputError(
-            "Frequency-domain QC marks downstream outputs stale; rerun the "
-            "required processing/QC workflow before this analysis."
-        )
+    frequency_qc = _reviewed_frequency_qc(project_root)
     completed, ledger_filter_applied = _completed_ledger_recordings(
         project_root,
         index,
@@ -499,6 +628,12 @@ def _select_repeated_batch_cohort(
     frequency_participant_keys = _casefold_ids(frequency_participants)
     frequency_recordings = _sort_ids(frequency_qc.excluded_recordings)
     frequency_recording_keys = _casefold_ids(frequency_recordings)
+    frequency_participant_condition_keys = _condition_identity_keys(
+        frequency_qc.excluded_participant_conditions
+    )
+    frequency_recording_condition_keys = _condition_identity_keys(
+        frequency_qc.excluded_recording_conditions
+    )
     request_exclusion_reason = {row.recording_id.casefold(): row.reason for row in request.recording_exclusions}
 
     all_relevant = tuple(
@@ -533,6 +668,17 @@ def _select_repeated_batch_cohort(
             exclusion_reasons[identity].add("Frequency-domain participant exclusion")
         if recording_key in frequency_recording_keys:
             exclusion_reasons[identity].add("Frequency-domain recording exclusion")
+        if (
+            record.participant_id.casefold(),
+            condition_key,
+        ) in frequency_participant_condition_keys:
+            exclusion_reasons[identity].add(
+                "Frequency-domain participant-condition exclusion"
+            )
+        if identity in frequency_recording_condition_keys:
+            exclusion_reasons[identity].add(
+                "Frequency-domain recording-condition exclusion"
+            )
     participant_group_lookup = {
         participant.participant_id.casefold(): ("" if participant.group_id is None else participant.group_id.casefold())
         for participant in index.participants.values()
@@ -556,6 +702,17 @@ def _select_repeated_batch_cohort(
                 exclusion_reasons[identity].add("Frequency-domain participant exclusion")
             if recording_key in frequency_recording_keys:
                 exclusion_reasons[identity].add("Frequency-domain recording exclusion")
+            if (
+                recording.participant_id.casefold(),
+                condition.casefold(),
+            ) in frequency_participant_condition_keys:
+                exclusion_reasons[identity].add(
+                    "Frequency-domain participant-condition exclusion"
+                )
+            if identity in frequency_recording_condition_keys:
+                exclusion_reasons[identity].add(
+                    "Frequency-domain recording-condition exclusion"
+                )
 
     active_records = tuple(
         record
@@ -682,22 +839,43 @@ def _select_repeated_batch_cohort(
                         source_records.append(record)
                         seen_sources.add(identity)
 
-    included_recording_keys = {str(record.recording_id).casefold() for record in source_records}
-    participant_electrodes = {
-        str(participant_id): tuple(sorted(str(value) for value in electrodes))
-        for participant_id, electrodes in (frequency_qc.auto_excluded_electrodes_by_participant or {}).items()
-        if str(participant_id).casefold() in {record.participant_id.casefold() for record in source_records}
-        and electrodes
+    participant_electrodes = _condition_electrode_map(
+        frequency_qc.excluded_electrodes_by_participant_condition
+    )
+    recording_electrodes = _condition_electrode_map(
+        frequency_qc.excluded_electrodes_by_recording_condition
+    )
+    electrode_exclusions: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for record in source_records:
+        condition_key = record.condition.casefold()
+        identity = (str(record.recording_id), record.condition)
+        electrode_exclusions[identity].update(
+            participant_electrodes.get(
+                (record.participant_id.casefold(), condition_key),
+                (),
+            )
+        )
+        electrode_exclusions[identity].update(
+            recording_electrodes.get(
+                (str(record.recording_id).casefold(), condition_key),
+                (),
+            )
+        )
+    electrode_exclusions = {
+        identity: electrodes
+        for identity, electrodes in electrode_exclusions.items()
+        if electrodes
     }
-    recording_electrodes = {
-        str(recording_id): tuple(sorted(str(value) for value in electrodes))
-        for recording_id, electrodes in (frequency_qc.auto_excluded_electrodes_by_recording or {}).items()
-        if str(recording_id).casefold() in included_recording_keys and electrodes
-    }
-    if participant_electrodes or recording_electrodes:
+    if electrode_exclusions:
         details = [
-            *(f"{identity}: {', '.join(values)}" for identity, values in sorted(participant_electrodes.items())),
-            *(f"{identity}: {', '.join(values)}" for identity, values in sorted(recording_electrodes.items())),
+            f"{recording_id} / {condition}: {', '.join(sorted(electrodes))}"
+            for (recording_id, condition), electrodes in sorted(
+                electrode_exclusions.items(),
+                key=lambda row: (
+                    row[0][0].casefold(),
+                    row[0][1].casefold(),
+                ),
+            )
         ]
         raise FreeHarmonicInputError(
             "Free Harmonic Clustering requires the complete BioSemi64 sensor "
@@ -974,7 +1152,7 @@ def prepare_project_contrast(
         manual_excluded_participants=cohort.manual_excluded_participants,
         frequency_qc_excluded_participants=(cohort.frequency_qc_excluded_participants),
         incomplete_pair_participants=cohort.incomplete_pair_participants,
-        participant_condition_exclusions=(_relevant_participant_condition_exclusions(index, request)),
+        participant_condition_exclusions=cohort.participant_condition_exclusions,
         dataset_diagnostics=diagnostics,
         full_fft_provenance_method_version=(full_fft_provenance.method_version),
         full_fft_source_fingerprint=full_fft_provenance.source_fingerprint,

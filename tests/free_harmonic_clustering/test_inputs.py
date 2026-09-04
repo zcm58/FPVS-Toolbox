@@ -13,6 +13,9 @@ from config import DEFAULT_ELECTRODE_NAMES_64
 from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceMissingError,
 )
+from Main_App.processing.frequency_domain_qc import (
+    FrequencyDomainCoverageDecisions,
+)
 from Tools.Free_Harmonic_Clustering import inputs
 from Tools.Free_Harmonic_Clustering.models import (
     AnalysisDesign,
@@ -49,9 +52,6 @@ def _write_project(
     ledger_statuses: dict[str, str] | None = None,
     manual_excluded_participants: tuple[str, ...] = (),
     participant_condition_exclusions: dict[str, tuple[str, ...]] | None = None,
-    frequency_excluded_participants: tuple[str, ...] = (),
-    electrode_exclusions: tuple[tuple[str, str], ...] = (),
-    frequency_outputs_stale: bool = False,
 ) -> tuple[Path, dict[tuple[str, str], Path]]:
     root.mkdir(parents=True)
     raw_root = root / "Raw"
@@ -78,15 +78,7 @@ def _write_project(
         },
         "tools": {
             "frequency_domain_qc": {
-                "auto_participant_exclusions": [
-                    {"participant_id": participant} for participant in frequency_excluded_participants
-                ],
-                "manual_participant_exclusions": [],
-                "auto_participant_electrode_exclusions": [
-                    {"participant_id": participant, "electrode": electrode}
-                    for participant, electrode in electrode_exclusions
-                ],
-                "downstream_outputs_stale": frequency_outputs_stale,
+                "downstream_outputs_stale": False,
             }
         },
     }
@@ -296,6 +288,53 @@ def _install_reader_doubles(
     return header_calls, amplitude_calls
 
 
+def _install_frequency_exclusions(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    excluded_participants: tuple[str, ...] = (),
+    excluded_recordings: tuple[str, ...] = (),
+    excluded_participant_conditions: tuple[tuple[str, str], ...] = (),
+    excluded_recording_conditions: tuple[tuple[str, str], ...] = (),
+    participant_condition_electrodes: dict[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+    recording_condition_electrodes: dict[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+) -> None:
+    """Install current reviewed QC exclusions without reviving legacy auto fields."""
+
+    exclusions = FrequencyDomainCoverageDecisions(
+        decision_fingerprint="reviewed-frequency-qc-fixture",
+        review_complete=True,
+        excluded_participants=frozenset(excluded_participants),
+        excluded_recordings=frozenset(excluded_recordings),
+        excluded_participant_conditions=frozenset(
+            excluded_participant_conditions
+        ),
+        excluded_recording_conditions=frozenset(excluded_recording_conditions),
+        excluded_electrodes_by_participant_condition=(
+            participant_condition_electrodes or {}
+        ),
+        excluded_electrodes_by_recording_condition=(
+            recording_condition_electrodes or {}
+        ),
+        reviewed_decisions=(),
+    )
+    monkeypatch.setattr(
+        inputs,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _project_root: exclusions,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _completed_frequency_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_frequency_exclusions(monkeypatch)
+
+
 def _independent_project(
     tmp_path: Path,
     **kwargs: object,
@@ -320,7 +359,6 @@ def _independent_project(
             "N4": "excluded",
         },
         "manual_excluded_participants": ("A3",),
-        "frequency_excluded_participants": ("N3",),
     }
     defaults.update(kwargs)
     return _write_project(
@@ -584,6 +622,10 @@ def test_independent_project_cohort_honors_all_exclusions_and_reads_once(
 ) -> None:
     root, _paths = _independent_project(tmp_path)
     header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+    _install_frequency_exclusions(
+        monkeypatch,
+        excluded_participants=("N3",),
+    )
     progress: list[tuple[int, int]] = []
 
     prepared = inputs.prepare_project_contrast(
@@ -731,17 +773,30 @@ def test_relevant_participant_condition_exclusions_are_preserved_in_provenance(
     root, _paths = _write_project(
         tmp_path / "Project",
         groups={"all": ("All Participants", "All")},
-        participant_groups={"P1": "all", "P2": "all", "P3": "all"},
+        participant_groups={
+            "P1": "all",
+            "P2": "all",
+            "P3": "all",
+            "P4": "all",
+        },
         participant_conditions={
             "P1": ("Angry", "Happy", "Unselected"),
             "P2": ("Angry", "Happy", "Unselected"),
             "P3": ("Angry", "Happy", "Unselected"),
+            "P4": ("Angry", "Happy", "Unselected"),
         },
         participant_condition_exclusions={
             "P3": ("Happy", "Unselected"),
         },
     )
     _install_reader_doubles(monkeypatch)
+    _install_frequency_exclusions(
+        monkeypatch,
+        excluded_participant_conditions=(
+            ("P4", "Happy"),
+            ("P4", "Unselected"),
+        ),
+    )
 
     prepared = inputs.prepare_project_contrast(
         ProjectContrastRequest(
@@ -756,19 +811,23 @@ def test_relevant_participant_condition_exclusions_are_preserved_in_provenance(
     exclusions = prepared.provenance.participant_condition_exclusions
     assert [(row.participant_id, row.condition, row.reason) for row in exclusions] == [
         ("P3", "Happy", "Project participant-condition exclusion"),
+        ("P4", "Happy", "Reviewed frequency-domain condition exclusion"),
     ]
-    assert prepared.provenance.incomplete_pair_participants == ("P3",)
+    assert prepared.provenance.incomplete_pair_participants == ("P3", "P4")
 
 
 def test_included_frequency_qc_electrode_exclusion_fails_before_workbook_reads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root, _paths = _independent_project(
-        tmp_path,
-        electrode_exclusions=(("A1", "Fp1"),),
-    )
+    root, _paths = _independent_project(tmp_path)
     header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+    _install_frequency_exclusions(
+        monkeypatch,
+        participant_condition_electrodes={
+            ("A1", "Faces"): frozenset({"Fp1"})
+        },
+    )
 
     with pytest.raises(FreeHarmonicInputError, match="active electrode exclusions"):
         inputs.prepare_project_contrast(
@@ -784,11 +843,12 @@ def test_independent_arm_with_fewer_than_two_participants_fails_before_io(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root, _paths = _independent_project(
-        tmp_path,
-        frequency_excluded_participants=("N2", "N3"),
-    )
+    root, _paths = _independent_project(tmp_path)
     header_calls, amplitude_calls = _install_reader_doubles(monkeypatch)
+    _install_frequency_exclusions(
+        monkeypatch,
+        excluded_participants=("N2", "N3"),
+    )
 
     with pytest.raises(FreeHarmonicInputError, match="at least two participants"):
         inputs.prepare_project_contrast(

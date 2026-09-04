@@ -10,6 +10,10 @@ import numpy as np
 from openpyxl import Workbook
 import pytest
 
+from Main_App.processing import full_fft_provenance
+from Main_App.processing.frequency_domain_qc import (
+    FrequencyDomainCoverageDecisions,
+)
 from Main_App.processing.full_fft_provenance import (
     FullFftProvenanceError,
     FullFftProvenanceStaleError,
@@ -24,6 +28,25 @@ from Main_App.io.eeg_geometry import (
 )
 from Main_App.processing.processing_ledger import PROCESSING_FINGERPRINT_VERSION
 from Main_App.projects import FrequencyProtocol
+
+
+@pytest.fixture(autouse=True)
+def _completed_frequency_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: FrequencyDomainCoverageDecisions(
+            decision_fingerprint="reviewed-frequency-qc-fixture",
+            review_complete=True,
+            excluded_participants=frozenset(),
+            excluded_recordings=frozenset(),
+            excluded_participant_conditions=frozenset(),
+            excluded_recording_conditions=frozenset(),
+            excluded_electrodes_by_participant_condition={},
+            excluded_electrodes_by_recording_condition={},
+            reviewed_decisions=(),
+        ),
+    )
 
 
 def _write_geometry_ledger(

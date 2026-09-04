@@ -7,6 +7,10 @@ import numpy as np
 from openpyxl import Workbook
 import pytest
 
+from Main_App.processing import full_fft_provenance
+from Main_App.processing.frequency_domain_qc import (
+    FrequencyDomainCoverageDecisions,
+)
 from Main_App.processing.full_fft_provenance import (
     FULL_FFT_PROVENANCE_METHOD_VERSION,
     FullFftProvenanceError,
@@ -97,6 +101,40 @@ def _write_project(
     return root, paths
 
 
+def _frequency_exclusions(
+    *,
+    excluded_participant_conditions: tuple[tuple[str, str], ...] = (),
+    participant_condition_electrodes: dict[
+        tuple[str, str], frozenset[str]
+    ]
+    | None = None,
+) -> FrequencyDomainCoverageDecisions:
+    return FrequencyDomainCoverageDecisions(
+        decision_fingerprint="reviewed-frequency-qc-fixture",
+        review_complete=True,
+        excluded_participants=frozenset(),
+        excluded_recordings=frozenset(),
+        excluded_participant_conditions=frozenset(
+            excluded_participant_conditions
+        ),
+        excluded_recording_conditions=frozenset(),
+        excluded_electrodes_by_participant_condition=(
+            participant_condition_electrodes or {}
+        ),
+        excluded_electrodes_by_recording_condition={},
+        reviewed_decisions=(),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _completed_frequency_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: _frequency_exclusions(),
+    )
+
+
 def test_neutral_provenance_round_trip_is_stats_independent_and_project_relative(
     tmp_path: Path,
 ) -> None:
@@ -120,6 +158,14 @@ def test_neutral_provenance_round_trip_is_stats_independent_and_project_relative
     assert "stats" not in manifest["tools"]
     assert metadata["cohort_state"]["ledger_filter_applied"] is True
     assert metadata["frequency_qc_state"]["excluded_participants"] == []
+    assert metadata["frequency_qc_state"] == {
+        "authority": "reviewed_frequency_domain_qc",
+        "review_complete": True,
+        "decision_fingerprint": "reviewed-frequency-qc-fixture",
+        "excluded_participants": [],
+        "excluded_participant_conditions": [],
+        "excluded_electrodes_by_participant_condition": [],
+    }
     assert len(metadata["processing_export_state"]) == 2
     assert metadata["geometry"] == biosemi64_geometry_identity()
     assert written.source_workbook_count == 2
@@ -158,6 +204,149 @@ def test_neutral_provenance_round_trip_is_stats_independent_and_project_relative
         noise_half_width_hz=0.1,
     )
     assert validated.grid_fingerprint == fhc_plan.grid_fingerprint
+
+
+def test_condition_scoped_review_change_stales_neutral_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _paths = _write_project(tmp_path)
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: _frequency_exclusions(),
+    )
+    write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: _frequency_exclusions(
+            excluded_participant_conditions=(("P2", "Faces"),),
+        ),
+    )
+
+    with pytest.raises(
+        FullFftProvenanceStaleError,
+        match="frequency-domain cohort/QC exclusions changed",
+    ):
+        validate_project_full_fft_provenance(
+            root,
+            base_frequency_hz=6.0,
+            oddball_frequency_hz=1.2,
+        )
+
+
+def test_condition_electrode_review_change_stales_neutral_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _paths = _write_project(tmp_path)
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: _frequency_exclusions(),
+    )
+    write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: _frequency_exclusions(
+            participant_condition_electrodes={
+                ("P1", "Faces"): frozenset({"Fp1"})
+            },
+        ),
+    )
+
+    with pytest.raises(
+        FullFftProvenanceStaleError,
+        match="frequency-domain cohort/QC exclusions changed",
+    ):
+        validate_project_full_fft_provenance(
+            root,
+            base_frequency_hz=6.0,
+            oddball_frequency_hz=1.2,
+        )
+
+
+def test_legacy_automatic_suggestions_do_not_own_neutral_provenance(
+    tmp_path: Path,
+) -> None:
+    root, _paths = _write_project(tmp_path)
+    written = write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.setdefault("tools", {}).setdefault("frequency_domain_qc", {}).update(
+        {
+            "auto_participant_exclusions": [{"participant_id": "P2"}],
+            "auto_participant_electrode_exclusions": [
+                {"participant_id": "P1", "electrode": "Fp1"}
+            ],
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    validated = validate_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+
+    assert validated.frequency_qc_fingerprint == written.frequency_qc_fingerprint
+
+
+def test_claimed_complete_review_with_invalid_evidence_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _paths = _write_project(tmp_path)
+    write_project_full_fft_provenance(
+        root,
+        base_frequency_hz=6.0,
+        oddball_frequency_hz=1.2,
+    )
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.setdefault("tools", {}).setdefault("frequency_domain_qc", {})[
+        "review_complete"
+    ] = True
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    monkeypatch.setattr(
+        full_fft_provenance,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: FrequencyDomainCoverageDecisions(
+            decision_fingerprint="",
+            review_complete=False,
+            excluded_participants=frozenset(),
+            excluded_recordings=frozenset(),
+            excluded_participant_conditions=frozenset(),
+            excluded_recording_conditions=frozenset(),
+            excluded_electrodes_by_participant_condition={},
+            excluded_electrodes_by_recording_condition={},
+            reviewed_decisions=(),
+        ),
+    )
+
+    with pytest.raises(
+        FullFftProvenanceStaleError,
+        match="no longer has valid decision provenance",
+    ):
+        validate_project_full_fft_provenance(
+            root,
+            base_frequency_hz=6.0,
+            oddball_frequency_hz=1.2,
+        )
 
 
 def test_missing_record_requests_postprocessing_not_eeg_preprocessing(

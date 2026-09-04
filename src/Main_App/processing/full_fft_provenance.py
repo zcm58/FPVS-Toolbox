@@ -7,7 +7,7 @@ harmonic-selection state and does not depend on a Summed-BCA cache.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
@@ -23,7 +23,8 @@ from Main_App.io.eeg_geometry import (
 )
 
 from Main_App.processing.frequency_domain_qc import (
-    active_frequency_domain_exclusions,
+    load_frequency_domain_qc_state,
+    resolve_frequency_qc_coverage_decisions,
 )
 from Main_App.processing.processing_ledger import load_ledger
 from Main_App.projects import (
@@ -177,6 +178,55 @@ def _hash_payload(value: object) -> str:
         ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _condition_identity_rows(
+    values: Iterable[tuple[str, str]],
+    *,
+    identity_field: str,
+) -> list[dict[str, str]]:
+    """Return deterministic reviewed condition identities for provenance."""
+
+    normalized = {
+        (str(identity).strip().casefold(), str(condition).strip().casefold())
+        for identity, condition in values
+        if str(identity).strip() and str(condition).strip()
+    }
+    return [
+        {identity_field: identity, "condition": condition}
+        for identity, condition in sorted(normalized)
+    ]
+
+
+def _condition_electrode_rows(
+    values: Mapping[tuple[str, str], frozenset[str]],
+    *,
+    identity_field: str,
+) -> list[dict[str, object]]:
+    """Return deterministic reviewed electrode exclusions without scope widening."""
+
+    normalized: dict[tuple[str, str], set[str]] = {}
+    for (identity, condition), electrodes in values.items():
+        key = (
+            str(identity).strip().casefold(),
+            str(condition).strip().casefold(),
+        )
+        if not all(key):
+            continue
+        normalized.setdefault(key, set()).update(
+            str(electrode).strip().upper()
+            for electrode in electrodes
+            if str(electrode).strip()
+        )
+    return [
+        {
+            identity_field: identity,
+            "condition": condition,
+            "electrodes": sorted(electrodes),
+        }
+        for (identity, condition), electrodes in sorted(normalized.items())
+        if electrodes
+    ]
 
 
 def _fingerprint_columns(
@@ -433,11 +483,21 @@ def _source_snapshot(
     )
     manual_excluded = _manual_excluded_participants(index)
     manual_excluded_recordings = _manual_excluded_recordings(index)
-    frequency_qc = active_frequency_domain_exclusions(project_root)
-    if frequency_qc.downstream_outputs_stale:
+    frequency_qc_state = load_frequency_domain_qc_state(project_root)
+    frequency_qc = resolve_frequency_qc_coverage_decisions(project_root)
+    if bool(frequency_qc_state.get("downstream_outputs_stale", False)):
         raise FullFftProvenanceStaleError(
             "Frequency-domain cohort/QC state is stale. Complete the required "
             "post-processing review before using FullFFT analyses."
+        )
+    if not frequency_qc.review_complete:
+        if bool(frequency_qc_state.get("review_complete", False)):
+            detail = "no longer has valid decision provenance"
+        else:
+            detail = "has not been completed with valid review evidence"
+        raise FullFftProvenanceStaleError(
+            f"The frequency-domain QC review {detail}. Repeat the review "
+            "before using FullFFT analyses."
         )
     frequency_excluded = {
         str(value).strip().casefold()
@@ -449,6 +509,30 @@ def _source_snapshot(
         for value in frequency_qc.excluded_recordings
         if str(value).strip()
     }
+    frequency_participant_conditions = _condition_identity_rows(
+        frequency_qc.excluded_participant_conditions,
+        identity_field="participant_id",
+    )
+    frequency_participant_condition_keys = {
+        (row["participant_id"], row["condition"])
+        for row in frequency_participant_conditions
+    }
+    frequency_recording_conditions = _condition_identity_rows(
+        frequency_qc.excluded_recording_conditions,
+        identity_field="recording_id",
+    )
+    frequency_recording_condition_keys = {
+        (row["recording_id"], row["condition"])
+        for row in frequency_recording_conditions
+    }
+    participant_condition_electrodes = _condition_electrode_rows(
+        frequency_qc.excluded_electrodes_by_participant_condition,
+        identity_field="participant_id",
+    )
+    recording_condition_electrodes = _condition_electrode_rows(
+        frequency_qc.excluded_electrodes_by_recording_condition,
+        identity_field="recording_id",
+    )
     active_records = tuple(
         record
         for record in index.workbooks
@@ -465,6 +549,8 @@ def _source_snapshot(
         )
         and record.participant_id.casefold() not in manual_excluded
         and record.participant_id.casefold() not in frequency_excluded
+        and (record.participant_id.casefold(), record.condition.casefold())
+        not in frequency_participant_condition_keys
         and (
             not repeated_session
             or str(record.recording_id or "").casefold()
@@ -474,6 +560,14 @@ def _source_snapshot(
             not repeated_session
             or str(record.recording_id or "").casefold()
             not in frequency_excluded_recordings
+        )
+        and (
+            not repeated_session
+            or (
+                str(record.recording_id or "").casefold(),
+                record.condition.casefold(),
+            )
+            not in frequency_recording_condition_keys
         )
     )
     if not active_records:
@@ -534,37 +628,27 @@ def _source_snapshot(
         )
     )
 
-    frequency_qc_payload = {
+    # Legacy ``auto_*`` fields remain preserved as inactive suggestions in the
+    # frequency-QC state. They are deliberately absent here: only explicit,
+    # reviewed exclusions own FullFFT cohort/provenance identity.
+    frequency_qc_payload: dict[str, object] = {
+        "authority": "reviewed_frequency_domain_qc",
+        "review_complete": True,
+        "decision_fingerprint": str(frequency_qc.decision_fingerprint),
         "excluded_participants": sorted(frequency_excluded),
-        "electrode_exclusions": {
-            str(participant).strip().casefold(): sorted(
-                str(electrode).strip().upper()
-                for electrode in electrodes
-                if str(electrode).strip()
-            )
-            for participant, electrodes in sorted(
-                frequency_qc.auto_excluded_electrodes_by_participant.items(),
-                key=lambda row: str(row[0]).casefold(),
-            )
-            if str(participant).strip() and electrodes
-        },
+        "excluded_participant_conditions": frequency_participant_conditions,
+        "excluded_electrodes_by_participant_condition": (
+            participant_condition_electrodes
+        ),
     }
     if repeated_session:
         frequency_qc_payload.update(
             {
                 "excluded_recordings": sorted(frequency_excluded_recordings),
-                "recording_electrode_exclusions": {
-                    str(recording_id).strip().casefold(): sorted(
-                        str(electrode).strip().upper()
-                        for electrode in electrodes
-                        if str(electrode).strip()
-                    )
-                    for recording_id, electrodes in sorted(
-                        frequency_qc.auto_excluded_electrodes_by_recording.items(),
-                        key=lambda row: str(row[0]).casefold(),
-                    )
-                    if str(recording_id).strip() and electrodes
-                },
+                "excluded_recording_conditions": frequency_recording_conditions,
+                "excluded_electrodes_by_recording_condition": (
+                    recording_condition_electrodes
+                ),
             }
         )
     cohort_keys = [
