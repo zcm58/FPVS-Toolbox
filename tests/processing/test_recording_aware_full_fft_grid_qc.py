@@ -37,6 +37,7 @@ def test_full_fft_recording_exclusion_does_not_remove_sibling_visit() -> None:
         reference_oddball_cycles=None,
         reference_support=1,
         reference_total=2,
+        oddball_frequency_hz=1.2,
     )
 
     assert luteal.pair_key == ("p01__luteal", "faces")

@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from fractions import Fraction
+import math
 from pathlib import Path
 import re
 from typing import Mapping, Sequence
@@ -78,9 +79,17 @@ class FullFftGridAudit:
     reference_oddball_cycles: int | None
     reference_support: int
     reference_total: int
-    oddball_frequency_hz: float = 1.2
+    oddball_frequency_hz: float
     frequency_protocol_fingerprint: str = ""
     method_version: str = FULL_FFT_GRID_QC_METHOD_VERSION
+
+    def __post_init__(self) -> None:
+        oddball_frequency_hz = float(self.oddball_frequency_hz)
+        if not math.isfinite(oddball_frequency_hz) or oddball_frequency_hz <= 0.0:
+            raise ValueError(
+                "FullFFT grid QC requires an explicit positive project oddball rate."
+            )
+        object.__setattr__(self, "oddball_frequency_hz", oddball_frequency_hz)
 
     @property
     def reference_duration_s(self) -> float | None:

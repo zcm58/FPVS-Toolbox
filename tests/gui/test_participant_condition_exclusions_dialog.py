@@ -53,6 +53,7 @@ def test_participant_condition_exclusions_dialog_prechecks_grid_mismatch(qtbot) 
         reference_oddball_cycles=144,
         reference_support=2,
         reference_total=3,
+        oddball_frequency_hz=1.2,
     )
     dialog = ParticipantConditionExclusionsDialog(audit)
     qtbot.addWidget(dialog)
@@ -76,6 +77,7 @@ def test_participant_condition_exclusions_dialog_does_not_guess_tied_grid(
         reference_oddball_cycles=None,
         reference_support=1,
         reference_total=2,
+        oddball_frequency_hz=1.2,
     )
     dialog = ParticipantConditionExclusionsDialog(audit)
     qtbot.addWidget(dialog)
@@ -93,6 +95,7 @@ def test_participant_condition_exclusions_dialog_preserves_unobserved_entries(
         reference_oddball_cycles=None,
         reference_support=0,
         reference_total=1,
+        oddball_frequency_hz=1.2,
     )
     dialog = ParticipantConditionExclusionsDialog(
         audit,
@@ -124,6 +127,7 @@ def test_recording_aware_condition_dialog_keeps_visit_scope_explicit(qtbot) -> N
         reference_oddball_cycles=144,
         reference_support=2,
         reference_total=3,
+        oddball_frequency_hz=1.2,
     )
     dialog = ParticipantConditionExclusionsDialog(audit)
     qtbot.addWidget(dialog)
