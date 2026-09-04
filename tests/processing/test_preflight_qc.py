@@ -96,7 +96,7 @@ def test_unscoped_preflight_reports_not_evaluated_without_loading_signal(
     assert scan.results[0].raw_spectral_qc is None
     assert scan.results[0].condition_qc == {
         "method_name": "condition_aware_preflight_qc",
-        "method_version": "v5_analyzed_interval_coordinates",
+        "method_version": "v6_five_second_overlapping_transients",
         "evaluation_status": "not_evaluated",
         "cache_status": "not_evaluated",
         "reason": "missing_analyzed_interval_context",
@@ -167,7 +167,7 @@ def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
     }
 
 
-def test_preflight_suggestions_include_review_only_removed_electrode_classes(
+def test_preflight_suggestions_exclude_unselected_review_only_signal_classes(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
@@ -186,8 +186,53 @@ def test_preflight_suggestions_include_review_only_removed_electrode_classes(
         )
     )
 
-    assert scan.suggested_removed_electrodes == {"P37": ["FT7", "P9", "P10"]}
+    assert scan.suggested_removed_electrodes == {"P37": ["FT7"]}
     assert scan.suspicious_results == scan.results
+
+
+def test_review_only_amplitude_and_burden_findings_reach_decision_review(
+    tmp_path: Path,
+) -> None:
+    severe = PreflightQcFileResult(
+        path=tmp_path / "P38.bdf",
+        participant_id="P38",
+        load_error=None,
+        raw_channel_qc={
+            "excluded": False,
+            "raw_amplitude_review_findings": [
+                {"severity": "severe_review", "authority": "review_only"}
+            ],
+        },
+        raw_spectral_qc=None,
+    )
+    burden = PreflightQcFileResult(
+        path=tmp_path / "P39.bdf",
+        participant_id="P39",
+        load_error=None,
+        raw_channel_qc={
+            "excluded": False,
+            "candidate_burden_findings": [
+                {"rule": "candidate_count_review", "authority": "review_only"}
+            ],
+        },
+        raw_spectral_qc=None,
+    )
+    warning_only = PreflightQcFileResult(
+        path=tmp_path / "P40.bdf",
+        participant_id="P40",
+        load_error=None,
+        raw_channel_qc={
+            "excluded": False,
+            "raw_amplitude_review_findings": [
+                {"severity": "warning_review", "authority": "review_only"}
+            ],
+        },
+        raw_spectral_qc=None,
+    )
+    scan = PreflightQcScan(results=(severe, burden, warning_only))
+
+    assert scan.hard_exclusion_candidates == (severe, burden)
+    assert scan.suspicious_results == (severe, burden, warning_only)
 
 
 def test_scan_preprocessing_qc_uses_parallel_workers(

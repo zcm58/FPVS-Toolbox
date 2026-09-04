@@ -19,7 +19,7 @@ from Main_App.io.eeg_geometry import (
 )
 from Main_App.processing.raw_channel_qc import (
     LEFT_HEMISPHERE_CHANNELS,
-    RAW_CHANNEL_QC_EXCLUSION_REASON,
+    RAW_CHANNEL_QC_METHOD_VERSION,
     RIGHT_HEMISPHERE_CHANNELS,
 )
 from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
@@ -727,6 +727,40 @@ def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
     )
 
 
+def test_preproc_cache_fingerprints_effective_detector_mode_and_manual_switch(
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "detector-cache.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    base_settings = {
+        "auto_detect_removed_electrodes": False,
+        "manual_removed_electrodes_enabled": False,
+        "removed_electrode_detection_choice_schema_version": "1.0",
+    }
+
+    detector_off = process_runner._preproc_cache_payload(
+        fake_bdf,
+        base_settings,
+        mne_version=str(mne.__version__),
+    )
+    manual_enabled = process_runner._preproc_cache_payload(
+        fake_bdf,
+        {**base_settings, "manual_removed_electrodes_enabled": True},
+        mne_version=str(mne.__version__),
+    )
+
+    detector_settings = detector_off["preprocessing_settings"]
+    assert detector_settings["removed_electrode_detection_mode"] == "off"
+    assert detector_settings["auto_detect_removed_electrodes"] is False
+    assert detector_settings["manual_removed_electrodes_enabled"] is False
+    assert detector_settings["removed_electrode_detection_choice_schema_version"] == (
+        "1.0"
+    )
+    assert process_runner._preproc_cache_key(detector_off) != (
+        process_runner._preproc_cache_key(manual_enabled)
+    )
+
+
 def test_interpolation_failure_keeps_requested_and_error_provenance(
     monkeypatch,
     tmp_path: Path,
@@ -804,7 +838,7 @@ def test_interpolation_failure_keeps_requested_and_error_provenance(
     assert result["geometry"] == result["audit"]["geometry"]
 
 
-def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
+def test_run_full_pipeline_continues_after_candidate_burden_review_flag(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -834,14 +868,20 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
         lambda _app, _filepath, **_kwargs: raw.copy(),
     )
 
-    def _unexpected_preprocessing(*_args, **_kwargs):
+    captured: dict[str, object] = {}
+
+    def _continue_to_preprocessing(raw_input, params, *_args, **_kwargs):  # noqa: ARG001
         preprocess_calls.append("called")
-        raise AssertionError("raw QC exclusions should stop before preprocessing")
+        captured["review_rules"] = list(params["_fpvs_raw_qc_review_rules"])
+        captured["candidate_burden"] = list(
+            params["_fpvs_raw_qc_candidate_burden_findings"]
+        )
+        raise RuntimeError("stop after raw QC continuation capture")
 
     monkeypatch.setattr(
         process_runner.backend_preprocess,
         "perform_preprocessing",
-        _unexpected_preprocessing,
+        _continue_to_preprocessing,
     )
     monkeypatch.setattr(
         "Main_App.exports.post_export_adapter.run_post_export",
@@ -866,23 +906,23 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
             "max_bad_chans": 20,
-                "removed_electrode_detection_mode": "manual",
-                "manual_removed_electrodes": {"p21": []},
-                **plan_settings,
-            },
+            "removed_electrode_detection_mode": "auto",
+            "auto_detect_removed_electrodes": True,
+            **plan_settings,
+        },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
         project_root=tmp_path / "project",
     )
 
-    assert result["status"] == "excluded"
-    assert result["stage"] == "raw_qc"
-    assert result["reason"] == RAW_CHANNEL_QC_EXCLUSION_REASON
-    assert result["geometry"] == biosemi64_geometry_identity()
-    assert result["raw_channel_qc"]["n_channels"] == 64
-    assert result["raw_channel_qc"]["n_bad_channels"] == 27
-    assert "left_hemisphere_failure" in result["raw_channel_qc"]["triggered_rules"]
-    assert preprocess_calls == []
+    assert result["status"] == "error"
+    assert result["stage"] == "preprocess"
+    assert "left_hemisphere_candidate_burden_review" in captured["review_rules"]
+    assert any(
+        finding["rule"] == "left_hemisphere_candidate_burden_review"
+        for finding in captured["candidate_burden"]
+    )
+    assert preprocess_calls == ["called"]
     assert export_calls == []
 
 
@@ -1042,7 +1082,7 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
     assert captured["raw_bads"] == ["FT8"]
     assert captured["raw_qc_bad_channels"] == ["FT8"]
     assert captured["manual_channels"] == ["FT8"]
-    assert captured["low_variance_channels"] == ["P9"]
+    assert captured["low_variance_channels"] == []
 
 
 def test_run_full_pipeline_publishes_available_source_conditions(
@@ -1094,6 +1134,13 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         captured["epochs_dict"] = ctx.preprocessed_data
         ctx.export_timing_records.append(
             {"source": "post_process", "stage": "workbook_write", "elapsed_ms": 7}
+        )
+        ctx.export_receipts.append(
+            {
+                "condition_label": "A",
+                "occurrence_key": "21:0",
+                "status": "written",
+            }
         )
         return 1
 
@@ -1164,11 +1211,20 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     assert epochs.metadata["N_step"].tolist() == [4, 4]
     assert epochs.metadata["N_mod_step"].tolist() == [0, 0]
     assert epochs.metadata["fallback_reason"].tolist() == ["", ""]
+    assert epochs.metadata["occurrence_key"].tolist() == ["21:0", "21:1"]
+    assert epochs.metadata["repetition_index"].tolist() == [0, 1]
     assert result["preproc_cache_status"] == "disabled"
     assert "events" in result["timings_ms"]
     assert "epochs" in result["timings_ms"]
     assert result["export_timing_records"] == [
         {"source": "post_process", "stage": "workbook_write", "elapsed_ms": 7}
+    ]
+    assert result["export_receipts"] == [
+        {
+            "condition_label": "A",
+            "occurrence_key": "21:0",
+            "status": "written",
+        }
     ]
     source_kwargs = captured["source_derivative_kwargs"]
     assert tuple(source_kwargs["condition_epochs"]) == ("A",)
@@ -1202,6 +1258,105 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         for path in result["source_derivative_outputs"]
     )
     assert len(result["source_derivative_outputs"]) == 3
+
+
+def test_run_full_pipeline_returns_partial_receipts_when_export_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    info = mne.create_info(
+        ["Cz", "Pz", "Status"],
+        sfreq=8.0,
+        ch_types=["eeg", "eeg", "stim"],
+    )
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
+    )
+    events = np.asarray(
+        [
+            [8, 0, 21],
+            [10, 0, 55],
+            [14, 0, 55],
+            [32, 0, 21],
+            [34, 0, 55],
+            [38, 0, 55],
+        ],
+        dtype=int,
+    )
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "begin_preproc_audit",
+        lambda *_args, **_kwargs: {"file": "export-failure.bdf"},
+    )
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "perform_preprocessing",
+        _passthrough_preprocessing_with_realized_spans,
+    )
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "finalize_preproc_audit",
+        lambda *args, **kwargs: ({"n_rejected": 0}, []),
+    )
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.load_eeg_file",
+        lambda _app, _filepath, **_kwargs: raw.copy(),
+    )
+    monkeypatch.setattr(
+        "Main_App.exports.post_export_adapter.LegacyCtx",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    def _fail_after_one_receipt(ctx, _labels):
+        ctx.export_receipts.append(
+            {
+                "condition_label": "A",
+                "occurrence_key": "21:0",
+                "status": "written",
+            }
+        )
+        raise RuntimeError("fixture export failure")
+
+    monkeypatch.setattr(
+        "Main_App.exports.post_export_adapter.run_post_export",
+        _fail_after_one_receipt,
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
+
+    fake_bdf = tmp_path / "export-failure.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            **_protocol_settings(
+                file_path=fake_bdf,
+                events=events,
+                event_map={"A": 21},
+                sfreq=8,
+                n_times=64,
+                presentation_rate_hz=4,
+                oddball_every_n=2,
+                expected_cycles=1,
+            ),
+        },
+        event_map={"A": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "error"
+    assert result["stage"] == "export"
+    assert result["export_receipts"] == [
+        {
+            "condition_label": "A",
+            "occurrence_key": "21:0",
+            "status": "written",
+        }
+    ]
 
 
 def test_run_full_pipeline_uses_one_project_oddball_marker_across_conditions(
@@ -1426,6 +1581,30 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "_fpvs_raw_qc_rare_burst_channels": ["P10"],
         "_fpvs_raw_qc_spatial_outlier_channels": [],
         "_fpvs_raw_qc_manual_removed_channels": ["P9"],
+        "_fpvs_raw_qc_method_version": RAW_CHANNEL_QC_METHOD_VERSION,
+        "_fpvs_raw_qc_review_rules": ["candidate_count_review"],
+        "_fpvs_raw_qc_candidate_sources": {
+            "P9": ["low_variance"],
+            "P10": ["rare_burst"],
+        },
+        "_fpvs_raw_qc_candidate_burden_findings": [
+            {
+                "rule": "candidate_count_review",
+                "authority": "review_only",
+                "observed": 21,
+                "threshold": 20,
+                "comparator": ">",
+                "channels": ["P9", "P10"],
+            }
+        ],
+        "_fpvs_raw_qc_amplitude_review_findings": [
+            {
+                "scope": "recording_analyzed_interval_union",
+                "severity": "severe_review",
+                "authority": "review_only",
+            }
+        ],
+        "_fpvs_raw_qc_baseline_severe_review": True,
         "_fpvs_raw_qc_baseline_median_std_uv": 520.4,
         "_fpvs_raw_qc_baseline_median_p2p_99_uv": 1671.6,
         "_fpvs_raw_qc_baseline_warning": False,
@@ -1457,6 +1636,12 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     load_settings.pop("_fpvs_raw_qc_rare_burst_channels")
     load_settings.pop("_fpvs_raw_qc_spatial_outlier_channels")
     load_settings.pop("_fpvs_raw_qc_manual_removed_channels")
+    load_settings.pop("_fpvs_raw_qc_method_version")
+    load_settings.pop("_fpvs_raw_qc_review_rules")
+    load_settings.pop("_fpvs_raw_qc_candidate_sources")
+    load_settings.pop("_fpvs_raw_qc_candidate_burden_findings")
+    load_settings.pop("_fpvs_raw_qc_amplitude_review_findings")
+    load_settings.pop("_fpvs_raw_qc_baseline_severe_review")
     load_settings.pop("_fpvs_raw_qc_baseline_median_std_uv")
     load_settings.pop("_fpvs_raw_qc_baseline_median_p2p_99_uv")
     load_settings.pop("_fpvs_raw_qc_baseline_warning")
@@ -1510,6 +1695,9 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert payload["preprocessing_settings"]["line_noise_filter_method_version"]
     assert payload["preprocessing_settings"]["line_noise_filter_half_width_hz"] == 0.5
     assert payload["preprocessing_settings"]["line_noise_filter_component_count"] == 3
+    assert payload["preprocessing_settings"]["raw_channel_qc_method_version"] == (
+        RAW_CHANNEL_QC_METHOD_VERSION
+    )
     assert status == "hit"
     assert loaded is not None
     assert loaded.get_data().shape == raw.get_data().shape
@@ -1521,6 +1709,19 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert load_settings["_fpvs_raw_qc_rare_burst_channels"] == ["P10"]
     assert load_settings["_fpvs_raw_qc_spatial_outlier_channels"] == []
     assert load_settings["_fpvs_raw_qc_manual_removed_channels"] == ["P9"]
+    assert load_settings["_fpvs_raw_qc_method_version"] == RAW_CHANNEL_QC_METHOD_VERSION
+    assert load_settings["_fpvs_raw_qc_review_rules"] == ["candidate_count_review"]
+    assert load_settings["_fpvs_raw_qc_candidate_sources"] == {
+        "P9": ["low_variance"],
+        "P10": ["rare_burst"],
+    }
+    assert load_settings["_fpvs_raw_qc_candidate_burden_findings"][0]["rule"] == (
+        "candidate_count_review"
+    )
+    assert load_settings["_fpvs_raw_qc_amplitude_review_findings"][0][
+        "severity"
+    ] == "severe_review"
+    assert load_settings["_fpvs_raw_qc_baseline_severe_review"] is True
     assert load_settings["_fpvs_raw_qc_baseline_median_std_uv"] == 520.4
     assert load_settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] == 1671.6
     assert load_settings["_fpvs_raw_qc_baseline_warning"] is False

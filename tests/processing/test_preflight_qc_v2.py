@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 import threading
 import time
 
@@ -112,19 +113,189 @@ def _install_lazy_fakes(
 
 
 def test_v3_accepts_canonical_project_reference_keys() -> None:
-    settings = {"ref_chan1": "M1", "ref_chan2": "M2"}
+    settings = {
+        "ref_chan1": "M1",
+        "ref_chan2": "M2",
+        "removed_electrode_detection_mode": "off",
+        "auto_detect_removed_electrodes": False,
+        "manual_removed_electrodes_enabled": True,
+        "_fpvs_manual_removed_electrodes": ["P9"],
+    }
 
     assert preflight_qc._configured_ref_pair(settings) == ("M1", "M2")
-    assert preflight_qc._preflight_cache_settings(settings)["reference_pair"] == [
+    cache_settings = preflight_qc._preflight_cache_settings(settings)
+    assert cache_settings["reference_pair"] == [
         "M1",
         "M2",
     ]
+    assert cache_settings["removed_electrode_detection_mode"] == "off"
+    assert cache_settings["auto_detect_removed_electrodes"] is False
+    assert cache_settings["manual_removed_electrodes_enabled"] is True
+    assert cache_settings["_fpvs_manual_removed_electrodes"] == ["P9"]
     assert "epoch_end" not in preflight_qc._preflight_cache_settings(settings)
     method = preflight_qc._preflight_cache_method()
-    assert method["version"] == "v5_analyzed_interval_coordinates"
+    assert method["version"] == "v6_five_second_overlapping_transients"
+    assert method["condition_io_chunk_duration_s"] == 10.0
+    assert method["transient_window_duration_s"] == 5.0
+    assert method["transient_window_hop_s"] == 2.5
+    assert method["transient_overlap_counting"] == (
+        "union_coverage_not_independent_events"
+    )
     assert method["geometry"]["montage_id"] == "biosemi64"
     assert method["condition_completion_policy"] == "locked_fft_span_v1"
     assert "condition_minimum_completion_s" not in method
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "sfreq", "expected"),
+    (
+        (
+            100,
+            10.0,
+            ((0, 50, "regular"), (25, 75, "regular"), (50, 100, "regular")),
+        ),
+        (
+            113,
+            10.0,
+            (
+                (0, 50, "regular"),
+                (25, 75, "regular"),
+                (50, 100, "regular"),
+                (63, 113, "tail_aligned"),
+            ),
+        ),
+        (30, 10.0, ((0, 30, "short"),)),
+        (50, 10.0, ((0, 50, "regular"),)),
+        (
+            100,
+            7.5,
+            (
+                (0, 38, "regular"),
+                (19, 57, "regular"),
+                (38, 76, "regular"),
+                (57, 95, "regular"),
+                (62, 100, "tail_aligned"),
+            ),
+        ),
+    ),
+)
+def test_transient_window_bounds_are_deterministic_and_fully_bounded(
+    sample_count: int,
+    sfreq: float,
+    expected: tuple[tuple[int, int, str], ...],
+) -> None:
+    bounds = preflight_qc._transient_window_bounds(sample_count, sfreq=sfreq)
+
+    assert bounds == expected
+    assert len({(start, stop) for start, stop, _kind in bounds}) == len(bounds)
+    covered = np.zeros(sample_count, dtype=bool)
+    for start, stop, _kind in bounds:
+        assert 0 <= start < stop <= sample_count
+        covered[start:stop] = True
+    assert covered.all()
+
+
+def test_condition_windows_are_views_inside_one_analyzed_occurrence() -> None:
+    data = np.arange(2 * 113, dtype=float).reshape(2, 113)
+    span = preflight_qc.ConditionQcSpan(
+        condition_label="Arbitrary rate condition",
+        condition_id=17,
+        repetition_index=2,
+        onset_sample=350,
+        time_start_sample=400,
+        time_stop_sample=513,
+        spectral_start_sample=400,
+        spectral_stop_sample=513,
+        oddball_id=55,
+        last_oddball_sample=512,
+    )
+
+    windows = preflight_qc._condition_blocks(data, span=span, sfreq=10.0)
+
+    assert [(item.start_sample, item.stop_sample) for item in windows] == [
+        (400, 450),
+        (425, 475),
+        (450, 500),
+        (463, 513),
+    ]
+    assert all(item.condition_id == "Arbitrary rate condition" for item in windows)
+    assert all(item.occurrence == 2 for item in windows)
+    assert all(np.shares_memory(item.data, data) for item in windows)
+    assert windows[-1].window_kind == "tail_aligned"
+    assert sum(item.is_final for item in windows) == 1
+
+
+@pytest.mark.parametrize("burst_duration_ms", (50, 100, 300))
+def test_overlap_supplies_one_window_containing_a_boundary_burst(
+    burst_duration_ms: int,
+) -> None:
+    sfreq = 100.0
+    bounds = preflight_qc._transient_window_bounds(1_000, sfreq=sfreq)
+    duration = int(round(burst_duration_ms / 1_000 * sfreq))
+    burst_start = 500 - duration // 2
+    burst_stop = burst_start + duration
+
+    assert burst_start < 500 < burst_stop
+    assert not any(
+        start <= burst_start and burst_stop <= stop
+        for start, stop in ((0, 500), (500, 1_000))
+    )
+    assert any(
+        start <= burst_start and burst_stop <= stop
+        for start, stop, _kind in bounds
+    )
+
+
+def test_occurrence_evaluation_scope_keeps_unavailable_rows_out_of_denominator() -> None:
+    event_plan = SimpleNamespace(
+        spans=(SimpleNamespace(condition_id=1, repetition_index=0),),
+        approved_occurrences=(
+            {
+                "condition_code": 1,
+                "repetition_index": 1,
+                "disposition": "exclude_occurrence",
+            },
+        ),
+        unresolved_occurrences=(
+            {
+                "condition_code": 2,
+                "repetition_index": 0,
+                "review_reasons": ["missing_required_marker"],
+            },
+        ),
+        marker_integrity_plan={
+            "occurrences": [
+                {
+                    "condition_label": "Faces",
+                    "condition_code": 1,
+                    "repetition_index": 0,
+                    "fingerprint": "evaluated",
+                },
+                {
+                    "condition_label": "Faces",
+                    "condition_code": 1,
+                    "repetition_index": 1,
+                    "fingerprint": "excluded",
+                },
+                {
+                    "condition_label": "Words",
+                    "condition_code": 2,
+                    "repetition_index": 0,
+                    "fingerprint": "missing",
+                },
+            ]
+        },
+    )
+
+    rows = preflight_qc._occurrence_evaluation_scope(event_plan)
+
+    assert [row["evaluation_status"] for row in rows] == [
+        "evaluated",
+        "not_evaluated",
+        "not_evaluated",
+    ]
+    assert rows[1]["reason"] == "excluded_after_marker_review"
+    assert rows[2]["reason"] == "missing_required_marker"
 
 
 def test_legacy_preflight_loader_uses_project_channel_limit(
@@ -252,6 +423,43 @@ def test_v3_reads_exact_locked_condition_samples_and_reuses_cache(
     assert stim_arguments == ["Trigger", "Trigger"]
 
 
+def test_preflight_preserves_detector_off_without_signal_candidate_leakage(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06-off.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows())
+    settings = {
+        **_settings(),
+        "removed_electrode_detection_mode": "off",
+        "auto_detect_removed_electrodes": False,
+    }
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        settings,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    payload = scan.results[0].raw_channel_qc
+    assert payload["low_variance_channels"] == []
+    assert payload["high_amplitude_channels"] == []
+    assert payload["rare_burst_channels"] == []
+    assert payload["spatial_outlier_channels"] == []
+    assert payload["candidate_sources"] == {}
+    assert payload["candidate_burden_findings"] == []
+    assert payload["occurrence_review_findings"] == []
+    assert payload["transient_review_findings"] == []
+    assert payload["experimental_removed_electrode_detector"] == {
+        "evaluation_status": "not_evaluated",
+        "reason": "disabled_in_project_settings",
+    }
+
+
 def test_v3_converts_absolute_plan_bounds_to_relative_raw_reads(
     monkeypatch,
     tmp_path: Path,
@@ -310,7 +518,7 @@ def test_v3_missing_marker_pauses_without_sample_read_or_cache(
     ]
     assert result.condition_qc["method_name"] == "condition_aware_preflight_qc"
     assert result.condition_qc["method_version"] == (
-        "v5_analyzed_interval_coordinates"
+        "v6_five_second_overlapping_transients"
     )
     assert result.condition_qc["cache_status"] == "marker_review_required"
     assert raw.reads == []
@@ -318,7 +526,7 @@ def test_v3_missing_marker_pauses_without_sample_read_or_cache(
         tmp_path
         / ".fpvs_processing"
         / "preflight_qc"
-        / "v5_analyzed_interval_coordinates"
+        / "v6_five_second_overlapping_transients"
     )
     assert not list(cache_directory.glob("*.json"))
 

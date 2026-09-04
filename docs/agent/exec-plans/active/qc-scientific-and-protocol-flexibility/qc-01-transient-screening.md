@@ -5,7 +5,28 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** design direction accepted; implementation and validation pending.
+**Status:** implemented on 2026-09-04 with focused numerical coverage. Empirical
+threshold calibration on independently annotated recordings remains open.
+
+### Implementation Progress
+
+- Preflight now slices each approved analyzed occurrence into deterministic
+  5-second windows with a nominal 2.5-second hop. A final full window ends at
+  the exact occurrence boundary; sub-5-second occurrences use one unpadded
+  window.
+- The 10-second constant now controls disk I/O chunks only. Full-occurrence
+  metrics count each source sample once; overlapping transient flags report
+  the union of flagged-window coverage and do not claim artifact duration.
+- Cache identity records the window, hop, tail policy, overlap interpretation,
+  and method version. Tests cover exact and irregular endings, rounded sample
+  rates, short occurrences, boundary bursts, unique-sample aggregation, and
+  overlap-union reporting.
+- Window-level cap-wide amplitude warnings remain visible even when a brief
+  burst is diluted below the full-occurrence threshold. Overlapping flagged
+  windows are grouped by occurrence and reported as one union-coverage finding.
+- The tests validate implementation behavior only. The planned participant-
+  split calibration and external validation are still required before making
+  sensitivity or specificity claims.
 
 ### Problem and Evidence
 

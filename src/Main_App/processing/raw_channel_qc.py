@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Callable, Iterable
 from typing import Any, Mapping, Sequence
 
@@ -12,6 +12,7 @@ from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     BIOSEMI64_CHANNEL_SET,
     BioSemi64GeometryError,
+    canonical_biosemi64_head_coordinates,
     validate_raw_biosemi64_geometry,
 )
 from Main_App.processing.analysis_spans import merge_relative_spans
@@ -28,7 +29,12 @@ from Main_App.processing.removed_electrode_detection import (
 )
 
 RAW_CHANNEL_QC_EXCLUSION_REASON = "raw_channel_qc_failure"
-RAW_CHANNEL_QC_METHOD_VERSION = "analyzed_interval_union_v3_biosemi64_geometry"
+RAW_CHANNEL_QC_METHOD_VERSION = "analyzed_interval_review_flags_v4"
+BIOSEMI_SHARED_NOISE_HELP_URL = "https://www.biosemi.com/faq/cms%26drl.htm"
+SEVERE_RAW_AMPLITUDE_HELP_TEXT = (
+    "Large raw signals detected. Referencing may reduce shared electrical noise. "
+    "Review before excluding this recording."
+)
 _CALIBRATION = DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION
 
 SCALP_CHANNEL_ORDER: tuple[str, ...] = BIOSEMI64_CHANNELS
@@ -150,9 +156,14 @@ class RawChannelQCResult:
     scoring_scope: str = "legacy_sampled_windows"
     scoring_spans: tuple[tuple[int, int], ...] = ()
     scoring_sample_count: int = 0
+    review_rules: tuple[str, ...] = ()
+    candidate_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    burden_findings: tuple[Mapping[str, object], ...] = ()
+    review_only: bool = True
+    raw_baseline_severe_review: bool = False
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload = {
             "method_version": RAW_CHANNEL_QC_METHOD_VERSION,
             "n_channels": self.n_channels,
             "n_bad_channels": self.n_bad_channels,
@@ -182,7 +193,39 @@ class RawChannelQCResult:
             "scoring_scope": self.scoring_scope,
             "scoring_spans": [list(span) for span in self.scoring_spans],
             "scoring_sample_count": self.scoring_sample_count,
+            "review_only": self.review_only,
+            "review_rules": list(self.review_rules),
+            "candidate_sources": {
+                str(channel): list(sources)
+                for channel, sources in self.candidate_sources.items()
+            },
+            "candidate_burden_findings": [
+                dict(finding) for finding in self.burden_findings
+            ],
+            "raw_baseline_severe_review": self.raw_baseline_severe_review,
         }
+        payload["raw_amplitude_review_findings"] = (
+            [
+                {
+                    "scope": "recording_analyzed_interval_union",
+                    "severity": (
+                        "severe_review"
+                        if self.raw_baseline_severe_review
+                        else "warning_review"
+                    ),
+                    "median_std_uv": self.raw_baseline_median_std_uv,
+                    "median_p2p_99_uv": self.raw_baseline_median_p2p_99_uv,
+                    "scoring_spans": [list(span) for span in self.scoring_spans],
+                    "scoring_sample_count": self.scoring_sample_count,
+                    "authority": "review_only",
+                    "help_text": SEVERE_RAW_AMPLITUDE_HELP_TEXT,
+                    "help_url": BIOSEMI_SHARED_NOISE_HELP_URL,
+                }
+            ]
+            if self.raw_baseline_warning
+            else []
+        )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -257,7 +300,9 @@ def _channel_metric_values(
     return std_uv, p2p_99_uv, p2p_999_uv, full_p2p_uv
 
 
-CONDITION_RAW_CHANNEL_QC_METHOD_VERSION = "condition_blocks_v5_biosemi64_geometry"
+CONDITION_RAW_CHANNEL_QC_METHOD_VERSION = (
+    "condition_windows_v6_five_second_half_overlap_biosemi64"
+)
 
 
 class ConditionRawChannelQCCancelled(RuntimeError):
@@ -270,8 +315,10 @@ class ConditionRawChannelQCBlock:
 
     ``data`` contains every source channel listed in ``channel_names`` passed to
     :func:`evaluate_condition_raw_channel_qc_v2`. The evaluator selects scalp EEG
-    channels itself. A non-final block must span exactly ten seconds (or the
-    explicitly configured block duration); the final block may be shorter.
+    channels itself. Windows may overlap. ``window_kind`` distinguishes regular
+    windows, the optional full-length window aligned to the occurrence end, and
+    a single short occurrence. ``is_final`` marks the last diagnostic window,
+    not a disjoint data chunk.
     """
 
     condition_id: str
@@ -280,6 +327,7 @@ class ConditionRawChannelQCBlock:
     stop_sample: int
     data: np.ndarray
     is_final: bool
+    window_kind: str = "regular"
 
 
 @dataclass(frozen=True)
@@ -312,10 +360,17 @@ class RawChannelBlockMetrics:
     start_sample: int
     stop_sample: int
     metrics: RawChannelMetricSet
+    sampling_rate_hz: float = 1.0
+    window_kind: str = "regular"
+    review_categories: tuple[str, ...] = ()
 
     @property
     def n_samples(self) -> int:
         return self.stop_sample - self.start_sample
+
+    @property
+    def duration_s(self) -> float:
+        return self.n_samples / self.sampling_rate_hz
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -325,7 +380,46 @@ class RawChannelBlockMetrics:
             "start_sample": self.start_sample,
             "stop_sample": self.stop_sample,
             "n_samples": self.n_samples,
+            "duration_s": self.duration_s,
+            "window_kind": self.window_kind,
+            "review_categories": list(self.review_categories),
             **self.metrics.to_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class RawAmplitudeWindowMetrics:
+    """Cap-wide amplitude evidence from one bounded diagnostic window."""
+
+    condition_id: str
+    occurrence: int
+    start_sample: int
+    stop_sample: int
+    sampling_rate_hz: float
+    window_kind: str
+    median_std_uv: float
+    median_p2p_99_uv: float
+    severe_review: bool
+
+    @property
+    def n_samples(self) -> int:
+        return self.stop_sample - self.start_sample
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "condition_label": self.condition_id,
+            "occurrence": self.occurrence,
+            "occurrence_display": self.occurrence + 1,
+            "start_sample": self.start_sample,
+            "stop_sample": self.stop_sample,
+            "sample_count": self.n_samples,
+            "duration_s": self.n_samples / self.sampling_rate_hz,
+            "window_kind": self.window_kind,
+            "median_std_uv": self.median_std_uv,
+            "median_p2p_99_uv": self.median_p2p_99_uv,
+            "severity": (
+                "severe_review" if self.severe_review else "warning_review"
+            ),
         }
 
 
@@ -358,6 +452,7 @@ class RawChannelConditionAggregate:
     low_variance_channels: tuple[str, ...]
     high_amplitude_channels: tuple[str, ...]
     rare_burst_channels: tuple[str, ...]
+    spatial_outlier_channels: tuple[str, ...]
     transient_low_variance_channels: tuple[str, ...]
     transient_high_amplitude_channels: tuple[str, ...]
     transient_rare_burst_channels: tuple[str, ...]
@@ -382,6 +477,7 @@ class RawChannelConditionAggregate:
             "low_variance_channels": list(self.low_variance_channels),
             "high_amplitude_channels": list(self.high_amplitude_channels),
             "rare_burst_channels": list(self.rare_burst_channels),
+            "spatial_outlier_channels": list(self.spatial_outlier_channels),
             "transient_low_variance_channels": list(self.transient_low_variance_channels),
             "transient_high_amplitude_channels": list(self.transient_high_amplitude_channels),
             "transient_rare_burst_channels": list(self.transient_rare_burst_channels),
@@ -403,6 +499,13 @@ class ConditionRawChannelQCResult:
     manual_removed_channels: tuple[str, ...]
     thresholds: Mapping[str, float | int | bool]
     review_rules: tuple[str, ...]
+    candidate_sources: Mapping[str, tuple[str, ...]]
+    burden_findings: tuple[Mapping[str, object], ...]
+    largest_bad_cluster_channels: tuple[str, ...]
+    occurrence_review_findings: tuple[Mapping[str, object], ...]
+    transient_review_findings: tuple[Mapping[str, object], ...]
+    transient_amplitude_review_findings: tuple[Mapping[str, object], ...]
+    transient_windowing: Mapping[str, object]
     method_version: str = CONDITION_RAW_CHANNEL_QC_METHOD_VERSION
     review_only: bool = True
     excluded: bool = False
@@ -451,6 +554,10 @@ class ConditionRawChannelQCResult:
         return self._condition_intersection("rare_burst_channels")
 
     @property
+    def persistent_spatial_outlier_channels(self) -> tuple[str, ...]:
+        return self._condition_intersection("spatial_outlier_channels")
+
+    @property
     def transient_low_variance_channels(self) -> tuple[str, ...]:
         return self._condition_union("transient_low_variance_channels")
 
@@ -476,13 +583,7 @@ class ConditionRawChannelQCResult:
 
     @property
     def bad_channels(self) -> tuple[str, ...]:
-        return _ordered_channel_union(
-            self.channel_names,
-            self.manual_removed_channels,
-            self.low_variance_channels,
-            self.high_amplitude_channels,
-            self.rare_burst_channels,
-        )
+        return tuple(self.candidate_sources)
 
     @property
     def channels_to_interpolate(self) -> tuple[str, ...]:
@@ -496,7 +597,7 @@ class ConditionRawChannelQCResult:
 
     @property
     def spatial_outlier_channels(self) -> tuple[str, ...]:
-        return ()
+        return self.persistent_spatial_outlier_channels
 
     @property
     def triggered_rules(self) -> tuple[str, ...]:
@@ -505,6 +606,10 @@ class ConditionRawChannelQCResult:
     @property
     def warning_rules(self) -> tuple[str, ...]:
         return self.review_rules
+
+    @property
+    def largest_bad_cluster_size(self) -> int:
+        return len(self.largest_bad_cluster_channels)
 
     @property
     def raw_baseline_warning(self) -> bool:
@@ -547,22 +652,24 @@ class ConditionRawChannelQCResult:
         if self.bad_channels or self.raw_baseline_warning or self.review_rules:
             return (
                 f"Condition-aware raw channel QC completed for {self.filename}: "
-                f"{self.n_conditions} condition occurrence(s), {self.n_blocks} block(s), and "
+                f"{self.n_conditions} condition occurrence(s), {self.n_blocks} "
+                "diagnostic window(s), and "
                 f"{self.n_bad_channels}/{self.n_channels} channel(s) were persistently "
                 "flagged across all occurrences; transient findings are reported separately. "
-                "All v2 findings are review-only and do not automatically exclude or interpolate channels."
+                "Signal-review findings do not automatically exclude recordings or select "
+                "channels for interpolation."
             )
         return (
             f"Condition-aware raw channel QC passed for {self.filename}: "
-            f"{self.n_conditions} condition occurrence(s) and {self.n_blocks} block(s) examined. "
-            "V2 findings are review-only."
+            f"{self.n_conditions} condition occurrence(s) and {self.n_blocks} "
+            "diagnostic window(s) examined."
         )
 
     def to_payload(self) -> dict[str, object]:
         left = sum(channel in LEFT_HEMISPHERE_CHANNELS for channel in self.bad_channels)
         right = sum(channel in RIGHT_HEMISPHERE_CHANNELS for channel in self.bad_channels)
         midline = sum(channel in MIDLINE_CHANNELS for channel in self.bad_channels)
-        return {
+        payload = {
             "method_version": self.method_version,
             "review_only": self.review_only,
             "excluded": self.excluded,
@@ -592,27 +699,74 @@ class ConditionRawChannelQCResult:
             "persistent_low_variance_channels": list(self.persistent_low_variance_channels),
             "persistent_high_amplitude_channels": list(self.persistent_high_amplitude_channels),
             "persistent_rare_burst_channels": list(self.persistent_rare_burst_channels),
+            "persistent_spatial_outlier_channels": list(
+                self.persistent_spatial_outlier_channels
+            ),
             "transient_low_variance_channels": list(self.transient_low_variance_channels),
             "transient_high_amplitude_channels": list(self.transient_high_amplitude_channels),
             "transient_rare_burst_channels": list(self.transient_rare_burst_channels),
-            "spatial_outlier_channels": [],
-            "spatial_qc_evaluated": False,
+            "spatial_outlier_channels": list(self.spatial_outlier_channels),
+            "spatial_qc_evaluated": bool(
+                self.thresholds.get("spatial_predictability_experimental")
+            ),
             "raw_baseline_median_std_uv": self.raw_baseline_median_std_uv,
             "raw_baseline_median_p2p_99_uv": self.raw_baseline_median_p2p_99_uv,
             "raw_baseline_aggregation": "maximum_across_condition_occurrences",
             "raw_baseline_warning": self.raw_baseline_warning,
             "raw_baseline_excluded": False,
             "raw_baseline_failure_review": self.raw_baseline_failure_review,
-            "largest_bad_cluster_size": 0,
-            "largest_bad_cluster_channels": [],
-            "bad_cluster_qc_evaluated": False,
+            "largest_bad_cluster_size": self.largest_bad_cluster_size,
+            "largest_bad_cluster_channels": list(
+                self.largest_bad_cluster_channels
+            ),
+            "bad_cluster_qc_evaluated": bool(
+                self.thresholds.get("bad_channel_cluster_experimental")
+            ),
             "triggered_rules": [],
             "warning_rules": list(self.warning_rules),
             "review_rules": list(self.review_rules),
+            "candidate_sources": {
+                channel: list(sources)
+                for channel, sources in self.candidate_sources.items()
+            },
+            "candidate_burden_findings": [
+                dict(finding) for finding in self.burden_findings
+            ],
+            "occurrence_review_findings": [
+                dict(finding) for finding in self.occurrence_review_findings
+            ],
+            "transient_review_findings": [
+                dict(finding) for finding in self.transient_review_findings
+            ],
+            "transient_windowing": dict(self.transient_windowing),
             "thresholds": dict(self.thresholds),
             "conditions": [item.to_payload() for item in self.conditions],
             "transient_extrema": [item.to_payload() for item in self.transient_extrema],
         }
+        payload["raw_amplitude_review_findings"] = [
+            {
+                "scope": "condition_occurrence",
+                "condition_label": condition.condition_id,
+                "occurrence": condition.occurrence,
+                "occurrence_display": condition.occurrence + 1,
+                "start_sample": condition.start_sample,
+                "stop_sample": condition.stop_sample,
+                "sample_count": condition.n_samples,
+                "median_std_uv": condition.raw_baseline_median_std_uv,
+                "median_p2p_99_uv": condition.raw_baseline_median_p2p_99_uv,
+                "severity": (
+                    "severe_review"
+                    if condition.raw_baseline_failure_review
+                    else "warning_review"
+                ),
+                "authority": "review_only",
+                "help_text": SEVERE_RAW_AMPLITUDE_HELP_TEXT,
+                "help_url": BIOSEMI_SHARED_NOISE_HELP_URL,
+            }
+            for condition in self.conditions
+            if condition.raw_baseline_warning
+        ] + [dict(finding) for finding in self.transient_amplitude_review_findings]
+        return payload
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -821,17 +975,43 @@ def _bad_channel_clusters(
     *,
     config: RawChannelQCConfig,
 ) -> list[tuple[str, ...]]:
-    unique_bads = sorted({str(channel) for channel in bad_channels if str(channel) in SCALP_CHANNELS})
+    all_scalp = [
+        str(channel)
+        for channel in getattr(raw, "ch_names", [])
+        if str(channel) in SCALP_CHANNELS
+    ]
+    return _bad_channel_clusters_from_positions(
+        _channel_positions(raw, all_scalp),
+        bad_channels,
+        config=config,
+    )
+
+
+def _bad_channel_clusters_from_positions(
+    positions: Mapping[str, Sequence[float]],
+    bad_channels: Sequence[str],
+    *,
+    config: RawChannelQCConfig,
+) -> list[tuple[str, ...]]:
+    """Return connected candidate components for one explicit sensor geometry."""
+
+    unique_bads = sorted(
+        {
+            str(channel)
+            for channel in bad_channels
+            if str(channel) in SCALP_CHANNELS and str(channel) in positions
+        }
+    )
     if not unique_bads:
         return []
 
-    all_scalp = [str(channel) for channel in getattr(raw, "ch_names", []) if str(channel) in SCALP_CHANNELS]
-    positions = _channel_positions(raw, all_scalp)
     if len(positions) < 2:
         return [(channel,) for channel in unique_bads]
 
     pos_names = sorted(positions)
-    coords = np.vstack([positions[name] for name in pos_names])
+    coords = np.vstack(
+        [np.asarray(positions[name], dtype=float) for name in pos_names]
+    )
     distances = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=2)
     np.fill_diagonal(distances, np.inf)
     nearest = np.min(distances, axis=1)
@@ -880,7 +1060,24 @@ def _spatial_neighbor_map(
     *,
     config: RawChannelQCConfig,
 ) -> dict[str, tuple[str, ...]]:
-    positions = _channel_positions(raw, channels)
+    return _spatial_neighbor_map_from_positions(
+        _channel_positions(raw, channels),
+        channels,
+        config=config,
+    )
+
+
+def _spatial_neighbor_map_from_positions(
+    positions: Mapping[str, Sequence[float]],
+    channels: Sequence[str],
+    *,
+    config: RawChannelQCConfig,
+) -> dict[str, tuple[str, ...]]:
+    positions = {
+        str(channel): np.asarray(positions[str(channel)], dtype=float)
+        for channel in channels
+        if str(channel) in positions
+    }
     if len(positions) < config.spatial_min_neighbors + 1:
         return {}
 
@@ -928,7 +1125,23 @@ def _spatial_predictability_scores(
     donor_exclusions: Sequence[str],
     config: RawChannelQCConfig,
 ) -> dict[str, float]:
-    neighbor_map = _spatial_neighbor_map(raw, channels, config=config)
+    return _spatial_predictability_scores_with_neighbors(
+        data,
+        channels,
+        neighbor_map=_spatial_neighbor_map(raw, channels, config=config),
+        donor_exclusions=donor_exclusions,
+        config=config,
+    )
+
+
+def _spatial_predictability_scores_with_neighbors(
+    data: np.ndarray,
+    channels: Sequence[str],
+    *,
+    neighbor_map: Mapping[str, Sequence[str]],
+    donor_exclusions: Sequence[str],
+    config: RawChannelQCConfig,
+) -> dict[str, float]:
     if not neighbor_map:
         return {}
 
@@ -978,6 +1191,184 @@ def _spatial_outlier_channels(
         calibration=config,
         min_reference_count=config.min_channels_for_hard_qc,
     )
+
+
+def _candidate_source_map(
+    channel_names: Sequence[str],
+    **sources: Sequence[str],
+) -> dict[str, tuple[str, ...]]:
+    """Keep each candidate channel's evidence sources separate and ordered."""
+
+    source_sets = {
+        str(source): {str(channel) for channel in channels}
+        for source, channels in sources.items()
+    }
+    return {
+        str(channel): tuple(
+            source
+            for source, channels in source_sets.items()
+            if str(channel) in channels
+        )
+        for channel in channel_names
+        if any(str(channel) in channels for channels in source_sets.values())
+    }
+
+
+def _candidate_burden(
+    channel_names: Sequence[str],
+    candidate_sources: Mapping[str, Sequence[str]],
+    *,
+    positions: Mapping[str, Sequence[float]],
+    config: RawChannelQCConfig,
+    cluster_rules_enabled: bool,
+) -> dict[str, object]:
+    """Describe provisional candidate burden without making an exclusion decision."""
+
+    candidates = tuple(
+        str(channel)
+        for channel in channel_names
+        if str(channel) in candidate_sources
+    )
+    left_channels = tuple(
+        channel for channel in candidates if channel in LEFT_HEMISPHERE_CHANNELS
+    )
+    right_channels = tuple(
+        channel for channel in candidates if channel in RIGHT_HEMISPHERE_CHANNELS
+    )
+    midline_channels = tuple(
+        channel for channel in candidates if channel in MIDLINE_CHANNELS
+    )
+    left_total = sum(channel in LEFT_HEMISPHERE_CHANNELS for channel in channel_names)
+    right_total = sum(channel in RIGHT_HEMISPHERE_CHANNELS for channel in channel_names)
+    midline_total = sum(channel in MIDLINE_CHANNELS for channel in channel_names)
+    n_channels = len(channel_names)
+    n_candidates = len(candidates)
+    bad_fraction = n_candidates / n_channels if n_channels else 0.0
+    left_fraction = len(left_channels) / left_total if left_total else 0.0
+    right_fraction = len(right_channels) / right_total if right_total else 0.0
+    clusters = (
+        _bad_channel_clusters_from_positions(
+            positions,
+            candidates,
+            config=config,
+        )
+        if cluster_rules_enabled
+        else []
+    )
+    largest_cluster = clusters[0] if clusters else ()
+
+    findings: list[dict[str, object]] = []
+
+    def add_finding(
+        rule: str,
+        *,
+        observed: float | int,
+        threshold: float | int,
+        comparator: str,
+        channels: Sequence[str],
+        denominator: int | None = None,
+        severity: str = "review",
+    ) -> None:
+        findings.append(
+            {
+                "rule": rule,
+                "authority": "review_only",
+                "severity": severity,
+                "observed": observed,
+                "threshold": threshold,
+                "comparator": comparator,
+                "denominator": denominator,
+                "channels": list(channels),
+                "candidate_sources": {
+                    channel: list(candidate_sources[channel])
+                    for channel in channels
+                    if channel in candidate_sources
+                },
+                "rule_version": RAW_CHANNEL_QC_METHOD_VERSION,
+            }
+        )
+
+    if n_candidates > config.max_bad_channels:
+        add_finding(
+            "candidate_count_review",
+            observed=n_candidates,
+            threshold=config.max_bad_channels,
+            comparator=">",
+            channels=candidates,
+            denominator=n_channels,
+        )
+    if bad_fraction > config.max_bad_fraction:
+        add_finding(
+            "candidate_fraction_review",
+            observed=bad_fraction,
+            threshold=config.max_bad_fraction,
+            comparator=">",
+            channels=candidates,
+            denominator=n_channels,
+        )
+    if (
+        left_total >= config.min_hemisphere_channels
+        and left_fraction >= config.max_hemisphere_bad_fraction
+    ):
+        add_finding(
+            "left_hemisphere_candidate_burden_review",
+            observed=left_fraction,
+            threshold=config.max_hemisphere_bad_fraction,
+            comparator=">=",
+            channels=left_channels,
+            denominator=left_total,
+        )
+    if (
+        right_total >= config.min_hemisphere_channels
+        and right_fraction >= config.max_hemisphere_bad_fraction
+    ):
+        add_finding(
+            "right_hemisphere_candidate_burden_review",
+            observed=right_fraction,
+            threshold=config.max_hemisphere_bad_fraction,
+            comparator=">=",
+            channels=right_channels,
+            denominator=right_total,
+        )
+    if cluster_rules_enabled and len(largest_cluster) >= config.min_bad_cluster_size:
+        add_finding(
+            "candidate_cluster_review",
+            observed=len(largest_cluster),
+            threshold=config.min_bad_cluster_size,
+            comparator=">=",
+            channels=largest_cluster,
+            severity="severe_review",
+        )
+    elif (
+        cluster_rules_enabled
+        and len(largest_cluster) >= config.min_bad_cluster_warning_size
+    ):
+        add_finding(
+            "possible_candidate_cluster_review",
+            observed=len(largest_cluster),
+            threshold=config.min_bad_cluster_warning_size,
+            comparator=">=",
+            channels=largest_cluster,
+            severity="warning_review",
+        )
+
+    return {
+        "candidate_channels": candidates,
+        "n_candidates": n_candidates,
+        "n_channels": n_channels,
+        "candidate_fraction": bad_fraction,
+        "left_channels": left_channels,
+        "left_total": left_total,
+        "left_fraction": left_fraction,
+        "right_channels": right_channels,
+        "right_total": right_total,
+        "right_fraction": right_fraction,
+        "midline_channels": midline_channels,
+        "midline_total": midline_total,
+        "largest_cluster": tuple(largest_cluster),
+        "clusters": tuple(tuple(cluster) for cluster in clusters),
+        "findings": tuple(findings),
+    }
 
 
 def _empty_result(
@@ -1045,10 +1436,26 @@ def evaluate_raw_channel_qc(
         "max_bad_fraction": config.max_bad_fraction,
         "max_hemisphere_bad_fraction": config.max_hemisphere_bad_fraction,
         "min_channels_for_hard_qc": config.min_channels_for_hard_qc,
+        "min_hemisphere_channels": config.min_hemisphere_channels,
+        "min_bad_cluster_warning_size": config.min_bad_cluster_warning_size,
+        "min_bad_cluster_size": config.min_bad_cluster_size,
+        "neighbor_distance_factor": config.neighbor_distance_factor,
         "auto_detect_removed_electrodes": config.auto_detect_removed_electrodes,
-        "spatial_predictability_experimental": True,
-        "bad_channel_cluster_experimental": True,
+        "spatial_predictability_experimental": bool(
+            config.auto_detect_removed_electrodes and config.spatial_qc_enabled
+        ),
+        "bad_channel_cluster_experimental": bool(
+            config.auto_detect_removed_electrodes
+            or config.removed_electrode_detection_mode
+            == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        ),
         **removed_electrode_threshold_payload(config),
+        "baseline_severe_review_median_std_uv": (
+            config.baseline_exclusion_median_std_uv
+        ),
+        "baseline_severe_review_median_p2p_99_uv": (
+            config.baseline_exclusion_median_p2p_99_uv
+        ),
     }
     n_times = int(getattr(raw, "n_times", 0))
     if analysis_spans is None:
@@ -1081,20 +1488,23 @@ def evaluate_raw_channel_qc(
         return RawChannelQCResult(
             excluded=True,
             reason=RAW_CHANNEL_QC_EXCLUSION_REASON,
-            message=f"{filename} excluded by raw channel-health QC: no EEG samples were available.",
+            message=(
+                f"{filename} could not be evaluated by raw channel-health QC: "
+                "no analyzed EEG samples were available."
+            ),
             n_channels=n_channels,
-            n_bad_channels=n_channels,
-            bad_fraction=1.0,
+            n_bad_channels=0,
+            bad_fraction=0.0,
             left_bad=0,
             left_total=0,
             right_bad=0,
             right_total=0,
             midline_bad=0,
             midline_total=0,
-            bad_channels=tuple(str(raw.ch_names[index]) for index in picks),
+            bad_channels=(),
             channels_to_interpolate=(),
             manual_removed_channels=(),
-            low_variance_channels=tuple(str(raw.ch_names[index]) for index in picks),
+            low_variance_channels=(),
             high_amplitude_channels=(),
             rare_burst_channels=(),
             spatial_outlier_channels=(),
@@ -1110,6 +1520,7 @@ def evaluate_raw_channel_qc(
             scoring_scope=scoring_scope,
             scoring_spans=spans,
             scoring_sample_count=0,
+            review_only=False,
         )
 
     cluster_rules_enabled = (
@@ -1187,18 +1598,19 @@ def evaluate_raw_channel_qc(
     ]
 
     low_variance_channels: list[str] = []
-    for row in channel_stats:
-        is_bad = is_low_variance_removed_channel(
-            std_uv=row.std_uv,
-            p2p_99_uv=row.p2p_99_uv,
-            median_std_uv=median_std_uv,
-            median_p2p_99_uv=median_p2p_99_uv,
-            calibration=config,
-        )
-        if not is_bad:
-            continue
+    if config.auto_detect_removed_electrodes:
+        for row in channel_stats:
+            is_bad = is_low_variance_removed_channel(
+                std_uv=row.std_uv,
+                p2p_99_uv=row.p2p_99_uv,
+                median_std_uv=median_std_uv,
+                median_p2p_99_uv=median_p2p_99_uv,
+                calibration=config,
+            )
+            if not is_bad:
+                continue
 
-        low_variance_channels.append(row.channel)
+            low_variance_channels.append(row.channel)
 
     high_amplitude_channels: list[str] = []
     if config.auto_detect_removed_electrodes:
@@ -1272,31 +1684,18 @@ def evaluate_raw_channel_qc(
             )
         )
 
-    candidate_channels = list(
-        dict.fromkeys(
-            [
-                *manual_removed_channels,
-                *low_variance_channels,
-                *high_amplitude_channels,
-                *rare_burst_channels,
-                *spatial_outlier_channels,
-            ]
-        )
+    candidate_sources = _candidate_source_map(
+        [row.channel for row in channel_stats],
+        manual_removed=manual_removed_channels,
+        low_variance=low_variance_channels,
+        high_amplitude=high_amplitude_channels,
+        rare_burst=rare_burst_channels,
+        spatial_predictability=spatial_outlier_channels,
+        preexisting_raw_bad=(
+            _raw_bads(raw) if cluster_rules_enabled else ()
+        ),
     )
-    left_bad = right_bad = midline_bad = 0
-    for channel in candidate_channels:
-        group = _channel_group(channel)
-        if group == "left":
-            left_bad += 1
-        elif group == "right":
-            right_bad += 1
-        elif group == "midline":
-            midline_bad += 1
-
-    n_bad = len(candidate_channels)
-    bad_fraction = n_bad / n_channels if n_channels else 0.0
-    left_fraction = left_bad / left_total if left_total else 0.0
-    right_fraction = right_bad / right_total if right_total else 0.0
+    candidate_channels = tuple(candidate_sources)
     channels_to_interpolate = tuple(
         dict.fromkeys(
             [
@@ -1309,45 +1708,32 @@ def evaluate_raw_channel_qc(
             ]
         )
     )
-
-    cluster_candidates = set(_raw_bads(raw))
-    if cluster_rules_enabled:
-        cluster_candidates.update(candidate_channels)
-    clusters = (
-        _bad_channel_clusters(raw, sorted(cluster_candidates), config=config)
-        if cluster_rules_enabled
-        else []
+    burden = _candidate_burden(
+        [row.channel for row in channel_stats],
+        candidate_sources,
+        positions=(
+            _channel_positions(raw, [row.channel for row in channel_stats])
+            if cluster_rules_enabled
+            else {}
+        ),
+        config=config,
+        cluster_rules_enabled=cluster_rules_enabled,
     )
-    largest_cluster = clusters[0] if clusters else ()
+    n_bad = int(burden["n_candidates"])
+    bad_fraction = float(burden["candidate_fraction"])
+    left_bad = len(burden["left_channels"])
+    right_bad = len(burden["right_channels"])
+    midline_bad = len(burden["midline_channels"])
+    largest_cluster = tuple(burden["largest_cluster"])
+    burden_findings = tuple(burden["findings"])
 
-    triggered: list[str] = []
-    if n_bad > config.max_bad_channels:
-        triggered.append("bad_channel_count")
-    if bad_fraction > config.max_bad_fraction:
-        triggered.append("bad_channel_fraction")
+    review_rules = [str(finding["rule"]) for finding in burden_findings]
     if raw_baseline_excluded:
-        triggered.append("raw_amplitude_baseline_failure")
-    if left_total >= config.min_hemisphere_channels and left_fraction >= config.max_hemisphere_bad_fraction:
-        triggered.append("left_hemisphere_failure")
-    if right_total >= config.min_hemisphere_channels and right_fraction >= config.max_hemisphere_bad_fraction:
-        triggered.append("right_hemisphere_failure")
-    if (
-        cluster_rules_enabled
-        and len(largest_cluster) >= config.min_bad_cluster_size
-    ):
-        triggered.append("bad_channel_cluster")
-    warning_rules: list[str] = []
-    if raw_baseline_warning and not raw_baseline_excluded:
-        warning_rules.append("raw_amplitude_baseline_warning")
-    if (
-        cluster_rules_enabled
-        and len(largest_cluster) >= config.min_bad_cluster_warning_size
-        and len(largest_cluster) < config.min_bad_cluster_size
-    ):
-        warning_rules.append("possible_bad_channel_cluster")
+        review_rules.insert(0, "raw_amplitude_baseline_severe_review")
+    elif raw_baseline_warning:
+        review_rules.insert(0, "raw_amplitude_baseline_warning")
+    warning_rules = list(review_rules)
 
-    excluded = bool(triggered)
-    reason = RAW_CHANNEL_QC_EXCLUSION_REASON if excluded else None
     cluster_text = ""
     if largest_cluster:
         cluster_text = (
@@ -1360,21 +1746,22 @@ def evaluate_raw_channel_qc(
     )
     if raw_baseline_excluded:
         message = (
-            f"{filename} excluded by raw channel-health QC: participant-level raw "
-            "amplitude baseline was excessively noisy."
+            f"Raw channel QC flagged {filename} for review: large raw signals "
+            "were detected. Referencing may reduce shared electrical noise; "
+            "review the evidence before excluding this recording."
             f"{baseline_text} {n_bad}/{n_channels} scalp EEG channels were "
             "low-amplitude, extreme high-amplitude, rare-burst, or spatially "
             f"inconsistent; left={left_bad}/{left_total}, "
             f"right={right_bad}/{right_total}, midline={midline_bad}/{midline_total}."
-            f"{cluster_text} Triggered rule(s): {', '.join(triggered)}."
+            f"{cluster_text} Review rule(s): {', '.join(review_rules)}."
         )
-    elif excluded:
+    elif burden_findings:
         message = (
-            f"{filename} excluded by raw channel-health QC: {n_bad}/{n_channels} scalp EEG "
+            f"Raw channel QC flagged {filename} for review: {n_bad}/{n_channels} scalp EEG "
             "channels were low-amplitude, extreme high-amplitude, rare-burst, or spatially "
             f"inconsistent; left={left_bad}/{left_total}, "
             f"right={right_bad}/{right_total}, midline={midline_bad}/{midline_total}."
-            f"{cluster_text} Triggered rule(s): {', '.join(triggered)}."
+            f"{cluster_text} Review rule(s): {', '.join(review_rules)}."
         )
     elif channels_to_interpolate:
         message = (
@@ -1393,8 +1780,8 @@ def evaluate_raw_channel_qc(
             message += f"{cluster_text}{baseline_text} Warning rule(s): {', '.join(warning_rules)}."
 
     return RawChannelQCResult(
-        excluded=excluded,
-        reason=reason,
+        excluded=False,
+        reason=None,
         message=message,
         n_channels=n_channels,
         n_bad_channels=n_bad,
@@ -1415,15 +1802,19 @@ def evaluate_raw_channel_qc(
         raw_baseline_median_std_uv=median_std_uv,
         raw_baseline_median_p2p_99_uv=median_p2p_99_uv,
         raw_baseline_warning=raw_baseline_warning,
-        raw_baseline_excluded=raw_baseline_excluded,
+        raw_baseline_excluded=False,
         largest_bad_cluster_size=len(largest_cluster),
         largest_bad_cluster_channels=tuple(largest_cluster),
-        triggered_rules=tuple(triggered),
+        triggered_rules=(),
         warning_rules=tuple(warning_rules),
         thresholds=thresholds,
         scoring_scope=scoring_scope,
         scoring_spans=spans,
         scoring_sample_count=sum(stop - start for start, stop in spans),
+        review_rules=tuple(review_rules),
+        candidate_sources=candidate_sources,
+        burden_findings=burden_findings,
+        raw_baseline_severe_review=raw_baseline_excluded,
     )
 
 
@@ -1452,7 +1843,19 @@ def _v2_thresholds(config: RawChannelQCConfig) -> dict[str, float | int | bool]:
         "max_bad_fraction": config.max_bad_fraction,
         "max_hemisphere_bad_fraction": config.max_hemisphere_bad_fraction,
         "min_channels_for_hard_qc": config.min_channels_for_hard_qc,
+        "min_hemisphere_channels": config.min_hemisphere_channels,
+        "min_bad_cluster_warning_size": config.min_bad_cluster_warning_size,
+        "min_bad_cluster_size": config.min_bad_cluster_size,
+        "neighbor_distance_factor": config.neighbor_distance_factor,
         "auto_detect_removed_electrodes": config.auto_detect_removed_electrodes,
+        "spatial_predictability_experimental": bool(
+            config.auto_detect_removed_electrodes and config.spatial_qc_enabled
+        ),
+        "bad_channel_cluster_experimental": bool(
+            config.auto_detect_removed_electrodes
+            or config.removed_electrode_detection_mode
+            == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        ),
         "review_only": True,
         **removed_electrode_threshold_payload(config),
     }
@@ -1501,15 +1904,16 @@ def _classify_v2_metrics(
     )
 
     low_variance: list[str] = []
-    for row in rows:
-        if is_low_variance_removed_channel(
-            std_uv=row.std_uv,
-            p2p_99_uv=row.p2p_99_uv,
-            median_std_uv=median_std_uv,
-            median_p2p_99_uv=median_p2p_99_uv,
-            calibration=config,
-        ):
-            low_variance.append(row.channel)
+    if config.auto_detect_removed_electrodes:
+        for row in rows:
+            if is_low_variance_removed_channel(
+                std_uv=row.std_uv,
+                p2p_99_uv=row.p2p_99_uv,
+                median_std_uv=median_std_uv,
+                median_p2p_99_uv=median_p2p_99_uv,
+                calibration=config,
+            ):
+                low_variance.append(row.channel)
 
     high_amplitude: list[str] = []
     if config.auto_detect_removed_electrodes:
@@ -1629,6 +2033,213 @@ def _transient_extrema(
     return tuple(extrema)
 
 
+_OCCURRENCE_CATEGORY_FIELDS = (
+    ("low_variance_channels", "low_variance"),
+    ("high_amplitude_channels", "high_amplitude"),
+    ("rare_burst_channels", "rare_burst"),
+    ("spatial_outlier_channels", "spatial_predictability"),
+)
+
+
+def _occurrence_review_findings(
+    conditions: Sequence[RawChannelConditionAggregate],
+    channel_names: Sequence[str],
+) -> tuple[Mapping[str, object], ...]:
+    """Explain exactly where full-occurrence channel flags did and did not recur."""
+
+    evaluated_count = len(conditions)
+    by_channel: dict[
+        str, list[tuple[RawChannelConditionAggregate, tuple[str, ...]]]
+    ] = {str(channel): [] for channel in channel_names}
+    for condition in conditions:
+        for channel in channel_names:
+            categories = tuple(
+                category
+                for field_name, category in _OCCURRENCE_CATEGORY_FIELDS
+                if channel in getattr(condition, field_name)
+            )
+            if categories:
+                by_channel[str(channel)].append((condition, categories))
+
+    findings: list[Mapping[str, object]] = []
+    for channel in channel_names:
+        flagged = by_channel.get(str(channel), [])
+        flagged_count = len(flagged)
+        if not flagged_count:
+            continue
+        all_flagged = flagged_count == evaluated_count
+        common_categories = set(flagged[0][1])
+        for _condition, categories in flagged[1:]:
+            common_categories.intersection_update(categories)
+        persistent_categories = (
+            tuple(sorted(common_categories)) if all_flagged else ()
+        )
+        same_category_persistent = all_flagged and bool(persistent_categories)
+        reason_varied = all_flagged and not same_category_persistent
+        for condition, categories in flagged:
+            location = (
+                f"{condition.condition_id}, occurrence {condition.occurrence + 1}"
+            )
+            if evaluated_count == 1:
+                statement = (
+                    f"{channel} was flagged as potentially bad in {location} "
+                    "(the only evaluated occurrence)."
+                )
+            elif flagged_count == 1:
+                others = evaluated_count - 1
+                statement = (
+                    f"{channel} was flagged as potentially bad in {location} only. "
+                    f"It was not flagged in the other {others} evaluated "
+                    f"occurrence{'s' if others != 1 else ''}."
+                )
+            elif same_category_persistent:
+                statement = (
+                    f"{channel} was flagged as potentially bad in {location} and "
+                    f"in all {evaluated_count} evaluated occurrences for at least "
+                    f"one same reason ({', '.join(persistent_categories)})."
+                )
+            elif reason_varied:
+                statement = (
+                    f"{channel} was flagged as potentially bad in {location}. Every "
+                    "evaluated occurrence was flagged, but the reason varied."
+                )
+            else:
+                statement = (
+                    f"{channel} was flagged as potentially bad in {location}. It was "
+                    f"flagged in {flagged_count} of {evaluated_count} evaluated occurrences."
+                )
+            findings.append(
+                {
+                    "channel": str(channel),
+                    "condition_label": condition.condition_id,
+                    "occurrence": condition.occurrence,
+                    "occurrence_display": condition.occurrence + 1,
+                    "categories": list(categories),
+                    "start_sample": condition.start_sample,
+                    "stop_sample": condition.stop_sample,
+                    "sample_count": condition.n_samples,
+                    "evaluated_occurrence_count": evaluated_count,
+                    "flagged_occurrence_count": flagged_count,
+                    "same_category_persistent": same_category_persistent,
+                    "persistent_categories": list(persistent_categories),
+                    "all_evaluated_occurrences_flagged": all_flagged,
+                    "reason_varied": reason_varied,
+                    "statement": statement,
+                    "authority": "review_only",
+                }
+            )
+    return tuple(findings)
+
+
+def _merged_window_spans(
+    windows: Sequence[RawChannelBlockMetrics | RawAmplitudeWindowMetrics],
+) -> tuple[tuple[int, int], ...]:
+    spans = sorted((window.start_sample, window.stop_sample) for window in windows)
+    merged: list[list[int]] = []
+    for start, stop in spans:
+        if not merged or start > merged[-1][1]:
+            merged.append([start, stop])
+        else:
+            merged[-1][1] = max(merged[-1][1], stop)
+    return tuple((start, stop) for start, stop in merged)
+
+
+def _transient_review_findings(
+    block_rows: Sequence[RawChannelBlockMetrics],
+) -> tuple[Mapping[str, object], ...]:
+    grouped: dict[tuple[str, str, int, str], list[RawChannelBlockMetrics]] = {}
+    for row in block_rows:
+        for category in row.review_categories:
+            grouped.setdefault(
+                (row.metrics.channel, row.condition_id, row.occurrence, category),
+                [],
+            ).append(row)
+
+    findings: list[Mapping[str, object]] = []
+    for (channel, condition, occurrence, category), windows in sorted(
+        grouped.items(),
+        key=lambda item: (
+            min(window.start_sample for window in item[1]),
+            item[0],
+        ),
+    ):
+        ordered_windows = sorted(windows, key=_block_tie_key)
+        union_spans = _merged_window_spans(ordered_windows)
+        union_samples = sum(stop - start for start, stop in union_spans)
+        findings.append(
+            {
+                "channel": channel,
+                "condition_label": condition,
+                "occurrence": occurrence,
+                "occurrence_display": occurrence + 1,
+                "category": category,
+                "diagnostic_window_count": len(ordered_windows),
+                "windows": [window.to_payload() for window in ordered_windows],
+                "flagged_window_union_spans": [list(span) for span in union_spans],
+                "flagged_window_coverage_samples": union_samples,
+                "coverage_meaning": "flagged_window_coverage_not_artifact_duration",
+                "authority": "review_only",
+            }
+        )
+    return tuple(findings)
+
+
+def _transient_amplitude_review_findings(
+    rows: Sequence[RawAmplitudeWindowMetrics],
+) -> tuple[Mapping[str, object], ...]:
+    """Group overlapping cap-wide amplitude windows as review provenance."""
+
+    grouped: dict[tuple[str, int], list[RawAmplitudeWindowMetrics]] = {}
+    for row in rows:
+        grouped.setdefault((row.condition_id, row.occurrence), []).append(row)
+
+    findings: list[Mapping[str, object]] = []
+    for (condition, occurrence), windows in sorted(
+        grouped.items(),
+        key=lambda item: (
+            min(window.start_sample for window in item[1]),
+            item[0],
+        ),
+    ):
+        ordered = sorted(windows, key=lambda item: (item.start_sample, item.stop_sample))
+        union_spans = _merged_window_spans(ordered)
+        peak = max(
+            ordered,
+            key=lambda item: (
+                item.severe_review,
+                item.median_std_uv,
+                item.median_p2p_99_uv,
+                -item.start_sample,
+            ),
+        )
+        findings.append(
+            {
+                "scope": "overlapping_diagnostic_window_union",
+                "condition_label": condition,
+                "occurrence": occurrence,
+                "occurrence_display": occurrence + 1,
+                "severity": (
+                    "severe_review"
+                    if any(window.severe_review for window in ordered)
+                    else "warning_review"
+                ),
+                "median_std_uv": peak.median_std_uv,
+                "median_p2p_99_uv": peak.median_p2p_99_uv,
+                "diagnostic_window_count": len(ordered),
+                "windows": [window.to_payload() for window in ordered],
+                "flagged_window_union_spans": [list(span) for span in union_spans],
+                "flagged_window_coverage_samples": sum(
+                    stop - start for start, stop in union_spans
+                ),
+                "coverage_meaning": "flagged_window_coverage_not_artifact_duration",
+                "authority": "review_only",
+                "help_text": SEVERE_RAW_AMPLITUDE_HELP_TEXT,
+                "help_url": BIOSEMI_SHARED_NOISE_HELP_URL,
+            }
+        )
+    return tuple(findings)
+
+
 def _review_rules(
     conditions: Sequence[RawChannelConditionAggregate],
 ) -> tuple[str, ...]:
@@ -1637,18 +2248,25 @@ def _review_rules(
         ("low_variance_channels", "condition_persistent_low_variance_review"),
         ("high_amplitude_channels", "condition_persistent_high_amplitude_review"),
         ("rare_burst_channels", "condition_persistent_rare_burst_review"),
+        ("spatial_outlier_channels", "condition_persistent_spatial_review"),
     )
     transient_checks = (
         ("transient_high_amplitude_channels", "condition_transient_high_amplitude_review"),
         ("transient_rare_burst_channels", "condition_transient_rare_burst_review"),
     )
-    for field, rule in persistent_checks:
+    for field_name, rule in persistent_checks:
         if conditions and set.intersection(
-            *(set(getattr(condition, field)) for condition in conditions)
+            *(set(getattr(condition, field_name)) for condition in conditions)
         ):
             rules.append(rule)
-    for field, rule in transient_checks:
-        if any(getattr(condition, field) for condition in conditions):
+    if any(
+        getattr(condition, field_name)
+        for condition in conditions
+        for field_name, _category in _OCCURRENCE_CATEGORY_FIELDS
+    ):
+        rules.append("condition_occurrence_channel_review")
+    for field_name, rule in transient_checks:
+        if any(getattr(condition, field_name) for condition in conditions):
             rules.append(rule)
     if any(condition.raw_baseline_failure_review for condition in conditions):
         rules.append("condition_amplitude_baseline_failure_review")
@@ -1665,6 +2283,10 @@ def _condition_result(
     block_rows: Sequence[RawChannelBlockMetrics],
     manual_removed_channels: tuple[str, ...],
     thresholds: Mapping[str, float | int | bool],
+    config: RawChannelQCConfig,
+    inherited_transient_findings: Sequence[Mapping[str, object]] | None = None,
+    transient_amplitude_findings: Sequence[Mapping[str, object]] = (),
+    transient_windowing: Mapping[str, object] | None = None,
 ) -> ConditionRawChannelQCResult:
     ordered_conditions = tuple(
         sorted(
@@ -1676,6 +2298,49 @@ def _condition_result(
             ),
         )
     )
+    def persistent(field_name: str) -> tuple[str, ...]:
+        if not ordered_conditions:
+            return ()
+        selected = set(getattr(ordered_conditions[0], field_name))
+        for condition in ordered_conditions[1:]:
+            selected.intersection_update(getattr(condition, field_name))
+        return tuple(channel for channel in channel_names if channel in selected)
+
+    candidate_sources = _candidate_source_map(
+        channel_names,
+        manual_removed=manual_removed_channels,
+        persistent_low_variance=persistent("low_variance_channels"),
+        persistent_high_amplitude=persistent("high_amplitude_channels"),
+        persistent_rare_burst=persistent("rare_burst_channels"),
+        persistent_spatial_predictability=persistent("spatial_outlier_channels"),
+    )
+    cluster_rules_enabled = (
+        config.auto_detect_removed_electrodes
+        or config.removed_electrode_detection_mode
+        == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    )
+    burden = _candidate_burden(
+        channel_names,
+        candidate_sources,
+        positions=canonical_biosemi64_head_coordinates(),
+        config=config,
+        cluster_rules_enabled=cluster_rules_enabled,
+    )
+    burden_findings = tuple(burden["findings"])
+    review_rules = list(_review_rules(ordered_conditions))
+    review_rules.extend(str(finding["rule"]) for finding in burden_findings)
+    if any(
+        str(finding.get("severity") or "") == "severe_review"
+        for finding in transient_amplitude_findings
+    ):
+        review_rules.append("condition_transient_amplitude_baseline_severe_review")
+    elif transient_amplitude_findings:
+        review_rules.append("condition_transient_amplitude_baseline_warning")
+    transient_findings = (
+        tuple(inherited_transient_findings)
+        if inherited_transient_findings is not None
+        else _transient_review_findings(block_rows)
+    )
     return ConditionRawChannelQCResult(
         filename=filename,
         channel_names=channel_names,
@@ -1683,7 +2348,17 @@ def _condition_result(
         transient_extrema=_transient_extrema(block_rows, channel_names),
         manual_removed_channels=manual_removed_channels,
         thresholds=dict(thresholds),
-        review_rules=_review_rules(ordered_conditions),
+        review_rules=tuple(dict.fromkeys(review_rules)),
+        candidate_sources=candidate_sources,
+        burden_findings=burden_findings,
+        largest_bad_cluster_channels=tuple(burden["largest_cluster"]),
+        occurrence_review_findings=_occurrence_review_findings(
+            ordered_conditions,
+            channel_names,
+        ),
+        transient_review_findings=transient_findings,
+        transient_amplitude_review_findings=tuple(transient_amplitude_findings),
+        transient_windowing=dict(transient_windowing or {}),
     )
 
 
@@ -1708,10 +2383,42 @@ def _shared_full_condition_view(
     root = _root_array(chunks[0])
     if root.ndim != 2 or any(_root_array(chunk) is not root for chunk in chunks[1:]):
         return None
-    expected_shape = (chunks[0].shape[0], sum(chunk.shape[1] for chunk in chunks))
-    if root.shape != expected_shape:
+    if root.shape[0] != chunks[0].shape[0]:
         return None
     return np.asarray(root, dtype=np.float64)
+
+
+def _assemble_unique_condition_data(
+    chunks: Sequence[np.ndarray],
+    starts: Sequence[int],
+    *,
+    occurrence_start: int,
+    occurrence_stop: int,
+) -> np.ndarray:
+    """Rebuild unique occurrence samples without counting overlap twice."""
+
+    if not chunks or len(chunks) != len(starts):
+        raise ValueError("condition windows and sample starts must be non-empty and aligned")
+    n_samples = int(occurrence_stop) - int(occurrence_start)
+    assembled = np.empty((chunks[0].shape[0], n_samples), dtype=np.float64)
+    covered = np.zeros(n_samples, dtype=bool)
+    for chunk, start in zip(chunks, starts, strict=True):
+        local_start = int(start) - int(occurrence_start)
+        local_stop = local_start + int(chunk.shape[1])
+        if local_start < 0 or local_stop > n_samples:
+            raise ValueError("condition window lies outside its occurrence bounds")
+        existing = covered[local_start:local_stop]
+        if existing.any() and not np.array_equal(
+            assembled[:, local_start:local_stop][:, existing],
+            chunk[:, existing],
+            equal_nan=True,
+        ):
+            raise ValueError("overlapping condition windows contain different samples")
+        assembled[:, local_start:local_stop] = chunk
+        covered[local_start:local_stop] = True
+    if not bool(covered.all()):
+        raise ValueError("condition windows do not cover every occurrence sample")
+    return assembled
 
 
 def evaluate_condition_raw_channel_qc_v2(
@@ -1722,11 +2429,14 @@ def evaluate_condition_raw_channel_qc_v2(
     filename: str,
     sfreq: float,
     block_duration_s: float = 10.0,
+    window_hop_s: float | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> ConditionRawChannelQCResult:
     """Evaluate every supplied condition sample without retaining a full recording.
 
-    Blocks for an occurrence must be consecutive and end with ``is_final=True``.
+    Windows for an occurrence must cover it without gaps and end with
+    ``is_final=True``. Overlap contributes only to transient diagnostics; exact
+    full-occurrence metrics count every analyzed sample once.
     Exact aggregate percentiles require retaining only the current occurrence's
     blocks; they are discarded as soon as that occurrence is finalized. Review
     thresholds intentionally never set ``excluded`` or interpolation candidates.
@@ -1739,6 +2449,12 @@ def evaluate_condition_raw_channel_qc_v2(
     if not np.isfinite(duration_value) or duration_value <= 0.0:
         raise ValueError("block_duration_s must be a positive finite value")
     full_block_samples = max(1, int(round(sfreq_value * duration_value)))
+    hop_value = duration_value if window_hop_s is None else float(window_hop_s)
+    if not np.isfinite(hop_value) or hop_value <= 0.0:
+        raise ValueError("window_hop_s must be a positive finite value")
+    hop_samples = max(1, int(round(sfreq_value * hop_value)))
+    if hop_samples > full_block_samples:
+        raise ValueError("window_hop_s cannot leave gaps between diagnostic windows")
 
     source_channel_names = tuple(str(channel) for channel in channel_names)
     if len(set(source_channel_names)) != len(source_channel_names):
@@ -1770,7 +2486,10 @@ def evaluate_condition_raw_channel_qc_v2(
     current_start = 0
     current_stop = 0
     current_chunks: list[np.ndarray] = []
+    current_window_starts: list[int] = []
     current_block_rows: list[RawChannelBlockMetrics] = []
+    current_amplitude_window_rows: list[RawAmplitudeWindowMetrics] = []
+    all_amplitude_window_rows: list[RawAmplitudeWindowMetrics] = []
     transient_low: set[str] = set()
     transient_high: set[str] = set()
     transient_rare: set[str] = set()
@@ -1782,10 +2501,45 @@ def evaluate_condition_raw_channel_qc_v2(
         aggregate_data = current_chunks[0]
         if len(current_chunks) > 1:
             aggregate_data = _shared_full_condition_view(current_chunks)
-            if aggregate_data is None:
-                aggregate_data = np.concatenate(current_chunks, axis=1)
+            if (
+                aggregate_data is None
+                or aggregate_data.shape[1] != current_stop - current_start
+            ):
+                aggregate_data = _assemble_unique_condition_data(
+                    current_chunks,
+                    current_window_starts,
+                    occurrence_start=current_start,
+                    occurrence_stop=current_stop,
+                )
         aggregate_rows = _v2_metric_rows(aggregate_data, scalp_names)
         aggregate_classification = _classify_v2_metrics(aggregate_rows, config)
+        spatial_outliers: tuple[str, ...] = ()
+        if config.auto_detect_removed_electrodes and config.spatial_qc_enabled:
+            donor_exclusions = _ordered_channel_union(
+                scalp_names,
+                manual_removed,
+                aggregate_classification.low_variance_channels,
+                aggregate_classification.high_amplitude_channels,
+                aggregate_classification.rare_burst_channels,
+            )
+            canonical_positions = canonical_biosemi64_head_coordinates()
+            neighbor_map = _spatial_neighbor_map_from_positions(
+                canonical_positions,
+                scalp_names,
+                config=config,
+            )
+            scores = _spatial_predictability_scores_with_neighbors(
+                aggregate_data,
+                scalp_names,
+                neighbor_map=neighbor_map,
+                donor_exclusions=donor_exclusions,
+                config=config,
+            )
+            spatial_outliers = _spatial_outlier_channels(
+                scores,
+                excluded_channels=donor_exclusions,
+                config=config,
+            )
         conditions.append(
             RawChannelConditionAggregate(
                 condition_id=current_key[0],
@@ -1797,6 +2551,7 @@ def evaluate_condition_raw_channel_qc_v2(
                 low_variance_channels=aggregate_classification.low_variance_channels,
                 high_amplitude_channels=aggregate_classification.high_amplitude_channels,
                 rare_burst_channels=aggregate_classification.rare_burst_channels,
+                spatial_outlier_channels=spatial_outliers,
                 transient_low_variance_channels=_ordered_channel_union(
                     scalp_names, tuple(transient_low)
                 ),
@@ -1813,10 +2568,18 @@ def evaluate_condition_raw_channel_qc_v2(
             )
         )
         all_block_rows.extend(current_block_rows)
+        # A lone short/exact window is identical to the full-occurrence
+        # aggregate already reported above. Multi-window occurrences retain
+        # bounded amplitude evidence so a brief cap-wide burst is not diluted
+        # out of the occurrence aggregate.
+        if len(current_chunks) > 1:
+            all_amplitude_window_rows.extend(current_amplitude_window_rows)
         seen_occurrences.add(current_key)
         current_key = None
         current_chunks.clear()
+        current_window_starts.clear()
         current_block_rows.clear()
+        current_amplitude_window_rows.clear()
         transient_low.clear()
         transient_high.clear()
         transient_rare.clear()
@@ -1859,20 +2622,38 @@ def evaluate_condition_raw_channel_qc_v2(
         n_samples = stop_sample - start_sample
         if start_sample < 0 or n_samples <= 0 or data.shape[1] != n_samples:
             raise ValueError("condition block provenance must exactly match its positive sample count")
-        if block.is_final:
-            if n_samples > full_block_samples:
-                raise ValueError("a final condition block cannot exceed the configured block size")
-        elif n_samples != full_block_samples:
-            raise ValueError("each non-final condition block must equal the configured block size")
+        window_kind = str(block.window_kind or "regular")
+        if window_kind not in {"regular", "tail_aligned", "short"}:
+            raise ValueError(f"unsupported condition-window kind {window_kind!r}")
+        if n_samples > full_block_samples:
+            raise ValueError("a condition window cannot exceed the configured window size")
+        if not block.is_final and n_samples != full_block_samples:
+            raise ValueError("each non-final condition window must equal the configured window size")
+        if window_kind in {"tail_aligned", "short"} and not block.is_final:
+            raise ValueError(f"a {window_kind} condition window must be final")
+        if window_kind == "tail_aligned" and n_samples != full_block_samples:
+            raise ValueError("a tail-aligned condition window must be full length")
+        if window_kind == "short" and n_samples >= full_block_samples:
+            raise ValueError("a short condition window must be shorter than the nominal window")
 
         if current_key is None:
             current_key = key
             current_start = start_sample
-            current_stop = start_sample
-        if start_sample != current_stop:
-            raise ValueError(
-                f"condition occurrence {key!r} has a gap or overlap before sample {start_sample}"
-            )
+            current_stop = stop_sample
+        else:
+            previous_start = current_window_starts[-1]
+            expected_start = previous_start + hop_samples
+            if start_sample <= previous_start or start_sample > current_stop:
+                raise ValueError(
+                    f"condition occurrence {key!r} has invalid window coverage before sample {start_sample}"
+                )
+            if window_kind == "tail_aligned":
+                if start_sample > expected_start:
+                    raise ValueError("tail-aligned condition window leaves a gap")
+            elif start_sample != expected_start:
+                raise ValueError(
+                    f"condition occurrence {key!r} has an unexpected window hop before sample {start_sample}"
+                )
 
         if picks == tuple(range(len(source_channel_names))):
             selected = data
@@ -1881,9 +2662,23 @@ def evaluate_condition_raw_channel_qc_v2(
         block_index = len(current_chunks)
         block_metric_rows = _v2_metric_rows(selected, scalp_names)
         classification = _classify_v2_metrics(block_metric_rows, config)
+        if classification.baseline_warning:
+            current_amplitude_window_rows.append(
+                RawAmplitudeWindowMetrics(
+                    condition_id=condition_id,
+                    occurrence=occurrence,
+                    start_sample=start_sample,
+                    stop_sample=stop_sample,
+                    sampling_rate_hz=sfreq_value,
+                    window_kind=window_kind,
+                    median_std_uv=classification.median_std_uv,
+                    median_p2p_99_uv=classification.median_p2p_99_uv,
+                    severe_review=classification.baseline_failure_review,
+                )
+            )
         # A relative low-variance classification is calibrated for persistent
-        # multi-window data, not a single 10-second block. Preserve each
-        # channel's quietest-block metrics below, but do not turn an isolated
+        # multi-window data, not a single 5-second diagnostic window. Preserve
+        # each channel's quietest-block metrics below, but do not turn an isolated
         # quiet block into a removed-electrode review flag.
         transient_high.update(classification.high_amplitude_channels)
         transient_rare.update(classification.rare_burst_channels)
@@ -1895,11 +2690,22 @@ def evaluate_condition_raw_channel_qc_v2(
                 start_sample=start_sample,
                 stop_sample=stop_sample,
                 metrics=row,
+                sampling_rate_hz=sfreq_value,
+                window_kind=window_kind,
+                review_categories=tuple(
+                    category
+                    for category, channels in (
+                        ("high_amplitude", classification.high_amplitude_channels),
+                        ("rare_burst", classification.rare_burst_channels),
+                    )
+                    if row.channel in channels
+                ),
             )
             for row in block_metric_rows
         )
         current_chunks.append(selected)
-        current_stop = stop_sample
+        current_window_starts.append(start_sample)
+        current_stop = max(current_stop, stop_sample)
 
         if block.is_final:
             finalize_current()
@@ -1914,6 +2720,26 @@ def evaluate_condition_raw_channel_qc_v2(
         block_rows=all_block_rows,
         manual_removed_channels=manual_removed,
         thresholds=_v2_thresholds(config),
+        config=config,
+        transient_amplitude_findings=_transient_amplitude_review_findings(
+            all_amplitude_window_rows
+        ),
+        transient_windowing={
+            "requested_window_duration_s": duration_value,
+            "requested_hop_duration_s": hop_value,
+            "actual_window_samples": full_block_samples,
+            "actual_hop_samples": hop_samples,
+            "actual_window_duration_s": full_block_samples / sfreq_value,
+            "actual_hop_duration_s": hop_samples / sfreq_value,
+            "nominal_overlap_samples": max(0, full_block_samples - hop_samples),
+            "nominal_overlap_fraction": max(
+                0.0,
+                (full_block_samples - hop_samples) / full_block_samples,
+            ),
+            "tail_policy": "full_window_ending_at_occurrence_stop",
+            "short_occurrence_policy": "one_unpadded_window",
+            "full_occurrence_sample_counting": "unique_samples_once",
+        },
     )
 
 
@@ -1929,6 +2755,7 @@ def combine_condition_raw_channel_qc_v2(
     first = results[0]
     channel_names = first.channel_names
     thresholds = dict(first.thresholds)
+    transient_windowing = dict(first.transient_windowing)
     manual_removed = first.manual_removed_channels
     combined_conditions: list[RawChannelConditionAggregate] = []
     block_rows: list[RawChannelBlockMetrics] = []
@@ -1940,6 +2767,10 @@ def combine_condition_raw_channel_qc_v2(
             raise ValueError("cannot combine raw-channel QC results with different channel layouts")
         if dict(result.thresholds) != thresholds:
             raise ValueError("cannot combine raw-channel QC results with different thresholds")
+        if dict(result.transient_windowing) != transient_windowing:
+            raise ValueError(
+                "cannot combine raw-channel QC results with different transient windows"
+            )
         if result.manual_removed_channels != manual_removed:
             raise ValueError("cannot combine raw-channel QC results with different manual channel settings")
         for condition in result.conditions:
@@ -1953,6 +2784,62 @@ def combine_condition_raw_channel_qc_v2(
                 (extrema.lowest_variance_block, extrema.highest_amplitude_block)
             )
 
+    config = RawChannelQCConfig(
+        max_bad_channels=_coerce_int(
+            thresholds.get("max_bad_channels"),
+            RawChannelQCConfig.max_bad_channels,
+        ),
+        max_bad_fraction=float(
+            thresholds.get("max_bad_fraction", RawChannelQCConfig.max_bad_fraction)
+        ),
+        max_hemisphere_bad_fraction=float(
+            thresholds.get(
+                "max_hemisphere_bad_fraction",
+                RawChannelQCConfig.max_hemisphere_bad_fraction,
+            )
+        ),
+        min_channels_for_hard_qc=_coerce_int(
+            thresholds.get("min_channels_for_hard_qc"),
+            RawChannelQCConfig.min_channels_for_hard_qc,
+        ),
+        min_hemisphere_channels=_coerce_int(
+            thresholds.get("min_hemisphere_channels"),
+            RawChannelQCConfig.min_hemisphere_channels,
+        ),
+        min_bad_cluster_warning_size=_coerce_int(
+            thresholds.get("min_bad_cluster_warning_size"),
+            RawChannelQCConfig.min_bad_cluster_warning_size,
+        ),
+        min_bad_cluster_size=_coerce_int(
+            thresholds.get("min_bad_cluster_size"),
+            RawChannelQCConfig.min_bad_cluster_size,
+        ),
+        neighbor_distance_factor=float(
+            thresholds.get(
+                "neighbor_distance_factor",
+                RawChannelQCConfig.neighbor_distance_factor,
+            )
+        ),
+        auto_detect_removed_electrodes=bool(
+            thresholds.get("auto_detect_removed_electrodes")
+        ),
+        removed_electrode_detection_mode=(
+            REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+            if manual_removed
+            else REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        ),
+    )
+    inherited_transient_findings = tuple(
+        finding
+        for result in results
+        for finding in result.transient_review_findings
+    )
+    inherited_amplitude_findings = tuple(
+        finding
+        for result in results
+        for finding in result.transient_amplitude_review_findings
+    )
+
     return _condition_result(
         filename=str(filename or first.filename),
         channel_names=channel_names,
@@ -1960,6 +2847,10 @@ def combine_condition_raw_channel_qc_v2(
         block_rows=block_rows,
         manual_removed_channels=manual_removed,
         thresholds=thresholds,
+        config=config,
+        inherited_transient_findings=inherited_transient_findings,
+        transient_amplitude_findings=inherited_amplitude_findings,
+        transient_windowing=transient_windowing,
     )
 
 

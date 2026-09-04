@@ -30,7 +30,7 @@ def test_preprocessing_qc_review_table_shows_group_membership(qtbot) -> None:
 
     preflight_workflow._set_preflight_table(
         host,
-        ["PID", "Group", "Flag", "Reason", "More info"],
+        ["PID", "Group", "Flag", "Reason", "Decision", "More info"],
         preflight_workflow._hard_candidate_row_values([result], labels),
         stretch_column=3,
     )
@@ -39,7 +39,7 @@ def test_preprocessing_qc_review_table_shows_group_membership(qtbot) -> None:
     assert table.horizontalHeaderItem(1).text() == "Group"
     assert table.item(0, 0).text() == "P01"
     assert table.item(0, 1).text() == "Control"
-    assert table.cellWidget(0, 4).text() == "More info"
+    assert table.cellWidget(0, 5).text() == "More info"
 
 
 @pytest.mark.parametrize(

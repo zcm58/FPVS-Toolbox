@@ -11,15 +11,17 @@ its filter order, or any generated scientific output.
 - The normal preprocessing path remains unchanged and continues to load the
   complete selected BDF channel set before the locked FIR, optional smart FFT
   multi-notch, and 256 Hz downsample stages.
-- Preflight QC v3 reads the complete Status channel, but reads EEG samples only
+- Preflight QC v6 reads the complete Status channel, but reads EEG samples only
   from the exact shared marker-derived locked FFT spans. Samples outside the
   spans analyzed by normal processing are not scored.
 - Time-domain and spectral QC use identical locked spans. There is no fixed
   minimum or maximum condition duration; a present condition without a valid
   on-bin crop fails explicitly instead of using an onset-based or fixed-duration
   substitute.
-- Time-domain QC examines every sequential 10-second block plus the final
-  partial block in every relevant condition occurrence.
+- Time-domain QC examines 5-second diagnostic windows with a nominal 2.5-second
+  hop inside every relevant condition occurrence. The final window ends at the
+  exact occurrence stop; short occurrences use one unpadded window. Full-
+  occurrence metrics still count each source sample exactly once.
 - Only channels flagged consistently across every relevant condition occurrence
   are prefilled as persistent removed-electrode candidates; occurrence-specific
   and transient-block findings remain separately reported review signals.
@@ -27,7 +29,8 @@ its filter order, or any generated scientific output.
   integer-oddball-cycle length used by normal processing. It does not use an
   arbitrary 90-second prefix.
 - Long condition buffers spill to a temporary condition-only float64 memmap in
-  10-second read chunks; the complete recording is never mapped for preflight.
+  10-second I/O chunks, independently of the 5-second diagnostic windows; the
+  complete recording is never mapped for preflight.
   FFT channels are batched with byte-identical per-channel results so temporary
   memory stays bounded.
 - Spectral candidates extend through the configured retained upper band, bounded
@@ -40,14 +43,14 @@ its filter order, or any generated scientific output.
 - Configured effective 50/60 Hz mains-notch centers and their harmonics are
   classified separately from unexpected off-harmonic peaks. A mains/FPVS
   harmonic collision is recorded explicitly.
-- New exhaustive/transient preflight findings are review signals. This speedup
-  does not silently create new automatic hard-exclusion rules.
+- Transient, severe-amplitude, and candidate-burden findings are review signals.
+  They do not automatically exclude a recording or select channels for repair.
 - Cache state lives only under the active project root at
-  `.fpvs_processing/preflight_qc/v2`, is written atomically, and treats missing,
-  corrupt, or stale entries as cache misses. The stable directory is retained;
-  the v3 method and locked-span policy identities invalidate fixed-minimum
-  entries.
-- The v3 fast path requires an explicit active project root and complete event
+  `.fpvs_processing/preflight_qc/v6_five_second_overlapping_transients`, is
+  written atomically, and treats missing, corrupt, or stale entries as cache
+  misses. Window, hop, tail, overlap interpretation, geometry, and locked-span
+  identities invalidate incompatible entries.
+- The v6 fast path requires an explicit active project root and complete event
   map. The existing preflight API remains a compatibility fallback when those
   inputs are absent.
 - QC concurrency is bounded independently from processing concurrency: at most

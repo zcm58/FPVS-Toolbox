@@ -5,9 +5,24 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** accepted on 2026-09-03. The user requires an obvious warning when
-an electrode was flagged in one particular condition but not all conditions.
-Implementation waits for the completed cumulative plan.
+**Status:** implemented on 2026-09-04 in structured preflight evidence and the
+ordinary review table. CI/visible GUI smoke remains at integrated handoff.
+
+### Implementation Progress
+
+- Every enabled-detector full-occurrence finding records electrode, canonical
+  condition label, occurrence, analyzed sample bounds, category, evaluated
+  denominator, and a concise scope statement. The text distinguishes one-only,
+  partial, same-category persistent, and all-flagged/reason-varied cases.
+- A reason counts as persistent when at least one category recurs in every
+  evaluated occurrence, even if an additional category appears in only one.
+- Marker occurrences unavailable to QC are recorded as `Not evaluated` with a
+  reason and excluded from the evaluated denominator. Detector Off is also
+  presented as `Not evaluated` and cannot leak inferred detector findings.
+- Transient rows remain separate, retain their overlapping window identities,
+  and have review-only authority. Recording-wide interpolation suggestions
+  remain limited to low variance in the same category across every evaluated
+  occurrence, plus independently configured manual targets.
 
 ### Accepted Behavior and User-Facing Meaning
 

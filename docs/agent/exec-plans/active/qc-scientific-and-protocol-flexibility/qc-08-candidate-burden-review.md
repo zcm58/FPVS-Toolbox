@@ -5,10 +5,30 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** accepted on 2026-09-03. The user agreed that the final decision
-should use more evidence. Implementation waits for the completed cumulative
-plan. The accepted item-18 section above records the current rules, scientific
-limits, and observed runner/ledger consequences.
+**Status:** implemented on 2026-09-04 in the shared signal-review result and
+preflight/runner path. Final integrated report/ledger verification remains a
+Wave-2 handoff gate.
+
+### Implementation Progress
+
+- Count (`>`), fraction (`>`), hemisphere (`>=`), and BioSemi64 connected-
+  cluster (`>=`) crossings are structured review-only findings with observed
+  values, denominators, thresholds, comparators, channels, candidate sources,
+  and rule version.
+- None of these findings sets automatic exclusion or adds amplitude, burst, or
+  spatial candidates to interpolation. Each candidate row starts with no
+  exclusion selected; the user can keep or exclude rows independently and can
+  choose recording or participant scope when repeated recordings exist.
+  Closing or continuing without changes excludes nothing.
+- Focused tests cover count/fraction boundaries, hemisphere equality, four-,
+  five-, and six-channel clusters, six manual targets, six high-amplitude
+  candidates, cache round-trip, and continuation into preprocessing. These
+  tests do not validate the provisional scientific thresholds.
+- Visible GUI smoke for CI/manual validation: open a review with at least two
+  candidate recordings; verify every Decision starts at **No exclusion
+  selected**, exclude only one row, leave or keep the other, apply the review,
+  and confirm only the chosen recording/participant enters project exclusions.
+  Close and reopen once without applying and confirm nothing is added.
 
 ### Accepted Behavior and Boundaries
 

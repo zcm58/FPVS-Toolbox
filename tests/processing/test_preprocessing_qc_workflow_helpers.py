@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,22 @@ class _LabelStub:
 
     def setVisible(self, visible: bool) -> None:
         self.visible = visible
+
+
+class _ChoiceStub:
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def currentData(self) -> str:
+        return self._value
+
+
+class _TableStub:
+    def __init__(self, cells: dict[tuple[int, int], _ChoiceStub]) -> None:
+        self._cells = cells
+
+    def cellWidget(self, row: int, column: int):  # noqa: ANN201
+        return self._cells.get((row, column))
 
 
 @pytest.mark.parametrize(
@@ -275,7 +292,7 @@ def test_removed_electrode_review_parser_ignores_reason_column() -> None:
     assert warnings == []
 
 
-def test_removed_electrode_review_reasons_include_electrode_candidate_classes() -> None:
+def test_removed_electrode_review_reasons_include_only_selected_low_signal_class() -> None:
     scan = workflow.PreflightQcScan(
         results=(
             _review_candidate(
@@ -289,15 +306,11 @@ def test_removed_electrode_review_reasons_include_electrode_candidate_classes() 
     )
 
     assert workflow._removed_review_reason_map(scan) == {
-        "P13": (
-            "Low signal / flat candidate(s): FT7; "
-            "High-amplitude candidate(s): P9; "
-            "Rare-burst candidate(s): P10"
-        )
+        "P13": "Low signal / flat candidate(s): FT7"
     }
 
 
-def test_remaining_review_rows_exclude_removed_electrode_candidate_classes() -> None:
+def test_remaining_review_rows_keep_unselected_signal_candidate_classes() -> None:
     scan = workflow.PreflightQcScan(
         results=(
             _review_candidate(
@@ -305,6 +318,9 @@ def test_remaining_review_rows_exclude_removed_electrode_candidate_classes() -> 
                 raw_payload={
                     "high_amplitude_channels": ["C5", "T7"],
                     "rare_burst_channels": ["P9"],
+                    "experimental_removed_electrode_detector": {
+                        "evaluation_status": "evaluated"
+                    },
                 },
             ),
             _review_candidate(
@@ -312,6 +328,9 @@ def test_remaining_review_rows_exclude_removed_electrode_candidate_classes() -> 
                 raw_payload={
                     "high_amplitude_channels": ["Iz"],
                     "spatial_outlier_channels": ["AF3", "F7"],
+                    "experimental_removed_electrode_detector": {
+                        "evaluation_status": "evaluated"
+                    },
                 },
             ),
         )
@@ -322,50 +341,253 @@ def test_remaining_review_rows_exclude_removed_electrode_candidate_classes() -> 
         set(),
         {"patient": "Patient"},
     ) == [
+        ("P13", "Patient", "p13.bdf", "High-amplitude channel review: C5, T7"),
+        ("P13", "Patient", "p13.bdf", "Rare-burst channel review: P9"),
+        ("P17", "Patient", "p17.bdf", "High-amplitude channel review: Iz"),
         (
             "P17",
             "Patient",
             "p17.bdf",
-            "spatially inconsistent channel(s): AF3, F7",
+            "Spatially inconsistent channel review: AF3, F7",
         )
     ]
 
 
-def test_hard_participant_exclusion_reason_is_condensed_with_details() -> None:
+def test_severe_amplitude_review_reason_is_condensed_with_details() -> None:
     result = _hard_candidate(
         {
-            "excluded": True,
+            "excluded": False,
             "message": (
                 "p34.bdf excluded by raw channel-health QC: participant-level raw "
                 "amplitude baseline was excessively noisy."
             ),
-            "triggered_rules": ["raw_amplitude_baseline_failure"],
+            "review_rules": ["raw_amplitude_baseline_severe_review"],
+            "raw_amplitude_review_findings": [
+                {
+                    "severity": "severe_review",
+                    "median_std_uv": 32193.4,
+                    "median_p2p_99_uv": 260426.5,
+                }
+            ],
             "raw_baseline_median_std_uv": 32193.4,
             "raw_baseline_median_p2p_99_uv": 260426.5,
             "bad_channels": ["CPz", "FT7"],
             "thresholds": {
-                "baseline_exclusion_median_std_uv": 10000.0,
-                "baseline_exclusion_median_p2p_99_uv": 100000.0,
+                "baseline_severe_review_median_std_uv": 10000.0,
+                "baseline_severe_review_median_p2p_99_uv": 100000.0,
             },
         }
     )
 
-    assert workflow._hard_candidate_flag(result) == "Hard raw QC"
-    assert workflow._hard_candidate_reason(result) == "Extremely noisy baseline"
+    assert workflow._hard_candidate_flag(result) == "Signal review"
+    assert workflow._hard_candidate_reason(result) == "High raw signal amplitude"
     assert workflow._hard_candidate_row_values(
         [result],
         {"control": "Control"},
     ) == [
-        ("P34", "Control", "Hard raw QC", "Extremely noisy baseline", "")
+        (
+            "P34",
+            "Control",
+            "Signal review",
+            "High raw signal amplitude",
+            "",
+            "",
+        )
     ]
-    assert "far outside the expected range" in workflow._hard_candidate_plain_explanation(result)
+    assert "Referencing may reduce shared electrical noise" in (
+        workflow._hard_candidate_plain_explanation(result)
+    )
 
     details = workflow._hard_candidate_detail_text(result, {"control": "Control"})
     assert "Group: Control" in details
-    assert "Median STD: 32193.4 uV (hard exclusion >= 10000.0 uV)" in details
-    assert "Median P2P99: 260426.5 uV (hard exclusion >= 100000.0 uV)" in details
-    assert "raw_amplitude_baseline_failure" in details
+    assert "Median STD: 32193.4 uV (severe review >= 10000.0 uV)" in details
+    assert "Median P2P99: 260426.5 uV (severe review >= 100000.0 uV)" in details
+    assert "raw_amplitude_baseline_severe_review" in details
     assert "Original raw QC message" in details
+
+
+def test_severe_transient_amplitude_detail_does_not_misstate_aggregate() -> None:
+    result = _hard_candidate(
+        {
+            "excluded": False,
+            "review_rules": [
+                "condition_transient_amplitude_baseline_severe_review"
+            ],
+            "raw_baseline_median_std_uv": 1200.0,
+            "raw_baseline_median_p2p_99_uv": 8000.0,
+            "raw_amplitude_review_findings": [
+                {
+                    "scope": "overlapping_diagnostic_window_union",
+                    "condition_label": "Faces",
+                    "occurrence_display": 2,
+                    "severity": "severe_review",
+                    "median_std_uv": 12000.0,
+                    "median_p2p_99_uv": 110000.0,
+                    "diagnostic_window_count": 2,
+                    "flagged_window_union_spans": [[500, 1250]],
+                }
+            ],
+            "thresholds": {
+                "baseline_severe_review_median_std_uv": 10000.0,
+                "baseline_severe_review_median_p2p_99_uv": 100000.0,
+            },
+        }
+    )
+
+    details = workflow._hard_candidate_detail_text(result)
+
+    assert "Full-occurrence aggregate metrics" in details
+    assert "Median STD: 1200.0 uV" in details
+    assert "Amplitude review evidence" in details
+    assert "Faces, occurrence 2" in details
+    assert "median STD 12000.0 uV, median P2P99 110000.0 uV" in details
+    assert "flagged-window union [[500, 1250]]" in details
+
+
+def test_hard_exclusion_rows_require_explicit_per_row_exclude_choice() -> None:
+    candidates = [
+        _review_candidate(participant_id="P01"),
+        _review_candidate(participant_id="P02"),
+        _review_candidate(participant_id="P03"),
+    ]
+    table = _TableStub(
+        {
+            (0, workflow._HARD_EXCLUSION_DECISION_COLUMN): _ChoiceStub(
+                workflow._HARD_EXCLUSION_DECISION_UNSELECTED
+            ),
+            (1, workflow._HARD_EXCLUSION_DECISION_COLUMN): _ChoiceStub(
+                workflow._HARD_EXCLUSION_DECISION_KEEP
+            ),
+            (2, workflow._HARD_EXCLUSION_DECISION_COLUMN): _ChoiceStub(
+                workflow._HARD_EXCLUSION_DECISION_EXCLUDE
+            ),
+        }
+    )
+
+    selected = workflow._selected_hard_exclusions(
+        table,
+        candidates,
+        recording_mode=False,
+    )
+
+    assert selected == [(candidates[2], "participant")]
+
+    recording = replace(candidates[0], recording_id="P01__visit-2")
+    recording_table = _TableStub(
+        {
+            (0, 7): _ChoiceStub(workflow._HARD_EXCLUSION_DECISION_EXCLUDE),
+            (0, 8): _ChoiceStub("recording"),
+        }
+    )
+    assert workflow._selected_hard_exclusions(
+        recording_table,
+        [recording],
+        recording_mode=True,
+    ) == [(recording, "recording")]
+
+
+def test_amplitude_help_label_is_brief_and_links_to_biosemi() -> None:
+    label = _LabelStub()
+    host = SimpleNamespace(processing_current_file_label=label)
+
+    workflow._set_amplitude_help_label(
+        host,
+        "processing_current_file_label",
+        "Review this recording.",
+    )
+
+    assert "Large raw signals detected" in label.text
+    assert "Referencing may reduce shared electrical noise" in label.text
+    assert 'href="https://www.biosemi.com/faq/cms%26drl.htm"' in label.text
+
+
+def test_remaining_review_rows_make_occurrence_and_transient_scope_prominent() -> None:
+    result = _review_candidate(
+        raw_payload={
+            "review_rules": ["condition_occurrence_channel_review"],
+            "experimental_removed_electrode_detector": {
+                "evaluation_status": "evaluated"
+            },
+            "occurrence_review_findings": [
+                {
+                    "channel": "P7",
+                    "condition_label": "Condition A",
+                    "occurrence_display": 1,
+                    "categories": ["low_variance"],
+                    "start_sample": 100,
+                    "stop_sample": 500,
+                    "statement": (
+                        "P7 was flagged as potentially bad in Condition A, "
+                        "occurrence 1 only. It was not flagged in the other 3 "
+                        "evaluated occurrences."
+                    ),
+                }
+            ],
+            "transient_review_findings": [
+                {
+                    "channel": "P8",
+                    "condition_label": "Condition B",
+                    "occurrence_display": 2,
+                    "category": "rare_burst",
+                    "diagnostic_window_count": 2,
+                }
+            ],
+            "occurrence_evaluation_scope": [
+                {
+                    "condition_label": "Condition C",
+                    "occurrence_display": 1,
+                    "evaluation_status": "not_evaluated",
+                    "reason": "missing_required_marker",
+                }
+            ],
+        }
+    )
+
+    rows = workflow._remaining_review_rows(
+        workflow.PreflightQcScan(results=(result,)),
+        set(),
+        {"patient": "Patient"},
+    )
+    messages = [row[-1] for row in rows]
+
+    assert any(
+        message.startswith("P7 was flagged as potentially bad in Condition A")
+        and "Analyzed samples: [100, 500)" in message
+        for message in messages
+    )
+    assert any(
+        "P8 had a transient rare burst flag in Condition B, occurrence 2" in message
+        and "not measured artifact duration" in message
+        for message in messages
+    )
+    assert any(
+        "Condition C, occurrence 1: Not evaluated" in message
+        and "excluded from the evaluated comparison count" in message
+        for message in messages
+    )
+
+
+def test_detector_off_review_row_says_not_evaluated_without_inferred_findings() -> None:
+    result = _review_candidate(
+        raw_payload={
+            "experimental_removed_electrode_detector": {
+                "evaluation_status": "not_evaluated",
+                "reason": "disabled_in_project_settings",
+            }
+        }
+    )
+
+    rows = workflow._remaining_review_rows(
+        workflow.PreflightQcScan(results=(result,)),
+        set(),
+        {"patient": "Patient"},
+    )
+
+    assert len(rows) == 1
+    assert rows[0][-1] == (
+        "Experimental removed-electrode assessment: Not evaluated (disabled in "
+        "project settings). No detector finding is inferred."
+    )
 
 
 def test_review_flags_workbook_preserves_group_membership(tmp_path: Path) -> None:

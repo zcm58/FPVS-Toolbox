@@ -60,6 +60,10 @@ from Main_App.processing.preflight_qc import (
     scan_recording_not_started_files,
 )
 from Main_App.processing.preflight_qc_plan import PREFLIGHT_QC_MAX_WORKERS
+from Main_App.processing.raw_channel_qc import (
+    BIOSEMI_SHARED_NOISE_HELP_URL,
+    SEVERE_RAW_AMPLITUDE_HELP_TEXT,
+)
 from Main_App.processing.frequency_domain_qc import (
     mark_frequency_domain_outputs_stale,
 )
@@ -102,7 +106,11 @@ _REMOVED_REVIEW_MANUAL_COLUMN = 4
 _REMOVED_REVIEW_FINAL_COLUMN = 5
 _HARD_EXCLUSION_PID_COLUMN = 0
 _HARD_EXCLUSION_REASON_COLUMN = 3
-_HARD_EXCLUSION_DETAILS_COLUMN = 4
+_HARD_EXCLUSION_DECISION_COLUMN = 4
+_HARD_EXCLUSION_DETAILS_COLUMN = 5
+_HARD_EXCLUSION_DECISION_UNSELECTED = "unselected"
+_HARD_EXCLUSION_DECISION_KEEP = "keep"
+_HARD_EXCLUSION_DECISION_EXCLUDE = "exclude"
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
 _CONDITION_EXCLUSION_CHECK_COLUMN = 6
@@ -419,16 +427,6 @@ def _removed_review_reason_map(scan: PreflightQcScan) -> dict[str, str]:
                 "Low signal / flat candidate(s): "
                 + ", ".join(result.auto_removed_electrodes)
             )
-        if result.high_amplitude_channels:
-            fragments.append(
-                "High-amplitude candidate(s): "
-                + ", ".join(result.high_amplitude_channels)
-            )
-        if result.rare_burst_channels:
-            fragments.append(
-                "Rare-burst candidate(s): "
-                + ", ".join(result.rare_burst_channels)
-            )
         if fragments:
             reasons[result.identity_id] = "; ".join(fragments)
     return reasons
@@ -562,6 +560,25 @@ def _set_label(host: Any, attr_name: str, text: str) -> None:
     label = getattr(host, attr_name, None)
     if label is not None:
         label.setText(text)
+
+
+def _set_amplitude_help_label(host: Any, attr_name: str, prefix: str = "") -> None:
+    """Show the brief amplitude explanation and opt-in external help link."""
+
+    label = getattr(host, attr_name, None)
+    if label is None:
+        return
+    lead = f"{prefix.strip()} " if prefix.strip() else ""
+    label.setText(
+        lead
+        + SEVERE_RAW_AMPLITUDE_HELP_TEXT
+        + f' <a href="{BIOSEMI_SHARED_NOISE_HELP_URL}">'
+        "BioSemi: referencing and shared noise</a>"
+    )
+    if hasattr(label, "setTextFormat"):
+        label.setTextFormat(Qt.RichText)
+    if hasattr(label, "setOpenExternalLinks"):
+        label.setOpenExternalLinks(True)
 
 
 def _set_progress(host: Any, completed: int, total: int) -> None:
@@ -1114,7 +1131,7 @@ def _run_scan_embedded(
         busy=True,
         review_visible=False,
         checklist=(
-            "Inspect every 10-second block inside configured conditions",
+            "Inspect 5-second windows with 50% overlap inside analyzed occurrences",
             "Look for electrodes that appear physically disconnected",
             "Screen exact on-bin condition spectra through the retained band",
         ),
@@ -1668,10 +1685,10 @@ def _review_removed_electrodes(
     _show_data_quality_notice(
         host,
         "Review electrodes that may have been removed before recording.",
-        "FPVS Toolbox will show one participant-by-participant table for "
-        "removed-electrode candidates, high-amplitude candidates, and "
-        "rare-burst candidates. Please confirm the list and add any electrodes "
-        "that were removed but are missing from the table.",
+        "FPVS Toolbox will show low-signal removed-electrode candidates. "
+        "High-amplitude, rare-burst, and spatial findings remain separate "
+        "review evidence and are not preselected for interpolation. Confirm the "
+        "list and add any physically removed electrodes that are missing.",
     )
     _begin_preflight_page(
         host,
@@ -2189,61 +2206,78 @@ def _format_uv(value: float | None) -> str:
 
 def _hard_candidate_flag(result: PreflightQcFileResult) -> str:
     if result.raw_qc_excluded and result.raw_spectral_widespread:
-        return "Hard raw + spectral QC"
+        return "Technical raw + spectral QC"
     if result.raw_qc_excluded:
-        return "Hard raw QC"
+        return "Technical raw QC"
+    if result.raw_qc_decision_review_required and result.raw_spectral_widespread:
+        return "Signal + spectral review"
+    if result.raw_qc_decision_review_required:
+        return "Signal review"
     if result.raw_spectral_widespread:
-        return "Raw spectral QC"
-    return "Participant QC"
+        return "Raw spectral review"
+    return "Recording review"
 
 
 def _hard_candidate_reason(result: PreflightQcFileResult) -> str:
     payload = result.raw_channel_qc or {}
-    rules = set(_payload_list(payload, "triggered_rules"))
-    if "raw_amplitude_baseline_failure" in rules:
-        return "Extremely noisy baseline"
-    if {"left_hemisphere_failure", "right_hemisphere_failure"} & rules:
-        return "Large cap-side failure"
-    if "bad_channel_cluster" in rules:
-        return "Large cluster of bad channels"
-    if {"bad_channel_count", "bad_channel_fraction"} & rules:
-        return "Too many bad channels"
+    rules = set(_payload_list(payload, "review_rules"))
+    rules.update(_payload_list(payload, "triggered_rules"))
+    if any(
+        str(finding.get("severity") or "") == "severe_review"
+        for finding in result.raw_amplitude_review_findings
+    ):
+        return "High raw signal amplitude"
+    if {
+        "left_hemisphere_candidate_burden_review",
+        "right_hemisphere_candidate_burden_review",
+        "left_hemisphere_failure",
+        "right_hemisphere_failure",
+    } & rules:
+        return "Candidates concentrated on one cap side"
+    if {"candidate_cluster_review", "bad_channel_cluster"} & rules:
+        return "Connected cluster of candidate channels"
+    if {
+        "candidate_count_review",
+        "candidate_fraction_review",
+        "bad_channel_count",
+        "bad_channel_fraction",
+    } & rules:
+        return "High candidate-channel burden"
     if result.raw_spectral_widespread:
         return "Widespread frequency artifact"
     if result.raw_qc_excluded:
-        return "Raw channel-health failure"
-    return "Participant-level QC failure"
+        return "Raw data could not be evaluated"
+    return "Recording-level signal review"
 
 
 def _hard_candidate_plain_explanation(result: PreflightQcFileResult) -> str:
     reason = _hard_candidate_reason(result)
-    if reason == "Extremely noisy baseline":
+    if reason == "High raw signal amplitude":
+        return SEVERE_RAW_AMPLITUDE_HELP_TEXT
+    if reason == "Candidates concentrated on one cap side":
         return (
-            "The participant's raw EEG baseline is far outside the expected range "
-            "across the cap. Interpolating a few electrodes is unlikely to rescue "
-            "this recording."
+            "Candidate channels are concentrated on one side of the cap. This is "
+            "a provisional review flag; inspect the evidence before deciding."
         )
-    if reason == "Large cap-side failure":
+    if reason == "Connected cluster of candidate channels":
         return (
-            "A large portion of one side of the cap failed the raw channel-health "
-            "check before preprocessing."
+            "Several nearby channels were flagged together using BioSemi64 sensor "
+            "positions. The cluster is review evidence, not an automatic exclusion."
         )
-    if reason == "Large cluster of bad channels":
+    if reason == "High candidate-channel burden":
         return (
-            "Several neighboring channels failed together, which is more serious "
-            "than an isolated bad electrode."
-        )
-    if reason == "Too many bad channels":
-        return (
-            "The raw channel-health check found too many problem channels for this "
-            "participant to enter the processed dataset safely."
+            "The count or fraction of candidate channels crossed a provisional "
+            "review threshold. The threshold alone does not show that the recording "
+            "is unusable."
         )
     if reason == "Widespread frequency artifact":
         return (
             "The raw spectral screen found a widespread artifact pattern before "
             "preprocessing."
         )
-    return "The participant met a project-level QC exclusion rule before preprocessing."
+    if result.raw_qc_excluded:
+        return "A technical raw-data check could not produce analyzable EEG samples."
+    return "The recording crossed a signal-review threshold before preprocessing."
 
 
 def _hard_candidate_detail_text(
@@ -2259,12 +2293,22 @@ def _hard_candidate_detail_text(
     baseline_p2p = _payload_float(raw_payload, "raw_baseline_median_p2p_99_uv")
     baseline_std_limit = _payload_float(
         thresholds,
-        "baseline_exclusion_median_std_uv",
+        "baseline_severe_review_median_std_uv",
     )
+    if baseline_std_limit is None:
+        baseline_std_limit = _payload_float(
+            thresholds,
+            "baseline_exclusion_median_std_uv",
+        )
     baseline_p2p_limit = _payload_float(
         thresholds,
-        "baseline_exclusion_median_p2p_99_uv",
+        "baseline_severe_review_median_p2p_99_uv",
     )
+    if baseline_p2p_limit is None:
+        baseline_p2p_limit = _payload_float(
+            thresholds,
+            "baseline_exclusion_median_p2p_99_uv",
+        )
     raw_message = result.raw_qc_message
     spectral_message = result.raw_spectral_message
     lines = [
@@ -2289,24 +2333,85 @@ def _hard_candidate_detail_text(
         lines.extend(
             [
                 "",
-                "Baseline metrics:",
+                "Full-occurrence aggregate metrics:",
                 f"- Median STD: {_format_uv(baseline_std)}"
                 + (
-                    f" (hard exclusion >= {_format_uv(baseline_std_limit)})"
+                    f" (severe review >= {_format_uv(baseline_std_limit)})"
                     if baseline_std_limit is not None
                     else ""
                 ),
                 f"- Median P2P99: {_format_uv(baseline_p2p)}"
                 + (
-                    f" (hard exclusion >= {_format_uv(baseline_p2p_limit)})"
+                    f" (severe review >= {_format_uv(baseline_p2p_limit)})"
                     if baseline_p2p_limit is not None
                     else ""
                 ),
             ]
         )
-    rule_lines = _payload_list(raw_payload, "triggered_rules")
+    if result.raw_amplitude_review_findings:
+        lines.extend(["", "Amplitude review evidence:"])
+        for finding in result.raw_amplitude_review_findings:
+            scope = str(finding.get("scope") or "analyzed interval").replace(
+                "_", " "
+            )
+            condition = str(finding.get("condition_label") or "").strip()
+            occurrence = finding.get("occurrence_display")
+            location = (
+                f"; {condition}, occurrence {occurrence}"
+                if condition and occurrence not in (None, "")
+                else ""
+            )
+            window_count = finding.get("diagnostic_window_count")
+            window_text = (
+                f"; {window_count} overlapping diagnostic window(s)"
+                if window_count not in (None, "")
+                else ""
+            )
+            union_spans = finding.get("flagged_window_union_spans")
+            span_text = (
+                f"; flagged-window union {union_spans}"
+                if isinstance(union_spans, Sequence)
+                and not isinstance(union_spans, (str, bytes))
+                else ""
+            )
+            lines.append(
+                "- "
+                + str(finding.get("severity") or "review").replace("_", " ")
+                + f" ({scope}{location}): median STD "
+                + _format_uv(_payload_float(finding, "median_std_uv"))
+                + ", median P2P99 "
+                + _format_uv(_payload_float(finding, "median_p2p_99_uv"))
+                + window_text
+                + span_text
+            )
+    rule_lines = _payload_list(raw_payload, "review_rules")
+    if not rule_lines:
+        rule_lines = _payload_list(raw_payload, "triggered_rules")
     if rule_lines:
-        lines.extend(["", "Triggered rule(s):", "- " + "\n- ".join(rule_lines)])
+        lines.extend(["", "Review rule(s):", "- " + "\n- ".join(rule_lines)])
+    if result.candidate_burden_findings:
+        lines.extend(["", "Candidate burden evidence:"])
+        for finding in result.candidate_burden_findings:
+            denominator = finding.get("denominator")
+            observed = finding.get("observed")
+            measured = (
+                f"{observed}/{denominator}"
+                if denominator not in (None, 0) and isinstance(observed, int)
+                else str(observed)
+            )
+            lines.append(
+                "- "
+                + str(finding.get("rule") or "candidate burden")
+                + f": observed {measured} {finding.get('comparator') or ''} "
+                + str(finding.get("threshold"))
+            )
+    if result.occurrence_review_findings:
+        lines.extend(["", "Condition / occurrence evidence:"])
+        lines.extend(
+            "- " + str(finding.get("statement") or "")
+            for finding in result.occurrence_review_findings
+            if str(finding.get("statement") or "").strip()
+        )
     bad_channels = _payload_list(raw_payload, "bad_channels")
     if bad_channels:
         lines.extend(["", "Flagged channel(s):", ", ".join(bad_channels)])
@@ -2334,6 +2439,7 @@ def _hard_candidate_row_values(
                 _hard_candidate_reason(result),
                 "",
                 "",
+                "",
             )
             for result in candidates
         ]
@@ -2343,6 +2449,7 @@ def _hard_candidate_row_values(
             _result_group_display_name(result, labels),
             _hard_candidate_flag(result),
             _hard_candidate_reason(result),
+            "",
             "",
         )
         for result in candidates
@@ -2383,6 +2490,14 @@ def _show_hard_exclusion_detail_dialog(
     explanation = QLabel(_hard_candidate_plain_explanation(result), dialog)
     explanation.setObjectName("participant_qc_details_explanation")
     explanation.setWordWrap(True)
+    if _hard_candidate_reason(result) == "High raw signal amplitude":
+        explanation.setText(
+            SEVERE_RAW_AMPLITUDE_HELP_TEXT
+            + f' <a href="{BIOSEMI_SHARED_NOISE_HELP_URL}">'
+            "BioSemi: referencing and shared noise</a>"
+        )
+        explanation.setTextFormat(Qt.RichText)
+        explanation.setOpenExternalLinks(True)
     layout.addWidget(explanation)
 
     details_edit = QPlainTextEdit(dialog)
@@ -2412,7 +2527,7 @@ def _install_hard_exclusion_details(
         return
     recording_mode = _recording_aware(candidates)
     identity_column = 1 if recording_mode else _HARD_EXCLUSION_PID_COLUMN
-    details_column = 8 if recording_mode else _HARD_EXCLUSION_DETAILS_COLUMN
+    details_column = 9 if recording_mode else _HARD_EXCLUSION_DETAILS_COLUMN
     candidate_by_pid = {_identity_id(result).casefold(): result for result in candidates}
     details_by_pid = {
         _identity_id(result).casefold(): _hard_candidate_detail_text(
@@ -2847,6 +2962,39 @@ def _confirm_condition_crop_exclusions(
     return True
 
 
+def _selected_hard_exclusions(
+    table: Any,
+    candidates: Sequence[PreflightQcFileResult],
+    *,
+    recording_mode: bool,
+) -> list[tuple[PreflightQcFileResult, str]]:
+    """Return only rows explicitly set to Exclude; unselected rows are safe."""
+
+    decision_column = 7 if recording_mode else _HARD_EXCLUSION_DECISION_COLUMN
+    scope_column = 8 if recording_mode else None
+    selected: list[tuple[PreflightQcFileResult, str]] = []
+    for row, result in enumerate(candidates):
+        decision_widget = table.cellWidget(row, decision_column)
+        decision = (
+            str(decision_widget.currentData())
+            if decision_widget is not None
+            and hasattr(decision_widget, "currentData")
+            else _HARD_EXCLUSION_DECISION_UNSELECTED
+        )
+        if decision != _HARD_EXCLUSION_DECISION_EXCLUDE:
+            continue
+        scope = "participant"
+        if scope_column is not None:
+            scope_widget = table.cellWidget(row, scope_column)
+            scope = (
+                str(scope_widget.currentData())
+                if scope_widget is not None and hasattr(scope_widget, "currentData")
+                else "recording"
+            )
+        selected.append((result, scope))
+    return selected
+
+
 def _confirm_hard_exclusions(
     host: Any,
     params: dict[str, Any],
@@ -2865,20 +3013,20 @@ def _confirm_hard_exclusions(
             else "Review participants that may need to be excluded."
         ),
         (
-            "FPVS Toolbox found recording-level data quality problems. Choose "
-            "whether each candidate applies only to that recording or to the "
-            "participant across all visits."
+            "FPVS Toolbox found recording-level review flags. Review the "
+            "evidence, then choose whether to continue or explicitly exclude "
+            "the recording or participant."
             if recording_mode
-            else "FPVS Toolbox found participant-level data quality problems. The "
-            "next screen lists the candidates and lets you add them to the manual "
-            "participant exclusion list before processing starts."
+            else "FPVS Toolbox found participant-level review flags. The next "
+            "screen lets you continue or explicitly add them to the manual "
+            "participant exclusion list."
         ),
     )
     _begin_preflight_page(
         host,
         step=_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
-        title="Confirm Participant Exclusions",
-        message="Review participant-level data quality failures before processing begins.",
+        title="Review Possible Exclusions",
+        message="Review signal evidence before deciding whether to exclude data.",
         busy=False,
         review_visible=True,
         review_title=(
@@ -2888,9 +3036,9 @@ def _confirm_hard_exclusions(
         ),
         progress_visible=False,
         checklist=(
-            "Review recordings with hard data quality failures"
+            "Review recording-level signal evidence"
             if recording_mode
-            else "Review participants with hard data quality failures",
+            else "Review participant-level signal evidence",
             "Choose single-recording or participant-wide scope"
             if recording_mode
             else "Add confirmed cases to the participant exclusion list",
@@ -2900,21 +3048,39 @@ def _confirm_hard_exclusions(
     _set_label(
         host,
         "processing_summary_label",
-        "FPVS Toolbox found recording-level data quality failures that should "
-        "not enter the processed dataset."
+        "FPVS Toolbox found recording-level review flags. These flags do not "
+        "exclude data automatically."
         if recording_mode
-        else "FPVS Toolbox found participant-level data quality failures that "
-        "should not enter the processed dataset.",
+        else "FPVS Toolbox found participant-level review flags. These flags do "
+        "not exclude data automatically.",
     )
-    _set_label(
-        host,
-        "processing_current_file_label",
-        "Session/phase-at-visit and visit order are distinct; fixed order can "
-        "confound them. Review scope for each candidate below."
-        if recording_mode
-        else "Review the candidates below. You can add them to the manual "
-        "participant exclusion list or continue without changing the list.",
+    amplitude_review = any(
+        any(
+            str(finding.get("severity") or "") == "severe_review"
+            for finding in result.raw_amplitude_review_findings
+        )
+        for result in candidates
     )
+    if amplitude_review:
+        _set_amplitude_help_label(
+            host,
+            "processing_current_file_label",
+            (
+                "Review scope for each candidate below."
+                if recording_mode
+                else "Review the candidates below."
+            ),
+        )
+    else:
+        _set_label(
+            host,
+            "processing_current_file_label",
+            "Session/phase-at-visit and visit order are distinct; fixed order can "
+            "confound them. Review scope for each candidate below."
+            if recording_mode
+            else "Review the candidates below. You can add them to the manual "
+            "participant exclusion list or continue without changing the list.",
+        )
     if recording_mode:
         headers = (
             "Participant",
@@ -2924,12 +3090,13 @@ def _confirm_hard_exclusions(
             "Group",
             "Flag",
             "Reason",
+            "Decision",
             "Scope",
             "More info",
         )
         stretch_column = 6
     else:
-        headers = ("PID", "Group", "Flag", "Reason", "More info")
+        headers = ("PID", "Group", "Flag", "Reason", "Decision", "More info")
         stretch_column = _HARD_EXCLUSION_REASON_COLUMN
     _set_preflight_table(
         host,
@@ -2939,26 +3106,53 @@ def _confirm_hard_exclusions(
         center_columns=True,
     )
     table = getattr(host, "processing_files_table", None)
-    if recording_mode and table is not None:
+    if table is not None:
         for row in range(len(candidates)):
-            scope = QComboBox(table)
-            scope.setObjectName(f"hard_exclusion_scope_{row}")
-            scope.addItem("This recording", "recording")
-            scope.addItem("Participant (all visits)", "participant")
-            scope.setToolTip(
-                "Recording scope excludes one visit. Participant scope excludes "
-                "all current and future visits for this participant."
+            decision = QComboBox(table)
+            decision.setObjectName(f"hard_exclusion_decision_{row}")
+            decision.addItem(
+                "No exclusion selected",
+                _HARD_EXCLUSION_DECISION_UNSELECTED,
             )
-            _install_preflight_cell_widget(table, row, 7, scope)
+            decision.addItem("Include / keep available", _HARD_EXCLUSION_DECISION_KEEP)
+            decision.addItem("Exclude", _HARD_EXCLUSION_DECISION_EXCLUDE)
+            decision.setToolTip(
+                "Choose Exclude only after reviewing this row. The default does "
+                "not exclude anything."
+            )
+            _install_preflight_cell_widget(
+                table,
+                row,
+                7 if recording_mode else _HARD_EXCLUSION_DECISION_COLUMN,
+                decision,
+            )
+            if recording_mode:
+                scope = QComboBox(table)
+                scope.setObjectName(f"hard_exclusion_scope_{row}")
+                scope.addItem("This recording", "recording")
+                scope.addItem("Participant (all visits)", "participant")
+                scope.setToolTip(
+                    "Recording scope excludes one visit. Participant scope excludes "
+                    "all current and future visits for this participant."
+                )
+                _install_preflight_cell_widget(table, row, 8, scope)
     _install_hard_exclusion_details(host, candidates, group_labels)
     choice = _await_preflight_choice(
         host,
         (
-            ("Add Exclusions", "add", "primary"),
-            ("Continue Without Adding", "skip", "secondary"),
+            ("Apply Review Decisions", "apply", "primary"),
+            ("Continue Without Changes", "skip", "secondary"),
         ),
     )
-    if choice != "add":
+    if choice != "apply" or table is None:
+        return set()
+
+    selected_rows = _selected_hard_exclusions(
+        table,
+        candidates,
+        recording_mode=recording_mode,
+    )
+    if not selected_rows:
         return set()
 
     current = normalize_manual_excluded_participants(
@@ -2971,13 +3165,7 @@ def _confirm_hard_exclusions(
         participant_additions: list[str] = []
         recording_additions: list[str] = []
         accepted: set[str] = set()
-        for row, result in enumerate(candidates):
-            scope_widget = table.cellWidget(row, 7) if table is not None else None
-            scope = (
-                str(scope_widget.currentData())
-                if isinstance(scope_widget, QComboBox)
-                else "recording"
-            )
+        for result, scope in selected_rows:
             if scope == "participant":
                 participant_additions.append(result.participant_id)
                 accepted.add(result.participant_id.casefold())
@@ -2992,10 +3180,13 @@ def _confirm_hard_exclusions(
         )
     else:
         updated = normalize_manual_excluded_participants(
-            [*current, *(result.participant_id for result in candidates)]
+            [*current, *(result.participant_id for result, _scope in selected_rows)]
         )
         updated_recordings = current_recordings
-        accepted = {result.participant_id.casefold() for result in candidates}
+        accepted = {
+            result.participant_id.casefold()
+            for result, _scope in selected_rows
+        }
     updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
     updated_preproc["manual_excluded_participants"] = updated
     updated_preproc["manual_excluded_recordings"] = updated_recordings
@@ -3092,51 +3283,169 @@ def _remaining_review_rows(
     labels = group_labels or {}
     recording_mode = _recording_aware(scan.results)
     rows: list[tuple[str, ...]] = []
+
+    def append_row(result: PreflightQcFileResult, review_item: str) -> None:
+        if recording_mode:
+            rows.append(
+                (
+                    result.participant_id,
+                    result.recording_id or "Not registered",
+                    _session_label(result),
+                    _visit_label(result),
+                    _result_group_display_name(result, labels),
+                    result.path.name,
+                    review_item,
+                )
+            )
+        else:
+            rows.append(
+                (
+                    result.participant_id,
+                    _result_group_display_name(result, labels),
+                    result.path.name,
+                    review_item,
+                )
+            )
+
     for result in scan.suspicious_results:
         if (
             result.participant_id.casefold() in accepted_hard_exclusions
             or result.identity_id.casefold() in accepted_hard_exclusions
         ):
             continue
-        fragments: list[str] = []
         if result.load_error:
-            fragments.append(f"could not be scanned ({result.load_error})")
-        if result.warning_rules:
-            fragments.append(
-                "raw data warning rule(s): " + ", ".join(result.warning_rules)
+            append_row(result, f"Could not be scanned ({result.load_error}).")
+
+        for finding in result.raw_amplitude_review_findings:
+            condition = str(finding.get("condition_label") or "").strip()
+            occurrence = finding.get("occurrence_display")
+            location = (
+                f" in {condition}, occurrence {occurrence}"
+                if condition and occurrence not in (None, "")
+                else " across the recording's analyzed intervals"
             )
-        if result.spatial_outlier_channels:
-            fragments.append(
-                "spatially inconsistent channel(s): "
-                + ", ".join(result.spatial_outlier_channels)
+            severity = str(finding.get("severity") or "review").replace("_", " ")
+            window_count = finding.get("diagnostic_window_count")
+            union_spans = finding.get("flagged_window_union_spans")
+            window_scope = (
+                f" {window_count} overlapping diagnostic window(s); "
+                f"flagged-window union {union_spans}."
+                if window_count not in (None, "")
+                else ""
+            )
+            append_row(
+                result,
+                f"High raw signal amplitude ({severity}){location}: median STD "
+                f"{_format_uv(_payload_float(finding, 'median_std_uv'))}; median "
+                f"P2P99 {_format_uv(_payload_float(finding, 'median_p2p_99_uv'))}."
+                f"{window_scope} "
+                f"{SEVERE_RAW_AMPLITUDE_HELP_TEXT} BioSemi help: "
+                f"{BIOSEMI_SHARED_NOISE_HELP_URL}",
+            )
+
+        for finding in result.candidate_burden_findings:
+            channels = _payload_list(finding, "channels")
+            denominator = finding.get("denominator")
+            observed = finding.get("observed")
+            observed_text = (
+                f"{observed}/{denominator}"
+                if isinstance(observed, int) and denominator not in (None, 0)
+                else str(observed)
+            )
+            append_row(
+                result,
+                "Candidate burden review: "
+                + str(finding.get("rule") or "threshold").replace("_", " ")
+                + f"; observed {observed_text} {finding.get('comparator') or ''} "
+                + str(finding.get("threshold"))
+                + (f"; channels {', '.join(channels)}" if channels else "")
+                + ". Review only; no automatic exclusion or interpolation.",
+            )
+
+        for finding in result.occurrence_review_findings:
+            statement = str(finding.get("statement") or "").strip()
+            categories = _payload_list(finding, "categories")
+            bounds = (
+                finding.get("start_sample"),
+                finding.get("stop_sample"),
+            )
+            append_row(
+                result,
+                statement
+                + (f" Category: {', '.join(categories)}." if categories else "")
+                + (
+                    f" Analyzed samples: [{bounds[0]}, {bounds[1]})."
+                    if None not in bounds
+                    else ""
+                ),
+            )
+
+        for finding in result.transient_review_findings:
+            append_row(
+                result,
+                f"{finding.get('channel') or 'Channel'} had a transient "
+                f"{str(finding.get('category') or 'signal').replace('_', ' ')} "
+                f"flag in {finding.get('condition_label') or 'condition'}, occurrence "
+                f"{finding.get('occurrence_display') or '?'}, across "
+                f"{finding.get('diagnostic_window_count') or 0} overlapping "
+                "diagnostic window(s). Reported coverage is the union of flagged "
+                "windows, not measured artifact duration.",
+            )
+
+        for scope_row in result.occurrence_evaluation_scope:
+            if scope_row.get("evaluation_status") != "not_evaluated":
+                continue
+            reason = str(scope_row.get("reason") or "unavailable").replace("_", " ")
+            append_row(
+                result,
+                f"{scope_row.get('condition_label') or 'Condition'}, occurrence "
+                f"{scope_row.get('occurrence_display') or '?'}: Not evaluated "
+                f"({reason}). It is excluded from the evaluated comparison count.",
+            )
+
+        if result.raw_channel_qc is not None and not result.experimental_detector_evaluated:
+            append_row(
+                result,
+                "Experimental removed-electrode assessment: Not evaluated "
+                "(disabled in project settings). No detector finding is inferred.",
+            )
+
+        structured_channel_findings = bool(
+            result.occurrence_review_findings or result.transient_review_findings
+        )
+        if not structured_channel_findings and result.high_amplitude_channels:
+            append_row(
+                result,
+                "High-amplitude channel review: "
+                + ", ".join(result.high_amplitude_channels),
+            )
+        if not structured_channel_findings and result.rare_burst_channels:
+            append_row(
+                result,
+                "Rare-burst channel review: " + ", ".join(result.rare_burst_channels),
+            )
+        if not structured_channel_findings and result.spatial_outlier_channels:
+            append_row(
+                result,
+                "Spatially inconsistent channel review: "
+                + ", ".join(result.spatial_outlier_channels),
+            )
+        if (
+            result.review_rules
+            and not result.raw_amplitude_review_findings
+            and not result.candidate_burden_findings
+            and not structured_channel_findings
+        ):
+            append_row(
+                result,
+                "Raw-data review rule(s): " + ", ".join(result.review_rules),
             )
         if result.raw_spectral_flagged_channels and not result.raw_spectral_widespread:
-            fragments.append(
-                "localized raw spectral flag(s): "
-                + ", ".join(result.raw_spectral_flagged_channels[:8])
+            append_row(
+                result,
+                "Localized raw spectral flag(s): "
+                + ", ".join(result.raw_spectral_flagged_channels[:8]),
             )
-        if fragments:
-            if recording_mode:
-                rows.append(
-                    (
-                        result.participant_id,
-                        result.recording_id or "Not registered",
-                        _session_label(result),
-                        _visit_label(result),
-                        _result_group_display_name(result, labels),
-                        result.path.name,
-                        "; ".join(fragments),
-                    )
-                )
-            else:
-                rows.append(
-                    (
-                        result.participant_id,
-                        _result_group_display_name(result, labels),
-                        result.path.name,
-                        "; ".join(fragments),
-                    )
-                )
     return rows
 
 
@@ -3166,23 +3475,23 @@ def _show_suspicious_remainder(
 
     _show_data_quality_notice(
         host,
-        "Some items should be reviewed later.",
-        "FPVS Toolbox found non-electrode-removal review items. These items will "
-        "not stop processing, but you should review them before relying on the "
-        "affected results.",
+        "Signal findings remain for review.",
+        "FPVS Toolbox found recording-, condition-, or occurrence-level signal "
+        "findings. They will not stop processing automatically, but should be "
+        "reviewed before relying on the affected results.",
         details=report_message,
     )
     _begin_preflight_page(
         host,
         step=_REVIEW_OTHER_FLAGS_STEP,
-        title="Review Other Flags",
-        message="FPVS Toolbox found non-electrode-removal items that should be reviewed later.",
+        title="Review Signal Flags",
+        message="Review recording, condition, and occurrence signal findings.",
         busy=False,
         review_visible=True,
         review_title="Review Flags",
         progress_visible=False,
         checklist=(
-            "Review non-electrode-removal flags",
+            "Review recording, condition, and occurrence scope",
             "Use the saved workbook as a later review checklist",
             "Continue processing when you have noted the flagged items",
         ),
@@ -3190,13 +3499,21 @@ def _show_suspicious_remainder(
     _set_label(
         host,
         "processing_summary_label",
-        "FPVS Toolbox found non-electrode-removal review flags.",
+        "FPVS Toolbox found signal-review flags that do not change data automatically.",
     )
-    _set_label(
-        host,
-        "processing_current_file_label",
-        f"Please make note of these and manually investigate them later. {report_message}",
-    )
+    if any(result.raw_amplitude_review_findings for result in scan.results):
+        _set_amplitude_help_label(
+            host,
+            "processing_current_file_label",
+            "Review the amplitude findings below. " + report_message,
+        )
+    else:
+        _set_label(
+            host,
+            "processing_current_file_label",
+            "Please make note of these and manually investigate them later. "
+            + report_message,
+        )
     _set_preflight_table(
         host,
         (

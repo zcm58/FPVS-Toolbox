@@ -21,7 +21,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 PREFLIGHT_QC_CACHE_SCHEMA_VERSION = 1
-PREFLIGHT_QC_CACHE_METHOD_DIRECTORY = "v5_analyzed_interval_coordinates"
+PREFLIGHT_QC_CACHE_METHOD_DIRECTORY = "v6_five_second_overlapping_transients"
 PREFLIGHT_QC_CACHE_RELATIVE_DIRECTORY = (
     Path(".fpvs_processing")
     / "preflight_qc"

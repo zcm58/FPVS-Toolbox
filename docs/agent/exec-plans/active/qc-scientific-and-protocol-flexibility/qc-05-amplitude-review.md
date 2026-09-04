@@ -5,9 +5,25 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** accepted on 2026-09-03. The user explicitly requested a flag with
-short, understandable GUI text explaining the concept and linking to BioSemi.
-Implementation waits for the completed cumulative plan.
+**Status:** implemented on 2026-09-04 in the Wave-2 signal-review slice. The
+local non-GUI checks pass; CI/visible GUI smoke remains for the link surface.
+
+### Implementation Progress
+
+- Warning and severe raw-amplitude measurements are preserved on the approved
+  analyzed intervals. Severe amplitude now has review-only authority and no
+  longer returns a raw-QC exclusion by itself.
+- The preflight decision review shows the accepted brief explanation and a
+  clickable BioSemi CMS/DRL/referencing link for warning and severe findings.
+  Details distinguish full-occurrence aggregates from bounded-window peaks and
+  retain condition, occurrence, window-union, and measured-value provenance.
+- Processing cache/audit metadata now carries the method version, amplitude
+  finding, and severe-review state. The runner continues after amplitude-only
+  findings. Technical no-sample failures remain independent.
+- Visible GUI smoke for CI/manual validation: exercise one warning-only and one
+  severe bounded-window finding, open **More info**, confirm aggregate and
+  window values are distinguished, and open the BioSemi link from each review
+  page in the system browser.
 
 ### Current Behavior and Scientific Basis
 

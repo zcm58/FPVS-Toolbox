@@ -61,12 +61,16 @@ from Main_App.processing.analysis_spans import (
     validate_source_analysis_span_plan,
 )
 from Main_App.processing.removed_electrode_detection import (
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     manual_removed_electrodes_for_pid,
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
 )
-from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
+from Main_App.processing.raw_channel_qc import (
+    RAW_CHANNEL_QC_METHOD_VERSION,
+    evaluate_raw_channel_qc,
+)
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocol,
     FrequencyProtocolError,
@@ -122,6 +126,22 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(item) for item in value if str(item).strip()]
     return []
+
+
+def _mapping_list(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _string_list_mapping(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): _string_list(items)
+        for key, items in value.items()
+        if str(key).strip()
+    }
 
 
 def _project_frequency_protocol(settings: Mapping[str, object]) -> FrequencyProtocol:
@@ -834,6 +854,13 @@ def _preproc_cache_payload(
         if event_map is not None
         else None
     )
+    effective_detector_mode = normalize_removed_electrode_detection_mode(
+        settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=settings.get(
+            "auto_detect_removed_electrodes",
+            True,
+        ),
+    )
     relevant_settings = {
         "high_pass": settings.get("high_pass"),
         "low_pass": settings.get("low_pass"),
@@ -855,12 +882,16 @@ def _preproc_cache_payload(
             "max_bad_chans",
             settings.get("max_bad_channels_alert_thresh"),
         ),
-        "auto_detect_removed_electrodes": settings.get(
-            "auto_detect_removed_electrodes",
-            True,
+        "raw_channel_qc_method_version": RAW_CHANNEL_QC_METHOD_VERSION,
+        "auto_detect_removed_electrodes": (
+            effective_detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         ),
-        "removed_electrode_detection_mode": settings.get(
-            "removed_electrode_detection_mode",
+        "removed_electrode_detection_mode": effective_detector_mode,
+        "manual_removed_electrodes_enabled": bool(
+            settings.get("manual_removed_electrodes_enabled", False)
+        ),
+        "removed_electrode_detection_choice_schema_version": settings.get(
+            "removed_electrode_detection_choice_schema_version"
         ),
         "manual_removed_electrodes_for_file": _manual_removed_electrodes_for_file(
             file_path,
@@ -1083,6 +1114,24 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_warning_rules"] = _string_list(
             metadata.get("raw_qc_warning_rules")
         )
+        settings["_fpvs_raw_qc_method_version"] = str(
+            metadata.get("raw_qc_method_version") or ""
+        )
+        settings["_fpvs_raw_qc_review_rules"] = _string_list(
+            metadata.get("raw_qc_review_rules")
+        )
+        settings["_fpvs_raw_qc_candidate_sources"] = _string_list_mapping(
+            metadata.get("raw_qc_candidate_sources")
+        )
+        settings["_fpvs_raw_qc_candidate_burden_findings"] = _mapping_list(
+            metadata.get("raw_qc_candidate_burden_findings")
+        )
+        settings["_fpvs_raw_qc_amplitude_review_findings"] = _mapping_list(
+            metadata.get("raw_qc_amplitude_review_findings")
+        )
+        settings["_fpvs_raw_qc_baseline_severe_review"] = bool(
+            metadata.get("raw_qc_baseline_severe_review")
+        )
         settings["_fpvs_raw_qc_baseline_median_std_uv"] = _float_or_zero(
             metadata.get("raw_qc_baseline_median_std_uv")
         )
@@ -1254,6 +1303,24 @@ def _store_preprocessed_cache(
             "raw_qc_warning_rules": _string_list(
                 settings.get("_fpvs_raw_qc_warning_rules")
             ),
+            "raw_qc_method_version": str(
+                settings.get("_fpvs_raw_qc_method_version") or ""
+            ),
+            "raw_qc_review_rules": _string_list(
+                settings.get("_fpvs_raw_qc_review_rules")
+            ),
+            "raw_qc_candidate_sources": _string_list_mapping(
+                settings.get("_fpvs_raw_qc_candidate_sources")
+            ),
+            "raw_qc_candidate_burden_findings": _mapping_list(
+                settings.get("_fpvs_raw_qc_candidate_burden_findings")
+            ),
+            "raw_qc_amplitude_review_findings": _mapping_list(
+                settings.get("_fpvs_raw_qc_amplitude_review_findings")
+            ),
+            "raw_qc_baseline_severe_review": bool(
+                settings.get("_fpvs_raw_qc_baseline_severe_review")
+            ),
             "raw_qc_baseline_median_std_uv": _float_or_zero(
                 settings.get("_fpvs_raw_qc_baseline_median_std_uv")
             ),
@@ -1407,6 +1474,7 @@ def _run_full_pipeline_for_file(
     """
     t0 = time.perf_counter()
     timings_ms: Dict[str, int] = {}
+    export_receipts: List[Dict[str, object]] = []
     cache_status = "not_checked"
     settings = _settings_for_file(file_path, settings)
 
@@ -1663,6 +1731,12 @@ def _run_full_pipeline_for_file(
             settings["_fpvs_raw_qc_spatial_outlier_channels"] = []
             settings["_fpvs_raw_qc_manual_removed_channels"] = []
             settings["_fpvs_raw_qc_warning_rules"] = []
+            settings["_fpvs_raw_qc_method_version"] = RAW_CHANNEL_QC_METHOD_VERSION
+            settings["_fpvs_raw_qc_review_rules"] = []
+            settings["_fpvs_raw_qc_candidate_sources"] = {}
+            settings["_fpvs_raw_qc_candidate_burden_findings"] = []
+            settings["_fpvs_raw_qc_amplitude_review_findings"] = []
+            settings["_fpvs_raw_qc_baseline_severe_review"] = False
             settings["_fpvs_raw_qc_baseline_median_std_uv"] = 0.0
             settings["_fpvs_raw_qc_baseline_median_p2p_99_uv"] = 0.0
             settings["_fpvs_raw_qc_baseline_warning"] = False
@@ -1748,6 +1822,24 @@ def _run_full_pipeline_for_file(
                 raw_qc_result.manual_removed_channels
             )
             settings["_fpvs_raw_qc_warning_rules"] = list(raw_qc_result.warning_rules)
+            raw_qc_payload = raw_qc_result.to_payload()
+            settings["_fpvs_raw_qc_method_version"] = str(
+                raw_qc_payload.get("method_version") or RAW_CHANNEL_QC_METHOD_VERSION
+            )
+            settings["_fpvs_raw_qc_review_rules"] = list(raw_qc_result.review_rules)
+            settings["_fpvs_raw_qc_candidate_sources"] = {
+                str(channel): list(sources)
+                for channel, sources in raw_qc_result.candidate_sources.items()
+            }
+            settings["_fpvs_raw_qc_candidate_burden_findings"] = [
+                dict(finding) for finding in raw_qc_result.burden_findings
+            ]
+            settings["_fpvs_raw_qc_amplitude_review_findings"] = _mapping_list(
+                raw_qc_payload.get("raw_amplitude_review_findings")
+            )
+            settings["_fpvs_raw_qc_baseline_severe_review"] = (
+                raw_qc_result.raw_baseline_severe_review
+            )
             settings["_fpvs_raw_qc_baseline_median_std_uv"] = (
                 raw_qc_result.raw_baseline_median_std_uv
             )
@@ -2134,6 +2226,8 @@ def _run_full_pipeline_for_file(
                     {
                         "crop_mode": "project_marker_plan_target_grid_v2",
                         "oddball_id": marker_code,
+                        "occurrence_key": occurrence_key,
+                        "repetition_index": repetition_index,
                         "n55": len(retained_samples),
                         "first55_samp": first_marker,
                         "last55_samp": last_marker,
@@ -2235,6 +2329,7 @@ def _run_full_pipeline_for_file(
             settings=settings,
             log=_worker_log,
             export_timing_records=export_timing_records,
+            export_receipts=export_receipts,
         )
         fif_written = run_post_export(ctx, list(event_map.keys()))
         logger.debug(
@@ -2380,6 +2475,24 @@ def _run_full_pipeline_for_file(
         audit_after["raw_qc_scoring_sample_count"] = int(
             settings.get("_fpvs_raw_qc_scoring_sample_count") or 0
         )
+        audit_after["raw_qc_method_version"] = str(
+            settings.get("_fpvs_raw_qc_method_version") or ""
+        )
+        audit_after["raw_qc_review_rules"] = _string_list(
+            settings.get("_fpvs_raw_qc_review_rules")
+        )
+        audit_after["raw_qc_candidate_sources"] = _string_list_mapping(
+            settings.get("_fpvs_raw_qc_candidate_sources")
+        )
+        audit_after["raw_qc_candidate_burden_findings"] = _mapping_list(
+            settings.get("_fpvs_raw_qc_candidate_burden_findings")
+        )
+        audit_after["raw_qc_amplitude_review_findings"] = _mapping_list(
+            settings.get("_fpvs_raw_qc_amplitude_review_findings")
+        )
+        audit_after["raw_qc_baseline_severe_review"] = bool(
+            settings.get("_fpvs_raw_qc_baseline_severe_review")
+        )
 
         logger.debug(
             "[PIPELINE] %s: audit complete n_rejected=%s problems=%s",
@@ -2461,6 +2574,7 @@ def _run_full_pipeline_for_file(
             "events_info": events_info,
             "timings_ms": dict(timings_ms),
             "export_timing_records": export_timing_records,
+            "export_receipts": export_receipts,
             "preproc_cache_status": cache_status,
             "post_export_ok": True,
             "source_derivative_status": source_derivative_status,
@@ -2505,6 +2619,8 @@ def _run_full_pipeline_for_file(
                 }
             )
         error_result.update(interpolation)
+        if stage == "export":
+            error_result["export_receipts"] = list(export_receipts)
         error_result["audit"] = failure_audit
         return error_result
     finally:

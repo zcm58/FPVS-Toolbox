@@ -36,6 +36,9 @@ from Main_App.processing.preflight_qc_plan import (
     PREFLIGHT_QC_MAX_WORKERS,
     PREFLIGHT_QC_METHOD_NAME,
     PREFLIGHT_QC_METHOD_VERSION,
+    PREFLIGHT_QC_TRANSIENT_TAIL_POLICY,
+    PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S,
+    PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S,
     ConditionQcSpan,
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
@@ -59,10 +62,6 @@ from Main_App.processing.raw_spectral_qc import (
     ConditionSpectralQCThresholds,
     evaluate_condition_spectral_qc_v2,
 )
-from Main_App.processing.removed_electrode_detection import (
-    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
-)
-
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
@@ -148,6 +147,61 @@ class PreflightQcFileResult:
             return ()
         return tuple(str(value) for value in values if str(value).strip())
 
+    @staticmethod
+    def _mapping_rows(
+        payload: Mapping[str, object] | None,
+        key: str,
+    ) -> tuple[Mapping[str, object], ...]:
+        values = (payload or {}).get(key)
+        if not isinstance(values, Sequence) or isinstance(values, str):
+            return ()
+        return tuple(value for value in values if isinstance(value, Mapping))
+
+    @property
+    def review_rules(self) -> tuple[str, ...]:
+        payload = self.raw_channel_qc or {}
+        values = payload.get("review_rules")
+        if not isinstance(values, Sequence) or isinstance(values, str):
+            return self.warning_rules
+        return tuple(str(value) for value in values if str(value).strip())
+
+    @property
+    def candidate_burden_findings(self) -> tuple[Mapping[str, object], ...]:
+        return self._mapping_rows(self.raw_channel_qc, "candidate_burden_findings")
+
+    @property
+    def raw_amplitude_review_findings(self) -> tuple[Mapping[str, object], ...]:
+        return self._mapping_rows(self.raw_channel_qc, "raw_amplitude_review_findings")
+
+    @property
+    def occurrence_review_findings(self) -> tuple[Mapping[str, object], ...]:
+        return self._mapping_rows(self.raw_channel_qc, "occurrence_review_findings")
+
+    @property
+    def transient_review_findings(self) -> tuple[Mapping[str, object], ...]:
+        return self._mapping_rows(self.raw_channel_qc, "transient_review_findings")
+
+    @property
+    def occurrence_evaluation_scope(self) -> tuple[Mapping[str, object], ...]:
+        return self._mapping_rows(self.raw_channel_qc, "occurrence_evaluation_scope")
+
+    @property
+    def experimental_detector_evaluated(self) -> bool:
+        payload = self.raw_channel_qc or {}
+        detector = payload.get("experimental_removed_electrode_detector")
+        return bool(
+            isinstance(detector, Mapping)
+            and detector.get("evaluation_status") == "evaluated"
+        )
+
+    @property
+    def raw_qc_decision_review_required(self) -> bool:
+        severe_amplitude = any(
+            str(finding.get("severity") or "") == "severe_review"
+            for finding in self.raw_amplitude_review_findings
+        )
+        return severe_amplitude or bool(self.candidate_burden_findings)
+
     @property
     def raw_qc_excluded(self) -> bool:
         payload = self.raw_channel_qc or {}
@@ -191,15 +245,7 @@ class PreflightQcScan:
     def suggested_removed_electrodes(self) -> dict[str, list[str]]:
         suggestions: dict[str, list[str]] = {}
         for result in self.results:
-            channels = list(
-                dict.fromkeys(
-                    [
-                        *result.auto_removed_electrodes,
-                        *result.high_amplitude_channels,
-                        *result.rare_burst_channels,
-                    ]
-                )
-            )
+            channels = list(dict.fromkeys(result.auto_removed_electrodes))
             if not channels:
                 continue
             suggestions[result.identity_id] = channels
@@ -210,7 +256,9 @@ class PreflightQcScan:
         return tuple(
             result
             for result in self.results
-            if result.raw_qc_excluded or result.raw_spectral_widespread
+            if result.raw_qc_excluded
+            or result.raw_spectral_widespread
+            or result.raw_qc_decision_review_required
         )
 
     @property
@@ -219,10 +267,19 @@ class PreflightQcScan:
             result
             for result in self.results
             if result.load_error
-            or result.warning_rules
+            or result.review_rules
             or result.high_amplitude_channels
             or result.rare_burst_channels
             or result.spatial_outlier_channels
+            or result.candidate_burden_findings
+            or result.raw_amplitude_review_findings
+            or result.occurrence_review_findings
+            or result.transient_review_findings
+            or any(
+                row.get("evaluation_status") == "not_evaluated"
+                for row in result.occurrence_evaluation_scope
+            )
+            or not result.experimental_detector_evaluated
             or (
                 result.raw_spectral_flagged_channels
                 and not result.raw_spectral_widespread
@@ -645,14 +702,6 @@ def scan_recording_not_started_files(
     return tuple(flagged)
 
 
-def _auto_qc_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
-    payload = dict(settings)
-    payload["auto_detect_removed_electrodes"] = True
-    payload["removed_electrode_detection_mode"] = REMOVED_ELECTRODE_DETECTION_MODE_AUTO
-    payload["_fpvs_manual_removed_electrodes"] = []
-    return payload
-
-
 class _LogShim:
     def log(self, message: str, *args: Any, **kwargs: Any) -> None:
         _ = args, kwargs
@@ -815,8 +864,9 @@ def _condition_data_buffer(
     """Yield one condition without ever materializing the full recording.
 
     Ordinary condition intervals remain in RAM and are read once. Unusually
-    long intervals are copied, in the same ten-second chunks used by the
-    time-domain QC, into a temporary condition-only float64 memmap. Both paths
+    long intervals are copied in bounded ten-second I/O chunks into a temporary
+    condition-only float64 memmap. Diagnostic windowing is planned separately
+    after the occurrence buffer is complete. Both paths
     expose the same array values to the QC math; the disk-backed path only
     changes where the condition buffer lives.
     """
@@ -889,10 +939,9 @@ def _condition_blocks(
     span: ConditionQcSpan,
     sfreq: float,
 ) -> tuple[ConditionRawChannelQCBlock, ...]:
-    block_samples = max(1, int(round(PREFLIGHT_QC_BLOCK_DURATION_S * sfreq)))
+    bounds = _transient_window_bounds(data.shape[1], sfreq=sfreq)
     blocks: list[ConditionRawChannelQCBlock] = []
-    for local_start in range(0, data.shape[1], block_samples):
-        local_stop = min(data.shape[1], local_start + block_samples)
+    for index, (local_start, local_stop, window_kind) in enumerate(bounds):
         absolute_start = int(span.time_start_sample) + local_start
         absolute_stop = int(span.time_start_sample) + local_stop
         blocks.append(
@@ -902,10 +951,115 @@ def _condition_blocks(
                 start_sample=absolute_start,
                 stop_sample=absolute_stop,
                 data=data[:, local_start:local_stop],
-                is_final=local_stop == data.shape[1],
+                is_final=index == len(bounds) - 1,
+                window_kind=window_kind,
             )
         )
     return tuple(blocks)
+
+
+def _transient_window_bounds(
+    sample_count: int,
+    *,
+    sfreq: float,
+) -> tuple[tuple[int, int, str], ...]:
+    """Plan bounded 5-second/50%-overlap diagnostic windows."""
+
+    n_samples = int(sample_count)
+    sample_rate = float(sfreq)
+    if n_samples <= 0:
+        raise ValueError("Transient QC requires a positive occurrence sample count.")
+    if not np.isfinite(sample_rate) or sample_rate <= 0.0:
+        raise ValueError("Transient QC requires a positive finite sampling rate.")
+    window_samples = max(
+        1,
+        int(round(PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S * sample_rate)),
+    )
+    hop_samples = max(
+        1,
+        int(round(PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S * sample_rate)),
+    )
+    hop_samples = min(hop_samples, window_samples)
+    if n_samples < window_samples:
+        return ((0, n_samples, "short"),)
+
+    starts = list(range(0, n_samples - window_samples + 1, hop_samples))
+    tail_start = n_samples - window_samples
+    kinds = ["regular"] * len(starts)
+    if starts[-1] != tail_start:
+        starts.append(tail_start)
+        kinds.append("tail_aligned")
+    return tuple(
+        (start, start + window_samples, kinds[index])
+        for index, start in enumerate(starts)
+    )
+
+
+def _occurrence_evaluation_scope(
+    event_plan: Any,
+) -> list[dict[str, object]]:
+    """Account for evaluated and intentionally unavailable marker occurrences."""
+
+    evaluated = {
+        (int(span.condition_id), int(span.repetition_index))
+        for span in event_plan.spans
+    }
+    approved = {
+        (
+            int(item.get("condition_code", -1)),
+            int(item.get("repetition_index", -1)),
+        ): str(item.get("disposition") or "")
+        for item in event_plan.approved_occurrences
+        if isinstance(item, Mapping)
+    }
+    unresolved = {
+        (
+            int(item.get("condition_code", -1)),
+            int(item.get("repetition_index", -1)),
+        ): tuple(str(reason) for reason in item.get("review_reasons", ()))
+        for item in event_plan.unresolved_occurrences
+        if isinstance(item, Mapping)
+    }
+    marker_payload = event_plan.marker_integrity_plan
+    occurrences = (
+        marker_payload.get("occurrences", ())
+        if isinstance(marker_payload, Mapping)
+        else ()
+    )
+    rows: list[dict[str, object]] = []
+    for occurrence in occurrences:
+        if not isinstance(occurrence, Mapping):
+            continue
+        code = int(occurrence.get("condition_code", -1))
+        repetition = int(occurrence.get("repetition_index", -1))
+        key = (code, repetition)
+        if key in evaluated:
+            status = "evaluated"
+            reason = None
+        elif key in unresolved:
+            status = "not_evaluated"
+            reasons = unresolved[key]
+            reason = ", ".join(reasons) or "marker_review_required"
+        elif approved.get(key) == "exclude_occurrence":
+            status = "not_evaluated"
+            reason = "excluded_after_marker_review"
+        else:
+            status = "not_evaluated"
+            reason = "analysis_span_not_retained"
+        rows.append(
+            {
+                "condition_label": str(occurrence.get("condition_label") or code),
+                "condition_code": code,
+                "occurrence": repetition,
+                "occurrence_display": repetition + 1,
+                "evaluation_status": status,
+                "reason": reason,
+                "marker_occurrence_fingerprint": str(
+                    occurrence.get("fingerprint") or ""
+                ),
+            }
+        )
+    return rows
 
 
 def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
@@ -920,6 +1074,13 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "max_bad_channels_alert_thresh",
         "removed_electrode_detection_mode",
         "auto_detect_removed_electrodes",
+        "manual_removed_electrodes_enabled",
+        "removed_electrode_detection_choice_schema_version",
+        "removed_electrode_detection_choice_status",
+        "removed_electrode_detection_choice_source",
+        "_fpvs_manual_removed_electrodes",
+        "manual_removed_electrodes",
+        "manual_removed_electrodes_by_recording",
         "high_pass",
         "low_pass",
         "downsample",
@@ -956,7 +1117,11 @@ def _preflight_cache_method(
         "version": PREFLIGHT_QC_METHOD_VERSION,
         "raw_channel_method": CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
         "raw_spectral_method": CONDITION_SPECTRAL_QC_METHOD_VERSION,
-        "condition_block_duration_s": PREFLIGHT_QC_BLOCK_DURATION_S,
+        "condition_io_chunk_duration_s": PREFLIGHT_QC_BLOCK_DURATION_S,
+        "transient_window_duration_s": PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S,
+        "transient_window_hop_s": PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S,
+        "transient_tail_policy": PREFLIGHT_QC_TRANSIENT_TAIL_POLICY,
+        "transient_overlap_counting": "union_coverage_not_independent_events",
         "condition_completion_policy": "locked_fft_span_v1",
         "geometry": biosemi64_geometry_identity(
             electrode_mapping_profile=settings.get("electrode_mapping_profile"),
@@ -1351,7 +1516,10 @@ def _scan_one_preflight_file_v2(
                                 qc_settings,
                                 filename=file_path.name,
                                 sfreq=sfreq,
-                                block_duration_s=PREFLIGHT_QC_BLOCK_DURATION_S,
+                                block_duration_s=(
+                                    PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S
+                                ),
+                                window_hop_s=PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S,
                                 should_cancel=should_cancel,
                             )
                         )
@@ -1423,6 +1591,24 @@ def _scan_one_preflight_file_v2(
             filename=file_path.name,
         )
         raw_channel_payload = channel_result.to_payload()
+        raw_channel_payload["scoring_scope"] = "approved_analyzed_occurrences"
+        raw_channel_payload["occurrence_evaluation_scope"] = (
+            _occurrence_evaluation_scope(event_plan)
+        )
+        raw_channel_payload["analysis_span_plan_fingerprint"] = str(
+            event_plan_payload["source_analysis_span_plan"]["fingerprint"]
+        )
+        thresholds = raw_channel_payload.get("thresholds")
+        detector_evaluated = bool(
+            isinstance(thresholds, Mapping)
+            and thresholds.get("auto_detect_removed_electrodes")
+        )
+        raw_channel_payload["experimental_removed_electrode_detector"] = {
+            "evaluation_status": (
+                "evaluated" if detector_evaluated else "not_evaluated"
+            ),
+            "reason": None if detector_evaluated else "disabled_in_project_settings",
+        }
         raw_spectral_payload = _aggregate_condition_spectral_qc(
             spectral_results,
             filename=file_path.name,
@@ -1450,8 +1636,8 @@ def _scan_one_preflight_file_v2(
                 retained_channels=channel_names,
             ),
             "hard_exclusion_policy": (
-                "review_only_in_preflight_v4; established hard rules remain "
-                "unchanged in the normal processing runner"
+                "signal_amplitude_and_candidate_burden_are_review_only; "
+                "technical_integrity_failures_remain_blocking"
             ),
         }
         result = PreflightQcFileResult(
@@ -1771,7 +1957,10 @@ def scan_preprocessing_qc(
         info for info in raw_file_infos if _path_key(Path(info.path)) not in skip_keys
     ]
     total = len(pending_infos)
-    qc_settings = _auto_qc_settings(settings)
+    # The preflight review must observe the project's explicit detector mode.
+    # In particular, an Off project must not acquire detector findings merely
+    # because the scan runs before preprocessing.
+    qc_settings = dict(settings)
     resolved_event_map = (
         {str(label): int(code) for label, code in event_map.items()}
         if event_map

@@ -66,6 +66,29 @@ testing, or another specialized estimand.
   size in representative lab recordings. Retain the representative-data rerun
   and reprocessing inventory when those become available.
 
+### Preprocessing signal QC
+
+- Report that signal-based QC used the exact marker-reviewed analyzed
+  condition-occurrence spans, with project presentation rate, oddball rule,
+  expected oddball cycles, and actual analyzed duration. State which
+  occurrences were not evaluated and why; do not count them as clean or as an
+  unflagged denominator.
+- Report 5-second transient windows with a nominal 2.5-second hop, actual
+  rounded sample counts, and the full tail-aligned or short-unpadded edge
+  policy. Treat the union of flagged-window coverage as review provenance, not
+  measured artifact duration or independent events.
+- Report the experimental removed-electrode detector mode and version. Separate
+  persistent low-variance suggestions and manual targets from high-amplitude,
+  rare-burst, spatial, condition/occurrence, and transient review evidence.
+- Report severe raw amplitude and candidate count, fraction, hemisphere, and
+  BioSemi64 cluster crossings as review flags, along with the user's explicit
+  recording- or participant-scope inclusion/exclusion decision. These
+  provisional thresholds do not prove that a recording is usable or unusable.
+- If detector performance is reported, identify the labeled dataset, equipment,
+  participant-level development/holdout split, denominators, and uncertainty.
+  Describe current percentages as in-lab validation until an independent
+  dataset or lab reproduces them.
+
 ### Summed BCA and selection provenance
 
 - Report the named harmonic-selection profile, stable method ID/version,

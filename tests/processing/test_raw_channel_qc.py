@@ -256,6 +256,17 @@ def _raw_with_high_amplitude_channel(channel: str) -> mne.io.RawArray:
     return raw
 
 
+def _raw_with_high_amplitude_channels(channels: list[str]) -> mne.io.RawArray:
+    raw = _raw_with_spatial_outlier_channel(channels[0])
+    rng = np.random.default_rng(513)
+    for channel in channels:
+        raw._data[raw.ch_names.index(channel)] = rng.normal(
+            scale=20_000e-6,
+            size=raw.n_times,
+        )
+    return raw
+
+
 def _raw_with_global_baseline(scale_uv: float = 20_000.0) -> mne.io.RawArray:
     montage = mne.channels.make_standard_montage("biosemi64")
     names = list(montage.ch_names)
@@ -362,22 +373,32 @@ def test_spatial_raw_channel_qc_accepts_valid_reduced_retained_subset() -> None:
     assert result.n_channels == 16
 
 
-def test_raw_channel_qc_excludes_hemisphere_failure_at_exact_half_channels() -> None:
+def test_raw_channel_qc_flags_hemisphere_burden_at_exact_half_without_excluding() -> None:
     result = evaluate_raw_channel_qc(
         _raw_with_left_failure(),
         {"stim_channel": "Status", "max_bad_chans": 20},
         filename="p21.bdf",
     )
 
-    assert result.excluded is True
+    assert result.excluded is False
     assert result.n_channels == 64
     assert result.n_bad_channels == 27
     assert result.bad_fraction < 0.50
     assert result.left_bad == result.left_total
-    assert "left_hemisphere_failure" in result.triggered_rules
+    assert result.triggered_rules == ()
+    finding = next(
+        item
+        for item in result.burden_findings
+        if item["rule"] == "left_hemisphere_candidate_burden_review"
+    )
+    assert finding["observed"] == 1.0
+    assert finding["threshold"] == 0.5
+    assert finding["comparator"] == ">="
+    assert finding["denominator"] == result.left_total
+    assert finding["authority"] == "review_only"
 
 
-def test_raw_channel_qc_excludes_when_bad_fraction_exceeds_half() -> None:
+def test_raw_channel_qc_flags_fraction_above_half_without_excluding() -> None:
     raw = _raw_with_left_failure()
     rng = np.random.default_rng(24)
     extra_midline = ["Iz", "Oz", "POz", "Pz", "CPz", "AFz"]
@@ -390,10 +411,16 @@ def test_raw_channel_qc_excludes_when_bad_fraction_exceeds_half() -> None:
         filename="p21.bdf",
     )
 
-    assert result.excluded is True
+    assert result.excluded is False
     assert result.n_bad_channels == 33
     assert result.bad_fraction > 0.50
-    assert "bad_channel_fraction" in result.triggered_rules
+    assert result.triggered_rules == ()
+    assert any(
+        item["rule"] == "candidate_fraction_review"
+        and item["comparator"] == ">"
+        and item["denominator"] == 64
+        for item in result.burden_findings
+    )
 
 
 def test_raw_channel_qc_skips_hard_rules_for_tiny_montage() -> None:
@@ -524,6 +551,62 @@ def test_raw_channel_qc_flags_spatial_outlier_without_interpolation() -> None:
     assert result.to_payload()["method_version"] == RAW_CHANNEL_QC_METHOD_VERSION
 
 
+def test_candidate_count_and_fraction_comparators_respect_exact_boundaries() -> None:
+    channels = tuple(BIOSEMI64_CHANNELS)
+    config = raw_channel_qc_module.RawChannelQCConfig(
+        max_bad_channels=20,
+        max_bad_fraction=0.5,
+        max_hemisphere_bad_fraction=2.0,
+    )
+
+    def findings(candidate_count: int):
+        return raw_channel_qc_module._candidate_burden(
+            channels,
+            {channel: ("test",) for channel in channels[:candidate_count]},
+            positions={},
+            config=config,
+            cluster_rules_enabled=False,
+        )["findings"]
+
+    assert not any(
+        item["rule"] == "candidate_count_review" for item in findings(20)
+    )
+    assert any(item["rule"] == "candidate_count_review" for item in findings(21))
+    assert not any(
+        item["rule"] == "candidate_fraction_review" for item in findings(32)
+    )
+    assert any(
+        item["rule"] == "candidate_fraction_review" for item in findings(33)
+    )
+
+
+def test_candidate_hemisphere_comparator_includes_exact_threshold() -> None:
+    channels = tuple(BIOSEMI64_CHANNELS)
+    left = tuple(
+        channel for channel in channels if channel in LEFT_HEMISPHERE_CHANNELS
+    )
+    config = raw_channel_qc_module.RawChannelQCConfig(
+        max_bad_channels=64,
+        max_bad_fraction=1.0,
+        max_hemisphere_bad_fraction=1.0,
+    )
+    burden = raw_channel_qc_module._candidate_burden(
+        channels,
+        {channel: ("test",) for channel in left},
+        positions={},
+        config=config,
+        cluster_rules_enabled=False,
+    )
+
+    finding = next(
+        item
+        for item in burden["findings"]
+        if item["rule"] == "left_hemisphere_candidate_burden_review"
+    )
+    assert finding["observed"] == finding["threshold"] == 1.0
+    assert finding["comparator"] == ">="
+
+
 def test_raw_channel_qc_flags_high_amplitude_outlier_without_interpolation() -> None:
     raw = _raw_with_high_amplitude_channel("FT8")
 
@@ -542,19 +625,25 @@ def test_raw_channel_qc_flags_high_amplitude_outlier_without_interpolation() -> 
     assert result.triggered_rules == ()
 
 
-def test_raw_channel_qc_excludes_global_baseline_failure() -> None:
+def test_raw_channel_qc_marks_severe_amplitude_for_review_without_excluding() -> None:
     result = evaluate_raw_channel_qc(
         _raw_with_global_baseline(),
         {"stim_channel": "Status", "max_bad_chans": 64},
         filename="p34.bdf",
     )
 
-    assert result.excluded is True
-    assert result.raw_baseline_excluded is True
+    assert result.excluded is False
+    assert result.raw_baseline_excluded is False
+    assert result.raw_baseline_severe_review is True
     assert result.raw_baseline_warning is True
     assert result.raw_baseline_median_std_uv >= 10_000.0
     assert result.raw_baseline_median_p2p_99_uv >= 100_000.0
-    assert "raw_amplitude_baseline_failure" in result.triggered_rules
+    assert result.triggered_rules == ()
+    assert "raw_amplitude_baseline_severe_review" in result.review_rules
+    finding = result.to_payload()["raw_amplitude_review_findings"][0]
+    assert finding["severity"] == "severe_review"
+    assert finding["authority"] == "review_only"
+    assert finding["help_url"].startswith("https://www.biosemi.com/")
 
 
 def test_raw_channel_qc_warns_for_elevated_baseline_without_excluding() -> None:
@@ -600,9 +689,34 @@ def test_raw_channel_qc_toggle_disables_auto_interpolation_candidates() -> None:
     )
 
     assert result.excluded is False
-    assert result.bad_channels == ("P9",)
+    assert result.bad_channels == ()
     assert result.channels_to_interpolate == ()
     assert result.triggered_rules == ()
+    assert result.burden_findings == ()
+    assert result.thresholds["spatial_predictability_experimental"] is False
+    assert result.thresholds["bad_channel_cluster_experimental"] is False
+
+
+def test_no_analyzed_samples_is_technical_failure_without_detector_evidence() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_clustered_removed_channels(["P9"]),
+        {
+            "stim_channel": "Status",
+            "removed_electrode_detection_mode": "off",
+            "auto_detect_removed_electrodes": False,
+        },
+        filename="no-analyzed-samples.bdf",
+        analysis_spans=[],
+    )
+
+    assert result.excluded is True
+    assert result.review_only is False
+    assert result.triggered_rules == ("no_samples",)
+    assert result.bad_channels == ()
+    assert result.low_variance_channels == ()
+    assert result.channels_to_interpolate == ()
+    assert result.candidate_sources == {}
+    assert result.burden_findings == ()
 
 
 def test_raw_channel_qc_toggle_disables_spatial_outlier_detection() -> None:
@@ -641,13 +755,14 @@ def test_raw_channel_qc_manual_mode_only_interpolates_manual_list() -> None:
 
     assert result.excluded is False
     assert result.manual_removed_channels == ("FT8",)
-    assert result.low_variance_channels == ("P9",)
-    assert result.bad_channels == ("FT8", "P9")
+    assert result.low_variance_channels == ()
+    assert result.bad_channels == ("FT8",)
     assert result.channels_to_interpolate == ("FT8",)
     assert result.triggered_rules == ()
+    assert result.candidate_sources == {"FT8": ("manual_removed",)}
 
 
-def test_raw_channel_qc_manual_mode_still_excludes_hemisphere_failure() -> None:
+def test_raw_channel_qc_manual_mode_does_not_emit_detector_hemisphere_evidence() -> None:
     result = evaluate_raw_channel_qc(
         _raw_with_left_failure(),
         {
@@ -659,11 +774,12 @@ def test_raw_channel_qc_manual_mode_still_excludes_hemisphere_failure() -> None:
         filename="p21.bdf",
     )
 
-    assert result.excluded is True
+    assert result.excluded is False
     assert result.channels_to_interpolate == ()
-    assert set(result.low_variance_channels) == set(LEFT_HEMISPHERE_CHANNELS)
-    assert result.left_bad == result.left_total
-    assert "left_hemisphere_failure" in result.triggered_rules
+    assert result.low_variance_channels == ()
+    assert result.left_bad == 0
+    assert result.triggered_rules == ()
+    assert result.burden_findings == ()
 
 
 def test_raw_channel_qc_warns_for_four_channel_bad_cluster() -> None:
@@ -678,12 +794,26 @@ def test_raw_channel_qc_warns_for_four_channel_bad_cluster() -> None:
     assert result.excluded is False
     assert result.n_bad_channels == 4
     assert result.triggered_rules == ()
-    assert result.warning_rules == ("possible_bad_channel_cluster",)
+    assert result.warning_rules == ("possible_candidate_cluster_review",)
     assert result.largest_bad_cluster_size == 4
     assert set(result.largest_bad_cluster_channels) == {"F7", "FT7", "FC5", "T7"}
 
 
-def test_raw_channel_qc_excludes_six_channel_bad_cluster() -> None:
+def test_raw_channel_qc_keeps_five_channel_cluster_at_warning_level() -> None:
+    channels = ["F7", "FT7", "FC5", "T7", "C5"]
+    result = evaluate_raw_channel_qc(
+        _raw_with_clustered_removed_channels(channels),
+        {"stim_channel": "Status", "max_bad_chans": 20},
+        filename="p15.bdf",
+    )
+
+    assert result.excluded is False
+    assert result.largest_bad_cluster_size == 5
+    assert "possible_candidate_cluster_review" in result.review_rules
+    assert "candidate_cluster_review" not in result.review_rules
+
+
+def test_raw_channel_qc_flags_six_channel_cluster_without_excluding() -> None:
     raw = _raw_with_clustered_removed_channels(["F7", "FT7", "FC5", "T7", "C5", "CP5"])
 
     result = evaluate_raw_channel_qc(
@@ -692,8 +822,48 @@ def test_raw_channel_qc_excludes_six_channel_bad_cluster() -> None:
         filename="p15.bdf",
     )
 
-    assert result.excluded is True
+    assert result.excluded is False
     assert result.n_bad_channels == 6
-    assert "bad_channel_cluster" in result.triggered_rules
-    assert result.warning_rules == ()
+    assert result.triggered_rules == ()
+    assert "candidate_cluster_review" in result.warning_rules
     assert result.largest_bad_cluster_size == 6
+
+
+def test_six_high_amplitude_candidates_are_review_only_and_not_selected() -> None:
+    channels = ["F7", "FT7", "FC5", "T7", "C5", "CP5"]
+    result = evaluate_raw_channel_qc(
+        _raw_with_high_amplitude_channels(channels),
+        {"stim_channel": "Status", "max_bad_chans": 20},
+        filename="p16.bdf",
+    )
+
+    assert result.excluded is False
+    assert set(result.high_amplitude_channels) == set(channels)
+    assert result.channels_to_interpolate == ()
+    assert "candidate_cluster_review" in result.review_rules
+    assert all(
+        "high_amplitude" in result.candidate_sources[channel]
+        for channel in channels
+    )
+
+
+def test_six_manual_targets_can_continue_with_cluster_review() -> None:
+    channels = ["F7", "FT7", "FC5", "T7", "C5", "CP5"]
+    result = evaluate_raw_channel_qc(
+        _raw_with_clustered_removed_channels([]),
+        {
+            "stim_channel": "Status",
+            "max_bad_chans": 20,
+            "removed_electrode_detection_mode": "manual",
+            "_fpvs_manual_removed_electrodes": channels,
+        },
+        filename="p17.bdf",
+    )
+
+    assert result.excluded is False
+    assert result.channels_to_interpolate == tuple(channels)
+    assert "candidate_cluster_review" in result.review_rules
+    assert all(
+        result.candidate_sources[channel] == ("manual_removed",)
+        for channel in channels
+    )

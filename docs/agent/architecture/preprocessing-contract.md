@@ -226,12 +226,12 @@ See
 `docs/agent/quality/biosemi64-geometry-sensitivity.md` for the reproducible
 protocol, limits, and required lab-data follow-up.
 
-## Raw QC Hard Exclusions
+## Raw QC Signal Review and Technical Exclusions
 
 `src/Main_App/processing/raw_channel_qc.py` owns pre-preprocessing
-removed-electrode detection and hard exclusions for raw channel-health failures.
-It runs after a BDF is loaded and before `begin_preproc_audit` so interpolation
-cannot hide a dead or disconnected channel cluster.
+removed-electrode detection, signal-review evidence, and independent technical
+no-sample failures. It runs after a BDF is loaded and before
+`begin_preproc_audit` so interpolation cannot hide the original evidence.
 The calibration surface for automatic removed-electrode detection lives in
 `src/Main_App/processing/removed_electrode_detection.py`. Keep threshold
 constants, user-facing method wording, and low-variance, high-amplitude, and
@@ -243,11 +243,11 @@ those defaults.
 `src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
 scan without importing Qt. The normal GUI route supplies an explicit active
 project root and condition event map, which enables condition-aware preflight
-QC `v5_analyzed_interval_coordinates`. A caller that omits either required
+QC `v6_five_second_overlapping_transients`. A caller that omits either required
 input receives an explicit `not_evaluated` planning result. It does not run the
 retired whole-recording/first-90-second signal checks.
 
-The v5 path reads the complete configured Status channel to plan events, then requests
+The v6 path reads the complete configured Status channel to plan events, then requests
 EEG samples only from each shared marker-derived locked FFT span. The
 time-domain and spectral intervals are identical to the samples that normal
 processing will analyze; there is no fixed minimum or maximum condition
@@ -274,16 +274,18 @@ times relative to the Raw start. It does not rescale source absolute indices.
 Interpolation still operates on the resident continuous Raw at its established
 pipeline position. Missing or stale source/target plans stop processing, and
 the preprocessed cache and source-ready provenance bind both plan identities.
-Time-domain
-QC examines every consecutive 10-second block plus the final partial block and
-retains exact float64 full-condition metrics plus transient worst-block
-provenance. Only channels classified consistently across every relevant
-condition occurrence are participant-persistent and feed the existing removed-
-electrode confirmation table; condition-specific and 10-second-block findings
-remain separately identified provenance. A channel's quietest 10-second block
-is recorded, but the persistent relative low-variance calibration is not
-misapplied to that isolated block as a removed-electrode flag. Extreme
-high-amplitude and rare-burst block findings remain review signals.
+Time-domain QC computes exact float64 metrics once over every unique sample in
+each approved occurrence. Supplementary transient screening uses 5-second
+windows with a nominal 2.5-second hop. A final full window ends at the exact
+occurrence stop when needed; an occurrence shorter than 5 seconds gets one
+unpadded window. Repeated overlapping flags report the union of flagged-window
+coverage and do not estimate artifact duration. Cap-wide window amplitude
+findings remain visible when a short burst is diluted in the full-occurrence
+aggregate. A channel feeds the removed-electrode confirmation table only when
+low variance recurs across every evaluated occurrence. Extra evidence in one
+occurrence does not erase that persistent low-variance reason. High-
+amplitude, rare-burst, spatial, occurrence-local, and transient findings remain
+visible review evidence and are not interpolation suggestions.
 
 The retired project epoch-window fields are not part of normalized
 preprocessing or runtime parameters. When an older manifest contains custom
@@ -292,7 +294,7 @@ values, project loading moves them to
 ledger and source-ready sidecar identities. That compatibility metadata must
 never control extraction, preprocessing, or QC.
 
-The v5 spectral QC uses the same shared per-condition, shortest-repetition,
+The v6 spectral QC uses the same shared per-condition, shortest-repetition,
 integer-oddball-cycle FFT span planner as normal processing. It evaluates the
 Hann-windowed FFT for every channel in deterministic memory-bounded batches;
 focused parity tests require byte-identical per-channel amplitudes relative to
@@ -306,22 +308,25 @@ minimum and maximum, leaving 20 bins for the mean and population standard
 deviation. Expected FPVS harmonics, effective configured mains-notch centers,
 their collisions, and unexpected off-harmonic peaks are reported separately.
 
-Condition-aware findings are review-only in preflight v5. They do not create a
-new hard-exclusion rule; the established hard raw-channel rules remain
-unchanged in the normal process runner. A review-only condition finding can
-therefore be deferred to the existing processing-time decision rather than
-silently changing that calibrated rule. V4 caps participant workers at four,
+Condition-aware signal findings are review-only in preflight v6 and in the
+normal process runner. Severe raw amplitude and candidate count, fraction,
+hemisphere, and connected-cluster crossings enter the existing explicit
+recording/participant decision review; continuing does not promote their
+channels to interpolation targets. Technical integrity failures and saved
+manual exclusions remain independent. Each review row begins unselected and
+must be explicitly kept or excluded; an exclusion can use recording or
+participant scope. V4 caps participant workers at four,
 simultaneous BDF reads at two, and simultaneous spectral evaluators at two. A
 condition buffer larger than 256 MiB is filled in 10-second chunks into a
 temporary condition-only float64 memmap; no full-recording preflight memmap is
 created. V4 preserves deterministic result order and checks cancellation
-between condition reads, time blocks, FFT channel batches, and cache writes.
+between condition reads, diagnostic windows, FFT channel batches, and cache writes.
 Successful participant results
 are cached atomically under the active project root at
-`.fpvs_processing/preflight_qc/v5_analyzed_interval_coordinates`; a missing, corrupt, or
+`.fpvs_processing/preflight_qc/v6_five_second_overlapping_transients`; a missing, corrupt, or
 fingerprint-stale entry is a cache miss. The key includes raw path/size/mtime,
 relevant settings, method and dependency versions, the canonical BioSemi64
-geometry identity, and the resolved event/span plan. The v5 directory/method identity,
+geometry identity, and the resolved event/span plan. The v6 directory/method identity,
 `locked_fft_span_v1` completion policy, and geometry fingerprint invalidate
 results produced under earlier geometry or fixed-minimum coverage.
 
@@ -350,7 +355,7 @@ remain deterministic for reporting.
 For grouped projects, `HeaderOnlyPreflight` and `PreflightQcFileResult` retain
 the canonical `group_id` from `RawFileInfo`. The GUI resolves that ID through
 `ProjectGroupContext` and shows the configured group label in live scan status,
-empty-recording review, removed-electrode review, hard-exclusion review and
+empty-recording review, removed-electrode review, possible-exclusion review and
 details, and remaining review flags. A missing or unknown grouped assignment is
 an error; folder names are not a membership fallback. In v2.1, participant
 exclusions and removed-electrode maps remain keyed by project-wide unique
@@ -359,7 +364,7 @@ participant ID.
 For repeated-session v2.2 projects, every preflight and processing observation
 also carries canonical `recording_id`, `session_id`, session label,
 `visit_index`, source, and stable group identity. Caches, candidate maps,
-accepted/rejected electrode provenance, hard exclusions, remaining review
+accepted/rejected electrode provenance, explicit exclusions, remaining review
 flags, condition-crop decisions, ledger rows, and QC exports key per-file state
 by recording ID so a second visit cannot overwrite the first. Participant ID
 remains the person/pairing identity. Declared sessions without a recording are
@@ -384,34 +389,34 @@ when conservative auto-detect is enabled,
 persistently flat/very low-variance scalp channels can be automatically added to
 `raw.info["bads"]` before preprocessing. The second-pass raw-QC detector adds
 flag-only candidate lists for extreme high-amplitude outliers, rare-burst
-channels, and spatially inconsistent channels. High-amplitude and rare-burst
-candidates are prefilled into the preflight removed-electrode review as FPVS
-Toolbox flagged candidates so users can accept or reject them, but they are not
-automatically added to the interpolation target list without that review.
+channels, and spatially inconsistent channels. These flag-only categories stay
+in the signal-review table and are never prefilled into the removed-electrode
+or interpolation list.
 Spatial channels are only flagged when local predictability is both low and a
 robust outlier within the participant's own montage. Low-variance raw-QC bad
 channels are excluded from kurtosis donor/pick calculations and are included in
 the later spherical interpolation target list.
 
-Raw channel QC also records participant-level baseline raw-amplitude medians.
-A file is hard-excluded before preprocessing when both the scalp-channel median
-STD is at least 10,000 uV and the scalp-channel median P2P99 is at least
-100,000 uV. A softer warning is recorded when the median STD is at least
-2,000 uV or the median P2P99 is at least 10,000 uV. Baseline metrics and status
-are exported to `Quality Check/Processing_QC_Summary.xlsx` and stored in cache,
-audit, and ledger payloads so skipped incremental files retain prior results.
+Raw channel QC also records recording-level baseline raw-amplitude medians. A
+severe review flag is recorded when both the scalp-channel median STD is at
+least 10,000 uV and median P2P99 is at least 100,000 uV. A warning starts at
+2,000 uV median STD or 10,000 uV median P2P99. Neither level automatically
+excludes a recording. The GUI explains that referencing may reduce shared
+electrical noise and links to BioSemi's CMS/DRL/referencing explanation. It
+does not imply that referencing repairs clipping or missing data. Metrics,
+severity, reviewed decisions, and analyzed scope are retained in provenance.
 
 Manual list mode stores `manual_removed_electrodes` as a PID-to-electrode map in
 project preprocessing settings. Manual entries supersede automatic detection for
 that participant: only the manually listed valid scalp electrodes are treated as
 removed-electrode raw-QC candidates, added to `raw.info["bads"]`, excluded from
 kurtosis donor/pick calculations, and included in the later spherical
-interpolation target list. Manual entries still participate in the same
-participant-level hard-exclusion checks for bad-channel count, bad-channel
-fraction, hemisphere failure, and connected bad-channel clusters. When the mode
-is Off, broad low-variance hard-exclusion checks still run, but isolated
-low-variance channels are not auto-marked for interpolation and the local
-cluster warning/exclusion rule is not applied.
+interpolation target list. Manual entries can contribute to candidate count,
+fraction, hemisphere, and BioSemi64 connected-cluster review findings, but
+those findings cannot exclude a recording automatically. When the experimental
+detector is Off, it emits no low-variance, high-amplitude, rare-burst, spatial,
+or detector-derived burden evidence. Independent manual entries retain their
+own authority.
 
 Repeated projects may additionally store
 `manual_removed_electrodes_by_recording`. An explicit recording row overrides
@@ -451,8 +456,8 @@ handles these manual exclusions before child-process submission, so excluded
 participants do not pay the BDF load/preprocessing cost and the worker pool can
 move directly to eligible files.
 
-The default `max_bad_chans` is `20`. A raw file is excluded when any of these
-rules trigger on the BioSemi 64 scalp surface:
+The default `max_bad_chans` is `20`. The following provisional crossings create
+recording-level review findings on the BioSemi64 scalp surface:
 
 - More channels than `max_bad_chans` are flat, very low amplitude, extreme
   high-amplitude outliers, or spatially inconsistent.
@@ -463,21 +468,17 @@ rules trigger on the BioSemi 64 scalp surface:
 - When removed-electrode auto-detection is enabled, the largest connected
   bad-channel cluster on the scalp montage has at least six electrodes.
 
-When the largest connected raw-QC candidate cluster has at least four but fewer
-than six electrodes, the participant is not hard-excluded. The run records a
-`possible_bad_channel_cluster` warning so the participant can be reviewed before
-group analysis.
+The count and fraction rules use strict `>` comparisons. Hemisphere and cluster
+rules use `>=`. A connected cluster of four or five is a warning-level review;
+six or more is a severe review. Both use the canonical BioSemi64 coordinates.
 
-The hemisphere rule is intentionally separate from the global fraction rule so a
-left- or right-side equipment failure is excluded even when the full-scalp
-fraction is below or equal to 50 percent. The cluster rule uses montage geometry
-to find connected bad-channel components; it is intended to stop local blocks of
-four or more removed/flat electrodes from being interpolated as if they were
-isolated channels. The raw BDF is never modified. The per-file result uses
-status `excluded`, stage `raw_qc`, reason `raw_channel_qc_failure`, and includes
-a `raw_channel_qc` payload with bad channel counts, hemisphere counts, bad
-channel names, interpolation candidates, largest cluster details, triggered
-rules, and thresholds.
+The hemisphere rule remains separate from the global fraction rule so a
+one-sided concentration stays visible when the full-scalp fraction is lower.
+Each structured finding carries its observed value, denominator, comparator,
+threshold, channel names, candidate sources, rule version, and review-only
+authority. These rules do not change the cohort or delete outputs. An explicit
+recording- or participant-scope exclusion still uses the established manual
+review path. The raw BDF is never modified.
 
 At the end of a GUI processing run, excluded files are reported in a modal
 summary alongside header-only BioSemi recordings. The summary must state that

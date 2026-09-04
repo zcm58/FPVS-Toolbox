@@ -25,8 +25,13 @@ from Main_App.processing.marker_integrity import (
 from Main_App.projects.frequency_protocol import FrequencyProtocol
 
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
-PREFLIGHT_QC_METHOD_VERSION = "v5_analyzed_interval_coordinates"
+PREFLIGHT_QC_METHOD_VERSION = "v6_five_second_overlapping_transients"
+# Disk-buffered reads remain in bounded ten-second chunks.  Diagnostic
+# transient windows are intentionally independent of this I/O chunk size.
 PREFLIGHT_QC_BLOCK_DURATION_S = 10.0
+PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S = 5.0
+PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S = 2.5
+PREFLIGHT_QC_TRANSIENT_TAIL_POLICY = "full_window_ending_at_occurrence_stop"
 PREFLIGHT_QC_MAX_WORKERS = 4
 PREFLIGHT_QC_MAX_IO_READERS = 2
 PREFLIGHT_QC_MAX_SPECTRAL_WORKERS = 2
@@ -351,6 +356,9 @@ __all__ = [
     "PREFLIGHT_QC_MAX_WORKERS",
     "PREFLIGHT_QC_METHOD_NAME",
     "PREFLIGHT_QC_METHOD_VERSION",
+    "PREFLIGHT_QC_TRANSIENT_TAIL_POLICY",
+    "PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S",
+    "PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S",
     "PreflightQcEventPlan",
     "plan_preflight_qc_events",
     "resolve_preflight_spectral_bounds",

@@ -19,15 +19,14 @@ recording error.
   recommendations.
 - `src/Main_App/gui/preprocessing_qc_workflow.py`: modal embedded workflow that
   presents recording-not-started files, prepopulated manual removed-electrode
-  metadata, participant hard-exclusion recommendations, and remaining
-  suspicious findings before processing starts.
+  metadata, recording-level signal-review decisions, and remaining scoped
+  findings before processing starts.
 - `src/Main_App/gui/manual_removed_electrodes_dialog.py`: modal table for
   project-level manual removed-electrode metadata.
 - `src/Main_App/gui/manual_participant_exclusions_dialog.py`: modal table for
   project-level manual participant exclusions.
-- `src/Main_App/processing/raw_channel_qc.py`: raw BDF sampling, montage
-  neighbor lookup, participant-level hard-exclusion rules, and pipeline result
-  payloads.
+- `src/Main_App/processing/raw_channel_qc.py`: raw BDF sampling, BioSemi64
+  neighbor lookup, structured review rules, and pipeline result payloads.
 - `src/Main_App/gui/settings_panel.py`: Advanced Settings control and info
   dialog text import.
 - `tests/processing/test_removed_electrode_detection.py`: focused tests for the
@@ -36,8 +35,7 @@ recording error.
   participant behavior.
 
 Keep future threshold tuning in `removed_electrode_detection.py` unless the
-sampling strategy, montage geometry, or participant exclusion rules themselves
-must change.
+sampling strategy, montage geometry, or review rules themselves must change.
 
 Keep raw spectral preflight threshold tuning in `raw_spectral_qc.py`. This
 screen is intentionally conservative and should prioritize participant-level
@@ -77,6 +75,25 @@ Use the
 as the geometry-isolation receipt. A representative labeled lab-data rerun is
 still required to estimate how often the geometry correction changes detector
 nominations or historical scientific conclusions.
+
+## Current Sampling and Authority
+
+Signal metrics use only exact marker-reviewed analyzed occurrences. Exact
+full-occurrence metrics count each sample once. Transient diagnostics use
+5-second windows with a nominal 2.5-second hop, including one full tail-aligned
+window when needed and one unpadded window for occurrences shorter than 5
+seconds. Overlapping flags report the union of flagged-window coverage; that
+coverage is not an estimate of artifact duration and overlapping windows are
+not independent events.
+
+Low variance in the same category across every evaluated occurrence may be
+proposed for removed-electrode review when the experimental detector is
+enabled. High amplitude, rare bursts, spatial inconsistency, occurrence-local
+findings, and all candidate count/fraction/hemisphere/cluster thresholds are
+review evidence only. Severe whole-cap amplitude is also review-only. These
+rules preserve measurements for a user decision and do not establish that a
+recording is unusable. Their numerical thresholds remain provisional pending
+the participant-split empirical evaluation below.
 
 ## Calibration Data
 
@@ -119,10 +136,10 @@ detector:
 - 99.9 percent and full-window peak-to-peak amplitude in microvolts when
   checking rare burst behavior.
 - Ratios against the participant's robust good-channel baseline.
-- Participant-level scalp median STD and P2P99 to catch globally noisy baseline
-  failures before channel-level review.
+- Recording-level scalp median STD and P2P99 for warning and severe review.
 - Spatial predictability or inconsistency scores from local montage neighbors.
-- Persistence across sampled windows when adding a new window-level rule.
+- Full-occurrence category persistence and separate 5-second/50%-overlap
+  transient-window provenance.
 
 Report distributions separately for confirmed unplugged electrodes, confirmed
 plugged-in clean electrodes, plugged-in setup-warning electrodes, and
@@ -142,17 +159,28 @@ training set:
 - Positive predictive value for auto-removed electrodes.
 - False-positive and false-negative channel lists by PID.
 
-Report isolated-electrode detection separately from participant-level hard
-exclusions such as hemisphere failure, more than 50 percent bad electrodes, and
-connected bad-channel clusters.
+Report proposed removed electrodes separately from recording-level review
+findings for candidate count, fraction, hemisphere concentration, connected
+clusters, and severe amplitude. Also report false alerts per clean recording
+hour and avoid treating overlapping windows as independent samples.
+
+For transient calibration, compare 5-second/50%-overlap against 5-, 10-, and
+15-second non-overlapping arms on independently annotated clean and artifact
+intervals. Include 50, 100, and 300 ms synthetic checks only as numerical
+verification, not ground truth. Split development and holdout data by
+participant or recording, stratify by protocol rates and analyzed duration,
+and report event recall, distinct channels flagged, false alerts per recording
+and clean hour, and reviewer burden. Publishable in-lab data can support
+reproduction; a separate dataset or lab is still needed for external
+validation.
 
 ## Tuning Rules
 
 The automatic mode is intentionally conservative. Prefer leaving an uncertain
-electrode in the dataset over auto-removing a plugged-in electrode. Participant-
-level baseline failures are the exception: if the entire scalp baseline is
-extreme, exclude the participant before preprocessing rather than trying to fix
-the dataset with channel interpolation.
+electrode in the dataset over auto-removing a plugged-in electrode. Extreme
+whole-cap amplitude requires explicit review because raw BioSemi common-mode
+signals may change after reference; the amplitude thresholds alone do not
+authorize exclusion.
 
 When tuning:
 
@@ -201,10 +229,11 @@ Adding or exporting provenance-only comparison metadata does not require a cache
 or processing-fingerprint bump when the detector thresholds, preprocessing
 order, and final channel inclusion behavior are unchanged.
 
-Current baseline/rare-burst calibration is intentionally narrow. The hard
-participant baseline rule excludes files only when scalp median STD is at least
-10,000 uV and scalp median P2P99 is at least 100,000 uV. The warning rule starts
-at 2,000 uV median STD or 10,000 uV median P2P99. The rare-burst channel rule
+Current baseline/rare-burst calibration is intentionally narrow. The severe
+amplitude review starts when scalp median STD is at least 10,000 uV and scalp
+median P2P99 is at least 100,000 uV. The warning review starts at 2,000 uV
+median STD or 10,000 uV median P2P99. Neither level automatically excludes a
+recording. The rare-burst channel rule
 looks for the top-ranked STD outliers with STD at least 8,000 uV and compressed
 P2P99 or a very large full-window/P2P99 ratio; those channels are surfaced in
 preflight review and QC exports rather than silently interpolated.
