@@ -1603,6 +1603,11 @@ def test_managed_multigroup_cache_miss_does_not_rebuild_harmonic_domain(
         }
 
     monkeypatch.setattr(workers, "prepare_summed_bca_data", _summed)
+    monkeypatch.setattr(
+        workers,
+        "load_shared_frequency_qc_review",
+        lambda **_kwargs: _cached_qc_report(),
+    )
 
     frame, frozen, _metadata = workers._prepare_project_long_data(
         subjects=["P1", "P2"],

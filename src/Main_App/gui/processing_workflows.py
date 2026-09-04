@@ -817,7 +817,9 @@ def _handle_frequency_domain_qc_review(
             apply_frequency_domain_qc_decision(
                 project.project_root,
                 report,
+                review_decisions=dialog.review_decisions(),
                 manual_participant_reasons=dialog.manual_participant_reasons(),
+                manual_recording_reasons=dialog.manual_recording_reasons(),
             )
             _sync_project_tools_metadata_from_disk(project)
         except Exception as exc:

@@ -7,11 +7,17 @@ import pytest
 
 from Main_App.processing import full_fft_provenance
 from Main_App.processing.frequency_domain_qc import (
+    DECISION_RETAIN,
     FrequencyDomainQcIntegrityError,
     apply_frequency_domain_qc_decision,
     load_frequency_domain_qc_state,
     run_frequency_domain_qc_review,
     sync_frequency_domain_qc_automatic_state,
+)
+from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
 )
 from Main_App.projects.preprocessing_settings import (
     FIXED_HARMONIC_SELECTION_PROFILE,
@@ -238,7 +244,14 @@ def test_integrity_failure_cannot_reuse_prior_scientific_review(tmp_path) -> Non
     )
     initial = run_frequency_domain_qc_review(project)
     assert initial["review_required"] is True
-    apply_frequency_domain_qc_decision(project.project_root, initial)
+    apply_frequency_domain_qc_decision(
+        project.project_root,
+        initial,
+        review_decisions={
+            str(item["finding_fingerprint"]): {"decision": DECISION_RETAIN}
+            for item in initial["review_findings"]
+        },
+    )
 
     _write_workbook(
         workbook_path,
@@ -268,10 +281,19 @@ def _make_project(
             "harmonic_selection_profile": FIXED_HARMONIC_SELECTION_PROFILE,
             "harmonic_selection_profile_version": HARMONIC_SELECTION_PROFILE_VERSION,
             "fixed_harmonic_frequencies_hz": "1.2, 2.4",
+            "fixed_harmonic_input_mode": "frequency_list",
             "fixed_harmonic_auto_exclude_base": True,
         }
     )
     project.update_preprocessing(preprocessing)
+    project.update_frequency_protocol(
+        FrequencyProtocol.from_recurrence(
+            6,
+            5,
+            expected_analyzed_oddball_cycles=12,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        )
+    )
     project.save()
     workbook_path = (
         root
@@ -302,6 +324,25 @@ def _write_workbook(
     )
     with pd.ExcelWriter(path) as writer:
         bca.to_excel(writer, sheet_name="BCA (uV)", index=False)
+        eligibility = resolve_spectral_eligibility(
+            protocol=FrequencyProtocol.from_recurrence(
+                6,
+                5,
+                expected_analyzed_oddball_cycles=12,
+                expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+            ),
+            sampling_rate_hz=128,
+            analyzed_samples=1280,
+            requested_high_pass_hz=0.1,
+            requested_low_pass_hz=50,
+            applied_high_pass_hz=0.1,
+            applied_low_pass_hz=50,
+        )
+        pd.DataFrame(eligibility.to_rows()).to_excel(
+            writer,
+            sheet_name="Spectral Eligibility",
+            index=False,
+        )
         if audit_rows:
             pd.DataFrame(audit_rows).to_excel(
                 writer,

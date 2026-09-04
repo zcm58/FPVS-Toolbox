@@ -6,8 +6,9 @@ Load this module with the parent index and shared contracts. Load QC-10 and
 QC-20's pre-review readiness gate before finalizing this review.
 
 
-**Status:** accepted on 2026-09-03; implementation pending until the cumulative
-review is complete.
+**Status:** implemented on the active QC branch on 2026-09-04. The local
+non-Qt and static-GUI checks pass; CI-only Qt execution and the visible smoke
+path remain release verification rather than implementation authority.
 
 ### Problem and Accepted Solution
 
@@ -86,3 +87,21 @@ identity, original workbooks, and harmonic-selection contracts. No new
 scientific threshold calibration is required for correcting the identity
 wiring; QC-10, QC-14, and QC-17 own the authority and applicability of the
 underlying findings.
+
+### Implementation Evidence
+
+`processing/frequency_domain_qc.py` now uses the existing canonical recording
+identity, persists exact recording/condition/electrode decisions, keeps the
+whole-participant choice explicit, requires reasons for exclusions, and exposes
+one condition-aware coverage-decision resolver for QC-20/QC-21. Legacy
+summed-BCA machine exclusions migrate to inactive suggestions. The review
+dialog and processing workflow show and submit recording/session identity
+without widening a choice to sibling recordings.
+
+Focused processing tests cover two visits for one participant, repeated
+session labels, exact condition/electrode scope, reopening saved decisions,
+required reasons, legacy migration, and review fingerprints. Static GUI tests
+cover the recording-aware rows and no-default decision contract. The visible
+release smoke path is to review two recordings from one participant, exclude a
+single condition/electrode in one recording, reopen the dialog, and verify that
+the saved reason and scope return while the sibling recording remains retained.

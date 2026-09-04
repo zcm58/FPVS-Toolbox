@@ -1,4 +1,4 @@
-"""Modal review dialog for project-wide frequency-domain QC flags."""
+"""Modal, recording-aware review for experimental summed-BCA findings."""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ from collections.abc import Mapping
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
     QDialog,
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
@@ -23,13 +25,29 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui.components import ActionRow, StatusBanner, make_action_button
 from Main_App.processing.frequency_domain_qc import (
-    MANUAL_EXCLUSION_REASONS,
-    WARNING_REASON_UNUSUAL_VALUES,
+    DECISION_EXCLUDE_CONDITION,
+    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_EXCLUDE_PARTICIPANT,
+    DECISION_EXCLUDE_RECORDING,
+    DECISION_RETAIN,
+    SUMMED_BCA_SCREENING_BRIEF_TEXT,
+    validate_frequency_domain_qc_review_decisions,
 )
+from Main_App.processing.frequency_qc_identity import frequency_qc_review_rows
+
+_CHOOSE_DECISION = ""
+_DECISION_LABELS = {
+    _CHOOSE_DECISION: "Choose a decision…",
+    DECISION_RETAIN: "Retain this finding",
+    DECISION_EXCLUDE_CONDITION_ELECTRODE: "Exclude electrode in this condition",
+    DECISION_EXCLUDE_CONDITION: "Exclude this condition",
+    DECISION_EXCLUDE_RECORDING: "Exclude this recording",
+    DECISION_EXCLUDE_PARTICIPANT: "Exclude whole participant",
+}
 
 
 class FrequencyDomainQcReviewDialog(QDialog):
-    """Collect reviewed manual participant exclusions before post-processing resumes."""
+    """Collect explicit choices without treating a BCA flag as an exclusion."""
 
     def __init__(
         self,
@@ -40,127 +58,183 @@ class FrequencyDomainQcReviewDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._report = report
+        self._identity_scope = str(
+            report.get("identity_scope") or "participant"
+        ).strip().casefold()
         self._group_membership_required = participant_groups is not None
         self._participant_groups = {
             str(participant_id).strip().casefold(): str(group_label).strip()
             for participant_id, group_label in (participant_groups or {}).items()
             if str(participant_id).strip() and str(group_label).strip()
         }
-        self._manual_controls: dict[str, tuple[QCheckBox, QComboBox]] = {}
-        self.setWindowTitle("Frequency-Domain QC Review")
+        self._decision_controls: dict[str, tuple[QComboBox, QLineEdit]] = {}
+        self._submitted_decisions: tuple[dict[str, object], ...] = ()
+        self.setWindowTitle("Experimental Summed-BCA Review")
         self.setModal(True)
-        self.setMinimumSize(900, 640)
-        self.resize(1120, 720)
+        self.setMinimumSize(1000, 650)
+        self.resize(1220, 780)
         self._build_ui()
 
+    def review_decisions(self) -> tuple[dict[str, object], ...]:
+        return tuple(dict(item) for item in self._submitted_decisions)
+
     def manual_participant_reasons(self) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for participant_id, (checkbox, combo) in self._manual_controls.items():
-            if checkbox.isEnabled() and checkbox.isChecked():
-                out[participant_id] = str(combo.currentText() or WARNING_REASON_UNUSUAL_VALUES)
-        return out
+        return {
+            str(item.get("participant_id") or ""): str(item.get("reason") or "")
+            for item in self._submitted_decisions
+            if item.get("decision") == DECISION_EXCLUDE_PARTICIPANT
+        }
+
+    def manual_recording_reasons(self) -> dict[str, str]:
+        return {
+            str(item.get("recording_id") or ""): str(item.get("reason") or "")
+            for item in self._submitted_decisions
+            if item.get("decision") == DECISION_EXCLUDE_RECORDING
+            and str(item.get("recording_id") or "")
+        }
+
+    def accept(self) -> None:
+        raw = {
+            fingerprint: {
+                "decision": str(combo.currentData() or ""),
+                "reason": reason.text().strip(),
+            }
+            for fingerprint, (combo, reason) in self._decision_controls.items()
+        }
+        try:
+            self._submitted_decisions = (
+                validate_frequency_domain_qc_review_decisions(self._report, raw)
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Review Incomplete", str(exc))
+            return
+        super().accept()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
-        banner = StatusBanner(
-            (
-                "FPVS Toolbox found unusual frequency-domain values that need "
-                "review before final harmonics are finalized."
-            ),
-            self,
-            variant="warning",
+        layout.addWidget(
+            StatusBanner(
+                "Review each flagged frequency-domain finding before final harmonics are finalized.",
+                self,
+                variant="warning",
+            )
         )
-        layout.addWidget(banner)
-
+        explanation = QLabel(SUMMED_BCA_SCREENING_BRIEF_TEXT, self)
+        explanation.setObjectName("frequency_domain_qc_experimental_explanation")
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
         outcome_label = QLabel(_outcome_text(self._report), self)
         outcome_label.setObjectName("frequency_domain_qc_outcome_label")
         outcome_label.setWordWrap(True)
         layout.addWidget(outcome_label)
 
-        summary_label = QLabel("Review Needed", self)
-        summary_label.setObjectName("frequency_domain_qc_summary_label")
-        layout.addWidget(summary_label)
-
         self.summary_table = QTableWidget(self)
         self.summary_table.setObjectName("frequency_domain_qc_summary_table")
         self.summary_table.setColumnCount(6)
+        identity_heading = (
+            "Recording" if self._identity_scope == "recording" else "Participant"
+        )
         self.summary_table.setHorizontalHeaderLabels(
             [
+                identity_heading,
                 "Participant",
+                "Session / visit",
                 "Group",
-                "Finding",
+                "Findings",
                 "Automatic action",
-                "Exclude whole participant",
-                "Reason",
             ]
         )
-        self.summary_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.summary_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.summary_table.setMaximumHeight(185)
         self.summary_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.summary_table.setSelectionMode(QAbstractItemView.NoSelection)
         header = self.summary_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        for column in (0, 1, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        layout.addWidget(self.summary_table, 2)
+        layout.addWidget(self.summary_table)
         self._populate_summary_table()
 
-        rules_header = QWidget(self)
-        rules_layout = QHBoxLayout(rules_header)
-        rules_layout.setContentsMargins(0, 0, 0, 0)
-        self.rules_button = QToolButton(rules_header)
-        self.rules_button.setText("Show QC rules")
+        review_label = QLabel("Decide Every Finding", self)
+        review_label.setObjectName("frequency_domain_qc_review_label")
+        layout.addWidget(review_label)
+        self.details_table = QTableWidget(self)
+        self.details_table.setObjectName("frequency_domain_qc_details_table")
+        self.details_table.setColumnCount(14)
+        self.details_table.setHorizontalHeaderLabels(
+            [
+                "Participant",
+                "Recording",
+                "Session / visit",
+                "Condition",
+                "Electrode / ROI",
+                "Finding",
+                "Signed value",
+                "Absolute value",
+                "Band",
+                "Harmonics",
+                "Analysis window",
+                "Independent QC",
+                "Decision",
+                "Reason for exclusion",
+            ]
+        )
+        self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.details_table.setSelectionMode(QAbstractItemView.NoSelection)
+        header = self.details_table.horizontalHeader()
+        for column in range(12):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(12, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(13, QHeaderView.Stretch)
+        layout.addWidget(self.details_table, 3)
+        self._populate_details_table()
+
+        technical_rows = _technical_context_rows(self._report)
+        if technical_rows:
+            technical_label = QLabel(
+                f"{len(technical_rows)} cohort-context input(s) are unavailable. "
+                "They were not silently treated as passes; review the recorded technical statuses.",
+                self,
+            )
+            technical_label.setObjectName("frequency_domain_qc_technical_status")
+            technical_label.setWordWrap(True)
+            layout.addWidget(technical_label)
+            technical_details = QPlainTextEdit(self)
+            technical_details.setObjectName(
+                "frequency_domain_qc_technical_status_details"
+            )
+            technical_details.setReadOnly(True)
+            technical_details.setMaximumHeight(90)
+            technical_details.setPlainText(
+                "\n".join(_technical_context_text(row) for row in technical_rows)
+            )
+            layout.addWidget(technical_details)
+
+        tools = QWidget(self)
+        tools_layout = QHBoxLayout(tools)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        self.rules_button = QToolButton(tools)
+        self.rules_button.setText("Show screening rules")
         self.rules_button.setCheckable(True)
-        self.rules_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.rules_button.toggled.connect(self._toggle_rules)
-        rules_layout.addWidget(self.rules_button)
-
-        self.details_button = QToolButton(rules_header)
-        self.details_button.setText("Show all flagged values")
-        self.details_button.setCheckable(True)
-        self.details_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.details_button.toggled.connect(self._toggle_details)
-        rules_layout.addWidget(self.details_button)
-        rules_layout.addStretch(1)
-        layout.addWidget(rules_header)
-
+        tools_layout.addWidget(self.rules_button)
+        tools_layout.addStretch(1)
+        layout.addWidget(tools)
         self.rules_label = QLabel(_threshold_text(self._report), self)
         self.rules_label.setObjectName("frequency_domain_qc_rules_label")
         self.rules_label.setWordWrap(True)
         self.rules_label.setVisible(False)
         layout.addWidget(self.rules_label)
 
-        self.details_table = QTableWidget(self)
-        self.details_table.setObjectName("frequency_domain_qc_details_table")
-        self.details_table.setColumnCount(6)
-        self.details_table.setHorizontalHeaderLabels(
-            [
-                "Participant",
-                "Group",
-                "Condition",
-                "Electrode",
-                "Summed BCA",
-                "Severity",
-            ]
-        )
-        self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.details_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.details_table.setVisible(False)
-        layout.addWidget(self.details_table, 2)
-        self._populate_details_table()
-
         actions = ActionRow(self, alignment=Qt.AlignRight)
         actions.setObjectName("frequency_domain_qc_actions")
         cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
         continue_btn = make_action_button(
-            "Apply and Continue",
-            variant="primary",
-            parent=actions,
+            "Apply and Continue", variant="primary", parent=actions
         )
         cancel_btn.clicked.connect(self.reject)
         continue_btn.clicked.connect(self.accept)
@@ -170,73 +244,101 @@ class FrequencyDomainQcReviewDialog(QDialog):
 
     def _populate_summary_table(self) -> None:
         summaries = [
-            item
-            for item in _mapping_rows(self._report.get("participant_summaries"))
-            if item.get("pause_review")
+            row
+            for row in frequency_qc_review_rows(self._report)
+            if row.get("pause_review")
         ]
-        manual_existing = {
-            str(item.get("participant_id") or "")
-            for item in _mapping_rows(self._report.get("manual_participant_exclusions"))
-        }
-        auto_electrodes_by_participant = _auto_electrodes_by_participant(self._report)
         self.summary_table.setRowCount(len(summaries))
-        for row, item in enumerate(summaries):
+        for row_index, item in enumerate(summaries):
             participant_id = str(item.get("participant_id") or "")
-            auto_participant = bool(item.get("auto_participant_excluded"))
-            values = [
+            recording_id = str(item.get("recording_id") or "")
+            values = (
+                recording_id or participant_id,
                 participant_id,
+                _session_text(item),
                 self._group_for_participant(participant_id),
                 _finding_text(item),
-                _automatic_action_text(
-                    item,
-                    auto_electrodes_by_participant.get(participant_id, []),
-                ),
-            ]
-            for column, text in enumerate(values):
-                table_item = QTableWidgetItem(text)
-                table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-                self.summary_table.setItem(row, column, table_item)
-
-            checkbox = QCheckBox(self.summary_table)
-            checkbox.setChecked(auto_participant or participant_id in manual_existing)
-            checkbox.setEnabled(not auto_participant)
-            checkbox.setToolTip(
-                "Automatic participant exclusions cannot be changed here."
-                if auto_participant
-                else "Optionally remove this whole participant from frequency-domain outputs."
+                "None — review flag only",
             )
-            self.summary_table.setCellWidget(row, 4, _centered_cell_widget(checkbox))
-
-            combo = QComboBox(self.summary_table)
-            combo.addItems(list(MANUAL_EXCLUSION_REASONS))
-            combo.setCurrentText(WARNING_REASON_UNUSUAL_VALUES)
-            combo.setEnabled(checkbox.isEnabled() and checkbox.isChecked())
-            checkbox.toggled.connect(combo.setEnabled)
-            self.summary_table.setCellWidget(row, 5, combo)
-            self._manual_controls[participant_id] = (checkbox, combo)
-
-        self.summary_table.resizeColumnsToContents()
+            for column, value in enumerate(values):
+                table_item = QTableWidgetItem(value)
+                table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
+                self.summary_table.setItem(row_index, column, table_item)
         self.summary_table.resizeRowsToContents()
 
     def _populate_details_table(self) -> None:
-        flags = _mapping_rows(self._report.get("flags"))
-        self.details_table.setRowCount(len(flags))
-        for row, item in enumerate(flags):
-            values = [
-                str(item.get("participant_id") or ""),
-                self._group_for_participant(item.get("participant_id")),
-                str(item.get("condition") or ""),
-                str(item.get("electrode") or ""),
-                f"{float(item.get('summed_bca_uv') or 0.0):.3f}",
-                str(item.get("severity") or ""),
+        findings = _review_findings(self._report)
+        existing = {
+            str(row.get("finding_fingerprint") or ""): row
+            for row in [
+                *_mapping_rows(self._report.get("review_decisions")),
+                *_mapping_rows(self._report.get("review_prefill_decisions")),
             ]
-            for column, text in enumerate(values):
-                table_item = QTableWidgetItem(text)
+        }
+        self.details_table.setRowCount(len(findings))
+        for row_index, item in enumerate(findings):
+            fingerprint = str(item.get("finding_fingerprint") or "")
+            signed_value, absolute_value = _value_texts(item)
+            values = (
+                str(item.get("participant_id") or ""),
+                str(item.get("recording_id") or ""),
+                _session_text(item),
+                str(item.get("condition") or ""),
+                str(item.get("electrode") or item.get("roi") or ""),
+                _finding_kind_text(item),
+                signed_value,
+                absolute_value,
+                str(item.get("band_crossed") or item.get("severity") or ""),
+                _harmonic_text(item),
+                _analysis_window_text(item),
+                _independent_qc_text(item),
+            )
+            for column, value in enumerate(values):
+                table_item = QTableWidgetItem(value)
                 table_item.setFlags(table_item.flags() & ~Qt.ItemIsEditable)
-                if column == 4:
+                if column in {6, 7}:
                     table_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.details_table.setItem(row, column, table_item)
-        self.details_table.resizeColumnsToContents()
+                self.details_table.setItem(row_index, column, table_item)
+
+            combo = QComboBox(self.details_table)
+            combo.setObjectName(f"frequency_domain_qc_decision_{row_index}")
+            allowed = [_CHOOSE_DECISION, DECISION_RETAIN, DECISION_EXCLUDE_CONDITION]
+            if item.get("electrode"):
+                allowed.insert(2, DECISION_EXCLUDE_CONDITION_ELECTRODE)
+            if self._identity_scope == "recording":
+                allowed.append(DECISION_EXCLUDE_RECORDING)
+            allowed.append(DECISION_EXCLUDE_PARTICIPANT)
+            for decision in allowed:
+                combo.addItem(_DECISION_LABELS[decision], decision)
+            reason = QLineEdit(self.details_table)
+            reason.setObjectName(f"frequency_domain_qc_reason_{row_index}")
+            reason.setPlaceholderText("Required for an exclusion")
+            saved = existing.get(fingerprint)
+            if saved is not None:
+                prior_decision = str(saved.get("decision") or "")
+                prior_reason = str(saved.get("reason") or "").strip()
+                prior_label = _DECISION_LABELS.get(
+                    prior_decision,
+                    prior_decision.replace("_", " ") or "Unavailable",
+                )
+                context = f"Prior reviewed decision: {prior_label}."
+                if prior_reason:
+                    context += f" Prior reason: {prior_reason}"
+                combo.setToolTip(context)
+                reason.setToolTip(context)
+            combo.currentIndexChanged.connect(
+                lambda _index, current=combo, edit=reason: edit.setEnabled(
+                    str(current.currentData() or "")
+                    not in {_CHOOSE_DECISION, DECISION_RETAIN}
+                )
+            )
+            reason.setEnabled(
+                str(combo.currentData() or "")
+                not in {_CHOOSE_DECISION, DECISION_RETAIN}
+            )
+            self.details_table.setCellWidget(row_index, 12, combo)
+            self.details_table.setCellWidget(row_index, 13, reason)
+            self._decision_controls[fingerprint] = (combo, reason)
         self.details_table.resizeRowsToContents()
 
     def _group_for_participant(self, participant_id: object) -> str:
@@ -253,120 +355,144 @@ class FrequencyDomainQcReviewDialog(QDialog):
 
     def _toggle_rules(self, checked: bool) -> None:
         self.rules_label.setVisible(bool(checked))
-        self.rules_button.setText("Hide QC rules" if checked else "Show QC rules")
-
-    def _toggle_details(self, checked: bool) -> None:
-        self.details_table.setVisible(bool(checked))
-        self.details_button.setText(
-            "Hide all flagged values" if checked else "Show all flagged values"
+        self.rules_button.setText(
+            "Hide screening rules" if checked else "Show screening rules"
         )
+
+
+def _review_findings(report: Mapping[str, object]) -> list[Mapping[str, object]]:
+    value = report.get("review_findings")
+    return _mapping_rows(value if value is not None else report.get("flags"))
+
+
+def _technical_context_rows(report: Mapping[str, object]) -> list[Mapping[str, object]]:
+    return [
+        row
+        for row in _mapping_rows(report.get("cohort_relative_rows"))
+        if str(row.get("status") or "") != "complete"
+    ]
 
 
 def _outcome_text(report: Mapping[str, object]) -> str:
-    summaries = [
-        item
-        for item in _mapping_rows(report.get("participant_summaries"))
-        if item.get("pause_review")
-    ]
-    auto_electrodes = _mapping_rows(report.get("auto_participant_electrode_exclusions"))
-    auto_participants = _mapping_rows(report.get("auto_participant_exclusions"))
-    need_verb = "needs" if len(summaries) == 1 else "need"
-    parts = [
-        f"{_count_phrase(len(summaries), 'participant')} {need_verb} review.",
-        (
-            f"{_count_phrase(len(auto_electrodes), 'participant-electrode pair')} "
-            "will be excluded automatically."
-        ),
-    ]
-    if auto_participants:
-        parts.append(
-            f"{_count_phrase(len(auto_participants), 'participant')} "
-            "will be removed automatically."
+    findings = _review_findings(report)
+    scope = str(report.get("identity_scope") or "participant")
+    identities = {
+        str(
+            (
+                row.get("recording_id")
+                if scope == "recording"
+                else row.get("participant_id")
+            )
+            or ""
         )
-    else:
-        parts.append("No participant will be removed unless you choose that below.")
-    parts.append(
-        "Use the checkbox only when you want to remove the whole participant."
+        for row in findings
+    }
+    identities.discard("")
+    unit = "recording" if scope == "recording" else "participant"
+    return (
+        f"{_count_phrase(len(findings), 'finding')} across "
+        f"{_count_phrase(len(identities), unit)} need an explicit decision. "
+        "No electrode, condition, recording, or participant will be excluded automatically."
     )
-    return " ".join(parts)
 
 
 def _finding_text(summary: Mapping[str, object]) -> str:
-    electrode = str(summary.get("max_electrode") or "").strip()
-    condition = str(summary.get("max_condition") or "").strip()
     max_value = float(summary.get("max_abs_summed_bca_uv") or 0.0)
     warning_count = int(summary.get("warning_cell_count") or 0)
-    hard_count = int(summary.get("hard_excluded_electrode_count") or 0)
-    location = "/".join(part for part in (condition, electrode) if part)
-    lead = f"Max abs summed BCA {max_value:.3f} uV"
-    if location:
-        lead += f" at {location}"
-    details = []
-    if hard_count:
-        details.append(_count_phrase(hard_count, "hard electrode"))
+    extreme_count = int(summary.get("extreme_electrode_count") or 0)
+    parts = [f"max absolute value {max_value:.3f} uV"]
     if warning_count:
-        details.append(_count_phrase(warning_count, "warning cell"))
-    return f"{lead}; {', '.join(details)}" if details else lead
+        parts.append(_count_phrase(warning_count, "flagged value"))
+    if extreme_count:
+        parts.append(_count_phrase(extreme_count, "extreme electrode"))
+    return "; ".join(parts)
 
 
-def _automatic_action_text(
-    summary: Mapping[str, object],
-    auto_electrodes: list[str],
-) -> str:
-    if bool(summary.get("auto_participant_excluded")):
-        electrodes = _format_electrodes(auto_electrodes)
-        if electrodes:
-            return f"Exclude whole participant automatically; hard electrodes: {electrodes}"
-        return "Exclude whole participant automatically"
-    hard_count = int(summary.get("hard_excluded_electrode_count") or 0)
-    if hard_count:
-        electrodes = _format_electrodes(auto_electrodes)
-        if electrodes:
-            return f"Exclude {electrodes}; keep participant"
-        return f"Exclude {_count_phrase(hard_count, 'participant-electrode pair')}; keep participant"
-    reasons = [str(reason) for reason in summary.get("pause_reasons", []) or []]
-    if reasons:
-        return "Review only; no automatic exclusion"
-    return "No automatic action"
+def _finding_kind_text(item: Mapping[str, object]) -> str:
+    if item.get("finding_type") == "cohort_relative_summed_bca_context":
+        return "Cohort-relative " + str(item.get("metric") or "context").replace(
+            "_", " "
+        )
+    return "Absolute electrode summed BCA"
 
 
-def _auto_electrodes_by_participant(report: Mapping[str, object]) -> dict[str, list[str]]:
-    electrodes_by_participant: dict[str, set[str]] = {}
-    for item in _mapping_rows(report.get("auto_participant_electrode_exclusions")):
-        participant_id = str(item.get("participant_id") or "").strip()
-        electrode = str(item.get("electrode") or "").strip()
-        if not participant_id or not electrode:
-            continue
-        electrodes_by_participant.setdefault(participant_id, set()).add(electrode)
-    return {
-        participant_id: sorted(electrodes)
-        for participant_id, electrodes in electrodes_by_participant.items()
-    }
+def _value_texts(item: Mapping[str, object]) -> tuple[str, str]:
+    if item.get("finding_type") == "cohort_relative_summed_bca_context":
+        raw_value = item.get("value_uv")
+        if raw_value is None:
+            raw_value = item.get("abs_summed_bca_uv")
+        if raw_value is None:
+            return "Unavailable", "Unavailable"
+        value = float(raw_value)
+        return f"{value:.3f} uV", f"{abs(value):.3f} uV"
+    signed = float(item.get("summed_bca_uv") or 0.0)
+    absolute = float(item.get("abs_summed_bca_uv") or abs(signed))
+    return f"{signed:.3f} uV", f"{absolute:.3f} uV"
 
 
-def _format_electrodes(electrodes: list[str]) -> str:
-    if not electrodes:
-        return ""
-    if len(electrodes) <= 4:
-        return ", ".join(electrodes)
-    return f"{', '.join(electrodes[:4])}, +{len(electrodes) - 4} more"
+def _harmonic_text(item: Mapping[str, object]) -> str:
+    values = item.get("selected_harmonics_hz") or []
+    if not isinstance(values, (list, tuple)):
+        return "Unavailable"
+    if not values:
+        return "0: None"
+    return (
+        f"{len(values)}: "
+        + ", ".join(f"{float(value):g}" for value in values)
+        + " Hz"
+    )
+
+
+def _analysis_window_text(item: Mapping[str, object]) -> str:
+    cycles = item.get("expected_analyzed_oddball_cycles")
+    duration = item.get("analyzed_duration_seconds")
+    if cycles in (None, "") and duration in (None, ""):
+        return "Unavailable"
+    return f"{cycles} cycles / {float(duration):g} s"
+
+
+def _independent_qc_text(item: Mapping[str, object]) -> str:
+    evidence = item.get("independent_qc")
+    if isinstance(evidence, (list, tuple)) and evidence:
+        return "; ".join(str(value) for value in evidence)
+    status = str(item.get("independent_qc_status") or "").strip()
+    return status.replace("_", " ") or "Not available"
+
+
+def _technical_context_text(item: Mapping[str, object]) -> str:
+    identity = str(item.get("recording_id") or item.get("participant_id") or "")
+    condition = str(item.get("condition") or "")
+    roi = str(item.get("roi") or "")
+    reasons = ", ".join(str(value) for value in item.get("reason_codes") or [])
+    return f"{identity} / {condition} / {roi}: {reasons or item.get('status') or 'unavailable'}"
+
+
+def _session_text(item: Mapping[str, object]) -> str:
+    label = str(item.get("session_label") or item.get("session_id") or "").strip()
+    visit = item.get("visit_index")
+    if visit not in (None, ""):
+        suffix = f"visit {visit}"
+        return f"{label} ({suffix})" if label else suffix
+    return label
 
 
 def _count_phrase(count: int, singular: str, plural: str | None = None) -> str:
-    if count == 1:
-        return f"1 {singular}"
-    return f"{count} {plural or singular + 's'}"
+    return f"{count} {singular if count == 1 else plural or singular + 's'}"
 
 
 def _threshold_text(report: Mapping[str, object]) -> str:
     thresholds = report.get("thresholds") if isinstance(report.get("thresholds"), Mapping) else {}
+    settings = report.get("screening_settings") if isinstance(report.get("screening_settings"), Mapping) else {}
     return (
-        "Thresholds: warning > "
-        f"{thresholds.get('warning_summed_bca_uv', 10)} uV; strong warning > "
-        f"{thresholds.get('strong_warning_summed_bca_uv', 50)} uV; automatic "
-        f"electrode exclusion > {thresholds.get('hard_electrode_summed_bca_uv', 250)} uV; "
-        "automatic participant exclusion when more than "
-        f"{thresholds.get('hard_participant_unique_electrodes', 10)} unique electrodes are hard-excluded."
+        "Experimental absolute-value review bands: warning above "
+        f"{thresholds.get('warning_summed_bca_uv', 10)} uV; strong warning above "
+        f"{thresholds.get('strong_warning_summed_bca_uv', 50)} uV; extreme review above "
+        f"{thresholds.get('extreme_review_summed_bca_uv', 250)} uV. "
+        "Cohort-relative context uses median/MAD, scaled-IQR, and zero-spread "
+        "fallbacks with warning/extreme robust scores "
+        f"{settings.get('cohort_warning_robust_score', 6)}/"
+        f"{settings.get('cohort_extreme_robust_score', 10)}. These are review "
+        "limits and never automatic exclusions."
     )
 
 
@@ -374,16 +500,6 @@ def _mapping_rows(value: object) -> list[Mapping[str, object]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
-
-
-def _centered_cell_widget(widget: QWidget) -> QWidget:
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.addStretch(1)
-    layout.addWidget(widget)
-    layout.addStretch(1)
-    return container
 
 
 __all__ = ["FrequencyDomainQcReviewDialog"]

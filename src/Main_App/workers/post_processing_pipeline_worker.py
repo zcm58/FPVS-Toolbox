@@ -109,6 +109,8 @@ class PostProcessingPipelineWorker(QObject):
         self._selection_changed = False
         self._artifact_targets: dict[str, Path] = {}
         self._artifact_archives: dict[str, Path] = {}
+        self._recording_condition_outcomes: Any | None = None
+        self._pre_review_roi_coverage: Any | None = None
 
     @Slot()
     def run(self) -> None:
@@ -157,6 +159,7 @@ class PostProcessingPipelineWorker(QObject):
                 )
                 return
             self._sync_frequency_domain_qc_automatic_state(project_root, qc_report)
+            self._finalize_frequency_qc_release(project_root)
             if qc_report.get("review_reused"):
                 steps.append(
                     PostProcessingStepResult(
@@ -377,11 +380,11 @@ class PostProcessingPipelineWorker(QObject):
             require_pre_review_readiness,
         )
         from Main_App.processing.frequency_domain_qc import run_frequency_domain_qc_review
+        from Main_App.processing.roi_coverage import build_pre_review_roi_coverage
 
         project_root = Path(self._project.project_root).expanduser().resolve()
-        outcome_ledger = load_recording_condition_outcomes(
-            load_ledger(project_root)
-        )
+        processing_ledger = load_ledger(project_root)
+        outcome_ledger = load_recording_condition_outcomes(processing_ledger)
         if outcome_ledger is None:
             raise RecordingConditionOutcomeError(
                 "Frequency review is blocked because the current processing run "
@@ -389,6 +392,13 @@ class PostProcessingPipelineWorker(QObject):
                 "to create validated workbook receipts."
             )
         require_pre_review_readiness(outcome_ledger)
+        self._recording_condition_outcomes = outcome_ledger
+        self._pre_review_roi_coverage = build_pre_review_roi_coverage(
+            self._project,
+            outcome_ledger=outcome_ledger,
+            processing_ledger=processing_ledger,
+            persist=True,
+        )
         self._dataset_index = load_project_dataset_index(project_root)
         return run_frequency_domain_qc_review(
             self._project,
@@ -406,6 +416,40 @@ class PostProcessingPipelineWorker(QObject):
         )
 
         sync_frequency_domain_qc_automatic_state(project_root, qc_report)
+
+    def _finalize_frequency_qc_release(self, project_root: Path) -> None:
+        """Run QC-21 final coverage and record the QC-20 release receipt."""
+
+        from Main_App.processing.frequency_domain_qc import (
+            resolve_frequency_qc_coverage_decisions,
+        )
+        from Main_App.processing.roi_coverage import (
+            build_final_roi_coverage,
+            record_final_release_readiness,
+        )
+
+        if self._recording_condition_outcomes is None:
+            raise RuntimeError(
+                "Final frequency release requires the current recording-condition outcome ledger."
+            )
+        decisions = resolve_frequency_qc_coverage_decisions(project_root)
+        if not decisions.review_complete:
+            raise RuntimeError(
+                "Final frequency release requires a current completed summed-BCA review."
+            )
+        final_coverage = build_final_roi_coverage(
+            self._project,
+            outcome_ledger=self._recording_condition_outcomes,
+            frequency_decisions=decisions,
+            pre_review_coverage=self._pre_review_roi_coverage,
+            persist=True,
+        )
+        record_final_release_readiness(
+            project_root,
+            self._recording_condition_outcomes,
+            final_coverage,
+            expected_decision_fingerprint=decisions.decision_fingerprint,
+        )
 
     def _run_harmonic_selection(self) -> PostProcessingStepResult:
         self._emit_progress("FPVS Toolbox is currently identifying significant harmonics.")

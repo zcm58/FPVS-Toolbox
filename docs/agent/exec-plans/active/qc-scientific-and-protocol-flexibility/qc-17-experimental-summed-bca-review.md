@@ -6,9 +6,11 @@ Load this module with the parent index, shared contracts, QC-03, QC-10 through
 QC-15, QC-20's pre-review readiness gate, QC-21 definition/source
 prevalidation, and the project-settings portions of QC-04.
 
-**Status:** accepted on 2026-09-03. Keep the existing magnitude and count values
-as experience-based experimental defaults, but remove their independent
-authority to exclude data. Review takes place in the GUI.
+**Status:** software behavior implemented on the active QC branch on
+2026-09-04. Keep the existing magnitude and count values as experience-based
+experimental defaults, but remove their independent authority to exclude data.
+Review takes place in the GUI. Representative-data calibration, CI-only Qt
+execution, and the visible smoke path remain release evidence.
 
 ## Accepted Behavior
 
@@ -26,8 +28,10 @@ authority to exclude data. Review takes place in the GUI.
    64. Store the enabled state, values, and policy version per project.
 3. Rename `hard` findings to `extreme` or `high-priority review`. No summed-BCA
    value or count automatically excludes an electrode, condition, recording, or
-   participant. The default GUI decision is retain. A broader exclusion requires
-   a separate explicit user choice. Independent technical evidence keeps only
+   participant. The GUI has no preselected decision: the reviewer must explicitly
+   choose Retain for the scientific no-exclusion outcome or choose a reasoned
+   exclusion. A broader exclusion requires a separate explicit user choice.
+   Independent technical evidence keeps only
    the authority granted by its own validated policy; BCA cannot promote another
    review-only method to automatic authority and is not a QC-16 corroborator.
 4. Scope each finding and decision to its actual recording, condition, and
@@ -110,3 +114,38 @@ checklist. Summed BCA remains a defensible multiharmonic response measure; this
 action limits the unvalidated interpretation of its magnitude as artifact
 ([Retter et al., 2021](https://doi.org/10.1162/jocn_a_01763),
 [Keil et al., 2022](https://doi.org/10.1111/psyp.14052)).
+
+## Implementation Evidence
+
+Project experimental settings own the enabled state, method version, absolute
+10/50/250 uV bands, five-cell and 11-electrode pattern counts, cohort robust
+scores, and cohort floors. Validation enforces ordered positive amplitudes and
+bounded electrode counts. The Settings GUI presents the review-only wording;
+disabled runs are recorded as `not_performed`.
+
+`processing/frequency_domain_qc.py` consumes canonical project protocol and
+harmonic-selection inputs, emits exact recording/condition/electrode absolute
+and cohort-relative evidence, preserves signed and absolute values and the
+harmonic list, and never creates an automatic exclusion. The dialog begins
+without a selected decision, requires a reason for every exclusion, and keeps
+participant-wide exclusion as an explicit broader choice. The bounded
+review/recompute loop rejects repeated states, reopens when current harmonic or
+cohort evidence changes, and coordinates final coverage/release through the
+public QC-20/QC-21 helpers before canonical harmonic publication.
+
+Managed Stats runs now load the completed shared QC-17 decision fingerprint and
+review evidence instead of calculating a separate fixed-rate BCA screen.
+Exports retain the shared source, review-only authority, status, thresholds,
+and fingerprint; nonfinite dependent-variable handling remains a separate
+integrity rule. Projectless legacy Stats calls retain their compatibility path.
+
+Focused non-Qt processing and static GUI checks cover arbitrary protocol
+rates/cycles, thresholds and grouped patterns, disabled status, no automatic
+authority, exact decision scope, legacy migration, evidence change,
+oscillation protection, and final-gate order. Focused Stats checks cover reuse
+of recording-aware QC-17 evidence, rejection of an incomplete review, no
+independent managed-project calculation, and exported audit provenance. The
+visible release smoke path is to toggle the project feature, review and retain
+one finding, apply one reasoned condition/electrode exclusion, verify a changed
+candidate harmonic list reopens review, and confirm Stats reports the same
+review fingerprint without widening the exclusion.

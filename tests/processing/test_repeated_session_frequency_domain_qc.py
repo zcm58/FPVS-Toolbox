@@ -4,16 +4,26 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from Main_App.processing.frequency_domain_qc import (
+    DECISION_EXCLUDE_RECORDING,
+    DECISION_RETAIN,
     WARNING_REASON_UNUSUAL_VALUES,
     active_frequency_domain_exclusions,
     apply_frequency_domain_qc_decision,
     filter_frequency_domain_recordings,
     frequency_domain_excluded_electrodes_for_recording,
+    load_current_frequency_qc_review_evidence,
+    resolve_frequency_qc_coverage_decisions,
     run_frequency_domain_qc_review,
 )
+from Main_App.processing.spectral_eligibility import resolve_spectral_eligibility
 from Main_App.projects import Project, load_project_dataset_index
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_NAME,
     HARMONIC_PROFILE_FIXED_ID,
@@ -31,24 +41,19 @@ def test_bad_visit_is_recording_scoped_and_paired_visit_remains_available(
     assert report["identity_scope"] == "recording"
     assert report["auto_participant_exclusions"] == []
     assert report["auto_recording_exclusions"] == []
-    assert report["auto_recording_electrode_exclusions"] == [
-        {
-            "recording_id": "P1__VISIT_1",
-            "participant_id": "P1",
-            "session_id": "visit_1",
-            "visit_index": 1,
-            "electrode": "O2",
-            "reason": "abs summed BCA exceeded hard electrode threshold",
-            "threshold_uv": 250.0,
-            "max_abs_summed_bca_uv": 300.0,
-            "triggering_conditions": ["Faces"],
-            "source": "automatic_frequency_domain_qc",
-        }
-    ]
+    assert report["auto_recording_electrode_exclusions"] == []
+    assert report["flags"][0]["recording_id"] == "P1__VISIT_1"
 
     apply_frequency_domain_qc_decision(
         project_root,
         report,
+        review_decisions={
+            str(item["finding_fingerprint"]): {
+                "decision": DECISION_EXCLUDE_RECORDING,
+                "reason": WARNING_REASON_UNUSUAL_VALUES,
+            }
+            for item in report["review_findings"]
+        },
         manual_recording_reasons={
             "P1__visit_1": WARNING_REASON_UNUSUAL_VALUES,
         },
@@ -57,13 +62,11 @@ def test_bad_visit_is_recording_scoped_and_paired_visit_remains_available(
 
     assert exclusions.excluded_participants == frozenset()
     assert exclusions.manual_excluded_recordings == frozenset({"P1__VISIT_1"})
-    assert exclusions.auto_excluded_electrodes_by_recording == {
-        "P1__VISIT_1": frozenset({"O2"})
-    }
+    assert exclusions.auto_excluded_electrodes_by_recording == {}
     assert frequency_domain_excluded_electrodes_for_recording(
         project_root,
         "p1__visit_1",
-    ) == frozenset({"O2"})
+    ) == frozenset()
 
     index = load_project_dataset_index(project_root)
     recording_data = index.recording_data(require_group_assignment=True)
@@ -80,16 +83,61 @@ def test_bad_visit_is_recording_scoped_and_paired_visit_remains_available(
     assert "P1__visit_2" in kept
 
 
+@pytest.mark.parametrize("mutation", ("delete", "tamper"))
+def test_changed_manual_recording_rows_fail_review_integrity(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    project_root = _write_repeated_project(tmp_path / "RepeatedProject")
+    project = Project.load(project_root)
+    report = run_frequency_domain_qc_review(project)
+    apply_frequency_domain_qc_decision(
+        project_root,
+        report,
+        review_decisions={
+            str(item["finding_fingerprint"]): {"decision": DECISION_RETAIN}
+            for item in report["review_findings"]
+        },
+        manual_recording_reasons={
+            "P2__visit_2": "Reviewed whole-recording exclusion"
+        },
+    )
+    manifest_path = project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    rows = manifest["tools"]["frequency_domain_qc"][
+        "manual_recording_exclusions"
+    ]
+    if mutation == "delete":
+        rows.clear()
+    else:
+        rows[0]["reason"] = "Tampered reason"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    decisions = resolve_frequency_qc_coverage_decisions(project_root)
+
+    assert decisions.review_complete is False
+    assert decisions.excluded_recordings == frozenset()
+    with pytest.raises(RuntimeError, match="missing, stale, or tampered"):
+        load_current_frequency_qc_review_evidence(project_root)
+
+
 def _write_repeated_project(project_root: Path) -> Path:
     manifest = {
         "schema_version": "2.2.0",
         "subfolders": {"excel": "1 - Excel Data Files"},
         "event_map": {"Faces": 1},
+        "frequency_protocol": FrequencyProtocol.from_recurrence(
+            6,
+            5,
+            expected_analyzed_oddball_cycles=12,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ).to_manifest(),
         "preprocessing": {
             "harmonic_selection_policy": FIXED_PREDEFINED_POLICY_NAME,
             "harmonic_selection_profile": HARMONIC_PROFILE_FIXED_ID,
             "harmonic_selection_profile_version": "1.0",
             "fixed_harmonic_frequencies_hz": "1.2, 2.4",
+            "fixed_harmonic_input_mode": "frequency_list",
         },
         "groups": {
             "treated": {
@@ -174,3 +222,22 @@ def _write_bca_workbook(
     )
     with pd.ExcelWriter(path) as writer:
         frame.to_excel(writer, sheet_name="BCA (uV)", index=False)
+        eligibility = resolve_spectral_eligibility(
+            protocol=FrequencyProtocol.from_recurrence(
+                6,
+                5,
+                expected_analyzed_oddball_cycles=12,
+                expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+            ),
+            sampling_rate_hz=128,
+            analyzed_samples=1280,
+            requested_high_pass_hz=0.1,
+            requested_low_pass_hz=50,
+            applied_high_pass_hz=0.1,
+            applied_low_pass_hz=50,
+        )
+        pd.DataFrame(eligibility.to_rows()).to_excel(
+            writer,
+            sheet_name="Spectral Eligibility",
+            index=False,
+        )

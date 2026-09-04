@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -520,6 +521,16 @@ def merge_exclusion_reports(
         n_subjects_required_excluded=n_required,
     )
     qc_metadata = {
+        "source": qc_report.source,
+        "source_fingerprint": qc_report.source_fingerprint,
+        "decision_fingerprint": qc_report.decision_fingerprint,
+        "evidence_fingerprint": qc_report.evidence_fingerprint,
+        "harmonic_selection_fingerprint": (
+            qc_report.harmonic_selection_fingerprint
+        ),
+        "review_complete": qc_report.review_complete,
+        "screening_status": qc_report.screening_status,
+        "authority": qc_report.authority,
         "screened_conditions": qc_report.screened_conditions,
         "screened_rois": qc_report.screened_rois,
         "warn_threshold": qc_report.summary.warn_threshold,
@@ -573,10 +584,18 @@ def build_flagged_details_map(
     return {pid: "\n\n".join(lines) for pid, lines in details.items()}
 
 
-def _qc_threshold_metadata(qc_report: QcExclusionReport | None) -> dict[str, float]:
+def _qc_threshold_metadata(qc_report: QcExclusionReport | None) -> dict[str, object]:
     """Handle the qc threshold metadata step for the Stats workflow."""
     if not qc_report:
         return {
+            "qc_source": "",
+            "qc_source_fingerprint": "",
+            "qc_decision_fingerprint": "",
+            "qc_evidence_fingerprint": "",
+            "qc_harmonic_selection_fingerprint": "",
+            "qc_review_complete": False,
+            "qc_screening_status": "not_available",
+            "qc_authority": "",
             "warn_threshold": float("nan"),
             "critical_threshold": float("nan"),
             "warn_abs_floor_sumabs": float("nan"),
@@ -586,6 +605,16 @@ def _qc_threshold_metadata(qc_report: QcExclusionReport | None) -> dict[str, flo
         }
     summary = qc_report.summary
     return {
+        "qc_source": qc_report.source,
+        "qc_source_fingerprint": qc_report.source_fingerprint,
+        "qc_decision_fingerprint": qc_report.decision_fingerprint,
+        "qc_evidence_fingerprint": qc_report.evidence_fingerprint,
+        "qc_harmonic_selection_fingerprint": (
+            qc_report.harmonic_selection_fingerprint
+        ),
+        "qc_review_complete": qc_report.review_complete,
+        "qc_screening_status": qc_report.screening_status,
+        "qc_authority": qc_report.authority,
         "warn_threshold": summary.warn_threshold,
         "critical_threshold": summary.critical_threshold,
         "warn_abs_floor_sumabs": summary.warn_abs_floor_sumabs,
@@ -602,6 +631,44 @@ def build_flagged_participants_tables(
     """Handle the build flagged participants tables step for the Stats workflow."""
     details: list[dict[str, object]] = []
     qc_meta = _qc_threshold_metadata(qc_report)
+    detail_columns = [
+        "participant_id",
+        "original_participant_id",
+        "recording_id",
+        "flag_type",
+        "severity",
+        "condition",
+        "roi",
+        "metric_value",
+        "robust_center",
+        "robust_spread",
+        "robust_score",
+        "threshold_used",
+        "abs_floor_used",
+        "trigger_harmonic_hz",
+        "roi_mean_bca_at_trigger",
+        "saved_decision",
+        "decision_reason",
+        "evidence_fingerprint",
+        "source",
+        "shared_decision_fingerprint",
+        "shared_source_fingerprint",
+        "shared_evidence_fingerprint",
+        "harmonic_selection_fingerprint",
+        "authority",
+        "technical_status_category",
+        "technical_status_reason_codes",
+        "technical_detail",
+        "reason_text",
+        "qc_source",
+        "qc_source_fingerprint",
+        "qc_decision_fingerprint",
+        "qc_evidence_fingerprint",
+        "qc_harmonic_selection_fingerprint",
+        "qc_review_complete",
+        "qc_screening_status",
+        "qc_authority",
+    ]
 
     if qc_report:
         for participant in qc_report.participants:
@@ -609,6 +676,8 @@ def build_flagged_participants_tables(
                 details.append(
                     {
                         "participant_id": participant.participant_id,
+                        "original_participant_id": violation.participant_id,
+                        "recording_id": violation.recording_id,
                         "flag_type": violation.metric,
                         "severity": violation.severity,
                         "condition": violation.condition,
@@ -621,7 +690,25 @@ def build_flagged_participants_tables(
                         "abs_floor_used": violation.abs_floor_used,
                         "trigger_harmonic_hz": violation.trigger_harmonic_hz,
                         "roi_mean_bca_at_trigger": violation.roi_mean_bca_at_trigger,
+                        "saved_decision": violation.decision,
+                        "decision_reason": violation.decision_reason,
+                        "evidence_fingerprint": violation.evidence_fingerprint,
+                        "source": violation.source,
+                        "shared_decision_fingerprint": (
+                            violation.shared_decision_fingerprint
+                        ),
+                        "shared_source_fingerprint": (
+                            violation.shared_source_fingerprint
+                        ),
+                        "shared_evidence_fingerprint": (
+                            violation.shared_evidence_fingerprint
+                        ),
+                        "harmonic_selection_fingerprint": (
+                            violation.harmonic_selection_fingerprint
+                        ),
+                        "authority": violation.authority,
                         "reason_text": format_qc_violation(violation),
+                        **qc_meta,
                     }
                 )
 
@@ -631,6 +718,8 @@ def build_flagged_participants_tables(
                 details.append(
                     {
                         "participant_id": participant.participant_id,
+                        "original_participant_id": participant.participant_id,
+                        "recording_id": "",
                         "flag_type": dv_violation.reason,
                         "severity": "REQUIRED" if dv_violation.reason == OUTLIER_REASON_NONFINITE else "FLAG",
                         "condition": dv_violation.condition,
@@ -643,31 +732,28 @@ def build_flagged_participants_tables(
                         "abs_floor_used": None,
                         "trigger_harmonic_hz": None,
                         "roi_mean_bca_at_trigger": None,
+                        "saved_decision": "",
+                        "decision_reason": "",
+                        "evidence_fingerprint": "",
+                        "source": "dependent_variable_integrity",
+                        "shared_decision_fingerprint": "",
+                        "shared_source_fingerprint": "",
+                        "shared_evidence_fingerprint": "",
+                        "harmonic_selection_fingerprint": "",
+                        "authority": (
+                            "required" if dv_violation.reason == OUTLIER_REASON_NONFINITE else "review_only"
+                        ),
                         "reason_text": format_outlier_reason(
                             dv_violation.reason,
                             abs_limit=dv_report.summary.abs_limit,
                         ),
+                        **qc_meta,
                     }
                 )
 
     details_df = pd.DataFrame(
         details,
-        columns=[
-            "participant_id",
-            "flag_type",
-            "severity",
-            "condition",
-            "roi",
-            "metric_value",
-            "robust_center",
-            "robust_spread",
-            "robust_score",
-            "threshold_used",
-            "abs_floor_used",
-            "trigger_harmonic_hz",
-            "roi_mean_bca_at_trigger",
-            "reason_text",
-        ],
+        columns=detail_columns,
     )
 
     summary_rows: list[dict[str, object]] = []
@@ -703,6 +789,14 @@ def build_flagged_participants_tables(
             "worst_condition",
             "worst_roi",
             "reason_text",
+            "qc_source",
+            "qc_source_fingerprint",
+            "qc_decision_fingerprint",
+            "qc_evidence_fingerprint",
+            "qc_harmonic_selection_fingerprint",
+            "qc_review_complete",
+            "qc_screening_status",
+            "qc_authority",
             "warn_threshold",
             "critical_threshold",
             "warn_abs_floor_sumabs",
@@ -722,6 +816,14 @@ def build_flagged_participants_tables(
                 "worst_condition",
                 "worst_roi",
                 "reason_text",
+                "qc_source",
+                "qc_source_fingerprint",
+                "qc_decision_fingerprint",
+                "qc_evidence_fingerprint",
+                "qc_harmonic_selection_fingerprint",
+                "qc_review_complete",
+                "qc_screening_status",
+                "qc_authority",
                 "warn_threshold",
                 "critical_threshold",
                 "warn_abs_floor_sumabs",
@@ -729,6 +831,68 @@ def build_flagged_participants_tables(
                 "warn_abs_floor_maxabs",
                 "critical_abs_floor_maxabs",
             ],
+        )
+    if qc_report and qc_report.technical_statuses:
+        technical_details: list[dict[str, object]] = []
+        for status in qc_report.technical_statuses:
+            recording_id = str(status.get("recording_id") or "")
+            participant_id = str(status.get("participant_id") or "")
+            category = str(status.get("category") or "technical_status")
+            status_value = str(status.get("status") or status.get("failure_type") or "unavailable")
+            reason_codes = [str(value) for value in status.get("reason_codes") or []]
+            technical_detail = str(
+                status.get("technical_detail") or status.get("reason") or ""
+            )
+            reason_parts = [
+                f"Shared QC-17 technical status: {category}",
+                status_value,
+            ]
+            if reason_codes:
+                reason_parts.append(", ".join(reason_codes))
+            if technical_detail:
+                reason_parts.append(technical_detail)
+            technical_details.append(
+                {
+                    "participant_id": recording_id or participant_id or "<project>",
+                    "original_participant_id": participant_id,
+                    "recording_id": recording_id,
+                    "flag_type": "QC_TECHNICAL_STATUS",
+                    "severity": status_value.upper(),
+                    "condition": str(status.get("condition") or ""),
+                    "roi": str(status.get("roi") or status.get("electrode") or ""),
+                    "metric_value": np.nan,
+                    "robust_center": np.nan,
+                    "robust_spread": np.nan,
+                    "robust_score": np.nan,
+                    "threshold_used": np.nan,
+                    "abs_floor_used": np.nan,
+                    "trigger_harmonic_hz": status.get("harmonic_hz"),
+                    "roi_mean_bca_at_trigger": np.nan,
+                    "saved_decision": "",
+                    "decision_reason": "",
+                    "evidence_fingerprint": str(
+                        status.get("fingerprint")
+                        or status.get("cell_fingerprint")
+                        or qc_report.evidence_fingerprint
+                    ),
+                    "source": "shared_project_qc17_review",
+                    "shared_decision_fingerprint": qc_report.decision_fingerprint,
+                    "shared_source_fingerprint": qc_report.source_fingerprint,
+                    "shared_evidence_fingerprint": qc_report.evidence_fingerprint,
+                    "harmonic_selection_fingerprint": (
+                        qc_report.harmonic_selection_fingerprint
+                    ),
+                    "authority": str(status.get("authority") or "technical_context"),
+                    "technical_status_category": category,
+                    "technical_status_reason_codes": ", ".join(reason_codes),
+                    "technical_detail": technical_detail,
+                    "reason_text": "; ".join(reason_parts),
+                    **qc_meta,
+                }
+            )
+        details_df = pd.concat(
+            [details_df, pd.DataFrame(technical_details, columns=detail_columns)],
+            ignore_index=True,
         )
     return summary_df, details_df
 

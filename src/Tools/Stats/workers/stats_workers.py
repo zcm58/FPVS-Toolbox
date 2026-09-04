@@ -52,6 +52,7 @@ from Tools.Stats.qc.stats_qc_exclusion import (
     QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
     QC_DEFAULT_WARN_THRESHOLD,
     QcExclusionReport,
+    load_shared_frequency_qc_review,
     run_qc_exclusion,
 )
 from Tools.Stats.reporting.lmm_reporting import (
@@ -259,11 +260,22 @@ def _apply_qc_screening(
     message_cb,
     qc_config: dict | None,
     qc_state: dict | None,
+    project_root: str | None = None,
 ) -> tuple[list[str], dict, QcExclusionReport | None]:
     if not subjects:
         return subjects, subject_data, None
 
-    if qc_state is not None and isinstance(qc_state.get("report"), QcExclusionReport):
+    if project_root not in (None, ""):
+        qc_report = load_shared_frequency_qc_review(
+            project_root=project_root,
+            subjects=subjects,
+            conditions_all=list(conditions_all or []),
+            rois_all=rois_all or {},
+            log_func=message_cb,
+        )
+        if qc_state is not None:
+            qc_state["report"] = qc_report
+    elif qc_state is not None and isinstance(qc_state.get("report"), QcExclusionReport):
         qc_report = qc_state.get("report")
     else:
         config = qc_config or {}
@@ -455,6 +467,7 @@ def _prepare_single_group_data(
         message_cb=message_cb,
         qc_config=qc_config,
         qc_state=qc_state,
+        project_root=project_root,
     )
     subjects, subject_data, manual_excluded = _apply_manual_exclusions(
         subjects=list(subjects) if subjects else [],

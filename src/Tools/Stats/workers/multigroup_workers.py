@@ -83,6 +83,7 @@ from Tools.Stats.qc.stats_qc_exclusion import (
     QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
     QC_DEFAULT_WARN_THRESHOLD,
     QcExclusionReport,
+    load_shared_frequency_qc_review,
     run_qc_exclusion,
 )
 from Tools.Stats.data.group_harmonic_cache import (
@@ -840,7 +841,17 @@ def _prepare_project_long_data(
     _raise_if_preparation_cancelled(cancel_check, stage="before_qc")
     _emit_progress(progress_callback, 1, 5)
     config = dict(qc_config or {})
-    if (
+    if project_root not in (None, ""):
+        qc_report = load_shared_frequency_qc_review(
+            project_root=project_root,
+            subjects=selected_subjects,
+            conditions_all=[str(value) for value in (conditions_all or ())],
+            rois_all=dict(rois_all or rois),
+            log_func=message_emit,
+        )
+        if qc_state is not None:
+            qc_state["report"] = qc_report
+    elif (
         qc_state is not None
         and isinstance(qc_state.get("report"), QcExclusionReport)
     ):

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -27,13 +27,16 @@ logger = logging.getLogger("Tools.Stats")
 
 QC_REASON_SUMABS = "QC_SUMABS"
 QC_REASON_MAXABS = "QC_MAXABS"
+QC_REASON_ABSOLUTE_ELECTRODE = "QC_ABSOLUTE_ELECTRODE_SUMMED_BCA"
 
 QC_SEVERITY_WARNING = "WARNING"
 QC_SEVERITY_CRITICAL = "CRITICAL"
+QC_SEVERITY_EXTREME = "EXTREME"
 
 QC_METRIC_LABELS = {
     QC_REASON_SUMABS: "Unusually large total response",
     QC_REASON_MAXABS: "Unusually large peak response",
+    QC_REASON_ABSOLUTE_ELECTRODE: "Unusually large electrode summed BCA",
 }
 
 # Conservative defaults to reduce false positives; these values are reported in exports.
@@ -63,6 +66,17 @@ class QcViolation:
     abs_floor_used: float
     trigger_harmonic_hz: Optional[float] = None
     roi_mean_bca_at_trigger: Optional[float] = None
+    recording_id: str = ""
+    participant_id: str = ""
+    decision: str = ""
+    decision_reason: str = ""
+    evidence_fingerprint: str = ""
+    source: str = "legacy_stats_local_screen"
+    shared_decision_fingerprint: str = ""
+    shared_source_fingerprint: str = ""
+    shared_evidence_fingerprint: str = ""
+    harmonic_selection_fingerprint: str = ""
+    authority: str = "review_only"
 
 
 @dataclass(frozen=True)
@@ -105,10 +119,24 @@ class QcExclusionReport:
     participants: list[QcParticipantReport]
     screened_conditions: list[str]
     screened_rois: list[str]
+    source: str = "legacy_stats_local_screen"
+    source_fingerprint: str = ""
+    decision_fingerprint: str = ""
+    evidence_fingerprint: str = ""
+    harmonic_selection_fingerprint: str = ""
+    review_complete: bool = False
+    screening_status: str = "performed"
+    authority: str = "review_only"
+    technical_statuses: tuple[dict[str, object], ...] = ()
 
     @property
     def excluded_pids(self) -> set[str]:
         """Backward-compatible accessor for excluded participant IDs."""
+        if self.source == "shared_project_qc17_review":
+            # The shared experimental QC-17 report carries review findings and
+            # audit context. Final coverage applies its explicit decisions; the
+            # Stats adapter itself has no participant-exclusion authority.
+            return set()
         for attr_name in ("excluded_subjects", "excluded_participants", "excluded_ids"):
             attr_value = getattr(self, attr_name, None)
             if isinstance(attr_value, (set, list, tuple)):
@@ -165,7 +193,322 @@ def format_qc_violation(violation: QcViolation) -> str:
             f"{violation.trigger_harmonic_hz:.3f} Hz, "
             f"mean BCA at trigger: {violation.roi_mean_bca_at_trigger:.4f}"
         )
+    if violation.recording_id:
+        lines.append(f"Recording: {violation.recording_id}")
+    if violation.decision:
+        decision_text = f"Saved QC-17 decision: {violation.decision}"
+        if violation.decision_reason:
+            decision_text += f" ({violation.decision_reason})"
+        lines.append(decision_text)
+    if violation.source == "shared_project_qc17_review":
+        lines.append("Source: shared experimental QC-17 review evidence")
     return "\n".join(lines)
+
+
+def load_shared_frequency_qc_review(
+    *,
+    project_root: str | Path,
+    subjects: Sequence[str],
+    conditions_all: Sequence[str],
+    rois_all: Mapping[str, Sequence[str]],
+    log_func: Optional[Callable[[str], None]] = None,
+) -> QcExclusionReport:
+    """Adapt saved QC-17 evidence for Stats without recomputing a BCA screen."""
+
+    from Main_App.processing.frequency_domain_qc import (
+        load_current_frequency_qc_review_evidence,
+        resolve_frequency_qc_coverage_decisions,
+    )
+
+    root = Path(project_root).resolve()
+    decisions = resolve_frequency_qc_coverage_decisions(root)
+    if not decisions.review_complete:
+        raise RuntimeError(
+            "Stats requires a current completed experimental summed-BCA review. "
+            "Run post-processing and finish the QC-17 GUI review first."
+        )
+    review_evidence = load_current_frequency_qc_review_evidence(root)
+    decision_by_finding = {
+        str(row.get("finding_fingerprint") or ""): row
+        for row in decisions.reviewed_decisions
+        if str(row.get("finding_fingerprint") or "")
+    }
+    findings = [
+        *_mapping_rows(review_evidence.get("ordinary_findings")),
+        *_mapping_rows(review_evidence.get("cohort_findings")),
+        *_mapping_rows(review_evidence.get("reconfirmation_findings")),
+    ]
+    finding_fingerprints = {
+        str(finding.get("finding_fingerprint") or "")
+        for finding in findings
+        if str(finding.get("finding_fingerprint") or "")
+    }
+    for row in decisions.reviewed_decisions:
+        finding_fingerprint = str(row.get("finding_fingerprint") or "")
+        if (
+            not finding_fingerprint
+            or finding_fingerprint in finding_fingerprints
+            or str(row.get("decision") or "") == "retain"
+        ):
+            continue
+        evidence = row.get("evidence")
+        if not isinstance(evidence, Mapping):
+            raise RuntimeError(
+                "Saved QC-17 exclusion lacks its reviewed evidence. Run "
+                "post-processing and complete the review again."
+            )
+        findings.append(
+            {
+                **dict(evidence),
+                "participant_id": str(row.get("participant_id") or ""),
+                "recording_id": str(row.get("recording_id") or ""),
+                "session_id": str(row.get("session_id") or ""),
+                "visit_index": row.get("visit_index"),
+                "condition": str(row.get("condition") or ""),
+                "electrode": str(row.get("electrode") or ""),
+                "roi": str(row.get("roi") or ""),
+                "finding_fingerprint": finding_fingerprint,
+            }
+        )
+        finding_fingerprints.add(finding_fingerprint)
+    subject_lookup = {str(value).casefold(): str(value) for value in subjects}
+    by_identity: dict[str, list[QcViolation]] = {}
+    for finding in findings:
+        finding_fingerprint = str(finding.get("finding_fingerprint") or "")
+        row = decision_by_finding.get(finding_fingerprint)
+        if row is None:
+            raise RuntimeError(
+                "Saved QC-17 evidence lacks its exact reviewed decision. "
+                "Run post-processing and complete the review again."
+            )
+        metric = _shared_qc_metric(finding)
+        if metric is None:
+            continue
+        participant_id = str(row.get("participant_id") or "")
+        recording_id = str(row.get("recording_id") or "")
+        identity = (
+            subject_lookup.get(recording_id.casefold())
+            or subject_lookup.get(participant_id.casefold())
+            or recording_id
+            or participant_id
+        )
+        if not identity:
+            continue
+        value = _finite_or_nan(
+            finding.get("value_uv")
+            if finding.get("value_uv") is not None
+            else finding.get("abs_summed_bca_uv")
+        )
+        severity = str(
+            finding.get("band_crossed") or finding.get("severity") or "WARNING"
+        ).upper()
+        if "EXTREME" in severity or "RECONFIRM" in severity:
+            severity = QC_SEVERITY_EXTREME
+        elif "STRONG" in severity:
+            severity = "STRONG"
+        else:
+            severity = QC_SEVERITY_WARNING
+        violation = QcViolation(
+            condition=str(row.get("condition") or ""),
+            roi=str(finding.get("roi") or finding.get("electrode") or ""),
+            metric=metric,
+            severity=severity,
+            value=value,
+            robust_center=_finite_or_nan(finding.get("robust_center_uv")),
+            robust_spread=_finite_or_nan(finding.get("robust_spread_uv")),
+            robust_score=_finite_or_nan(finding.get("robust_score")),
+            threshold_used=_finite_or_nan(finding.get("threshold_used")),
+            abs_floor_used=_finite_or_nan(
+                finding.get("absolute_floor_used_uv")
+            ),
+            trigger_harmonic_hz=_optional_finite_float(
+                finding.get("peak_harmonic_hz")
+            ),
+            roi_mean_bca_at_trigger=_optional_finite_float(
+                finding.get("peak_signed_roi_mean_uv")
+            ),
+            recording_id=recording_id,
+            participant_id=participant_id,
+            decision=str(row.get("decision") or ""),
+            decision_reason=str(row.get("reason") or ""),
+            evidence_fingerprint=finding_fingerprint,
+            source="shared_project_qc17_review",
+            shared_decision_fingerprint=decisions.decision_fingerprint,
+            shared_source_fingerprint=str(
+                review_evidence.get("source_fingerprint") or ""
+            ),
+            shared_evidence_fingerprint=str(
+                review_evidence.get("evidence_fingerprint") or ""
+            ),
+            harmonic_selection_fingerprint=str(
+                finding.get("harmonic_selection_fingerprint")
+                or review_evidence.get("harmonic_selection_fingerprint")
+                or ""
+            ),
+            authority="review_only",
+        )
+        by_identity.setdefault(identity, []).append(violation)
+
+    participants = [
+        _shared_qc_participant_report(identity, violations)
+        for identity, violations in sorted(by_identity.items(), key=lambda item: item[0].casefold())
+    ]
+    settings = (
+        review_evidence.get("screening_settings")
+        if isinstance(review_evidence.get("screening_settings"), Mapping)
+        else {}
+    )
+    technical_statuses = tuple(
+        dict(item)
+        for item in _mapping_rows(
+            review_evidence.get("technical_statuses")
+        )
+    )
+    screened_conditions = list(
+        dict.fromkeys(
+            [str(value) for value in conditions_all]
+            + [violation.condition for values in by_identity.values() for violation in values]
+        )
+    )
+    screened_rois = sorted(
+        {
+            *map(str, rois_all.keys()),
+            *(
+                violation.roi
+                for values in by_identity.values()
+                for violation in values
+                if violation.roi
+            ),
+        },
+        key=str.casefold,
+    )
+    report = QcExclusionReport(
+        summary=QcExclusionSummary(
+            n_subjects_before=len(subjects),
+            n_subjects_flagged=len(participants),
+            n_subjects_after=len(subjects),
+            warn_threshold=float(
+                settings.get("cohort_warning_robust_score", QC_DEFAULT_WARN_THRESHOLD)
+            ),
+            critical_threshold=float(
+                settings.get(
+                    "cohort_extreme_robust_score",
+                    QC_DEFAULT_CRITICAL_THRESHOLD,
+                )
+            ),
+            warn_abs_floor_sumabs=float(
+                settings.get(
+                    "cohort_warning_sum_floor_uv",
+                    QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
+                )
+            ),
+            critical_abs_floor_sumabs=float(
+                settings.get(
+                    "cohort_extreme_sum_floor_uv",
+                    QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
+                )
+            ),
+            warn_abs_floor_maxabs=float(
+                settings.get(
+                    "cohort_warning_peak_floor_uv",
+                    QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
+                )
+            ),
+            critical_abs_floor_maxabs=float(
+                settings.get(
+                    "cohort_extreme_peak_floor_uv",
+                    QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
+                )
+            ),
+        ),
+        participants=participants,
+        screened_conditions=screened_conditions,
+        screened_rois=screened_rois,
+        source="shared_project_qc17_review",
+        source_fingerprint=str(review_evidence.get("source_fingerprint") or ""),
+        decision_fingerprint=decisions.decision_fingerprint,
+        evidence_fingerprint=str(
+            review_evidence.get("evidence_fingerprint") or ""
+        ),
+        harmonic_selection_fingerprint=str(
+            review_evidence.get("harmonic_selection_fingerprint") or ""
+        ),
+        review_complete=True,
+        screening_status=str(
+            review_evidence.get("screening_status") or "performed"
+        ),
+        authority="review_only",
+        technical_statuses=technical_statuses,
+    )
+    _log_message(
+        log_func,
+        "Stats reused the saved experimental QC-17 review; no separate "
+        "summed-BCA screen was calculated.",
+    )
+    return report
+
+
+def _shared_qc_metric(evidence: Mapping[str, object]) -> str | None:
+    finding_type = str(evidence.get("finding_type") or "")
+    if finding_type == "absolute_electrode_summed_bca":
+        return QC_REASON_ABSOLUTE_ELECTRODE
+    metric = str(evidence.get("metric") or "")
+    if metric == "sum_abs_roi_mean":
+        return QC_REASON_SUMABS
+    if metric == "peak_abs_roi_mean":
+        return QC_REASON_MAXABS
+    if (
+        finding_type == "prior_outcome_informed_exclusion_reconfirmation"
+        and str(evidence.get("electrode") or "")
+    ):
+        return QC_REASON_ABSOLUTE_ELECTRODE
+    return None
+
+
+def _shared_qc_participant_report(
+    identity: str,
+    violations: Sequence[QcViolation],
+) -> QcParticipantReport:
+    ordered = list(violations)
+    worst = max(
+        ordered,
+        key=lambda item: abs(item.value) if np.isfinite(item.value) else -1.0,
+    )
+    return QcParticipantReport(
+        participant_id=identity,
+        reasons=sorted({item.metric for item in ordered}),
+        n_violations=len(ordered),
+        worst_value=worst.value,
+        worst_condition=worst.condition,
+        worst_roi=worst.roi,
+        worst_metric=worst.metric,
+        robust_center=worst.robust_center,
+        robust_spread=worst.robust_spread,
+        robust_score=worst.robust_score,
+        threshold_used=worst.threshold_used,
+        trigger_harmonic_hz=worst.trigger_harmonic_hz,
+        roi_mean_bca_at_trigger=worst.roi_mean_bca_at_trigger,
+        violations=ordered,
+    )
+
+
+def _finite_or_nan(value: object) -> float:
+    parsed = _optional_finite_float(value)
+    return float("nan") if parsed is None else parsed
+
+
+def _optional_finite_float(value: object) -> float | None:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if np.isfinite(parsed) else None
+
+
+def _mapping_rows(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def qc_metric_label(metric: str) -> str:

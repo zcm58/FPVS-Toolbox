@@ -649,9 +649,6 @@ class StatsWindowPipelineMixin:
         reasons: dict[str, str] = {}
         for pid in report.manual_excluded_pids:
             reasons[str(pid)] = "manual exclusion"
-        if report.qc_report:
-            for participant in report.qc_report.participants:
-                reasons[str(participant.participant_id)] = "QC exclusion"
         if report.required_exclusions:
             for violation in report.required_exclusions:
                 reasons[str(violation.participant_id)] = f"required DV exclusion ({violation.reason})"

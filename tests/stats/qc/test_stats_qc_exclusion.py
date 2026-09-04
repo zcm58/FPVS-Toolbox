@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
+import pytest
 
 import Tools.Stats.qc.stats_qc_exclusion as qc_exclusion
 from Tools.Stats.analysis.dv_policies import (
@@ -13,6 +16,7 @@ from Tools.Stats.qc.stats_qc_exclusion import (
     QC_REASON_SUMABS,
     QcViolation,
     format_qc_violation,
+    load_shared_frequency_qc_review,
     run_qc_exclusion,
 )
 
@@ -194,3 +198,232 @@ def test_format_qc_violation_is_human_readable() -> None:
     assert "value: 12.3400" in text
     assert "Robust score: 7.890" in text
     assert "threshold 6.00" in text
+
+
+def test_managed_stats_reuses_recording_aware_qc17_evidence(monkeypatch, tmp_path) -> None:
+    import Main_App.processing.frequency_domain_qc as project_qc
+
+    rows = tuple(
+        {
+            "recording_id": recording_id,
+            "participant_id": "P1",
+            "condition": "Faces",
+            "roi": "Right OT",
+            "decision": "retain",
+            "reason": "",
+            "finding_fingerprint": f"finding-{recording_id}",
+        }
+        for recording_id in ("P1__V1", "P1__V2")
+    )
+    findings = [
+        {
+            "finding_type": "cohort_relative_summed_bca_context",
+            "recording_id": row["recording_id"],
+            "participant_id": "P1",
+            "condition": "Faces",
+            "roi": "Right OT",
+            "metric": "sum_abs_roi_mean",
+            "value_uv": 12.0,
+            "robust_center_uv": 2.0,
+            "robust_spread_uv": 1.0,
+            "robust_score": 10.0,
+            "threshold_used": 10.0,
+            "absolute_floor_used_uv": 10.0,
+            "severity": "extreme",
+            "finding_fingerprint": row["finding_fingerprint"],
+            "harmonic_selection_fingerprint": "harmonic-fingerprint",
+        }
+        for row in rows
+    ]
+    monkeypatch.setattr(
+        project_qc,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: SimpleNamespace(
+            review_complete=True,
+            decision_fingerprint="decision-fingerprint",
+            reviewed_decisions=rows,
+        ),
+    )
+    monkeypatch.setattr(
+        project_qc,
+        "load_current_frequency_qc_review_evidence",
+        lambda _root: {
+            "cohort_findings": findings,
+            "ordinary_findings": [],
+            "screening_settings": {
+                "cohort_warning_robust_score": 6.0,
+                "cohort_extreme_robust_score": 10.0,
+            },
+            "screening_status": "performed",
+            "source_fingerprint": "source-fingerprint",
+            "evidence_fingerprint": "evidence-fingerprint",
+            "harmonic_selection_fingerprint": "harmonic-fingerprint",
+        },
+    )
+
+    report = load_shared_frequency_qc_review(
+        project_root=tmp_path,
+        subjects=["P1__V1", "P1__V2"],
+        conditions_all=["Faces"],
+        rois_all={"Right OT": ["O2"]},
+    )
+
+    assert report.source == "shared_project_qc17_review"
+    assert report.source_fingerprint == "source-fingerprint"
+    assert report.decision_fingerprint == "decision-fingerprint"
+    assert report.evidence_fingerprint == "evidence-fingerprint"
+    assert report.harmonic_selection_fingerprint == "harmonic-fingerprint"
+    assert [item.participant_id for item in report.participants] == [
+        "P1__V1",
+        "P1__V2",
+    ]
+    assert all(
+        violation.source == "shared_project_qc17_review"
+        for participant in report.participants
+        for violation in participant.violations
+    )
+    assert all(
+        violation.participant_id == "P1"
+        and violation.decision == "retain"
+        and violation.harmonic_selection_fingerprint == "harmonic-fingerprint"
+        for participant in report.participants
+        for violation in participant.violations
+    )
+
+
+def test_managed_stats_preserves_stabilized_reconfirmation_only_exclusion(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    import Main_App.processing.frequency_domain_qc as project_qc
+
+    decision = {
+        "recording_id": "P1__V1",
+        "participant_id": "P1",
+        "session_id": "visit_1",
+        "condition": "Faces",
+        "electrode": "O2",
+        "roi": "",
+        "decision": "exclude_condition_electrode",
+        "reason": "Reviewed condition-specific artifact",
+        "finding_fingerprint": "reconfirmation-finding",
+        "evidence": {
+            "finding_type": "prior_outcome_informed_exclusion_reconfirmation",
+            "summed_bca_uv": 300.0,
+            "abs_summed_bca_uv": 300.0,
+            "severity": "reconfirmation",
+            "band_crossed": "reconfirmation required; prior band extreme",
+            "selected_harmonics_hz": [1.2, 2.4],
+            "harmonic_selection_fingerprint": "harmonic-fingerprint",
+            "independent_qc": [
+                {
+                    "source": "qc21_pre_review_coverage",
+                    "status": "current",
+                    "authority": "context_only",
+                }
+            ],
+            "independent_qc_status": "available",
+            "independent_qc_authority": "context_only",
+            "independent_qc_fingerprint": "independent-fingerprint",
+        },
+    }
+    monkeypatch.setattr(
+        project_qc,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: SimpleNamespace(
+            review_complete=True,
+            decision_fingerprint="decision-fingerprint",
+            reviewed_decisions=(decision,),
+        ),
+    )
+    monkeypatch.setattr(
+        project_qc,
+        "load_current_frequency_qc_review_evidence",
+        lambda _root: {
+            "ordinary_findings": [],
+            "cohort_findings": [],
+            "reconfirmation_findings": [],
+            "screening_settings": {},
+            "screening_status": "performed",
+            "source_fingerprint": "source-fingerprint",
+            "evidence_fingerprint": "evidence-fingerprint",
+            "harmonic_selection_fingerprint": "harmonic-fingerprint",
+        },
+    )
+
+    report = load_shared_frequency_qc_review(
+        project_root=tmp_path,
+        subjects=["P1__V1"],
+        conditions_all=["Faces"],
+        rois_all={"Right OT": ["O2"]},
+    )
+
+    assert report.excluded_pids == set()
+    assert len(report.participants) == 1
+    violation = report.participants[0].violations[0]
+    assert report.participants[0].participant_id == "P1__V1"
+    assert violation.recording_id == "P1__V1"
+    assert violation.participant_id == "P1"
+    assert violation.condition == "Faces"
+    assert violation.roi == "O2"
+    assert violation.decision == "exclude_condition_electrode"
+    assert violation.decision_reason == "Reviewed condition-specific artifact"
+    assert violation.evidence_fingerprint == "reconfirmation-finding"
+    assert violation.source == "shared_project_qc17_review"
+    assert violation.shared_decision_fingerprint == "decision-fingerprint"
+    assert violation.shared_source_fingerprint == "source-fingerprint"
+    assert violation.shared_evidence_fingerprint == "evidence-fingerprint"
+    assert violation.harmonic_selection_fingerprint == "harmonic-fingerprint"
+    assert violation.authority == "review_only"
+
+
+def test_managed_stats_rejects_incomplete_qc17_review(monkeypatch, tmp_path) -> None:
+    import Main_App.processing.frequency_domain_qc as project_qc
+
+    monkeypatch.setattr(
+        project_qc,
+        "load_frequency_domain_qc_state",
+        lambda _root: {},
+    )
+    monkeypatch.setattr(
+        project_qc,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: SimpleNamespace(review_complete=False),
+    )
+
+    with pytest.raises(RuntimeError, match="completed experimental summed-BCA review"):
+        load_shared_frequency_qc_review(
+            project_root=tmp_path,
+            subjects=["P1"],
+            conditions_all=["Faces"],
+            rois_all={},
+        )
+
+
+def test_managed_stats_rejects_stale_qc17_evidence(monkeypatch, tmp_path) -> None:
+    import Main_App.processing.frequency_domain_qc as project_qc
+
+    monkeypatch.setattr(
+        project_qc,
+        "resolve_frequency_qc_coverage_decisions",
+        lambda _root: SimpleNamespace(
+            review_complete=True,
+            decision_fingerprint="decision-fingerprint",
+            reviewed_decisions=(),
+        ),
+    )
+    monkeypatch.setattr(
+        project_qc,
+        "load_current_frequency_qc_review_evidence",
+        lambda _root: (_ for _ in ()).throw(
+            RuntimeError("Saved evidence is stale or tampered")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="stale or tampered"):
+        load_shared_frequency_qc_review(
+            project_root=tmp_path,
+            subjects=["P1"],
+            conditions_all=["Faces"],
+            rois_all={},
+        )

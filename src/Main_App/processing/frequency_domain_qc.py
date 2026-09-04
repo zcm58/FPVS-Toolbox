@@ -19,7 +19,16 @@ import pandas as pd
 from Main_App.processing.frequency_qc_identity import (
     resolve_frequency_qc_recording_decisions,
 )
-from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
+from Main_App.projects import (
+    ProjectDatasetIndex,
+    load_project_dataset_index,
+    normalize_experimental_qc_settings,
+    normalize_frequency_protocol,
+)
+from Main_App.projects.experimental_qc_settings import (
+    SUMMED_BCA_SCREENING_BRIEF_TEXT,
+    SummedBcaScreeningSettings,
+)
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recordings,
@@ -31,13 +40,34 @@ logger = logging.getLogger(__name__)
 QUALITY_CHECK_FOLDER = "Quality Check"
 FREQUENCY_DOMAIN_QC_REPORT_NAME = "Frequency_Domain_QC_Review.txt"
 FREQUENCY_DOMAIN_QC_METADATA_PATH = ("tools", "frequency_domain_qc")
-FREQUENCY_DOMAIN_QC_SCHEMA_VERSION = 2
-FREQUENCY_DOMAIN_QC_METHOD_VERSION = "summed_bca_plausibility_integrity_v2"
+FREQUENCY_DOMAIN_QC_SCHEMA_VERSION = 4
+FREQUENCY_DOMAIN_QC_METHOD_VERSION = "experimental_summed_bca_review_v4"
 REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION = (
-    "summed_bca_plausibility_recording_integrity_v2"
+    "experimental_summed_bca_recording_review_v4"
 )
 FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION = "selected_bca_finite_v1"
+FREQUENCY_DOMAIN_QC_DECISION_VERSION = "frequency_qc_review_decision_v2"
+FREQUENCY_DOMAIN_QC_LOOP_VERSION = "frequency_qc_bounded_recompute_v1"
+FREQUENCY_DOMAIN_QC_REVIEW_EVIDENCE_VERSION = "frequency_qc_review_evidence_v1"
+FREQUENCY_DOMAIN_QC_INDEPENDENT_EVIDENCE_VERSION = (
+    "frequency_qc_independent_evidence_v1"
+)
+FREQUENCY_DOMAIN_QC_MAX_REVIEW_ITERATIONS = 64
 SPECTRAL_METRIC_QC_SHEET_NAME = "Spectral Metric QC"
+
+DECISION_RETAIN = "retain"
+DECISION_EXCLUDE_CONDITION_ELECTRODE = "exclude_condition_electrode"
+DECISION_EXCLUDE_CONDITION = "exclude_condition"
+DECISION_EXCLUDE_RECORDING = "exclude_recording"
+DECISION_EXCLUDE_PARTICIPANT = "exclude_participant"
+
+REVIEW_DECISIONS = (
+    DECISION_RETAIN,
+    DECISION_EXCLUDE_CONDITION_ELECTRODE,
+    DECISION_EXCLUDE_CONDITION,
+    DECISION_EXCLUDE_RECORDING,
+    DECISION_EXCLUDE_PARTICIPANT,
+)
 
 _BCA_AUDIT_REQUIRED_COLUMNS = (
     "Electrode",
@@ -62,18 +92,57 @@ MANUAL_EXCLUSION_REASONS = (
 class FrequencyDomainQcThresholds:
     warning_summed_bca_uv: float = 10.0
     strong_warning_summed_bca_uv: float = 50.0
-    hard_electrode_summed_bca_uv: float = 250.0
-    repeated_warning_cells: int = 5
-    hard_participant_unique_electrodes: int = 10
+    extreme_review_summed_bca_uv: float = 250.0
+    concentrated_review_flagged_cells: int = 5
+    broad_extreme_review_unique_electrodes: int = 11
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: SummedBcaScreeningSettings,
+    ) -> "FrequencyDomainQcThresholds":
+        return cls(
+            warning_summed_bca_uv=settings.warning_summed_bca_uv,
+            strong_warning_summed_bca_uv=settings.strong_warning_summed_bca_uv,
+            extreme_review_summed_bca_uv=settings.extreme_review_summed_bca_uv,
+            concentrated_review_flagged_cells=(
+                settings.concentrated_review_flagged_cells
+            ),
+            broad_extreme_review_unique_electrodes=(
+                settings.broad_extreme_review_unique_electrodes
+            ),
+        )
+
+    @property
+    def hard_electrode_summed_bca_uv(self) -> float:
+        """Compatibility alias for historical report readers."""
+
+        return self.extreme_review_summed_bca_uv
+
+    @property
+    def repeated_warning_cells(self) -> int:
+        """Compatibility alias for historical report readers."""
+
+        return self.concentrated_review_flagged_cells
+
+    @property
+    def hard_participant_unique_electrodes(self) -> int:
+        """Compatibility alias for historical report readers."""
+
+        return self.broad_extreme_review_unique_electrodes - 1
 
     def to_manifest(self) -> dict[str, object]:
         return {
             "warning_summed_bca_uv": float(self.warning_summed_bca_uv),
             "strong_warning_summed_bca_uv": float(self.strong_warning_summed_bca_uv),
-            "hard_electrode_summed_bca_uv": float(self.hard_electrode_summed_bca_uv),
-            "repeated_warning_cells": int(self.repeated_warning_cells),
-            "hard_participant_unique_electrodes": int(
-                self.hard_participant_unique_electrodes
+            "extreme_review_summed_bca_uv": float(
+                self.extreme_review_summed_bca_uv
+            ),
+            "concentrated_review_flagged_cells": int(
+                self.concentrated_review_flagged_cells
+            ),
+            "broad_extreme_review_unique_electrodes": int(
+                self.broad_extreme_review_unique_electrodes
             ),
         }
 
@@ -94,6 +163,74 @@ class FrequencyDomainExclusions:
     auto_excluded_electrodes_by_recording: dict[str, frozenset[str]] = field(
         default_factory=dict
     )
+    excluded_participant_conditions: frozenset[tuple[str, str]] = frozenset()
+    excluded_recording_conditions: frozenset[tuple[str, str]] = frozenset()
+    excluded_electrodes_by_participant_condition: dict[
+        tuple[str, str], frozenset[str]
+    ] = field(default_factory=dict)
+    excluded_electrodes_by_recording_condition: dict[
+        tuple[str, str], frozenset[str]
+    ] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class FrequencyDomainCoverageDecisions:
+    """Authoritative reviewed QC-17 exclusions for QC-20/QC-21 consumers."""
+
+    decision_fingerprint: str
+    review_complete: bool
+    excluded_participants: frozenset[str]
+    excluded_recordings: frozenset[str]
+    excluded_participant_conditions: frozenset[tuple[str, str]]
+    excluded_recording_conditions: frozenset[tuple[str, str]]
+    excluded_electrodes_by_participant_condition: dict[
+        tuple[str, str], frozenset[str]
+    ]
+    excluded_electrodes_by_recording_condition: dict[
+        tuple[str, str], frozenset[str]
+    ]
+    reviewed_decisions: tuple[dict[str, object], ...]
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "decision_fingerprint": self.decision_fingerprint,
+            "review_complete": self.review_complete,
+            "excluded_participants": sorted(self.excluded_participants),
+            "excluded_recordings": sorted(self.excluded_recordings),
+            "excluded_participant_conditions": [
+                {"participant_id": participant_id, "condition": condition}
+                for participant_id, condition in sorted(
+                    self.excluded_participant_conditions
+                )
+            ],
+            "excluded_recording_conditions": [
+                {"recording_id": recording_id, "condition": condition}
+                for recording_id, condition in sorted(
+                    self.excluded_recording_conditions
+                )
+            ],
+            "excluded_electrodes_by_participant_condition": [
+                {
+                    "participant_id": key[0],
+                    "condition": key[1],
+                    "electrodes": sorted(electrodes),
+                }
+                for key, electrodes in sorted(
+                    self.excluded_electrodes_by_participant_condition.items()
+                )
+            ],
+            "excluded_electrodes_by_recording_condition": [
+                {
+                    "recording_id": key[0],
+                    "condition": key[1],
+                    "electrodes": sorted(electrodes),
+                }
+                for key, electrodes in sorted(
+                    self.excluded_electrodes_by_recording_condition.items()
+                )
+            ],
+            "reviewed_decisions": [dict(item) for item in self.reviewed_decisions],
+        }
 
 
 class FrequencyDomainQcIntegrityError(RuntimeError):
@@ -105,6 +242,21 @@ class _SummedBcaInspection:
     flags: tuple[dict[str, object], ...]
     technical_integrity_failures: tuple[dict[str, object], ...]
     unavailable_by_method: tuple[dict[str, object], ...]
+
+
+@dataclass(frozen=True)
+class _CohortSummedBcaInspection:
+    rows: tuple[dict[str, object], ...]
+    flags: tuple[dict[str, object], ...]
+    roi_fingerprint: str
+    cohort_fingerprint: str
+
+
+@dataclass(frozen=True)
+class _IndependentQcContext:
+    source_identity: dict[str, object]
+    cells: dict[tuple[str, str], dict[str, object]]
+    processing_entries: dict[str, dict[str, object]]
 
 
 def run_frequency_domain_qc_review(
@@ -120,8 +272,11 @@ def run_frequency_domain_qc_review(
             log_func(str(message))
 
     project_root = Path(project.project_root).resolve()
-    thresholds = DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS
-    from Main_App.processing.roi_settings import load_rois_from_settings
+    screening_settings = _experimental_summed_bca_settings(project, project_root)
+    thresholds = FrequencyDomainQcThresholds.from_settings(screening_settings)
+    from Main_App.processing.harmonic_selection_qc import (
+        resolve_processing_harmonic_selection_inputs,
+    )
 
     if dataset_index is None:
         dataset_index = load_project_dataset_index(project_root)
@@ -129,44 +284,25 @@ def run_frequency_domain_qc_review(
         raise ValueError(
             "The supplied dataset index belongs to a different project root."
         )
-    conditions = list(dataset_index.conditions)
-    repeated_session = dataset_index.is_repeated_session
-    recording_assignments: dict[str, dict[str, object]] = {}
-    if repeated_session:
-        subjects = list(dataset_index.recording_ids)
-        subject_data = dataset_index.recording_data(require_group_assignment=True)
-        recording_assignments = _recording_assignments_from_index(dataset_index)
-    else:
-        subjects = list(dataset_index.participant_ids)
-        subject_data = dataset_index.subject_data(require_group_assignment=True)
-    subjects, subject_data = _filter_to_completed_subjects(
-        project_root=project_root,
-        subjects=subjects,
-        subject_data=subject_data,
+    canonical_inputs = resolve_processing_harmonic_selection_inputs(
+        project,
+        log_func=_log,
+        dataset_index=dataset_index,
     )
-    if repeated_session:
-        subjects = _filter_preprocessing_manual_recording_exclusions(
-            project,
-            subjects,
-            recording_assignments=recording_assignments,
-        )
-    else:
-        subjects = _filter_preprocessing_manual_exclusions(project, subjects)
-    subject_data = {
-        subject: dict(subject_data.get(subject, {}))
-        for subject in subjects
-        if subject_data.get(subject)
-    }
-    ordered_conditions = _ordered_conditions(project, conditions)
-    subject_data = _filter_subject_data(subject_data, ordered_conditions)
-    subjects = [subject for subject in subjects if subject_data.get(subject)]
-    if not subjects or not ordered_conditions:
-        raise RuntimeError(
-            "Frequency-domain QC could not find completed condition workbooks."
-        )
-
-    rois = load_rois_from_settings() or {}
-    settings = _harmonic_selection_settings(project)
+    subjects = list(canonical_inputs.subjects)
+    subject_data = canonical_inputs.subject_data
+    ordered_conditions = list(canonical_inputs.conditions)
+    repeated_session = canonical_inputs.is_repeated_session
+    recording_assignments = canonical_inputs.recording_assignments
+    rois = canonical_inputs.rois
+    settings = canonical_inputs.settings
+    active_exclusions = active_frequency_domain_exclusions(project_root)
+    condition_electrode_exclusions = (
+        active_exclusions.excluded_electrodes_by_recording_condition
+        if repeated_session
+        else active_exclusions.excluded_electrodes_by_participant_condition
+    )
+    independent_qc_context = _load_independent_qc_context(project_root)
     selected_harmonics, provisional_metadata = _provisional_harmonics(
         project_root=project_root,
         subjects=subjects,
@@ -177,19 +313,31 @@ def run_frequency_domain_qc_review(
         log_func=_log,
         recording_assignments=(recording_assignments if repeated_session else None),
         declared_session_ids=(
-            tuple(session.session_id for session in dataset_index.ordered_sessions)
+            canonical_inputs.declared_session_ids
             if repeated_session
             else None
         ),
         participant_group_ids=(
-            dataset_index.participant_group_id_map()
+            canonical_inputs.participant_group_ids
             if repeated_session
             else None
         ),
         declared_group_ids=(
-            tuple(group.group_id for group in dataset_index.ordered_groups)
+            canonical_inputs.declared_group_ids
             if repeated_session
             else None
+        ),
+        base_frequency_hz=canonical_inputs.base_frequency_hz,
+        oddball_frequency_hz=canonical_inputs.oddball_frequency_hz,
+        eligible_harmonic_orders=canonical_inputs.eligible_harmonic_orders,
+        spectral_eligibility_fingerprint=(
+            canonical_inputs.spectral_eligibility_fingerprint
+        ),
+        electrode_exclusions_by_subject_condition=(
+            condition_electrode_exclusions
+        ),
+        expected_scalp_channels_by_subject_condition=(
+            _expected_scalp_channels_by_subject_condition(independent_qc_context)
         ),
     )
     _log(
@@ -204,29 +352,50 @@ def run_frequency_domain_qc_review(
         thresholds=thresholds,
         log_func=_log,
         recording_assignments=(recording_assignments if repeated_session else None),
+        screening_enabled=screening_settings.enabled,
+        selected_harmonics_metadata=provisional_metadata,
+        excluded_electrodes_by_subject_condition=(
+            condition_electrode_exclusions
+        ),
+    )
+    harmonic_selection_fingerprint = _harmonic_selection_fingerprint(
+        provisional_metadata
     )
     flags = list(inspection.flags)
+    protocol_metadata = _project_protocol_review_metadata(project, project_root)
+    for flag in flags:
+        flag.update(protocol_metadata)
+        flag["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
+        _attach_independent_qc_evidence(flag, independent_qc_context)
+        flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(flag)
+    cohort_inspection = _collect_cohort_summed_bca_context(
+        subjects=subjects,
+        conditions=ordered_conditions,
+        subject_data=subject_data,
+        selected_harmonics=selected_harmonics,
+        rois=rois,
+        settings=screening_settings,
+        recording_assignments=(recording_assignments if repeated_session else None),
+        protocol_metadata=protocol_metadata,
+        screening_enabled=screening_settings.enabled,
+        excluded_electrodes_by_subject_condition=(
+            condition_electrode_exclusions
+        ),
+    )
+    cohort_flags = list(cohort_inspection.flags)
+    cohort_rows = [dict(row) for row in cohort_inspection.rows]
+    for row in cohort_rows:
+        row["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
+    for flag in cohort_flags:
+        flag["harmonic_selection_fingerprint"] = harmonic_selection_fingerprint
+        _attach_independent_qc_evidence(flag, independent_qc_context)
+        flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(flag)
+    machine_findings = [*flags, *cohort_flags]
     technical_integrity_failures = list(
         inspection.technical_integrity_failures
     )
     unavailable_by_method = list(inspection.unavailable_by_method)
     technical_integrity_failed = bool(technical_integrity_failures)
-    if repeated_session:
-        summaries, auto_electrodes, auto_participants = _summarize_recording_flags(
-            flags,
-            thresholds,
-        )
-    else:
-        summaries, auto_electrodes, auto_participants = _summarize_flags(
-            flags,
-            thresholds,
-        )
-    if technical_integrity_failed:
-        # Threshold flags from complete rows remain useful diagnostic evidence,
-        # but an incomplete project-wide input cannot create exclusions.
-        summaries = []
-        auto_electrodes = []
-        auto_participants = []
     finite_input_status = {
         "method_version": FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION,
         "status": (
@@ -253,36 +422,101 @@ def run_frequency_domain_qc_review(
         }
     )
     finite_input_status["fingerprint"] = finite_input_fingerprint
-    analysis_fingerprint = _analysis_fingerprint(
+    source_workbooks = _source_workbook_rows(
+        project_root=project_root,
+        subjects=subjects,
+        conditions=ordered_conditions,
+        subject_data=subject_data,
+        recording_assignments=(recording_assignments if repeated_session else None),
+    )
+    source_fingerprint = _hash_payload(
+        {
+            "source_workbooks": source_workbooks,
+            "finite_input_fingerprint": finite_input_fingerprint,
+            "harmonic_selection_fingerprint": harmonic_selection_fingerprint,
+            "frequency_protocol_fingerprint": protocol_metadata.get(
+                "frequency_protocol_fingerprint"
+            ),
+            "roi_definition_fingerprint": cohort_inspection.roi_fingerprint,
+            "cohort_fingerprint": cohort_inspection.cohort_fingerprint,
+            "independent_qc_source_fingerprint": independent_qc_context.source_identity.get(
+                "fingerprint"
+            ),
+        }
+    )
+    evidence_context_fingerprint = _analysis_fingerprint(
         project_root=project_root,
         subjects=subjects,
         conditions=ordered_conditions,
         subject_data=subject_data,
         selected_harmonics=selected_harmonics,
         thresholds=thresholds,
-        flags=flags,
+        flags=machine_findings,
         finite_input_fingerprint=finite_input_fingerprint,
         recording_assignments=(recording_assignments if repeated_session else None),
+        screening_settings=screening_settings,
+        provisional_metadata=provisional_metadata,
+        roi_definition_fingerprint=cohort_inspection.roi_fingerprint,
+        cohort_fingerprint=cohort_inspection.cohort_fingerprint,
+        source_workbooks=source_workbooks,
+        source_fingerprint=source_fingerprint,
     )
     state = load_frequency_domain_qc_state(project_root)
-    current_auto_electrodes = _auto_electrode_entries_from_state(state)
-    current_auto_participants = _auto_participant_entries_from_state(state)
-    current_manual = _manual_entries_from_state(state)
-    current_auto_recording_electrodes = _auto_recording_electrode_entries_from_state(
-        state
+    reconfirmation_findings, stable_exclusion_decisions = (
+        _review_exclusion_reconfirmation_findings(
+            state,
+            evidence_context_fingerprint=evidence_context_fingerprint,
+            selected_harmonics=selected_harmonics,
+            harmonic_selection_fingerprint=harmonic_selection_fingerprint,
+            protocol_metadata=protocol_metadata,
+            roi_definition_fingerprint=cohort_inspection.roi_fingerprint,
+            cohort_fingerprint=cohort_inspection.cohort_fingerprint,
+            independent_qc_context=independent_qc_context,
+        )
     )
-    current_auto_recordings = _auto_recording_entries_from_state(state)
+    review_findings = [*machine_findings, *reconfirmation_findings]
+    if repeated_session:
+        summaries, machine_electrodes, machine_subjects = _summarize_recording_flags(
+            review_findings,
+            thresholds,
+        )
+    else:
+        summaries, machine_electrodes, machine_subjects = _summarize_flags(
+            review_findings,
+            thresholds,
+        )
+    if technical_integrity_failed:
+        summaries = []
+        machine_electrodes = []
+        machine_subjects = []
+        review_findings = machine_findings
+        reconfirmation_findings = []
+        stable_exclusion_decisions = []
+    analysis_fingerprint = evidence_context_fingerprint
+    review_loop = _frequency_qc_review_loop_status(
+        state,
+        analysis_fingerprint=analysis_fingerprint,
+    )
+    current_manual = _manual_entries_from_state(state)
     current_manual_recordings = _manual_recording_entries_from_state(state)
+    current_review_decisions = _current_review_decisions(
+        report_flags=review_findings,
+        state=state,
+    )
+    active_review_decisions = _merge_review_decision_rows(
+        stable_exclusion_decisions,
+        current_review_decisions,
+    )
     current_decision_fingerprint = _decision_fingerprint(
         analysis_fingerprint=analysis_fingerprint,
-        auto_electrodes=current_auto_electrodes,
-        auto_participants=current_auto_participants,
+        auto_electrodes=(),
+        auto_participants=(),
         manual_participants=current_manual,
-        auto_recording_electrodes=(
-            current_auto_recording_electrodes if repeated_session else None
-        ),
-        auto_recordings=(current_auto_recordings if repeated_session else None),
+        auto_recording_electrodes=(() if repeated_session else None),
+        auto_recordings=(() if repeated_session else None),
         manual_recordings=(current_manual_recordings if repeated_session else None),
+        review_decisions=active_review_decisions,
+        identity_scope=("recording" if repeated_session else "participant"),
     )
     last_review = state.get("last_review")
     reviewed_decision_fingerprint = ""
@@ -295,14 +529,24 @@ def run_frequency_domain_qc_review(
         if bool(summary.get("pause_review"))
     ]
     review_reused = bool(
+        screening_settings.enabled
+        and
         not technical_integrity_failed
         and pause_subjects
+        and len(current_review_decisions) == len(review_findings)
         and reviewed_decision_fingerprint
         and reviewed_decision_fingerprint == current_decision_fingerprint
     )
     review_required = bool(
-        not technical_integrity_failed and pause_subjects and not review_reused
+        screening_settings.enabled
+        and not technical_integrity_failed
+        and pause_subjects
+        and not review_reused
     )
+    if not screening_settings.enabled:
+        review_reused = False
+        review_required = False
+    legacy_machine_suggestions = _legacy_machine_suggestions_from_state(state)
     report: dict[str, object] = {
         "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
         "method_version": (
@@ -311,13 +555,31 @@ def run_frequency_domain_qc_review(
             else FREQUENCY_DOMAIN_QC_METHOD_VERSION
         ),
         "project_root": str(project_root),
+        "screening_status": (
+            "performed" if screening_settings.enabled else "not_performed"
+        ),
+        "screening_enabled": screening_settings.enabled,
+        "screening_policy_version": screening_settings.policy_version,
+        "screening_explanation": SUMMED_BCA_SCREENING_BRIEF_TEXT,
+        "screening_settings": screening_settings.to_manifest(),
         "thresholds": thresholds.to_manifest(),
         "subjects": list(subjects),
         "conditions": list(ordered_conditions),
         "selected_harmonics_hz": list(selected_harmonics),
         "harmonic_policy": settings.name,
+        "frequency_protocol": protocol_metadata,
         "provisional_harmonic_metadata": provisional_metadata,
         "flags": flags,
+        "cohort_relative_rows": cohort_rows,
+        "cohort_relative_flags": cohort_flags,
+        "reconfirmation_findings": reconfirmation_findings,
+        "review_findings": review_findings,
+        "roi_definition_fingerprint": cohort_inspection.roi_fingerprint,
+        "cohort_fingerprint": cohort_inspection.cohort_fingerprint,
+        "harmonic_selection_fingerprint": harmonic_selection_fingerprint,
+        "source_workbooks": source_workbooks,
+        "source_fingerprint": source_fingerprint,
+        "independent_qc_source": independent_qc_context.source_identity,
         "qc_complete": not technical_integrity_failed,
         "result_status": finite_input_status["status"],
         "technical_integrity_failed": technical_integrity_failed,
@@ -326,14 +588,30 @@ def run_frequency_domain_qc_review(
         "finite_input_status": finite_input_status,
         "threshold_flags_diagnostic_only": technical_integrity_failed,
         "participant_summaries": summaries,
-        "auto_participant_electrode_exclusions": auto_electrodes,
-        "auto_participant_exclusions": auto_participants,
+        "machine_participant_electrode_suggestions": machine_electrodes,
+        "machine_participant_suggestions": machine_subjects,
+        "legacy_machine_suggestions": legacy_machine_suggestions,
+        "auto_participant_electrode_exclusions": [],
+        "auto_participant_exclusions": [],
         "manual_participant_exclusions": current_manual,
+        "review_decisions": current_review_decisions,
+        "active_review_decisions": active_review_decisions,
+        "review_prefill_decisions": [
+            {
+                "finding_fingerprint": str(
+                    finding.get("finding_fingerprint") or ""
+                ),
+                "decision": str(finding.get("prior_decision") or ""),
+                "reason": str(finding.get("prior_reason") or ""),
+            }
+            for finding in reconfirmation_findings
+        ],
         "analysis_fingerprint": analysis_fingerprint,
         "current_decision_fingerprint": current_decision_fingerprint,
         "review_required": review_required,
         "review_reused": review_reused,
         "review_subject_count": len(pause_subjects),
+        "review_loop": review_loop,
         "generated_at": _now_utc_iso(),
     }
     if repeated_session:
@@ -354,11 +632,11 @@ def run_frequency_domain_qc_review(
                 ],
                 "recording_summaries": summaries,
                 "participant_summaries": [],
-                "auto_recording_electrode_exclusions": auto_electrodes,
-                "auto_recording_exclusions": auto_participants,
+                "machine_recording_electrode_suggestions": machine_electrodes,
+                "machine_recording_suggestions": machine_subjects,
+                "auto_recording_electrode_exclusions": [],
+                "auto_recording_exclusions": [],
                 "manual_recording_exclusions": current_manual_recordings,
-                "auto_participant_electrode_exclusions": current_auto_electrodes,
-                "auto_participant_exclusions": current_auto_participants,
                 "review_recording_count": len(pause_subjects),
             }
         )
@@ -398,16 +676,235 @@ def require_frequency_domain_qc_complete(
     )
 
 
+def validate_frequency_domain_qc_review_decisions(
+    report: Mapping[str, object],
+    decisions: Mapping[str, object] | Sequence[Mapping[str, object]] | None,
+) -> tuple[dict[str, object], ...]:
+    """Bind explicit GUI choices to every current QC-17 machine finding."""
+
+    raw_findings = _iter_mapping_entries(
+        report.get("review_findings")
+        if report.get("review_findings") is not None
+        else report.get("flags")
+    )
+    flags = {
+        str(item.get("finding_fingerprint") or ""): dict(item)
+        for item in raw_findings
+        if str(item.get("finding_fingerprint") or "")
+    }
+    if len(flags) != len(raw_findings):
+        raise ValueError(
+            "Every summed-BCA review finding requires a unique evidence fingerprint."
+        )
+    raw_by_fingerprint: dict[str, Mapping[str, object]] = {}
+    if isinstance(decisions, Mapping):
+        for raw_key, raw_value in decisions.items():
+            key = str(raw_key or "").strip()
+            if isinstance(raw_value, Mapping):
+                row = dict(raw_value)
+            else:
+                row = {"decision": raw_value}
+            row.setdefault("finding_fingerprint", key)
+            raw_by_fingerprint[key] = row
+    elif isinstance(decisions, Sequence) and not isinstance(
+        decisions,
+        (str, bytes),
+    ):
+        for raw_value in decisions:
+            if not isinstance(raw_value, Mapping):
+                raise ValueError("Summed-BCA review decisions must be mappings.")
+            key = str(raw_value.get("finding_fingerprint") or "").strip()
+            if not key or key in raw_by_fingerprint:
+                raise ValueError(
+                    "Summed-BCA review decisions contain a blank or duplicate finding fingerprint."
+                )
+            raw_by_fingerprint[key] = raw_value
+    elif decisions is not None:
+        raise ValueError("Summed-BCA review decisions must be a mapping or list.")
+
+    if not bool(report.get("screening_enabled", True)):
+        if raw_by_fingerprint:
+            raise ValueError(
+                "Summed-BCA review decisions cannot be submitted while screening is disabled."
+            )
+        return ()
+    unknown = sorted(set(raw_by_fingerprint).difference(flags))
+    missing = sorted(set(flags).difference(raw_by_fingerprint))
+    if unknown:
+        raise ValueError(
+            "Summed-BCA review contains stale or unknown findings: "
+            + ", ".join(unknown[:5])
+        )
+    if missing:
+        raise ValueError(
+            "Choose an explicit decision for every summed-BCA finding before continuing."
+        )
+
+    scope = str(report.get("identity_scope") or "participant").strip().casefold()
+    normalized: list[dict[str, object]] = []
+    for finding_fingerprint, finding in flags.items():
+        submitted = raw_by_fingerprint[finding_fingerprint]
+        decision = str(submitted.get("decision") or "").strip().casefold()
+        if decision not in REVIEW_DECISIONS:
+            raise ValueError(
+                "Each summed-BCA finding requires one explicit retain or exclusion decision."
+            )
+        if decision == DECISION_EXCLUDE_RECORDING and scope != "recording":
+            raise ValueError(
+                "A recording exclusion requires a recording-scoped QC report."
+            )
+        reason = (
+            ""
+            if decision == DECISION_RETAIN
+            else str(submitted.get("reason") or "").strip()
+        )
+        if decision != DECISION_RETAIN and not reason:
+            raise ValueError("Every summed-BCA exclusion requires a reason.")
+        participant_id = _normalize_participant_id(finding.get("participant_id"))
+        recording_id = _normalize_recording_id(finding.get("recording_id"))
+        condition = str(finding.get("condition") or "").strip()
+        electrode = _normalize_electrode(finding.get("electrode"))
+        roi = str(finding.get("roi") or "").strip()
+        if not participant_id or not condition or not (electrode or roi):
+            raise ValueError(
+                "Summed-BCA finding identity is incomplete; regenerate the review."
+            )
+        if decision == DECISION_EXCLUDE_CONDITION_ELECTRODE and not electrode:
+            raise ValueError(
+                "An electrode-in-condition exclusion requires an electrode-level finding."
+            )
+        row: dict[str, object] = {
+            "version": FREQUENCY_DOMAIN_QC_DECISION_VERSION,
+            "finding_fingerprint": finding_fingerprint,
+            "analysis_fingerprint": str(report.get("analysis_fingerprint") or ""),
+            "decision": decision,
+            "decision_scope": (
+                "recording_condition_electrode"
+                if scope == "recording" and electrode
+                else "recording_condition_roi"
+                if scope == "recording"
+                else "participant_condition_electrode"
+                if electrode
+                else "participant_condition_roi"
+            ),
+            "participant_id": participant_id,
+            "recording_id": recording_id,
+            "session_id": str(finding.get("session_id") or ""),
+            "visit_index": finding.get("visit_index"),
+            "condition": condition,
+            "electrode": electrode,
+            "roi": roi,
+            "reason": reason,
+            "source": "explicit_gui_review",
+            "outcome_informed": decision != DECISION_RETAIN,
+            "replaces_decision_fingerprint": str(
+                finding.get("replaces_decision_fingerprint") or ""
+            ),
+            "evidence": {
+                key: _json_safe(finding.get(key))
+                for key in (
+                    "finding_type",
+                    "summed_bca_uv",
+                    "abs_summed_bca_uv",
+                    "severity",
+                    "band_crossed",
+                    "selected_harmonics_hz",
+                    "selected_harmonic_count",
+                    "selection_fingerprint",
+                    "harmonic_selection_fingerprint",
+                    "frequency_protocol_fingerprint",
+                    "expected_analyzed_oddball_cycles",
+                    "analyzed_duration_seconds",
+                    "independent_qc",
+                    "independent_qc_status",
+                    "independent_qc_authority",
+                    "independent_qc_fingerprint",
+                    "metric",
+                    "value_uv",
+                    "robust_center_uv",
+                    "robust_spread_uv",
+                    "robust_spread_method",
+                    "robust_score",
+                    "threshold_used",
+                    "absolute_floor_used_uv",
+                    "peak_harmonic_hz",
+                    "peak_signed_roi_mean_uv",
+                    "roi_definition_fingerprint",
+                    "cohort_fingerprint",
+                )
+            },
+        }
+        row["decision_fingerprint"] = _hash_payload(row)
+        normalized.append(row)
+
+    _require_consistent_broad_decisions(normalized)
+    return tuple(
+        sorted(
+            normalized,
+            key=lambda item: str(item["finding_fingerprint"]),
+        )
+    )
+
+
+def _require_consistent_broad_decisions(
+    decisions: Sequence[Mapping[str, object]],
+) -> None:
+    by_recording: dict[str, set[str]] = defaultdict(set)
+    by_participant: dict[str, set[str]] = defaultdict(set)
+    by_condition: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for item in decisions:
+        decision = str(item.get("decision") or "")
+        participant_id = _normalize_participant_id(item.get("participant_id"))
+        recording_id = _normalize_recording_id(item.get("recording_id"))
+        if participant_id:
+            by_participant[participant_id].add(decision)
+        if recording_id:
+            by_recording[recording_id].add(decision)
+        identity = recording_id or participant_id
+        condition = str(item.get("condition") or "")
+        if identity and condition:
+            by_condition[(identity, condition)].add(decision)
+    for label, grouped, broad_decision in (
+        ("recording", by_recording, DECISION_EXCLUDE_RECORDING),
+        ("participant", by_participant, DECISION_EXCLUDE_PARTICIPANT),
+    ):
+        for identity, values in grouped.items():
+            if broad_decision in values and values != {broad_decision}:
+                raise ValueError(
+                    f"A whole-{label} exclusion conflicts with another decision "
+                    f"for {identity}. Apply the same broader choice to all of its findings."
+                )
+    for (identity, condition), values in by_condition.items():
+        if DECISION_EXCLUDE_CONDITION in values and values != {
+            DECISION_EXCLUDE_CONDITION
+        }:
+            raise ValueError(
+                "A whole-condition exclusion conflicts with another decision "
+                f"for {identity}/{condition}. Apply the same condition choice "
+                "to all of its findings."
+            )
+
+
 def apply_frequency_domain_qc_decision(
     project_root: str | Path,
     report: Mapping[str, object],
     *,
+    review_decisions: Mapping[str, object]
+    | Sequence[Mapping[str, object]]
+    | None = None,
     manual_participant_reasons: Mapping[str, str] | None = None,
     manual_recording_reasons: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Persist a reviewed QC decision and write the human-readable report."""
 
     require_frequency_domain_qc_complete(report)
+    normalized_review_decisions = [
+        dict(item)
+        for item in validate_frequency_domain_qc_review_decisions(
+            report,
+            review_decisions,
+        )
+    ]
     resolved_recording_decisions = resolve_frequency_qc_recording_decisions(
         report,
         manual_recording_reasons,
@@ -418,27 +915,46 @@ def apply_frequency_domain_qc_decision(
     state = _metadata_from_manifest(manifest)
     now = _now_utc_iso()
     repeated_session = str(report.get("identity_scope") or "") == "recording"
-    auto_electrodes = _normalize_auto_electrode_entries(
-        report.get("auto_participant_electrode_exclusions")
+    replaced_decision_fingerprints = {
+        str(item.get("replaces_decision_fingerprint") or "")
+        for item in normalized_review_decisions
+        if str(item.get("replaces_decision_fingerprint") or "")
+    }
+    current_finding_fingerprints = {
+        str(item.get("finding_fingerprint") or "")
+        for item in normalized_review_decisions
+    }
+    preserved_review_decisions = [
+        item
+        for item in _review_decisions_from_state(state)
+        if str(item.get("decision") or "") != DECISION_RETAIN
+        and str(item.get("decision_fingerprint") or "")
+        not in replaced_decision_fingerprints
+        and str(item.get("finding_fingerprint") or "")
+        not in current_finding_fingerprints
+    ]
+    combined_review_decisions = _merge_review_decision_rows(
+        preserved_review_decisions,
+        normalized_review_decisions,
     )
-    auto_participants = _normalize_auto_participant_entries(
-        report.get("auto_participant_exclusions")
-    )
-    auto_recording_electrodes = _normalize_auto_recording_electrode_entries(
-        report.get("auto_recording_electrode_exclusions")
-    )
-    auto_recordings = _normalize_auto_recording_entries(
-        report.get("auto_recording_exclusions")
+    legacy_machine_suggestions = _merge_legacy_machine_suggestions(
+        state,
+        report.get("legacy_machine_suggestions"),
     )
     existing_manual = _manual_entries_from_state(state)
     manual_by_pid = {entry["participant_id"]: dict(entry) for entry in existing_manual}
+    reviewed_participant_exclusions = {
+        _normalize_participant_id(item.get("participant_id"))
+        for item in normalized_review_decisions
+        if item.get("decision") == DECISION_EXCLUDE_PARTICIPANT
+    }
     for raw_pid, raw_reason in (manual_participant_reasons or {}).items():
         pid = _normalize_participant_id(raw_pid)
-        if not pid:
+        if not pid or pid in reviewed_participant_exclusions:
             continue
-        reason = str(raw_reason or WARNING_REASON_UNUSUAL_VALUES).strip()
-        if reason not in MANUAL_EXCLUSION_REASONS:
-            reason = WARNING_REASON_UNUSUAL_VALUES
+        reason = str(raw_reason or "").strip()
+        if not reason:
+            raise ValueError("Every whole-participant exclusion requires a reason.")
         previous = manual_by_pid.get(pid, {})
         manual_by_pid[pid] = {
             "participant_id": pid,
@@ -447,17 +963,26 @@ def apply_frequency_domain_qc_decision(
             "added_at": str(previous.get("added_at") or now),
             "updated_at": now,
         }
-    manual_entries = sorted(manual_by_pid.values(), key=lambda item: item["participant_id"])
+    manual_entries = _normalize_manual_entries(
+        sorted(manual_by_pid.values(), key=lambda item: item["participant_id"])
+    )
     existing_manual_recordings = _manual_recording_entries_from_state(state)
     manual_by_recording = {
         str(entry["recording_id"]).casefold(): dict(entry)
         for entry in existing_manual_recordings
     }
+    reviewed_recording_exclusions = {
+        _normalize_recording_id(item.get("recording_id"))
+        for item in normalized_review_decisions
+        if item.get("decision") == DECISION_EXCLUDE_RECORDING
+    }
     for decision in resolved_recording_decisions:
         recording_id = str(decision.identity.recording_id)
-        reason = str(decision.reason or WARNING_REASON_UNUSUAL_VALUES).strip()
-        if reason not in MANUAL_EXCLUSION_REASONS:
-            reason = WARNING_REASON_UNUSUAL_VALUES
+        if _normalize_recording_id(recording_id) in reviewed_recording_exclusions:
+            continue
+        reason = str(decision.reason or "").strip()
+        if not reason:
+            raise ValueError("Every whole-recording exclusion requires a reason.")
         recording_key = recording_id.casefold()
         previous = manual_by_recording.get(recording_key, {})
         manual_by_recording[recording_key] = {
@@ -469,27 +994,43 @@ def apply_frequency_domain_qc_decision(
             "added_at": str(previous.get("added_at") or now),
             "updated_at": now,
         }
-    manual_recording_entries = sorted(
-        manual_by_recording.values(),
-        key=lambda item: str(item["recording_id"]).casefold(),
+    manual_recording_entries = _normalize_manual_recording_entries(
+        sorted(
+            manual_by_recording.values(),
+            key=lambda item: str(item["recording_id"]).casefold(),
+        )
     )
     analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
+    identity_scope = "recording" if repeated_session else "participant"
+    review_evidence = _build_review_evidence_payload(report)
     decision_fingerprint = _decision_fingerprint(
         analysis_fingerprint=analysis_fingerprint,
-        auto_electrodes=auto_electrodes,
-        auto_participants=auto_participants,
+        auto_electrodes=(),
+        auto_participants=(),
         manual_participants=manual_entries,
-        auto_recording_electrodes=(
-            auto_recording_electrodes if repeated_session else None
-        ),
-        auto_recordings=(auto_recordings if repeated_session else None),
+        auto_recording_electrodes=(() if repeated_session else None),
+        auto_recordings=(() if repeated_session else None),
         manual_recordings=(manual_recording_entries if repeated_session else None),
+        review_decisions=combined_review_decisions,
+        identity_scope=identity_scope,
+    )
+    _require_non_oscillating_review_decision(
+        state,
+        analysis_fingerprint=analysis_fingerprint,
+        decision_fingerprint=decision_fingerprint,
+    )
+    for decision in normalized_review_decisions:
+        decision["reviewed_at"] = now
+    combined_review_decisions = _merge_review_decision_rows(
+        preserved_review_decisions,
+        normalized_review_decisions,
     )
     report_path = _write_frequency_domain_qc_text_report(
         root,
         report=report,
         manual_participants=manual_entries,
         manual_recordings=manual_recording_entries,
+        review_decisions=combined_review_decisions,
         decision_fingerprint=decision_fingerprint,
         reviewed_at=now,
     )
@@ -498,24 +1039,49 @@ def apply_frequency_domain_qc_decision(
             "method_version": str(
                 report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
             ),
-            "thresholds": DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS.to_manifest(),
-            "auto_participant_electrode_exclusions": auto_electrodes,
-            "auto_participant_exclusions": auto_participants,
+            "identity_scope": identity_scope,
+            "screening_settings": dict(
+                report.get("screening_settings")
+                if isinstance(report.get("screening_settings"), Mapping)
+                else {}
+            ),
+            "thresholds": dict(
+                report.get("thresholds")
+                if isinstance(report.get("thresholds"), Mapping)
+                else {}
+            ),
+            "auto_participant_electrode_exclusions": [],
+            "auto_participant_exclusions": [],
+            "auto_recording_electrode_exclusions": [],
+            "auto_recording_exclusions": [],
+            "legacy_machine_suggestions": legacy_machine_suggestions,
             "manual_participant_exclusions": manual_entries,
+            "manual_recording_exclusions": (
+                manual_recording_entries if repeated_session else []
+            ),
+            "review_decisions": combined_review_decisions,
+            "review_evidence": review_evidence,
+            "review_complete": True,
             "downstream_outputs_stale": True,
             "last_review": {
                 "reviewed_at": now,
                 "analysis_fingerprint": analysis_fingerprint,
                 "decision_fingerprint": decision_fingerprint,
+                "evidence_fingerprint": str(
+                    review_evidence["evidence_fingerprint"]
+                ),
+                "identity_scope": identity_scope,
                 "report_path": _manifest_safe_path(root, report_path),
                 "review_subject_count": int(report.get("review_subject_count") or 0),
+                "screening_status": str(report.get("screening_status") or ""),
+                "screening_policy_version": str(
+                    report.get("screening_policy_version") or ""
+                ),
             },
         }
     if repeated_session:
         update.update(
             {
-                "auto_recording_electrode_exclusions": auto_recording_electrodes,
-                "auto_recording_exclusions": auto_recordings,
                 "manual_recording_exclusions": manual_recording_entries,
             }
         )
@@ -524,6 +1090,12 @@ def apply_frequency_domain_qc_decision(
             last_review["review_recording_count"] = int(
                 report.get("review_recording_count") or 0
             )
+    update["review_history"] = _updated_review_history(
+        state,
+        report=report,
+        decision_fingerprint=decision_fingerprint,
+        reviewed_at=now,
+    )
     state.update(update)
     _set_metadata_in_manifest(manifest, state)
     _write_manifest_if_changed(manifest_path, manifest)
@@ -534,75 +1106,132 @@ def sync_frequency_domain_qc_automatic_state(
     project_root: str | Path,
     report: Mapping[str, object],
 ) -> dict[str, object]:
-    """Refresh automatic QC exclusions from the current processed files."""
+    """Persist a no-prompt/reused review without granting BCA automatic authority."""
 
     require_frequency_domain_qc_complete(report)
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)
     state = _metadata_from_manifest(manifest)
-    repeated_session = str(report.get("identity_scope") or "") == "recording"
     previous_auto_electrodes = _auto_electrode_entries_from_state(state)
     previous_auto_participants = _auto_participant_entries_from_state(state)
-    auto_electrodes = _normalize_auto_electrode_entries(
-        report.get("auto_participant_electrode_exclusions")
-    )
-    auto_participants = _normalize_auto_participant_entries(
-        report.get("auto_participant_exclusions")
-    )
-    previous_auto_recording_electrodes = (
-        _auto_recording_electrode_entries_from_state(state)
-    )
+    previous_auto_recording_electrodes = _auto_recording_electrode_entries_from_state(state)
     previous_auto_recordings = _auto_recording_entries_from_state(state)
-    auto_recording_electrodes = _normalize_auto_recording_electrode_entries(
-        report.get("auto_recording_electrode_exclusions")
+    legacy_authority_removed = bool(
+        previous_auto_electrodes
+        or previous_auto_participants
+        or previous_auto_recording_electrodes
+        or previous_auto_recordings
     )
-    auto_recordings = _normalize_auto_recording_entries(
-        report.get("auto_recording_exclusions")
+    legacy_machine_suggestions = _merge_legacy_machine_suggestions(
+        state,
+        report.get("legacy_machine_suggestions"),
     )
-    if repeated_session:
-        automatic_state_changed = (
-            previous_auto_recording_electrodes != auto_recording_electrodes
-            or previous_auto_recordings != auto_recordings
-        )
-    else:
-        automatic_state_changed = (
-            previous_auto_electrodes != auto_electrodes
-            or previous_auto_participants != auto_participants
-        )
+    now = _now_utc_iso()
+    current_decisions = _current_review_decisions(
+        report_flags=_iter_mapping_entries(
+            report.get("review_findings")
+            if report.get("review_findings") is not None
+            else report.get("flags")
+        ),
+        state=state,
+    )
+    current_decisions = _merge_review_decision_rows(
+        [
+            dict(item)
+            for item in _iter_mapping_entries(
+                report.get("active_review_decisions")
+            )
+        ],
+        current_decisions,
+    )
+    repeated_session = str(report.get("identity_scope") or "") == "recording"
+    identity_scope = "recording" if repeated_session else "participant"
+    manual_entries = _manual_entries_from_state(state)
+    manual_recording_entries = _manual_recording_entries_from_state(state)
+    analysis_fingerprint = str(report.get("analysis_fingerprint") or "")
+    decision_fingerprint = _decision_fingerprint(
+        analysis_fingerprint=analysis_fingerprint,
+        auto_electrodes=(),
+        auto_participants=(),
+        manual_participants=manual_entries,
+        auto_recording_electrodes=(() if repeated_session else None),
+        auto_recordings=(() if repeated_session else None),
+        manual_recordings=(manual_recording_entries if repeated_session else None),
+        review_decisions=current_decisions,
+        identity_scope=identity_scope,
+    )
+    review_evidence = _build_review_evidence_payload(report)
+    previous_last_review = (
+        dict(state.get("last_review"))
+        if isinstance(state.get("last_review"), Mapping)
+        else {}
+    )
     update: dict[str, object] = {
-            "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
-            "method_version": str(
-                report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
+        "schema_version": FREQUENCY_DOMAIN_QC_SCHEMA_VERSION,
+        "method_version": str(
+            report.get("method_version") or FREQUENCY_DOMAIN_QC_METHOD_VERSION
+        ),
+        "identity_scope": identity_scope,
+        "screening_settings": dict(
+            report.get("screening_settings")
+            if isinstance(report.get("screening_settings"), Mapping)
+            else {}
+        ),
+        "thresholds": dict(
+            report.get("thresholds")
+            if isinstance(report.get("thresholds"), Mapping)
+            else {}
+        ),
+        "auto_participant_electrode_exclusions": [],
+        "auto_participant_exclusions": [],
+        "auto_recording_electrode_exclusions": [],
+        "auto_recording_exclusions": [],
+        "legacy_machine_suggestions": legacy_machine_suggestions,
+        "manual_participant_exclusions": manual_entries,
+        "manual_recording_exclusions": (
+            manual_recording_entries if repeated_session else []
+        ),
+        "review_decisions": current_decisions,
+        "review_evidence": review_evidence,
+        "review_complete": not bool(report.get("review_required")),
+        "last_review": {
+            "reviewed_at": str(previous_last_review.get("reviewed_at") or now),
+            "synced_at": now,
+            "analysis_fingerprint": analysis_fingerprint,
+            "decision_fingerprint": decision_fingerprint,
+            "evidence_fingerprint": str(
+                review_evidence["evidence_fingerprint"]
             ),
-            "thresholds": DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS.to_manifest(),
-            "last_automatic_qc": {
-                "reviewed_at": _now_utc_iso(),
-                "analysis_fingerprint": str(report.get("analysis_fingerprint") or ""),
-                "review_required": bool(report.get("review_required")),
-                "review_reused": bool(report.get("review_reused")),
-            },
+            "identity_scope": identity_scope,
+            "report_path": str(previous_last_review.get("report_path") or ""),
+            "review_subject_count": int(
+                report.get("review_subject_count") or 0
+            ),
+            "review_recording_count": int(
+                report.get("review_recording_count") or 0
+            ),
+            "screening_status": str(report.get("screening_status") or ""),
+            "screening_policy_version": str(
+                report.get("screening_policy_version") or ""
+            ),
+        },
+        "last_automatic_qc": {
+            "reviewed_at": now,
+            "analysis_fingerprint": analysis_fingerprint,
+            "review_required": bool(report.get("review_required")),
+            "review_reused": bool(report.get("review_reused")),
+            "screening_status": str(report.get("screening_status") or ""),
+            "authority": "review_only",
         }
-    if repeated_session:
-        update.update(
-            {
-                "auto_recording_electrode_exclusions": auto_recording_electrodes,
-                "auto_recording_exclusions": auto_recordings,
-            }
-        )
-    else:
-        update.update(
-            {
-                "auto_participant_electrode_exclusions": auto_electrodes,
-                "auto_participant_exclusions": auto_participants,
-            }
-        )
+    }
     state.update(update)
-    if automatic_state_changed:
+    if legacy_authority_removed:
         state["downstream_outputs_stale"] = True
-        state["stale_reason"] = "Automatic frequency-domain QC exclusions changed."
-        state["stale_at"] = _now_utc_iso()
-        state.pop("last_review", None)
+        state["stale_reason"] = (
+            "Legacy summed-BCA automatic exclusions were converted to review-only suggestions."
+        )
+        state["stale_at"] = now
     _set_metadata_in_manifest(manifest, state)
     _write_manifest_if_changed(manifest_path, manifest)
     return state
@@ -656,58 +1285,243 @@ def active_frequency_domain_exclusions(
     project_root: str | Path | None,
 ) -> FrequencyDomainExclusions:
     state = load_frequency_domain_qc_state(project_root)
-    auto_participants = {
-        _normalize_participant_id(entry.get("participant_id"))
-        for entry in _iter_mapping_entries(state.get("auto_participant_exclusions"))
-    }
+    return _frequency_domain_exclusions_from_rows(
+        state=state,
+        decisions=_review_decisions_from_state(state),
+        manual_entries=_manual_entries_from_state(state),
+        manual_recording_entries=_manual_recording_entries_from_state(state),
+    )
+
+
+def _frequency_domain_exclusions_from_rows(
+    *,
+    state: Mapping[str, object],
+    decisions: Sequence[Mapping[str, object]],
+    manual_entries: Sequence[Mapping[str, object]],
+    manual_recording_entries: Sequence[Mapping[str, object]],
+) -> FrequencyDomainExclusions:
     manual_participants = {
         _normalize_participant_id(entry.get("participant_id"))
-        for entry in _iter_mapping_entries(state.get("manual_participant_exclusions"))
-    }
-    auto_participants = {pid for pid in auto_participants if pid}
-    manual_participants = {pid for pid in manual_participants if pid}
-    electrodes_by_pid: dict[str, set[str]] = defaultdict(set)
-    for entry in _iter_mapping_entries(state.get("auto_participant_electrode_exclusions")):
-        pid = _normalize_participant_id(entry.get("participant_id"))
-        electrode = _normalize_electrode(entry.get("electrode"))
-        if pid and electrode:
-            electrodes_by_pid[pid].add(electrode)
-    auto_recordings = {
-        _normalize_recording_id(entry.get("recording_id"))
-        for entry in _iter_mapping_entries(state.get("auto_recording_exclusions"))
+        for entry in manual_entries
+        if _normalize_participant_id(entry.get("participant_id"))
     }
     manual_recordings = {
         _normalize_recording_id(entry.get("recording_id"))
-        for entry in _iter_mapping_entries(state.get("manual_recording_exclusions"))
+        for entry in manual_recording_entries
+        if _normalize_recording_id(entry.get("recording_id"))
     }
-    auto_recordings = {recording_id for recording_id in auto_recordings if recording_id}
-    manual_recordings = {
-        recording_id for recording_id in manual_recordings if recording_id
-    }
-    electrodes_by_recording: dict[str, set[str]] = defaultdict(set)
-    for entry in _iter_mapping_entries(
-        state.get("auto_recording_electrode_exclusions")
-    ):
-        recording_id = _normalize_recording_id(entry.get("recording_id"))
-        electrode = _normalize_electrode(entry.get("electrode"))
-        if recording_id and electrode:
-            electrodes_by_recording[recording_id].add(electrode)
+    participant_conditions: set[tuple[str, str]] = set()
+    recording_conditions: set[tuple[str, str]] = set()
+    participant_condition_electrodes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    recording_condition_electrodes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for decision in decisions:
+        action = str(decision.get("decision") or "")
+        participant_id = _normalize_participant_id(decision.get("participant_id"))
+        recording_id = _normalize_recording_id(decision.get("recording_id"))
+        condition = str(decision.get("condition") or "").strip()
+        electrode = _normalize_electrode(decision.get("electrode"))
+        if action == DECISION_EXCLUDE_PARTICIPANT and participant_id:
+            manual_participants.add(participant_id)
+        elif action == DECISION_EXCLUDE_RECORDING and recording_id:
+            manual_recordings.add(recording_id)
+        elif action == DECISION_EXCLUDE_CONDITION:
+            if recording_id and condition:
+                recording_conditions.add((recording_id, condition))
+            elif participant_id and condition:
+                participant_conditions.add((participant_id, condition))
+        elif action == DECISION_EXCLUDE_CONDITION_ELECTRODE:
+            if recording_id and condition and electrode:
+                recording_condition_electrodes[(recording_id, condition)].add(
+                    electrode
+                )
+            elif participant_id and condition and electrode:
+                participant_condition_electrodes[(participant_id, condition)].add(
+                    electrode
+                )
     return FrequencyDomainExclusions(
-        excluded_participants=frozenset(auto_participants | manual_participants),
-        auto_excluded_participants=frozenset(auto_participants),
+        excluded_participants=frozenset(manual_participants),
+        auto_excluded_participants=frozenset(),
         manual_excluded_participants=frozenset(manual_participants),
-        auto_excluded_electrodes_by_participant={
-            pid: frozenset(sorted(electrodes))
-            for pid, electrodes in electrodes_by_pid.items()
-        },
+        auto_excluded_electrodes_by_participant={},
         downstream_outputs_stale=bool(state.get("downstream_outputs_stale", False)),
-        excluded_recordings=frozenset(auto_recordings | manual_recordings),
-        auto_excluded_recordings=frozenset(auto_recordings),
+        excluded_recordings=frozenset(manual_recordings),
+        auto_excluded_recordings=frozenset(),
         manual_excluded_recordings=frozenset(manual_recordings),
-        auto_excluded_electrodes_by_recording={
-            recording_id: frozenset(sorted(electrodes))
-            for recording_id, electrodes in electrodes_by_recording.items()
+        auto_excluded_electrodes_by_recording={},
+        excluded_participant_conditions=frozenset(participant_conditions),
+        excluded_recording_conditions=frozenset(recording_conditions),
+        excluded_electrodes_by_participant_condition={
+            key: frozenset(sorted(electrodes))
+            for key, electrodes in participant_condition_electrodes.items()
         },
+        excluded_electrodes_by_recording_condition={
+            key: frozenset(sorted(electrodes))
+            for key, electrodes in recording_condition_electrodes.items()
+        },
+    )
+
+
+def _raw_state_rows(
+    state: Mapping[str, object],
+    key: str,
+) -> list[Mapping[str, object]] | None:
+    raw = state.get(key, [])
+    if not isinstance(raw, list):
+        return None
+    if any(not isinstance(item, Mapping) for item in raw):
+        return None
+    return [item for item in raw if isinstance(item, Mapping)]
+
+
+def _manual_state_rows_are_canonical(
+    state: Mapping[str, object],
+    *,
+    key: str,
+    normalizer: Callable[[object], list[dict[str, object]]],
+) -> tuple[bool, list[dict[str, object]]]:
+    raw = _raw_state_rows(state, key)
+    if raw is None:
+        return False, []
+    normalized = normalizer(raw)
+    return _json_safe(raw) == _json_safe(normalized), normalized
+
+
+def _review_decision_state_rows_are_hash_valid(
+    state: Mapping[str, object],
+) -> tuple[bool, list[dict[str, object]]]:
+    raw = _raw_state_rows(state, "review_decisions")
+    if raw is None:
+        return False, []
+    normalized = _review_decisions_from_state(state)
+    decision_fingerprints = [
+        str(item.get("decision_fingerprint") or "") for item in normalized
+    ]
+    finding_fingerprints = [
+        str(item.get("finding_fingerprint") or "") for item in normalized
+    ]
+    valid = (
+        len(normalized) == len(raw)
+        and len(decision_fingerprints) == len(set(decision_fingerprints))
+        and len(finding_fingerprints) == len(set(finding_fingerprints))
+        and all(decision_fingerprints)
+        and all(finding_fingerprints)
+    )
+    if not raw:
+        valid = True
+    return valid, normalized
+
+
+def resolve_frequency_qc_coverage_decisions(
+    project_root: str | Path | None,
+) -> FrequencyDomainCoverageDecisions:
+    """Return current explicit QC-17 decisions for final ROI/release gates."""
+
+    root = Path(project_root).resolve() if project_root not in (None, "") else None
+    state = load_frequency_domain_qc_state(project_root)
+    decisions_valid, decision_rows = _review_decision_state_rows_are_hash_valid(
+        state
+    )
+    participant_rows_valid, manual_entries = _manual_state_rows_are_canonical(
+        state,
+        key="manual_participant_exclusions",
+        normalizer=_normalize_manual_entries,
+    )
+    recording_rows_valid, manual_recording_entries = (
+        _manual_state_rows_are_canonical(
+            state,
+            key="manual_recording_exclusions",
+            normalizer=_normalize_manual_recording_entries,
+        )
+    )
+    last_review = state.get("last_review")
+    saved_decision_fingerprint = (
+        str(last_review.get("decision_fingerprint") or "").strip()
+        if isinstance(last_review, Mapping)
+        else ""
+    )
+    saved_analysis_fingerprint = (
+        str(last_review.get("analysis_fingerprint") or "").strip()
+        if isinstance(last_review, Mapping)
+        else ""
+    )
+    identity_scope = str(state.get("identity_scope") or "").strip().casefold()
+    last_identity_scope = (
+        str(last_review.get("identity_scope") or "").strip().casefold()
+        if isinstance(last_review, Mapping)
+        else ""
+    )
+    identity_valid = (
+        identity_scope in {"participant", "recording"}
+        and identity_scope == last_identity_scope
+    )
+    if identity_scope == "participant" and manual_recording_entries:
+        recording_rows_valid = False
+    computed_decision_fingerprint = ""
+    if saved_analysis_fingerprint and identity_valid:
+        computed_decision_fingerprint = _decision_fingerprint(
+            analysis_fingerprint=saved_analysis_fingerprint,
+            auto_electrodes=(),
+            auto_participants=(),
+            manual_participants=manual_entries,
+            auto_recording_electrodes=(
+                () if identity_scope == "recording" else None
+            ),
+            auto_recordings=(() if identity_scope == "recording" else None),
+            manual_recordings=(
+                manual_recording_entries
+                if identity_scope == "recording"
+                else None
+            ),
+            review_decisions=decision_rows,
+            identity_scope=identity_scope,
+        )
+    evidence = (
+        _validated_review_evidence_from_state(root, state)
+        if root is not None
+        else None
+    )
+    review_complete = bool(
+        state.get("review_complete")
+        and decisions_valid
+        and participant_rows_valid
+        and recording_rows_valid
+        and identity_valid
+        and evidence is not None
+        and saved_decision_fingerprint
+        and computed_decision_fingerprint == saved_decision_fingerprint
+    )
+    exclusions = (
+        _frequency_domain_exclusions_from_rows(
+            state=state,
+            decisions=decision_rows,
+            manual_entries=manual_entries,
+            manual_recording_entries=manual_recording_entries,
+        )
+        if review_complete
+        else _frequency_domain_exclusions_from_rows(
+            state=state,
+            decisions=(),
+            manual_entries=(),
+            manual_recording_entries=(),
+        )
+    )
+    decisions = tuple(dict(item) for item in decision_rows) if review_complete else ()
+    return FrequencyDomainCoverageDecisions(
+        decision_fingerprint=(
+            computed_decision_fingerprint if review_complete else ""
+        ),
+        review_complete=review_complete,
+        excluded_participants=exclusions.excluded_participants,
+        excluded_recordings=exclusions.excluded_recordings,
+        excluded_participant_conditions=exclusions.excluded_participant_conditions,
+        excluded_recording_conditions=exclusions.excluded_recording_conditions,
+        excluded_electrodes_by_participant_condition=(
+            exclusions.excluded_electrodes_by_participant_condition
+        ),
+        excluded_electrodes_by_recording_condition=(
+            exclusions.excluded_electrodes_by_recording_condition
+        ),
+        reviewed_decisions=decisions,
     )
 
 
@@ -720,10 +1534,16 @@ def filter_frequency_domain_subjects(
     excluded = {pid.upper() for pid in exclusions.excluded_participants}
     filtered_subjects = [str(pid) for pid in subjects if str(pid).upper() not in excluded]
     filtered_data = {
-        pid: dict(subject_data.get(pid, {}))
+        pid: {
+            condition: path
+            for condition, path in dict(subject_data.get(pid, {})).items()
+            if (_normalize_participant_id(pid), str(condition))
+            not in exclusions.excluded_participant_conditions
+        }
         for pid in filtered_subjects
         if subject_data.get(pid)
     }
+    filtered_subjects = [pid for pid in filtered_subjects if filtered_data.get(pid)]
     removed = sorted(str(pid) for pid in subjects if str(pid).upper() in excluded)
     return filtered_subjects, filtered_data, removed
 
@@ -757,10 +1577,20 @@ def filter_frequency_domain_recordings(
         not in excluded_participants
     ]
     filtered_data = {
-        recording_id: dict(recording_data.get(recording_id, {}))
+        recording_id: {
+            condition: path
+            for condition, path in dict(recording_data.get(recording_id, {})).items()
+            if (_normalize_recording_id(recording_id), str(condition))
+            not in exclusions.excluded_recording_conditions
+        }
         for recording_id in filtered_recordings
         if recording_data.get(recording_id)
     }
+    filtered_recordings = [
+        recording_id
+        for recording_id in filtered_recordings
+        if filtered_data.get(recording_id)
+    ]
     removed = sorted(
         str(recording_id)
         for recording_id in recording_ids
@@ -772,20 +1602,29 @@ def filter_frequency_domain_recordings(
 def frequency_domain_excluded_electrodes_for_subject(
     project_root: str | Path | None,
     participant_id: object,
+    condition: object | None = None,
 ) -> frozenset[str]:
     exclusions = active_frequency_domain_exclusions(project_root)
     pid = _normalize_participant_id(participant_id)
-    return exclusions.auto_excluded_electrodes_by_participant.get(pid, frozenset())
+    if condition in (None, ""):
+        return frozenset()
+    return exclusions.excluded_electrodes_by_participant_condition.get(
+        (pid, str(condition).strip()),
+        frozenset(),
+    )
 
 
 def frequency_domain_excluded_electrodes_for_recording(
     project_root: str | Path | None,
     recording_id: object,
+    condition: object | None = None,
 ) -> frozenset[str]:
     exclusions = active_frequency_domain_exclusions(project_root)
     normalized = _normalize_recording_id(recording_id)
-    return exclusions.auto_excluded_electrodes_by_recording.get(
-        normalized,
+    if condition in (None, ""):
+        return frozenset()
+    return exclusions.excluded_electrodes_by_recording_condition.get(
+        (normalized, str(condition).strip()),
         frozenset(),
     )
 
@@ -867,22 +1706,26 @@ def clear_manual_frequency_domain_recording_exclusions(
 def thresholds_summary_lines() -> list[str]:
     thresholds = DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS
     return [
-        f"Warning: abs(summed BCA) > {thresholds.warning_summed_bca_uv:g} uV",
+        "Experimental summed-BCA screening is review-only; no threshold "
+        "automatically excludes data.",
+        f"Warning review band: abs(summed BCA) > {thresholds.warning_summed_bca_uv:g} uV",
         (
-            "Repeated-warning review: "
-            f"{thresholds.repeated_warning_cells} or more warning cells per participant"
+            "Concentrated review: "
+            f"{thresholds.concentrated_review_flagged_cells} or more flagged cells "
+            "per recording or participant"
         ),
         (
-            "Strong warning: "
+            "Strong review band: "
             f"abs(summed BCA) > {thresholds.strong_warning_summed_bca_uv:g} uV"
         ),
         (
-            "Automatic electrode exclusion: "
-            f"abs(summed BCA) > {thresholds.hard_electrode_summed_bca_uv:g} uV"
+            "Extreme review band: "
+            f"abs(summed BCA) > {thresholds.extreme_review_summed_bca_uv:g} uV"
         ),
         (
-            "Automatic participant exclusion: more than "
-            f"{thresholds.hard_participant_unique_electrodes:g} unique hard-excluded electrodes"
+            "Broad review: at least "
+            f"{thresholds.broad_extreme_review_unique_electrodes:g} unique "
+            "extreme-band electrodes"
         ),
     ]
 
@@ -900,6 +1743,16 @@ def _provisional_harmonics(
     declared_session_ids: Sequence[str] | None = None,
     participant_group_ids: Mapping[str, str] | None = None,
     declared_group_ids: Sequence[str] | None = None,
+    base_frequency_hz: float,
+    oddball_frequency_hz: float,
+    eligible_harmonic_orders: Sequence[int],
+    spectral_eligibility_fingerprint: str,
+    electrode_exclusions_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ] | None = None,
+    expected_scalp_channels_by_subject_condition: Mapping[
+        tuple[str, str], Sequence[str]
+    ] | None = None,
 ) -> tuple[tuple[float, ...], dict[str, object]]:
     from Tools.Stats.analysis.dv_policy_fixed_predefined import (
         build_fixed_harmonic_selection,
@@ -914,16 +1767,25 @@ def _provisional_harmonics(
             subjects=subjects,
             conditions=conditions,
             subject_data=subject_data,
-            base_frequency_hz=_analysis_base_frequency_hz(),
+            base_frequency_hz=base_frequency_hz,
             rois=rois,
             log_func=log_func,
             settings=settings,
-            max_freq=_analysis_bca_upper_limit_hz(),
+            max_freq=None,
             project_root=project_root,
             recording_assignments=recording_assignments,
             declared_session_ids=declared_session_ids,
             participant_group_ids=participant_group_ids,
             declared_group_ids=declared_group_ids,
+            oddball_frequency_hz=oddball_frequency_hz,
+            eligible_harmonic_orders=eligible_harmonic_orders,
+            spectral_eligibility_fingerprint=spectral_eligibility_fingerprint,
+            electrode_exclusions_by_subject_condition=(
+                electrode_exclusions_by_subject_condition
+            ),
+            expected_scalp_channels_by_subject_condition=(
+                expected_scalp_channels_by_subject_condition
+            ),
         )
         return (
             tuple(round(float(freq), 4) for freq in selection.selected_harmonics_hz),
@@ -936,17 +1798,32 @@ def _provisional_harmonics(
     selection = build_fixed_harmonic_selection(
         requested_values=settings.fixed_harmonic_frequencies_hz,
         bca_columns=columns,
-        base_frequency_hz=_analysis_base_frequency_hz(),
+        base_frequency_hz=base_frequency_hz,
         auto_exclude_base_overlaps=settings.fixed_harmonic_auto_exclude_base,
         base_overlap_tolerance_hz=settings.fixed_harmonic_base_tolerance_hz,
         matching_tolerance_hz=settings.fixed_harmonic_matching_tolerance_hz,
         input_mode=settings.fixed_harmonic_input_mode,
         upper_harmonic_index=settings.fixed_harmonic_upper_harmonic_index,
         upper_frequency_hz=settings.fixed_harmonic_upper_frequency_hz,
+        oddball_frequency_hz=oddball_frequency_hz,
+        eligible_harmonic_orders=eligible_harmonic_orders,
+    )
+    metadata = selection.to_metadata()
+    metadata.update(
+        {
+            "frequency_protocol_base_rate_hz": float(base_frequency_hz),
+            "frequency_protocol_oddball_rate_hz": float(oddball_frequency_hz),
+            "eligible_harmonic_orders": [
+                int(order) for order in eligible_harmonic_orders
+            ],
+            "spectral_eligibility_fingerprint": str(
+                spectral_eligibility_fingerprint
+            ),
+        }
     )
     return (
         tuple(round(float(freq), 4) for freq in selection.included_frequencies_hz),
-        selection.to_metadata(),
+        metadata,
     )
 
 
@@ -959,6 +1836,11 @@ def _collect_summed_bca_flags(
     thresholds: FrequencyDomainQcThresholds,
     log_func: Callable[[str], None],
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    screening_enabled: bool = True,
+    selected_harmonics_metadata: Mapping[str, object] | None = None,
+    excluded_electrodes_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ] | None = None,
 ) -> _SummedBcaInspection:
     from Main_App.io import (
         MissingXlsxColumnsError,
@@ -1007,6 +1889,14 @@ def _collect_summed_bca_flags(
             for row_offset, row in frame.iterrows():
                 electrode = _normalize_electrode(row.get("Electrode"))
                 if not electrode:
+                    continue
+                cell_exclusions = (
+                    excluded_electrodes_by_subject_condition or {}
+                ).get(
+                    (_normalize_recording_id(subject), str(condition)),
+                    frozenset(),
+                )
+                if electrode in cell_exclusions:
                     continue
                 finite_values: list[float] = []
                 score_unavailable = False
@@ -1090,19 +1980,36 @@ def _collect_summed_bca_flags(
                     )
                     continue
                 abs_value = abs(value)
-                if abs_value <= thresholds.warning_summed_bca_uv:
+                if not screening_enabled or abs_value <= thresholds.warning_summed_bca_uv:
                     continue
                 severity = "warning"
-                if abs_value > thresholds.hard_electrode_summed_bca_uv:
-                    severity = "hard"
+                if abs_value > thresholds.extreme_review_summed_bca_uv:
+                    severity = "extreme"
                 elif abs_value > thresholds.strong_warning_summed_bca_uv:
                     severity = "strong"
                 flag: dict[str, object] = {
                     **identity,
+                    "finding_type": "absolute_electrode_summed_bca",
                     "electrode": electrode,
                     "summed_bca_uv": value,
                     "abs_summed_bca_uv": float(abs_value),
                     "severity": severity,
+                    "band_crossed": severity,
+                    "selected_harmonics_hz": [
+                        round(float(freq), 4) for freq in selected_harmonics
+                    ],
+                    "selected_harmonic_count": len(selected_harmonics),
+                    "selection_fingerprint": str(
+                        (selected_harmonics_metadata or {}).get(
+                            "selection_fingerprint"
+                        )
+                        or (selected_harmonics_metadata or {}).get(
+                            "selection_input_fingerprint"
+                        )
+                        or ""
+                    ),
+                    "independent_qc": [],
+                    "independent_qc_status": "not_supplied_to_summed_bca_review",
                 }
                 if recording_assignments is not None:
                     assignment = recording_assignments.get(subject, {})
@@ -1118,6 +2025,9 @@ def _collect_summed_bca_flags(
                             "visit_index": assignment.get("visit_index"),
                         }
                     )
+                flag["finding_fingerprint"] = _frequency_qc_finding_fingerprint(
+                    flag
+                )
                 flags.append(flag)
     return _SummedBcaInspection(
         flags=tuple(
@@ -1142,6 +2052,403 @@ def _collect_summed_bca_flags(
             sorted(unavailable_by_method, key=_bca_diagnostic_sort_key)
         ),
     )
+
+
+def _collect_cohort_summed_bca_context(
+    *,
+    subjects: Sequence[str],
+    conditions: Sequence[str],
+    subject_data: Mapping[str, Mapping[str, str]],
+    selected_harmonics: Sequence[float],
+    rois: Mapping[str, Sequence[str]],
+    settings: SummedBcaScreeningSettings,
+    recording_assignments: Mapping[str, Mapping[str, object]] | None,
+    protocol_metadata: Mapping[str, object],
+    screening_enabled: bool,
+    excluded_electrodes_by_subject_condition: Mapping[
+        tuple[str, str], frozenset[str]
+    ] | None = None,
+) -> _CohortSummedBcaInspection:
+    """Build optional cohort-relative context from the exact candidate list."""
+
+    roi_definitions = {
+        str(name).strip(): tuple(
+            dict.fromkeys(
+                _normalize_electrode(channel)
+                for channel in channels
+                if _normalize_electrode(channel)
+            )
+        )
+        for name, channels in rois.items()
+        if str(name).strip()
+    }
+    roi_fingerprint = _hash_payload(
+        {
+            "method": "fixed_roi_definition_v1",
+            "rois": {
+                name: list(channels)
+                for name, channels in sorted(roi_definitions.items())
+            },
+        }
+    )
+    cohort_payload = {
+        "subjects": list(subjects),
+        "conditions": list(conditions),
+        "recording_assignments": _json_safe(recording_assignments or {}),
+        "roi_definition_fingerprint": roi_fingerprint,
+        "selected_harmonics_hz": [
+            round(float(value), 4) for value in selected_harmonics
+        ],
+        "frequency_protocol_fingerprint": protocol_metadata.get(
+            "frequency_protocol_fingerprint"
+        ),
+        "settings": settings.to_manifest(),
+        "excluded_electrodes_by_subject_condition": [
+            {
+                "identity": identity,
+                "condition": condition,
+                "electrodes": sorted(electrodes),
+            }
+            for (identity, condition), electrodes in sorted(
+                (excluded_electrodes_by_subject_condition or {}).items()
+            )
+        ],
+    }
+    cohort_fingerprint = _hash_payload(cohort_payload)
+    if not screening_enabled:
+        return _CohortSummedBcaInspection(
+            rows=(),
+            flags=(),
+            roi_fingerprint=roi_fingerprint,
+            cohort_fingerprint=cohort_fingerprint,
+        )
+
+    from Main_App.io import (
+        MissingXlsxColumnsError,
+        read_xlsx_sheet_selected_columns,
+    )
+
+    columns = [f"{float(freq):.4f}_Hz" for freq in selected_harmonics]
+    rows: list[dict[str, object]] = []
+    for subject in subjects:
+        for condition in conditions:
+            file_path = str(subject_data.get(subject, {}).get(condition) or "")
+            identity = _frequency_qc_cell_identity(
+                subject=str(subject),
+                condition=str(condition),
+                file_path=file_path,
+                recording_assignments=recording_assignments,
+            )
+            if not file_path or not Path(file_path).is_file():
+                for roi_name, roi_channels in roi_definitions.items():
+                    rows.append(
+                        {
+                            **identity,
+                            **protocol_metadata,
+                            "roi": roi_name,
+                            "roi_electrodes": list(roi_channels),
+                            "status": "technical_input_unavailable",
+                            "reason_codes": ["source_workbook_missing"],
+                            "roi_definition_fingerprint": roi_fingerprint,
+                            "cohort_fingerprint": cohort_fingerprint,
+                        }
+                    )
+                continue
+            try:
+                frame = read_xlsx_sheet_selected_columns(
+                    file_path,
+                    sheet_name="BCA (uV)",
+                    required_columns=["Electrode", *columns],
+                )
+            except (MissingXlsxColumnsError, OSError, ValueError) as exc:
+                for roi_name, roi_channels in roi_definitions.items():
+                    rows.append(
+                        {
+                            **identity,
+                            **protocol_metadata,
+                            "roi": roi_name,
+                            "roi_electrodes": list(roi_channels),
+                            "status": "technical_input_unavailable",
+                            "reason_codes": [
+                                "source_workbook_unreadable_or_incomplete"
+                            ],
+                            "technical_detail": str(exc),
+                            "roi_definition_fingerprint": roi_fingerprint,
+                            "cohort_fingerprint": cohort_fingerprint,
+                        }
+                    )
+                continue
+            electrode_labels = [
+                _normalize_electrode(value) for value in frame["Electrode"]
+            ]
+            if len(electrode_labels) != len(set(electrode_labels)):
+                duplicate_status = ["duplicate_electrode_rows"]
+            else:
+                duplicate_status = []
+            indexed = frame.copy()
+            indexed.index = electrode_labels
+            cell_exclusions = (
+                excluded_electrodes_by_subject_condition or {}
+            ).get(
+                (_normalize_recording_id(subject), str(condition)),
+                frozenset(),
+            )
+            for roi_name, roi_channels in roi_definitions.items():
+                missing_channels = [
+                    channel for channel in roi_channels if channel not in indexed.index
+                ]
+                excluded_channels = [
+                    channel for channel in roi_channels if channel in cell_exclusions
+                ]
+                reasons = list(duplicate_status)
+                if missing_channels:
+                    reasons.append("fixed_roi_members_missing")
+                if excluded_channels:
+                    reasons.append("fixed_roi_members_excluded_by_review")
+                if not roi_channels:
+                    reasons.append("fixed_roi_empty")
+                if reasons:
+                    rows.append(
+                        {
+                            **identity,
+                            **protocol_metadata,
+                            "roi": roi_name,
+                            "roi_electrodes": list(roi_channels),
+                            "missing_electrodes": missing_channels,
+                            "excluded_electrodes": excluded_channels,
+                            "status": "technical_input_unavailable",
+                            "reason_codes": reasons,
+                            "roi_definition_fingerprint": roi_fingerprint,
+                            "cohort_fingerprint": cohort_fingerprint,
+                        }
+                    )
+                    continue
+                numeric = indexed.loc[list(roi_channels), columns].apply(
+                    pd.to_numeric,
+                    errors="coerce",
+                )
+                values = numeric.to_numpy(dtype=float)
+                if values.size == 0 or not np.isfinite(values).all():
+                    rows.append(
+                        {
+                            **identity,
+                            **protocol_metadata,
+                            "roi": roi_name,
+                            "roi_electrodes": list(roi_channels),
+                            "status": "technical_input_unavailable",
+                            "reason_codes": ["roi_harmonic_values_nonfinite"],
+                            "roi_definition_fingerprint": roi_fingerprint,
+                            "cohort_fingerprint": cohort_fingerprint,
+                        }
+                    )
+                    continue
+                harmonic_means = values.mean(axis=0)
+                peak_index = int(np.argmax(np.abs(harmonic_means)))
+                rows.append(
+                    {
+                        **identity,
+                        **protocol_metadata,
+                        "roi": roi_name,
+                        "roi_electrodes": list(roi_channels),
+                        "status": "complete",
+                        "reason_codes": [],
+                        "selected_harmonics_hz": [
+                            round(float(value), 4) for value in selected_harmonics
+                        ],
+                        "selected_harmonic_count": len(selected_harmonics),
+                        "sum_abs_roi_mean_uv": float(
+                            np.sum(np.abs(harmonic_means))
+                        ),
+                        "peak_abs_roi_mean_uv": float(
+                            abs(harmonic_means[peak_index])
+                        ),
+                        "peak_signed_roi_mean_uv": float(
+                            harmonic_means[peak_index]
+                        ),
+                        "peak_harmonic_hz": round(
+                            float(selected_harmonics[peak_index]),
+                            4,
+                        ),
+                        "roi_definition_fingerprint": roi_fingerprint,
+                        "cohort_fingerprint": cohort_fingerprint,
+                    }
+                )
+
+    cohort_fingerprint = _hash_payload(
+        {
+            **cohort_payload,
+            "rows": [
+                {
+                    key: _json_safe(row.get(key))
+                    for key in (
+                        "participant_id",
+                        "recording_id",
+                        "condition",
+                        "roi",
+                        "status",
+                        "reason_codes",
+                        "selected_harmonics_hz",
+                        "sum_abs_roi_mean_uv",
+                        "peak_abs_roi_mean_uv",
+                        "peak_signed_roi_mean_uv",
+                        "peak_harmonic_hz",
+                    )
+                }
+                for row in rows
+            ],
+        }
+    )
+    for row in rows:
+        row["cohort_fingerprint"] = cohort_fingerprint
+
+    flags: list[dict[str, object]] = []
+    for condition in conditions:
+        for roi_name in roi_definitions:
+            cell_rows = [
+                row
+                for row in rows
+                if row.get("condition") == condition
+                and row.get("roi") == roi_name
+                and row.get("status") == "complete"
+            ]
+            for metric, value_key, warning_score, extreme_score, warning_floor, extreme_floor in (
+                (
+                    "sum_abs_roi_mean",
+                    "sum_abs_roi_mean_uv",
+                    settings.cohort_warning_robust_score,
+                    settings.cohort_extreme_robust_score,
+                    settings.cohort_warning_sum_floor_uv,
+                    settings.cohort_extreme_sum_floor_uv,
+                ),
+                (
+                    "peak_abs_roi_mean",
+                    "peak_abs_roi_mean_uv",
+                    settings.cohort_warning_robust_score,
+                    settings.cohort_extreme_robust_score,
+                    settings.cohort_warning_peak_floor_uv,
+                    settings.cohort_extreme_peak_floor_uv,
+                ),
+            ):
+                values = np.asarray(
+                    [float(row[value_key]) for row in cell_rows],
+                    dtype=float,
+                )
+                center, spread, spread_method = _cohort_robust_center_spread(values)
+                for row, value in zip(cell_rows, values):
+                    score = _cohort_robust_score(float(value), center, spread)
+                    row[f"{metric}_robust_center_uv"] = center
+                    row[f"{metric}_robust_spread_uv"] = spread
+                    row[f"{metric}_robust_spread_method"] = spread_method
+                    row[f"{metric}_robust_score"] = score
+                    severity = ""
+                    threshold_used = None
+                    floor_used = None
+                    if score >= extreme_score and value >= extreme_floor:
+                        severity = "extreme"
+                        threshold_used = extreme_score
+                        floor_used = extreme_floor
+                    elif score >= warning_score and value >= warning_floor:
+                        severity = "warning"
+                        threshold_used = warning_score
+                        floor_used = warning_floor
+                    if not severity:
+                        continue
+                    finding = {
+                        **{
+                            key: row.get(key)
+                            for key in (
+                                "participant_id",
+                                "recording_id",
+                                "session_id",
+                                "visit_index",
+                                "condition",
+                                "workbook_path",
+                                "frequency_protocol_fingerprint",
+                                "expected_analyzed_oddball_cycles",
+                                "analyzed_duration_seconds",
+                            )
+                        },
+                        "finding_type": "cohort_relative_summed_bca_context",
+                        "roi": roi_name,
+                        "metric": metric,
+                        "value_uv": float(value),
+                        "robust_center_uv": center,
+                        "robust_spread_uv": spread,
+                        "robust_spread_method": spread_method,
+                        "robust_score": score,
+                        "threshold_used": threshold_used,
+                        "absolute_floor_used_uv": floor_used,
+                        "severity": severity,
+                        "band_crossed": f"cohort_{severity}",
+                        "selected_harmonics_hz": list(
+                            row.get("selected_harmonics_hz") or []
+                        ),
+                        "selected_harmonic_count": int(
+                            row.get("selected_harmonic_count") or 0
+                        ),
+                        "peak_harmonic_hz": row.get("peak_harmonic_hz"),
+                        "peak_signed_roi_mean_uv": row.get(
+                            "peak_signed_roi_mean_uv"
+                        ),
+                        "roi_definition_fingerprint": roi_fingerprint,
+                        "cohort_fingerprint": cohort_fingerprint,
+                        "independent_qc": [],
+                        "independent_qc_status": (
+                            "shared_experimental_context_only"
+                        ),
+                    }
+                    finding["finding_fingerprint"] = (
+                        _frequency_qc_finding_fingerprint(finding)
+                    )
+                    flags.append(finding)
+
+    return _CohortSummedBcaInspection(
+        rows=tuple(rows),
+        flags=tuple(
+            sorted(
+                flags,
+                key=lambda item: (
+                    str(
+                        item.get("recording_id")
+                        or item.get("participant_id")
+                        or ""
+                    ).casefold(),
+                    str(item.get("condition") or "").casefold(),
+                    str(item.get("roi") or "").casefold(),
+                    str(item.get("metric") or ""),
+                ),
+            )
+        ),
+        roi_fingerprint=roi_fingerprint,
+        cohort_fingerprint=cohort_fingerprint,
+    )
+
+
+def _cohort_robust_center_spread(
+    values: np.ndarray,
+) -> tuple[float, float, str]:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return float("nan"), float("nan"), "unavailable"
+    center = float(np.median(finite))
+    mad = float(np.median(np.abs(finite - center)))
+    if mad > 0.0:
+        return center, float(1.4826 * mad), "scaled_mad"
+    q1, q3 = np.percentile(finite, [25, 75])
+    iqr = float(q3 - q1)
+    if iqr > 0.0:
+        return center, float(0.7413 * iqr), "scaled_iqr_fallback"
+    return center, 0.0, "zero_spread_fallback"
+
+
+def _cohort_robust_score(value: float, center: float, spread: float) -> float:
+    if not np.isfinite(value) or not np.isfinite(center):
+        return float("nan")
+    if spread > 0.0:
+        return float((value - center) / spread)
+    if value == center:
+        return 0.0
+    return float("inf") if value > center else float("-inf")
 
 
 def _read_bca_method_audit_rows(
@@ -1371,81 +2678,103 @@ def _finite_input_fingerprint_diagnostic(
     return payload
 
 
+def _finding_abs_value(finding: Mapping[str, object]) -> float:
+    value = finding.get("abs_summed_bca_uv")
+    if value is None:
+        value = finding.get("value_uv")
+    if value is None:
+        value = finding.get("summed_bca_uv")
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return abs(parsed) if np.isfinite(parsed) else 0.0
+
+
 def _summarize_flags(
     flags: Sequence[Mapping[str, object]],
     thresholds: FrequencyDomainQcThresholds,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
     by_pid: dict[str, list[Mapping[str, object]]] = defaultdict(list)
-    hard_by_pid_electrode: dict[tuple[str, str], list[Mapping[str, object]]] = defaultdict(list)
+    extreme_by_pid_electrode: dict[
+        tuple[str, str], list[Mapping[str, object]]
+    ] = defaultdict(list)
     for flag in flags:
         pid = _normalize_participant_id(flag.get("participant_id"))
         electrode = _normalize_electrode(flag.get("electrode"))
         if not pid:
             continue
         by_pid[pid].append(flag)
-        if str(flag.get("severity") or "") == "hard" and electrode:
-            hard_by_pid_electrode[(pid, electrode)].append(flag)
+        if str(flag.get("severity") or "") == "extreme" and electrode:
+            extreme_by_pid_electrode[(pid, electrode)].append(flag)
 
-    auto_electrodes: list[dict[str, object]] = []
-    hard_electrodes_by_pid: dict[str, set[str]] = defaultdict(set)
-    for (pid, electrode), entries in sorted(hard_by_pid_electrode.items()):
-        hard_electrodes_by_pid[pid].add(electrode)
-        max_entry = max(entries, key=lambda item: float(item.get("abs_summed_bca_uv") or 0.0))
-        auto_electrodes.append(
+    machine_electrodes: list[dict[str, object]] = []
+    extreme_electrodes_by_pid: dict[str, set[str]] = defaultdict(set)
+    for (pid, electrode), entries in sorted(extreme_by_pid_electrode.items()):
+        extreme_electrodes_by_pid[pid].add(electrode)
+        max_entry = max(entries, key=_finding_abs_value)
+        machine_electrodes.append(
             {
                 "participant_id": pid,
                 "electrode": electrode,
-                "reason": "abs summed BCA exceeded hard electrode threshold",
-                "threshold_uv": float(thresholds.hard_electrode_summed_bca_uv),
-                "max_abs_summed_bca_uv": float(max_entry.get("abs_summed_bca_uv") or 0.0),
+                "reason": "abs summed BCA exceeded the experimental extreme-review threshold",
+                "threshold_uv": float(thresholds.extreme_review_summed_bca_uv),
+                "max_abs_summed_bca_uv": _finding_abs_value(max_entry),
                 "triggering_conditions": sorted(
                     {str(entry.get("condition") or "") for entry in entries if entry.get("condition")}
                 ),
-                "source": "automatic_frequency_domain_qc",
+                "source": "experimental_summed_bca_machine_suggestion",
+                "authority": "review_only",
             }
         )
 
-    auto_participants: list[dict[str, object]] = []
+    machine_subjects: list[dict[str, object]] = []
     summaries: list[dict[str, object]] = []
     for pid, entries in sorted(by_pid.items()):
         warning_count = len(entries)
-        strong_count = sum(1 for item in entries if str(item.get("severity") or "") in {"strong", "hard"})
-        hard_electrode_count = len(hard_electrodes_by_pid.get(pid, set()))
-        max_entry = max(entries, key=lambda item: float(item.get("abs_summed_bca_uv") or 0.0))
-        auto_participant = hard_electrode_count > int(thresholds.hard_participant_unique_electrodes)
-        if auto_participant:
-            auto_participants.append(
+        strong_count = sum(1 for item in entries if str(item.get("severity") or "") in {"strong", "extreme"})
+        extreme_electrode_count = len(extreme_electrodes_by_pid.get(pid, set()))
+        max_entry = max(entries, key=_finding_abs_value)
+        broad_review = extreme_electrode_count >= int(
+            thresholds.broad_extreme_review_unique_electrodes
+        )
+        if broad_review:
+            machine_subjects.append(
                 {
                     "participant_id": pid,
-                    "reason": "more than 10 unique electrodes exceeded hard electrode threshold",
-                    "hard_excluded_electrode_count": int(hard_electrode_count),
-                    "source": "automatic_frequency_domain_qc",
+                    "reason": "broad experimental review threshold reached",
+                    "extreme_electrode_count": int(extreme_electrode_count),
+                    "source": "experimental_summed_bca_machine_suggestion",
+                    "authority": "review_only",
                 }
             )
         pause_reasons: list[str] = []
-        if auto_participant:
-            pause_reasons.append("automatic participant exclusion")
-        if hard_electrode_count:
-            pause_reasons.append("automatic electrode exclusion")
+        if warning_count:
+            pause_reasons.append("experimental review flag")
+        if broad_review:
+            pause_reasons.append("broad high-priority review")
+        if extreme_electrode_count:
+            pause_reasons.append("extreme value review")
         if strong_count:
             pause_reasons.append("strong warning")
-        if warning_count >= int(thresholds.repeated_warning_cells):
-            pause_reasons.append("repeated warning pattern")
+        if warning_count >= int(thresholds.concentrated_review_flagged_cells):
+            pause_reasons.append("concentrated warning pattern")
         summaries.append(
             {
                 "participant_id": pid,
-                "max_abs_summed_bca_uv": float(max_entry.get("abs_summed_bca_uv") or 0.0),
+                "max_abs_summed_bca_uv": _finding_abs_value(max_entry),
                 "max_condition": str(max_entry.get("condition") or ""),
                 "max_electrode": str(max_entry.get("electrode") or ""),
                 "warning_cell_count": int(warning_count),
-                "strong_or_hard_cell_count": int(strong_count),
-                "hard_excluded_electrode_count": int(hard_electrode_count),
-                "auto_participant_excluded": bool(auto_participant),
+                "strong_or_extreme_cell_count": int(strong_count),
+                "extreme_electrode_count": int(extreme_electrode_count),
+                "broad_review": bool(broad_review),
+                "automatic_action": "none",
                 "pause_review": bool(pause_reasons),
                 "pause_reasons": pause_reasons,
             }
         )
-    return summaries, auto_electrodes, auto_participants
+    return summaries, machine_electrodes, machine_subjects
 
 
 def _summarize_recording_flags(
@@ -1455,7 +2784,7 @@ def _summarize_recording_flags(
     """Summarize repeated-session QC without promoting a visit to a person."""
 
     by_recording: dict[str, list[Mapping[str, object]]] = defaultdict(list)
-    hard_by_recording_electrode: dict[
+    extreme_by_recording_electrode: dict[
         tuple[str, str], list[Mapping[str, object]]
     ] = defaultdict(list)
     for flag in flags:
@@ -1464,20 +2793,17 @@ def _summarize_recording_flags(
         if not recording_id:
             continue
         by_recording[recording_id].append(flag)
-        if str(flag.get("severity") or "") == "hard" and electrode:
-            hard_by_recording_electrode[(recording_id, electrode)].append(flag)
+        if str(flag.get("severity") or "") == "extreme" and electrode:
+            extreme_by_recording_electrode[(recording_id, electrode)].append(flag)
 
-    auto_electrodes: list[dict[str, object]] = []
-    hard_electrodes_by_recording: dict[str, set[str]] = defaultdict(set)
+    machine_electrodes: list[dict[str, object]] = []
+    extreme_electrodes_by_recording: dict[str, set[str]] = defaultdict(set)
     for (recording_id, electrode), entries in sorted(
-        hard_by_recording_electrode.items()
+        extreme_by_recording_electrode.items()
     ):
-        hard_electrodes_by_recording[recording_id].add(electrode)
-        max_entry = max(
-            entries,
-            key=lambda item: float(item.get("abs_summed_bca_uv") or 0.0),
-        )
-        auto_electrodes.append(
+        extreme_electrodes_by_recording[recording_id].add(electrode)
+        max_entry = max(entries, key=_finding_abs_value)
+        machine_electrodes.append(
             {
                 "recording_id": recording_id,
                 "participant_id": _normalize_participant_id(
@@ -1486,11 +2812,9 @@ def _summarize_recording_flags(
                 "session_id": str(max_entry.get("session_id") or ""),
                 "visit_index": max_entry.get("visit_index"),
                 "electrode": electrode,
-                "reason": "abs summed BCA exceeded hard electrode threshold",
-                "threshold_uv": float(thresholds.hard_electrode_summed_bca_uv),
-                "max_abs_summed_bca_uv": float(
-                    max_entry.get("abs_summed_bca_uv") or 0.0
-                ),
+                "reason": "abs summed BCA exceeded the experimental extreme-review threshold",
+                "threshold_uv": float(thresholds.extreme_review_summed_bca_uv),
+                "max_abs_summed_bca_uv": _finding_abs_value(max_entry),
                 "triggering_conditions": sorted(
                     {
                         str(entry.get("condition") or "")
@@ -1498,28 +2822,26 @@ def _summarize_recording_flags(
                         if entry.get("condition")
                     }
                 ),
-                "source": "automatic_frequency_domain_qc",
+                "source": "experimental_summed_bca_machine_suggestion",
+                "authority": "review_only",
             }
         )
 
-    auto_recordings: list[dict[str, object]] = []
+    machine_recordings: list[dict[str, object]] = []
     summaries: list[dict[str, object]] = []
     for recording_id, entries in sorted(by_recording.items()):
         warning_count = len(entries)
         strong_count = sum(
             1
             for item in entries
-            if str(item.get("severity") or "") in {"strong", "hard"}
+            if str(item.get("severity") or "") in {"strong", "extreme"}
         )
-        hard_electrode_count = len(
-            hard_electrodes_by_recording.get(recording_id, set())
+        extreme_electrode_count = len(
+            extreme_electrodes_by_recording.get(recording_id, set())
         )
-        max_entry = max(
-            entries,
-            key=lambda item: float(item.get("abs_summed_bca_uv") or 0.0),
-        )
-        auto_recording = hard_electrode_count > int(
-            thresholds.hard_participant_unique_electrodes
+        max_entry = max(entries, key=_finding_abs_value)
+        broad_review = extreme_electrode_count >= int(
+            thresholds.broad_extreme_review_unique_electrodes
         )
         identity = {
             "recording_id": recording_id,
@@ -1529,44 +2851,43 @@ def _summarize_recording_flags(
             "session_id": str(max_entry.get("session_id") or ""),
             "visit_index": max_entry.get("visit_index"),
         }
-        if auto_recording:
-            auto_recordings.append(
+        if broad_review:
+            machine_recordings.append(
                 {
                     **identity,
-                    "reason": (
-                        "more than 10 unique electrodes exceeded hard electrode "
-                        "threshold in this recording"
-                    ),
-                    "hard_excluded_electrode_count": int(hard_electrode_count),
-                    "source": "automatic_frequency_domain_qc",
+                    "reason": "broad experimental review threshold reached",
+                    "extreme_electrode_count": int(extreme_electrode_count),
+                    "source": "experimental_summed_bca_machine_suggestion",
+                    "authority": "review_only",
                 }
             )
         pause_reasons: list[str] = []
-        if auto_recording:
-            pause_reasons.append("automatic recording exclusion")
-        if hard_electrode_count:
-            pause_reasons.append("automatic recording-electrode exclusion")
+        if warning_count:
+            pause_reasons.append("experimental review flag")
+        if broad_review:
+            pause_reasons.append("broad high-priority review")
+        if extreme_electrode_count:
+            pause_reasons.append("extreme value review")
         if strong_count:
             pause_reasons.append("strong warning")
-        if warning_count >= int(thresholds.repeated_warning_cells):
-            pause_reasons.append("repeated warning pattern")
+        if warning_count >= int(thresholds.concentrated_review_flagged_cells):
+            pause_reasons.append("concentrated warning pattern")
         summaries.append(
             {
                 **identity,
-                "max_abs_summed_bca_uv": float(
-                    max_entry.get("abs_summed_bca_uv") or 0.0
-                ),
+                "max_abs_summed_bca_uv": _finding_abs_value(max_entry),
                 "max_condition": str(max_entry.get("condition") or ""),
                 "max_electrode": str(max_entry.get("electrode") or ""),
                 "warning_cell_count": int(warning_count),
-                "strong_or_hard_cell_count": int(strong_count),
-                "hard_excluded_electrode_count": int(hard_electrode_count),
-                "auto_recording_excluded": bool(auto_recording),
+                "strong_or_extreme_cell_count": int(strong_count),
+                "extreme_electrode_count": int(extreme_electrode_count),
+                "broad_review": bool(broad_review),
+                "automatic_action": "none",
                 "pause_review": bool(pause_reasons),
                 "pause_reasons": pause_reasons,
             }
         )
-    return summaries, auto_electrodes, auto_recordings
+    return summaries, machine_electrodes, machine_recordings
 
 
 def _analysis_fingerprint(
@@ -1580,46 +2901,22 @@ def _analysis_fingerprint(
     flags: Sequence[Mapping[str, object]],
     finite_input_fingerprint: str,
     recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+    screening_settings: SummedBcaScreeningSettings | None = None,
+    provisional_metadata: Mapping[str, object] | None = None,
+    roi_definition_fingerprint: str = "",
+    cohort_fingerprint: str = "",
+    source_workbooks: Sequence[Mapping[str, object]] | None = None,
+    source_fingerprint: str = "",
 ) -> str:
-    workbooks = []
-    for subject in subjects:
-        for condition in conditions:
-            file_path = subject_data.get(subject, {}).get(condition)
-            if not file_path:
-                continue
-            path = Path(file_path)
-            try:
-                stat = path.stat()
-                size = int(stat.st_size)
-                mtime = int(stat.st_mtime_ns)
-            except OSError:
-                size = None
-                mtime = None
-            workbook: dict[str, object] = {
-                    "subject": str(subject),
-                    "condition": str(condition),
-                    "path": _manifest_safe_path(project_root, path),
-                    "size_bytes": size,
-                    "mtime_ns": mtime,
-                }
-            if recording_assignments is not None:
-                assignment = recording_assignments.get(str(subject), {})
-                workbook.update(
-                    {
-                        "recording_id": str(subject),
-                        "participant_id": str(
-                            assignment.get("participant_id") or ""
-                        ),
-                        "group_id": str(assignment.get("group_id") or ""),
-                        "session_id": str(assignment.get("session_id") or ""),
-                        "source_id": str(assignment.get("source_id") or ""),
-                        "visit_index": assignment.get("visit_index"),
-                        "days_from_baseline": assignment.get(
-                            "days_from_baseline"
-                        ),
-                    }
-                )
-            workbooks.append(workbook)
+    workbooks = list(source_workbooks or ())
+    if not workbooks:
+        workbooks = _source_workbook_rows(
+            project_root=project_root,
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            recording_assignments=recording_assignments,
+        )
     payload = {
         "method_version": (
             REPEATED_FREQUENCY_DOMAIN_QC_METHOD_VERSION
@@ -1627,19 +2924,39 @@ def _analysis_fingerprint(
             else FREQUENCY_DOMAIN_QC_METHOD_VERSION
         ),
         "thresholds": thresholds.to_manifest(),
+        "screening_settings": (
+            screening_settings.to_manifest()
+            if screening_settings is not None
+            else {}
+        ),
         "subjects": list(map(str, subjects)),
         "conditions": list(map(str, conditions)),
         "selected_harmonics_hz": [round(float(freq), 4) for freq in selected_harmonics],
         "finite_input_method_version": FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION,
         "finite_input_fingerprint": str(finite_input_fingerprint),
+        "provisional_harmonic_metadata": _json_safe(
+            provisional_metadata or {}
+        ),
+        "roi_definition_fingerprint": str(roi_definition_fingerprint),
+        "cohort_fingerprint": str(cohort_fingerprint),
+        "source_fingerprint": str(source_fingerprint),
         "workbooks": workbooks,
         "flags": [
             {
                 "participant_id": _normalize_participant_id(flag.get("participant_id")),
                 "condition": str(flag.get("condition") or ""),
                 "electrode": _normalize_electrode(flag.get("electrode")),
-                "abs_summed_bca_uv": round(float(flag.get("abs_summed_bca_uv") or 0.0), 6),
+                "roi": str(flag.get("roi") or ""),
+                "metric": str(flag.get("metric") or ""),
+                "value_uv": _json_safe(flag.get("value_uv")),
+                "abs_summed_bca_uv": round(_finding_abs_value(flag), 6),
                 "severity": str(flag.get("severity") or ""),
+                "finding_fingerprint": str(
+                    flag.get("finding_fingerprint") or ""
+                ),
+                "independent_qc_fingerprint": str(
+                    flag.get("independent_qc_fingerprint") or ""
+                ),
             }
             for flag in flags
         ],
@@ -1680,17 +2997,76 @@ def _analysis_fingerprint(
                         "session_id": str(flag.get("session_id") or ""),
                         "condition": str(flag.get("condition") or ""),
                         "electrode": _normalize_electrode(flag.get("electrode")),
+                        "roi": str(flag.get("roi") or ""),
+                        "metric": str(flag.get("metric") or ""),
+                        "value_uv": _json_safe(flag.get("value_uv")),
                         "abs_summed_bca_uv": round(
-                            float(flag.get("abs_summed_bca_uv") or 0.0),
+                            _finding_abs_value(flag),
                             6,
                         ),
                         "severity": str(flag.get("severity") or ""),
+                        "finding_fingerprint": str(
+                            flag.get("finding_fingerprint") or ""
+                        ),
+                        "independent_qc_fingerprint": str(
+                            flag.get("independent_qc_fingerprint") or ""
+                        ),
                     }
                     for flag in flags
                 ],
             }
         )
     return _hash_payload(payload)
+
+
+def _source_workbook_rows(
+    *,
+    project_root: Path,
+    subjects: Sequence[str],
+    conditions: Sequence[str],
+    subject_data: Mapping[str, Mapping[str, str]],
+    recording_assignments: Mapping[str, Mapping[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    workbooks: list[dict[str, object]] = []
+    for subject in subjects:
+        for condition in conditions:
+            file_path = subject_data.get(subject, {}).get(condition)
+            if not file_path:
+                continue
+            path = Path(file_path)
+            try:
+                stat = path.stat()
+                size = int(stat.st_size)
+                mtime = int(stat.st_mtime_ns)
+            except OSError:
+                size = None
+                mtime = None
+            workbook: dict[str, object] = {
+                    "subject": str(subject),
+                    "condition": str(condition),
+                    "path": _manifest_safe_path(project_root, path),
+                    "size_bytes": size,
+                    "mtime_ns": mtime,
+                }
+            if recording_assignments is not None:
+                assignment = recording_assignments.get(str(subject), {})
+                workbook.update(
+                    {
+                        "recording_id": str(subject),
+                        "participant_id": str(
+                            assignment.get("participant_id") or ""
+                        ),
+                        "group_id": str(assignment.get("group_id") or ""),
+                        "session_id": str(assignment.get("session_id") or ""),
+                        "source_id": str(assignment.get("source_id") or ""),
+                        "visit_index": assignment.get("visit_index"),
+                        "days_from_baseline": assignment.get(
+                            "days_from_baseline"
+                        ),
+                    }
+                )
+            workbooks.append(workbook)
+    return workbooks
 
 
 def _decision_fingerprint(
@@ -1702,12 +3078,32 @@ def _decision_fingerprint(
     auto_recording_electrodes: Sequence[Mapping[str, object]] | None = None,
     auto_recordings: Sequence[Mapping[str, object]] | None = None,
     manual_recordings: Sequence[Mapping[str, object]] | None = None,
+    review_decisions: Sequence[Mapping[str, object]] | None = None,
+    identity_scope: str,
 ) -> str:
     payload = {
         "analysis_fingerprint": str(analysis_fingerprint),
+        "identity_scope": str(identity_scope).strip().casefold(),
         "auto_electrodes": _json_safe(_normalize_auto_electrode_entries(auto_electrodes)),
         "auto_participants": _json_safe(_normalize_auto_participant_entries(auto_participants)),
         "manual_participants": _json_safe(_normalize_manual_entries(manual_participants)),
+        "review_decisions": _json_safe(
+            [
+                {
+                    key: value
+                    for key, value in dict(item).items()
+                    if key != "reviewed_at"
+                }
+                for item in sorted(
+                    (review_decisions or ()),
+                    key=lambda row: str(
+                        row.get("decision_fingerprint")
+                        or row.get("finding_fingerprint")
+                        or ""
+                    ),
+                )
+            ]
+        ),
     }
     if (
         auto_recording_electrodes is not None
@@ -1738,79 +3134,103 @@ def _write_frequency_domain_qc_text_report(
     report: Mapping[str, object],
     manual_participants: Sequence[Mapping[str, object]],
     manual_recordings: Sequence[Mapping[str, object]],
+    review_decisions: Sequence[Mapping[str, object]],
     decision_fingerprint: str,
     reviewed_at: str,
 ) -> Path:
     qc_folder = project_root / QUALITY_CHECK_FOLDER
     qc_folder.mkdir(parents=True, exist_ok=True)
     path = qc_folder / FREQUENCY_DOMAIN_QC_REPORT_NAME
-    thresholds = report.get("thresholds") if isinstance(report.get("thresholds"), Mapping) else {}
+    thresholds = (
+        report.get("thresholds")
+        if isinstance(report.get("thresholds"), Mapping)
+        else {}
+    )
+    protocol = (
+        report.get("frequency_protocol")
+        if isinstance(report.get("frequency_protocol"), Mapping)
+        else {}
+    )
     lines = [
-        "Frequency-Domain QC Review",
+        "Experimental Summed-BCA Review",
+        "",
+        str(report.get("screening_explanation") or SUMMED_BCA_SCREENING_BRIEF_TEXT),
+        "No summed-BCA threshold automatically excludes data.",
+        "An outcome-informed exclusion is exploratory and requires sensitivity reporting.",
         "",
         f"Reviewed at: {reviewed_at}",
         f"Decision fingerprint: {decision_fingerprint}",
         f"Project: {project_root}",
+        f"Identity scope: {report.get('identity_scope') or 'participant'}",
+        f"Screening status: {report.get('screening_status') or ''}",
         "",
-        "Thresholds",
-        f"- Warning: abs(summed BCA) > {thresholds.get('warning_summed_bca_uv', 10)} uV",
+        "Project protocol and candidate harmonic state",
         (
-            "- Repeated warning review: "
-            f"{thresholds.get('repeated_warning_cells', 5)} warning cells per participant"
-        ),
-        f"- Strong warning: abs(summed BCA) > {thresholds.get('strong_warning_summed_bca_uv', 50)} uV",
-        (
-            "- Automatic electrode exclusion: abs(summed BCA) > "
-            f"{thresholds.get('hard_electrode_summed_bca_uv', 250)} uV"
+            "- Presentation / oddball rate: "
+            f"{protocol.get('presentation_rate_hz', '')} / "
+            f"{protocol.get('oddball_rate_hz', '')} Hz"
         ),
         (
-            "- Automatic participant exclusion: more than "
-            f"{thresholds.get('hard_participant_unique_electrodes', 10)} unique hard-excluded electrodes"
+            "- Expected analyzed oddball cycles / duration: "
+            f"{protocol.get('expected_analyzed_oddball_cycles', '')} / "
+            f"{protocol.get('analyzed_duration_seconds', '')} s"
         ),
-        "",
-        "Selected provisional harmonics",
-        "- "
+        "- Harmonics: "
         + (
-            ", ".join(f"{float(freq):g} Hz" for freq in report.get("selected_harmonics_hz", []) or [])
+            ", ".join(
+                f"{float(freq):g} Hz"
+                for freq in report.get("selected_harmonics_hz", []) or []
+            )
             or "None"
         ),
+        f"- Analysis fingerprint: {report.get('analysis_fingerprint') or ''}",
+        f"- ROI definition fingerprint: {report.get('roi_definition_fingerprint') or ''}",
+        f"- Cohort fingerprint: {report.get('cohort_fingerprint') or ''}",
         "",
-        "Automatic participant-electrode exclusions",
+        "Experimental review thresholds",
+        f"- Warning: > {thresholds.get('warning_summed_bca_uv', 10)} uV",
+        f"- Strong: > {thresholds.get('strong_warning_summed_bca_uv', 50)} uV",
+        f"- Extreme: > {thresholds.get('extreme_review_summed_bca_uv', 250)} uV",
+        (
+            "- Concentrated review: at least "
+            f"{thresholds.get('concentrated_review_flagged_cells', 5)} flagged cells"
+        ),
+        (
+            "- Broad review: at least "
+            f"{thresholds.get('broad_extreme_review_unique_electrodes', 11)} "
+            "unique extreme-band electrodes"
+        ),
+        "",
+        "Reviewed findings and decisions",
     ]
-    auto_electrodes = _normalize_auto_electrode_entries(
-        report.get("auto_participant_electrode_exclusions")
-    )
-    if auto_electrodes:
-        for entry in auto_electrodes:
-            conditions = ", ".join(entry.get("triggering_conditions", []) or [])
+    normalized_decisions = [dict(item) for item in review_decisions]
+    if normalized_decisions:
+        for entry in normalized_decisions:
+            evidence = (
+                entry.get("evidence")
+                if isinstance(entry.get("evidence"), Mapping)
+                else {}
+            )
+            identity = str(entry.get("recording_id") or entry.get("participant_id") or "")
+            target = str(entry.get("electrode") or entry.get("roi") or "")
+            signed = evidence.get("summed_bca_uv")
+            if signed is None:
+                signed = evidence.get("peak_signed_roi_mean_uv")
+            absolute = evidence.get("abs_summed_bca_uv")
+            if absolute is None:
+                absolute = evidence.get("value_uv")
+            harmonics = evidence.get("selected_harmonics_hz") or []
             lines.append(
-                "- {participant_id} {electrode}: max abs summed BCA {value:.3f} uV"
-                "{conditions}".format(
-                    participant_id=entry["participant_id"],
-                    electrode=entry["electrode"],
-                    value=float(entry.get("max_abs_summed_bca_uv") or 0.0),
-                    conditions=f" ({conditions})" if conditions else "",
-                )
+                f"- {identity} / {entry.get('condition') or ''} / {target}: "
+                f"decision={entry.get('decision') or ''}; "
+                f"signed={signed}; absolute={absolute}; "
+                f"band={evidence.get('band_crossed') or evidence.get('severity') or ''}; "
+                f"harmonics={harmonics}; reason={entry.get('reason') or '(retain)'}"
             )
     else:
         lines.append("- None")
 
-    lines.extend(["", "Automatic participant exclusions"])
-    auto_participants = _normalize_auto_participant_entries(
-        report.get("auto_participant_exclusions")
-    )
-    if auto_participants:
-        for entry in auto_participants:
-            lines.append(
-                "- {participant_id}: {count} hard-excluded electrodes".format(
-                    participant_id=entry["participant_id"],
-                    count=int(entry.get("hard_excluded_electrode_count") or 0),
-                )
-            )
-    else:
-        lines.append("- None")
-
-    lines.extend(["", "Manual participant exclusions"])
+    lines.extend(["", "Preserved whole-participant exclusions"])
     manual_entries = _normalize_manual_entries(manual_participants)
     if manual_entries:
         for entry in manual_entries:
@@ -1818,67 +3238,8 @@ def _write_frequency_domain_qc_text_report(
     else:
         lines.append("- None")
 
-    lines.extend(["", "Reviewed participant summary"])
-    summaries = [
-        item
-        for item in _iter_mapping_entries(report.get("participant_summaries"))
-        if item.get("pause_review")
-    ]
-    if summaries:
-        for item in summaries:
-            reasons = ", ".join(str(reason) for reason in item.get("pause_reasons", []) or [])
-            lines.append(
-                "- {pid}: max {value:.3f} uV at {condition}/{electrode}; "
-                "{warnings} warning cells; {hard} hard electrodes; {reasons}".format(
-                    pid=item.get("participant_id"),
-                    value=float(item.get("max_abs_summed_bca_uv") or 0.0),
-                    condition=item.get("max_condition") or "",
-                    electrode=item.get("max_electrode") or "",
-                    warnings=int(item.get("warning_cell_count") or 0),
-                    hard=int(item.get("hard_excluded_electrode_count") or 0),
-                    reasons=reasons,
-                )
-            )
-    else:
-        lines.append("- No participant required review.")
     if str(report.get("identity_scope") or "") == "recording":
-        lines.extend(["", "Automatic recording-electrode exclusions"])
-        recording_electrodes = _normalize_auto_recording_electrode_entries(
-            report.get("auto_recording_electrode_exclusions")
-        )
-        if recording_electrodes:
-            for entry in recording_electrodes:
-                lines.append(
-                    "- {recording_id} ({participant_id}, {session_id}) {electrode}: "
-                    "max abs summed BCA {value:.3f} uV".format(
-                        recording_id=entry["recording_id"],
-                        participant_id=entry.get("participant_id") or "",
-                        session_id=entry.get("session_id") or "",
-                        electrode=entry["electrode"],
-                        value=float(
-                            entry.get("max_abs_summed_bca_uv") or 0.0
-                        ),
-                    )
-                )
-        else:
-            lines.append("- None")
-        lines.extend(["", "Automatic recording exclusions"])
-        recording_exclusions = _normalize_auto_recording_entries(
-            report.get("auto_recording_exclusions")
-        )
-        if recording_exclusions:
-            for entry in recording_exclusions:
-                lines.append(
-                    "- {recording_id}: {count} hard-excluded electrodes".format(
-                        recording_id=entry["recording_id"],
-                        count=int(
-                            entry.get("hard_excluded_electrode_count") or 0
-                        ),
-                    )
-                )
-        else:
-            lines.append("- None")
-        lines.extend(["", "Manual recording exclusions"])
+        lines.extend(["", "Preserved whole-recording exclusions"])
         normalized_manual_recordings = _normalize_manual_recording_entries(
             manual_recordings
         )
@@ -1887,31 +3248,29 @@ def _write_frequency_domain_qc_text_report(
                 lines.append(f"- {entry['recording_id']}: {entry['reason']}")
         else:
             lines.append("- None")
-        lines.extend(["", "Reviewed recording summary"])
-        recording_summaries = [
-            item
-            for item in _iter_mapping_entries(report.get("recording_summaries"))
-            if item.get("pause_review")
-        ]
-        if recording_summaries:
-            for item in recording_summaries:
-                reasons = ", ".join(
-                    str(reason) for reason in item.get("pause_reasons", []) or []
-                )
-                lines.append(
-                    "- {recording_id} ({participant_id}, {session_id}): max "
-                    "{value:.3f} uV at {condition}/{electrode}; {reasons}".format(
-                        recording_id=item.get("recording_id") or "",
-                        participant_id=item.get("participant_id") or "",
-                        session_id=item.get("session_id") or "",
-                        value=float(item.get("max_abs_summed_bca_uv") or 0.0),
-                        condition=item.get("max_condition") or "",
-                        electrode=item.get("max_electrode") or "",
-                        reasons=reasons,
-                    )
-                )
-        else:
-            lines.append("- No recording required review.")
+    technical_rows = [
+        item
+        for item in _iter_mapping_entries(report.get("cohort_relative_rows"))
+        if item.get("status") != "complete"
+    ]
+    lines.extend(["", "Cohort-context technical statuses"])
+    if technical_rows:
+        for entry in technical_rows:
+            identity = str(entry.get("recording_id") or entry.get("participant_id") or "")
+            lines.append(
+                f"- {identity} / {entry.get('condition') or ''} / "
+                f"{entry.get('roi') or ''}: {entry.get('status') or ''}; "
+                f"reasons={entry.get('reason_codes') or []}"
+            )
+    else:
+        lines.append("- None")
+    legacy = _iter_mapping_entries(report.get("legacy_machine_suggestions"))
+    lines.extend(["", "Preserved legacy machine suggestions (inactive)"])
+    if legacy:
+        for entry in legacy:
+            lines.append(f"- {_json_safe(entry)}")
+    else:
+        lines.append("- None")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -2140,23 +3499,1010 @@ def _filter_subject_data(
     }
 
 
-def _analysis_base_frequency_hz() -> float:
-    from Main_App import SettingsManager
+def _experimental_summed_bca_settings(
+    project: Any,
+    project_root: Path,
+) -> SummedBcaScreeningSettings:
+    raw_settings = getattr(project, "experimental_qc_settings", None)
+    manifest_path = project_root / "project.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = None
+    if isinstance(manifest, Mapping) and "experimental_qc" in manifest:
+        raw_settings = manifest.get("experimental_qc")
+    try:
+        return normalize_experimental_qc_settings(
+            raw_settings
+        ).summed_bca_screening
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "The project experimental summed-BCA settings are invalid. Correct "
+            "them in Settings before frequency-domain review."
+        ) from exc
+
+
+def _project_protocol_review_metadata(
+    project: Any,
+    project_root: Path,
+) -> dict[str, object]:
+    raw_protocol = getattr(project, "frequency_protocol", None)
+    if raw_protocol is None:
+        try:
+            manifest = json.loads(
+                (project_root / "project.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        raw_protocol = manifest.get("frequency_protocol")
+    try:
+        protocol = normalize_frequency_protocol(raw_protocol)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Frequency-domain QC requires a valid project frequency protocol."
+        ) from exc
+    if (
+        not protocol.is_ready
+        or protocol.oddball_rate_hz is None
+        or protocol.presentation_rate_hz is None
+        or protocol.expected_analyzed_oddball_cycles is None
+    ):
+        raise RuntimeError(
+            "Frequency-domain QC requires the project presentation rate, oddball "
+            "rate/recurrence, and expected analyzed oddball-cycle count."
+        )
+    cycles = int(protocol.expected_analyzed_oddball_cycles)
+    duration = float(Fraction(cycles, 1) / protocol.oddball_rate_hz)
+    return {
+        "frequency_protocol_version": protocol.version,
+        "frequency_protocol_fingerprint": protocol.fingerprint,
+        "presentation_rate_hz": float(protocol.presentation_rate_hz),
+        "oddball_rate_hz": float(protocol.oddball_rate_hz),
+        "oddball_every_n": int(protocol.oddball_every_n),
+        "expected_analyzed_oddball_cycles": cycles,
+        "analyzed_duration_seconds": duration,
+    }
+
+
+def _harmonic_selection_fingerprint(
+    metadata: Mapping[str, object],
+) -> str:
+    return str(
+        metadata.get("selection_fingerprint")
+        or metadata.get("selection_input_fingerprint")
+        or ""
+    ).strip()
+
+
+def _strict_embedded_fingerprint(
+    value: object,
+) -> tuple[str, dict[str, object]]:
+    if not isinstance(value, Mapping) or not value:
+        return "none_available", {}
+    payload = dict(value)
+    recorded = str(payload.pop("fingerprint", "") or "")
+    try:
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return "invalid", {}
+    expected = hashlib.sha256(encoded).hexdigest()
+    if not recorded or recorded != expected:
+        return "invalid", {}
+    return "current", {**payload, "fingerprint": recorded}
+
+
+def _normalized_processing_qc_entry(
+    entry: Mapping[str, object] | None,
+) -> dict[str, object]:
+    if not isinstance(entry, Mapping):
+        payload: dict[str, object] = {"status": "processing_entry_missing"}
+        payload["fingerprint"] = _hash_payload(payload)
+        return payload
+
+    from Main_App.processing.interpolation_burden import (
+        InterpolationBurdenError,
+        normalize_interpolation_burden,
+    )
+    from Main_App.processing.preprocessing_outcome import (
+        PreprocessingOutcomeError,
+        normalize_preprocessing_outcome,
+    )
+
+    errors: list[str] = []
+    try:
+        outcome = normalize_preprocessing_outcome(entry)
+        outcome_payload = outcome.to_payload()
+        if not outcome.is_current:
+            errors.append("preprocessing_outcome_not_current")
+    except (PreprocessingOutcomeError, TypeError, ValueError):
+        outcome_payload = {}
+        errors.append("preprocessing_outcome_invalid")
+
+    raw_burden = entry.get("interpolation_burden")
+    try:
+        burden_payload = normalize_interpolation_burden(raw_burden).to_payload()  # type: ignore[arg-type]
+    except (InterpolationBurdenError, TypeError, ValueError):
+        burden_payload = {}
+        errors.append(
+            "interpolation_burden_missing"
+            if raw_burden in (None, {})
+            else "interpolation_burden_invalid"
+        )
+
+    kurtosis_status, kurtosis_payload = _strict_embedded_fingerprint(
+        entry.get("kurtosis_qc_evidence")
+    )
+    plan_status, plan_payload = _strict_embedded_fingerprint(
+        entry.get("kurtosis_decision_plan")
+    )
+    if kurtosis_status == "invalid":
+        errors.append("kurtosis_evidence_invalid")
+    if plan_status == "invalid":
+        errors.append("kurtosis_decision_plan_invalid")
+
+    payload = {
+        "status": "current" if not errors else "current_source_invalid",
+        "errors": errors,
+        "preprocessing_outcome": outcome_payload,
+        "interpolation_burden": burden_payload,
+        "kurtosis_evidence_status": kurtosis_status,
+        "kurtosis_qc_evidence": kurtosis_payload,
+        "kurtosis_decision_plan_status": plan_status,
+        "kurtosis_decision_plan": plan_payload,
+    }
+    payload["fingerprint"] = _hash_payload(payload)
+    return payload
+
+
+def _load_independent_qc_context(project_root: Path) -> _IndependentQcContext:
+    from Main_App.processing.processing_ledger import load_ledger
+    from Main_App.processing.roi_coverage import (
+        ROI_COVERAGE_STAGE_PRE_REVIEW,
+        RoiCoverageGateError,
+        load_roi_coverage,
+    )
 
     try:
-        return float(SettingsManager().get("analysis", "base_freq", "6.0"))
-    except (TypeError, ValueError):
-        return 6.0
+        coverage = load_roi_coverage(
+            project_root,
+            stage=ROI_COVERAGE_STAGE_PRE_REVIEW,
+        )
+    except (OSError, TypeError, ValueError, RoiCoverageGateError) as exc:
+        core = {
+            "version": FREQUENCY_DOMAIN_QC_INDEPENDENT_EVIDENCE_VERSION,
+            "status": "pre_review_coverage_invalid",
+            "reason": str(exc),
+            "pre_review_roi_coverage_fingerprint": "",
+            "processing_entries": [],
+        }
+        return _IndependentQcContext(
+            source_identity={**core, "fingerprint": _hash_payload(core)},
+            cells={},
+            processing_entries={},
+        )
+    if coverage is None:
+        core = {
+            "version": FREQUENCY_DOMAIN_QC_INDEPENDENT_EVIDENCE_VERSION,
+            "status": "pre_review_coverage_missing",
+            "reason": "Current QC-21 pre-review coverage was not available.",
+            "pre_review_roi_coverage_fingerprint": "",
+            "processing_entries": [],
+        }
+        return _IndependentQcContext(
+            source_identity={**core, "fingerprint": _hash_payload(core)},
+            cells={},
+            processing_entries={},
+        )
+
+    ledger = load_ledger(project_root)
+    raw_entries = ledger.get("entries")
+    entries = raw_entries if isinstance(raw_entries, Mapping) else {}
+    entry_by_identity = {
+        str(key).casefold(): value
+        for key, value in entries.items()
+        if isinstance(value, Mapping)
+    }
+    cells: dict[tuple[str, str], dict[str, object]] = {}
+    processing_entries: dict[str, dict[str, object]] = {}
+    for cell in coverage.cells:
+        cell_payload = cell.to_payload()
+        cells[(cell.recording_id.casefold(), cell.condition_label.casefold())] = (
+            cell_payload
+        )
+        recording_key = cell.recording_id.casefold()
+        if recording_key not in processing_entries:
+            processing_entries[recording_key] = _normalized_processing_qc_entry(
+                entry_by_identity.get(recording_key)
+            )
+    status = (
+        "current"
+        if all(
+            str(entry.get("status") or "") == "current"
+            for entry in processing_entries.values()
+        )
+        else "current_source_invalid"
+    )
+    core = {
+        "version": FREQUENCY_DOMAIN_QC_INDEPENDENT_EVIDENCE_VERSION,
+        "status": status,
+        "reason": "",
+        "pre_review_roi_coverage_fingerprint": coverage.fingerprint,
+        "processing_entries": [
+            {
+                "recording_id": recording_id,
+                "fingerprint": str(entry.get("fingerprint") or ""),
+                "status": str(entry.get("status") or ""),
+            }
+            for recording_id, entry in sorted(processing_entries.items())
+        ],
+    }
+    return _IndependentQcContext(
+        source_identity={**core, "fingerprint": _hash_payload(core)},
+        cells=cells,
+        processing_entries=processing_entries,
+    )
 
 
-def _analysis_bca_upper_limit_hz() -> float | None:
-    from Main_App import SettingsManager
+def _expected_scalp_channels_by_subject_condition(
+    context: _IndependentQcContext,
+) -> dict[tuple[str, str], tuple[str, ...]] | None:
+    expected: dict[tuple[str, str], tuple[str, ...]] = {}
+    for key, cell in context.cells.items():
+        source = cell.get("source_evidence")
+        if not isinstance(source, Mapping):
+            continue
+        channels = tuple(
+            str(channel).strip()
+            for channel in source.get("expected_scalp_channels") or ()
+            if str(channel).strip()
+        )
+        if channels:
+            expected[key] = channels
+    return expected or None
 
-    try:
-        value = float(SettingsManager().get("analysis", "bca_upper_limit", "16.8"))
-    except (TypeError, ValueError):
+
+def _attach_independent_qc_evidence(
+    finding: dict[str, object],
+    context: _IndependentQcContext,
+) -> None:
+    identity = _normalize_recording_id(
+        finding.get("recording_id") or finding.get("participant_id")
+    )
+    condition = str(finding.get("condition") or "").strip()
+    cell = context.cells.get((identity.casefold(), condition.casefold()))
+    if cell is None:
+        source_status = str(context.source_identity.get("status") or "")
+        status = "current_source_cell_missing"
+        evidence = [
+            {
+                "source": "qc21_pre_review_coverage",
+                "status": status,
+                "source_status": source_status or "unavailable",
+                "authority": "context_only",
+                "reason": str(context.source_identity.get("reason") or ""),
+                "source_fingerprint": str(
+                    context.source_identity.get("fingerprint") or ""
+                ),
+            }
+        ]
+        finding["independent_qc"] = evidence
+        finding["independent_qc_status"] = status
+        finding["independent_qc_source_status"] = source_status or "unavailable"
+        finding["independent_qc_authority"] = "context_only"
+        finding["independent_qc_fingerprint"] = _hash_payload(
+            {
+                "status": finding["independent_qc_status"],
+                "source_status": finding["independent_qc_source_status"],
+                "evidence": evidence,
+            }
+        )
+        return
+
+    evidence: list[dict[str, object]] = []
+    source = cell.get("source_evidence")
+    source = dict(source) if isinstance(source, Mapping) else {}
+    electrode = _normalize_electrode(finding.get("electrode"))
+    roi_name = str(finding.get("roi") or "").strip()
+    coverage_row: dict[str, object] = {
+        "source": "qc21_pre_review_coverage",
+        "status": "current",
+        "authority": "context_only",
+        "cell_fingerprint": str(cell.get("fingerprint") or ""),
+        "source_evidence_fingerprint": str(source.get("fingerprint") or ""),
+    }
+    target_channels: list[str] = []
+    if electrode:
+        retained = [str(value) for value in source.get("expected_scalp_channels") or []]
+        observed = [str(value) for value in source.get("observed_scalp_channels") or []]
+        interpolated = [
+            str(value)
+            for value in source.get("successfully_interpolated_channels") or []
+        ]
+        target_channels = [electrode]
+        coverage_row.update(
+            {
+                "electrode": electrode,
+                "in_retained_scalp": electrode in retained,
+                "observed_in_source": electrode in observed,
+                "successfully_interpolated": electrode in interpolated,
+            }
+        )
+    elif roi_name:
+        roi_rows = [
+            dict(row)
+            for row in _iter_mapping_entries(cell.get("roi_memberships"))
+            if str(row.get("roi_name") or "").casefold() == roi_name.casefold()
+        ]
+        if len(roi_rows) == 1:
+            roi_row = roi_rows[0]
+            target_channels = [
+                str(value) for value in roi_row.get("expected_channels") or []
+            ]
+            coverage_row.update(
+                {
+                    "roi": roi_name,
+                    "roi_membership_status": str(roi_row.get("status") or ""),
+                    "roi_membership_fingerprint": str(
+                        roi_row.get("fingerprint") or ""
+                    ),
+                    "expected_channels": target_channels,
+                    "observed_channels": list(
+                        roi_row.get("observed_channels") or []
+                    ),
+                    "interpolated_channels": list(
+                        roi_row.get("interpolated_channels") or []
+                    ),
+                }
+            )
+        else:
+            coverage_row.update(
+                {
+                    "roi": roi_name,
+                    "status": "current_roi_membership_missing",
+                }
+            )
+    evidence.append(coverage_row)
+
+    processing = context.processing_entries.get(identity.casefold())
+    if not isinstance(processing, Mapping):
+        evidence.append(
+            {
+                "source": "processing_ledger",
+                "status": "processing_entry_missing",
+                "authority": "context_only",
+            }
+        )
+    else:
+        burden = processing.get("interpolation_burden")
+        burden = dict(burden) if isinstance(burden, Mapping) else {}
+        evidence.append(
+            {
+                "source": "interpolation_burden",
+                "authority": "context_only",
+                "status": (
+                    str(burden.get("status") or "current_source_invalid")
+                ),
+                "fingerprint": str(burden.get("fingerprint") or ""),
+                "numerator": burden.get("numerator"),
+                "denominator": burden.get("denominator"),
+                "percentage": burden.get("percentage"),
+                "requires_review": burden.get("requires_review"),
+                "successfully_interpolated_channels": list(
+                    burden.get("successfully_interpolated_channels") or []
+                ),
+                "target_interpolated_channels": [
+                    channel
+                    for channel in target_channels
+                    if channel
+                    in set(burden.get("successfully_interpolated_channels") or [])
+                ],
+            }
+        )
+        kurtosis = processing.get("kurtosis_qc_evidence")
+        plan = processing.get("kurtosis_decision_plan")
+        kurtosis_status = str(
+            processing.get("kurtosis_evidence_status") or "none_available"
+        )
+        plan_status = str(
+            processing.get("kurtosis_decision_plan_status") or "none_available"
+        )
+        channel_rows = [
+            dict(row)
+            for row in _iter_mapping_entries(
+                kurtosis.get("channels") if isinstance(kurtosis, Mapping) else None
+            )
+            if _normalize_electrode(row.get("channel")) in set(target_channels)
+        ]
+        decision_rows = [
+            dict(row)
+            for row in _iter_mapping_entries(
+                plan.get("channel_decisions") if isinstance(plan, Mapping) else None
+            )
+            if _normalize_electrode(row.get("channel")) in set(target_channels)
+        ]
+        evidence.append(
+            {
+                "source": "kurtosis_qc",
+                "authority": "context_only",
+                "status": (
+                    "none_available"
+                    if kurtosis_status == plan_status == "none_available"
+                    else "current"
+                    if kurtosis_status in {"current", "none_available"}
+                    and plan_status in {"current", "none_available"}
+                    else "current_source_invalid"
+                ),
+                "evidence_fingerprint": str(
+                    kurtosis.get("fingerprint")
+                    if isinstance(kurtosis, Mapping)
+                    else ""
+                ),
+                "decision_plan_fingerprint": str(
+                    plan.get("fingerprint") if isinstance(plan, Mapping) else ""
+                ),
+                "channels": channel_rows,
+                "channel_decisions": decision_rows,
+            }
+        )
+
+    invalid = any(
+        str(row.get("status") or "").endswith("invalid")
+        or str(row.get("status") or "").endswith("missing")
+        for row in evidence
+    )
+    status = "current_source_invalid" if invalid else "available"
+    finding["independent_qc"] = evidence
+    finding["independent_qc_status"] = status
+    finding["independent_qc_authority"] = "context_only"
+    finding["independent_qc_fingerprint"] = _hash_payload(
+        {"status": status, "evidence": evidence}
+    )
+
+
+def _technical_status_rows(report: Mapping[str, object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for category, key in (
+        ("technical_integrity_failure", "technical_integrity_failures"),
+        ("unavailable_by_method", "unavailable_by_method"),
+    ):
+        rows.extend(
+            {"category": category, **dict(item)}
+            for item in _iter_mapping_entries(report.get(key))
+        )
+    rows.extend(
+        {"category": "cohort_context", **dict(item)}
+        for item in _iter_mapping_entries(report.get("cohort_relative_rows"))
+        if str(item.get("status") or "") != "complete"
+    )
+    source = report.get("independent_qc_source")
+    if isinstance(source, Mapping) and str(source.get("status") or "") != "current":
+        rows.append({"category": "independent_qc_source", **dict(source)})
+    return rows
+
+
+def _build_review_evidence_payload(
+    report: Mapping[str, object],
+) -> dict[str, object]:
+    identity_scope = str(report.get("identity_scope") or "participant").casefold()
+    core: dict[str, object] = {
+        "version": FREQUENCY_DOMAIN_QC_REVIEW_EVIDENCE_VERSION,
+        "analysis_fingerprint": str(report.get("analysis_fingerprint") or ""),
+        "identity_scope": identity_scope,
+        "screening_enabled": bool(report.get("screening_enabled")),
+        "screening_status": str(report.get("screening_status") or ""),
+        "screening_policy_version": str(
+            report.get("screening_policy_version") or ""
+        ),
+        "screening_settings": dict(report.get("screening_settings") or {}),
+        "thresholds": dict(report.get("thresholds") or {}),
+        "selected_harmonics_hz": list(report.get("selected_harmonics_hz") or []),
+        "harmonic_policy": str(report.get("harmonic_policy") or ""),
+        "harmonic_selection_fingerprint": str(
+            report.get("harmonic_selection_fingerprint") or ""
+        ),
+        "provisional_harmonic_metadata": dict(
+            report.get("provisional_harmonic_metadata") or {}
+        ),
+        "frequency_protocol": dict(report.get("frequency_protocol") or {}),
+        "frequency_protocol_fingerprint": str(
+            dict(report.get("frequency_protocol") or {}).get(
+                "frequency_protocol_fingerprint"
+            )
+        ),
+        "roi_definition_fingerprint": str(
+            report.get("roi_definition_fingerprint") or ""
+        ),
+        "cohort_fingerprint": str(report.get("cohort_fingerprint") or ""),
+        "source_workbooks": [
+            dict(item)
+            for item in _iter_mapping_entries(report.get("source_workbooks"))
+        ],
+        "source_fingerprint": str(report.get("source_fingerprint") or ""),
+        "independent_qc_source": dict(
+            report.get("independent_qc_source") or {}
+        ),
+        "ordinary_findings": [
+            dict(item) for item in _iter_mapping_entries(report.get("flags"))
+        ],
+        "cohort_findings": [
+            dict(item)
+            for item in _iter_mapping_entries(report.get("cohort_relative_flags"))
+        ],
+        "cohort_rows": [
+            dict(item)
+            for item in _iter_mapping_entries(report.get("cohort_relative_rows"))
+        ],
+        "reconfirmation_findings": [
+            dict(item)
+            for item in _iter_mapping_entries(report.get("reconfirmation_findings"))
+        ],
+        "finite_input_status": dict(report.get("finite_input_status") or {}),
+        "technical_integrity_failures": [
+            dict(item)
+            for item in _iter_mapping_entries(
+                report.get("technical_integrity_failures")
+            )
+        ],
+        "unavailable_by_method": [
+            dict(item)
+            for item in _iter_mapping_entries(report.get("unavailable_by_method"))
+        ],
+        "technical_statuses": _technical_status_rows(report),
+    }
+    return {**core, "evidence_fingerprint": _hash_payload(core)}
+
+
+def _source_workbooks_are_current(
+    project_root: Path,
+    rows: object,
+) -> bool:
+    raw_rows = rows if isinstance(rows, list) else None
+    if raw_rows is None:
+        return False
+    for row in raw_rows:
+        if not isinstance(row, Mapping):
+            return False
+        raw_path = str(row.get("path") or "")
+        if not raw_path:
+            return False
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = project_root / path
+        try:
+            stat = path.resolve(strict=True).stat()
+        except OSError:
+            return False
+        if row.get("size_bytes") != int(stat.st_size):
+            return False
+        if row.get("mtime_ns") != int(stat.st_mtime_ns):
+            return False
+    return True
+
+
+def _validated_review_evidence_from_state(
+    project_root: Path,
+    state: Mapping[str, object],
+) -> dict[str, object] | None:
+    raw = state.get("review_evidence")
+    if not isinstance(raw, Mapping):
         return None
-    return value if value > 0 else None
+    payload = dict(raw)
+    recorded = str(payload.pop("evidence_fingerprint", "") or "")
+    if (
+        payload.get("version") != FREQUENCY_DOMAIN_QC_REVIEW_EVIDENCE_VERSION
+        or not recorded
+        or _hash_payload(payload) != recorded
+    ):
+        return None
+    last_review = state.get("last_review")
+    if not isinstance(last_review, Mapping):
+        return None
+    if (
+        str(payload.get("analysis_fingerprint") or "")
+        != str(last_review.get("analysis_fingerprint") or "")
+        or recorded != str(last_review.get("evidence_fingerprint") or "")
+        or str(payload.get("identity_scope") or "")
+        != str(last_review.get("identity_scope") or "")
+    ):
+        return None
+    for finding in [
+        *_iter_mapping_entries(payload.get("ordinary_findings")),
+        *_iter_mapping_entries(payload.get("cohort_findings")),
+        *_iter_mapping_entries(payload.get("reconfirmation_findings")),
+    ]:
+        if str(finding.get("finding_fingerprint") or "") != (
+            _frequency_qc_finding_fingerprint(finding)
+        ):
+            return None
+    if not _source_workbooks_are_current(
+        project_root,
+        payload.get("source_workbooks"),
+    ):
+        return None
+    saved_independent = payload.get("independent_qc_source")
+    current_independent = _load_independent_qc_context(project_root).source_identity
+    if not isinstance(saved_independent, Mapping) or dict(saved_independent) != (
+        current_independent
+    ):
+        return None
+    return {**payload, "evidence_fingerprint": recorded}
+
+
+def load_current_frequency_qc_review_evidence(
+    project_root: str | Path,
+) -> dict[str, object]:
+    """Load fingerprint-current saved QC-17 evidence or fail closed."""
+
+    root = Path(project_root).resolve()
+    decisions = resolve_frequency_qc_coverage_decisions(root)
+    if not decisions.review_complete:
+        raise RuntimeError(
+            "Saved experimental summed-BCA decisions are missing, stale, or "
+            "tampered. Run post-processing and complete QC-17 review again."
+        )
+    state = load_frequency_domain_qc_state(root)
+    evidence = _validated_review_evidence_from_state(root, state)
+    if evidence is None:
+        raise RuntimeError(
+            "Saved experimental summed-BCA evidence is missing, stale, or tampered. "
+            "Run post-processing and complete QC-17 review again."
+        )
+    return evidence
+
+
+def _frequency_qc_finding_fingerprint(
+    finding: Mapping[str, object],
+) -> str:
+    return _hash_payload(
+        {
+            key: _json_safe(finding.get(key))
+            for key in (
+                "finding_type",
+                "participant_id",
+                "recording_id",
+                "session_id",
+                "visit_index",
+                "condition",
+                "electrode",
+                "roi",
+                "metric",
+                "summed_bca_uv",
+                "abs_summed_bca_uv",
+                "value_uv",
+                "robust_center_uv",
+                "robust_spread_uv",
+                "robust_spread_method",
+                "robust_score",
+                "threshold_used",
+                "absolute_floor_used_uv",
+                "severity",
+                "selected_harmonics_hz",
+                "selection_fingerprint",
+                "harmonic_selection_fingerprint",
+                "frequency_protocol_fingerprint",
+                "expected_analyzed_oddball_cycles",
+                "analyzed_duration_seconds",
+                "roi_definition_fingerprint",
+                "cohort_fingerprint",
+                "independent_qc_status",
+                "independent_qc_authority",
+                "independent_qc_fingerprint",
+                "independent_qc",
+            )
+        }
+    )
+
+
+def _review_decisions_from_state(
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    if not bool(state.get("review_complete")):
+        return []
+    normalized: list[dict[str, object]] = []
+    for raw in _iter_mapping_entries(state.get("review_decisions")):
+        row = dict(raw)
+        if row.get("version") != FREQUENCY_DOMAIN_QC_DECISION_VERSION:
+            continue
+        recorded = str(row.pop("decision_fingerprint", "") or "")
+        reviewed_at = row.pop("reviewed_at", None)
+        if not recorded or _hash_payload(row) != recorded:
+            continue
+        row["decision_fingerprint"] = recorded
+        if reviewed_at not in (None, ""):
+            row["reviewed_at"] = reviewed_at
+        normalized.append(row)
+    return sorted(
+        normalized,
+        key=lambda item: str(item.get("finding_fingerprint") or ""),
+    )
+
+
+def _current_review_decisions(
+    *,
+    report_flags: Sequence[Mapping[str, object]],
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    current_fingerprints = {
+        str(flag.get("finding_fingerprint") or "")
+        for flag in report_flags
+        if str(flag.get("finding_fingerprint") or "")
+    }
+    analysis_fingerprints = {
+        str(flag.get("analysis_fingerprint") or "")
+        for flag in report_flags
+        if str(flag.get("analysis_fingerprint") or "")
+    }
+    decisions = [
+        item
+        for item in _review_decisions_from_state(state)
+        if str(item.get("finding_fingerprint") or "") in current_fingerprints
+    ]
+    if analysis_fingerprints and any(
+        str(item.get("analysis_fingerprint") or "") not in analysis_fingerprints
+        for item in decisions
+    ):
+        return []
+    return decisions
+
+
+def _merge_review_decision_rows(
+    *groups: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    by_fingerprint: dict[str, dict[str, object]] = {}
+    for group in groups:
+        for item in group:
+            fingerprint = str(item.get("decision_fingerprint") or "")
+            if not fingerprint:
+                continue
+            by_fingerprint[fingerprint] = dict(item)
+    return [by_fingerprint[key] for key in sorted(by_fingerprint)]
+
+
+def _review_exclusion_reconfirmation_findings(
+    state: Mapping[str, object],
+    *,
+    evidence_context_fingerprint: str,
+    selected_harmonics: Sequence[float],
+    harmonic_selection_fingerprint: str,
+    protocol_metadata: Mapping[str, object],
+    roi_definition_fingerprint: str,
+    cohort_fingerprint: str,
+    independent_qc_context: _IndependentQcContext,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Carry stable exclusions and reopen those bound to older evidence."""
+
+    reconfirmation_findings: list[dict[str, object]] = []
+    stable_exclusions: list[dict[str, object]] = []
+    for decision in _review_decisions_from_state(state):
+        if str(decision.get("decision") or "") == DECISION_RETAIN:
+            continue
+        if str(decision.get("analysis_fingerprint") or "") == str(
+            evidence_context_fingerprint
+        ):
+            stable_exclusions.append(decision)
+            continue
+        evidence = (
+            dict(decision.get("evidence"))
+            if isinstance(decision.get("evidence"), Mapping)
+            else {}
+        )
+        signed_value = evidence.get("summed_bca_uv")
+        absolute_value = evidence.get("abs_summed_bca_uv")
+        if absolute_value is None:
+            absolute_value = evidence.get("value_uv")
+        finding: dict[str, object] = {
+            "finding_type": "prior_outcome_informed_exclusion_reconfirmation",
+            "participant_id": _normalize_participant_id(
+                decision.get("participant_id")
+            ),
+            "recording_id": _normalize_recording_id(
+                decision.get("recording_id")
+            ),
+            "session_id": str(decision.get("session_id") or ""),
+            "visit_index": decision.get("visit_index"),
+            "condition": str(decision.get("condition") or ""),
+            "electrode": _normalize_electrode(decision.get("electrode")),
+            "roi": str(decision.get("roi") or ""),
+            "summed_bca_uv": signed_value,
+            "abs_summed_bca_uv": absolute_value,
+            "value_uv": evidence.get("value_uv"),
+            "metric": evidence.get("metric"),
+            "severity": "reconfirmation",
+            "band_crossed": (
+                "reconfirmation required; prior band "
+                f"{evidence.get('band_crossed') or evidence.get('severity') or 'unknown'}"
+            ),
+            "selected_harmonics_hz": [
+                round(float(value), 4) for value in selected_harmonics
+            ],
+            "selected_harmonic_count": len(selected_harmonics),
+            "harmonic_selection_fingerprint": harmonic_selection_fingerprint,
+            "prior_selected_harmonics_hz": list(
+                evidence.get("selected_harmonics_hz") or []
+            ),
+            "prior_decision": str(decision.get("decision") or ""),
+            "prior_reason": str(decision.get("reason") or ""),
+            "replaces_decision_fingerprint": str(
+                decision.get("decision_fingerprint") or ""
+            ),
+            "reconfirmation_reason": (
+                "The candidate harmonic/cohort evidence changed after this "
+                "outcome-informed exclusion. Confirm or revise its scope."
+            ),
+            "frequency_protocol_fingerprint": protocol_metadata.get(
+                "frequency_protocol_fingerprint"
+            ),
+            "expected_analyzed_oddball_cycles": protocol_metadata.get(
+                "expected_analyzed_oddball_cycles"
+            ),
+            "analyzed_duration_seconds": protocol_metadata.get(
+                "analyzed_duration_seconds"
+            ),
+            "roi_definition_fingerprint": roi_definition_fingerprint,
+            "cohort_fingerprint": cohort_fingerprint,
+            "prior_independent_qc_fingerprint": str(
+                evidence.get("independent_qc_fingerprint") or ""
+            ),
+        }
+        _attach_independent_qc_evidence(finding, independent_qc_context)
+        finding["finding_fingerprint"] = _frequency_qc_finding_fingerprint(
+            {
+                **finding,
+                "evidence_context_fingerprint": evidence_context_fingerprint,
+                "prior_decision_fingerprint": decision.get(
+                    "decision_fingerprint"
+                ),
+            }
+        )
+        reconfirmation_findings.append(finding)
+    return (
+        sorted(
+            reconfirmation_findings,
+            key=lambda item: str(item.get("finding_fingerprint") or ""),
+        ),
+        stable_exclusions,
+    )
+
+
+def _legacy_machine_suggestions_from_state(
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    return _merge_legacy_machine_suggestions(state, None)
+
+
+def _merge_legacy_machine_suggestions(
+    state: Mapping[str, object],
+    report_value: object,
+) -> list[dict[str, object]]:
+    rows = [
+        dict(item)
+        for item in _iter_mapping_entries(state.get("legacy_machine_suggestions"))
+    ]
+    rows.extend(dict(item) for item in _iter_mapping_entries(report_value))
+    for state_key, suggestion_type in (
+        ("auto_participant_electrode_exclusions", "participant_electrode"),
+        ("auto_participant_exclusions", "participant"),
+        ("auto_recording_electrode_exclusions", "recording_electrode"),
+        ("auto_recording_exclusions", "recording"),
+    ):
+        for item in _iter_mapping_entries(state.get(state_key)):
+            rows.append(
+                {
+                    **dict(item),
+                    "legacy_source_field": state_key,
+                    "suggestion_type": suggestion_type,
+                    "authority": "review_only_legacy_suggestion",
+                    "migration_version": FREQUENCY_DOMAIN_QC_METHOD_VERSION,
+                }
+            )
+    by_fingerprint: dict[str, dict[str, object]] = {}
+    for row in rows:
+        fingerprint = _hash_payload(row)
+        by_fingerprint[fingerprint] = {**row, "suggestion_fingerprint": fingerprint}
+    return [by_fingerprint[key] for key in sorted(by_fingerprint)]
+
+
+def _updated_review_history(
+    state: Mapping[str, object],
+    *,
+    report: Mapping[str, object],
+    decision_fingerprint: str,
+    reviewed_at: str,
+) -> list[dict[str, object]]:
+    history = [
+        dict(item)
+        for item in _iter_mapping_entries(state.get("review_history"))
+    ]
+    history.append(
+        {
+            "loop_version": FREQUENCY_DOMAIN_QC_LOOP_VERSION,
+            "analysis_fingerprint": str(report.get("analysis_fingerprint") or ""),
+            "decision_fingerprint": str(decision_fingerprint),
+            "reviewed_at": reviewed_at,
+            "selected_harmonics_hz": list(
+                report.get("selected_harmonics_hz") or []
+            ),
+            "subject_count": len(report.get("recordings") or report.get("subjects") or []),
+        }
+    )
+    return history[-FREQUENCY_DOMAIN_QC_MAX_REVIEW_ITERATIONS:]
+
+
+def _frequency_qc_review_loop_status(
+    state: Mapping[str, object],
+    *,
+    analysis_fingerprint: str,
+) -> dict[str, object]:
+    """Reject an oscillating or unbounded review/recompute sequence."""
+
+    history = [
+        dict(item)
+        for item in _iter_mapping_entries(state.get("review_history"))
+        if item.get("loop_version") == FREQUENCY_DOMAIN_QC_LOOP_VERSION
+        and str(item.get("analysis_fingerprint") or "")
+    ]
+    fingerprints = [
+        str(item.get("analysis_fingerprint") or "") for item in history
+    ]
+    if (
+        len(fingerprints) >= FREQUENCY_DOMAIN_QC_MAX_REVIEW_ITERATIONS
+        and analysis_fingerprint != fingerprints[-1]
+    ):
+        raise RuntimeError(
+            "Experimental summed-BCA review reached its bounded recompute limit "
+            f"({FREQUENCY_DOMAIN_QC_MAX_REVIEW_ITERATIONS} reviewed states). "
+            "Resolve the changing inclusion decisions before rerunning."
+        )
+    return {
+        "method_version": FREQUENCY_DOMAIN_QC_LOOP_VERSION,
+        "completed_review_iterations": len(fingerprints),
+        "next_review_iteration": len(fingerprints) + 1,
+        "maximum_review_iterations": FREQUENCY_DOMAIN_QC_MAX_REVIEW_ITERATIONS,
+        "current_analysis_fingerprint": analysis_fingerprint,
+        "previous_analysis_fingerprint": fingerprints[-1] if fingerprints else "",
+        "status": (
+            "stable_review_state"
+            if fingerprints and analysis_fingerprint == fingerprints[-1]
+            else "revisited_review_state"
+            if analysis_fingerprint in fingerprints
+            else "new_review_state"
+        ),
+    }
+
+
+def _require_non_oscillating_review_decision(
+    state: Mapping[str, object],
+    *,
+    analysis_fingerprint: str,
+    decision_fingerprint: str,
+) -> None:
+    history = [
+        dict(item)
+        for item in _iter_mapping_entries(state.get("review_history"))
+        if item.get("loop_version") == FREQUENCY_DOMAIN_QC_LOOP_VERSION
+    ]
+    if not history:
+        return
+    repeated_pair = any(
+        str(item.get("analysis_fingerprint") or "") == analysis_fingerprint
+        and str(item.get("decision_fingerprint") or "") == decision_fingerprint
+        for item in history
+    )
+    if repeated_pair and str(history[-1].get("analysis_fingerprint") or "") != (
+        analysis_fingerprint
+    ):
+        raise RuntimeError(
+            "Experimental summed-BCA review is oscillating: the same review "
+            "state and decision were already followed by a different candidate "
+            "state. Revise the inclusion choice or project protocol before "
+            "continuing."
+        )
 
 
 def _metadata_from_manifest(manifest: Mapping[str, object] | None) -> dict[str, object]:
@@ -2463,10 +4809,19 @@ def _manifest_safe_path(project_root: Path, path: Path) -> str:
 
 
 __all__ = [
+    "DECISION_EXCLUDE_CONDITION",
+    "DECISION_EXCLUDE_CONDITION_ELECTRODE",
+    "DECISION_EXCLUDE_PARTICIPANT",
+    "DECISION_EXCLUDE_RECORDING",
+    "DECISION_RETAIN",
     "DEFAULT_FREQUENCY_DOMAIN_QC_THRESHOLDS",
     "FREQUENCY_DOMAIN_QC_INTEGRITY_METHOD_VERSION",
     "FREQUENCY_DOMAIN_QC_REPORT_NAME",
+    "FREQUENCY_DOMAIN_QC_REVIEW_EVIDENCE_VERSION",
     "MANUAL_EXCLUSION_REASONS",
+    "REVIEW_DECISIONS",
+    "SUMMED_BCA_SCREENING_BRIEF_TEXT",
+    "FrequencyDomainCoverageDecisions",
     "FrequencyDomainExclusions",
     "FrequencyDomainQcIntegrityError",
     "FrequencyDomainQcThresholds",
@@ -2481,10 +4836,13 @@ __all__ = [
     "frequency_domain_excluded_electrodes_for_recording",
     "is_frequency_domain_output_stale",
     "load_frequency_domain_qc_state",
+    "load_current_frequency_qc_review_evidence",
     "mark_frequency_domain_outputs_current",
     "mark_frequency_domain_outputs_stale",
     "require_frequency_domain_qc_complete",
+    "resolve_frequency_qc_coverage_decisions",
     "run_frequency_domain_qc_review",
     "sync_frequency_domain_qc_automatic_state",
     "thresholds_summary_lines",
+    "validate_frequency_domain_qc_review_decisions",
 ]
