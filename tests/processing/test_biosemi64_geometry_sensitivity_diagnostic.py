@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 
 import numpy as np
 import pytest
 
 from scripts.manual_diagnostics import run_biosemi64_geometry_sensitivity as diagnostic
+
+
+def test_production_noise_helper_module_is_registered() -> None:
+    module_name = diagnostic.compute_noise_stats_for_bin_channels.__module__
+
+    assert module_name in sys.modules
+    assert (
+        sys.modules[module_name].compute_noise_stats_for_bin_channels
+        is diagnostic.compute_noise_stats_for_bin_channels
+    )
 
 
 def test_synthetic_protocol_is_frozen_and_deterministic() -> None:

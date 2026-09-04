@@ -66,7 +66,16 @@ def _load_noise_stats_helper() -> Any:
     if specification is None or specification.loader is None:
         raise RuntimeError(f"Cannot load production noise helper: {module_path}")
     module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
+    previous_module = sys.modules.get(specification.name)
+    sys.modules[specification.name] = module
+    try:
+        specification.loader.exec_module(module)
+    except BaseException:
+        if previous_module is None:
+            sys.modules.pop(specification.name, None)
+        else:
+            sys.modules[specification.name] = previous_module
+        raise
     return module.compute_noise_stats_for_bin_channels
 
 
