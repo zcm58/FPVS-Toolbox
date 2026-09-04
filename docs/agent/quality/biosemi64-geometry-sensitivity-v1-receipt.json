@@ -165,14 +165,14 @@
   },
   "protocol_id": "qc15_biosemi64_geometry_sensitivity_v1",
   "runtime": {
-    "git_worktree_dirty": true,
+    "git_worktree_dirty": false,
     "mne": "1.9.0",
     "numpy": "2.3.1",
     "platform": "Windows-11-10.0.26200-SP0",
     "production_noise_helper_sha256": "66391ece9d07492a00a5be70363734b696cd057cadc8b04fd3163e7909a35bdc",
     "python": "3.13.9",
-    "script_sha256": "d1b77bc92419b9989f110837f5ea9d202fb442c2cdba3cff19f42672c52e9b3d",
-    "toolbox_commit": "7381406949c6d57b79efcbe6deb65eff027f590d"
+    "script_sha256": "6e989829dd0c10aac7d872b7c03b3417947cab8ee3f20e10300e772f9de8db53",
+    "toolbox_commit": "c261996ed05d36c720d04c8b2026cb89e2973cd2"
   },
   "scenario_summaries": [
     {

@@ -1,7 +1,7 @@
 # BioSemi64 Geometry Sensitivity Diagnostic
 
-Status: deterministic synthetic geometry-isolation run complete; representative
-lab-data validation and a clean-commit release receipt remain required
+Status: deterministic synthetic geometry-isolation run and clean-commit release
+receipt complete; representative lab-data validation remains required
 
 Protocol: `qc15_biosemi64_geometry_sensitivity_v1`
 
@@ -199,9 +199,10 @@ The runner writes:
 The reviewed synthetic result fingerprint is
 `fc776d270b54fd6bad2fca8b1bcae0da51a8a082b0979e58b7128f6f928c76b5`.
 It ran with Python `3.13.9`, NumPy `2.3.1`, and MNE `1.9.0`. The receipt records
-the exact runner and production noise-helper hashes. This first run occurred on
-the QC-15 implementation worktree and therefore truthfully records
-`git_worktree_dirty: true`; replace it with a clean-commit rerun before release.
+the exact runner and production noise-helper hashes. The release receipt was
+regenerated from clean tracked commit
+`c261996ed05d36c720d04c8b2026cb89e2973cd2` and records
+`git_worktree_dirty: false`.
 
 For a bounded check of one real recording, pass `--input-bdf` and an explicit
 canonical `--bad-channels` list (or `none`). The mode rejects A/B labels,

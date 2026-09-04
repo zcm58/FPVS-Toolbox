@@ -5,9 +5,13 @@
 Load this module with the parent index and shared contracts. Execute it before
 every other action in this plan.
 
-**Status:** accepted on 2026-09-03 as execution priority 1. The user reports
-that most historical recordings required interpolation, so prior outputs are
-potentially affected and require an explicit compatibility assessment.
+**Status:** implemented on 2026-09-04 in commits `efdac5e8` and `c261996e`.
+Canonical geometry, strict load validation, reduced-set handling, processing
+and downstream provenance, failure evidence, legacy reprocessing gates, and a
+clean synthetic sensitivity receipt are complete. The user reports that most
+historical recordings required interpolation, so representative lab-data
+validation and a project-specific historical inventory remain follow-up
+evidence work before claims are made about prior scientific results.
 
 ## Accepted Behavior
 
