@@ -89,8 +89,10 @@ majority when one exists, asks the user to confirm any participant-condition
 grid exclusions, asks the user to confirm the manual removed-electrode table,
 offers participant-level exclusions, and reports remaining suspicious
 findings. The grid identity is the sampling-rate-independent integer count of
-1.2-Hz oddball cycles in the planned crop; the review does not hard-code 120
-seconds or alter the locked shortest-common crop calculation. Incremental raw
+project-defined oddball cycles in the planned crop. The expected count and
+oddball rate come from the confirmed project frequency protocol; the review
+does not hard-code 1.2 Hz or 120 seconds or alter the locked shortest-common
+crop calculation. Incremental raw
 observations are compared with header-only observations from the active,
 completed processed-workbook cohort; the current raw plan replaces an older
 workbook observation for the same participant-condition. Ledger-incomplete and
