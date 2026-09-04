@@ -104,10 +104,9 @@ _PARTICIPANT_SECONDARY_FONTSIZE = FIGURE_SMALL_TEXT_MIN_SIZE_PT
 
 @dataclass(frozen=True)
 class DetectabilitySettings:
-    # IMPORTANT: do NOT include base frequency 6.0 in oddball harmonics
-    oddball_harmonics_hz: list[float] = field(
-        default_factory=lambda: [1.2, 2.4, 3.6, 4.8, 7.2]
-    )
+    # Canonical managed runs replace this with the project selection. Custom
+    # exploratory runs require an explicit list rather than a legacy-rate default.
+    oddball_harmonics_hz: list[float] = field(default_factory=list)
     harmonic_source: str = CANONICAL_HARMONIC_SOURCE
     harmonic_fingerprint: str = ""
     z_threshold: float = 1.64
