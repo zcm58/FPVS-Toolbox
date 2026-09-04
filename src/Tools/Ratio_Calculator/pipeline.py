@@ -7,6 +7,11 @@ from typing import Callable, Iterable
 import pandas as pd
 
 from Main_App.Shared.file_filters import is_excel_workbook_file
+from Main_App.processing.roi_settings import build_roi_definition_snapshot
+from Tools.Stats.analysis.canonical_harmonics import (
+    CANONICAL_HARMONIC_SOURCE,
+    load_project_processing_harmonics,
+)
 
 from .compute import (
     compute_ratio_rows_from_sums,
@@ -42,9 +47,15 @@ def run_ratio_calculator(
     settings: RatioCalculatorSettings | None = None,
     roi_defs: dict[str, list[str]] | None = None,
     log: Callable[[str], None] | None = None,
+    project_root: str | Path | None = None,
 ) -> RatioCalculatorResult:
     settings = settings or RatioCalculatorSettings()
-    roi_defs = roi_defs or ROI_DEFS_DEFAULT
+    if roi_defs is None:
+        roi_defs = ROI_DEFS_DEFAULT
+    roi_snapshot = build_roi_definition_snapshot(roi_defs)
+    if not roi_snapshot.rois:
+        raise ValueError("At least one valid fixed BioSemi64 ROI is required.")
+    roi_defs = roi_snapshot.as_mapping()
     manual_list = list(manual_exclude)
 
     log_lines: list[str] = []
@@ -57,11 +68,35 @@ def run_ratio_calculator(
     out_dir = Path(output_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    expected_hz = expected_oddball_harmonics(
-        oddball_base_hz=settings.oddball_base_hz,
-        up_to_hz=settings.sum_up_to_hz,
-        excluded_hz=settings.excluded_freqs_hz,
-    )
+    managed_project = project_root not in (None, "")
+    harmonic_source = "legacy_manual_ratio_settings"
+    harmonic_fingerprint = ""
+    if managed_project:
+        canonical = load_project_processing_harmonics(
+            project_root=project_root,
+            log_func=_log,
+        )
+        expected_hz = [float(value) for value in canonical.selected_harmonics_hz]
+        harmonic_source = CANONICAL_HARMONIC_SOURCE
+        harmonic_fingerprint = canonical.fingerprint_text
+    else:
+        if (
+            settings.oddball_base_hz is None
+            or settings.oddball_base_hz <= 0
+            or settings.sum_up_to_hz is None
+            or settings.sum_up_to_hz <= 0
+        ):
+            raise ValueError(
+                "An unmanaged ratio calculation requires an explicitly entered "
+                "oddball frequency and upper harmonic frequency."
+            )
+        expected_hz = expected_oddball_harmonics(
+            oddball_base_hz=settings.oddball_base_hz,
+            up_to_hz=settings.sum_up_to_hz,
+            excluded_hz=settings.excluded_freqs_hz,
+        )
+    if not expected_hz:
+        raise ValueError("No harmonics are available for the ratio calculation.")
 
     _log("=" * 110)
     _log(f"RUN_LABEL: {run_label}")
@@ -71,9 +106,16 @@ def run_ratio_calculator(
     _log("PARAMETERS")
     _log(f"  CONDITION A: {condition_label_a}")
     _log(f"  CONDITION B: {condition_label_b}")
-    _log(f"  ODDBALL_BASE_HZ: {settings.oddball_base_hz}")
-    _log(f"  SUM_UP_TO_HZ: {settings.sum_up_to_hz}")
-    _log(f"  EXCLUDED_FREQS_HZ: {sorted(list(settings.excluded_freqs_hz))}")
+    _log(f"  HARMONIC_SOURCE: {harmonic_source}")
+    if managed_project:
+        _log(f"  HARMONIC_SELECTION_FINGERPRINT: {harmonic_fingerprint}")
+    else:
+        _log(f"  LEGACY_MANUAL_ODDBALL_BASE_HZ: {settings.oddball_base_hz}")
+        _log(f"  LEGACY_MANUAL_SUM_UP_TO_HZ: {settings.sum_up_to_hz}")
+        _log(
+            "  LEGACY_MANUAL_EXCLUDED_FREQS_HZ: "
+            f"{sorted(list(settings.excluded_freqs_hz))}"
+        )
     _log(
         "  INCLUDED_ODDBALL_HARMONICS_HZ "
         f"(n={len(expected_hz)}): [{fmt_hz_list(expected_hz)}]"
@@ -326,11 +368,28 @@ def run_ratio_calculator(
             {"key": "RUN_LABEL", "value": run_label},
             {"key": "CONDITION_LABEL_A", "value": condition_label_a},
             {"key": "CONDITION_LABEL_B", "value": condition_label_b},
-            {"key": "ODDBALL_BASE_HZ", "value": settings.oddball_base_hz},
-            {"key": "SUM_UP_TO_HZ", "value": settings.sum_up_to_hz},
-            {"key": "EXCLUDED_FREQS_HZ", "value": str(sorted(list(settings.excluded_freqs_hz)))},
+            {"key": "HARMONIC_SOURCE", "value": harmonic_source},
+            {
+                "key": "HARMONIC_SELECTION_FINGERPRINT",
+                "value": harmonic_fingerprint,
+            },
+            {
+                "key": "LEGACY_MANUAL_ODDBALL_BASE_HZ",
+                "value": "" if managed_project else settings.oddball_base_hz,
+            },
+            {
+                "key": "LEGACY_MANUAL_SUM_UP_TO_HZ",
+                "value": "" if managed_project else settings.sum_up_to_hz,
+            },
+            {
+                "key": "LEGACY_MANUAL_EXCLUDED_FREQS_HZ",
+                "value": ""
+                if managed_project
+                else str(sorted(list(settings.excluded_freqs_hz))),
+            },
             {"key": "INCLUDED_ODDBALL_HARMONICS_HZ", "value": fmt_hz_list(expected_hz)},
             {"key": "N_INCLUDED_HARMONICS", "value": len(expected_hz)},
+            {"key": "ROI_DEFINITION_FINGERPRINT", "value": roi_snapshot.fingerprint},
             {"key": "MANUAL_EXCLUDE", "value": str(manual_list)},
             {"key": "MANUAL_FOUND_IN_PAIRED", "value": str(manual_in_paired)},
             {"key": "MANUAL_NOT_FOUND_IN_PAIRED", "value": str(manual_not_found)},

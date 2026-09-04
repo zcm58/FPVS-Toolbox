@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import traceback
+from pathlib import Path
 from typing import Iterable
 
 from PySide6.QtCore import QObject, Signal
@@ -28,6 +29,7 @@ class RatioCalculatorWorker(QObject):
         manual_exclude: Iterable[str],
         settings: RatioCalculatorSettings,
         roi_defs: dict[str, list[str]],
+        project_root: str | Path | None = None,
     ) -> None:
         super().__init__()
         self._input_dir_a = input_dir_a
@@ -39,6 +41,7 @@ class RatioCalculatorWorker(QObject):
         self._manual_exclude = list(manual_exclude)
         self._settings = settings
         self._roi_defs = roi_defs
+        self._project_root = project_root
 
     def _log(self, message: str) -> None:
         self.log.emit(message)
@@ -60,6 +63,7 @@ class RatioCalculatorWorker(QObject):
                 settings=self._settings,
                 roi_defs=self._roi_defs,
                 log=self._log,
+                project_root=self._project_root,
             )
             self.progress.emit(100)
             self.status.emit("Ratio calculations complete.")

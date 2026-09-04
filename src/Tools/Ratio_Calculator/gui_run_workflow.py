@@ -149,6 +149,7 @@ class RatioRunWorkflowMixin:
             manual_exclude=manual_list,
             settings=settings,
             roi_defs=self._active_roi_defs,
+            project_root=self._project_root,
         )
         self._thread = thread
         self._worker = worker

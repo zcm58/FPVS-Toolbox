@@ -346,15 +346,17 @@ class RatioSectionsMixin:
 
         self.oddball_spin = QDoubleSpinBox()
         self.oddball_spin.setDecimals(3)
-        self.oddball_spin.setRange(0.1, 100.0)
-        self.oddball_spin.setValue(1.2)
+        self.oddball_spin.setRange(0.0, 100.0)
+        self.oddball_spin.setSpecialValueText("Set explicitly")
+        self.oddball_spin.setValue(0.0)
 
         self.sum_up_spin = QDoubleSpinBox()
         self.sum_up_spin.setDecimals(3)
-        self.sum_up_spin.setRange(0.1, 200.0)
-        self.sum_up_spin.setValue(16.8)
+        self.sum_up_spin.setRange(0.0, 200.0)
+        self.sum_up_spin.setSpecialValueText("Set explicitly")
+        self.sum_up_spin.setValue(0.0)
 
-        self.excluded_edit = QLineEdit("6.0, 12.0, 18.0, 24.0")
+        self.excluded_edit = QLineEdit()
         self.excluded_edit.setPlaceholderText("Comma-separated frequencies")
 
         self.palette_combo = QComboBox()
@@ -384,9 +386,17 @@ class RatioSectionsMixin:
         ]:
             edit.setPlaceholderText("auto or min,max")
 
-        form.addRow("Oddball base (Hz):", self.oddball_spin)
-        form.addRow("Sum up to (Hz):", self.sum_up_spin)
-        form.addRow("Excluded freqs (Hz):", self.excluded_edit)
+        if self._project_root is None:
+            form.addRow("Legacy oddball base (Hz):", self.oddball_spin)
+            form.addRow("Legacy sum up to (Hz):", self.sum_up_spin)
+            form.addRow("Legacy excluded freqs (Hz):", self.excluded_edit)
+        else:
+            project_harmonics = QLabel(
+                "Uses the current project harmonic selection. Recalculate Harmonics "
+                "in project settings to change it."
+            )
+            project_harmonics.setWordWrap(True)
+            form.addRow("Harmonics:", project_harmonics)
         form.addRow("Palette:", self.palette_combo)
         form.addRow("Figure DPI:", self.png_dpi_spin)
         form.addRow(self.use_stable_ylims_check)

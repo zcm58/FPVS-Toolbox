@@ -13,8 +13,6 @@ from .utils import (
     harmonic_col_to_hz,
     hz_key,
     parse_participant_id,
-    safe_mean,
-    safe_sum,
 )
 
 
@@ -23,14 +21,46 @@ def compute_roi_harmonic_means(
     roi_electrodes: list[str],
     harmonic_cols: list[str],
 ) -> dict[float, float]:
-    roi_df = df[df[ELECTRODE_COL].isin(roi_electrodes)].copy()
-    if roi_df.empty:
-        raise ValueError(f"Target electrodes {roi_electrodes} not found in Excel data.")
+    if ELECTRODE_COL not in df.columns:
+        raise ValueError(f"Excel data is missing column {ELECTRODE_COL!r}.")
+    if not roi_electrodes:
+        raise ValueError("A fixed ROI must contain at least one electrode.")
+
+    row_indices: dict[str, list[int]] = {}
+    for row_index, raw_label in enumerate(df[ELECTRODE_COL].tolist()):
+        label = str(raw_label).strip()
+        if not label:
+            continue
+        row_indices.setdefault(label.casefold(), []).append(row_index)
+
+    ordered_indices: list[int] = []
+    for electrode in roi_electrodes:
+        matches = row_indices.get(str(electrode).strip().casefold(), [])
+        if not matches:
+            raise ValueError(
+                f"Fixed ROI electrode {electrode!r} is missing from the Excel data. "
+                "The ROI result was not calculated."
+            )
+        if len(matches) != 1:
+            raise ValueError(
+                f"Fixed ROI electrode {electrode!r} appears {len(matches)} times in "
+                "the Excel data. The ROI result was not calculated."
+            )
+        ordered_indices.append(matches[0])
+
+    roi_df = df.iloc[ordered_indices]
     out: dict[float, float] = {}
     for col in harmonic_cols:
+        if col not in roi_df.columns:
+            raise ValueError(f"Excel data is missing selected harmonic column {col!r}.")
         hz = hz_key(harmonic_col_to_hz(col))
         vals = pd.to_numeric(roi_df[col], errors="raise").to_numpy(dtype=float)
-        out[hz] = safe_mean(vals)
+        if not np.isfinite(vals).all():
+            raise ValueError(
+                f"Fixed ROI contains a nonfinite value at {hz:g} Hz. "
+                "The ROI result was not calculated."
+            )
+        out[hz] = float(np.mean(vals))
     return out
 
 
@@ -82,9 +112,9 @@ def summarize_participant_file_sums(
         snr_by_hz = compute_roi_harmonic_means(df_snr, electrodes, cols_in_order)
         bca_by_hz = compute_roi_harmonic_means(df_bca, electrodes, cols_in_order)
 
-        sum_z = safe_sum(np.array([z_by_hz[hz] for hz in expected_hz_keys], dtype=float))
-        sum_snr = safe_sum(np.array([snr_by_hz[hz] for hz in expected_hz_keys], dtype=float))
-        sum_bca = safe_sum(np.array([bca_by_hz[hz] for hz in expected_hz_keys], dtype=float))
+        sum_z = float(np.sum([z_by_hz[hz] for hz in expected_hz_keys]))
+        sum_snr = float(np.sum([snr_by_hz[hz] for hz in expected_hz_keys]))
+        sum_bca = float(np.sum([bca_by_hz[hz] for hz in expected_hz_keys]))
 
         rows.append(
             {

@@ -37,9 +37,9 @@ EPS = 1e-12
 
 @dataclass
 class RatioCalculatorSettings:
-    oddball_base_hz: float = 1.2
-    sum_up_to_hz: float = 16.8
-    excluded_freqs_hz: set[float] = field(default_factory=lambda: {6.0, 12.0, 18.0, 24.0})
+    oddball_base_hz: float | None = None
+    sum_up_to_hz: float | None = None
+    excluded_freqs_hz: set[float] = field(default_factory=set)
     palette_choice: str = "vibrant"
     png_dpi: int = FIGURE_EXPORT_DPI
     use_stable_ylims: bool = True

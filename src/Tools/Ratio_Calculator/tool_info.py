@@ -21,6 +21,15 @@ an audit workbook, matching PNG/PDF plots, and a run log to the selected output
 folder.
 </p>
 
+<h3>Project Harmonics and ROIs</h3>
+<p>
+For a loaded project, Ratio Calculator uses the project's accepted harmonic
+selection. Each ROI requires every configured electrode with a finite value;
+the tool does not calculate a reduced-electrode or partial-harmonic result.
+An unmanaged exploratory run requires its harmonic values to be entered
+explicitly and records them as legacy/manual settings.
+</p>
+
 <h3>Repeated Sessions</h3>
 <p>
 This tool is currently disabled for repeated-session projects because its

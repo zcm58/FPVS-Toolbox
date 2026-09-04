@@ -127,6 +127,12 @@ class RatioSettingsMixin:
         if not self._active_roi_defs:
             errors.append("No valid ROIs are configured in Settings.")
 
+        if self._project_root is None:
+            if self.oddball_spin.value() <= 0:
+                errors.append("Enter the unmanaged oddball frequency.")
+            if self.sum_up_spin.value() <= 0:
+                errors.append("Enter the unmanaged upper harmonic frequency.")
+
         return errors
 
     def _set_validation_errors(self, errors: list[str]) -> None:
