@@ -84,9 +84,10 @@ add only applicable static GUI/project-I/O checks if those owners change.
 Document a visible check of the exported workbook's labels and outcomes; do
 not launch Qt locally for this plan.
 
-Update `docs/agent/architecture/preprocessing-contract.md`,
+The implementation documentation updates
+`docs/agent/architecture/preprocessing-contract.md`,
 `docs/agent/quality/removed-electrode-detection-calibration.md`, and the relevant
-user methods/reporting guidance when implementation lands. No scientific
+user methods/reporting guidance. No scientific
 threshold calibration is claimed or required for correcting these reporting
 semantics. Item 16 retains the existing continuation policy for this update;
 reported failure/skipped outcomes must remain distinguishable from success.

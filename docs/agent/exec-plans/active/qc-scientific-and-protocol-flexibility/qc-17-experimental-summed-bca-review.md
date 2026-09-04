@@ -9,8 +9,10 @@ prevalidation, and the project-settings portions of QC-04.
 **Status:** software behavior implemented on the active QC branch on
 2026-09-04. Keep the existing magnitude and count values as experience-based
 experimental defaults, but remove their independent authority to exclude data.
-Review takes place in the GUI. Representative-data calibration, CI-only Qt
-execution, and the visible smoke path remain release evidence.
+Review takes place in the GUI. Representative-data calibration is required only
+before considering stronger scientific authority; the current review-only
+behavior does not depend on it. CI-only Qt execution and the visible smoke path
+remain verification work.
 
 ## Accepted Behavior
 

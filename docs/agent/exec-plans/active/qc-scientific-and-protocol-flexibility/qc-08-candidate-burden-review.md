@@ -5,9 +5,9 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** implemented on 2026-09-04 in the shared signal-review result and
-preflight/runner path. Final integrated report/ledger verification remains a
-Wave-2 handoff gate.
+**Status:** implementation and report/ledger orchestration completed on
+2026-09-04 in the shared signal-review and preflight/runner paths. Local
+repository verification is complete; CI-only Qt and visible smoke checks remain.
 
 ### Implementation Progress
 
@@ -117,5 +117,4 @@ and static GUI checks through the verification driver. Qt execution remains
 CI-only; document a visible manual smoke path for early exclusion, continuation,
 and downstream review. Update the preprocessing/reporting contract, condition-
 aware preflight documentation, calibration guide, and user methods/QC guidance
-when implementation lands. No current-behavior architecture or source edits
-are part of this planning turn.
+as part of the implementation.

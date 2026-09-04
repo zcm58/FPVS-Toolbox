@@ -124,11 +124,12 @@ surface and shared crop helpers; avoid an alternate processing pipeline.
 Implement the shared span/provenance work before finalizing QC-01/QC-05
 calibration. Run the processing focused gate and relevant project-I/O/static
 GUI checks through the repository driver; GUI execution remains CI-only.
-Update `docs/agent/architecture/preprocessing-contract.md`,
+The implementation documentation updates
+`docs/agent/architecture/preprocessing-contract.md`,
 `docs/agent/architecture/fft-crop-method.md`, the calibration guide, the active
 condition-aware preflight plan, and
-`docs/user/reference/methods-reporting-checklist.md` when implementation lands.
+`docs/user/reference/methods-reporting-checklist.md`.
 Update the post-processing export contract where shared span provenance changes.
 The scoring-sample change is explicitly authorized; operation-order and
 harmonic-selection guards remain intact and must receive focused regression
-coverage. Current-behavior architecture docs remain unchanged during planning.
+coverage.

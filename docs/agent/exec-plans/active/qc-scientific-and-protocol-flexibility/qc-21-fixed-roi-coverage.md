@@ -7,11 +7,10 @@ source prevalidation, load QC-02, QC-07, QC-10, QC-15, and the QC-20 ledger.
 For final coverage, additionally load QC-03, QC-09, QC-16, QC-17, and QC-20's
 pre-review state.
 
-**Status:** accepted on 2026-09-03; source/final coverage ledgers, exact
-membership, interpolation provenance, normalized-derivative availability, and
-downstream enforcement were implemented on 2026-09-04. The concurrent
-QC-03/QC-17 review integration owns the pre-review/final coverage orchestration
-call sites. A primary raw ROI result requires its complete, prespecified
+**Status:** implementation and pre-review/final-release orchestration completed
+on 2026-09-04, including source/final coverage ledgers, exact membership,
+interpolation provenance, normalized-derivative availability, and downstream
+enforcement. A primary raw ROI result requires its complete, prespecified
 electrode set. Successful interpolation restores an electrode for this purpose
 and remains visible in provenance. Whole-scalp-normalized ROI derivatives also
 require their complete frozen normalization set.
@@ -164,9 +163,9 @@ or duplicate weighting can be produced and valid complete results remain
 numerically unchanged. Run focused non-GUI Stats, export, project-I/O, and
 processing checks; use CI-only Qt coverage and a documented visible smoke path.
 
-Update the Stats ROI/normalization and harmonic-selection contracts, GUI ROI
-settings guidance, analysis-ready and tool export documentation, and the user
-methods/QC guidance when implementation lands.
+The implementation updates the Stats ROI/normalization and harmonic-selection
+contracts, GUI ROI settings guidance, analysis-ready and tool export
+documentation, and the user methods/QC guidance.
 
 Fixed electrode sets are established FPVS practice, while spherical
 interpolation is an estimate that repopulates the intended channel set rather

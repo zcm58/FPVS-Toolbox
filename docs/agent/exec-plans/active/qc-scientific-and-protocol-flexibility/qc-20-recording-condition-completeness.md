@@ -9,10 +9,9 @@ ledger; only afterward does QC-20's pre-review gate consume the QC-21 result.
 For the final release gate, additionally load QC-03, QC-17, and QC-21 final
 coverage.
 
-**Status:** wave-1 ledger, wave-3 receipts, and the wave-4 final-release
-ledger/validator and downstream enforcement were implemented on 2026-09-04.
-The concurrent QC-03/QC-17 review integration owns the pre-review/final gate
-orchestration call sites. Every recording and condition expected by the project
+**Status:** implementation and orchestration completed on 2026-09-04 across
+the wave-1 ledger, wave-3 receipts, wave-4 pre-review/final-release gates, and
+downstream enforcement. Every recording and condition expected by the project
 must be accounted for. A workbook is not required for a condition that is
 explicitly excluded or unavailable.
 
@@ -126,6 +125,6 @@ non-GUI processing, project-I/O, export, frequency-QC, harmonic-selection,
 Stats-input, and reporting checks. Qt behavior remains CI-only with a documented
 visible rerun/review smoke path.
 
-Update the processing-ledger, post-processing/export, dataset-index, Stats
-input, user troubleshooting/QC, and methods-reporting documentation when
-implementation lands.
+The implementation updates the processing-ledger, post-processing/export,
+dataset-index, Stats input, user troubleshooting/QC, and methods-reporting
+documentation.

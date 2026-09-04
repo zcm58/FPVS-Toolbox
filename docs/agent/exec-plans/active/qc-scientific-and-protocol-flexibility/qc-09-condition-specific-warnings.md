@@ -93,4 +93,4 @@ at the supported 1280x900 workspace through a documented visible/manual smoke
 path. Add relevant GUI behavior coverage for CI but do not run Qt/offscreen GUI
 tests locally. Run focused processing plus safe static GUI checks through the
 repository driver and update preflight, preprocessing-report, and user QC
-documentation when implementation lands.
+documentation as part of the implementation.

@@ -101,8 +101,9 @@ invalidation, legacy migration, and report completeness. Prove raw events are
 never fabricated and no unresolved gap is crossed. Use non-GUI checks, CI-only
 Qt coverage, and a documented visible smoke path.
 
-Update the project protocol/import, FFT-crop, preprocessing and processing-
-ledger, GUI/QC, and methods-reporting documentation when implementation lands.
+The implementation updates the project protocol/import, FFT-crop,
+preprocessing and processing-ledger, GUI/QC, and methods-reporting
+documentation.
 
 Markers can establish the recorded event code and timing, but a missing marker
 alone cannot establish whether the visual stimulus continued. FPVS depends on

@@ -2,11 +2,14 @@
 
 ## Status and Use
 
-The scientific review is complete and twenty-one QC actions are approved.
-Implementation started on 2026-09-04 on branch
-`codex/qc-scientific-protocol-v3`, based directly on v3 release commit
-`f586652e0bf9920eb42ce9e8a75b5b08f2717f31`. QC-15 is execution priority 1
-and blocks the other planned changes.
+The scientific review is complete, and all twenty-one approved QC actions were
+implemented on branch `codex/qc-scientific-protocol-v3`, created directly from
+v3 release commit `f586652e0bf9920eb42ce9e8a75b5b08f2717f31`. QC-15 was
+executed first. Local integration completed with 2,514 tests passed and three
+skipped, plus all applicable non-path repository audits. The precommit wrapper
+was attempted but its path audit stopped on eight pre-existing untracked
+`outputs/` paths; those user-owned files were preserved. Outstanding empirical
+evidence is tracked separately below.
 
 For future execution, read only:
 
@@ -118,12 +121,12 @@ beyond QC-02 and the existing freshness contracts.
 
 ## Execution Waves
 
-0. **Priority 1 geometry correction:** implement QC-15 before every other action; version legacy outputs and complete the sensitivity/reprocessing assessment.
-1. **Protocol and identity foundation:** implement QC-11, the rate-foundation portion of QC-12, QC-13, and QC-19 in that order; add QC-04 and QC-17 settings/schema/migration foundations, QC-02/QC-03 foundations, the QC-20 expected ledger, and QC-21 ROI/source validators.
-2. **Analyzed-interval signal QC:** implement QC-06 from QC-19-approved spans, then QC-01 and QC-05; finish QC-04's On/Off authority wiring before QC-09, QC-08, QC-16, and QC-18; run QC-04 empirical recalibration after those behaviors are final.
-3. **Outcomes and integrity:** finish QC-02; implement QC-07 and QC-10; add QC-20 atomic output receipts and core cell states.
-4. **Frequency and ROI finalization:** apply QC-14, then finish QC-12's harmonic-domain replacement and QC-18's deterministic notch-collision availability; run QC-21 definition/source prevalidation and QC-20's pre-review readiness gate; finish QC-03; allow QC-17's bounded provisional selection/review/recomputation loop; apply decisions; run QC-21 final coverage; then pass QC-20's final release gate before harmonic selection finalizes and feeds Stats or primary exports.
-5. **Integration:** migrations, cache/fingerprint invalidation, cross-module regression, documentation, and visible manual smoke paths.
+0. **Priority 1 geometry correction:** QC-15 was implemented before every other action; representative lab comparison and the historical reprocessing inventory remain empirical follow-ups.
+1. **Protocol and identity foundation:** QC-11, QC-12's rate foundation, QC-13, QC-19, settings/schema migration, report/review identity, the QC-20 ledger, and QC-21 source validators were implemented.
+2. **Analyzed-interval signal QC:** QC-06, QC-01, QC-05, and the QC-04/QC-08/QC-09/QC-16/QC-18 review and authority wiring were implemented. Empirical recalibration is tracked separately.
+3. **Outcomes and integrity:** QC-02, QC-07, QC-10, and QC-20 output receipts and cell states were implemented.
+4. **Frequency and ROI finalization:** QC-12/QC-14 eligibility, QC-18 notch availability, QC-03/QC-17 review, QC-21 coverage, and QC-20 pre-review/final release orchestration were implemented.
+5. **Integration:** local regression and repository audits are complete. CI-only Qt execution and documented visible smoke paths remain release verification work.
 
 ## Implementation Progress
 
@@ -132,10 +135,17 @@ beyond QC-02 and the existing freshness contracts.
 | Plan activation and v3 branch baseline | Complete | Active plan moved onto `codex/qc-scientific-protocol-v3` at the exact v3 release base; documentation validation precedes the first source change. |
 | Wave 0: QC-15 BioSemi64 geometry | Complete | Canonical loading, reduced-set QC, interpolation and failure provenance, cache invalidation, legacy/mixed-output gates, downstream validation, and clean synthetic sensitivity receipt implemented in `efdac5e8` and `c261996e`. Representative lab-data validation remains explicitly limited follow-up evidence. |
 | Wave 1: protocol and identity foundation | Complete | Project-owned exact rates/cycles/marker identity, Studio/manual migration, audited marker review, experimental-settings schemas, preprocessing/frequency identity foundations, the pre-run QC-20 matrix, and fixed-ROI validators are implemented. Integrated evidence: processing focused gate 418 passed/1 skipped; project-I/O 214 passed; new foundation/static suites 76 passed. Qt execution remains CI-only. |
-| Wave 2: analyzed-interval signal QC | In progress | QC-01/QC-05/QC-06/QC-08/QC-09 are implemented, including 5-second/50%-overlap review evidence and exact exclusion of non-analyzed conditions. QC-04 separates the optional experimental detector from manual channel authority. QC-16 now includes the worker-side evidence scan, current/stale receipt reconciliation, no-default GUI review, and fail-closed processing handoff. QC-18's raw-spectral experimental enable/review surface remains. |
-| Wave 3: outcomes and integrity | In progress | Truthful preprocessing outcomes, QC-07 burden calculation and explicit >5% downstream review, QC-10 finite-cell enforcement and atomic spectral writers, and QC-20 current recording-condition receipts/pre-review reconciliation are implemented with focused tests. The QC-20 final release gate remains. |
-| Wave 4: frequency and ROI finalization | In progress | One project-filter/Nyquist-derived resolver now supplies harmonic eligibility and complete +/-10-bin support; notch collisions become structured unavailable values across processing, Stats, FHC provenance, and Plot Generator. Recording-aware frequency review, exact fixed-ROI coverage, and final readiness ordering remain. |
-| Wave 5: integration and handoff | Not started | Requires every action-level gate and final repository verification. |
+| Wave 2: analyzed-interval signal QC | Complete | QC-01/QC-05/QC-06/QC-08/QC-09 are implemented, including 5-second/50%-overlap review evidence and exact exclusion of non-analyzed conditions. QC-04 separates the optional experimental detector from manual channel authority; QC-16 and QC-18 preserve their approved review and authority limits. |
+| Wave 3: outcomes and integrity | Complete | Truthful preprocessing outcomes, QC-07 burden calculation and explicit >5% downstream review, QC-10 finite-cell enforcement and atomic spectral writers, and QC-20 current recording-condition receipts are implemented. |
+| Wave 4: frequency and ROI finalization | Complete | One project-filter/Nyquist-derived resolver supplies harmonic eligibility and complete +/-10-bin support; notch collisions are structured unavailable values. Recording-aware review, fixed-ROI coverage, and QC-20/QC-21 final release ordering are implemented. |
+| Wave 5: integration and handoff | Complete | The full local suite passed (2,514 passed, 3 skipped), and all applicable non-path audits passed. CI-only Qt execution and visible/manual smoke paths remain release verification. |
+
+## Outstanding Empirical Evidence
+
+- **QC-01:** participant-split calibration and external validation of transient thresholds.
+- **QC-04:** rerun the current detector method on the in-lab dataset, then seek external validation.
+- **QC-15:** representative lab-data geometry comparison and a historical-output reprocessing inventory.
+- **Provisional authority:** QC-05, QC-08, QC-16, QC-17, and QC-18 retain the scientific limits stated in their action modules; this implementation makes no stronger validity or exclusion claim.
 
 ## Completion Gate
 
@@ -145,5 +155,5 @@ beyond QC-02 and the existing freshness contracts.
 - [x] Reconcile approved actions with the waves and module dependencies after the final decisions.
 - [x] Give every approved behavior an owner, migration rule, acceptance checks, and required documentation.
 - [x] Move the finalized index and modules to `active/` together when implementation begins.
-- [ ] Implement by wave, reading the current module, this index, shared contracts, and only its named dependency modules.
-- [ ] Run focused gates per action and the repository precommit gate once at integrated handoff.
+- [x] Implement by wave, reading the current module, this index, shared contracts, and only its named dependency modules.
+- [x] Run focused gates per action and attempt the repository precommit gate at integrated handoff; preserve and report the unrelated untracked `outputs/` path findings.

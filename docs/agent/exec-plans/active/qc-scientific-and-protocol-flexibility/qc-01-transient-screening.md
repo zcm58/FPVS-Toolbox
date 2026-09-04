@@ -117,11 +117,10 @@ channel, or reject a participant because of these transient findings.
 
 The existing
 [condition-aware preflight speedup plan](../../active/condition-aware-preflight-qc-speedup.md)
-specifies 10-second scoring windows. On implementation, QC-01 supersedes that
-scoring-window decision only. Its exact-span, full-condition, review-only,
-buffering, and concurrency constraints continue. Update the conflicting plan
-text when implementation lands, keeping current-behavior documentation truthful
-until then.
+specified 10-second scoring windows. QC-01 superseded that scoring-window
+decision only. Its exact-span, full-condition, review-only, buffering, and
+concurrency constraints continue; the active documentation now distinguishes
+5-second scoring windows from 10-second disk-read chunks.
 
 The processing runner separately samples six 10-second windows across the raw
 file. QC-01 alone does not change that detector. The later accepted QC-06
@@ -161,14 +160,13 @@ channel inference under the changed sampling scope.
   not a prediction of four times total runtime. No fixed 120-second requirement
   is introduced.
 
-### Documentation and Verification at Implementation
+### Documentation and Verification
 
-Update `docs/agent/architecture/preprocessing-contract.md`, the existing
-speedup plan, and
-`docs/agent/quality/removed-electrode-detection-calibration.md`; update
+The implementation documentation updates
+`docs/agent/architecture/preprocessing-contract.md`, the existing speedup plan,
+`docs/agent/quality/removed-electrode-detection-calibration.md`,
 `docs/user/reference/methods-reporting-checklist.md` and relevant QC help to
-describe the accepted method and its calibration limits. No ownership or
-architecture changes have occurred in this planning-only pass.
+describe the accepted method and its calibration limits.
 
 Run the processing focused gate first:
 

@@ -80,9 +80,10 @@ submission. Run processing and GUI focused verification through the repository
 driver; keep local execution non-GUI. Document a visible smoke path for the
 same repeated-session cases, including any preserved whole-participant state.
 
-Reconcile the change with the active repeated-session project plan and update
+The implementation reconciles this change with the active repeated-session
+project plan and updates
 `docs/agent/architecture/post-processing-export-contract.md` plus the relevant
-user QC instructions when implementation lands. Preserve canonical project
+user QC instructions. Preserve canonical project
 identity, original workbooks, and harmonic-selection contracts. No new
 scientific threshold calibration is required for correcting the identity
 wiring; QC-10, QC-14, and QC-17 own the authority and applicability of the

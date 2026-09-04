@@ -92,4 +92,4 @@ unchanged. Run focused processing, post-processing export, project-I/O,
 and safe static GUI checks through the repository driver. Qt execution remains
 CI-only; document a visible/manual error-and-rerun path. Update the post-
 processing export/report contracts and user troubleshooting/methods guidance
-when implementation lands.
+as part of the implementation.

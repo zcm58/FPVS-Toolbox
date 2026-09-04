@@ -6,13 +6,12 @@ Load this module with the parent index, shared contracts, and QC-11 for the
 rate foundation. Also load QC-14 when finalizing the replacement harmonic
 domains.
 
-**Status:** implementation in progress as of 2026-09-04. Support project-wide rates beyond 6/1.2 Hz
-and allow either recurrence-count or direct-frequency entry. Both modes must
-resolve to a whole-number stimulus recurrence. On 2026-09-04, the user
-clarified that there is no universal 16.8-Hz analysis ceiling and then directed
-that the live 16.8-Hz default be removed in favor of the project's filtering
-settings. On 2026-09-04, the user accepted the complete +/-10-bin filter-range
-rule and one shared Toolbox source of spectral eligibility.
+**Status:** implemented on 2026-09-04. Projects support rates beyond 6/1.2 Hz
+through recurrence-count or direct-frequency entry, with both modes resolving
+to a whole-number stimulus recurrence. Managed processing has no live 16.8-Hz
+analysis ceiling or 120-second lock. One shared Toolbox resolver derives
+spectral eligibility from the project protocol, applied filter range, Nyquist,
+effective notches, and complete +/-10-bin support.
 
 ### Implementation Progress
 
@@ -43,7 +42,10 @@ rule and one shared Toolbox source of spectral eligibility.
 - Neutral FullFFT provenance schema v3 now stamps and validates the canonical
   project frequency-protocol fingerprint. The post-processing worker fails on
   missing managed protocol evidence instead of stamping a global 6/1.2
-  fallback, and a protocol change makes existing provenance stale.
+  fallback, and a protocol change makes existing provenance stale. The same
+  record fingerprints current reviewed participant/recording condition and
+  condition-electrode decisions; historical `auto_*` suggestions remain non-
+  authoritative audit data.
 - Condition-aware preflight crop-grid audits carry the project oddball rate and
   protocol fingerprint. Free Harmonic Clustering uses those project rates for
   frequency identity while remaining independent of the standard Stats

@@ -35,13 +35,14 @@ Action modules:
 ## Status and Working Agreement
 
 Scientific QC review completed 2026-09-03 after opening 2026-09-02.
-Implementation has not started.
-The user requested a read-only review of preflight and post-processing QC,
-including scientific defensibility and assumptions about presentation rate,
-oddball rate, and condition duration. The user subsequently authorized this
-cumulative execution plan and intends to execute it after the review and plan
-are finished. Source code, settings, and scientific outputs remain unchanged
-during planning.
+The twenty-one-action software implementation completed on 2026-09-04;
+local integrated verification also completed, while CI-only Qt/visible smoke
+checks and the explicitly listed empirical work remain. The user originally
+requested a read-only review of preflight and
+post-processing QC, including scientific defensibility and assumptions about
+presentation rate, oddball rate, and condition duration. The user subsequently
+authorized this cumulative execution plan. Source code, settings, and
+scientific outputs remained unchanged during the recorded planning phase.
 
 Review issues starting with low-priority findings and nonissues; group
 interrelated issues. On 2026-09-02, the user authorized automatically recording
@@ -50,8 +51,8 @@ manual review. Do not ask for confirmation of those no-action findings. For
 each manual-review issue, explain current behavior, scientific justification,
 protocol dependencies, and the recommended solution; obtain the user's
 disposition before advancing. Add a separate action-item section only when the
-user chooses action. Implementation details below are recommendations unless
-explicitly identified as user decisions.
+user chooses action. The implementation details below preserve the planning
+recommendations; the action modules record implemented behavior.
 
 The user requested simpler summaries on 2026-09-03. Keep conversational review
 to the concrete problem, a short recommended fix, and one decision question;
@@ -474,13 +475,14 @@ through QC-17. The current five-point queue appears after Item 37 below.
 - [x] Add QC-11 after the user accepted one independent, project-wide
   presentation/oddball-rate protocol with no condition overrides; later remove
   the assistant-inferred universal ceiling after the user's clarification.
-- [ ] Continue the review, automatically closing no-action findings and taking
+- [x] Continue the review, automatically closing no-action findings and taking
   one manual decision at a time; append approved actions.
-- [ ] Resolve dependencies, required inputs, acceptance criteria, and execution
+- [x] Resolve dependencies, required inputs, acceptance criteria, and execution
   order across approved items; finalize this plan before starting source edits.
-- [ ] Move the finalized plan to `active/` and implement in bounded sections.
-- [ ] Complete the applicable software checks and scientific validation;
-  explicitly identify any unmet empirical requirement.
+- [x] Move the finalized plan to `active/` and implement in bounded sections.
+- [x] Complete the applicable local software checks and explicitly identify the
+  unmet empirical requirements retained in the parent plan. CI-only Qt and
+  visible/manual smoke verification remain release work.
 
 ---
 

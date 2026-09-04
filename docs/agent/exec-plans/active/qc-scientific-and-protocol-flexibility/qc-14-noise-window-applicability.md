@@ -6,10 +6,10 @@ Load this module with the parent index, shared contracts, QC-12's completed
 rate foundation, and QC-13 when executing this action. QC-12's replacement
 harmonic domains finalize after this applicability boundary is available.
 
-**Status:** core implementation complete on 2026-09-04 with focused numerical
-coverage. Ordinary
-conditions are expected to be at least about 60 seconds, but validity is
-decided from cycles and available frequency bins rather than a fixed duration.
+**Status:** implementation and managed-consumer orchestration completed on
+2026-09-04 with focused numerical coverage. Ordinary conditions are expected
+to be at least about 60 seconds, but validity is decided from cycles and
+available frequency bins rather than a fixed duration.
 
 ### Implementation Progress
 

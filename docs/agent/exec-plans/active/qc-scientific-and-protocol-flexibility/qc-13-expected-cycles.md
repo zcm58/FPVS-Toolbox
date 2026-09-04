@@ -65,5 +65,5 @@ target spans, extra markers, a short repetition, systematic
 truncation, incompatible sample counts, repeated conditions, legacy projects,
 protocol edits, and unchanged valid output. Update project-I/O, FFT-crop,
 preprocessing, post-processing/export, GUI, and methods-reporting contracts
-when implementation lands. Run focused non-GUI checks and document a visible
+as part of the implementation. Run focused non-GUI checks and document a visible
 GUI smoke path; Qt execution remains CI-only.

@@ -122,5 +122,5 @@ Run processing focused verification and applicable static GUI/project-I/O
 scopes through the repository driver. Qt execution remains CI-only; document
 a visible manual review path for the flagged participant and repeated-session
 cases. Update the preprocessing reporting contract, post-processing review
-contract, and user methods/QC guidance when implementation lands. No active
-architecture or processing behavior changes during this planning pass.
+contract, and user methods/QC guidance as part of the implementation. No active
+architecture change is introduced by the reporting and review policy.
