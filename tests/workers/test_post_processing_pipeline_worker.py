@@ -51,6 +51,13 @@ class _RecordingWorker(PostProcessingPipelineWorker):
     def _run_frequency_domain_qc_review(self) -> dict[str, object]:
         self.calls.append("qc")
         self._emit_progress("qc done")
+        self._recording_condition_outcomes = SimpleNamespace(
+            fingerprint="current-outcome-ledger",
+            cells=(),
+        )
+        self._pre_review_roi_coverage = SimpleNamespace(
+            fingerprint="current-pre-review-coverage"
+        )
         return {"review_required": False, "review_reused": False}
 
     def _sync_frequency_domain_qc_automatic_state(
@@ -60,6 +67,11 @@ class _RecordingWorker(PostProcessingPipelineWorker):
     ) -> None:
         assert qc_report["review_required"] is False
         self.calls.append(f"sync:{project_root.name}")
+
+    def _finalize_frequency_qc_release(self, project_root: Path) -> None:
+        assert project_root == Path(self._project.project_root).resolve()
+        assert self._recording_condition_outcomes is not None
+        assert self._pre_review_roi_coverage is not None
 
     def _run_harmonic_selection(self) -> PostProcessingStepResult:
         self.calls.append("harmonics")
@@ -625,6 +637,7 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         harmonic_selection_qc,
         processing_ledger,
         recording_condition_outcomes,
+        roi_coverage,
     )
     from Tools.LORETA_Visualizer import stats_ready_workbook
 
@@ -632,7 +645,13 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     sentinel_index = SimpleNamespace(project_root=root)
     loader_calls: list[Path] = []
     captured: list[tuple[str, object]] = []
-    sentinel_outcomes = object()
+    sentinel_outcomes = SimpleNamespace(
+        fingerprint="current-outcome-ledger",
+        cells=(),
+    )
+    sentinel_coverage = SimpleNamespace(
+        fingerprint="current-pre-review-coverage"
+    )
 
     def load_index(project_root):
         loader_calls.append(Path(project_root))
@@ -642,6 +661,20 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         assert callable(log_func)
         captured.append(("qc", dataset_index))
         return {"review_required": False, "review_reused": False}
+
+    def build_coverage(
+        project,
+        *,
+        outcome_ledger,
+        processing_ledger,
+        persist,
+    ):
+        assert Path(project.project_root).resolve() == root
+        assert outcome_ledger is sentinel_outcomes
+        assert processing_ledger == {"root": str(root)}
+        assert persist is True
+        captured.append(("coverage", outcome_ledger))
+        return sentinel_coverage
 
     def run_harmonics(_project, *, log_func, dataset_index):
         assert callable(log_func)
@@ -687,6 +720,11 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
         lambda outcomes: captured.append(("readiness", outcomes)),
     )
     monkeypatch.setattr(
+        roi_coverage,
+        "build_pre_review_roi_coverage",
+        build_coverage,
+    )
+    monkeypatch.setattr(
         frequency_domain_qc,
         "run_frequency_domain_qc_review",
         run_qc,
@@ -713,9 +751,12 @@ def test_base_post_processing_steps_reuse_one_dataset_index(
     assert harmonic_result.ok is True
     assert stats_result.ok is True
     assert audit_result.ok is True
+    assert worker._recording_condition_outcomes is sentinel_outcomes
+    assert worker._pre_review_roi_coverage is sentinel_coverage
     assert loader_calls == [root]
     assert captured == [
         ("readiness", sentinel_outcomes),
+        ("coverage", sentinel_outcomes),
         ("qc", sentinel_index),
         ("harmonics", sentinel_index),
         ("stats", sentinel_index),
