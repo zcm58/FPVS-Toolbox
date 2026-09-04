@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -7,7 +9,13 @@ from Main_App.processing import raw_spectral_qc
 from Main_App.processing.raw_spectral_qc import (
     CONDITION_SPECTRAL_QC_METHOD_VERSION,
     ConditionSpectralQCCancelled,
+    ConditionSpectralQCThresholds,
     evaluate_condition_spectral_qc_v2,
+)
+from Main_App.projects import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+    RawSpectralScreeningSettings,
 )
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 
@@ -33,12 +41,21 @@ def _condition_data(
 
 
 def _settings(*, mains_hz: int, low_pass_hz: float) -> dict[str, object]:
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=12,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
     return {
-        "base_freq": 6.0,
+        "frequency_protocol": protocol,
+        "base_freq": 6.0,  # Deliberately redundant legacy values.
         "oddball_freq": 1.2,
         "line_noise_filter_enabled": True,
         "line_noise_frequency_hz": mains_hz,
+        "high_pass": 0.1,
         "low_pass": low_pass_hz,
+        "raw_spectral_screening": RawSpectralScreeningSettings().to_manifest(),
     }
 
 
@@ -116,6 +133,134 @@ def test_v2_uses_one_fft_and_exact_22_candidate_20_retained_noise_contract(
     assert result.thresholds["noise_window_bins"] == 12
     assert result.thresholds["noise_candidate_bins"] == 22
     assert result.thresholds["noise_retained_bins"] == 20
+
+
+@pytest.mark.parametrize(
+    ("score", "noise_mean", "noise_std", "expected_flags"),
+    (
+        (250.0, 10.0, 20.0, 1),
+        (np.nextafter(250.0, 0.0), 1.0, 1.0, 0),
+        (250.0, 10.0001, 1.0, 0),
+        (250.0, 10.0, 20.0001, 0),
+    ),
+)
+def test_locked_score_ratio_and_standardized_boundaries_are_inclusive(
+    monkeypatch: pytest.MonkeyPatch,
+    score: float,
+    noise_mean: float,
+    noise_std: float,
+    expected_flags: int,
+) -> None:
+    target_bin = 400  # 40 Hz for the ten-second, 256-Hz test span.
+
+    def _amplitude_batches(
+        _array: np.ndarray,
+        *,
+        window: np.ndarray,
+        amplitude_last_bin: int,
+        should_cancel: object,
+    ):
+        del window, should_cancel
+        amplitudes = np.zeros((1, amplitude_last_bin + 1), dtype=np.float64)
+        amplitudes[0, target_bin] = score
+        yield 0, amplitudes
+
+    monkeypatch.setattr(
+        raw_spectral_qc,
+        "_iter_condition_spectral_amplitude_batches",
+        _amplitude_batches,
+    )
+    monkeypatch.setattr(
+        raw_spectral_qc,
+        "compute_noise_stats_for_bin",
+        lambda *_args, **_kwargs: (noise_mean, noise_std),
+    )
+
+    result = evaluate_condition_spectral_qc_v2(
+        np.zeros((1, 2560), dtype=np.float64),
+        sfreq=256.0,
+        settings=_settings(mains_hz=60, low_pass_hz=50.0),
+        effective_upper_frequency_hz=50.0,
+        channel_names=("Oz",),
+    )
+
+    assert len(result.unexpected_off_harmonic_flags) == expected_flags
+
+
+@pytest.mark.parametrize(("channel_count", "expected"), ((48, True), (47, False)))
+def test_widespread_boundary_requires_75_percent_and_at_least_48_channels(
+    channel_count: int,
+    expected: bool,
+) -> None:
+    candidates = {
+        400: tuple(
+            (f"EEG {index + 1}", 250.0, 25.0, 12.0)
+            for index in range(channel_count)
+        )
+    }
+    *_, unexpected = raw_spectral_qc._group_condition_peaks(
+        candidates,
+        frequencies=np.arange(501, dtype=np.float64) / 10.0,
+        n_channels=64,
+        canonical_targets_by_bin={},
+        effective_notch_centers_hz=(),
+        thresholds=ConditionSpectralQCThresholds(),
+    )
+
+    assert unexpected[0].widespread is expected
+
+
+@pytest.mark.parametrize(
+    ("notch_center", "expected_notch_matches"),
+    ((40.5, 0), (np.nextafter(40.5, 40.0), 1)),
+)
+def test_notch_association_is_strictly_inside_half_hz_boundary(
+    notch_center: float,
+    expected_notch_matches: int,
+) -> None:
+    _expected, notch_handled, _collisions, unexpected = (
+        raw_spectral_qc._group_condition_peaks(
+            {400: (("Oz", 250.0, 25.0, 12.0),)},
+            frequencies=np.arange(501, dtype=np.float64) / 10.0,
+            n_channels=64,
+            canonical_targets_by_bin={},
+            effective_notch_centers_hz=(notch_center,),
+            thresholds=ConditionSpectralQCThresholds(),
+        )
+    )
+
+    assert len(notch_handled) == expected_notch_matches
+    assert len(unexpected) == 1 - expected_notch_matches
+
+
+def test_point_five_hz_screen_boundary_is_inclusive() -> None:
+    eligibility = SimpleNamespace(
+        targets=(
+            SimpleNamespace(
+                target_bin_index=49,
+                target=SimpleNamespace(
+                    frequency_hz=np.nextafter(0.5, 0.0),
+                    oddball_harmonic_order=1,
+                    presentation_harmonic_order=None,
+                ),
+            ),
+            SimpleNamespace(
+                target_bin_index=50,
+                target=SimpleNamespace(
+                    frequency_hz=0.5,
+                    oddball_harmonic_order=1,
+                    presentation_harmonic_order=None,
+                ),
+            ),
+        )
+    )
+
+    below = raw_spectral_qc._targets_below_screen_boundary(
+        eligibility,
+        minimum_frequency_hz=0.5,
+    )
+
+    assert [row["fft_bin"] for row in below] == [49]
 
 
 def test_batched_amplitudes_are_bit_identical_to_unbatched_formula(
@@ -314,3 +459,144 @@ def test_v2_method_and_payload_are_explicitly_review_only() -> None:
     assert result.review_only is True
     assert result.has_review_flags is False
     assert result.to_payload()["review_only"] is True
+
+
+def test_current_screen_rejects_legacy_rate_fallback() -> None:
+    settings = _settings(mains_hz=60, low_pass_hz=50.0)
+    settings.pop("frequency_protocol")
+
+    with pytest.raises(ValueError, match="canonical project frequency protocol"):
+        evaluate_condition_spectral_qc_v2(
+            _condition_data(),
+            sfreq=256.0,
+            settings=settings,
+            effective_upper_frequency_hz=50.0,
+        )
+
+
+def test_expected_peak_classification_uses_exact_project_bin_not_point_08_hz() -> None:
+    duration_s = 120.0
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    settings = _settings(mains_hz=60, low_pass_hz=10.0)
+    settings["frequency_protocol"] = protocol
+
+    result = evaluate_condition_spectral_qc_v2(
+        _condition_data(1.25, duration_s=duration_s, n_channels=1),
+        sfreq=256.0,
+        settings=settings,
+        effective_upper_frequency_hz=10.0,
+        channel_names=("Oz",),
+    )
+
+    assert result.expected_harmonic_peaks == ()
+    assert len(result.unexpected_off_harmonic_flags) == 1
+    assert result.unexpected_off_harmonic_flags[0].frequency_hz == pytest.approx(1.25)
+    assert result.thresholds["expected_peak_classification"] == (
+        "exact_canonical_fft_bin"
+    )
+    assert result.thresholds["legacy_harmonic_tolerance_hz"] is None
+
+
+def test_nondefault_three_hz_every_ten_protocol_and_sub_point_5_target_are_explicit() -> None:
+    protocol = FrequencyProtocol.from_recurrence(
+        3,
+        10,
+        expected_analyzed_oddball_cycles=30,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    settings = _settings(mains_hz=60, low_pass_hz=10.0)
+    settings["frequency_protocol"] = protocol
+
+    result = evaluate_condition_spectral_qc_v2(
+        _condition_data(3.0, duration_s=100.0, n_channels=1),
+        sfreq=256.0,
+        settings=settings,
+        effective_upper_frequency_hz=10.0,
+        channel_names=("Oz",),
+    )
+
+    assert [peak.frequency_hz for peak in result.expected_harmonic_peaks] == pytest.approx(
+        [3.0]
+    )
+    first_below = result.targets_below_screen_boundary[0]
+    assert first_below["frequency_hz"] == pytest.approx(0.3)
+    assert first_below["evaluation_status"] == "not_evaluated"
+    assert result.has_review_flags is True
+    assert result.presentation_rate_hz == pytest.approx(3.0)
+    assert result.oddball_rate_hz == pytest.approx(0.3)
+    assert result.fixed_noise_neighborhood_half_width_hz == pytest.approx(0.12)
+    assert result.fixed_noise_neighborhood_total_span_hz == pytest.approx(0.24)
+
+
+def test_current_policy_rejects_unversioned_threshold_override() -> None:
+    with pytest.raises(ValueError, match="thresholds are locked"):
+        evaluate_condition_spectral_qc_v2(
+            _condition_data(3.0, n_channels=1),
+            sfreq=256.0,
+            settings=_settings(mains_hz=60, low_pass_hz=10.0),
+            effective_upper_frequency_hz=10.0,
+            thresholds=ConditionSpectralQCThresholds(
+                min_legacy_hann_spectrum_score=251.0
+            ),
+        )
+
+
+def test_disabled_project_setting_is_not_performed_and_runs_no_fft(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(mains_hz=60, low_pass_hz=50.0)
+    settings["raw_spectral_screening"] = RawSpectralScreeningSettings(
+        enabled=False
+    ).to_manifest()
+    settings.pop("frequency_protocol")
+    monkeypatch.setattr(
+        raw_spectral_qc.np.fft,
+        "rfft",
+        lambda *_args, **_kwargs: pytest.fail("disabled screening ran an FFT"),
+    )
+
+    result = evaluate_condition_spectral_qc_v2(
+        _condition_data(40.0),
+        sfreq=256.0,
+        settings=settings,
+        effective_upper_frequency_hz=50.0,
+    )
+
+    assert result.evaluation_status == "not_performed_disabled"
+    assert result.evaluated is False
+    assert result.has_review_flags is False
+    assert result.unexpected_off_harmonic_flags == ()
+    assert result.notch_collisions == ()
+    assert result.frequency_protocol_fingerprint == ""
+
+
+def test_notch_collisions_are_visible_without_an_observed_peak() -> None:
+    result = evaluate_condition_spectral_qc_v2(
+        _condition_data(n_channels=2),
+        sfreq=256.0,
+        settings=_settings(mains_hz=60, low_pass_hz=100.0),
+        effective_upper_frequency_hz=100.0,
+        channel_names=("O1", "Oz"),
+    )
+
+    direct = next(
+        collision
+        for collision in result.notch_collisions
+        if collision.target_frequency_hz == pytest.approx(60.0)
+    )
+    assert direct.target_notch_centers_hz == (60.0,)
+    assert direct.affected_channels == ("O1", "Oz")
+    assert direct.standard_analysis_effect == (
+        "target_and_standard_noise_metrics_unavailable"
+    )
+    assert any(
+        not collision.target_notch_centers_hz and collision.noise_bin_collisions
+        for collision in result.notch_collisions
+    )
+    assert result.unexpected_off_harmonic_flags == ()
+    assert result.has_review_flags is True

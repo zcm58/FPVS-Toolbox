@@ -76,6 +76,7 @@ from Main_App.projects import (
     FrequencyProtocolError,
     ODDBALL_INPUT_MODE_DIRECT_HZ,
     ODDBALL_INPUT_MODE_RECURRENCE,
+    RAW_SPECTRAL_SCREENING_BRIEF_TEXT,
     SUMMED_BCA_SCREENING_BRIEF_TEXT,
     SummedBcaScreeningSettings,
     load_project_dataset_index,
@@ -997,7 +998,9 @@ class SettingsDialog(QDialog):
         self.fixed_harmonic_upper_frequency_edit.setObjectName(
             "settings_fixed_harmonic_upper_frequency"
         )
-        self.fixed_harmonic_upper_frequency_edit.setPlaceholderText("16.8")
+        self.fixed_harmonic_upper_frequency_edit.setPlaceholderText(
+            "Optional within project range"
+        )
         self.fixed_harmonic_upper_frequency_edit.setToolTip(
             "Include eligible oddball harmonics at or below this prespecified frequency."
         )
@@ -1429,6 +1432,109 @@ class SettingsDialog(QDialog):
         self._refresh_removed_electrode_detection_status()
         layout.addWidget(detector_card)
 
+        raw_spectral = experimental_settings.raw_spectral_screening
+        raw_spectral_card = SectionCard(
+            "Experimental Raw-Spectral Review",
+            tab,
+            object_name="settings_experimental_raw_spectral_card",
+        )
+        self.raw_spectral_explanation_label = QLabel(
+            RAW_SPECTRAL_SCREENING_BRIEF_TEXT,
+            raw_spectral_card,
+        )
+        self.raw_spectral_explanation_label.setObjectName(
+            "settings_experimental_raw_spectral_explanation"
+        )
+        self.raw_spectral_explanation_label.setWordWrap(True)
+        raw_spectral_card.content_layout.addWidget(
+            self.raw_spectral_explanation_label
+        )
+        self.raw_spectral_screening_enabled_check = QCheckBox(
+            "Enable experimental raw-spectral review",
+            raw_spectral_card,
+        )
+        self.raw_spectral_screening_enabled_check.setObjectName(
+            "settings_raw_spectral_screening_enabled"
+        )
+        self.raw_spectral_screening_enabled_check.setChecked(raw_spectral.enabled)
+        self.raw_spectral_screening_enabled_check.setToolTip(
+            "Peaks are compared with nearby FFT bins and labeled as expected FPVS, "
+            "associated with the configured line-noise filter, or unexpected. "
+            "Turning this off records the check as not performed."
+        )
+        raw_spectral_card.content_layout.addWidget(
+            self.raw_spectral_screening_enabled_check
+        )
+
+        self.raw_spectral_advanced_toggle = QToolButton(raw_spectral_card)
+        self.raw_spectral_advanced_toggle.setObjectName(
+            "settings_raw_spectral_advanced_toggle"
+        )
+        self.raw_spectral_advanced_toggle.setText("Advanced")
+        self.raw_spectral_advanced_toggle.setCheckable(True)
+        self.raw_spectral_advanced_toggle.setChecked(False)
+        self.raw_spectral_advanced_toggle.setToolTip(
+            "Show the locked provisional values used by this project."
+        )
+        raw_spectral_card.content_layout.addWidget(
+            self.raw_spectral_advanced_toggle,
+            0,
+            Qt.AlignLeft,
+        )
+
+        self.raw_spectral_advanced_values = QWidget(raw_spectral_card)
+        self.raw_spectral_advanced_values.setObjectName(
+            "settings_raw_spectral_advanced_values"
+        )
+        raw_spectral_grid = QGridLayout(self.raw_spectral_advanced_values)
+        raw_spectral_grid.setContentsMargins(0, 0, 0, 0)
+        raw_spectral_specs = (
+            ("Lower screen boundary", f"{raw_spectral.minimum_frequency_hz:g} Hz"),
+            (
+                "Legacy Hann-spectrum score",
+                f"{raw_spectral.minimum_legacy_hann_spectrum_score:g}",
+            ),
+            ("Local mean ratio", f"{raw_spectral.minimum_local_mean_ratio:g}"),
+            (
+                "Local standardized score",
+                f"{raw_spectral.minimum_local_standardized_score:g}",
+            ),
+            (
+                "Widespread label",
+                f"{raw_spectral.widespread_channel_fraction:.0%} and at least "
+                f"{raw_spectral.widespread_min_channels} scalp channels",
+            ),
+            (
+                "Noise neighborhood",
+                f"+/-{raw_spectral.noise_window_bins} bins; "
+                f"{raw_spectral.noise_candidate_bins} candidates; "
+                f"{raw_spectral.noise_retained_bins} retained",
+            ),
+            (
+                "Notch match",
+                f"distance < {raw_spectral.notch_half_width_hz:g} Hz",
+            ),
+            ("Threshold policy", raw_spectral.policy_version),
+        )
+        self.raw_spectral_advanced_value_labels: dict[str, QLabel] = {}
+        for row, (name, value) in enumerate(raw_spectral_specs):
+            name_label = QLabel(f"{name}:", self.raw_spectral_advanced_values)
+            value_label = QLabel(str(value), self.raw_spectral_advanced_values)
+            key = name.casefold().replace(" ", "_")
+            value_label.setObjectName(f"settings_raw_spectral_{key}_value")
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self.raw_spectral_advanced_value_labels[key] = value_label
+            raw_spectral_grid.addWidget(name_label, row, 0)
+            raw_spectral_grid.addWidget(value_label, row, 1)
+        self.raw_spectral_advanced_values.setVisible(False)
+        self.raw_spectral_advanced_toggle.toggled.connect(
+            self.raw_spectral_advanced_values.setVisible
+        )
+        raw_spectral_card.content_layout.addWidget(
+            self.raw_spectral_advanced_values
+        )
+        layout.addWidget(raw_spectral_card)
+
         screening = experimental_settings.summed_bca_screening
         summed_bca_card = SectionCard(
             "Experimental Summed-BCA Screening",
@@ -1552,6 +1658,7 @@ class SettingsDialog(QDialog):
             self.removed_electrode_detection_info_button,
             self.manual_removed_electrodes_enabled_check,
             self.manual_removed_electrodes_button,
+            self.raw_spectral_screening_enabled_check,
             self.summed_bca_screening_enabled_check,
             *self.summed_bca_threshold_edits.values(),
         ):
@@ -3529,8 +3636,15 @@ class SettingsDialog(QDialog):
                 "cohort_extreme_peak_floor_uv"
             ],
         )
-        return self.project.experimental_qc_settings.with_summed_bca_screening(
-            screening
+        raw_spectral = (
+            self.project.experimental_qc_settings.raw_spectral_screening.with_enabled(
+                self.raw_spectral_screening_enabled_check.isChecked()
+            )
+        )
+        return (
+            self.project.experimental_qc_settings.with_summed_bca_screening(
+                screening
+            ).with_raw_spectral_screening(raw_spectral)
         )
 
     def _validated_experimental_qc_settings(

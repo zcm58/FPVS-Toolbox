@@ -47,6 +47,17 @@ FPVS Toolbox does not automatically apply independent component analysis (ICA)
 or an equivalent component-rejection stage. Describe any artifact procedures
 performed outside the toolbox separately in the study methods.
 
+The Experimental settings page also controls **Raw-spectral review**. This
+review-only screen is On by default and flags unusually large narrow-frequency
+signals within each analyzed condition occurrence. Its Advanced panel shows
+locked provisional values. The displayed amplitude is a **Legacy Hann-spectrum
+score**, not a calibrated physical microvolt amplitude. Expected peaks are
+matched to the project's exact FPVS bins; configured line-noise overlaps are
+shown even without a large observed peak. The notch remains applied, so an
+affected standard frequency is unavailable while other valid frequencies and
+the recording-condition remain available. Turning the screen Off records it as
+not performed and does not make an earlier flag current.
+
 For the exact default Summed BCA harmonic rule, including the neighboring-bin
 noise window and threshold, see [Standard FPVS Screening](../tools/statistics.md).
 For the native single- and multi-group model, correction, diagnostic, and

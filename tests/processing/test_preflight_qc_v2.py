@@ -13,7 +13,11 @@ from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
 from Main_App.processing.raw_channel_qc import SCALP_CHANNELS
-from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+from Main_App.projects import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    FrequencyProtocol,
+    RawSpectralScreeningSettings,
+)
 
 
 def _event_rows(offset: int = 0) -> np.ndarray:
@@ -143,6 +147,9 @@ def test_v3_accepts_canonical_project_reference_keys() -> None:
     )
     assert method["geometry"]["montage_id"] == "biosemi64"
     assert method["condition_completion_policy"] == "locked_fft_span_v1"
+    assert method["raw_spectral_notch_method"]
+    assert method["raw_spectral_notch_half_width_hz"] == pytest.approx(0.5)
+    assert method["raw_spectral_eligibility_method"]
     assert "condition_minimum_completion_s" not in method
 
 
@@ -407,6 +414,9 @@ def test_v3_reads_exact_locked_condition_samples_and_reuses_cache(
     assert first.results[0].raw_spectral_qc["condition_results"][0][
         "fft_bin_spacing_hz"
     ] == pytest.approx(0.4)
+    assert first.results[0].raw_spectral_qc["condition_results"][0][
+        "occurrence_evidence_fingerprint"
+    ]
     assert any("Faces 1/1" in message for message, _done, _total in progress)
 
     settings_with_ignored_legacy_window = _settings()
@@ -458,6 +468,151 @@ def test_preflight_preserves_detector_off_without_signal_candidate_leakage(
         "evaluation_status": "not_evaluated",
         "reason": "disabled_in_project_settings",
     }
+
+
+def test_disabled_raw_spectral_screen_is_not_performed_and_invalidates_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06-raw-spectral-off.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    first_raw = _LazyRaw(data, names)
+    second_raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [first_raw, second_raw], _event_rows())
+
+    first = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        _settings(),
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+    disabled = _settings()
+    disabled["raw_spectral_screening"] = RawSpectralScreeningSettings(
+        enabled=False
+    ).to_manifest()
+    second = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        disabled,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    assert first.results[0].raw_spectral_qc["evaluation_status"] == "evaluated"
+    payload = second.results[0].raw_spectral_qc
+    assert second.results[0].condition_qc["cache_status"] == "miss"
+    assert payload["evaluation_status"] == "not_performed_disabled"
+    assert payload["evaluated"] is False
+    assert payload["flagged_channels"] == []
+    assert payload["review_rows"] == []
+    assert payload["automatic_data_changes"] is False
+
+
+def test_raw_spectral_history_never_has_hard_exclusion_authority(
+    tmp_path: Path,
+) -> None:
+    legacy_widespread = preflight_qc.PreflightQcFileResult(
+        path=tmp_path / "legacy.bdf",
+        participant_id="P01",
+        load_error=None,
+        raw_channel_qc={
+            "excluded": False,
+            "experimental_removed_electrode_detector": {
+                "evaluation_status": "evaluated"
+            },
+        },
+        raw_spectral_qc={
+            "widespread": True,
+            "flagged_channels": ["P1", "P2"],
+            "review_rows": [],
+        },
+    )
+    disabled = preflight_qc.PreflightQcFileResult(
+        path=tmp_path / "disabled.bdf",
+        participant_id="P02",
+        load_error=None,
+        raw_channel_qc={
+            "excluded": False,
+            "experimental_removed_electrode_detector": {
+                "evaluation_status": "evaluated"
+            },
+        },
+        raw_spectral_qc={
+            "evaluation_status": "not_performed_disabled",
+            "widespread": False,
+            "flagged_channels": [],
+            "review_rows": [],
+        },
+    )
+
+    scan = preflight_qc.PreflightQcScan(results=(legacy_widespread, disabled))
+
+    assert scan.hard_exclusion_candidates == ()
+    assert scan.suspicious_results == (legacy_widespread, disabled)
+
+
+def test_preflight_cache_settings_own_the_exact_project_frequency_protocol() -> None:
+    first = _settings()
+    second = _settings()
+    second["frequency_protocol"] = FrequencyProtocol.from_recurrence(
+        3,
+        10,
+        expected_analyzed_oddball_cycles=30,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+
+    first_payload = preflight_qc._preflight_cache_settings(first)
+    second_payload = preflight_qc._preflight_cache_settings(second)
+
+    assert first_payload["frequency_protocol"] != second_payload["frequency_protocol"]
+
+
+def test_raw_spectral_collision_aggregation_keeps_occurrence_evidence_review_only(
+    tmp_path: Path,
+) -> None:
+    settings = _settings()
+    settings["low_pass"] = 100.0
+    spectral_result = preflight_qc.evaluate_condition_spectral_qc_v2(
+        np.zeros((2, 640), dtype=np.float64),
+        sfreq=256.0,
+        settings=settings,
+        effective_upper_frequency_hz=100.0,
+        channel_names=("O1", "Oz"),
+    )
+    span = preflight_qc.ConditionQcSpan(
+        condition_label="Faces",
+        condition_id=1,
+        repetition_index=1,
+        onset_sample=100,
+        time_start_sample=100,
+        time_stop_sample=740,
+        spectral_start_sample=100,
+        spectral_stop_sample=740,
+        oddball_id=55,
+        last_oddball_sample=700,
+        marker_plan_fingerprint="marker-fingerprint",
+        approved_span_fingerprint="span-fingerprint",
+        marker_disposition="approved",
+    )
+
+    payload = preflight_qc._aggregate_condition_spectral_qc(
+        ((span, spectral_result),),
+        filename=(tmp_path / "P01.bdf").name,
+        skipped_spans=(),
+        screening_settings=RawSpectralScreeningSettings(),
+    )
+
+    collision = payload["review_rows"][0]
+    assert payload["automatic_data_changes"] is False
+    assert payload["widespread"] is False
+    assert collision["evidence_kind"] == "configured_notch_fpvs_collision"
+    assert collision["condition_label"] == "Faces"
+    assert collision["occurrence_display"] == 2
+    assert collision["affected_channels"] == ["O1", "Oz"]
+    assert collision["evidence_fingerprint"]
+    assert payload["condition_results"][0]["marker_plan_fingerprint"] == (
+        "marker-fingerprint"
+    )
 
 
 def test_preflight_applies_manual_channels_with_detector_off_without_auto_label(

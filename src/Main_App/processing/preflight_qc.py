@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+import hashlib
+import json
 import logging
 from pathlib import Path
 import tempfile
@@ -45,12 +47,20 @@ from Main_App.processing.preflight_qc_plan import (
 from Main_App.processing.analysis_spans import (
     restrict_source_analysis_span_plan_by_condition,
 )
+from Main_App.processing.fft_multinotch import (
+    FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
+)
 from Main_App.processing.removed_electrode_detection import (
     manual_removed_electrodes_for_recording,
 )
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocolError,
     normalize_frequency_protocol,
+)
+from Main_App.projects.experimental_qc_settings import (
+    RawSpectralScreeningSettings,
+    normalize_raw_spectral_screening_settings,
 )
 from Main_App.projects.preprocessing_settings import (
     is_participant_condition_excluded,
@@ -68,10 +78,14 @@ from Main_App.processing.raw_channel_qc import (
 )
 from Main_App.processing.raw_spectral_qc import (
     CONDITION_SPECTRAL_QC_METHOD_VERSION,
+    RAW_SPECTRAL_QC_DISABLED_STATUS,
     ConditionSpectralQCCancelled,
     ConditionSpectralQCResult,
-    ConditionSpectralQCThresholds,
+    condition_spectral_thresholds_from_project_settings,
     evaluate_condition_spectral_qc_v2,
+)
+from Main_App.processing.spectral_eligibility import (
+    SPECTRAL_ELIGIBILITY_METHOD_VERSION,
 )
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -250,6 +264,19 @@ class PreflightQcFileResult:
         return str(payload.get("message") or "").strip()
 
     @property
+    def raw_spectral_evaluation_status(self) -> str:
+        payload = self.raw_spectral_qc or {}
+        return str(payload.get("evaluation_status") or "").strip()
+
+    @property
+    def raw_spectral_review_rows(self) -> tuple[Mapping[str, object], ...]:
+        payload = self.raw_spectral_qc or {}
+        values = payload.get("review_rows")
+        if not isinstance(values, Sequence) or isinstance(values, str):
+            return ()
+        return tuple(value for value in values if isinstance(value, Mapping))
+
+    @property
     def raw_spectral_flagged_channels(self) -> tuple[str, ...]:
         payload = self.raw_spectral_qc or {}
         values = payload.get("flagged_channels")
@@ -286,7 +313,6 @@ class PreflightQcScan:
             result
             for result in self.results
             if result.raw_qc_excluded
-            or result.raw_spectral_widespread
             or result.raw_qc_decision_review_required
         )
 
@@ -309,10 +335,10 @@ class PreflightQcScan:
                 for row in result.occurrence_evaluation_scope
             )
             or not result.experimental_detector_evaluated
-            or (
-                result.raw_spectral_flagged_channels
-                and not result.raw_spectral_widespread
-            )
+            or result.raw_spectral_flagged_channels
+            or bool(result.raw_spectral_review_rows)
+            or result.raw_spectral_evaluation_status
+            in {"not_performed_disabled", "not_evaluated"}
         )
 
 
@@ -1115,6 +1141,11 @@ def _occurrence_evaluation_scope(
 def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
     analysis = settings.get("analysis")
     analysis_payload = dict(analysis) if isinstance(analysis, Mapping) else {}
+    analysis_protocol = analysis_payload.get("frequency_protocol")
+    if analysis_protocol is not None:
+        analysis_payload["frequency_protocol"] = normalize_frequency_protocol(
+            analysis_protocol
+        ).to_manifest()
     keys = (
         "stim_channel",
         "ref_channel1",
@@ -1139,18 +1170,25 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "downsample_rate",
         "base_freq",
         "oddball_freq",
+        "frequency_protocol_fingerprint",
         "line_noise_filter_enabled",
         "line_noise_frequency_hz",
         "max_chan_idx_keep",
         "max_idx_keep",
         "electrode_montage",
         "electrode_mapping_profile",
+        "raw_spectral_screening",
     )
     payload: dict[str, object] = {
         key: settings.get(key)
         for key in keys
         if settings.get(key) is not None
     }
+    raw_protocol = settings.get("frequency_protocol")
+    if raw_protocol is not None:
+        payload["frequency_protocol"] = normalize_frequency_protocol(
+            raw_protocol
+        ).to_manifest()
     payload["analysis"] = analysis_payload
     payload["channel_subset_first_n"] = _configured_biosemi64_channel_limit(
         settings
@@ -1203,6 +1241,9 @@ def _preflight_cache_method(
         "version": PREFLIGHT_QC_METHOD_VERSION,
         "raw_channel_method": CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
         "raw_spectral_method": CONDITION_SPECTRAL_QC_METHOD_VERSION,
+        "raw_spectral_notch_method": FFT_MULTINOTCH_METHOD_VERSION,
+        "raw_spectral_notch_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
+        "raw_spectral_eligibility_method": SPECTRAL_ELIGIBILITY_METHOD_VERSION,
         "condition_io_chunk_duration_s": PREFLIGHT_QC_BLOCK_DURATION_S,
         "transient_window_duration_s": PREFLIGHT_QC_TRANSIENT_WINDOW_DURATION_S,
         "transient_window_hop_s": PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S,
@@ -1276,51 +1317,161 @@ def _aggregate_condition_spectral_qc(
     *,
     filename: str,
     skipped_spans: Sequence[ConditionQcSpan],
+    screening_settings: RawSpectralScreeningSettings,
 ) -> dict[str, object]:
     flagged_channels: set[str] = set()
     unexpected_peaks: list[tuple[ConditionQcSpan, Any]] = []
+    notch_collisions: list[tuple[ConditionQcSpan, Any]] = []
     observed_widespread = False
     condition_payloads: list[dict[str, object]] = []
+    review_rows: list[dict[str, object]] = []
     for span, result in results:
+        occurrence_evidence_payload = {
+            "condition_label": span.condition_label,
+            "condition_id": span.condition_id,
+            "repetition_index": span.repetition_index,
+            "spectral_start_sample": span.spectral_start_sample,
+            "spectral_stop_sample": span.spectral_stop_sample,
+            "marker_plan_fingerprint": span.marker_plan_fingerprint,
+            "approved_span_fingerprint": span.approved_span_fingerprint,
+            "marker_disposition": span.marker_disposition,
+            "condition_evidence_fingerprint": result.evidence_fingerprint,
+            "default_scientific_decision": "retain",
+        }
+        occurrence_evidence_fingerprint = hashlib.sha256(
+            json.dumps(
+                occurrence_evidence_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
         payload = result.to_payload()
         payload["condition_label"] = span.condition_label
         payload["condition_id"] = span.condition_id
         payload["repetition_index"] = span.repetition_index
+        payload["occurrence_display"] = span.repetition_index + 1
         payload["start_sample"] = span.spectral_start_sample
         payload["stop_sample"] = span.spectral_stop_sample
+        payload["marker_plan_fingerprint"] = span.marker_plan_fingerprint
+        payload["approved_span_fingerprint"] = span.approved_span_fingerprint
+        payload["marker_disposition"] = span.marker_disposition
+        payload["occurrence_evidence_fingerprint"] = (
+            occurrence_evidence_fingerprint
+        )
         condition_payloads.append(payload)
         for peak in result.unexpected_off_harmonic_flags:
             flagged_channels.update(peak.channels)
             unexpected_peaks.append((span, peak))
             observed_widespread = observed_widespread or bool(peak.widespread)
+            review_rows.append(
+                {
+                    "evidence_kind": "unexpected_narrow_frequency_signal",
+                    "condition_label": span.condition_label,
+                    "condition_id": span.condition_id,
+                    "repetition_index": span.repetition_index,
+                    "occurrence_display": span.repetition_index + 1,
+                    "start_sample": span.spectral_start_sample,
+                    "stop_sample": span.spectral_stop_sample,
+                    "analyzed_duration_s": result.analyzed_duration_s,
+                    "realized_oddball_cycles": result.realized_oddball_cycles,
+                    "method_version": result.method_version,
+                    "threshold_policy_version": result.threshold_policy_version,
+                    "condition_evidence_fingerprint": result.evidence_fingerprint,
+                    "evidence_fingerprint": occurrence_evidence_fingerprint,
+                    "default_scientific_decision": "retain",
+                    **peak.to_payload(),
+                }
+            )
+        for collision in result.notch_collisions:
+            notch_collisions.append((span, collision))
+            review_rows.append(
+                {
+                    "evidence_kind": "configured_notch_fpvs_collision",
+                    "condition_label": span.condition_label,
+                    "condition_id": span.condition_id,
+                    "repetition_index": span.repetition_index,
+                    "occurrence_display": span.repetition_index + 1,
+                    "start_sample": span.spectral_start_sample,
+                    "stop_sample": span.spectral_stop_sample,
+                    "analyzed_duration_s": result.analyzed_duration_s,
+                    "realized_oddball_cycles": result.realized_oddball_cycles,
+                    "method_version": result.method_version,
+                    "threshold_policy_version": result.threshold_policy_version,
+                    "condition_evidence_fingerprint": result.evidence_fingerprint,
+                    "evidence_fingerprint": occurrence_evidence_fingerprint,
+                    "default_scientific_decision": "retain_recording_condition",
+                    **collision.to_payload(),
+                }
+            )
+        for below_boundary in result.targets_below_screen_boundary:
+            review_rows.append(
+                {
+                    "evidence_kind": "target_below_experimental_screen_boundary",
+                    "condition_label": span.condition_label,
+                    "condition_id": span.condition_id,
+                    "repetition_index": span.repetition_index,
+                    "occurrence_display": span.repetition_index + 1,
+                    "start_sample": span.spectral_start_sample,
+                    "stop_sample": span.spectral_stop_sample,
+                    "analyzed_duration_s": result.analyzed_duration_s,
+                    "realized_oddball_cycles": result.realized_oddball_cycles,
+                    "method_version": result.method_version,
+                    "threshold_policy_version": result.threshold_policy_version,
+                    "condition_evidence_fingerprint": result.evidence_fingerprint,
+                    "evidence_fingerprint": occurrence_evidence_fingerprint,
+                    "default_scientific_decision": "retain",
+                    **dict(below_boundary),
+                }
+            )
 
     strongest = max(
         unexpected_peaks,
-        key=lambda item: item[1].max_amplitude_uv,
+        key=lambda item: item[1].max_legacy_hann_spectrum_score,
         default=None,
     )
-    if unexpected_peaks:
+    if not screening_settings.enabled:
+        evaluation_status = RAW_SPECTRAL_QC_DISABLED_STATUS
         message = (
-            f"Condition-aware spectral QC flagged {len(unexpected_peaks)} unexpected "
-            f"off-harmonic peak(s) in {filename} for review."
+            f"Experimental raw-spectral review was not performed for {filename} "
+            "because it is disabled in project settings."
         )
-    elif results:
+    elif unexpected_peaks:
+        evaluation_status = "evaluated"
         message = (
-            f"Condition-aware spectral QC passed for {filename}: no unexpected "
-            "off-harmonic condition peaks require review."
+            f"Experimental raw-spectral review flagged {len(unexpected_peaks)} "
+            f"unexpected narrow-frequency signal(s) in {filename}."
+        )
+    elif notch_collisions:
+        evaluation_status = "evaluated"
+        message = (
+            f"Experimental raw-spectral review found {len(notch_collisions)} "
+            f"configured line-noise/FPVS collision(s) in {filename}."
+        )
+    elif any(result.evaluated for _span, result in results):
+        evaluation_status = "evaluated"
+        message = (
+            f"Experimental raw-spectral review found no unexpected "
+            f"narrow-frequency signals in {filename}."
         )
     else:
+        evaluation_status = "not_evaluated"
         message = (
-            f"Condition-aware spectral QC skipped for {filename}: no valid locked "
-            "on-bin condition span was available."
+            f"Experimental raw-spectral review was not evaluated for {filename}: "
+            "no valid locked on-bin condition span was available."
         )
 
     return {
         "method_version": CONDITION_SPECTRAL_QC_METHOD_VERSION,
+        "threshold_policy_version": screening_settings.policy_version,
+        "enabled": screening_settings.enabled,
+        "evaluation_status": evaluation_status,
         "review_only": True,
-        "evaluated": bool(results),
-        # The compatibility key remains false so v2 review findings cannot enter
-        # the legacy hard-exclusion confirmation path without calibration.
+        "evaluated": evaluation_status == "evaluated",
+        "default_scientific_decision": "retain",
+        "automatic_data_changes": False,
+        # Compatibility remains false so experimental review findings cannot
+        # enter the historical recording-exclusion path.
         "widespread": False,
         "observed_widespread_review": observed_widespread,
         "message": message,
@@ -1329,12 +1480,19 @@ def _aggregate_condition_spectral_qc(
         "peak_frequency_hz": (
             float(strongest[1].frequency_hz) if strongest is not None else None
         ),
-        "max_amplitude_uv": (
-            float(strongest[1].max_amplitude_uv) if strongest is not None else 0.0
+        "max_legacy_hann_spectrum_score": (
+            float(strongest[1].max_legacy_hann_spectrum_score)
+            if strongest is not None
+            else 0.0
         ),
         "max_local_ratio": (
             float(strongest[1].max_local_ratio) if strongest is not None else 0.0
         ),
+        "review_rows": review_rows,
+        "notch_collision_count": len(notch_collisions),
+        "unexpected_signal_count": len(unexpected_peaks),
+        "effective_settings": screening_settings.to_manifest(),
+        "method_specific_amplitude_label": "Legacy Hann-spectrum score",
         "condition_results": condition_payloads,
         "skipped_condition_spans": [
             {
@@ -1378,6 +1536,12 @@ def _scan_one_preflight_file_v2(
     visit_index = info.visit_index
     timings_ms: dict[str, float] = {}
     file_qc_settings = dict(qc_settings)
+    raw_spectral_screening = normalize_raw_spectral_screening_settings(
+        qc_settings.get("raw_spectral_screening")
+    )
+    file_qc_settings["raw_spectral_screening"] = (
+        raw_spectral_screening.to_manifest()
+    )
     file_qc_settings["_fpvs_manual_removed_electrodes"] = list(
         manual_removed_electrodes_for_recording(
             qc_settings,
@@ -1583,11 +1747,8 @@ def _scan_one_preflight_file_v2(
             qc_settings,
             source_sfreq=sfreq,
         )
-        spectral_thresholds = ConditionSpectralQCThresholds(
-            min_frequency_hz=max(
-                ConditionSpectralQCThresholds.min_frequency_hz,
-                float(lower_hz),
-            )
+        spectral_thresholds = condition_spectral_thresholds_from_project_settings(
+            raw_spectral_screening
         )
 
         channel_results = []
@@ -1684,7 +1845,7 @@ def _scan_one_preflight_file_v2(
                                 spectral_result = evaluate_condition_spectral_qc_v2(
                                     spectral_data,
                                     sfreq=sfreq,
-                                    settings=qc_settings,
+                                    settings=file_qc_settings,
                                     effective_upper_frequency_hz=upper_hz,
                                     channel_names=channel_names,
                                     condition_label=(
@@ -1774,6 +1935,7 @@ def _scan_one_preflight_file_v2(
             spectral_results,
             filename=file_path.name,
             skipped_spans=skipped_spectral_spans,
+            screening_settings=raw_spectral_screening,
         )
         condition_qc_payload: dict[str, object] = {
             "method_name": PREFLIGHT_QC_METHOD_NAME,

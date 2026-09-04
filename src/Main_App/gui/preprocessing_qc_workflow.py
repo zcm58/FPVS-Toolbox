@@ -2667,16 +2667,10 @@ def _format_uv(value: float | None) -> str:
 
 
 def _hard_candidate_flag(result: PreflightQcFileResult) -> str:
-    if result.raw_qc_excluded and result.raw_spectral_widespread:
-        return "Technical raw + spectral QC"
     if result.raw_qc_excluded:
         return "Technical raw QC"
-    if result.raw_qc_decision_review_required and result.raw_spectral_widespread:
-        return "Signal + spectral review"
     if result.raw_qc_decision_review_required:
         return "Signal review"
-    if result.raw_spectral_widespread:
-        return "Raw spectral review"
     return "Recording review"
 
 
@@ -2705,8 +2699,6 @@ def _hard_candidate_reason(result: PreflightQcFileResult) -> str:
         "bad_channel_fraction",
     } & rules:
         return "High candidate-channel burden"
-    if result.raw_spectral_widespread:
-        return "Widespread frequency artifact"
     if result.raw_qc_excluded:
         return "Raw data could not be evaluated"
     return "Recording-level signal review"
@@ -2731,11 +2723,6 @@ def _hard_candidate_plain_explanation(result: PreflightQcFileResult) -> str:
             "The count or fraction of candidate channels crossed a provisional "
             "review threshold. The threshold alone does not show that the recording "
             "is unusable."
-        )
-    if reason == "Widespread frequency artifact":
-        return (
-            "The raw spectral screen found a widespread artifact pattern before "
-            "preprocessing."
         )
     if result.raw_qc_excluded:
         return "A technical raw-data check could not produce analyzable EEG samples."
@@ -2772,7 +2759,6 @@ def _hard_candidate_detail_text(
             "baseline_exclusion_median_p2p_99_uv",
         )
     raw_message = result.raw_qc_message
-    spectral_message = result.raw_spectral_message
     lines = [
         f"Participant: {result.participant_id}",
         *(
@@ -2879,8 +2865,6 @@ def _hard_candidate_detail_text(
         lines.extend(["", "Flagged channel(s):", ", ".join(bad_channels)])
     if raw_message:
         lines.extend(["", "Original raw QC message:", raw_message])
-    if spectral_message:
-        lines.extend(["", "Original spectral QC message:", spectral_message])
     return "\n".join(lines)
 
 
@@ -3902,11 +3886,179 @@ def _remaining_review_rows(
                 result,
                 "Raw-data review rule(s): " + ", ".join(result.review_rules),
             )
-        if result.raw_spectral_flagged_channels and not result.raw_spectral_widespread:
+        for finding in result.raw_spectral_review_rows:
+            condition = str(finding.get("condition_label") or "condition")
+            occurrence = finding.get("occurrence_display") or "?"
+            duration = _payload_float(finding, "analyzed_duration_s")
+            cycles = finding.get("realized_oddball_cycles")
+            scope = (
+                f"{condition}, occurrence {occurrence}; "
+                f"{duration:.3f} s / {cycles} oddball cycles"
+                if duration is not None and cycles not in (None, "")
+                else f"{condition}, occurrence {occurrence}"
+            )
+            if (
+                finding.get("evidence_kind")
+                == "target_below_experimental_screen_boundary"
+            ):
+                frequency = _payload_float(finding, "frequency_hz")
+                fft_bin = finding.get("fft_bin")
+                harmonic = finding.get("oddball_harmonic")
+                frequency_text = (
+                    f"{frequency:.3f} Hz / bin {fft_bin}"
+                    if frequency is not None
+                    else f"bin {fft_bin}"
+                )
+                append_row(
+                    result,
+                    "Experimental raw-spectral review limitation: "
+                    + scope
+                    + f"; oddball harmonic {harmonic}; {frequency_text} is below "
+                    "the locked 0.5-Hz screen boundary and was not evaluated. "
+                    "The recording-condition is retained.",
+                )
+                continue
+            if finding.get("evidence_kind") == "configured_notch_fpvs_collision":
+                target_hz = _payload_float(finding, "target_frequency_hz")
+                target_bin = finding.get("target_fft_bin")
+                oddball_harmonic = finding.get("oddball_harmonic")
+                base_harmonic = finding.get("base_harmonic")
+                classification = str(
+                    finding.get("classification") or "notch collision"
+                ).replace("_", " ")
+                notch_centers = _payload_list(finding, "target_notch_centers_hz")
+                noise_collisions = finding.get("noise_bin_collisions")
+                noise_details: list[str] = []
+                if isinstance(noise_collisions, Sequence) and not isinstance(
+                    noise_collisions, str
+                ):
+                    for collision in noise_collisions:
+                        if not isinstance(collision, Mapping):
+                            continue
+                        bin_index = collision.get("fft_bin")
+                        bin_hz = _payload_float(collision, "frequency_hz")
+                        notch_hz = _payload_float(collision, "notch_center_hz")
+                        noise_details.append(
+                            f"bin {bin_index}"
+                            + (f" ({bin_hz:.3f} Hz)" if bin_hz is not None else "")
+                            + (
+                                f" at {notch_hz:g}-Hz notch"
+                                if notch_hz is not None
+                                else ""
+                            )
+                        )
+                affected_channels = _payload_list(finding, "affected_channels")
+                target_text = (
+                    f"; target {target_hz:.3f} Hz / bin {target_bin}"
+                    if target_hz is not None
+                    else ""
+                )
+                harmonic_text = f"; oddball harmonic {oddball_harmonic}"
+                if base_harmonic not in (None, ""):
+                    harmonic_text += f" / base harmonic {base_harmonic}"
+                target_notch_text = (
+                    f"; target notch center(s) {', '.join(notch_centers)} Hz"
+                    if notch_centers
+                    else ""
+                )
+                noise_text = (
+                    "; required noise collision(s): " + ", ".join(noise_details)
+                    if noise_details
+                    else ""
+                )
+                channel_text = (
+                    f"; {len(affected_channels)} affected scalp channel(s) "
+                    f"({', '.join(affected_channels)})"
+                    if affected_channels
+                    else ""
+                )
+                method_text = (
+                    f"; method {finding.get('method_version') or '?'} / thresholds "
+                    f"{finding.get('threshold_policy_version') or '?'}"
+                )
+                append_row(
+                    result,
+                    "Configured line-noise/FPVS collision: "
+                    + scope
+                    + f"; {classification}"
+                    + target_text
+                    + harmonic_text
+                    + target_notch_text
+                    + noise_text
+                    + channel_text
+                    + method_text
+                    + ". The configured line-noise filter stays in place. The affected "
+                    "standard frequency metric is unavailable; other valid frequencies "
+                    "remain available.",
+                )
+                continue
+            channels = _payload_list(finding, "channels")
+            frequency = _payload_float(finding, "frequency_hz")
+            legacy_score = _payload_float(
+                finding,
+                "max_legacy_hann_spectrum_score",
+            )
+            local_ratio = _payload_float(finding, "max_local_ratio")
+            local_score = _payload_float(
+                finding,
+                "max_local_standardized_score",
+            )
+            fft_bin = finding.get("fft_bin")
+            classification = str(
+                finding.get("classification") or "unexpected signal"
+            ).replace("_", " ")
+            widespread = "yes" if finding.get("widespread") else "no"
+            harmonic_parts = []
+            if finding.get("oddball_harmonic") not in (None, ""):
+                harmonic_parts.append(
+                    f"oddball harmonic {finding.get('oddball_harmonic')}"
+                )
+            if finding.get("base_harmonic") not in (None, ""):
+                harmonic_parts.append(f"base harmonic {finding.get('base_harmonic')}")
+            harmonic_text = (
+                "; matched " + " / ".join(harmonic_parts)
+                if harmonic_parts
+                else "; no canonical harmonic match"
+            )
             append_row(
                 result,
-                "Localized raw spectral flag(s): "
-                + ", ".join(result.raw_spectral_flagged_channels[:8]),
+                f"Experimental raw-spectral signal: {scope}; "
+                f"{frequency:.3f} Hz / bin {fft_bin}; {classification}"
+                f"{harmonic_text}; {len(channels)} channel(s) "
+                f"({', '.join(channels)}); Legacy Hann-spectrum score "
+                f"{legacy_score:.3g}; local mean ratio {local_ratio:.3g}; "
+                f"local standardized score {local_score:.3g}; widespread {widespread}; "
+                f"method {finding.get('method_version') or '?'} / thresholds "
+                f"{finding.get('threshold_policy_version') or '?'}. Review only; "
+                "the default decision is retain and this check never changes data."
+                if None not in (frequency, legacy_score, local_ratio, local_score)
+                else f"Experimental raw-spectral signal: {scope}. Review only; "
+                "the default decision is retain and this check never changes data.",
+            )
+        if (
+            not result.raw_spectral_review_rows
+            and result.raw_spectral_flagged_channels
+        ):
+            append_row(
+                result,
+                "Legacy raw-spectral history: "
+                + ", ".join(result.raw_spectral_flagged_channels)
+                + ". Preserved for review only; it has no current exclusion "
+                "authority and does not change data.",
+            )
+        if result.raw_spectral_evaluation_status == "not_performed_disabled":
+            append_row(
+                result,
+                "Experimental raw-spectral review: Not performed (disabled in "
+                "project settings). No prior spectral flag is treated as current.",
+            )
+        elif result.raw_spectral_evaluation_status == "not_evaluated":
+            detail = result.raw_spectral_message or (
+                "No valid analyzed condition span was available."
+            )
+            append_row(
+                result,
+                "Experimental raw-spectral review: Not evaluated. " + detail,
             )
     return rows
 

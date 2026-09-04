@@ -40,12 +40,17 @@ _SESSION_COMPATIBILITY_NAMES = {"repeated_session_tool_block_reason"}
 _PROJECT_CONTEXT_NAMES = {"resolve_active_project_root"}
 _EXPERIMENTAL_QC_SETTINGS_NAMES = {
     "EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION",
+    "LEGACY_EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION",
+    "RAW_SPECTRAL_SCREENING_BRIEF_TEXT",
+    "RAW_SPECTRAL_SCREENING_POLICY_VERSION",
     "SUMMED_BCA_SCREENING_BRIEF_TEXT",
     "SUMMED_BCA_SCREENING_POLICY_VERSION",
     "ExperimentalQcSettings",
     "ExperimentalQcSettingsError",
+    "RawSpectralScreeningSettings",
     "SummedBcaScreeningSettings",
     "normalize_experimental_qc_settings",
+    "normalize_raw_spectral_screening_settings",
     "normalize_summed_bca_screening_settings",
 }
 _FREQUENCY_PROTOCOL_NAMES = {

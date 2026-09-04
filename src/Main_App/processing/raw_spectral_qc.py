@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
+import hashlib
+import json
 import math
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
@@ -10,19 +13,43 @@ import numpy as np
 
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
+    FFT_MULTINOTCH_METHOD_VERSION,
     SkippedNotchCenter,
     resolve_effective_centers,
 )
 from Main_App.processing.raw_channel_qc import SCALP_CHANNELS
+from Main_App.processing.spectral_eligibility import (
+    SpectralEligibilityResult,
+    SpectralTargetAvailability,
+    resolve_spectral_eligibility,
+)
+from Main_App.projects.experimental_qc_settings import (
+    RAW_SPECTRAL_SCREENING_POLICY_VERSION,
+    RawSpectralScreeningSettings,
+    normalize_raw_spectral_screening_settings,
+)
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    normalize_frequency_protocol,
+)
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 
 
-CONDITION_SPECTRAL_QC_METHOD_VERSION = "condition_onbin_spectral_qc_v2"
+CONDITION_SPECTRAL_QC_METHOD_VERSION = "condition_exact_bin_spectral_review_v3"
+LEGACY_CONDITION_SPECTRAL_QC_METHOD_VERSION = "condition_onbin_spectral_qc_v2"
 CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS = 12
 CONDITION_SPECTRAL_QC_NOISE_CANDIDATE_BINS = 22
 CONDITION_SPECTRAL_QC_NOISE_RETAINED_BINS = 20
 CONDITION_SPECTRAL_QC_FFT_BATCH_TARGET_BYTES = 64 * 1024 * 1024
 CONDITION_SPECTRAL_QC_MAX_CHANNELS_PER_FFT_BATCH = 8
+RAW_SPECTRAL_QC_DISABLED_STATUS = "not_performed_disabled"
+RAW_SPECTRAL_QC_NOT_EVALUATED_STATUS = "not_evaluated"
+RAW_SPECTRAL_QC_EVALUATED_STATUS = "evaluated"
+RAW_SPECTRAL_NOTCH_COLLISION_MESSAGE = (
+    "The configured line-noise filter affected this FPVS frequency. It is not "
+    "used in standard analysis; other valid frequencies remain available."
+)
 
 
 class ConditionSpectralQCCancelled(RuntimeError):
@@ -360,12 +387,29 @@ class ConditionSpectralQCThresholds:
     """
 
     min_frequency_hz: float = 0.5
-    min_peak_amplitude_uv: float = 250.0
+    min_legacy_hann_spectrum_score: float = 250.0
     min_local_ratio: float = 25.0
-    min_noise_z: float = 12.0
+    min_local_standardized_score: float = 12.0
     widespread_channel_fraction: float = 0.75
     widespread_min_channels: int = 48
-    harmonic_tolerance_hz: float = 0.08
+
+
+def condition_spectral_thresholds_from_project_settings(
+    value: RawSpectralScreeningSettings | Mapping[str, Any] | None,
+) -> ConditionSpectralQCThresholds:
+    """Translate the locked project record into the versioned scan thresholds."""
+
+    settings = normalize_raw_spectral_screening_settings(value)
+    return ConditionSpectralQCThresholds(
+        min_frequency_hz=settings.minimum_frequency_hz,
+        min_legacy_hann_spectrum_score=(
+            settings.minimum_legacy_hann_spectrum_score
+        ),
+        min_local_ratio=settings.minimum_local_mean_ratio,
+        min_local_standardized_score=settings.minimum_local_standardized_score,
+        widespread_channel_fraction=settings.widespread_channel_fraction,
+        widespread_min_channels=settings.widespread_min_channels,
+    )
 
 
 @dataclass(frozen=True)
@@ -375,9 +419,10 @@ class ConditionSpectralPeak:
     fft_bin: int
     frequency_hz: float
     channels: tuple[str, ...]
-    max_amplitude_uv: float
+    classification: str
+    max_legacy_hann_spectrum_score: float
     max_local_ratio: float
-    max_noise_z: float
+    max_local_standardized_score: float
     widespread: bool
     base_harmonic: int | None
     oddball_harmonic: int | None
@@ -387,10 +432,16 @@ class ConditionSpectralPeak:
         return {
             "fft_bin": self.fft_bin,
             "frequency_hz": self.frequency_hz,
+            "classification": self.classification,
             "channels": list(self.channels),
-            "max_amplitude_uv": self.max_amplitude_uv,
+            "channel_count": len(self.channels),
+            "max_legacy_hann_spectrum_score": (
+                self.max_legacy_hann_spectrum_score
+            ),
             "max_local_ratio": self.max_local_ratio,
-            "max_noise_z": self.max_noise_z,
+            "max_local_standardized_score": (
+                self.max_local_standardized_score
+            ),
             "widespread": self.widespread,
             "base_harmonic": self.base_harmonic,
             "oddball_harmonic": self.oddball_harmonic,
@@ -399,17 +450,78 @@ class ConditionSpectralPeak:
 
 
 @dataclass(frozen=True)
+class ConditionSpectralNotchCollision:
+    """One deterministic notch collision on the canonical project FFT grid."""
+
+    target_fft_bin: int
+    target_frequency_hz: float
+    oddball_harmonic: int
+    base_harmonic: int | None
+    target_notch_centers_hz: tuple[float, ...]
+    noise_bin_collisions: tuple[tuple[int, float, float], ...]
+    affected_channels: tuple[str, ...]
+
+    @property
+    def classification(self) -> str:
+        if self.target_notch_centers_hz and self.noise_bin_collisions:
+            return "fpvs_target_and_noise_bins_notched"
+        if self.target_notch_centers_hz:
+            return "fpvs_target_notched"
+        return "fpvs_noise_bin_notched"
+
+    @property
+    def standard_analysis_effect(self) -> str:
+        if self.target_notch_centers_hz:
+            return "target_and_standard_noise_metrics_unavailable"
+        return "standard_noise_metrics_unavailable"
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "target_fft_bin": self.target_fft_bin,
+            "target_frequency_hz": self.target_frequency_hz,
+            "oddball_harmonic": self.oddball_harmonic,
+            "base_harmonic": self.base_harmonic,
+            "target_notch_centers_hz": list(self.target_notch_centers_hz),
+            "noise_bin_collisions": [
+                {
+                    "fft_bin": fft_bin,
+                    "frequency_hz": frequency_hz,
+                    "notch_center_hz": notch_center_hz,
+                }
+                for fft_bin, frequency_hz, notch_center_hz in self.noise_bin_collisions
+            ],
+            "affected_channels": list(self.affected_channels),
+            "affected_channel_count": len(self.affected_channels),
+            "standard_analysis_effect": self.standard_analysis_effect,
+            "message": RAW_SPECTRAL_NOTCH_COLLISION_MESSAGE,
+            "user_override": False,
+        }
+
+
+@dataclass(frozen=True)
 class ConditionSpectralQCResult:
     """Versioned, review-only QC result for one condition occurrence."""
 
     method_version: str
+    threshold_policy_version: str
+    evaluation_status: str
     evaluated: bool
     review_only: bool
     message: str
     n_channels: int
+    scalp_channels: tuple[str, ...]
     n_samples: int
     sfreq: float
     fft_bin_spacing_hz: float
+    analyzed_duration_s: float
+    realized_oddball_cycles: int | None
+    presentation_rate_hz: float | None
+    oddball_rate_hz: float | None
+    frequency_protocol_fingerprint: str
+    spectral_eligibility_fingerprint: str
+    fixed_noise_neighborhood_half_width_hz: float
+    fixed_noise_neighborhood_total_span_hz: float
     requested_upper_frequency_hz: float
     evaluated_upper_frequency_hz: float | None
     amplitude_upper_frequency_hz: float | None
@@ -419,27 +531,61 @@ class ConditionSpectralQCResult:
     expected_harmonic_peaks: tuple[ConditionSpectralPeak, ...]
     notch_handled_peaks: tuple[ConditionSpectralPeak, ...]
     collision_peaks: tuple[ConditionSpectralPeak, ...]
+    notch_collisions: tuple[ConditionSpectralNotchCollision, ...]
+    targets_below_screen_boundary: tuple[dict[str, object], ...]
     unexpected_off_harmonic_flags: tuple[ConditionSpectralPeak, ...]
-    thresholds: Mapping[str, float | int]
+    thresholds: Mapping[str, object]
 
     @property
     def has_review_flags(self) -> bool:
-        """Return whether an unexpected off-harmonic peak needs review."""
+        """Return whether any ordinary-review evidence or limitation is visible."""
 
-        return bool(self.unexpected_off_harmonic_flags)
+        return bool(
+            self.unexpected_off_harmonic_flags
+            or self.notch_collisions
+            or self.targets_below_screen_boundary
+        )
 
-    def to_payload(self) -> dict[str, object]:
-        """Return a JSON-compatible result without any exclusion decision."""
+    @property
+    def evidence_fingerprint(self) -> str:
+        payload = self._payload()
+        return hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
 
+    def _payload(self) -> dict[str, object]:
         return {
             "method_version": self.method_version,
+            "threshold_policy_version": self.threshold_policy_version,
+            "evaluation_status": self.evaluation_status,
             "evaluated": self.evaluated,
             "review_only": self.review_only,
+            "default_scientific_decision": "retain",
             "message": self.message,
             "n_channels": self.n_channels,
+            "scalp_channels": list(self.scalp_channels),
             "n_samples": self.n_samples,
             "sfreq": self.sfreq,
             "fft_bin_spacing_hz": self.fft_bin_spacing_hz,
+            "analyzed_duration_s": self.analyzed_duration_s,
+            "realized_oddball_cycles": self.realized_oddball_cycles,
+            "presentation_rate_hz": self.presentation_rate_hz,
+            "oddball_rate_hz": self.oddball_rate_hz,
+            "frequency_protocol_fingerprint": self.frequency_protocol_fingerprint,
+            "spectral_eligibility_fingerprint": (
+                self.spectral_eligibility_fingerprint
+            ),
+            "fixed_noise_neighborhood_half_width_hz": (
+                self.fixed_noise_neighborhood_half_width_hz
+            ),
+            "fixed_noise_neighborhood_total_span_hz": (
+                self.fixed_noise_neighborhood_total_span_hz
+            ),
             "requested_upper_frequency_hz": self.requested_upper_frequency_hz,
             "evaluated_upper_frequency_hz": self.evaluated_upper_frequency_hz,
             "amplitude_upper_frequency_hz": self.amplitude_upper_frequency_hz,
@@ -456,6 +602,12 @@ class ConditionSpectralQCResult:
                 item.to_payload() for item in self.notch_handled_peaks
             ],
             "collision_peaks": [item.to_payload() for item in self.collision_peaks],
+            "notch_collisions": [
+                item.to_payload() for item in self.notch_collisions
+            ],
+            "targets_below_screen_boundary": [
+                dict(item) for item in self.targets_below_screen_boundary
+            ],
             "unexpected_off_harmonic_flags": [
                 item.to_payload() for item in self.unexpected_off_harmonic_flags
             ],
@@ -463,18 +615,33 @@ class ConditionSpectralQCResult:
             "thresholds": dict(self.thresholds),
         }
 
+    def to_payload(self) -> dict[str, object]:
+        """Return a JSON-compatible result without any exclusion decision."""
+
+        payload = self._payload()
+        payload["evidence_fingerprint"] = self.evidence_fingerprint
+        return payload
+
 
 def _condition_threshold_payload(
     thresholds: ConditionSpectralQCThresholds,
-) -> dict[str, float | int]:
+) -> dict[str, object]:
     return {
         "min_frequency_hz": thresholds.min_frequency_hz,
-        "min_peak_amplitude_uv": thresholds.min_peak_amplitude_uv,
+        "min_legacy_hann_spectrum_score": (
+            thresholds.min_legacy_hann_spectrum_score
+        ),
         "min_local_ratio": thresholds.min_local_ratio,
-        "min_noise_z": thresholds.min_noise_z,
+        "min_local_standardized_score": (
+            thresholds.min_local_standardized_score
+        ),
         "widespread_channel_fraction": thresholds.widespread_channel_fraction,
         "widespread_min_channels": thresholds.widespread_min_channels,
-        "harmonic_tolerance_hz": thresholds.harmonic_tolerance_hz,
+        "expected_peak_classification": "exact_canonical_fft_bin",
+        "legacy_harmonic_tolerance_hz": None,
+        "legacy_hann_spectrum_score_definition": (
+            "abs(rfft((x-median(x))*hann))*2e6/N; no Hann coherent-gain correction"
+        ),
         "noise_window_bins": CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS,
         "noise_candidate_bins": CONDITION_SPECTRAL_QC_NOISE_CANDIDATE_BINS,
         "noise_retained_bins": CONDITION_SPECTRAL_QC_NOISE_RETAINED_BINS,
@@ -506,22 +673,6 @@ def _optional_float_setting(settings: Mapping[str, Any], key: str) -> float | No
     return number
 
 
-def _harmonic_number(
-    frequency: float,
-    *,
-    fundamental: float,
-    tolerance_hz: float,
-) -> int | None:
-    if not math.isfinite(fundamental) or fundamental <= 0.0:
-        return None
-    harmonic = int(round(frequency / fundamental))
-    if harmonic <= 0:
-        return None
-    if abs(frequency - harmonic * fundamental) > tolerance_hz:
-        return None
-    return harmonic
-
-
 def _condition_empty_result(
     *,
     message: str,
@@ -534,16 +685,41 @@ def _condition_empty_result(
     effective_notch_centers_hz: tuple[float, ...],
     skipped_notch_centers: tuple[SkippedNotchCenter, ...],
     thresholds: ConditionSpectralQCThresholds,
+    threshold_policy_version: str = RAW_SPECTRAL_SCREENING_POLICY_VERSION,
+    evaluation_status: str = RAW_SPECTRAL_QC_NOT_EVALUATED_STATUS,
+    realized_oddball_cycles: int | None = None,
+    frequency_protocol_fingerprint: str = "",
+    spectral_eligibility_fingerprint: str = "",
+    presentation_rate_hz: float | None = None,
+    oddball_rate_hz: float | None = None,
+    scalp_channels: tuple[str, ...] = (),
+    notch_collisions: tuple[ConditionSpectralNotchCollision, ...] = (),
+    targets_below_screen_boundary: tuple[dict[str, object], ...] = (),
 ) -> ConditionSpectralQCResult:
     return ConditionSpectralQCResult(
         method_version=CONDITION_SPECTRAL_QC_METHOD_VERSION,
+        threshold_policy_version=threshold_policy_version,
+        evaluation_status=evaluation_status,
         evaluated=False,
         review_only=True,
         message=message,
         n_channels=n_channels,
+        scalp_channels=scalp_channels,
         n_samples=n_samples,
         sfreq=sfreq,
         fft_bin_spacing_hz=fft_bin_spacing_hz,
+        analyzed_duration_s=(n_samples / sfreq if sfreq > 0.0 else 0.0),
+        realized_oddball_cycles=realized_oddball_cycles,
+        presentation_rate_hz=presentation_rate_hz,
+        oddball_rate_hz=oddball_rate_hz,
+        frequency_protocol_fingerprint=frequency_protocol_fingerprint,
+        spectral_eligibility_fingerprint=spectral_eligibility_fingerprint,
+        fixed_noise_neighborhood_half_width_hz=(
+            CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS * fft_bin_spacing_hz
+        ),
+        fixed_noise_neighborhood_total_span_hz=(
+            2 * CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS * fft_bin_spacing_hz
+        ),
         requested_upper_frequency_hz=requested_upper_frequency_hz,
         evaluated_upper_frequency_hz=None,
         amplitude_upper_frequency_hz=None,
@@ -553,6 +729,8 @@ def _condition_empty_result(
         expected_harmonic_peaks=(),
         notch_handled_peaks=(),
         collision_peaks=(),
+        notch_collisions=notch_collisions,
+        targets_below_screen_boundary=targets_below_screen_boundary,
         unexpected_off_harmonic_flags=(),
         thresholds=_condition_threshold_payload(thresholds),
     )
@@ -578,13 +756,118 @@ def _configured_notch_centers(
     )
 
 
+def _condition_frequency_protocol(settings: Mapping[str, Any]) -> FrequencyProtocol:
+    raw_protocol = settings.get("frequency_protocol")
+    if raw_protocol is None:
+        analysis = settings.get("analysis")
+        if isinstance(analysis, Mapping):
+            raw_protocol = analysis.get("frequency_protocol")
+    if raw_protocol is None:
+        raise FrequencyProtocolError(
+            "Raw-spectral review requires the canonical project frequency protocol; "
+            "legacy 6/1.2-Hz fallback is disabled."
+        )
+    protocol = normalize_frequency_protocol(raw_protocol)
+    if not protocol.is_ready:
+        raise FrequencyProtocolError(
+            "Raw-spectral review requires a ready project frequency protocol."
+        )
+    return protocol
+
+
+def _resolve_condition_eligibility(
+    *,
+    protocol: FrequencyProtocol,
+    settings: Mapping[str, Any],
+    sample_rate: float,
+    n_samples: int,
+    effective_upper_frequency_hz: float,
+    effective_notches: Sequence[float],
+) -> SpectralEligibilityResult:
+    nyquist = sample_rate / 2.0
+    configured_low = _optional_float_setting(settings, "low_pass")
+    filter_upper = min(
+        configured_low if configured_low is not None else nyquist,
+        effective_upper_frequency_hz,
+        nyquist,
+    )
+    configured_high = _optional_float_setting(settings, "high_pass")
+    filter_lower = configured_high if configured_high is not None else 0.0
+    return resolve_spectral_eligibility(
+        protocol=protocol,
+        sampling_rate_hz=sample_rate,
+        analyzed_samples=n_samples,
+        requested_high_pass_hz=(configured_high if configured_high is not None else None),
+        requested_low_pass_hz=filter_upper,
+        applied_high_pass_hz=filter_lower,
+        applied_low_pass_hz=filter_upper,
+        applied_notch_centers_hz=effective_notches,
+        notch_half_width_hz=FFT_MULTINOTCH_HALF_WIDTH_HZ,
+        notch_method_version=FFT_MULTINOTCH_METHOD_VERSION,
+    )
+
+
+def _notch_collision_evidence(
+    eligibility: SpectralEligibilityResult,
+    *,
+    channel_names: tuple[str, ...],
+) -> tuple[ConditionSpectralNotchCollision, ...]:
+    collisions: list[ConditionSpectralNotchCollision] = []
+    for availability in eligibility.targets:
+        if not (
+            availability.target_notch_centers_hz
+            or availability.noise_notch_collisions
+        ):
+            continue
+        collisions.append(
+            ConditionSpectralNotchCollision(
+                target_fft_bin=availability.target_bin_index,
+                target_frequency_hz=float(availability.target.frequency_hz),
+                oddball_harmonic=availability.target.oddball_harmonic_order,
+                base_harmonic=availability.target.presentation_harmonic_order,
+                target_notch_centers_hz=tuple(
+                    float(value) for value in availability.target_notch_centers_hz
+                ),
+                noise_bin_collisions=tuple(
+                    (
+                        fft_bin,
+                        float(Fraction(fft_bin) * eligibility.bin_width_hz),
+                        float(center),
+                    )
+                    for fft_bin, center in availability.noise_notch_collisions
+                ),
+                affected_channels=channel_names,
+            )
+        )
+    return tuple(collisions)
+
+
+def _targets_below_screen_boundary(
+    eligibility: SpectralEligibilityResult,
+    *,
+    minimum_frequency_hz: float,
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            "classification": "canonical_target_below_experimental_screen_boundary",
+            "evaluation_status": RAW_SPECTRAL_QC_NOT_EVALUATED_STATUS,
+            "reason": "below_locked_0_5_hz_screen_boundary",
+            "fft_bin": item.target_bin_index,
+            "frequency_hz": float(item.target.frequency_hz),
+            "oddball_harmonic": item.target.oddball_harmonic_order,
+            "base_harmonic": item.target.presentation_harmonic_order,
+        }
+        for item in eligibility.targets
+        if float(item.target.frequency_hz) < minimum_frequency_hz
+    )
+
+
 def _group_condition_peaks(
     candidates: Mapping[int, Sequence[tuple[str, float, float, float]]],
     *,
     frequencies: np.ndarray,
     n_channels: int,
-    base_freq: float,
-    oddball_freq: float,
+    canonical_targets_by_bin: Mapping[int, SpectralTargetAvailability],
     effective_notch_centers_hz: tuple[float, ...],
     thresholds: ConditionSpectralQCThresholds,
 ) -> tuple[
@@ -604,34 +887,44 @@ def _group_condition_peaks(
     for fft_bin in sorted(candidates):
         rows = candidates[fft_bin]
         frequency = float(frequencies[fft_bin])
-        base_harmonic = _harmonic_number(
-            frequency,
-            fundamental=base_freq,
-            tolerance_hz=thresholds.harmonic_tolerance_hz,
+        matched_target = canonical_targets_by_bin.get(fft_bin)
+        base_harmonic = (
+            matched_target.target.presentation_harmonic_order
+            if matched_target is not None
+            else None
         )
-        oddball_harmonic = _harmonic_number(
-            frequency,
-            fundamental=oddball_freq,
-            tolerance_hz=thresholds.harmonic_tolerance_hz,
+        oddball_harmonic = (
+            matched_target.target.oddball_harmonic_order
+            if matched_target is not None
+            else None
         )
         notch_centers = tuple(
             center
             for center in effective_notch_centers_hz
             if abs(frequency - center) < FFT_MULTINOTCH_HALF_WIDTH_HZ
         )
+        is_expected = matched_target is not None
+        if is_expected and notch_centers:
+            classification = "expected_fpvs_target_notched"
+        elif is_expected:
+            classification = "expected_fpvs_target"
+        elif notch_centers:
+            classification = "configured_notch_associated"
+        else:
+            classification = "unexpected_narrow_frequency_signal"
         peak = ConditionSpectralPeak(
             fft_bin=fft_bin,
             frequency_hz=frequency,
+            classification=classification,
             channels=tuple(sorted(row[0] for row in rows)),
-            max_amplitude_uv=max(float(row[1]) for row in rows),
+            max_legacy_hann_spectrum_score=max(float(row[1]) for row in rows),
             max_local_ratio=max(float(row[2]) for row in rows),
-            max_noise_z=max(float(row[3]) for row in rows),
+            max_local_standardized_score=max(float(row[3]) for row in rows),
             widespread=len(rows) >= min_widespread,
             base_harmonic=base_harmonic,
             oddball_harmonic=oddball_harmonic,
             matched_notch_centers_hz=notch_centers,
         )
-        is_expected = base_harmonic is not None or oddball_harmonic is not None
         if is_expected and notch_centers:
             collisions.append(peak)
         elif is_expected:
@@ -737,7 +1030,24 @@ def evaluate_condition_spectral_qc_v2(
     is checked before and after each FFT batch.
     """
 
-    thresholds = thresholds or ConditionSpectralQCThresholds()
+    raw_screening_value = settings.get("raw_spectral_screening")
+    raw_screening = normalize_raw_spectral_screening_settings(raw_screening_value)
+    locked_thresholds = condition_spectral_thresholds_from_project_settings(
+        raw_screening
+    )
+    if thresholds is not None and thresholds != locked_thresholds:
+        raise ValueError(
+            "Current raw-spectral thresholds are locked to the project policy "
+            f"version {raw_screening.policy_version}."
+        )
+    thresholds = locked_thresholds
+    protocol: FrequencyProtocol | None
+    try:
+        protocol = _condition_frequency_protocol(settings)
+    except FrequencyProtocolError:
+        if raw_screening.enabled:
+            raise
+        protocol = None
     try:
         sample_rate = float(sfreq)
         requested_upper = float(effective_upper_frequency_hz)
@@ -766,6 +1076,41 @@ def evaluate_condition_spectral_qc_v2(
         sfreq=sample_rate,
     )
     spacing = sample_rate / n_samples if n_samples > 0 else 0.0
+    if not raw_screening.enabled:
+        return _condition_empty_result(
+            message=(
+                f"Experimental raw-spectral review was not performed for "
+                f"{condition_label} because it is disabled in project settings."
+            ),
+            n_channels=n_channels,
+            n_samples=n_samples,
+            sfreq=sample_rate,
+            requested_upper_frequency_hz=requested_upper,
+            fft_bin_spacing_hz=spacing,
+            requested_notch_centers_hz=requested_notches,
+            effective_notch_centers_hz=effective_notches,
+            skipped_notch_centers=skipped_notches,
+            thresholds=thresholds,
+            evaluation_status=RAW_SPECTRAL_QC_DISABLED_STATUS,
+            frequency_protocol_fingerprint=(
+                protocol.fingerprint if protocol is not None else ""
+            ),
+            presentation_rate_hz=(
+                float(protocol.presentation_rate_hz)
+                if protocol is not None
+                else None
+            ),
+            oddball_rate_hz=(
+                float(protocol.oddball_rate_hz)
+                if protocol is not None
+                else None
+            ),
+            scalp_channels=names,
+        )
+    if protocol is None:  # Defensive: enabled mode raises while resolving it above.
+        raise FrequencyProtocolError(
+            "Raw-spectral review requires a ready project frequency protocol."
+        )
     if n_channels == 0 or n_samples <= 2 * CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS:
         return _condition_empty_result(
             message=f"Condition spectral QC skipped for {condition_label}: not enough EEG samples.",
@@ -778,10 +1123,33 @@ def evaluate_condition_spectral_qc_v2(
             effective_notch_centers_hz=effective_notches,
             skipped_notch_centers=skipped_notches,
             thresholds=thresholds,
+            frequency_protocol_fingerprint=protocol.fingerprint,
+            presentation_rate_hz=float(protocol.presentation_rate_hz),
+            oddball_rate_hz=float(protocol.oddball_rate_hz),
+            scalp_channels=names,
         )
 
     window = np.hanning(n_samples).astype(np.float64, copy=False)
     all_frequencies = np.fft.rfftfreq(n_samples, d=1.0 / sample_rate)
+    eligibility = _resolve_condition_eligibility(
+        protocol=protocol,
+        settings=settings,
+        sample_rate=sample_rate,
+        n_samples=n_samples,
+        effective_upper_frequency_hz=requested_upper,
+        effective_notches=effective_notches,
+    )
+    canonical_targets_by_bin = {
+        item.target_bin_index: item for item in eligibility.targets
+    }
+    notch_collisions = _notch_collision_evidence(
+        eligibility,
+        channel_names=names,
+    )
+    below_boundary = _targets_below_screen_boundary(
+        eligibility,
+        minimum_frequency_hz=thresholds.min_frequency_hz,
+    )
 
     physical_upper = min(requested_upper, float(all_frequencies[-1]))
     requested_last_bin = int(
@@ -792,8 +1160,13 @@ def evaluate_condition_spectral_qc_v2(
         requested_last_bin + CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS,
     )
     frequencies = all_frequencies[: amplitude_last_bin + 1]
+    configured_high_pass = _optional_float_setting(settings, "high_pass")
+    evaluated_lower = max(
+        thresholds.min_frequency_hz,
+        configured_high_pass if configured_high_pass is not None else 0.0,
+    )
     candidate_indices = np.flatnonzero(
-        (frequencies >= thresholds.min_frequency_hz)
+        (frequencies >= evaluated_lower)
         & (frequencies <= physical_upper)
     )
     candidate_indices = candidate_indices[
@@ -818,6 +1191,14 @@ def evaluate_condition_spectral_qc_v2(
             effective_notch_centers_hz=effective_notches,
             skipped_notch_centers=skipped_notches,
             thresholds=thresholds,
+            realized_oddball_cycles=eligibility.realized_oddball_cycles,
+            frequency_protocol_fingerprint=protocol.fingerprint,
+            spectral_eligibility_fingerprint=eligibility.fingerprint,
+            notch_collisions=notch_collisions,
+            targets_below_screen_boundary=below_boundary,
+            presentation_rate_hz=float(protocol.presentation_rate_hz),
+            oddball_rate_hz=float(protocol.oddball_rate_hz),
+            scalp_channels=names,
         )
 
     grouped: dict[int, list[tuple[str, float, float, float]]] = {}
@@ -830,7 +1211,10 @@ def evaluate_condition_spectral_qc_v2(
         for batch_row, row in enumerate(batch_amplitudes_uv):
             channel_name = names[batch_start + batch_row]
             indices = candidate_indices[
-                (row[candidate_indices] >= thresholds.min_peak_amplitude_uv)
+                (
+                    row[candidate_indices]
+                    >= thresholds.min_legacy_hann_spectrum_score
+                )
                 & (row[candidate_indices] >= row[candidate_indices - 1])
                 & (row[candidate_indices] >= row[candidate_indices + 1])
             ]
@@ -842,38 +1226,38 @@ def evaluate_condition_spectral_qc_v2(
                     window_size=CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS,
                     min_bins=CONDITION_SPECTRAL_QC_NOISE_CANDIDATE_BINS,
                 )
-                amplitude = float(row[fft_bin])
+                legacy_hann_score = float(row[fft_bin])
                 if noise_mean <= 0.0 or not math.isfinite(noise_mean):
                     continue
-                ratio = amplitude / noise_mean
+                ratio = legacy_hann_score / noise_mean
                 if noise_std > 0.0 and math.isfinite(noise_std):
-                    noise_z = (amplitude - noise_mean) / noise_std
-                elif amplitude > noise_mean:
-                    noise_z = float(np.finfo(np.float64).max)
+                    local_standardized_score = (
+                        legacy_hann_score - noise_mean
+                    ) / noise_std
+                elif legacy_hann_score > noise_mean:
+                    local_standardized_score = float(np.finfo(np.float64).max)
                 else:
-                    noise_z = 0.0
-                if ratio < thresholds.min_local_ratio or noise_z < thresholds.min_noise_z:
+                    local_standardized_score = 0.0
+                if (
+                    ratio < thresholds.min_local_ratio
+                    or local_standardized_score
+                    < thresholds.min_local_standardized_score
+                ):
                     continue
                 grouped.setdefault(fft_bin, []).append(
-                    (channel_name, amplitude, ratio, noise_z)
+                    (
+                        channel_name,
+                        legacy_hann_score,
+                        ratio,
+                        local_standardized_score,
+                    )
                 )
 
     expected, notch_handled, collisions, unexpected = _group_condition_peaks(
         grouped,
         frequencies=frequencies,
         n_channels=n_channels,
-        base_freq=_float_setting(settings, "base_freq", 6.0),
-        oddball_freq=_float_setting(
-            settings,
-            "oddball_freq",
-            _float_setting(
-                settings.get("analysis", {})
-                if isinstance(settings.get("analysis"), Mapping)
-                else {},
-                "oddball_freq",
-                1.2,
-            ),
-        ),
+        canonical_targets_by_bin=canonical_targets_by_bin,
         effective_notch_centers_hz=effective_notches,
         thresholds=thresholds,
     )
@@ -881,23 +1265,43 @@ def evaluate_condition_spectral_qc_v2(
     amplitude_upper = float(frequencies[-1])
     if unexpected:
         message = (
-            f"Condition spectral QC found {len(unexpected)} unexpected off-harmonic "
-            f"peak(s) for review in {condition_label}."
+            f"Experimental raw-spectral review found {len(unexpected)} unexpected "
+            f"narrow-frequency signal(s) in {condition_label}."
+        )
+    elif notch_collisions:
+        message = (
+            f"Experimental raw-spectral review found {len(notch_collisions)} "
+            f"configured line-noise/FPVS collision(s) in {condition_label}."
         )
     else:
         message = (
-            f"Condition spectral QC passed for {condition_label}: no unexpected "
-            "off-harmonic peaks require review."
+            f"Experimental raw-spectral review found no unexpected "
+            f"narrow-frequency signals in {condition_label}."
         )
     return ConditionSpectralQCResult(
         method_version=CONDITION_SPECTRAL_QC_METHOD_VERSION,
+        threshold_policy_version=raw_screening.policy_version,
+        evaluation_status=RAW_SPECTRAL_QC_EVALUATED_STATUS,
         evaluated=True,
         review_only=True,
         message=message,
         n_channels=n_channels,
+        scalp_channels=names,
         n_samples=n_samples,
         sfreq=sample_rate,
         fft_bin_spacing_hz=spacing,
+        analyzed_duration_s=n_samples / sample_rate,
+        realized_oddball_cycles=eligibility.realized_oddball_cycles,
+        presentation_rate_hz=float(protocol.presentation_rate_hz),
+        oddball_rate_hz=float(protocol.oddball_rate_hz),
+        frequency_protocol_fingerprint=protocol.fingerprint,
+        spectral_eligibility_fingerprint=eligibility.fingerprint,
+        fixed_noise_neighborhood_half_width_hz=(
+            CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS * spacing
+        ),
+        fixed_noise_neighborhood_total_span_hz=(
+            2 * CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS * spacing
+        ),
         requested_upper_frequency_hz=requested_upper,
         evaluated_upper_frequency_hz=evaluated_upper,
         amplitude_upper_frequency_hz=amplitude_upper,
@@ -907,6 +1311,8 @@ def evaluate_condition_spectral_qc_v2(
         expected_harmonic_peaks=expected,
         notch_handled_peaks=notch_handled,
         collision_peaks=collisions,
+        notch_collisions=notch_collisions,
+        targets_below_screen_boundary=below_boundary,
         unexpected_off_harmonic_flags=unexpected,
         thresholds=_condition_threshold_payload(thresholds),
     )
@@ -919,12 +1325,18 @@ __all__ = [
     "CONDITION_SPECTRAL_QC_NOISE_CANDIDATE_BINS",
     "CONDITION_SPECTRAL_QC_NOISE_RETAINED_BINS",
     "CONDITION_SPECTRAL_QC_NOISE_WINDOW_BINS",
+    "RAW_SPECTRAL_QC_DISABLED_STATUS",
+    "RAW_SPECTRAL_QC_EVALUATED_STATUS",
+    "RAW_SPECTRAL_QC_NOT_EVALUATED_STATUS",
+    "RAW_SPECTRAL_NOTCH_COLLISION_MESSAGE",
+    "ConditionSpectralNotchCollision",
     "ConditionSpectralPeak",
     "ConditionSpectralQCCancelled",
     "ConditionSpectralQCResult",
     "ConditionSpectralQCThresholds",
     "RawSpectralQCResult",
     "RawSpectralQCThresholds",
+    "condition_spectral_thresholds_from_project_settings",
     "evaluate_condition_spectral_qc_v2",
     "evaluate_raw_spectral_qc",
 ]

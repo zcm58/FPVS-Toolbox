@@ -522,6 +522,9 @@ def build_validated_params(host: Any) -> dict | None:
         return None
 
     normalized = normalize_preprocessing_settings(host.currentProject.preprocessing)
+    raw_spectral_screening = (
+        host.currentProject.experimental_qc_settings.raw_spectral_screening
+    )
     try:
         require_removed_electrode_detection_choice_ready(normalized)
     except RemovedElectrodeDetectionConfirmationRequired as exc:
@@ -656,6 +659,7 @@ def build_validated_params(host: Any) -> dict | None:
             "frequency_protocol": frequency_protocol.to_manifest(),
             "frequency_protocol_fingerprint": frequency_protocol.fingerprint,
         },
+        "raw_spectral_screening": raw_spectral_screening.to_manifest(),
     }
     logger.debug(
         "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "

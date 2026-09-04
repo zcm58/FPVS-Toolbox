@@ -350,8 +350,17 @@ this raw-processing reset and retain their normal fingerprint invalidation.
 `src/Main_App/processing/preflight_qc_plan.py` owns the condition/event plan,
 and `src/Main_App/processing/preflight_qc_cache.py` owns the GUI-neutral cache
 primitive. `raw_channel_qc.py` and `raw_spectral_qc.py` retain their existing v1
-APIs alongside their versioned condition-aware evaluators. Output ordering must
-remain deterministic for reporting.
+APIs alongside their versioned condition-aware evaluators. Current raw-spectral
+review is project-owned, experimental, On by default, and review-only. Off is
+recorded as `not_performed_disabled` and cannot reuse an earlier flag as current
+evidence. The v3 evaluator classifies peaks only by the canonical project FFT-bin
+grid from `spectral_eligibility.py`; the historical 0.08-Hz approximation remains
+legacy provenance. It records the legacy Hann-spectrum score (which omits Hann
+coherent-gain correction), local mean ratio, local standardized score, analyzed
+duration/cycles, scalp channels, and exact condition/occurrence scope. It also
+reports every configured target- or QC-14-noise-bin notch collision even when no
+peak crosses a screening threshold. These findings never repair or remove data.
+Output ordering must remain deterministic for reporting.
 For grouped projects, `HeaderOnlyPreflight` and `PreflightQcFileResult` retain
 the canonical `group_id` from `RawFileInfo`. The GUI resolves that ID through
 `ProjectGroupContext` and shows the configured group label in live scan status,

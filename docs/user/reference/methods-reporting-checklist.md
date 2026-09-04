@@ -107,6 +107,22 @@ testing, or another specialized estimand.
   and therefore affects every retained condition in that recording. Report the
   attempted, successful, and failed interpolation sets; calculate burden from
   successful repairs only.
+- Report whether experimental raw-spectral review was enabled, disabled, or
+  unavailable, with its method and threshold-policy versions. Include the exact
+  project rates, analyzed duration/cycles, FFT-bin width, fixed +/-12-bin
+  neighborhood and its realized Hz width, filter settings, requested/effective
+  notch centers, and BioSemi64 channel set.
+- Call the amplitude a **Legacy Hann-spectrum score**: its `2/N` scaling omits
+  Hann coherent-gain correction and is not a correctly normalized physical uV
+  amplitude. Report the provisional 250 score, 25 local-mean ratio, 12 local
+  standardized score, and 75%/48-channel widespread criteria as screening
+  thresholds, not validated biological cutoffs, z-test probabilities, or proof
+  of artifact.
+- Preserve condition/occurrence/channel/frequency evidence and exact-bin FPVS,
+  ordinary notch-associated, unexpected, and notch-collision classifications.
+  A configured target or required QC-14 noise-bin collision makes the affected
+  standard metric unavailable without excluding its recording-condition; the
+  experimental screen itself never changes data or cohort membership.
 
 ### Summed BCA and selection provenance
 

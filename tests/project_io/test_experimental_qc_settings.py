@@ -16,11 +16,14 @@ from Main_App.projects import (
     REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
     REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED,
     REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY,
+    RAW_SPECTRAL_SCREENING_BRIEF_TEXT,
+    RAW_SPECTRAL_SCREENING_POLICY_VERSION,
     SUMMED_BCA_SCREENING_POLICY_VERSION,
     SUMMED_BCA_SCREENING_BRIEF_TEXT,
     ExperimentalQcSettings,
     ExperimentalQcSettingsError,
     RemovedElectrodeDetectionConfirmationRequired,
+    RawSpectralScreeningSettings,
     SummedBcaScreeningSettings,
     normalize_experimental_qc_settings,
     normalize_preprocessing_settings,
@@ -80,6 +83,31 @@ def test_summed_bca_screening_defaults_are_versioned_and_review_only() -> None:
     )
 
 
+def test_raw_spectral_screening_defaults_are_locked_on_and_review_only() -> None:
+    screening = ExperimentalQcSettings().raw_spectral_screening
+
+    assert screening == RawSpectralScreeningSettings()
+    assert screening.enabled is True
+    assert screening.policy_version == RAW_SPECTRAL_SCREENING_POLICY_VERSION
+    assert screening.minimum_frequency_hz == 0.5
+    assert screening.minimum_legacy_hann_spectrum_score == 250.0
+    assert screening.minimum_local_mean_ratio == 25.0
+    assert screening.minimum_local_standardized_score == 12.0
+    assert screening.widespread_channel_fraction == 0.75
+    assert screening.widespread_min_channels == 48
+    assert screening.notch_half_width_hz == 0.5
+    assert (
+        screening.noise_window_bins,
+        screening.noise_candidate_bins,
+        screening.noise_retained_bins,
+    ) == (12, 22, 20)
+    assert RAW_SPECTRAL_SCREENING_BRIEF_TEXT == (
+        "Experimental. Flags unusually large narrow-frequency signals in each "
+        "analyzed condition for review. Thresholds are provisional, and this "
+        "check never removes data automatically."
+    )
+
+
 def test_experimental_qc_settings_normalize_and_round_trip() -> None:
     original = normalize_experimental_qc_settings(
         {
@@ -99,12 +127,17 @@ def test_experimental_qc_settings_normalize_and_round_trip() -> None:
                 "cohort_warning_peak_floor_uv": 1.5,
                 "cohort_extreme_peak_floor_uv": 3,
             },
+            "raw_spectral_screening": {
+                **RawSpectralScreeningSettings().to_manifest(),
+                "enabled": "false",
+            },
         }
     )
 
     assert original.summed_bca_screening.enabled is False
     assert original.summed_bca_screening.warning_summed_bca_uv == 12.5
     assert original.summed_bca_screening.concentrated_review_flagged_cells == 6
+    assert original.raw_spectral_screening.enabled is False
     assert normalize_experimental_qc_settings(original.to_manifest()) == original
 
 
@@ -113,6 +146,37 @@ def test_experimental_qc_settings_reject_unknown_schema_or_policy_versions() -> 
         ExperimentalQcSettings(schema_version="99.0.0")
     with pytest.raises(ExperimentalQcSettingsError, match="policy version"):
         SummedBcaScreeningSettings(policy_version="99.0.0")
+    with pytest.raises(ExperimentalQcSettingsError, match="policy version"):
+        RawSpectralScreeningSettings(policy_version="99.0.0")
+
+
+def test_legacy_experimental_qc_manifest_migrates_raw_spectral_screen_on() -> None:
+    legacy = normalize_experimental_qc_settings(
+        {
+            "schema_version": "1.0.0",
+            "summed_bca_screening": SummedBcaScreeningSettings().to_manifest(),
+        }
+    )
+
+    assert legacy.schema_version == EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION
+    assert legacy.raw_spectral_screening.enabled is True
+    assert legacy.to_manifest()["raw_spectral_screening"] == (
+        RawSpectralScreeningSettings().to_manifest()
+    )
+
+
+def test_raw_spectral_policy_rejects_unversioned_threshold_edits() -> None:
+    payload = RawSpectralScreeningSettings().to_manifest()
+    payload["minimum_local_mean_ratio"] = 24.0
+
+    with pytest.raises(ExperimentalQcSettingsError, match="locked value"):
+        RawSpectralScreeningSettings.from_manifest(payload)
+
+    payload = RawSpectralScreeningSettings().to_manifest()
+    payload["noise_window_bins"] = 12.5
+
+    with pytest.raises(ExperimentalQcSettingsError, match="locked value"):
+        RawSpectralScreeningSettings.from_manifest(payload)
 
 
 @pytest.mark.parametrize(
