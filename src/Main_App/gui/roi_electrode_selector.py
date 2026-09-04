@@ -90,7 +90,7 @@ class ElectrodeMapWidget(QWidget):
         self._active_roi_label = "active ROI"
         self.electrode_buttons: dict[str, QToolButton] = {}
         self.setObjectName("roi_electrode_map")
-        self.setMinimumSize(500, 425)
+        self.setMinimumSize(600, 550)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         for label in BIOSEMI64_LABELS:
@@ -107,7 +107,7 @@ class ElectrodeMapWidget(QWidget):
             self._update_button_presentation(label)
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
-        return QSize(620, 520)
+        return QSize(720, 620)
 
     def _transform(self) -> tuple[float, float, float]:
         scale = min(self.width() / 640, self.height() / 590)
@@ -116,7 +116,7 @@ class ElectrodeMapWidget(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
         scale, left, top = self._transform()
-        diameter = max(28, round(34 * scale))
+        diameter = max(36, round(36 * scale))
         for label, button in self.electrode_buttons.items():
             x, y = self._positions[label]
             button.setGeometry(
@@ -253,7 +253,7 @@ class ElectrodeMapWidget(QWidget):
         painter.setPen(QColor(TEXT_SECONDARY))
         for text, rect in (
             ("FRONT", QRectF(260, 21, 120, 24)),
-            ("BACK", QRectF(260, 560, 120, 24)),
+            ("BACK", QRectF(260, 570, 120, 18)),
             ("LEFT", QRectF(12, 288, 70, 24)),
             ("RIGHT", QRectF(558, 288, 70, 24)),
         ):

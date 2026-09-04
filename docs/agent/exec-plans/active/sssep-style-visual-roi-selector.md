@@ -12,9 +12,13 @@ A same-branch follow-up now supersedes the first implementation's page design.
 The ROIs tab is now visual-first: the interactive scalp map is embedded on the
 left and an ordered, color-coded list of named ROIs is embedded on the right.
 The prior comma-list front page, per-row **Select...** actions, separate modal,
-and **Quick Add** card are no longer the user workflow. Follow-up implementation
-and locally safe focused verification are complete. Registered Qt execution and
-the visible installed-application smoke remain pending under repository policy.
+and **Quick Add** card are no longer the user workflow. Commit `4f46b4bc`
+established that embedded surface. The current refinement removes its enclosing
+card, montage/preset toolbar, visible count/heading rows, and redundant project-
+root action; labels the fixed map **BioSemi 64**; enlarges its hit targets; and
+makes LOT, ROT, and Central protected built-in draft rows. Registered Qt
+execution and the visible installed-application smoke remain pending under
+repository policy.
 
 Planning baselines:
 
@@ -31,6 +35,7 @@ Replace the contents of **Settings > ROIs** with one embedded visual editor:
 
 - a scalable, nose-up BioSemi64 scalp map on the left;
 - an ordered list of named ROIs on the right;
+- protected, membership-editable LOT, ROT, and Central built-ins;
 - one presentation-only color per ROI;
 - segmented color rings on an electrode when it belongs to multiple ROIs;
 - direct pointer and keyboard toggling for the active ROI;
@@ -50,14 +55,16 @@ workbook or plot-output contract.
 | --- | --- |
 | First implementation | Commit `8d84b216` added a map in a row-scoped modal while retaining text rows and Quick Add. Its map, ordered state, tests, and consumer-refresh work are the follow-up baseline. |
 | Follow-up surface | Embed the map as the primary ROI-tab surface; remove the visible comma-list editor, row selector buttons, modal workflow, and separate Quick Add card. |
-| Page layout | One top-level ROI section with a map-left/list-right split. A content-native scroll area may be used for the ROI list, but the Settings page must not become page-scrollable. |
+| Page layout | One flat map-left/list-right split with no ROI `SectionCard`. A content-native scroll area may be used for the ROI list, but the Settings page must not become page-scrollable. |
 | Active ROI | Selecting a row on the right makes that ROI active. A map toggle changes only that ROI and never removes the electrode from another ROI. |
 | Overlap visualization | Draw separate ordered color-ring segments for every ROI containing an electrode. Do not blend colors, warn against overlap, or enforce exclusivity. |
 | Color persistence | Colors and internal row identities are presentation-only and deterministic within the editor. They are never written to `SettingsManager`. |
 | Text editing | Keep text entry for the ROI name only. Electrode membership is edited on the map. Existing noncanonical labels appear as individual retained occurrences with explicit removal controls, not as a comma field. |
-| Presets | Keep the exact FPVS montage-aware LOT, ROT, Central, and custom preset sources in a compact toolbar. Do not copy SSSEP preset memberships. |
+| Built-ins | Always materialize LOT, ROT, and Central in the editor draft from the exact shared FPVS catalog when missing. Protect their names and rows, but keep electrode membership editable. |
 | Canonical storage | Keep `SettingsManager` and the existing `[rois]` / `[roi_presets]` INI schema. No project-metadata or color-schema additions. |
-| Save boundary | All map, name, preset, add, and remove operations edit the current Settings draft. Outer Settings **Cancel** discards them; outer **Save** commits them. |
+| Dormant preset compatibility | Remove preset controls from the ROI screen. Preserve existing `[roi_presets]` data and APIs without loading or rewriting them from Settings. |
+| Save boundary | All map, name, add, and remove operations edit the current Settings draft. Outer Settings **Cancel** discards them; outer **Save** commits them. |
+| Projects root | Show **Change Projects Root...** only in Advanced, not in the ROI or other Settings footers. |
 | Downstream behavior | Preserve the first implementation's committed Stats/SNR refresh behavior and Ratio Calculator polling. Never mutate an active worker's snapshotted request. |
 | Output contract | No changes to ROI averaging, FullSNR reads, conditions/groups/sessions, plot rendering, 600-DPI PNG/PDF pairs, names, or folders. |
 
@@ -76,8 +83,8 @@ FPVS already has the required persistence and analysis backbone:
 - `src/Main_App/gui/roi_visual_editor_state.py` owns stable draft-row identity,
   independent selection ledgers, pair projection, partial-draft checks, and
   deterministic contrast-safe presentation colors.
-- `src/Main_App/gui/roi_settings_widgets.py` owns the presentation-only toolbar,
-  color palette, active-ROI controls, and bounded map summary.
+- `src/Main_App/gui/roi_settings_widgets.py` owns the presentation-only color
+  palette, active-ROI controls, action grouping, and keyboard order.
 - `src/Main_App/gui/roi_electrode_selector.py` owns the attributed BioSemi64
   map geometry and accessible electrode controls.
 - `src/Main_App/gui/roi_electrode_selector_state.py` owns the ordered token
@@ -86,24 +93,23 @@ FPVS already has the required persistence and analysis backbone:
   exports already consume the saved ROI mapping.
 
 The follow-up gap is presentation and multi-ROI coordination, not persistence
-or analysis. `ROISettingsEditor` should become the visual embedded collection
-editor while preserving `add_entry()`, `add_or_update_entry()`, `get_pairs()`,
-and `set_pairs()` for current Settings callers.
+or analysis. `ROISettingsEditor` is the visual embedded collection editor while
+preserving `add_entry()`, `get_pairs()`, and `set_pairs()` for Settings callers.
 
 ## Target User Workflow
 
-1. Open **Settings > ROIs**. The BioSemi64 scalp map is immediately available
-   on the left; the saved ROIs appear in order on the right with a color swatch,
-   membership summary, selection control, and remove action. The selected ROI's
-   name is edited in the single **Edit active ROI** field below the list.
+1. Open **Settings > ROIs**. The fixed map is labeled **BioSemi 64** and appears
+   immediately on the left; saved ROIs appear in order on the right with a color
+   swatch and selection control. The selected custom ROI's name is edited in the
+   single name field below the list.
 2. Select an ROI row. Its mapped electrodes receive the active ROI fill and
    persistent non-color selection cue. Every electrode also shows the ordered
    color-ring segments for all ROIs that contain it.
 3. Click an electrode or focus it and press Space to toggle membership in the
    active ROI only. Membership in other ROIs is unchanged.
-4. Add a blank ROI or add/update one from the compact FPVS preset toolbar. The
-   existing montage catalog and default/custom preset memberships remain the
-   sole preset source of truth.
+4. LOT, ROT, and Central are available as built-ins. Their memberships can be
+   edited, but their names and rows cannot be removed. Use **+ New ROI** to add
+   a custom ROI.
 5. Edit only the ROI name as text. If a loaded ROI contains labels not present
    on the BioSemi64 map, review those labels as separate occurrences on the
    right and remove an occurrence explicitly if desired. Duplicate occurrences
@@ -120,9 +126,13 @@ and `set_pairs()` for current Settings callers.
 - Preserve the existing app-level settings location and INI keys:
   `rois.montage`, `rois.names`, `rois.electrodes`, and montage-keyed custom
   presets. ROI settings do not move into `project.json`.
-- Preserve ROI row order, display names, and electrode order when the user
-  makes no effective change. The harmonic signature contains ordered tuples;
-  opening the visual tab must not create a false recalculation prompt.
+- Preserve saved ROI row order, display names, and electrode order. Mark only
+  the last case-insensitive canonical LOT/ROT/Central occurrence as protected,
+  matching last-wins consumers, and append only missing built-ins in catalog
+  order. Long-form occipito-temporal names remain ordinary custom rows.
+- Missing built-ins exist only in the Settings draft until outer Save. The
+  initial harmonic signature must use raw persisted pairs so saving injected
+  rows enters the established stale/recalculation path; Cancel remains a no-op.
 - Give every draft row an opaque internal identity. Do not use the ROI name as
   identity because duplicate ROI names are valid legacy data.
 - Use one independent `ROIElectrodeSelectionState` per row. Different ROIs may
@@ -132,27 +142,30 @@ and `set_pairs()` for current Settings callers.
   and append newly selected canonical electrodes in deterministic BioSemi64
   order. Persist through the existing uppercase normalization contract.
 - Preserve duplicate electrode occurrences within an ROI. The map shows one
-  position for that ROI, while its summary distinguishes total stored entries
-  from unique mapped positions.
+  position for that ROI; counts remain tooltip/accessibility metadata rather
+  than visible layout rows.
 - Preserve every existing noncanonical/unmapped label, including repeated
   labels and original occurrence order, until that occurrence is explicitly
   removed or the user explicitly replaces/clears the ROI.
-- A preset replacement or Clear action must not silently discard retained
-  unmapped labels. A same-name preset reset or **Clear Active ROI** requires a
-  second activation after warning about affected labels, then reports the
-  completed removal in the draft status.
+- **Clear Active ROI** must not silently discard retained unmapped labels. It
+  requires a second activation after warning about affected labels, then
+  reports the completed removal in the draft status.
 - The map defines intended ROI membership. Do not disable nodes based on a
   participant's removed electrodes, current QC exclusions, or workbook
   coverage.
 - Keep the FPVS LOT, ROT, and Central definitions exactly as stored in
   `Main_App.Shared.roi_presets`. SSSEP's Central membership differs and must
   not replace the FPVS definition.
+- Protect each built-in's name and row from editing/removal while allowing map
+  membership edits. An emptied built-in is partial and blocks Save.
+- Keep dormant custom-preset settings unchanged. The ROI page neither displays
+  nor rewrites them.
 - Colors, swatches, overlap segments, active-row state, and internal row IDs
   are UI metadata only. `get_pairs()` must return only the current ordered
   `(name, electrodes)` contract.
 - A wholly blank placeholder is valid and omitted from persistence. A partially
-  defined ROI blocks outer Save and custom-preset staging, activates the row,
-  and focuses the missing name or map input instead of silently dropping work.
+  defined ROI blocks outer Save, activates the row, and focuses the missing
+  name or map input instead of silently dropping work.
   Do not introduce uniqueness rules for names or electrodes.
 - No runtime dependency on the SSSEP repository. Retain the reviewed source
   attribution with the copied/adapted coordinate geometry.
@@ -207,32 +220,34 @@ Status: complete; locally safe verification recorded below.
 4. Draw ordered segmented rings around electrodes with multiple ROI
    memberships. Keep the native checkable button and non-color active-selection
    cue.
-5. Build a right-side list with active selection, swatches, entry and
-   unique-position counts, one active-name field, retained legacy-label
-   occurrences, and remove actions. Preserve duplicate names and occurrences.
+5. Build a right-side list with active selection, swatches, one active-name
+   field, retained legacy-label occurrences, and grouped clear/remove actions.
+   Keep counts out of the visible layout while preserving them for accessible
+   context. Preserve duplicate names and occurrences.
 6. Remove the per-row selector action and retire the modal-only UI when no
    active caller remains.
 
 Exit gate: selecting, naming, adding, removing, overlapping, and switching ROIs
 works entirely in the embedded draft without schema or order changes.
 
-### Milestone 2 — Consolidate Presets and Settings Integration
+### Milestone 2 — Built-ins and Settings Integration
 
 Status: complete; locally safe verification recorded below.
 
-1. Replace the separate Quick Add card with a compact montage/preset toolbar in
-   the single ROI surface.
-2. Preserve `default_roi_presets()` and staged custom presets as the only
-   membership sources.
-3. Preserve first case-insensitive name-match behavior in
-   `add_or_update_entry()` and exact ordered preset input; never convert preset
-   membership to a set for storage.
-4. Preserve outer Settings Save/Cancel, harmonic dirty detection,
+1. Remove the Quick Add and preset controls; show a plain **BioSemi 64** label
+   while retaining the internal `10-10` key.
+2. Materialize missing LOT, ROT, and Central rows from
+   `default_roi_presets()` in the Settings draft only.
+3. Preserve saved order and protect the last case-insensitive canonical
+   occurrence from rename/removal. Keep membership editable and ordered.
+4. Preserve dormant custom-preset data without reading or writing it from the
+   page.
+5. Preserve outer Settings Save/Cancel, harmonic dirty detection,
    recalculation, rollback, and page retirement.
-5. Preserve `_refresh_roi_consumers()` and current worker-snapshot boundaries.
+6. Preserve `_refresh_roi_consumers()` and current worker-snapshot boundaries.
 
-Exit gate: blank add, preset add/update, custom-preset staging, outer Cancel,
-outer Save, and rollback retain the established behavior through the new page.
+Exit gate: built-in protection, blank custom add, outer Cancel, outer Save, and
+rollback retain the established behavior through the new page.
 
 ### Milestone 3 — Focused Tests and Documentation
 
@@ -244,8 +259,8 @@ execution and visible cross-platform smoke remain pending.
    aggregate membership presentation data, UI-only colors, and occurrence-level
    unmapped removal.
 3. Add registered CI Qt coverage for pointer and Space toggling, active-row
-   switching, overlap rings, right-list behavior, preset controls, layout, and
-   accessibility.
+   switching, overlap rings, built-in protection, right-list behavior, layout,
+   and accessibility.
 4. Retain existing settings, processing, Stats, SNR, Ratio, and harmonic
    rollback regressions.
 5. Update GUI architecture and user documentation to describe the embedded
@@ -263,15 +278,16 @@ Primary implementation:
 - `src/Main_App/gui/roi_visual_editor_state.py` — GUI-neutral row identity,
   ordered collection behavior, pair projection, partial-draft validation, and
   UI-only color allocation.
-- `src/Main_App/gui/roi_settings_widgets.py` — compact preset toolbar,
-  right-side controls, presentation colors, and keyboard-order helpers.
+- `src/Main_App/gui/roi_settings_widgets.py` — right-side controls, grouped
+  actions, presentation colors, and keyboard-order helpers.
 - `src/Main_App/gui/roi_electrode_selector.py` — reusable map rendering,
   overlap-ring presentation, and accessible electrode controls; retire
   modal-only composition when unused.
 - `src/Main_App/gui/roi_electrode_selector_state.py` — BioSemi64 geometry,
   parser helpers, and the ordered per-ROI token ledger.
-- `src/Main_App/gui/settings_panel.py` — single ROI surface, compact preset
-  toolbar, and unchanged Save/rollback/consumer-refresh orchestration.
+- `src/Main_App/gui/settings_panel.py` — flat ROI surface, Advanced-only
+  project-root action, and unchanged Save/rollback/consumer-refresh
+  orchestration.
 
 Focused tests and docs:
 
@@ -289,8 +305,10 @@ Focused tests and docs:
 
 - The ROI tab opens directly to a nose-up map on the left and an ordered named
   ROI list on the right; no comma-list electrode editor, row-level selector
-  button, separate selector modal, or Quick Add card remains in the normal
-  workflow.
+  button, separate selector modal, Quick Add card, preset toolbar, or enclosing
+  ROI card remains in the normal workflow.
+- The GUI labels the fixed geometry **BioSemi 64** while retaining the internal
+  `10-10` persistence key.
 - All 64 `DEFAULT_ELECTRODE_NAMES_64` channels appear exactly once at the
   expected coordinates.
 - Every node is pointer- and keyboard-operable and has an accessible name,
@@ -310,8 +328,10 @@ Focused tests and docs:
   the harmonic signature, processing, or outputs.
 - Distinct draft IDs do not cycle through the base palette, and every generated
   node fill keeps at least 4.5:1 contrast with its white electrode label.
-- FPVS default/custom presets use the existing catalog and preserve existing
-  add/update and staging behavior.
+- LOT, ROT, and Central are always present in the draft. Their names and rows
+  are protected; their membership remains editable and must stay nonempty.
+- Existing custom-preset configuration remains byte/logically unchanged by
+  ordinary Settings saves even though preset controls are absent.
 - Outer Settings Cancel leaves persisted settings unchanged. Outer Save uses
   the current schema and harmonic recalculation/rollback path.
 - Cached SNR and Stats pages refresh after a committed change; Ratio Calculator
@@ -320,6 +340,7 @@ Focused tests and docs:
   PNG/PDF pairing, participant weighting, or scientific default changes.
 - The page fits and remains usable at 1280x900 on Windows; the shared
   implementation remains compatible with CachyOS.
+- **Change Projects Root...** appears only in Advanced.
 
 ## Verification Plan
 
@@ -363,7 +384,8 @@ The follow-up coverage must verify:
 - color/ID exclusion from persistence;
 - exact no-op ordering and legacy duplicate preservation;
 - occurrence-level noncanonical-label removal;
-- blank add, remove fallback, preset add/update, and custom-preset staging;
+- blank custom add, protected built-in removal/rename guards, and remove
+  fallback;
 - outer Settings Save/Cancel/reopen and rollback;
 - cached SNR-page refresh; and
 - usable geometry at the supported workspace size.
@@ -377,8 +399,8 @@ The follow-up coverage must verify:
    confirm only the active ROI changes.
 4. Put one electrode in multiple ROIs and confirm every ring segment, legend
    color, tooltip membership, and active non-color cue remains understandable.
-5. Exercise blank add, name editing, duplicate names, preset add/update, custom
-   preset staging, remove, and removal of one repeated legacy-label occurrence.
+5. Exercise blank add, name editing, duplicate names, protected built-in rows,
+   custom remove, and removal of one repeated legacy-label occurrence.
 6. Cancel Settings and reopen it; confirm no draft persisted.
 7. Save a no-op and confirm there is no false harmonic recalculation prompt.
    Save a real edit in a processed project and exercise existing
@@ -400,13 +422,14 @@ The follow-up coverage must verify:
 | Colors accidentally become data | Keep color allocation in the GUI presentation model and assert that pairs, INI, signature, and processing payloads contain no color or row ID. |
 | Visual round trip reorders electrodes | Retain the existing ordered token ledger; append only newly selected map nodes in canonical order. |
 | Legacy labels disappear without a text field | Render each configured occurrence explicitly and require an occurrence-level remove or explicit replace/clear action. |
-| Preset replacement silently drops legacy entries | Warn before an explicit replacement when retained unmapped occurrences would be removed. |
-| Page becomes too dense | Use one flat split surface, a compact toolbar and one-row ROI footer, bounded summaries, and scrolling only within the ROI list. Paint membership arcs inside disjoint native node bounds. |
+| Clearing silently drops legacy entries | Require a second activation when a clear would remove retained unmapped occurrences. |
+| Missing defaults silently change scientific inputs | Inject them only into the draft; compare against raw persisted pairs and commit through the normal recalculation/rollback path. |
+| Page becomes too dense | Use one flat split surface, grouped actions, names-only rows, a one-row ROI footer, and scrolling only within the ROI list. Paint membership arcs inside disjoint native node bounds. |
 | Scope expands into scientific/output code | Treat worker, aggregation, renderer, schema, filename, or default-membership edits as stop-and-review events. |
 
-Rollback remains schema-free: reverting the embedded follow-up to commit
-`8d84b216` restores the modal/text-row presentation without migrating or
-rewriting saved ROI data.
+Rollback remains schema-free: reverting the current refinement to `4f46b4bc`
+restores the first embedded layout without migrating or rewriting saved ROI
+data.
 
 ## Progress
 
@@ -426,7 +449,10 @@ Embedded visual-first follow-up:
 - [x] Color-coded ROI rows and overlap-ring presentation implemented.
 - [x] Name-only text editing and occurrence-preserving legacy-label controls
       implemented.
-- [x] Compact preset toolbar replaces Quick Add.
+- [x] Preset controls removed; dormant preset data remains compatible.
+- [x] LOT, ROT, and Central are protected built-in draft rows.
+- [x] BioSemi 64 labeling, enlarged map targets, and flat ROI layout implemented.
+- [x] Project-root action confined to Advanced.
 - [x] Partial drafts block Save instead of being silently omitted.
 - [x] Follow-up local safe gates completed and recorded.
 - [x] Follow-up registered CI Qt coverage authored and registered.
@@ -454,9 +480,10 @@ must not be represented as verification of the embedded follow-up:
   the untracked `outputs/` tree; those user files were left untouched.
 - Registered pytest-qt coverage was not run locally under repository policy.
 
-## Follow-up Verification Receipt
+## Historical Receipt — Embedded Visual-First Commit (`4f46b4bc`)
 
-Implementation is complete on `codex/sssep-roi-selector`.
+The following results apply to the embedded surface through `4f46b4bc`, before
+the flat/protected-built-in refinement:
 
 - `.venv\Scripts\python.exe .agents/scripts/verify.py --scope gui --tier
   focused` passed the GUI audit, changed-file Ruff, compilation, and 13
@@ -486,3 +513,34 @@ Implementation is complete on `codex/sssep-roi-selector`.
 - Unrelated working-tree changes in the execution-plan index/future plans and
   `outputs/` remain outside this feature and are intentionally excluded from
   the follow-up commit.
+
+## Final Refinement Verification Receipt
+
+The flat/protected-built-in refinement is complete on
+`codex/sssep-roi-selector`.
+
+- `.venv\Scripts\python.exe .agents/scripts/verify.py --scope gui --tier
+  focused` passed the GUI audit, changed-file Ruff, compilation, and all 16
+  GUI-neutral selector/collection tests.
+- Direct locally safe bundles passed: project I/O/settings, 123; processing,
+  375 with 1 skip; Plot Generator, 110; Stats, 384; Ratio Calculator, 7; and a
+  focused ROI settings/downstream bundle, 25.
+- The exact-tree non-Qt suite completed with 1,940 passed and 3 skipped. Its
+  only failure is the unchanged Publication Maps repeated-layout assertion
+  whose left text edge is `-0.190014` pixels. No Publication Maps source or
+  test changed in this work.
+- Strict MkDocs, protected/source-localization and Stats audits, changed-file
+  Ruff/compilation, and `git diff --check` passed.
+- Project-I/O, Plot Generator, Ratio Calculator, and repository drivers stop at
+  the same eight pre-existing hard-coded machine paths under the untracked
+  `outputs/` tree. Those user files were not edited or staged; their registered
+  test bundles were run directly.
+- Registered pytest-qt coverage was updated but not executed locally under
+  repository policy. It defines the flat surface, BioSemi 64 label, protected
+  built-ins, pointer/keyboard membership editing, tab traversal, grouped
+  actions, enlarged disjoint hit targets, Save/Cancel behavior, raw-vs-draft
+  harmonic signatures, and dormant-preset preservation.
+- The visible Windows 11/DPI/theme smoke and CachyOS smoke remain pending. The
+  manual path above is the residual visual acceptance gate.
+- Unrelated working-tree changes in the execution-plan index/future plans and
+  `outputs/` remain outside this feature and will be excluded from the commit.

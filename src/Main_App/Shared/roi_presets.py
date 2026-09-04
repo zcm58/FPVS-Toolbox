@@ -6,7 +6,7 @@ ROI_MONTAGE_10_10 = "10-10"
 DEFAULT_ROI_MONTAGE = ROI_MONTAGE_10_10
 
 SUPPORTED_ROI_MONTAGES: tuple[tuple[str, str], ...] = (
-    (ROI_MONTAGE_10_10, "10-10 International"),
+    (ROI_MONTAGE_10_10, "BioSemi 64"),
 )
 
 

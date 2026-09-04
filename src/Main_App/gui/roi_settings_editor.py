@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QLabel,
     QListWidgetItem,
@@ -15,16 +15,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.gui.components import StatusBanner, SubsectionHeaderLabel
+from Main_App.gui.components import StatusBanner
 from Main_App.gui.roi_electrode_selector import ElectrodeMapWidget, ROIMembership
 from Main_App.gui.roi_electrode_selector_state import BIOSEMI64_LABELS
 from Main_App.gui.roi_settings_widgets import (
     ROI_COLOR_PALETTE,
     ROIEditorSidePanel,
-    ROIEditorToolbar,
-    ROIPresetProvider,
     configure_roi_tab_order,
-    map_selection_summary,
     roi_color_for_id,
     roi_color_icon,
 )
@@ -34,42 +31,36 @@ from Main_App.gui.roi_visual_editor_state import ROIEditorCollection, ROIEditorE
 class ROISettingsEditor(QWidget):
     """Visual-first ROI editor that preserves the existing settings pair API."""
 
-    save_custom_presets_requested = Signal()
-
     def __init__(
         self,
         parent: QWidget | None = None,
         pairs: list[tuple[str, list[str]]] | None = None,
         *,
         canonical_electrodes: Sequence[str] = (),
-        montage_options: Sequence[tuple[str, str]] = (),
-        current_montage: str = "",
-        preset_provider: ROIPresetProvider | None = None,
+        default_rois: Sequence[tuple[str, Sequence[str]]],
+        current_montage: str,
+        montage_label: str = "BioSemi 64",
     ) -> None:
         super().__init__(parent)
         self._canonical_electrodes = tuple(canonical_electrodes) or BIOSEMI64_LABELS
-        self._preset_provider = preset_provider or (lambda _montage: ())
+        self._default_rois = tuple(
+            (str(name), tuple(str(electrode) for electrode in electrodes))
+            for name, electrodes in default_rois
+        )
+        self._current_montage = str(current_montage)
         self._collection = ROIEditorCollection(self._canonical_electrodes)
         self._rebuilding = False
-        self._pending_preset_reset: tuple[int, str, tuple[str, ...]] | None = None
         self._pending_clear_entry_id: int | None = None
         self.entries = self._collection.entries
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(10)
+        root_layout.setSpacing(6)
 
-        self.toolbar = ROIEditorToolbar(
-            montage_options,
-            current_montage,
-            self._preset_provider,
-            self,
-        )
-        self.montage_combo = self.toolbar.montage_combo
-        self.preset_combo = self.toolbar.preset_combo
-        self.add_preset_button = self.toolbar.add_preset_button
-        self.save_presets_button = self.toolbar.save_presets_button
-        root_layout.addWidget(self.toolbar)
+        self.montage_label = QLabel(f"Montage: {montage_label}", self)
+        self.montage_label.setObjectName("settings_rois_montage_label")
+        self.montage_label.setAccessibleName(f"ROI montage: {montage_label}")
+        root_layout.addWidget(self.montage_label)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.splitter.setObjectName("settings_rois_splitter")
@@ -80,28 +71,15 @@ class ROISettingsEditor(QWidget):
         self.map_pane.setObjectName("settings_rois_map_pane")
         map_layout = QVBoxLayout(self.map_pane)
         map_layout.setContentsMargins(0, 0, 4, 0)
-        map_layout.setSpacing(6)
-        map_layout.addWidget(SubsectionHeaderLabel("Interactive scalp map", self.map_pane))
-        self.active_summary = QLabel(self.map_pane)
-        self.active_summary.setObjectName("settings_rois_active_summary")
-        self.active_summary.setTextFormat(Qt.TextFormat.PlainText)
-        self.active_summary.setWordWrap(True)
-        map_layout.addWidget(self.active_summary)
+        map_layout.setSpacing(0)
         self.map_widget = ElectrodeMapWidget(self._canonical_electrodes, self.map_pane)
         map_layout.addWidget(self.map_widget, 1)
-        self.selection_summary = QLabel(self.map_pane)
-        self.selection_summary.setObjectName("settings_rois_selection_summary")
-        self.selection_summary.setTextFormat(Qt.TextFormat.PlainText)
-        self.selection_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.selection_summary.setWordWrap(True)
-        map_layout.addWidget(self.selection_summary)
 
         self.roi_pane = ROIEditorSidePanel(self.splitter)
         self.roi_list = self.roi_pane.roi_list
         self.add_button = self.roi_pane.add_button
         self.remove_button = self.roi_pane.remove_button
         self.name_edit = self.roi_pane.name_edit
-        self.electrode_count = self.roi_pane.electrode_count
         self.clear_button = self.roi_pane.clear_button
         self.unmapped_pane = self.roi_pane.unmapped_pane
         self.unmapped_list = self.roi_pane.unmapped_list
@@ -115,7 +93,7 @@ class ROISettingsEditor(QWidget):
         root_layout.addWidget(self.splitter, 1)
 
         self.status = StatusBanner("", self, variant="info")
-        self.status.setObjectName("settings_rois_preset_status")
+        self.status.setObjectName("settings_rois_status")
         self.status.label.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setVisible(False)
         root_layout.addWidget(self.status)
@@ -132,75 +110,15 @@ class ROISettingsEditor(QWidget):
         self.unmapped_list.currentRowChanged.connect(
             lambda row: self.remove_unmapped_button.setEnabled(row >= 0)
         )
-        self.montage_combo.currentIndexChanged.connect(self._on_montage_changed)
-        self.add_preset_button.clicked.connect(
-            lambda _checked=False: self.add_selected_preset()
-        )
-        self.preset_combo.currentIndexChanged.connect(
-            lambda _index: self._clear_pending_confirmations()
-        )
-        self.save_presets_button.clicked.connect(self._request_save_custom_presets)
         configure_roi_tab_order(
-            self.toolbar,
             self.roi_pane,
             tuple(self.map_widget.electrode_buttons.values()),
         )
 
         self.set_pairs(pairs or [])
-        self.refresh_presets()
 
     def current_montage(self) -> str:
-        return self.toolbar.current_montage()
-
-    def selected_preset(self) -> tuple[str, list[str], bool] | None:
-        return self.toolbar.selected_preset()
-
-    def refresh_presets(self) -> None:
-        self._clear_pending_confirmations()
-        self.toolbar.refresh_presets()
-
-    def add_selected_preset(self) -> str | None:
-        self._pending_clear_entry_id = None
-        preset = self.selected_preset()
-        if preset is None:
-            self.show_status("No ROI preset is selected.", "warning")
-            return None
-        name, electrodes, _is_default = preset
-        dropped_unmapped: tuple[str, ...] = ()
-        matching_index = self._collection.first_name_match(name)
-        if matching_index is not None:
-            self.roi_list.setCurrentRow(matching_index)
-            dropped_unmapped = self._collection.dropped_unmapped_occurrences(
-                matching_index,
-                electrodes,
-            )
-            confirmation = (
-                self.entries[matching_index].entry_id,
-                name.casefold(),
-                tuple(electrodes),
-            )
-            if dropped_unmapped and self._pending_preset_reset != confirmation:
-                self._pending_preset_reset = confirmation
-                self.show_status(
-                    f"Resetting {name} will remove its legacy / unmapped labels: "
-                    + ", ".join(dropped_unmapped)
-                    + ". Click Add / Reset Preset ROI again to confirm.",
-                    "warning",
-                )
-                return "confirmation_required"
-        self._clear_pending_confirmations()
-        result = self.add_or_update_entry(name, electrodes)
-        action = "Updated" if result == "updated" else "Added"
-        if dropped_unmapped:
-            self.show_status(
-                f"{action} {name} from the preset and removed its legacy / unmapped labels: "
-                + ", ".join(dropped_unmapped)
-                + ".",
-                "warning",
-            )
-        else:
-            self.show_status(f"{action} {name} from the selected preset.", "success")
-        return result
+        return self._current_montage
 
     def show_status(self, text: str, variant: str = "info") -> None:
         self.status.set_variant(variant)
@@ -223,21 +141,16 @@ class ROISettingsEditor(QWidget):
             "info",
         )
 
-    def add_or_update_entry(self, name: str, electrodes: list[str]) -> str:
-        self._clear_pending_confirmations()
-        result, row, created = self._collection.add_or_update(name, electrodes)
-        if created:
-            self._append_list_item(row)
-        else:
-            self._update_list_item(row)
-        self.roi_list.setCurrentRow(row)
-        self._sync_active_roi()
-        return result
-
     def remove_active_entry(self) -> None:
         self._clear_pending_confirmations()
         row = self.roi_list.currentRow()
         if not 0 <= row < len(self.entries):
+            return
+        if self.entries[row].is_default:
+            self.show_status(
+                f"{self.entries[row].display_name} is a built-in ROI and cannot be removed.",
+                "info",
+            )
             return
         removed, new_row, appended_blank = self._collection.remove(row)
         self.roi_list.takeItem(row)
@@ -251,7 +164,6 @@ class ROISettingsEditor(QWidget):
         )
 
     def clear_active_roi(self) -> str | None:
-        self._pending_preset_reset = None
         entry = self._active_entry()
         if entry is None:
             return None
@@ -261,7 +173,7 @@ class ROISettingsEditor(QWidget):
             self.show_status(
                 f"Clearing {entry.display_name} will remove its legacy / unmapped labels: "
                 + ", ".join(unmapped)
-                + ". Click Clear Active ROI again to confirm.",
+                + ". Activate Clear Active ROI again to confirm.",
                 "warning",
             )
             return "confirmation_required"
@@ -305,7 +217,11 @@ class ROISettingsEditor(QWidget):
         self.select_roi(index)
         if entry.name.strip():
             self.map_widget.electrode_buttons["Cz"].setFocus()
-            guidance = "Choose at least one electrode on the scalp map or remove the ROI."
+            guidance = (
+                "Choose at least one electrode on the scalp map."
+                if entry.is_default
+                else "Choose at least one electrode on the scalp map or remove the ROI."
+            )
         else:
             self.name_edit.setFocus()
             guidance = "Enter an ROI name or clear its electrode selection."
@@ -316,7 +232,7 @@ class ROISettingsEditor(QWidget):
         self._clear_pending_confirmations()
         self._rebuilding = True
         try:
-            self._collection.reset(pairs)
+            self._collection.reset(pairs, default_pairs=self._default_rois)
             self.roi_list.clear()
             for index in range(len(self.entries)):
                 self._append_list_item(index)
@@ -338,6 +254,9 @@ class ROISettingsEditor(QWidget):
 
     def roi_color(self, index: int) -> str:
         return self._color_for_entry(self.entries[index])
+
+    def is_default_roi(self, index: int) -> bool:
+        return self.entries[index].is_default
 
     @staticmethod
     def _color_for_entry(entry: ROIEditorEntry) -> str:
@@ -370,8 +289,19 @@ class ROISettingsEditor(QWidget):
             count_text += f" / {map_count} map position{'s' if map_count != 1 else ''}"
         if unmapped_count:
             count_text += f" / {unmapped_count} legacy"
-        item.setText(f"{entry.display_name}  ·  {count_text}")
-        accessible = f"{self._entry_label(index)}. {count_text}. Select to edit."
+        item.setText(
+            f"{entry.display_name}  ·  Built-in"
+            if entry.is_default
+            else entry.display_name
+        )
+        protection = (
+            " Built-in ROI; its name and row are protected."
+            if entry.is_default
+            else ""
+        )
+        accessible = (
+            f"{self._entry_label(index)}. {count_text}.{protection} Select to edit."
+        )
         item.setToolTip(accessible)
         item.setData(Qt.ItemDataRole.AccessibleTextRole, accessible)
         item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, accessible)
@@ -398,9 +328,12 @@ class ROISettingsEditor(QWidget):
         row = self.roi_list.currentRow()
         if not 0 <= row < len(self.entries):
             return
+        if self.entries[row].is_default:
+            with QSignalBlocker(self.name_edit):
+                self.name_edit.setText(self.entries[row].name)
+            return
         self.entries[row].name = text
         self._update_list_item(row)
-        self._refresh_active_heading()
         self._sync_map_context()
         self._refresh_accessibility()
 
@@ -418,14 +351,6 @@ class ROISettingsEditor(QWidget):
             "info",
         )
 
-    def _on_montage_changed(self, _index: int) -> None:
-        self.refresh_presets()
-        self.show_status("")
-
-    def _request_save_custom_presets(self, _checked: bool = False) -> None:
-        self._clear_pending_confirmations()
-        self.save_custom_presets_requested.emit()
-
     def _refresh_active_entry(self) -> None:
         row = self.roi_list.currentRow()
         self._update_list_item(row)
@@ -437,26 +362,24 @@ class ROISettingsEditor(QWidget):
             return
         with QSignalBlocker(self.name_edit):
             self.name_edit.setText(entry.name)
+        self.name_edit.setReadOnly(entry.is_default)
+        self.name_edit.setToolTip(
+            "Built-in ROI names cannot be changed; edit membership on the scalp map."
+            if entry.is_default
+            else "Edit the active ROI name."
+        )
         self._sync_map_context()
 
         electrodes = entry.selection.selected_electrodes()
-        map_count = len(entry.selection.selected_map_labels())
         unmapped = entry.selection.unmapped_electrodes()
-        self._refresh_active_heading()
-        mapped_labels = entry.selection.selected_map_labels()
-        self.selection_summary.setText(map_selection_summary(mapped_labels))
-        full_map_summary = (
-            "All selected map positions: " + ", ".join(mapped_labels)
-            if mapped_labels
-            else "No mapped electrodes selected for this ROI."
-        )
-        self.selection_summary.setToolTip(full_map_summary)
-        self.selection_summary.setAccessibleDescription(full_map_summary)
-        self.electrode_count.setText(
-            f"{len(electrodes)} electrode entr{'y' if len(electrodes) == 1 else 'ies'}; "
-            f"{map_count} visible map position{'s' if map_count != 1 else ''}."
-        )
         self.clear_button.setEnabled(bool(electrodes))
+        self.remove_button.setEnabled(not entry.is_default)
+        if entry.is_default:
+            self.remove_button.setToolTip(
+                f"{entry.display_name} is a built-in ROI and cannot be removed."
+            )
+        else:
+            self.remove_button.setToolTip(f"Remove {entry.display_name}.")
 
         with QSignalBlocker(self.unmapped_list):
             self.unmapped_list.clear()
@@ -469,19 +392,6 @@ class ROISettingsEditor(QWidget):
         self.unmapped_pane.setVisible(bool(unmapped))
         self.remove_unmapped_button.setEnabled(False)
         self._refresh_accessibility()
-
-    def _refresh_active_heading(self) -> None:
-        entry = self._active_entry()
-        if entry is None:
-            return
-        row = self.roi_list.currentRow()
-        electrodes = entry.selection.selected_electrodes()
-        map_count = len(entry.selection.selected_map_labels())
-        self.active_summary.setText(
-            f"Editing {self._entry_label(row)} — {len(electrodes)} electrode "
-            f"entr{'y' if len(electrodes) == 1 else 'ies'} ({map_count} map "
-            f"position{'s' if map_count != 1 else ''})."
-        )
 
     def _sync_map_context(self) -> None:
         entry = self._active_entry()
@@ -510,17 +420,22 @@ class ROISettingsEditor(QWidget):
         label = self._entry_label(row)
         self.name_edit.setAccessibleName(f"Name for {label}")
         self.name_edit.setAccessibleDescription(
-            "Edit the active ROI name. Electrode membership is edited on the scalp map."
+            "This built-in ROI name is fixed. Electrode membership is edited on the scalp map."
+            if entry.is_default
+            else "Edit the active ROI name. Electrode membership is edited on the scalp map."
         )
-        self.remove_button.setAccessibleName(f"Remove {label}")
+        self.remove_button.setAccessibleName(
+            f"{label} is built in and cannot be removed"
+            if entry.is_default
+            else f"Remove {label}"
+        )
         self.clear_button.setAccessibleName(f"Clear every electrode from {label}")
         self.remove_unmapped_button.setAccessibleName(
             f"Remove the selected legacy or unmapped label from {label}"
         )
 
     def _clear_pending_confirmations(self) -> None:
-        self._pending_preset_reset = None
         self._pending_clear_entry_id = None
 
 
-__all__ = ["ROISettingsEditor", "ROI_COLOR_PALETTE", "ROIPresetProvider"]
+__all__ = ["ROISettingsEditor", "ROI_COLOR_PALETTE"]

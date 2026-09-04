@@ -26,15 +26,18 @@ The ROI list comes from the current Toolbox settings. Define or edit ROIs in
 on the left and the ordered, color-coded ROI list appears on the right. Select
 an ROI name, then click an electrode or focus it and press Space to change that
 ROI. An electrode may belong to more than one ROI; separate color-ring segments
-show every overlapping membership. You can add a blank ROI or use an FPVS
-default or custom preset from the compact toolbar.
+show every overlapping membership. The fixed map is labeled **BioSemi 64**.
+LOT, ROT, and Central are always available as built-in ROIs: their electrode
+memberships can be edited, but their names and rows cannot be removed. Use
+**+ New ROI** to add another named ROI.
 
 Only ROI names use normal text entry. If older settings contain an electrode
 label that is not drawn on the BioSemi64 map, the ROI list keeps each such
 legacy occurrence visible until you explicitly remove or replace it. Map and
-list changes remain a draft. Resetting or clearing an ROI that still has legacy
-labels requires a second confirmation click. Choose **Save** on the outer
-Settings page to commit the draft, or **Cancel** to discard it.
+list changes remain a draft. Clearing an ROI that still has legacy labels
+requires a second confirmation click. Choose **Save** on the outer Settings
+page to commit the draft, or **Cancel** to discard it. A built-in ROI must retain
+at least one electrode before the draft can be saved.
 
 An already-open SNR Plots page refreshes after that Save. It keeps the selected
 ROI when the name still exists and otherwise returns to **(All ROIs)**. If no

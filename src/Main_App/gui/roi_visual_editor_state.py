@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Iterable, Sequence
 from colorsys import hsv_to_rgb
 from dataclasses import dataclass
@@ -46,6 +45,7 @@ class ROIEditorEntry:
     entry_id: int
     name: str
     selection: ROIElectrodeSelectionState
+    is_default: bool = False
 
     @property
     def display_name(self) -> str:
@@ -68,51 +68,64 @@ class ROIEditorCollection:
         self.entries: list[ROIEditorEntry] = []
         self._next_entry_id = 1
 
-    def reset(self, pairs: Iterable[tuple[str, Iterable[str]]]) -> None:
+    def reset(
+        self,
+        pairs: Iterable[tuple[str, Iterable[str]]],
+        *,
+        default_pairs: Iterable[tuple[str, Iterable[str]]] = (),
+    ) -> None:
         self.entries.clear()
         self._next_entry_id = 1
-        for name, electrodes in pairs:
-            self.append(name, electrodes)
+        saved_pairs = [
+            (str(name), self._electrode_values(electrodes))
+            for name, electrodes in pairs
+        ]
+        defaults = [
+            (str(name).strip(), self._electrode_values(electrodes))
+            for name, electrodes in default_pairs
+        ]
+        default_keys = {name.casefold() for name, _electrodes in defaults}
+        last_saved_default_index = {
+            name.strip().casefold(): index
+            for index, (name, _electrodes) in enumerate(saved_pairs)
+            if name.strip().casefold() in default_keys
+        }
+        for index, (name, electrodes) in enumerate(saved_pairs):
+            name_key = name.strip().casefold()
+            is_default = last_saved_default_index.get(name_key) == index
+            self._append_entry(name, electrodes, is_default=is_default)
+
+        for default_name, default_electrodes in defaults:
+            default_key = default_name.casefold()
+            if default_key not in last_saved_default_index:
+                self._append_entry(default_name, default_electrodes, is_default=True)
         if not self.entries:
             self.append("", ())
 
     def append(self, name: str, electrodes: str | Iterable[str]) -> int:
+        return self._append_entry(name, electrodes, is_default=False)
+
+    def _append_entry(
+        self,
+        name: str,
+        electrodes: str | Iterable[str],
+        *,
+        is_default: bool,
+    ) -> int:
         values = self._electrode_values(electrodes)
         entry = ROIEditorEntry(
             entry_id=self._next_entry_id,
             name=str(name),
             selection=ROIElectrodeSelectionState(self.canonical_electrodes, values),
+            is_default=is_default,
         )
         self._next_entry_id += 1
         self.entries.append(entry)
         return len(self.entries) - 1
 
-    def add_or_update(self, name: str, electrodes: Iterable[str]) -> tuple[str, int, bool]:
-        clean_name = name.strip()
-        matching_index = self.first_name_match(clean_name)
-        if matching_index is None:
-            matching_index = next(
-                (
-                    index
-                    for index, entry in enumerate(self.entries)
-                    if not entry.name.strip() and not entry.selection.selected_electrodes()
-                ),
-                None,
-            )
-        if matching_index is not None:
-            entry = self.entries[matching_index]
-            was_named_match = entry.name.strip().casefold() == clean_name.casefold()
-            entry.name = clean_name
-            entry.selection = ROIElectrodeSelectionState(
-                self.canonical_electrodes,
-                electrodes,
-            )
-            return ("updated" if was_named_match else "added"), matching_index, False
-
-        index = self.append(clean_name, electrodes)
-        return "added", index, True
-
     def remove(self, index: int) -> tuple[ROIEditorEntry, int, bool]:
+        if self.entries[index].is_default:
+            raise ValueError("Default ROIs cannot be removed.")
         removed = self.entries.pop(index)
         appended_blank = False
         if not self.entries:
@@ -129,46 +142,11 @@ class ROIEditorCollection:
                 pairs.append((name, electrodes))
         return pairs
 
-    def first_name_match(self, name: str) -> int | None:
-        clean_key = name.strip().casefold()
-        if not clean_key:
-            return None
-        return next(
-            (
-                index
-                for index, entry in enumerate(self.entries)
-                if entry.name.strip().casefold() == clean_key
-            ),
-            None,
-        )
-
     def first_partial_index(self) -> int | None:
         return next(
             (index for index, entry in enumerate(self.entries) if entry.is_partial()),
             None,
         )
-
-    def dropped_unmapped_occurrences(
-        self,
-        index: int,
-        replacement_electrodes: Iterable[str],
-    ) -> tuple[str, ...]:
-        """Return only legacy occurrences absent from a replacement selection."""
-
-        current = self.entries[index].selection.unmapped_electrodes()
-        replacement = ROIElectrodeSelectionState(
-            self.canonical_electrodes,
-            replacement_electrodes,
-        ).unmapped_electrodes()
-        remaining = Counter(label.casefold() for label in replacement)
-        dropped: list[str] = []
-        for label in current:
-            key = label.casefold()
-            if remaining[key] > 0:
-                remaining[key] -= 1
-            else:
-                dropped.append(label)
-        return tuple(dropped)
 
     @staticmethod
     def _electrode_values(electrodes: str | Iterable[str]) -> tuple[str, ...]:

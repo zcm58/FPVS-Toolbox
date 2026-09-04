@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from Main_App.Shared.roi_presets import ROI_MONTAGE_10_10, default_roi_presets
+from Main_App.Shared.roi_presets import (
+    ROI_MONTAGE_10_10,
+    default_roi_presets,
+    supported_roi_montages,
+)
 from Main_App.Shared.settings_manager import SettingsManager
 
 
@@ -40,6 +44,19 @@ def test_10_10_default_roi_presets_are_available() -> None:
         ("LOT", ["P7", "P9", "PO7", "PO3", "O1"]),
         ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]),
         ("Central", ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"]),
+    ]
+
+
+def test_roi_montage_is_presented_as_biosemi_64() -> None:
+    assert supported_roi_montages() == ((ROI_MONTAGE_10_10, "BioSemi 64"),)
+
+
+def test_fresh_settings_rois_match_the_canonical_default_catalog(tmp_path) -> None:
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+
+    assert manager.get_roi_pairs() == [
+        (preset.name, list(preset.electrodes))
+        for preset in default_roi_presets(ROI_MONTAGE_10_10)
     ]
 
 

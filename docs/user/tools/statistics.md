@@ -56,9 +56,10 @@ can:
 
 ROI definitions are app-level settings managed under **Settings > ROIs**. Use
 the embedded BioSemi64 map to edit the active named ROI, then save the outer
-Settings page. The Stats page refreshes its loaded ROI definitions and context
-from that committed mapping; visual editing does not alter raw EEG
-preprocessing.
+Settings page. LOT, ROT, and Central are built-in rows whose memberships remain
+editable, while **+ New ROI** adds custom definitions. The Stats page refreshes
+its loaded ROI definitions and context from that committed mapping; visual
+editing does not alter raw EEG preprocessing.
 
 Project metadata determines the mode:
 

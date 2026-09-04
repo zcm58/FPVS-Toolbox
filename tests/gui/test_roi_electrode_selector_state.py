@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Main_App.Shared.roi_presets import ROI_MONTAGE_10_10, default_roi_presets
 from Main_App.gui.roi_electrode_selector_state import (
     BIOSEMI64_LABELS,
     BIOSEMI64_POLAR_COORDINATES,
@@ -14,6 +15,12 @@ from Main_App.gui.roi_visual_editor_state import (
     ROI_COLOR_PALETTE,
     ROIEditorCollection,
     roi_color_for_id,
+)
+
+
+DEFAULT_ROIS = tuple(
+    (preset.name, preset.electrodes)
+    for preset in default_roi_presets(ROI_MONTAGE_10_10)
 )
 
 
@@ -141,8 +148,6 @@ def test_editor_collection_preserves_duplicate_rows_identity_and_isolation() -> 
         "LegacyAux",
     )
 
-    result, index, created = collection.add_or_update("shared", ("P7",))
-    assert (result, index, created) == ("updated", 0, False)
     assert collection.entries[0].entry_id == first_id
     assert collection.entries[1].entry_id == second_id
     assert collection.entries[1].selection.selected_electrodes() == ("O2",)
@@ -158,8 +163,8 @@ def test_editor_collection_reuses_blank_placeholder_and_restores_one_when_empty(
     collection.reset([])
     placeholder_id = collection.entries[0].entry_id
 
-    result, index, created = collection.add_or_update("Mapped", ("O1",))
-    assert (result, index, created) == ("added", 0, False)
+    collection.entries[0].name = "Mapped"
+    collection.entries[0].selection.set_checked("O1", True)
     assert collection.entries[0].entry_id == placeholder_id
 
     removed, new_index, appended_blank = collection.remove(0)
@@ -188,20 +193,102 @@ def test_editor_collection_partial_validation_allows_only_wholly_blank_placehold
     assert collection.first_partial_index() is None
 
 
-def test_editor_collection_reports_only_legacy_occurrences_a_preset_drops() -> None:
+def test_editor_collection_appends_only_missing_defaults_without_reordering_saved_rows() -> None:
     collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
     collection.reset(
-        [("Custom", ("O1", "LegacyAux", "LegacyAux", "RetainedAux"))]
+        [
+            ("Custom first", ("O1",)),
+            ("ROT", ("O2", "LegacyAux")),
+            ("Custom last", ("Cz",)),
+        ],
+        default_pairs=DEFAULT_ROIS,
     )
 
-    assert collection.dropped_unmapped_occurrences(
-        0,
-        ("O2", "legacyaux", "RetainedAux", "NewAux"),
-    ) == ("LegacyAux",)
-    assert collection.dropped_unmapped_occurrences(
-        0,
-        ("O2", "LegacyAux", "legacyaux", "retainedaux"),
-    ) == ()
+    assert [entry.name for entry in collection.entries] == [
+        "Custom first",
+        "ROT",
+        "Custom last",
+        "LOT",
+        "Central",
+    ]
+    assert [entry.is_default for entry in collection.entries] == [
+        False,
+        True,
+        False,
+        True,
+        True,
+    ]
+    assert collection.get_pairs() == [
+        ("Custom first", ["O1"]),
+        ("ROT", ["O2", "LEGACYAUX"]),
+        ("Custom last", ["CZ"]),
+        ("LOT", ["P7", "P9", "PO7", "PO3", "O1"]),
+        ("Central", ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"]),
+    ]
+
+
+def test_editor_collection_appends_all_defaults_to_an_empty_draft_in_catalog_order() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+
+    collection.reset([], default_pairs=DEFAULT_ROIS)
+
+    assert [entry.name for entry in collection.entries] == ["LOT", "ROT", "Central"]
+    assert all(entry.is_default for entry in collection.entries)
+    assert collection.get_pairs() == [
+        (name, [electrode.upper() for electrode in electrodes])
+        for name, electrodes in DEFAULT_ROIS
+    ]
+
+
+def test_editor_collection_protects_last_canonical_duplicate_and_not_long_name_aliases() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+    collection.reset(
+        [
+            ("LOT", ("O1",)),
+            ("Left Occipito-Temporal", ("PO7",)),
+            ("lot", ("O2", "O2")),
+            ("Right Occipito-Temporal", ("PO8",)),
+        ],
+        default_pairs=DEFAULT_ROIS,
+    )
+
+    assert [entry.name for entry in collection.entries] == [
+        "LOT",
+        "Left Occipito-Temporal",
+        "lot",
+        "Right Occipito-Temporal",
+        "ROT",
+        "Central",
+    ]
+    assert [entry.is_default for entry in collection.entries] == [
+        False,
+        False,
+        True,
+        False,
+        True,
+        True,
+    ]
+    assert collection.entries[2].selection.selected_electrodes() == ("O2", "O2")
+
+    removed, new_index, appended_blank = collection.remove(0)
+    assert removed.name == "LOT"
+    assert (new_index, appended_blank) == (0, False)
+    with pytest.raises(ValueError, match="Default ROIs cannot be removed"):
+        collection.remove(1)
+
+
+def test_empty_protected_default_is_partial_and_identity_is_not_persisted() -> None:
+    collection = ROIEditorCollection(DEFAULT_ELECTRODE_NAMES_64)
+    collection.reset([], default_pairs=DEFAULT_ROIS)
+
+    collection.entries[0].selection.clear()
+
+    assert collection.entries[0].is_default is True
+    assert collection.first_partial_index() == 0
+    assert collection.get_pairs() == [
+        ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]),
+        ("Central", ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"]),
+    ]
 
 
 def test_roi_colors_are_unique_and_keep_caption_contrast_with_white() -> None:

@@ -97,9 +97,10 @@ Primary paths:
   occurrences.
 - `src/Main_App/gui/roi_visual_editor_state.py`: GUI-neutral ordered collection
   state for stable draft-row identity, pair projection, partial-draft
-  validation, and deterministic contrast-safe presentation colors.
-- `src/Main_App/gui/roi_settings_widgets.py`: presentation-only toolbar,
-  right-side ROI controls, color palette, and keyboard-order helpers.
+  validation, protected built-in ROI identity, and deterministic contrast-safe
+  presentation colors.
+- `src/Main_App/gui/roi_settings_widgets.py`: presentation-only right-side ROI
+  controls, color palette, and keyboard-order helpers.
 - `src/Main_App/gui/roi_settings_editor.py`: embedded map/list coordinator that
   retains the ordered `(name, electrodes)` compatibility API consumed by
   Settings. None of the ROI editor modules reads or writes settings directly.
@@ -128,27 +129,37 @@ exclusions because those controls are intentionally more specialized than the
 primary preprocessing fields. Advanced also shows read-only frequency-domain QC
 thresholds and active frequency-domain exclusions; changing manual
 frequency-domain exclusions marks downstream frequency-domain outputs stale and
-requires regeneration. Do not put app-level visibility or diagnostics toggles
-in the Preprocessing tab.
+requires regeneration. The **Change Projects Root...** action is available only
+from the Advanced footer. Do not put app-level visibility or diagnostics
+toggles in the Preprocessing tab.
 
-The ROIs tab is a visual-first, embedded editor. A scalable BioSemi64 scalp map
-fills the left side and an ordered list of named, color-coded ROIs fills the
-right. Selecting a row makes that ROI active; pointer or Space-key activation
-of a map node changes only the active ROI. An electrode may belong to any
-number of ROIs. Ordered color-ring segments show those overlapping memberships,
-while active-row controls, checked/focus styling, counts, tooltips, and
-accessible descriptions keep the state understandable without relying on
-color alone.
+The ROIs tab is a flat, visual-first embedded editor without an enclosing
+`SectionCard`. A scalable BioSemi64 scalp map fills the left side and an ordered
+list of named, color-coded ROIs fills the right. Selecting a row makes that ROI
+active; pointer or Space-key activation of a map node changes only the active
+ROI. An electrode may belong to any number of ROIs. Ordered color-ring segments
+show those overlapping memberships, while active-row controls, checked/focus
+styling, tooltips, and accessible descriptions keep the state understandable
+without relying on color alone. Electrode counts remain accessible metadata;
+they are not visible layout rows.
 
 ROI names are the only normal text-entry surface. Configured labels that are
 not present on the BioSemi64 map remain visible as occurrence-preserving legacy
 entries with explicit removal controls; repeated labels must not be collapsed.
-The compact preset toolbar continues to source montage-aware FPVS defaults and
-custom presets from the existing catalog. Presentation colors and internal row
-identities are draft-only metadata and never enter the ROI settings schema.
-Same-name preset resets and full clears that would remove retained unmapped
-occurrences require a second explicit activation. Wholly blank placeholders are
-ignored, while partially defined rows block Save and focus the missing input.
+The only supported map is labeled **BioSemi 64** in the GUI while retaining the
+existing internal `10-10` settings key. LOT, ROT, and Central are built-in ROIs:
+the editor appends any missing built-in to the in-memory draft, protects the
+last case-insensitive saved occurrence from rename or deletion, and keeps its
+electrode membership editable. Existing row order and earlier duplicate-name
+rows remain unchanged. Presentation colors, protection identity, and internal
+row IDs are draft-only metadata and never enter the ROI settings schema.
+
+The preset controls are not part of the ROI screen. Existing `[roi_presets]`
+data and `SettingsManager` compatibility APIs remain intact but Settings does
+not load or rewrite them. Full clears that would remove retained unmapped
+occurrences require a second explicit activation. Wholly blank custom
+placeholders are ignored, while partially defined rows—including an emptied
+built-in ROI—block Save and focus the missing input.
 
 All embedded ROI edits remain in memory until the outer Settings **Save** uses
 `SettingsManager` and the existing harmonic recalculation/rollback workflow.

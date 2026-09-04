@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.Shared.roi_presets import (
-    default_roi_name_keys,
     default_roi_presets,
     supported_roi_montages,
     validate_roi_montage,
@@ -221,7 +220,6 @@ class SettingsDialog(QDialog):
         self.manager = manager
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
-        self._custom_roi_presets_by_montage: dict[str, list[tuple[str, list[str]]]] = {}
         self._settings_footer_buttons: list[QWidget] = []
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
@@ -253,7 +251,8 @@ class SettingsDialog(QDialog):
         self._init_advanced_tab(self.tabs)
         self._initial_harmonic_settings_signature = (
             self._harmonic_settings_signature_from_preprocessing(
-                self._project_preprocessing()
+                self._project_preprocessing(),
+                roi_pairs_override=self.manager.get_roi_pairs(),
             )
         )
         self._initial_frequency_analysis_signature = (
@@ -270,6 +269,7 @@ class SettingsDialog(QDialog):
         object_name: str,
         *,
         compact: bool = False,
+        show_change_root: bool = False,
     ) -> None:
         footer = QWidget(tab)
         footer.setObjectName(object_name)
@@ -277,27 +277,30 @@ class SettingsDialog(QDialog):
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
 
-        change_root = make_action_button("Change Projects Root...", parent=footer)
-        change_root.setObjectName(f"{object_name}_change_root")
-        change_root.clicked.connect(lambda: changeProjectsRoot(self))
-        footer_layout.addWidget(change_root)
+        footer_buttons: list[QWidget] = []
+        if show_change_root:
+            change_root = make_action_button("Change Projects Root...", parent=footer)
+            change_root.setObjectName(f"{object_name}_change_root")
+            change_root.clicked.connect(lambda: changeProjectsRoot(self))
+            footer_layout.addWidget(change_root)
+            self.btn_changeRoot = change_root
+            footer_buttons.append(change_root)
         if compact:
             footer_layout.addStretch(1)
-        if not hasattr(self, "btn_changeRoot"):
-            self.btn_changeRoot = change_root
 
         actions = ActionRow(footer, alignment=Qt.AlignRight)
         actions.setObjectName(f"{object_name}_actions")
         save_btn = make_action_button("Save", variant="primary", parent=actions)
         cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
+        save_btn.setObjectName(f"{object_name}_save")
+        cancel_btn.setObjectName(f"{object_name}_cancel")
         save_btn.clicked.connect(self._save)
         cancel_btn.clicked.connect(self.reject)
         actions.add_button(save_btn)
         actions.add_button(cancel_btn)
         footer_layout.addWidget(actions)
-        self._settings_footer_buttons.extend(
-            (change_root, save_btn, cancel_btn)
-        )
+        footer_buttons.extend((save_btn, cancel_btn))
+        self._settings_footer_buttons.extend(footer_buttons)
 
         layout.addWidget(footer)
 
@@ -855,35 +858,23 @@ class SettingsDialog(QDialog):
         layout.setSpacing(10)
 
         current_montage = self.manager.get_roi_montage()
-        self._custom_roi_presets_by_montage[current_montage] = self.manager.get_custom_roi_presets(
-            current_montage
+        montage_labels = dict(supported_roi_montages())
+        default_rois = tuple(
+            (preset.name, preset.electrodes)
+            for preset in default_roi_presets(current_montage)
         )
-        roi_group = SectionCard(
-            "Regions of Interest",
-            tab,
-            object_name="settings_rois_card",
-        )
-        roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.roi_editor = ROISettingsEditor(
-            self,
+            tab,
             self.manager.get_roi_pairs(),
             canonical_electrodes=config.DEFAULT_ELECTRODE_NAMES_64,
-            montage_options=supported_roi_montages(),
+            default_rois=default_rois,
             current_montage=current_montage,
-            preset_provider=self._roi_preset_items,
+            montage_label=montage_labels[current_montage],
         )
         self.roi_editor.setObjectName("settings_rois_editor")
         self.roi_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.roi_editor.save_custom_presets_requested.connect(
-            self._save_roi_editor_as_custom_presets
-        )
-        self.roi_montage_combo = self.roi_editor.montage_combo
-        self.roi_preset_combo = self.roi_editor.preset_combo
-        self.roi_preset_status = self.roi_editor.status
-        roi_group.content_layout.addWidget(self.roi_editor, 1)
-
-        layout.addWidget(roi_group, 1)
+        layout.addWidget(self.roi_editor, 1)
         self._add_settings_footer(tab, layout, "settings_rois_footer", compact=True)
 
         self._roi_tab_index = tabs.addTab(tab, "ROIs")
@@ -1125,7 +1116,12 @@ class SettingsDialog(QDialog):
         layout.addWidget(qc_group)
 
         layout.addStretch(1)
-        self._add_settings_footer(tab, layout, "settings_advanced_footer")
+        self._add_settings_footer(
+            tab,
+            layout,
+            "settings_advanced_footer",
+            show_change_root=True,
+        )
 
         tabs.addTab(tab, "Advanced")
 
@@ -1267,6 +1263,8 @@ class SettingsDialog(QDialog):
     def _harmonic_settings_signature_from_preprocessing(
         self,
         preprocessing: Dict[str, Any],
+        *,
+        roi_pairs_override: list[tuple[str, list[str]]] | None = None,
     ) -> tuple[object, ...]:
         settings = normalize_dv_policy(
             self._harmonic_policy_payload_from_preprocessing(preprocessing)
@@ -1281,11 +1279,13 @@ class SettingsDialog(QDialog):
             if hasattr(self, "bca_limit_edit")
             else self.manager.get("analysis", "bca_upper_limit", "16.8")
         )
-        roi_pairs = (
-            self.roi_editor.get_pairs()
-            if hasattr(self, "roi_editor")
-            else self.manager.get_roi_pairs()
-        )
+        roi_pairs = roi_pairs_override
+        if roi_pairs is None:
+            roi_pairs = (
+                self.roi_editor.get_pairs()
+                if hasattr(self, "roi_editor")
+                else self.manager.get_roi_pairs()
+            )
         normalized_rois = tuple(
             (
                 str(name).strip(),
@@ -1502,8 +1502,6 @@ class SettingsDialog(QDialog):
             self.manager.set("analysis", "bca_upper_limit", f"{bca_upper_limit:g}")
             self.manager.set_roi_montage(self._current_roi_montage())
             self.manager.set_roi_pairs(self.roi_editor.get_pairs())
-            for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
-                self.manager.set_custom_roi_presets(montage_key, custom_presets)
             self.manager.save()
         except Exception as exc:  # pragma: no cover - settings I/O failure
             QMessageBox.critical(self, "Save Error", str(exc))
@@ -2647,57 +2645,6 @@ class SettingsDialog(QDialog):
         self.roi_editor.validate_draft()
         return False
 
-    def _custom_roi_presets(self, montage: str) -> list[tuple[str, list[str]]]:
-        montage_key = validate_roi_montage(montage)
-        if montage_key not in self._custom_roi_presets_by_montage:
-            self._custom_roi_presets_by_montage[montage_key] = self.manager.get_custom_roi_presets(montage_key)
-        return self._custom_roi_presets_by_montage[montage_key]
-
-    def _roi_preset_items(self, montage: str) -> list[tuple[str, list[str], bool]]:
-        montage_key = validate_roi_montage(montage)
-        items: list[tuple[str, list[str], bool]] = []
-        seen: set[str] = set()
-        for preset in default_roi_presets(montage_key):
-            items.append((preset.name, list(preset.electrodes), True))
-            seen.add(preset.name.casefold())
-        for name, electrodes in self._custom_roi_presets(montage_key):
-            if name.casefold() not in seen:
-                items.append((name, list(electrodes), False))
-                seen.add(name.casefold())
-        return items
-
-    def _refresh_roi_preset_combo(self) -> None:
-        self.roi_editor.refresh_presets()
-
-    def _set_roi_preset_status(self, text: str, variant: str = "info") -> None:
-        self.roi_editor.show_status(text, variant)
-
-    def _save_roi_editor_as_custom_presets(self) -> None:
-        if not self._validate_roi_draft():
-            return
-        montage = self._current_roi_montage()
-        default_names = default_roi_name_keys(montage)
-        custom_by_name = {
-            name.casefold(): (name, list(electrodes))
-            for name, electrodes in self._custom_roi_presets(montage)
-        }
-        changed = 0
-        for name, electrodes in self.roi_editor.get_pairs():
-            name_key = name.casefold()
-            if name_key in default_names:
-                continue
-            candidate = (name, list(electrodes))
-            if custom_by_name.get(name_key) != candidate:
-                changed += 1
-            custom_by_name[name_key] = candidate
-
-        self._custom_roi_presets_by_montage[montage] = list(custom_by_name.values())
-        self._refresh_roi_preset_combo()
-        if changed:
-            self._set_roi_preset_status("Custom ROI presets will be saved when you click Save.", "success")
-        else:
-            self._set_roi_preset_status("No new custom ROI presets found.", "info")
-
     def _on_tab_changed(self, index: int) -> None:
         if getattr(self, "_tab_change_guard", False):
             return
@@ -2912,8 +2859,6 @@ class SettingsDialog(QDialog):
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_montage(self._current_roi_montage())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
-        for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
-            self.manager.set_custom_roi_presets(montage_key, custom_presets)
         pre_keys = [
             ("preprocessing", "low_pass", "low_pass"),
             ("preprocessing", "high_pass", "high_pass"),
