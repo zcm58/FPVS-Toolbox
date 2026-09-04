@@ -772,8 +772,16 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
         log_func(f"Error reading BCA sheet for {file_path}: missing Electrode column")
         return values, provenance
 
+    df_bca["Electrode"] = df_bca["Electrode"].astype(str).str.upper().str.strip()
+    duplicate_electrodes = sorted(
+        set(df_bca.loc[df_bca["Electrode"].duplicated(keep=False), "Electrode"])
+    )
+    if duplicate_electrodes:
+        raise RuntimeError(
+            "Fixed predefined harmonic summation requires one source row per "
+            f"electrode. Duplicate rows in {file_path}: {duplicate_electrodes[:8]}"
+        )
     df_bca = df_bca.set_index("Electrode")
-    df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
     missing_columns = [column for column in cols_to_sum if column not in df_bca.columns]
     if missing_columns:
         raise RuntimeError(
@@ -788,10 +796,6 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
         .replace([np.inf, -np.inf], np.nan)
     )
     excluded = {str(electrode).strip().upper() for electrode in excluded_electrodes_upper}
-    if excluded:
-        numeric_bca = numeric_bca.loc[
-            [electrode for electrode in numeric_bca.index if electrode not in excluded]
-        ]
     for roi_name, roi_channels in rois.items():
         roi_channel_names = [
             str(ch).strip().upper()
@@ -800,44 +804,76 @@ def _aggregate_bca_sum_harmonics_for_all_rois(
         if not roi_channel_names:
             log_func(f"ROI {roi_name} not defined.")
             continue
-
-        roi_chans = [ch for ch in roi_channel_names if ch in numeric_bca.index]
-        if not roi_chans:
-            log_func(f"No overlapping BCA data for ROI {roi_name} in {file_path}.")
-            continue
-        df_bca_roi = numeric_bca.loc[roi_chans].dropna(how="all")
-        if df_bca_roi.empty:
-            log_func(f"No data for ROI {roi_name} in {file_path}.")
+        if len(set(roi_channel_names)) != len(roi_channel_names):
+            raise RuntimeError(
+                f"ROI {roi_name!r} repeats an electrode and cannot be averaged."
+            )
+        missing_members = [
+            channel for channel in roi_channel_names if channel not in numeric_bca.index
+        ]
+        if missing_members:
+            raise RuntimeError(
+                f"ROI {roi_name!r} requires its complete electrode set in {file_path}. "
+                f"Missing: {missing_members}"
+            )
+        excluded_members = [
+            channel for channel in roi_channel_names if channel in excluded
+        ]
+        if excluded_members:
+            log_func(
+                f"ROI {roi_name} was not calculated for {file_path}; reviewed "
+                "required-electrode exclusion(s): " + ", ".join(excluded_members)
+            )
             if provenance_enabled:
                 provenance[roi_name] = _empty_fixed_provenance(
                     file_path,
-                    row_label=roi_chans,
+                    row_label=roi_channel_names,
                     col_label=cols_to_sum,
                 )
+                provenance[roi_name].update(
+                    {
+                        "roi_coverage_status": "unavailable",
+                        "expected_electrodes": roi_channel_names,
+                        "excluded_electrodes": excluded_members,
+                        "used_electrodes": [],
+                    }
+                )
             continue
+        df_bca_roi = numeric_bca.loc[roi_channel_names]
+        nonfinite_mask = ~np.isfinite(df_bca_roi.to_numpy(dtype=float))
+        if nonfinite_mask.any():
+            raise RuntimeError(
+                f"ROI {roi_name!r} has a nonfinite computable selected-harmonic "
+                f"BCA value in {file_path}; partial harmonic sums are forbidden."
+            )
 
         if provenance_enabled:
             provenance[roi_name] = {
                 "source_file": file_path,
                 "sheet": "BCA (uV)",
-                "row_label": roi_chans,
+                "row_label": roi_channel_names,
                 "col_label": cols_to_sum,
                 "raw_cell": df_bca_roi[cols_to_sum].to_dict(orient="index"),
                 "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
+                "roi_coverage_status": "available",
+                "expected_electrodes": roi_channel_names,
+                "excluded_electrodes": [],
+                "used_electrodes": roi_channel_names,
             }
 
-        bca_vals = df_bca_roi.sum(axis=1, min_count=1)
+        bca_vals = df_bca_roi.sum(axis=1, min_count=len(cols_to_sum))
         bca_vals = pd.to_numeric(bca_vals, errors="coerce").replace(
             [np.inf, -np.inf], np.nan
         )
-        if not bca_vals.notna().any():
-            log_func(
-                f"Warning: All-NaN BCA values after summation for ROI {roi_name} "
-                f"({file_path})."
+        if len(bca_vals) != len(roi_channel_names) or not np.isfinite(
+            bca_vals.to_numpy(dtype=float)
+        ).all():
+            raise RuntimeError(
+                f"ROI {roi_name!r} did not produce one finite complete-harmonic "
+                f"sum per configured electrode in {file_path}."
             )
-            continue
 
-        out = float(bca_vals.mean(skipna=True))
+        out = float(bca_vals.mean(skipna=False))
         values[roi_name] = out if np.isfinite(out) else np.nan
     return values, provenance
 
