@@ -5,11 +5,11 @@
 Load this module with the parent index, shared contracts, QC-02, and QC-15.
 
 
-**Status:** user accepted the direction on 2026-09-03. The user proposed a
-sub-5% dataset-average target and a flag for an individual exceeding that level,
-with downstream manual inclusion/exclusion. Implementation waits for the
-completed cumulative plan. The metric and reporting details below are the
-recommended implementation of that direction.
+**Status:** implemented on the active QC branch. Burden counts only unique,
+successfully interpolated canonical scalp channels, uses the frozen eligible
+scalp set as its denominator, and sends strict greater-than-5-percent cases to
+an explicit recording-aware downstream review. The threshold remains a review
+rule rather than a validity boundary or automatic exclusion.
 
 ### Scientific Rationale and Limits
 

@@ -5,10 +5,10 @@
 Load this module with the parent index, shared contracts, QC-11, and QC-12 when
 executing this action.
 
-**Status:** accepted on 2026-09-03. Each project owns one expected analyzed
-oddball-cycle count. FPVS Studio imports supply it from project metadata;
-manually created projects require user entry. Analyzed cycles and marker counts
-are separate quantities. Implementation waits for the completed plan.
+**Status:** implemented on the active QC branch. Each project owns one positive
+integer expected analyzed oddball-cycle count and source. FPVS Studio imports
+and manual entry normalize into the same exact protocol, and processing keeps
+analyzed cycles, marker counts, usable spans, and derived seconds distinct.
 
 ## Accepted Behavior
 

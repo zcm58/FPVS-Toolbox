@@ -5,10 +5,11 @@
 Load this module with the parent index and shared contracts when executing this
 action.
 
-**Status:** accepted on 2026-09-03 and corrected on 2026-09-04. Each project
-owns one presentation rate and one oddball-rate definition. Per-condition rate
-overrides are out of scope. There is no project-global BCA/analysis ceiling.
-Implementation waits for the completed cumulative plan.
+**Status:** implemented on the active QC branch. Each project owns one exact
+presentation/oddball protocol and fingerprint, including recurrence-count or
+direct-Hz entry with whole-number recurrence validation. Per-condition rate
+overrides remain out of scope, and the live project-global BCA ceiling has been
+removed.
 
 ## Problem
 

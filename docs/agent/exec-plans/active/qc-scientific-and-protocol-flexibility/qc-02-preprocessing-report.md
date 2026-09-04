@@ -5,10 +5,11 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** report-scoping decision accepted on 2026-09-03; implementation
-pending until the cumulative review is complete. The user said to label this
-as a preprocessing report. The supporting details below implement the reporting
-correction discussed in review item 10.
+**Status:** implemented on the active QC branch. The workbook and GUI call this
+the **Preprocessing QC Report**, derive stage outcomes from the processing
+ledger, and record interpolation candidate, attempted, successful, failed, and
+skipped states without presenting downstream cohort inclusion as a preprocessing
+result.
 
 ### Problem and Recommended Solution
 
