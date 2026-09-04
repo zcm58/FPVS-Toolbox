@@ -18,6 +18,10 @@ from PySide6.QtWidgets import (
 
 import config
 from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrodesDialog
+from Main_App.gui.project_protocol import (
+    ProjectProtocolRequiredError,
+    processing_protocol_snapshot,
+)
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.participant_review import review_participants_for_processing
 from Main_App.gui.event_map import has_complete_event_map_entry
@@ -39,6 +43,7 @@ from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
 )
+from Main_App.projects import FrequencyProtocolError, validate_protocol_condition_codes
 from Main_App.projects.recordings import project_recording_context
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
@@ -443,6 +448,12 @@ def _ensure_manual_removed_electrodes_reviewed(
 
 
 def build_validated_params(host: Any) -> dict | None:
+    try:
+        frequency_protocol = processing_protocol_snapshot(host.currentProject)
+    except ProjectProtocolRequiredError as exc:
+        QMessageBox.warning(host, "FPVS Protocol Required", str(exc))
+        return None
+
     normalized = normalize_preprocessing_settings(host.currentProject.preprocessing)
     logger.debug(
         "NORMALIZED_PREPROC_SNAPSHOT file_mode=%s normalized.high_pass=%r "
@@ -491,19 +502,15 @@ def build_validated_params(host: Any) -> dict | None:
     if not event_map:
         QMessageBox.warning(host, "No Events", "Please add at least one event map entry.")
         return None
+    try:
+        validate_protocol_condition_codes(frequency_protocol, event_map.values())
+    except FrequencyProtocolError as exc:
+        QMessageBox.warning(host, "Invalid FPVS Protocol", str(exc))
+        return None
 
     stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
-    try:
-        base_freq = float(host.settings.get("analysis", "base_freq", "6.0"))
-    except Exception:
-        base_freq = 6.0
-    try:
-        oddball_freq = float(
-            host.settings.get("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
-        )
-    except Exception:
-        oddball_freq = float(config.DEFAULT_ODDBALL_FREQ)
-    oddball_freq = config.validate_locked_oddball_frequency(oddball_freq)
+    base_freq = float(frequency_protocol.presentation_rate_hz)
+    oddball_freq = float(frequency_protocol.oddball_rate_hz)
     try:
         bca_upper_limit = float(
             host.settings.get(
@@ -558,6 +565,8 @@ def build_validated_params(host: Any) -> dict | None:
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,
         "event_id_map": event_map,
+        "frequency_protocol": frequency_protocol,
+        "frequency_protocol_fingerprint": frequency_protocol.fingerprint,
         "base_freq": base_freq,
         "oddball_freq": oddball_freq,
         "bca_upper_limit": bca_upper_limit,
@@ -565,6 +574,8 @@ def build_validated_params(host: Any) -> dict | None:
             "base_freq": base_freq,
             "oddball_freq": oddball_freq,
             "bca_upper_limit": bca_upper_limit,
+            "frequency_protocol": frequency_protocol.to_manifest(),
+            "frequency_protocol_fingerprint": frequency_protocol.fingerprint,
         },
     }
     logger.debug(

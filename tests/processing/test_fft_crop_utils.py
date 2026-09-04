@@ -23,7 +23,7 @@ def _build_events(fs: int, onset_ids=(1,), reps=1, cycles=10, include_dups=False
             s55 = start55 + c * period
             rows.append([s55, 0, 55])
             if include_dups:
-                rows.append([s55 + max(1, period // 10), 0, 55])
+                rows.append([s55, 0, 55])
         if missing_gap and cycles >= 6:
             rows.pop(-3)
         sample += int((cycles + 2) * period)
@@ -68,6 +68,30 @@ def test_duplicates_are_deduped():
     assert crop.dedup_dropped > 0
 
 
+def test_nonsimultaneous_early_marker_is_kept_as_evidence():
+    fs = 500
+    events, stream_end = _build_events(
+        fs,
+        onset_ids=(1,),
+        reps=1,
+        cycles=12,
+    )
+    extra = np.asarray([[events[1, 0] + 10, 0, 55]], dtype=int)
+    events = np.asarray(sorted(np.vstack([events, extra]), key=lambda row: row[0]))
+
+    results, _, _ = compute_fft_crop_from_events(
+        events,
+        fs=fs,
+        onset_ids={1},
+        stream_end_sample=stream_end,
+    )
+    crop = results[(1, 0)]
+
+    assert crop.n55_raw == crop.n55_dedup
+    assert crop.dedup_dropped == 0
+    assert crop.early_extra_count == 1
+
+
 def test_missing_gap_warns_but_does_not_crash():
     fs = 500
     events, stream_end = _build_events(fs, onset_ids=(1,), reps=1, cycles=12, missing_gap=True)
@@ -77,7 +101,7 @@ def test_missing_gap_warns_but_does_not_crash():
     assert crop.n_samples >= 0
 
 
-def test_condition_specific_oddball_codes_are_resolved_per_condition():
+def test_observed_condition_specific_codes_are_never_guessed():
     fs = 256
     events = np.asarray(
         [
@@ -98,7 +122,7 @@ def test_condition_specific_oddball_codes_are_resolved_per_condition():
         stream_end_sample=5000,
     )
 
-    assert oddball_ids == {1: 51, 2: 52}
+    assert oddball_ids == {1: 55, 2: 55}
 
     results, n_step, warns = compute_fft_crop_from_events(
         events,
@@ -110,12 +134,10 @@ def test_condition_specific_oddball_codes_are_resolved_per_condition():
 
     assert warns == []
     assert n_step == 640
-    assert results[(1, 0)].oddball_id == 51
-    assert results[(2, 0)].oddball_id == 52
-    assert not results[(1, 0)].fallback
-    assert not results[(2, 0)].fallback
-    assert results[(1, 0)].n_samples % n_step == 0
-    assert results[(2, 0)].n_samples % n_step == 0
+    assert results[(1, 0)].oddball_id == 55
+    assert results[(2, 0)].oddball_id == 55
+    assert results[(1, 0)].fallback
+    assert results[(2, 0)].fallback
 
 
 def test_differing_reps_common_n_minimum():

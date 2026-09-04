@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, Iterable, Mapping
 
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    REMOVED_ELECTRODE_DETECTION_MODE_OFF,
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
 )
@@ -34,10 +36,17 @@ _BOOL = "bool"
 _LINE_NOISE_FREQUENCY = "line_noise_frequency"
 _ELECTRODE_MONTAGE = "electrode_montage"
 _ELECTRODE_MAPPING_PROFILE = "electrode_mapping_profile"
+_REMOVED_ELECTRODE_LEGACY_BOOL = "removed_electrode_legacy_bool"
 _REMOVED_ELECTRODE_MODE = "removed_electrode_mode"
 _MANUAL_REMOVED_ELECTRODES = "manual_removed_electrodes"
 _MANUAL_REMOVED_ELECTRODES_BY_RECORDING = (
     "manual_removed_electrodes_by_recording"
+)
+MANUAL_REMOVED_ELECTRODES_ENABLED_KEY = "manual_removed_electrodes_enabled"
+_MANUAL_REMOVED_ELECTRODES_ENABLED_ALIASES = (
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+    "apply_manual_removed_electrodes",
+    "use_manual_removed_electrodes",
 )
 _MANUAL_EXCLUDED_PARTICIPANTS = "manual_excluded_participants"
 _MANUAL_EXCLUDED_RECORDINGS = "manual_excluded_recordings"
@@ -64,6 +73,50 @@ NEW_PROJECT_HARMONIC_SELECTION_PROFILE = (
     "dzhelyova_poncet_two_consecutive_failures"
 )
 HARMONIC_SELECTION_PROFILE_VERSION = "1.0"
+
+REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION = "1.0.0"
+REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY = "ready"
+REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED = (
+    "confirmation_required"
+)
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF = (
+    "new_project_default_off"
+)
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_SAVED_MODE = "saved_mode"
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_BOOLEAN = "legacy_boolean"
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING = "legacy_missing"
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE = (
+    "invalid_saved_value"
+)
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT = (
+    "fpvs_studio_import"
+)
+REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED = "user_confirmed"
+
+_REMOVED_ELECTRODE_MODE_ALIASES = (
+    "removed_electrode_detection_mode",
+    "removed_electrode_qc_mode",
+    "detect_removed_electrodes_mode",
+)
+_REMOVED_ELECTRODE_LEGACY_BOOLEAN_ALIASES = (
+    "auto_detect_removed_electrodes",
+    "detect_removed_electrodes",
+    "auto_mark_removed_electrodes",
+)
+_REMOVED_ELECTRODE_CHOICE_METADATA_KEYS = (
+    "removed_electrode_detection_choice_schema_version",
+    "removed_electrode_detection_choice_status",
+    "removed_electrode_detection_choice_source",
+)
+REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS = (
+    "removed_electrode_detection_mode",
+    "auto_detect_removed_electrodes",
+    *_REMOVED_ELECTRODE_CHOICE_METADATA_KEYS,
+)
+
+
+class RemovedElectrodeDetectionConfirmationRequired(RuntimeError):
+    """Raised when an older project needs an explicit detector choice."""
 
 ELECTRODE_MONTAGE_BIOSEMI64 = "biosemi64"
 ELECTRODE_MAPPING_PROFILE_ANATOMICAL = "anatomical_labels"
@@ -125,22 +178,14 @@ _FIELDS: tuple[_Field, ...] = (
     ),
     _Field(
         "auto_detect_removed_electrodes",
-        (
-            "auto_detect_removed_electrodes",
-            "detect_removed_electrodes",
-            "auto_mark_removed_electrodes",
-        ),
-        True,
-        _BOOL,
+        _REMOVED_ELECTRODE_LEGACY_BOOLEAN_ALIASES,
+        False,
+        _REMOVED_ELECTRODE_LEGACY_BOOL,
     ),
     _Field(
         "removed_electrode_detection_mode",
-        (
-            "removed_electrode_detection_mode",
-            "removed_electrode_qc_mode",
-            "detect_removed_electrodes_mode",
-        ),
-        REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+        _REMOVED_ELECTRODE_MODE_ALIASES,
+        REMOVED_ELECTRODE_DETECTION_MODE_OFF,
         _REMOVED_ELECTRODE_MODE,
     ),
     _Field(
@@ -152,6 +197,12 @@ _FIELDS: tuple[_Field, ...] = (
         ),
         {},
         _MANUAL_REMOVED_ELECTRODES,
+    ),
+    _Field(
+        MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+        _MANUAL_REMOVED_ELECTRODES_ENABLED_ALIASES,
+        False,
+        _BOOL,
     ),
     _Field(
         "manual_removed_electrodes_by_recording",
@@ -295,7 +346,7 @@ PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(
     field.name
     for field in _FIELDS
     if field.name not in REPEATED_SESSION_PREPROCESSING_KEYS
-)
+) + _REMOVED_ELECTRODE_CHOICE_METADATA_KEYS
 PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in _FIELDS}
 
 
@@ -311,6 +362,19 @@ def new_project_preprocessing_settings() -> Dict[str, Any]:
     return normalize_preprocessing_settings(
         {
             **PREPROCESSING_DEFAULTS,
+            "removed_electrode_detection_mode": (
+                REMOVED_ELECTRODE_DETECTION_MODE_OFF
+            ),
+            "auto_detect_removed_electrodes": False,
+            "removed_electrode_detection_choice_schema_version": (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            ),
+            "removed_electrode_detection_choice_status": (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+            ),
+            "removed_electrode_detection_choice_source": (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF
+            ),
             "harmonic_selection_profile": NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
             "harmonic_selection_profile_version": HARMONIC_SELECTION_PROFILE_VERSION,
             "group_significant_electrode_scope": _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL,
@@ -338,6 +402,241 @@ def _first_value(data: Mapping[str, Any], aliases: Iterable[str]) -> Any:
         if alias in data:
             return data[alias]
     return None
+
+
+def _first_present_nonblank_value(
+    data: Mapping[str, Any],
+    aliases: Iterable[str],
+) -> tuple[bool, Any]:
+    for alias in aliases:
+        if alias in data and data[alias] not in (None, ""):
+            return True, data[alias]
+    return False, None
+
+
+def _normalize_explicit_removed_electrode_mode(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return (
+            REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+            if value
+            else REMOVED_ELECTRODE_DETECTION_MODE_OFF
+        )
+    if value in (None, ""):
+        return None
+    text = str(value).strip().casefold().replace("_", " ").replace("-", " ")
+    if text in {"auto", "conservative", "conservative auto", "true", "on"}:
+        return REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+    if text in {"manual", "manual list", "manual metadata"}:
+        return REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    if text in {"off", "false", "none", "no"}:
+        return REMOVED_ELECTRODE_DETECTION_MODE_OFF
+    return None
+
+
+def _normalize_removed_electrode_detection_choice(
+    source: Mapping[str, Any],
+    normalized: Dict[str, Any],
+) -> None:
+    """Resolve detector choice without mistaking a missing legacy value for Auto."""
+
+    mode_present, mode_raw = _first_present_nonblank_value(
+        source,
+        _REMOVED_ELECTRODE_MODE_ALIASES,
+    )
+    boolean_present, boolean_raw = _first_present_nonblank_value(
+        source,
+        _REMOVED_ELECTRODE_LEGACY_BOOLEAN_ALIASES,
+    )
+    explicit_mode = (
+        _normalize_explicit_removed_electrode_mode(mode_raw)
+        if mode_present
+        else None
+    )
+    boolean_mode: str | None = None
+    if boolean_present:
+        try:
+            boolean_enabled = _coerce_bool(
+                boolean_raw,
+                default=False,
+                field="auto_detect_removed_electrodes",
+            )
+        except ValueError:
+            pass
+        else:
+            boolean_mode = (
+                REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+                if boolean_enabled
+                else REMOVED_ELECTRODE_DETECTION_MODE_OFF
+            )
+    metadata_present = any(
+        key in source for key in _REMOVED_ELECTRODE_CHOICE_METADATA_KEYS
+    )
+
+    if metadata_present:
+        version = str(
+            source.get("removed_electrode_detection_choice_schema_version") or ""
+        ).strip()
+        status = str(
+            source.get("removed_electrode_detection_choice_status") or ""
+        ).strip()
+        choice_source = str(
+            source.get("removed_electrode_detection_choice_source") or ""
+        ).strip()
+        valid_sources = {
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_SAVED_MODE,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_BOOLEAN,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
+        }
+        valid_statuses = {
+            REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY,
+            REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED,
+        }
+        metadata_is_valid = (
+            version == REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            and status in valid_statuses
+            and choice_source in valid_sources
+            and (
+                status != REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+                or choice_source
+                in {
+                    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING,
+                    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE,
+                }
+            )
+            and (
+                status != REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+                or explicit_mode is not None
+                or boolean_mode is not None
+            )
+        )
+        if metadata_is_valid:
+            if (
+                status
+                == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+            ):
+                resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+            else:
+                resolved_mode = explicit_mode or boolean_mode
+        elif (
+            status
+            == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        ):
+            # A recorded pending choice is never converted into consent merely
+            # because the provisional Off/Auto compatibility field is present.
+            version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+            choice_source = (
+                choice_source
+                if choice_source
+                in {
+                    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING,
+                    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE,
+                }
+                else REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE
+            )
+            resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+        elif explicit_mode is not None:
+            # Recover a partially written/corrupt provenance record from the
+            # valid saved behavior without discarding unrelated preprocessing.
+            version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+            choice_source = REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_SAVED_MODE
+            resolved_mode = explicit_mode
+        elif boolean_mode is not None:
+            version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+            choice_source = REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_BOOLEAN
+            resolved_mode = boolean_mode
+        else:
+            version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+            choice_source = (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE
+            )
+            resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+    elif explicit_mode is not None:
+        version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+        status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+        choice_source = REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_SAVED_MODE
+        resolved_mode = explicit_mode
+    elif boolean_present:
+        version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+        if boolean_mode is None:
+            status = (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+            )
+            choice_source = (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE
+            )
+            resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+        else:
+            status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+            choice_source = (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_BOOLEAN
+            )
+            resolved_mode = boolean_mode
+    elif mode_present:
+        version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+        status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        choice_source = (
+            REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE
+        )
+        resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+    else:
+        version = REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+        status = REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        choice_source = REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING
+        resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+
+    normalized["removed_electrode_detection_mode"] = resolved_mode
+    if resolved_mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
+        # ``Manual`` was the legacy mutually exclusive mode.  The v3 control
+        # separates it into automatic detection Off plus an independently
+        # active manual list, preserving its actual historical behavior.
+        resolved_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+        normalized[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = True
+    normalized["auto_detect_removed_electrodes"] = (
+        resolved_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+    )
+    normalized["removed_electrode_detection_mode"] = resolved_mode
+    normalized["removed_electrode_detection_choice_schema_version"] = version
+    normalized["removed_electrode_detection_choice_status"] = status
+    normalized["removed_electrode_detection_choice_source"] = choice_source
+
+
+def removed_electrode_detection_choice_was_saved(
+    raw: Mapping[str, Any] | None,
+) -> bool:
+    """Return whether a manifest contains an explicit detector-choice signal."""
+
+    source = raw if isinstance(raw, Mapping) else {}
+    if any(key in source for key in _REMOVED_ELECTRODE_CHOICE_METADATA_KEYS):
+        return True
+    mode_present, mode_raw = _first_present_nonblank_value(
+        source,
+        _REMOVED_ELECTRODE_MODE_ALIASES,
+    )
+    if mode_present and _normalize_explicit_removed_electrode_mode(mode_raw) is not None:
+        return True
+    boolean_present, boolean_raw = _first_present_nonblank_value(
+        source,
+        _REMOVED_ELECTRODE_LEGACY_BOOLEAN_ALIASES,
+    )
+    if not boolean_present:
+        return False
+    try:
+        _coerce_bool(
+            boolean_raw,
+            default=False,
+            field="auto_detect_removed_electrodes",
+        )
+    except ValueError:
+        return False
+    return True
 
 
 def _coerce_float(value: Any, *, default: float, field: str) -> float:
@@ -669,6 +968,17 @@ def normalize_preprocessing_settings(
             normalized[field.name] = _coerce_str(raw_value, default=field.default, field=field.name)
         elif field.type == _BOOL:
             normalized[field.name] = _coerce_bool(raw_value, default=field.default, field=field.name)
+        elif field.type == _REMOVED_ELECTRODE_LEGACY_BOOL:
+            try:
+                normalized[field.name] = _coerce_bool(
+                    raw_value,
+                    default=field.default,
+                    field=field.name,
+                )
+            except ValueError:
+                # Choice migration below records the malformed legacy value as
+                # unresolved. Do not let it discard unrelated preprocessing.
+                normalized[field.name] = bool(field.default)
         elif field.type == _LINE_NOISE_FREQUENCY:
             normalized[field.name] = _coerce_line_noise_frequency(
                 raw_value,
@@ -729,27 +1039,7 @@ def normalize_preprocessing_settings(
             _GROUP_SIGNIFICANT_ELECTRODE_SCOPE_ALL
         )
 
-    mode_raw = _first_value(
-        source,
-        (
-            "removed_electrode_detection_mode",
-            "removed_electrode_qc_mode",
-            "detect_removed_electrodes_mode",
-        ),
-    )
-    if mode_raw in (None, ""):
-        normalized["removed_electrode_detection_mode"] = (
-            normalize_removed_electrode_detection_mode(
-                None,
-                auto_detect_removed_electrodes=normalized[
-                    "auto_detect_removed_electrodes"
-                ],
-            )
-        )
-    normalized["auto_detect_removed_electrodes"] = (
-        normalized["removed_electrode_detection_mode"]
-        == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
-    )
+    _normalize_removed_electrode_detection_choice(source, normalized)
 
     low_pass_val = float(normalized.get("low_pass")) if "low_pass" in normalized else None
     high_pass_val = float(normalized.get("high_pass")) if "high_pass" in normalized else None
@@ -789,6 +1079,92 @@ def normalize_preprocessing_settings(
     return normalized
 
 
+def removed_electrode_detection_choice_requires_confirmation(
+    settings: Mapping[str, Any] | None,
+) -> bool:
+    """Return whether processing must pause for an explicit project choice."""
+
+    normalized = normalize_preprocessing_settings(settings)
+    return (
+        normalized["removed_electrode_detection_choice_status"]
+        == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+    )
+
+
+def require_removed_electrode_detection_choice_ready(
+    settings: Mapping[str, Any] | None,
+) -> str:
+    """Return the effective mode or raise before processing an unresolved project."""
+
+    normalized = normalize_preprocessing_settings(settings)
+    if (
+        normalized["removed_electrode_detection_choice_status"]
+        != REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+    ):
+        raise RemovedElectrodeDetectionConfirmationRequired(
+            "Choose whether to enable experimental removed-electrode detection "
+            "before processing this project. Off is recommended unless the "
+            "development-lab detector is intentionally being used."
+        )
+    return str(normalized["removed_electrode_detection_mode"])
+
+
+def confirm_removed_electrode_detection_choice(
+    settings: Mapping[str, Any] | None,
+    mode: Any,
+    *,
+    source: str = REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
+) -> Dict[str, Any]:
+    """Return settings with one explicit user-confirmed detector choice."""
+
+    normalized_mode = _normalize_explicit_removed_electrode_mode(mode)
+    if normalized_mode is None:
+        raise ValueError(f"Invalid removed-electrode detector mode: {mode!r}")
+    legacy_manual_mode = (
+        normalized_mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    )
+    if legacy_manual_mode:
+        normalized_mode = REMOVED_ELECTRODE_DETECTION_MODE_OFF
+    normalized_source = str(source or "").strip()
+    if normalized_source not in {
+        REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
+        REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT,
+    }:
+        raise ValueError(
+            "An explicit removed-electrode detector choice source must be "
+            "'user_confirmed' or 'fpvs_studio_import'."
+        )
+    updated = dict(settings or {})
+    updated.update(
+        {
+            "removed_electrode_detection_mode": normalized_mode,
+            "auto_detect_removed_electrodes": (
+                normalized_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+            ),
+            MANUAL_REMOVED_ELECTRODES_ENABLED_KEY: (
+                True
+                if legacy_manual_mode
+                else bool(
+                    normalize_preprocessing_settings(settings).get(
+                        MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+                        False,
+                    )
+                )
+            ),
+            "removed_electrode_detection_choice_schema_version": (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION
+            ),
+            "removed_electrode_detection_choice_status": (
+                REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+            ),
+            "removed_electrode_detection_choice_source": (
+                normalized_source
+            ),
+        }
+    )
+    return normalize_preprocessing_settings(updated)
+
+
 __all__ = [
     "ELECTRODE_MAPPING_PROFILE_ANATOMICAL",
     "ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1",
@@ -796,12 +1172,29 @@ __all__ = [
     "HARMONIC_SELECTION_PROFILE_VERSION",
     "FIXED_HARMONIC_SELECTION_PROFILE",
     "LEGACY_HARMONIC_SELECTION_PROFILE",
+    "MANUAL_REMOVED_ELECTRODES_ENABLED_KEY",
     "NEW_PROJECT_HARMONIC_SELECTION_PROFILE",
     "SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_BOOLEAN",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_SAVED_MODE",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY",
+    "RemovedElectrodeDetectionConfirmationRequired",
+    "confirm_removed_electrode_detection_choice",
     "new_project_preprocessing_settings",
     "normalize_electrode_mapping_profile",
     "normalize_electrode_montage",
     "normalize_preprocessing_settings",
+    "removed_electrode_detection_choice_requires_confirmation",
+    "removed_electrode_detection_choice_was_saved",
+    "require_removed_electrode_detection_choice_ready",
     "normalize_manual_excluded_participants",
     "normalize_manual_excluded_recordings",
     "normalize_manual_excluded_participant_conditions",

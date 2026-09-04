@@ -15,9 +15,11 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
+    QFormLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QSizePolicy,
@@ -26,6 +28,20 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import make_action_button
+from Main_App.gui.marker_occurrence_review import (
+    MARKER_DECISION_EXCLUDE,
+    MARKER_DECISION_RETAIN_FULL,
+    MARKER_DECISION_USE_CONTIGUOUS,
+    MarkerOccurrenceReviewError,
+    MarkerOccurrenceReviewItem,
+    build_marker_review_decision,
+    canonical_event_plans_by_file,
+    collect_marker_occurrence_reviews,
+    marker_occurrence_review_rows,
+    merge_marker_review_decision,
+    merge_rescanned_results,
+    resolved_path_text,
+)
 from Main_App.gui.recording_qc_identity import (
     participant_sort_key,
     project_recording_coverage_rows,
@@ -90,12 +106,13 @@ _HARD_EXCLUSION_DETAILS_COLUMN = 4
 _HARD_EXCLUSION_DETAILS_ATTR = "_preflight_hard_exclusion_details_by_pid"
 _PREFLIGHT_TABLE_CLICK_HANDLER_ATTR = "_preflight_table_item_clicked_handler"
 _CONDITION_EXCLUSION_CHECK_COLUMN = 6
-_DATA_QUALITY_STEP_TOTAL = 5
+_DATA_QUALITY_STEP_TOTAL = 6
 _SCAN_SIGNAL_HEALTH_STEP = 1
-_CONFIRM_CONDITION_EXCLUSIONS_STEP = 2
-_CONFIRM_REMOVED_ELECTRODES_STEP = 3
-_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP = 4
-_REVIEW_OTHER_FLAGS_STEP = 5
+_REVIEW_MARKER_OCCURRENCES_STEP = 2
+_CONFIRM_CONDITION_EXCLUSIONS_STEP = 3
+_CONFIRM_REMOVED_ELECTRODES_STEP = 4
+_CONFIRM_PARTICIPANT_EXCLUSIONS_STEP = 5
+_REVIEW_OTHER_FLAGS_STEP = 6
 
 
 class _PreflightQcWorker(QObject):
@@ -1201,6 +1218,423 @@ def _run_scan_embedded(
 
     scan = result_holder.get("scan")
     return scan if isinstance(scan, PreflightQcScan) else None
+
+
+def _marker_review_actions() -> tuple[tuple[str, str, str], ...]:
+    return (
+        ("Use Verified Span", MARKER_DECISION_USE_CONTIGUOUS, "primary"),
+        ("Retain Full Occurrence", MARKER_DECISION_RETAIN_FULL, "secondary"),
+        ("Exclude Occurrence", MARKER_DECISION_EXCLUDE, "secondary"),
+        ("Cancel Processing", "cancel", "secondary"),
+    )
+
+
+def _show_marker_review_error(host: Any, message: str) -> None:
+    box = QMessageBox(host)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle("Marker Review")
+    box.setText("This marker-review decision cannot be saved.")
+    box.setInformativeText(message)
+    box.setStandardButtons(QMessageBox.Ok)
+    box.exec()
+
+
+def _collect_retain_full_marker_evidence(
+    host: Any,
+    item: MarkerOccurrenceReviewItem,
+) -> dict[str, object] | None:
+    dialog = QDialog(host)
+    dialog.setObjectName("marker_retain_full_evidence_dialog")
+    dialog.setWindowTitle("Evidence for Full Occurrence")
+    dialog.setModal(True)
+    dialog.setMinimumWidth(620)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(18, 18, 18, 18)
+    layout.setSpacing(12)
+
+    title = QLabel(
+        f"{item.participant_id} · {item.recording_id or item.path.name} · "
+        f"{item.condition_label}, repetition {item.repetition_index + 1}",
+        dialog,
+    )
+    title.setObjectName("marker_retain_full_evidence_title")
+    title.setWordWrap(True)
+    layout.addWidget(title)
+
+    explanation = QLabel(
+        "Retain the full proposed crop only when independent evidence shows that "
+        "stimulation continued at the expected phase through the marker finding. "
+        "Choose the evidence type and enter a note or a log/file reference.",
+        dialog,
+    )
+    explanation.setWordWrap(True)
+    layout.addWidget(explanation)
+
+    form = QFormLayout()
+    form.setSpacing(10)
+    evidence_type = QComboBox(dialog)
+    evidence_type.setObjectName("marker_evidence_type_combo")
+    evidence_type.addItem("Select evidence type...", "")
+    evidence_type.addItem("Presentation log", "presentation_log")
+    evidence_type.addItem("Photodiode trace", "photodiode_trace")
+    evidence_type.addItem("Experimenter or session log", "session_log")
+    evidence_type.addItem("Video recording", "video_recording")
+    evidence_type.addItem("Other contemporaneous evidence", "other")
+    form.addRow("Evidence type", evidence_type)
+
+    evidence_reference = QLineEdit(dialog)
+    evidence_reference.setObjectName("marker_evidence_reference_edit")
+    evidence_reference.setPlaceholderText("For example: presentation_log.json, trial 4")
+    form.addRow("Log or file reference", evidence_reference)
+
+    evidence_note = QPlainTextEdit(dialog)
+    evidence_note.setObjectName("marker_evidence_note_edit")
+    evidence_note.setPlaceholderText(
+        "Briefly state what the evidence shows about continuous, phase-correct stimulation."
+    )
+    evidence_note.setMaximumHeight(120)
+    form.addRow("Evidence note", evidence_note)
+    layout.addLayout(form)
+
+    validation_label = QLabel("", dialog)
+    validation_label.setObjectName("marker_evidence_validation_label")
+    validation_label.setWordWrap(True)
+    layout.addWidget(validation_label)
+
+    accepted: dict[str, object] = {}
+    actions = QHBoxLayout()
+    actions.addStretch(1)
+    back_button = make_action_button("Back", variant="secondary", parent=dialog)
+    save_button = make_action_button(
+        "Save Evidence",
+        variant="primary",
+        parent=dialog,
+    )
+
+    def _save() -> None:
+        try:
+            decision = build_marker_review_decision(
+                item,
+                MARKER_DECISION_RETAIN_FULL,
+                evidence_type=str(evidence_type.currentData() or ""),
+                evidence_note=evidence_note.toPlainText(),
+                evidence_reference=evidence_reference.text(),
+            )
+        except MarkerOccurrenceReviewError as exc:
+            validation_label.setText(str(exc))
+            return
+        accepted.update(decision)
+        dialog.accept()
+
+    back_button.clicked.connect(dialog.reject)
+    save_button.clicked.connect(_save)
+    actions.addWidget(back_button)
+    actions.addWidget(save_button)
+    layout.addLayout(actions)
+
+    if dialog.exec() != QDialog.Accepted:
+        return None
+    return accepted or None
+
+
+def _collect_verified_marker_span(
+    host: Any,
+    item: MarkerOccurrenceReviewItem,
+) -> dict[str, object] | None:
+    if not item.contiguous_candidate_spans:
+        _show_marker_review_error(
+            host,
+            "This occurrence has no contiguous candidate that contains exactly the "
+            "project's expected analyzed oddball cycles.",
+        )
+        return None
+
+    dialog = QDialog(host)
+    dialog.setObjectName("marker_contiguous_span_dialog")
+    dialog.setWindowTitle("Choose Verified Contiguous Span")
+    dialog.setModal(True)
+    dialog.setMinimumWidth(560)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(18, 18, 18, 18)
+    layout.setSpacing(12)
+    explanation = QLabel(
+        "Choose one span found by the marker check. Each listed span stays inside "
+        "this occurrence and contains exactly the expected analyzed cycles.",
+        dialog,
+    )
+    explanation.setWordWrap(True)
+    layout.addWidget(explanation)
+
+    span_combo = QComboBox(dialog)
+    span_combo.setObjectName("marker_contiguous_span_combo")
+    for start, stop in item.contiguous_candidate_spans:
+        start_s = float((start - item.first_samp) / item.sampling_rate_hz)
+        stop_s = float((stop - item.first_samp) / item.sampling_rate_hz)
+        duration_s = float((stop - start) / item.sampling_rate_hz)
+        span_combo.addItem(
+            f"Samples [{start}, {stop}) · {start_s:.6g} to {stop_s:.6g} s "
+            f"from recording start · {duration_s:.6g} s duration",
+            (start, stop),
+        )
+    layout.addWidget(span_combo)
+
+    selected: dict[str, object] = {}
+    actions = QHBoxLayout()
+    actions.addStretch(1)
+    back_button = make_action_button("Back", variant="secondary", parent=dialog)
+    use_button = make_action_button("Use This Span", variant="primary", parent=dialog)
+
+    def _use() -> None:
+        raw_span = span_combo.currentData()
+        span = tuple(raw_span) if isinstance(raw_span, Sequence) else None
+        try:
+            decision = build_marker_review_decision(
+                item,
+                MARKER_DECISION_USE_CONTIGUOUS,
+                selected_span=span,  # type: ignore[arg-type]
+            )
+        except MarkerOccurrenceReviewError as exc:
+            _show_marker_review_error(host, str(exc))
+            return
+        selected.update(decision)
+        dialog.accept()
+
+    back_button.clicked.connect(dialog.reject)
+    use_button.clicked.connect(_use)
+    actions.addWidget(back_button)
+    actions.addWidget(use_button)
+    layout.addLayout(actions)
+
+    if dialog.exec() != QDialog.Accepted:
+        return None
+    return selected or None
+
+
+def _collect_marker_exclusion_reason(
+    host: Any,
+    item: MarkerOccurrenceReviewItem,
+) -> dict[str, object] | None:
+    dialog = QDialog(host)
+    dialog.setObjectName("marker_exclusion_reason_dialog")
+    dialog.setWindowTitle("Reason for Excluding Occurrence")
+    dialog.setModal(True)
+    dialog.setMinimumWidth(560)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(18, 18, 18, 18)
+    layout.setSpacing(12)
+    explanation = QLabel(
+        f"Explain why {item.condition_label}, repetition "
+        f"{item.repetition_index + 1}, should contribute no analyzed data. "
+        "This reason is saved with the exact marker evidence and occurrence scope.",
+        dialog,
+    )
+    explanation.setWordWrap(True)
+    layout.addWidget(explanation)
+
+    reason_edit = QPlainTextEdit(dialog)
+    reason_edit.setObjectName("marker_exclusion_reason_edit")
+    reason_edit.setPlaceholderText(
+        "Brief reason, for example: the presentation log confirms stimulation stopped."
+    )
+    reason_edit.setMaximumHeight(120)
+    layout.addWidget(reason_edit)
+
+    validation_label = QLabel("", dialog)
+    validation_label.setObjectName("marker_exclusion_reason_validation_label")
+    validation_label.setWordWrap(True)
+    layout.addWidget(validation_label)
+
+    accepted: dict[str, object] = {}
+    actions = QHBoxLayout()
+    actions.addStretch(1)
+    back_button = make_action_button("Back", variant="secondary", parent=dialog)
+    exclude_button = make_action_button(
+        "Exclude Occurrence",
+        variant="primary",
+        parent=dialog,
+    )
+
+    def _exclude() -> None:
+        try:
+            decision = build_marker_review_decision(
+                item,
+                MARKER_DECISION_EXCLUDE,
+                reason=reason_edit.toPlainText(),
+            )
+        except MarkerOccurrenceReviewError as exc:
+            validation_label.setText(str(exc))
+            return
+        accepted.update(decision)
+        dialog.accept()
+
+    back_button.clicked.connect(dialog.reject)
+    exclude_button.clicked.connect(_exclude)
+    actions.addWidget(back_button)
+    actions.addWidget(exclude_button)
+    layout.addLayout(actions)
+
+    if dialog.exec() != QDialog.Accepted:
+        return None
+    return accepted or None
+
+
+def _show_marker_occurrence_review(
+    host: Any,
+    item: MarkerOccurrenceReviewItem,
+    *,
+    index: int,
+    total: int,
+) -> str:
+    _begin_preflight_page(
+        host,
+        step=_REVIEW_MARKER_OCCURRENCES_STEP,
+        title="Review Marker Occurrence",
+        message=(
+            "A marker gap or extra marker needs a decision before signal-quality "
+            "checks can use this condition occurrence."
+        ),
+        busy=False,
+        review_visible=True,
+        review_title=f"Marker occurrence {index} of {total}",
+        progress_visible=False,
+        checklist=(
+            "Review the exact marker and interval evidence",
+            "Choose one occurrence-level analysis decision",
+            "Use independent evidence when retaining across a marker finding",
+        ),
+    )
+    _set_label(
+        host,
+        "processing_summary_label",
+        f"Reviewing {item.participant_id} · {item.condition_label} · repetition "
+        f"{item.repetition_index + 1}.",
+    )
+    _set_label(
+        host,
+        "processing_current_file_label",
+        "No marker is guessed or silently discarded. Your decision applies only "
+        "to this occurrence.",
+    )
+    _set_preflight_table(
+        host,
+        ("Evidence", "Observed"),
+        marker_occurrence_review_rows(item),
+        stretch_column=1,
+        preferred_column_widths={0: 240},
+    )
+    return _await_preflight_choice(host, _marker_review_actions())
+
+
+def _review_marker_occurrences(
+    host: Any,
+    raw_file_infos: Sequence[Any],
+    params: dict[str, Any],
+    scan: PreflightQcScan,
+    group_labels: Mapping[str, str],
+) -> PreflightQcScan | None:
+    try:
+        review_items = collect_marker_occurrence_reviews(scan)
+    except MarkerOccurrenceReviewError as exc:
+        _show_marker_review_error(host, str(exc))
+        return None
+    if not review_items:
+        return scan
+
+    affected_path_keys: set[str] = set()
+    for index, item in enumerate(review_items, start=1):
+        while True:
+            choice = _show_marker_occurrence_review(
+                host,
+                item,
+                index=index,
+                total=len(review_items),
+            )
+            if choice == "cancel":
+                try:
+                    host.log(
+                        "Data quality check cancelled at marker-occurrence review."
+                    )
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
+                return None
+            if choice == MARKER_DECISION_RETAIN_FULL:
+                decision = _collect_retain_full_marker_evidence(host, item)
+                if decision is None:
+                    continue
+            elif choice == MARKER_DECISION_USE_CONTIGUOUS:
+                decision = _collect_verified_marker_span(host, item)
+                if decision is None:
+                    continue
+            elif choice == MARKER_DECISION_EXCLUDE:
+                decision = _collect_marker_exclusion_reason(host, item)
+                if decision is None:
+                    continue
+            else:
+                _show_marker_review_error(host, "Choose an occurrence-level decision.")
+                continue
+            params["_fpvs_marker_review_decisions_by_file"] = (
+                merge_marker_review_decision(
+                    params.get("_fpvs_marker_review_decisions_by_file"),
+                    file_path=item.path,
+                    occurrence_key=item.occurrence_key,
+                    decision=decision,
+                )
+            )
+            affected_path_keys.add(resolved_path_text(item.path).casefold())
+            break
+
+    affected_infos = [
+        info
+        for info in raw_file_infos
+        if resolved_path_text(info.path).casefold() in affected_path_keys
+    ]
+    if len({resolved_path_text(info.path).casefold() for info in affected_infos}) != len(
+        affected_path_keys
+    ):
+        _show_marker_review_error(
+            host,
+            "The source-file identity for one reviewed occurrence could not be resolved.",
+        )
+        return None
+
+    rescanned = _run_scan_embedded(
+        host,
+        affected_infos,
+        params,
+        skip_paths=(),
+        group_labels=group_labels,
+    )
+    if rescanned is None or rescanned.cancelled:
+        return None
+    try:
+        merged_results = merge_rescanned_results(
+            scan.results,
+            rescanned.results,
+            affected_paths=[info.path for info in affected_infos],
+        )
+        merged_scan = replace(
+            scan,
+            results=merged_results,
+            project_grid_observations=(
+                rescanned.project_grid_observations
+                or scan.project_grid_observations
+            ),
+        )
+        unresolved = collect_marker_occurrence_reviews(merged_scan)
+    except MarkerOccurrenceReviewError as exc:
+        _show_marker_review_error(host, str(exc))
+        return None
+    if unresolved:
+        files = ", ".join(dict.fromkeys(item.path.name for item in unresolved))
+        _show_marker_review_error(
+            host,
+            "Marker review remains unresolved after the affected-file rescan: " + files,
+        )
+        return None
+    return merged_scan
 
 
 def _review_removed_electrodes(
@@ -2795,12 +3229,36 @@ def run_preprocessing_qc_workflow(
     host: Any,
     raw_file_infos: Sequence[Any],
     params: dict[str, Any],
+    *,
+    preserve_existing_plans: bool = False,
 ) -> bool:
-    """Run the embedded pre-processing QC review phases."""
+    """Run embedded QC, optionally extending an earlier reviewed file set."""
 
     if not raw_file_infos:
         return True
 
+    existing_event_plans: dict[str, Any] = {}
+    existing_header_exclusions: list[str] = []
+    if preserve_existing_plans:
+        raw_existing_plans = params.get("_fpvs_preflight_event_plans_by_file")
+        if isinstance(raw_existing_plans, Mapping):
+            existing_event_plans = {
+                str(key): dict(value)
+                for key, value in raw_existing_plans.items()
+                if isinstance(value, Mapping)
+            }
+        raw_existing_headers = params.get(
+            "_fpvs_preflight_recording_not_started_files",
+            (),
+        )
+        if isinstance(raw_existing_headers, str):
+            raw_existing_headers = (raw_existing_headers,)
+        if isinstance(raw_existing_headers, Sequence):
+            existing_header_exclusions = [
+                str(value) for value in raw_existing_headers if str(value).strip()
+            ]
+    else:
+        params.pop("_fpvs_preflight_event_plans_by_file", None)
     group_labels = _project_group_labels(host)
 
     _show_data_quality_notice(
@@ -2837,7 +3295,10 @@ def run_preprocessing_qc_workflow(
         group_labels,
     ):
         return False
-    params["_fpvs_preflight_recording_not_started_files"] = _path_strings(header_only)
+    params["_fpvs_preflight_recording_not_started_files"] = sorted(
+        set(existing_header_exclusions).union(_path_strings(header_only)),
+        key=str.casefold,
+    )
     header_only_keys = {_path_key(item.path) for item in header_only}
     active_infos = [
         info
@@ -2851,6 +3312,16 @@ def run_preprocessing_qc_workflow(
         params,
         skip_paths=[item.path for item in header_only],
         group_labels=group_labels,
+    )
+    if scan is None or scan.cancelled:
+        return False
+
+    scan = _review_marker_occurrences(
+        host,
+        active_infos,
+        params,
+        scan,
+        group_labels,
     )
     if scan is None or scan.cancelled:
         return False
@@ -2878,12 +3349,21 @@ def run_preprocessing_qc_workflow(
         scan,
         group_labels,
     )
-    return _show_suspicious_remainder(
+    if not _show_suspicious_remainder(
         host,
         scan,
         accepted_hard_exclusions,
         group_labels,
-    )
+    ):
+        return False
+    try:
+        current_event_plans = canonical_event_plans_by_file(scan)
+        existing_event_plans.update(current_event_plans)
+        params["_fpvs_preflight_event_plans_by_file"] = existing_event_plans
+    except MarkerOccurrenceReviewError as exc:
+        _show_marker_review_error(host, str(exc))
+        return False
+    return True
 
 
 __all__ = ["run_preprocessing_qc_workflow"]

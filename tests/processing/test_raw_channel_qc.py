@@ -451,6 +451,59 @@ def test_raw_channel_qc_v1_output_matches_reference_metrics_byte_exact(
     )
 
 
+def test_analyzed_interval_qc_ignores_outside_artifact_and_detects_inside() -> None:
+    base = _raw_with_clustered_removed_channels([])
+    outside = _attach_canonical_geometry(base.copy())
+    inside = _attach_canonical_geometry(base.copy())
+    target_index = base.ch_names.index("FT8")
+    rng = np.random.default_rng(2345)
+    outside._data[target_index, 2_000:] = rng.normal(
+        scale=20_000e-6,
+        size=outside.n_times - 2_000,
+    )
+    inside._data[target_index, 200:1_000] = rng.normal(
+        scale=20_000e-6,
+        size=800,
+    )
+    settings = {"stim_channel": "Status", "max_bad_chans": 20}
+
+    reference = evaluate_raw_channel_qc(
+        base,
+        settings,
+        filename="scope.bdf",
+        analysis_spans=[(200, 1_000)],
+    )
+    outside_result = evaluate_raw_channel_qc(
+        outside,
+        settings,
+        filename="scope.bdf",
+        analysis_spans=[(200, 1_000)],
+    )
+    inside_result = evaluate_raw_channel_qc(
+        inside,
+        settings,
+        filename="scope.bdf",
+        analysis_spans=[(200, 1_000)],
+    )
+
+    assert outside_result == reference
+    assert inside_result != reference
+    assert "FT8" in inside_result.high_amplitude_channels
+
+
+def test_analyzed_interval_qc_merges_overlaps_before_reading() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_clustered_removed_channels([]),
+        {"stim_channel": "Status", "max_bad_chans": 20},
+        filename="overlap.bdf",
+        analysis_spans=[(0, 1_000), (500, 1_500), (2_000, 2_500)],
+    )
+
+    assert result.scoring_scope == "approved_analyzed_interval_union"
+    assert result.scoring_spans == ((0, 1_500), (2_000, 2_500))
+    assert result.scoring_sample_count == 2_000
+
+
 def test_raw_channel_qc_flags_spatial_outlier_without_interpolation() -> None:
     raw = _raw_with_spatial_outlier_channel("FT7")
 

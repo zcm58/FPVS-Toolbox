@@ -10,14 +10,22 @@ from typing import Any
 
 import numpy as np
 
-from Main_App.Shared.fft_crop_utils import (
-    compute_fft_crop_from_events,
-    plan_condition_fft_spans,
-    resolve_oddball_ids_by_condition,
+from Main_App.Shared.fft_crop_utils import compute_onbin_step
+from Main_App.processing.analysis_spans import (
+    attach_source_analysis_span_plan,
+    canonical_condition_event_map,
 )
+from Main_App.processing.marker_integrity import (
+    ApprovedOccurrenceSpan,
+    MarkerReviewDecision,
+    apply_marker_review_decision,
+    approve_clean_occurrence,
+    build_marker_integrity_plan,
+)
+from Main_App.projects.frequency_protocol import FrequencyProtocol
 
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
-PREFLIGHT_QC_METHOD_VERSION = "v4_biosemi64_geometry"
+PREFLIGHT_QC_METHOD_VERSION = "v5_analyzed_interval_coordinates"
 PREFLIGHT_QC_BLOCK_DURATION_S = 10.0
 PREFLIGHT_QC_MAX_WORKERS = 4
 PREFLIGHT_QC_MAX_IO_READERS = 2
@@ -40,6 +48,9 @@ class ConditionQcSpan:
     oddball_id: int | None
     last_oddball_sample: int | None
     spectral_fallback_reason: str | None = None
+    marker_plan_fingerprint: str | None = None
+    approved_span_fingerprint: str | None = None
+    marker_disposition: str | None = None
 
     @property
     def time_sample_count(self) -> int:
@@ -64,26 +75,48 @@ class PreflightQcEventPlan:
 
     sfreq: float
     n_times: int
+    first_samp: int
     event_count: int
     event_digest: str
     n_step: int | None
     spans: tuple[ConditionQcSpan, ...]
+    condition_event_map: Mapping[str, int]
     warnings: tuple[str, ...] = ()
+    marker_integrity_plan: Mapping[str, Any] | None = None
+    approved_occurrences: tuple[Mapping[str, Any], ...] = ()
+    unresolved_occurrences: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def condition_count(self) -> int:
         return len(self.spans)
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "sfreq": float(self.sfreq),
             "n_times": int(self.n_times),
+            "first_samp": int(self.first_samp),
             "event_count": int(self.event_count),
             "event_digest": self.event_digest,
             "n_step": self.n_step,
             "spans": [span.to_payload() for span in self.spans],
+            "condition_event_map": {
+                str(label): int(code)
+                for label, code in self.condition_event_map.items()
+            },
             "warnings": list(self.warnings),
+            "marker_integrity_plan": (
+                dict(self.marker_integrity_plan)
+                if self.marker_integrity_plan is not None
+                else None
+            ),
+            "approved_occurrences": [
+                dict(item) for item in self.approved_occurrences
+            ],
+            "unresolved_occurrences": [
+                dict(item) for item in self.unresolved_occurrences
+            ],
         }
+        return attach_source_analysis_span_plan(payload)
 
 
 def _normalized_events(events: np.ndarray) -> np.ndarray:
@@ -108,6 +141,10 @@ def plan_preflight_qc_events(
     event_map: Mapping[str, int],
     sfreq: float,
     n_times: int,
+    first_samp: int = 0,
+    frequency_protocol: FrequencyProtocol,
+    marker_review_decisions: Mapping[str, Mapping[str, Any]] | None = None,
+    marker_review_scope: Mapping[str, Any] | None = None,
 ) -> PreflightQcEventPlan:
     """Plan every relevant condition interval without reading EEG data.
 
@@ -119,6 +156,8 @@ def plan_preflight_qc_events(
 
     sample_rate = float(sfreq)
     sample_count = int(n_times)
+    sample_origin = int(first_samp)
+    recording_stop = sample_origin + sample_count
     if not np.isfinite(sample_rate) or sample_rate <= 0.0:
         raise ValueError("sfreq must be a positive finite value")
     if sample_count <= 0:
@@ -142,82 +181,64 @@ def plan_preflight_qc_events(
         raise ValueError("No configured condition onset events were found in the recording.")
     present_onset_ids = {int(row[2]) for row in onset_rows}
 
-    oddball_ids = resolve_oddball_ids_by_condition(
+    marker_plan = build_marker_integrity_plan(
         events=normalized_events,
-        onset_ids=onset_ids,
-        stream_end_sample=sample_count,
+        event_map=event_map,
+        sampling_rate_hz=sample_rate,
+        n_times=sample_count,
+        first_samp=sample_origin,
+        protocol=frequency_protocol,
     )
-    crop_results, n_step, crop_warnings = compute_fft_crop_from_events(
-        events=normalized_events,
+    _, n_step, step_error = compute_onbin_step(
         fs=sample_rate,
-        onset_ids=onset_ids,
-        oddball_id=oddball_ids,
-        stream_end_sample=sample_count,
+        f_oddball=frequency_protocol.oddball_rate_hz,
     )
-
-    warnings = list(crop_warnings)
+    warnings: list[str] = []
+    if step_error:
+        warnings.append(step_error)
     if not n_step:
-        details = "; ".join(crop_warnings) or "unknown"
+        details = "; ".join(warnings) or "unknown"
         raise ValueError(
             "Locked FFT crop required for preflight QC but no valid N_step is "
             f"available: {details}. Fixed-duration fallback is disabled."
         )
+    decisions = marker_review_decisions or {}
+    approved_by_key: dict[str, ApprovedOccurrenceSpan] = {}
+    unresolved_payloads: list[Mapping[str, Any]] = []
+    for occurrence in marker_plan.occurrences:
+        if occurrence.requires_review:
+            raw_decision = decisions.get(occurrence.occurrence_key)
+            if raw_decision is None:
+                unresolved_payloads.append(occurrence.to_payload())
+                continue
+            approved = apply_marker_review_decision(
+                occurrence,
+                MarkerReviewDecision.from_payload(raw_decision),
+                marker_plan_fingerprint=marker_plan.fingerprint,
+                review_scope=marker_review_scope or {},
+            )
+        else:
+            approved = approve_clean_occurrence(occurrence)
+        approved_by_key[occurrence.occurrence_key] = approved
 
-    spectral_by_key: dict[tuple[int, int], tuple[int, int]] = {}
-    for condition_id in sorted(present_onset_ids):
-        span_plan = plan_condition_fft_spans(
-            crop_results=crop_results,
-            condition_id=condition_id,
-            n_step=n_step,
-        )
-        condition_label = labels_by_code[condition_id][0]
-        if span_plan.fallback_repetition_reasons:
-            raise ValueError(
-                "Locked FFT crop required for preflight QC but one or more "
-                f"repetitions could not be cropped on-bin for condition="
-                f"{condition_label}: "
-                f"{'; '.join(span_plan.fallback_repetition_reasons)}. "
-                "Fixed-duration fallback is disabled."
-            )
-        if span_plan.n_common is None:
-            raise ValueError(
-                "Locked FFT crop required for preflight QC but no common on-bin "
-                f"length could be computed for condition={condition_label}. "
-                "Fixed-duration fallback is disabled."
-            )
-        if int(span_plan.n_common) % int(n_step) != 0:
-            raise ValueError(
-                "Locked FFT crop invariant failed during preflight planning: "
-                f"N_common={span_plan.n_common}, N_step={n_step}, "
-                f"condition={condition_label}."
-            )
-        for key, spectral_span in zip(
-            span_plan.repetition_keys,
-            span_plan.repetition_spans,
-            strict=True,
-        ):
-            spectral_by_key[key] = (int(spectral_span[0]), int(spectral_span[1]))
-
-    repetition_counts: dict[int, int] = defaultdict(int)
     planned_spans: list[ConditionQcSpan] = []
-    for onset_row in onset_rows:
-        onset_sample = max(0, int(onset_row[0]))
-        condition_id = int(onset_row[2])
-        repetition_index = repetition_counts[condition_id]
-        repetition_counts[condition_id] += 1
-        key = (condition_id, repetition_index)
-        crop = crop_results.get(key)
-        spectral_span = spectral_by_key.get(key)
-        if crop is None or spectral_span is None:
+    for occurrence in marker_plan.occurrences:
+        approved = approved_by_key.get(occurrence.occurrence_key)
+        if approved is None or approved.is_excluded:
+            continue
+        onset_sample = occurrence.onset_sample
+        condition_id = occurrence.condition_code
+        repetition_index = occurrence.repetition_index
+        if approved.start_sample is None or approved.stop_sample is None:
             raise ValueError(
-                "Locked FFT crop planning produced no span for a present condition: "
-                f"condition={labels_by_code[condition_id][0]}, "
-                f"rep={repetition_index}."
+                "Approved marker occurrence did not provide an analysis span."
             )
-        spectral_start, spectral_stop = spectral_span
+        spectral_start = int(approved.start_sample)
+        spectral_stop = int(approved.stop_sample)
         if (
             spectral_start < onset_sample
-            or spectral_stop > sample_count
+            or spectral_start < sample_origin
+            or spectral_stop > recording_stop
             or spectral_stop <= spectral_start
         ):
             raise ValueError(
@@ -225,7 +246,7 @@ def plan_preflight_qc_events(
                 f"condition={labels_by_code[condition_id][0]}, "
                 f"rep={repetition_index}, onset={onset_sample}, "
                 f"start={spectral_start}, stop={spectral_stop}, "
-                f"n_times={sample_count}."
+                f"first_samp={sample_origin}, n_times={sample_count}."
             )
 
         labels = labels_by_code[condition_id]
@@ -243,26 +264,37 @@ def plan_preflight_qc_events(
                 time_stop_sample=spectral_stop,
                 spectral_start_sample=spectral_start,
                 spectral_stop_sample=spectral_stop,
-                oddball_id=(int(crop.oddball_id) if crop and crop.oddball_id else None),
+                oddball_id=int(occurrence.oddball_marker_code),
                 last_oddball_sample=(
-                    int(crop.last55_sample)
-                    if crop is not None and crop.last55_sample is not None
+                    int(occurrence.retained_marker_samples[-1])
+                    if occurrence.retained_marker_samples
                     else None
                 ),
                 spectral_fallback_reason=None,
+                marker_plan_fingerprint=occurrence.fingerprint,
+                approved_span_fingerprint=approved.fingerprint,
+                marker_disposition=approved.disposition,
             )
         )
 
-    missing_codes = sorted(onset_ids - set(repetition_counts))
+    missing_codes = sorted(onset_ids - present_onset_ids)
     warnings.extend(f"condition={code}:missing_onset" for code in missing_codes)
     return PreflightQcEventPlan(
         sfreq=sample_rate,
         n_times=sample_count,
+        first_samp=sample_origin,
         event_count=int(len(normalized_events)),
         event_digest=_event_digest(normalized_events),
         n_step=n_step,
         spans=tuple(planned_spans),
+        condition_event_map=canonical_condition_event_map(event_map),
         warnings=tuple(dict.fromkeys(warnings)),
+        marker_integrity_plan=marker_plan.to_payload(),
+        approved_occurrences=tuple(
+            approved.to_payload()
+            for approved in approved_by_key.values()
+        ),
+        unresolved_occurrences=tuple(unresolved_payloads),
     )
 
 

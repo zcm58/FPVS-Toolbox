@@ -6,6 +6,7 @@ import time
 
 import mne
 import numpy as np
+import pytest
 
 from Main_App.io.eeg_geometry import attach_raw_biosemi64_geometry
 from Main_App.io.load_utils import BdfPreflightInfo
@@ -66,7 +67,7 @@ def test_scan_recording_not_started_files_uses_bdf_header(monkeypatch, tmp_path:
     assert flagged[0].group_id == "control"
 
 
-def test_scan_preprocessing_qc_prepopulates_auto_removed_electrodes(
+def test_unscoped_preflight_reports_not_evaluated_without_loading_signal(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -79,7 +80,7 @@ def test_scan_preprocessing_qc_prepopulates_auto_removed_electrodes(
     )
     monkeypatch.setattr(
         "Main_App.processing.preflight_qc.load_utils.load_eeg_file",
-        lambda *_args, **_kwargs: _raw_with_removed_channel("P9"),
+        lambda *_args, **_kwargs: pytest.fail("unscoped preflight must not load EEG"),
     )
 
     scan = scan_preprocessing_qc(
@@ -88,12 +89,25 @@ def test_scan_preprocessing_qc_prepopulates_auto_removed_electrodes(
     )
 
     assert scan.cancelled is False
-    assert scan.suggested_removed_electrodes == {"P03": ["P9"]}
+    assert scan.suggested_removed_electrodes == {}
     assert scan.hard_exclusion_candidates == ()
     assert scan.results[0].group_id == "patient"
+    assert scan.results[0].raw_channel_qc is None
+    assert scan.results[0].raw_spectral_qc is None
+    assert scan.results[0].condition_qc == {
+        "method_name": "condition_aware_preflight_qc",
+        "method_version": "v5_analyzed_interval_coordinates",
+        "evaluation_status": "not_evaluated",
+        "cache_status": "not_evaluated",
+        "reason": "missing_analyzed_interval_context",
+        "message": (
+            "Signal-based preflight QC was not evaluated because an active project "
+            "root and condition event map are required to define the analyzed intervals."
+        ),
+    }
 
 
-def test_scan_preprocessing_qc_preserves_group_id_on_load_error(
+def test_unscoped_preflight_preserves_group_id_without_reporting_load_error(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -101,13 +115,10 @@ def test_scan_preprocessing_qc_preserves_group_id_on_load_error(
     raw_path.write_bytes(b"not a real bdf for this unit test")
     monkeypatch.setattr(preflight_qc.load_utils, "inspect_bdf_header", lambda _path: None)
 
-    def _raise_load_error(*_args, **_kwargs):
-        raise RuntimeError("load failed")
-
     monkeypatch.setattr(
         preflight_qc.load_utils,
         "load_eeg_file",
-        _raise_load_error,
+        lambda *_args, **_kwargs: pytest.fail("unscoped preflight must not load EEG"),
     )
 
     scan = scan_preprocessing_qc(
@@ -116,7 +127,8 @@ def test_scan_preprocessing_qc_preserves_group_id_on_load_error(
     )
 
     assert scan.results[0].group_id == "patient"
-    assert scan.results[0].load_error == "load failed"
+    assert scan.results[0].load_error is None
+    assert scan.results[0].condition_qc["evaluation_status"] == "not_evaluated"
 
 
 def test_legacy_preflight_loader_forwards_project_geometry_and_stim(
@@ -192,42 +204,27 @@ def test_scan_preprocessing_qc_uses_parallel_workers(
     active = 0
     max_active = 0
 
-    class _RawQcResult:
-        excluded = False
-        reason = None
-        message = ""
-
-        def to_payload(self) -> dict[str, object]:
-            return {"channels_to_interpolate": []}
-
-    class _SpectralQcResult:
-        def to_payload(self) -> dict[str, object]:
-            return {"evaluated": True, "widespread": False, "flagged_channels": []}
-
-    def _fake_load(*_args, **_kwargs):
+    def _fake_scan(info, *_args, **_kwargs):
         nonlocal active, max_active
         with lock:
             active += 1
             max_active = max(max_active, active)
         try:
             time.sleep(0.05)
-            return object()
+            return PreflightQcFileResult(
+                path=Path(info.path),
+                participant_id=str(info.subject_id),
+                group_id=str(info.group),
+                load_error=None,
+                raw_channel_qc=None,
+                raw_spectral_qc=None,
+                condition_qc={"evaluation_status": "not_evaluated"},
+            )
         finally:
             with lock:
                 active -= 1
 
-    monkeypatch.setattr(preflight_qc.load_utils, "inspect_bdf_header", lambda _path: None)
-    monkeypatch.setattr(preflight_qc.load_utils, "load_eeg_file", _fake_load)
-    monkeypatch.setattr(
-        preflight_qc,
-        "evaluate_raw_channel_qc",
-        lambda *_args, **_kwargs: _RawQcResult(),
-    )
-    monkeypatch.setattr(
-        preflight_qc,
-        "evaluate_raw_spectral_qc",
-        lambda *_args, **_kwargs: _SpectralQcResult(),
-    )
+    monkeypatch.setattr(preflight_qc, "_scan_one_preflight_file", _fake_scan)
 
     scan = scan_preprocessing_qc(
         [

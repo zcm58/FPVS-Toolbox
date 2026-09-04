@@ -103,18 +103,38 @@ Settings page, Standard FPVS Screening, Sensitivity Analysis, SNR Plot Generator
 Free Harmonic Clustering Analysis, Individual Detectability, and Ratio Calculator
 are embedded in this workspace stack.
 
-The Settings page groups project processing values under Preprocessing,
-project-specific harmonic selection and summation under Harmonics, analysis
-defaults under Stats, ROI definitions under ROIs, and app-level toggles such as
-Debug Mode and Beta Tools under Advanced. Advanced also hosts
-the project preprocessing QC toggle for auto-detecting removed electrodes,
-manual removed-electrode metadata, and manual participant-level processing
-exclusions because those controls are intentionally more specialized than the
-primary preprocessing fields. Advanced also shows read-only frequency-domain QC
+The Settings page groups project processing values under Preprocessing, the
+project-wide presentation/oddball protocol under Protocol, project-specific
+harmonic selection and summation under Harmonics, analysis defaults under
+Stats, ROI definitions under ROIs, project-owned review controls under
+Experimental, and app-level toggles such as Debug Mode and Beta Tools under
+Advanced. The Experimental tab hosts the explicit On/Off choice for the
+lab-calibrated automatic removed-electrode detector, its independently enabled
+manual removed-electrode lists, and the versioned summed-BCA screening limits.
+Advanced retains manual participant-level processing exclusions and shows
+read-only frequency-domain QC
 thresholds and active frequency-domain exclusions; changing manual
 frequency-domain exclusions marks downstream frequency-domain outputs stale and
 requires regeneration. Do not put app-level visibility or diagnostics toggles
 in the Preprocessing tab.
+
+The Protocol tab edits only the active project's versioned FPVS protocol. It
+accepts a presentation rate plus either an every-N-stimuli recurrence or a
+direct oddball rate that resolves to a whole-stimulus recurrence, shows the
+canonical oddball rate, stores a positive expected analyzed oddball-cycle
+count, derives duration read-only, and stores the project oddball marker code.
+Existing projects without trustworthy protocol metadata show proposed legacy
+rates but remain unconfirmed until the user supplies the cycle count and saves
+from Protocol. Marker-less v1.0 records keep their known rates and cycle fields
+while requiring marker confirmation; records without a cycle count still
+require one. Saving from another unchanged Settings tab leaves either
+unresolved form untouched; it does not turn a
+proposal into project provenance.
+Processing input validation consumes the resulting frozen project protocol,
+derives the temporary numeric compatibility fields from it, and blocks before
+QC when the protocol is unconfirmed, incomplete, invalid, or uses the same code
+for an oddball marker and condition onset. Saving one project never changes
+another project's protocol or the application-level rate defaults.
 
 The project-specific **Harmonic Selection and Summation** card on the dedicated
 Harmonics tab edits
@@ -428,3 +448,19 @@ The driver runs the safe import/static checks. Main-window and dialog pytest-qt
 coverage is CI-only by default; document a visible/manual smoke path for the
 changed interaction. Run the GUI audit directly only as an initial diagnostic
 before manually searching broad GUI folders.
+
+For Protocol-tab changes, the visible smoke path is: open two projects in turn,
+save distinct recurrence/direct-Hz protocols, reopen each project and verify its
+own values; confirm that direct-Hz entry displays the implied integer recurrence
+and derived duration; save an unrelated tab in an old unconfirmed project and
+verify the proposed protocol stays unconfirmed; confirm an unchanged imported
+marker retains its Studio source; verify an old unconfirmed project and a new
+project with no cycle count cannot start processing; and verify a marker code
+matching a condition-onset code is rejected. Keep Qt execution in CI unless the
+user has approved a visible local Qt session.
+
+For Experimental-tab changes, open a project at 1280x900 and verify both cards
+and their Save/Cancel controls remain visible. Confirm automatic detection has
+only Off and On choices, manual lists can be edited and enabled independently,
+and all summed-BCA thresholds survive save and reopen. For an older project with
+no saved detector choice, saving another setting must leave the choice pending.

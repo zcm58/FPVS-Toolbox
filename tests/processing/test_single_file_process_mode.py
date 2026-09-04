@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.gui.main_window import MainWindow
+from Main_App.projects import FrequencyProtocol
 import Main_App.gui.processing_inputs as processing_inputs
 import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 
@@ -48,6 +49,12 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
         input_folder=input_folder,
         subfolders={"excel": excel_subfolder},
         preprocessing=preprocessing,
+        frequency_protocol=FrequencyProtocol.from_recurrence(
+            "6",
+            5,
+            expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source="manual",
+        ),
         options={},
     )
 
@@ -137,6 +144,12 @@ def test_batch_non_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkey
         input_folder=input_folder,
         subfolders={"excel": excel_subfolder},
         preprocessing=preprocessing,
+        frequency_protocol=FrequencyProtocol.from_recurrence(
+            "6",
+            5,
+            expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source="manual",
+        ),
         options={},
     )
 

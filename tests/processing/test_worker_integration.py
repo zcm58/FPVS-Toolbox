@@ -10,8 +10,10 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from Main_App.projects import FrequencyProtocol
 from Main_App.projects.project import Project
 import Main_App.gui.processing_inputs as processing_inputs
+import Main_App.gui.processing_workflows as processing_workflows
 import Main_App.gui.main_window as main_window_module
 from Main_App.gui.main_window import MainWindow
 from Main_App.workers.mp_runner_bridge import MpRunnerBridge
@@ -35,6 +37,14 @@ def _build_worker_project(root: Path) -> Project:
         }
     )
     project.event_map = {"CondA": 11}
+    project.update_frequency_protocol(
+        FrequencyProtocol.from_recurrence(
+            "6",
+            5,
+            expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source="manual",
+        )
+    )
     project.save()
     input_dir = Path(project.input_folder)
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -68,6 +78,11 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
         lambda *_args, **_kwargs: True,
     )
     monkeypatch.setattr(
+        processing_workflows,
+        "_freeze_expected_processing_matrix",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         processing_inputs,
         "participant_review_rows",
         lambda *_args, **_kwargs: [],
@@ -79,6 +94,9 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
     assert captured["event_map"] == {"CondA": 11}
     assert captured["settings"]["stim_channel"] == "StimA"
     assert captured["settings"]["save_preprocessed_fif"] is False
+    assert captured["settings"]["frequency_protocol"] == project.frequency_protocol
+    assert captured["settings"]["base_freq"] == 6.0
+    assert captured["settings"]["oddball_freq"] == 1.2
     assert captured["max_workers"] >= 1
 
 
@@ -114,6 +132,11 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
         processing_inputs,
         "run_preprocessing_qc_workflow",
         lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        processing_workflows,
+        "_freeze_expected_processing_matrix",
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         processing_inputs,

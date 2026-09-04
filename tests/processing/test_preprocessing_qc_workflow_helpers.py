@@ -29,27 +29,32 @@ class _LabelStub:
         (
             workflow._SCAN_SIGNAL_HEALTH_STEP,
             "Scan Signal Health",
-            "Step 1 of 5: Scan Signal Health",
+            "Step 1 of 6: Scan Signal Health",
+        ),
+        (
+            workflow._REVIEW_MARKER_OCCURRENCES_STEP,
+            "Review Marker Occurrence",
+            "Step 2 of 6: Review Marker Occurrence",
         ),
         (
             workflow._CONFIRM_CONDITION_EXCLUSIONS_STEP,
             "Confirm Condition Exclusions",
-            "Step 2 of 5: Confirm Condition Exclusions",
+            "Step 3 of 6: Confirm Condition Exclusions",
         ),
         (
             workflow._CONFIRM_REMOVED_ELECTRODES_STEP,
             "Confirm Removed Electrodes",
-            "Step 3 of 5: Confirm Removed Electrodes",
+            "Step 4 of 6: Confirm Removed Electrodes",
         ),
         (
             workflow._CONFIRM_PARTICIPANT_EXCLUSIONS_STEP,
             "Confirm Participant Exclusions",
-            "Step 4 of 5: Confirm Participant Exclusions",
+            "Step 5 of 6: Confirm Participant Exclusions",
         ),
         (
             workflow._REVIEW_OTHER_FLAGS_STEP,
             "Review Other Flags",
-            "Step 5 of 5: Review Other Flags",
+            "Step 6 of 6: Review Other Flags",
         ),
     ),
 )

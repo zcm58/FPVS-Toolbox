@@ -46,6 +46,12 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_METHOD_VERSION,
     apply_fft_multinotch,
 )
+from Main_App.processing.analysis_spans import (
+    ANALYSIS_SPAN_PLAN_VERSION,
+    AnalysisSpanPlanError,
+    realize_target_analysis_span_plan,
+    relative_spans_from_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +90,74 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
         "electrode_mapping_profile",
         "anatomical_labels",
     )
+    source_span_plan = params.get("_fpvs_source_analysis_span_plan")
+    source_span_fingerprint = (
+        str(source_span_plan.get("fingerprint") or "")
+        if isinstance(source_span_plan, dict)
+        else ""
+    )
     return (
         f"order={PREPROCESSING_ORDER_VERSION}|hp={hp}|lp={lp}|ds={ds}|"
         f"rz={rz}|ref={r1},{r2}|stim={stim}|"
         f"montage={electrode_montage}|mapping={electrode_mapping_profile}|"
         f"geometry={BIOSEMI64_GEOMETRY_VERSION},{BIOSEMI64_COORDINATE_FINGERPRINT}|"
+        f"analysis_spans={ANALYSIS_SPAN_PLAN_VERSION},{source_span_fingerprint}|"
         f"fft_multinotch={line_noise_enabled},{line_noise_frequency},"
         f"{FFT_MULTINOTCH_METHOD_VERSION},{FFT_MULTINOTCH_HALF_WIDTH_HZ},"
         f"{FFT_MULTINOTCH_COMPONENT_COUNT}"
+    )
+
+
+def _realize_analysis_spans_for_raw(
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+) -> dict[str, Any] | None:
+    """Realize the validated source plan on the resident Raw sample grid."""
+
+    source_plan = params.get("_fpvs_source_analysis_span_plan")
+    required = bool(params.get("_fpvs_require_analysis_spans", False))
+    if not isinstance(source_plan, dict):
+        params.pop("_fpvs_realized_analysis_span_plan", None)
+        params.pop("_fpvs_analysis_scoring_sample_count", None)
+        if required:
+            raise AnalysisSpanPlanError(
+                "Processing requires a validated source analysis-span plan."
+            )
+        return None
+    realized = realize_target_analysis_span_plan(
+        source_plan,
+        target_sfreq_hz=float(raw.info["sfreq"]),
+        target_n_times=int(raw.n_times),
+        target_first_samp=int(raw.first_samp),
+    )
+    params["_fpvs_realized_analysis_span_plan"] = realized
+    params["_fpvs_analysis_scoring_sample_count"] = int(
+        realized["unique_sample_count"]
+    )
+    return realized
+
+
+def _kurtosis_scoring_data(
+    raw: mne.io.BaseRaw,
+    *,
+    picks: Any,
+    params: Dict[str, Any],
+) -> np.ndarray:
+    """Read every retained target sample once for the existing statistic."""
+
+    target_plan = params.get("_fpvs_realized_analysis_span_plan")
+    if not isinstance(target_plan, dict):
+        if params.get("_fpvs_require_analysis_spans", False):
+            raise AnalysisSpanPlanError(
+                "Kurtosis requires realized analyzed-interval coordinates."
+            )
+        return raw.get_data(picks=picks)
+    spans = relative_spans_from_plan(target_plan)
+    if not spans:
+        raise AnalysisSpanPlanError("Kurtosis analysis-span union is empty.")
+    return np.concatenate(
+        [raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans],
+        axis=1,
     )
 
 
@@ -245,6 +311,8 @@ def begin_preproc_audit(
     params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_applied_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_skipped_centers", None)
+    params.pop("_fpvs_realized_analysis_span_plan", None)
+    params.pop("_fpvs_analysis_scoring_sample_count", None)
 
     try:
         logger.debug(
@@ -401,6 +469,8 @@ def perform_preprocessing(
     params.pop("_fpvs_fft_multinotch_requested_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_applied_centers_hz", None)
     params.pop("_fpvs_fft_multinotch_skipped_centers", None)
+    params.pop("_fpvs_realized_analysis_span_plan", None)
+    params.pop("_fpvs_analysis_scoring_sample_count", None)
 
     debug_enabled = bool(params.get("debug_preproc", False)) or logger.isEnabledFor(logging.DEBUG)
 
@@ -977,6 +1047,8 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
+        _realize_analysis_spans_for_raw(raw, params)
+
         # 7) Kurtosis rejection & interpolation
         params["_fpvs_kurtosis_bad_channels"] = []
         params["_fpvs_interpolated_channels"] = []
@@ -1000,7 +1072,11 @@ def perform_preprocessing(
                 ),
             )
             if len(eeg_picks) >= 2:
-                data = raw.get_data(picks=eeg_picks)
+                data = _kurtosis_scoring_data(
+                    raw,
+                    picks=eeg_picks,
+                    params=params,
+                )
                 k_values = kurtosis(
                     data, axis=1, fisher=True, bias=False
                 )

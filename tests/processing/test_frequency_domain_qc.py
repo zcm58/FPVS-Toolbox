@@ -14,6 +14,10 @@ from Main_App.processing.frequency_domain_qc import (
     sync_frequency_domain_qc_automatic_state,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import (
+    FIXED_HARMONIC_SELECTION_PROFILE,
+    HARMONIC_SELECTION_PROFILE_VERSION,
+)
 from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_NAME
 from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
 
@@ -175,6 +179,8 @@ def _make_project(tmp_path):
     payload.update(
         {
             "harmonic_selection_policy": FIXED_PREDEFINED_POLICY_NAME,
+            "harmonic_selection_profile": FIXED_HARMONIC_SELECTION_PROFILE,
+            "harmonic_selection_profile_version": HARMONIC_SELECTION_PROFILE_VERSION,
             "fixed_harmonic_frequencies_hz": "1.2, 2.4",
             "fixed_harmonic_auto_exclude_base": True,
         }

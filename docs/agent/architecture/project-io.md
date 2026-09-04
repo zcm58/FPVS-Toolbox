@@ -33,8 +33,26 @@ FPVS Toolbox uses a strict hybrid settings model:
   and missing-variable errors remain unchanged.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
+- The experimental removed-electrode detector choice remains in the
+  `preprocessing` namespace for compatibility with existing processing inputs.
+  Its versioned choice status and source distinguish an actual saved selection
+  from a provisional value. New projects record Off as a ready choice. An
+  existing valid mode wins over a legacy boolean; a legacy boolean maps to a
+  ready Auto or Off choice; a project with neither loads as provisional Off and
+  `confirmation_required`. Routine saves keep that unresolved choice absent,
+  and only the explicit confirmation API may persist it. Manual participant and
+  recording electrode maps survive independently of this automatic-detector
+  choice.
+- Project-owned QC-17 configuration lives separately from raw preprocessing in
+  the top-level, versioned `experimental_qc` record. Its
+  `summed_bca_screening` subsection defaults to enabled review-only screening
+  with the accepted absolute, count, cohort-relative, summed-response, and peak
+  thresholds. Existing projects with no record receive those defaults and
+  persist them on their next save. This settings record is distinct from
+  `tools.frequency_domain_qc` findings and decisions; the Wave 1 foundation
+  does not reinterpret or change prior automatic exclusion state.
 - Project-wide FPVS timing lives in the top-level, versioned
-  `frequency_protocol` record. Protocol v1 stores exact rational identities for
+  `frequency_protocol` record. Protocol v1.1 stores exact rational identities for
   the presentation rate, integer oddball recurrence, canonical oddball rate,
   and one expected analyzed oddball-cycle count. The cycle source is `manual`
   or `fpvs_studio_import`; analyzed seconds are derived as cycles divided by
@@ -47,7 +65,14 @@ FPVS Toolbox uses a strict hybrid settings model:
   `incomplete` until a positive expected cycle count is supplied. An existing
   manifest with no protocol loads as `confirmation_required` and a routine
   save keeps the record absent, so historical outputs are not silently
-  relabeled with guessed defaults.
+  relabeled with guessed defaults. Marker-less protocol v1.0 records retain
+  their validated rate, recurrence, direct-entry audit text, cycle count, and
+  cycle source while migrating to v1.1 `confirmation_required`; the proposed
+  marker remains unclaimed until the user saves from Protocol. Accepting 55 at
+  that point records `legacy_default_55`, while editing the code records
+  `manual`. Saving an unrelated Settings tab preserves an unresolved protocol
+  unchanged. Processing and harmonic recalculation still require a ready,
+  explicitly confirmed protocol.
 - Electrode geometry is project-specific scientific state in the
   `preprocessing` namespace. `electrode_montage` currently accepts only
   `biosemi64`, displayed as **BioSemi ActiveTwo 64**. The default
@@ -285,6 +310,19 @@ The processing contract is deliberately strict:
 - The processing ledger computes expected condition/group workbook paths before
   work starts. The active process runner passes a per-source-file group folder
   to post-processing, which writes the condition-first/group-second layout.
+- QC-20's versioned expected-plan record builds the complete
+  recording-by-condition matrix from the processing plan before numerical
+  result accounting. It keys recordings by canonical recording ID when one
+  exists, preserves participant/group/session/source metadata, and binds exact
+  QC-19 occurrence spans to the project frequency-protocol, marker-evidence,
+  raw-file, processing, and BioSemi64 geometry fingerprints. A current run file
+  without a fully reviewed marker plan is rejected. Explicit current
+  recording/condition exclusions instead store scoped no-output decisions and
+  do not require a workbook for that scope. Reprocess-all and single-file
+  reprocessing extend the reviewed plan set for any previously skipped files
+  before output cleanup. A skipped legacy cell stays
+  `legacy_unknown`; existing workbook presence or the old `partial` warning
+  cannot promote it to a verified final outcome.
 - Missing per-file group routing and output-directory creation errors hard-fail;
   the exporter does not redirect a workbook to a parent folder.
 - The first current-run grouped workbook sets `groups_locked`,

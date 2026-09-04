@@ -14,7 +14,16 @@ from Main_App.processing.removed_electrode_detection import (
     parse_electrode_list,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT,
+    ODDBALL_INPUT_MODE_DIRECT_HZ,
+    ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    validate_protocol_condition_codes,
+)
 from Main_App.projects.preprocessing_settings import (
+    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT,
     new_project_preprocessing_settings,
 )
 
@@ -41,6 +50,8 @@ class FPVSConfigImport:
     project_title: str
     event_map: dict[str, int]
     manual_removed_electrodes: dict[str, list[str]]
+    oddball_marker_code: int
+    frequency_protocol: FrequencyProtocol | None
 
 
 def read_fpvs_config(path: Path) -> FPVSConfigImport:
@@ -90,11 +101,31 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
         used_codes.add(code)
 
     manual_removed_electrodes = _manual_removed_electrodes_from_config(payload)
+    oddball_marker_code = _oddball_marker_code_from_config(payload)
+    frequency_protocol = _frequency_protocol_from_config(
+        payload,
+        oddball_marker_code=oddball_marker_code,
+    )
+    try:
+        validate_protocol_condition_codes(
+            frequency_protocol
+            or FrequencyProtocol.from_recurrence(
+                6,
+                5,
+                oddball_marker_code=oddball_marker_code,
+                oddball_marker_code_source=ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+            ),
+            event_map.values(),
+        )
+    except FrequencyProtocolError as exc:
+        raise FPVSConfigImportError(str(exc)) from exc
 
     return FPVSConfigImport(
         project_title=title,
         event_map=event_map,
         manual_removed_electrodes=manual_removed_electrodes,
+        oddball_marker_code=oddball_marker_code,
+        frequency_protocol=frequency_protocol,
     )
 
 
@@ -110,7 +141,18 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> P
     )
     project.name = imported.project_title
     project.event_map = imported.event_map
+    imported_protocol = imported.frequency_protocol
+    if imported_protocol is None:
+        imported_protocol = project.frequency_protocol.with_oddball_marker_code(
+            imported.oddball_marker_code,
+            source=ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+        )
+    project.update_frequency_protocol(imported_protocol)
     if imported.manual_removed_electrodes:
+        project.confirm_removed_electrode_detection_choice(
+            REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+            source=REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT,
+        )
         project.update_preprocessing(
             {
                 **project.preprocessing,
@@ -120,6 +162,64 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path) -> P
         )
     project.save()
     return project
+
+
+def _oddball_marker_code_from_config(payload: Mapping[str, Any]) -> int:
+    triggers = payload.get("triggers")
+    if triggers is None:
+        return 55
+    if not isinstance(triggers, Mapping):
+        raise FPVSConfigImportError("triggers must be an object when provided.")
+    value = triggers.get("oddball_trigger_code", 55)
+    return _required_int(value, "triggers.oddball_trigger_code")
+
+
+def _frequency_protocol_from_config(
+    payload: Mapping[str, Any],
+    *,
+    oddball_marker_code: int,
+) -> FrequencyProtocol | None:
+    """Read an explicitly named Studio protocol without inferring generic fields."""
+
+    raw_protocol = payload.get("frequency_protocol")
+    if raw_protocol is None:
+        return None
+    if not isinstance(raw_protocol, Mapping):
+        raise FPVSConfigImportError("frequency_protocol must be an object.")
+
+    presentation_rate = raw_protocol.get("presentation_rate_hz")
+    cycles = raw_protocol.get("expected_analyzed_oddball_cycles")
+    cycle_source = (
+        EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT if cycles is not None else None
+    )
+    mode = str(raw_protocol.get("oddball_input_mode") or "").strip()
+    try:
+        if mode == ODDBALL_INPUT_MODE_DIRECT_HZ:
+            return FrequencyProtocol.from_direct_hz(
+                presentation_rate,
+                raw_protocol.get(
+                    "entered_oddball_rate_hz",
+                    raw_protocol.get("oddball_rate_hz"),
+                ),
+                expected_analyzed_oddball_cycles=cycles,
+                expected_analyzed_oddball_cycles_source=cycle_source,
+                oddball_marker_code=oddball_marker_code,
+                oddball_marker_code_source=ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+            )
+        if mode and mode != "oddball_every_n":
+            raise FPVSConfigImportError(
+                f"Unsupported frequency_protocol.oddball_input_mode: {mode!r}."
+            )
+        return FrequencyProtocol.from_recurrence(
+            presentation_rate,
+            raw_protocol.get("oddball_every_n"),
+            expected_analyzed_oddball_cycles=cycles,
+            expected_analyzed_oddball_cycles_source=cycle_source,
+            oddball_marker_code=oddball_marker_code,
+            oddball_marker_code_source=ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+        )
+    except FrequencyProtocolError as exc:
+        raise FPVSConfigImportError(f"Invalid frequency_protocol: {exc}") from exc
 
 
 def _manual_removed_electrodes_from_config(

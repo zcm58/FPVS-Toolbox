@@ -7,6 +7,16 @@ from Main_App.processing.preflight_qc_plan import (
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
 )
+from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+
+
+def _protocol(cycles: int = 3) -> FrequencyProtocol:
+    return FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=cycles,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
 
 
 def _events(*rows: tuple[int, int]) -> np.ndarray:
@@ -32,6 +42,7 @@ def test_plan_uses_locked_onbin_crop_for_time_and_spectral_qc() -> None:
         event_map={"Faces": 1},
         sfreq=256.0,
         n_times=100_000,
+        frequency_protocol=_protocol(),
     )
 
     assert plan.n_step == 640
@@ -51,14 +62,19 @@ def test_plan_excludes_onset_lead_in_and_post_crop_samples() -> None:
         events=_events(
             (100, 1),
             (300, 55),
+            (513, 55),
+            (727, 55),
             (940, 55),
             (1_000, 2),
             (1_100, 55),
+            (1_313, 55),
+            (1_527, 55),
             (1_740, 55),
         ),
         event_map={"First": 1, "Second": 2},
         sfreq=256.0,
         n_times=2_000,
+        frequency_protocol=_protocol(),
     )
 
     assert [(span.condition_label, span.time_start_sample, span.time_stop_sample) for span in plan.spans] == [
@@ -67,7 +83,7 @@ def test_plan_excludes_onset_lead_in_and_post_crop_samples() -> None:
     ]
 
 
-def test_locked_crop_extends_completion_without_following_a_marker_gap() -> None:
+def test_marker_gap_pauses_only_the_affected_occurrence() -> None:
     plan = plan_preflight_qc_events(
         events=_events(
             (100, 1),
@@ -76,19 +92,27 @@ def test_locked_crop_extends_completion_without_following_a_marker_gap() -> None
             (5_000, 55),
             (10_000, 1),
             (10_200, 55),
+            (10_413, 55),
+            (10_627, 55),
             (10_840, 55),
         ),
         event_map={"Short": 1},
         sfreq=256.0,
         n_times=20_000,
+        frequency_protocol=_protocol(),
     )
 
-    first, second = plan.spans
-    assert (first.time_start_sample, first.time_stop_sample) == (300, 940)
-    assert (first.spectral_start_sample, first.spectral_stop_sample) == (300, 940)
-    assert first.last_oddball_sample == 5_000
-    assert first.spectral_fallback_reason is None
-    assert (second.time_start_sample, second.time_stop_sample) == (10_200, 10_840)
+    assert len(plan.unresolved_occurrences) == 1
+    assert plan.unresolved_occurrences[0]["condition_code"] == 1
+    assert plan.unresolved_occurrences[0]["repetition_index"] == 0
+    assert plan.unresolved_occurrences[0]["review_reasons"] == [
+        "missing_marker_gap"
+    ]
+    assert len(plan.spans) == 1
+    assert (plan.spans[0].time_start_sample, plan.spans[0].time_stop_sample) == (
+        10_200,
+        10_840,
+    )
 
 
 def test_plan_is_deterministic_for_unsorted_event_input() -> None:
@@ -106,12 +130,14 @@ def test_plan_is_deterministic_for_unsorted_event_input() -> None:
         event_map={"Condition": 1},
         sfreq=256.0,
         n_times=2_000,
+        frequency_protocol=_protocol(),
     )
     second = plan_preflight_qc_events(
         events=reversed_events,
         event_map={"Condition": 1},
         sfreq=256.0,
         n_times=2_000,
+        frequency_protocol=_protocol(),
     )
 
     assert second == first
@@ -125,16 +151,18 @@ def test_plan_accepts_arbitrary_marker_derived_onbin_durations(
     sfreq = 256.0
     start = 300
     n_samples = int(duration_s * sfreq)
+    cycles = int(duration_s * 1.2)
+    marker_samples = [
+        start + round(index * sfreq / 1.2)
+        for index in range(cycles + 1)
+    ]
 
     plan = plan_preflight_qc_events(
-        events=_events(
-            (100, 1),
-            (start, 55),
-            (start + n_samples, 55),
-        ),
+        events=_events((100, 1), *((sample, 55) for sample in marker_samples)),
         event_map={"Condition": 1},
         sfreq=sfreq,
         n_times=start + n_samples + 1_000,
+        frequency_protocol=_protocol(cycles),
     )
 
     assert len(plan.spans) == 1
@@ -147,32 +175,45 @@ def test_plan_accepts_arbitrary_marker_derived_onbin_durations(
     )
 
 
-def test_plan_hard_fails_present_condition_without_valid_marker_crop() -> None:
-    with pytest.raises(ValueError, match="Locked FFT crop required.*insufficient_55"):
-        plan_preflight_qc_events(
-            events=_events((100, 1), (300, 55)),
-            event_map={"Condition": 1},
-            sfreq=256.0,
-            n_times=2_000,
-        )
+def test_plan_returns_unresolved_marker_evidence_instead_of_crossing_it() -> None:
+    plan = plan_preflight_qc_events(
+        events=_events((100, 1), (300, 55)),
+        event_map={"Condition": 1},
+        sfreq=256.0,
+        n_times=2_000,
+        frequency_protocol=_protocol(),
+    )
+
+    assert plan.spans == ()
+    assert plan.unresolved_occurrences[0]["review_reasons"] == [
+        "insufficient_project_oddball_markers"
+    ]
 
 
-def test_plan_hard_fails_when_sampling_rate_has_no_onbin_step() -> None:
-    with pytest.raises(ValueError, match="no valid N_step.*non_integer_fs"):
+def test_plan_hard_fails_when_sampling_rate_has_no_exact_declared_grid() -> None:
+    with pytest.raises(ValueError, match="incompatible with the sampling-rate grid"):
         plan_preflight_qc_events(
             events=_events((100, 1), (300, 55), (940, 55)),
             event_map={"Condition": 1},
             sfreq=256.5,
             n_times=2_000,
+            frequency_protocol=_protocol(),
         )
 
 
 def test_plan_tolerates_configured_condition_absent_from_recording() -> None:
     plan = plan_preflight_qc_events(
-        events=_events((100, 1), (300, 55), (940, 55)),
+        events=_events(
+            (100, 1),
+            (300, 55),
+            (513, 55),
+            (727, 55),
+            (940, 55),
+        ),
         event_map={"Present": 1, "Absent": 2},
         sfreq=256.0,
         n_times=2_000,
+        frequency_protocol=_protocol(),
     )
 
     assert [span.condition_label for span in plan.spans] == ["Present"]
@@ -186,6 +227,7 @@ def test_plan_requires_at_least_one_configured_condition_onset() -> None:
             event_map={"Condition": 1},
             sfreq=256.0,
             n_times=2_000,
+            frequency_protocol=_protocol(),
         )
 
 

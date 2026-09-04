@@ -9,15 +9,20 @@ import pytest
 from Main_App.projects import (
     EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT,
     EXPECTED_CYCLES_SOURCE_MANUAL,
+    DEFAULT_ODDBALL_MARKER_CODE,
     FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED,
     FREQUENCY_PROTOCOL_STATUS_INCOMPLETE,
     FREQUENCY_PROTOCOL_STATUS_READY,
+    FREQUENCY_PROTOCOL_VERSION,
+    LEGACY_FREQUENCY_PROTOCOL_VERSION,
     ODDBALL_INPUT_MODE_DIRECT_HZ,
+    ODDBALL_MARKER_SOURCE_MANUAL,
     FrequencyProtocol,
     FrequencyProtocolError,
     enumerate_exact_harmonics,
     enumerate_protocol_harmonics,
     new_manual_frequency_protocol,
+    validate_protocol_condition_codes,
 )
 from Main_App.projects.project import Project
 
@@ -33,6 +38,8 @@ def test_new_manual_protocol_seeds_rates_but_not_expected_cycles() -> None:
     assert protocol.oddball_rate_hz == Fraction(6, 5)
     assert protocol.expected_analyzed_oddball_cycles is None
     assert protocol.expected_analyzed_oddball_cycles_source is None
+    assert protocol.oddball_marker_code == DEFAULT_ODDBALL_MARKER_CODE
+    assert protocol.oddball_marker_code_source == ODDBALL_MARKER_SOURCE_MANUAL
     assert protocol.derived_analyzed_seconds is None
 
 
@@ -64,7 +71,7 @@ def test_recurrence_protocol_is_exact_immutable_and_has_stable_identity() -> Non
 
 def test_direct_constructor_normalizes_runtime_types_once() -> None:
     protocol = FrequencyProtocol(
-        version="1.0.0",
+        version=FREQUENCY_PROTOCOL_VERSION,
         status="ready",
         presentation_rate_hz="6",  # type: ignore[arg-type]
         oddball_input_mode="oddball_every_n",
@@ -73,6 +80,8 @@ def test_direct_constructor_normalizes_runtime_types_once() -> None:
         entered_oddball_rate_hz=None,
         expected_analyzed_oddball_cycles="144",  # type: ignore[arg-type]
         expected_analyzed_oddball_cycles_source="manual",
+        oddball_marker_code="55",  # type: ignore[arg-type]
+        oddball_marker_code_source="manual",
     )
 
     assert protocol.presentation_rate_hz == Fraction(6, 1)
@@ -151,6 +160,25 @@ def test_protocol_rejects_invalid_rate_recurrence_and_cycle_values(
         )
 
 
+def test_protocol_rejects_invalid_marker_code_or_source() -> None:
+    with pytest.raises(FrequencyProtocolError, match="oddball_marker_code"):
+        FrequencyProtocol.from_recurrence(6, 5, oddball_marker_code=0)
+    with pytest.raises(FrequencyProtocolError, match="source"):
+        FrequencyProtocol.from_recurrence(
+            6,
+            5,
+            oddball_marker_code_source="guessed",
+        )
+
+
+def test_protocol_marker_code_must_not_collide_with_condition_onset() -> None:
+    protocol = FrequencyProtocol.from_recurrence(6, 5, oddball_marker_code=55)
+
+    validate_protocol_condition_codes(protocol, [1, 2, 3])
+    with pytest.raises(FrequencyProtocolError, match="condition-onset"):
+        validate_protocol_condition_codes(protocol, [1, 55])
+
+
 def test_expected_sample_count_is_exact_and_rejects_nonintegral_grid() -> None:
     protocol = FrequencyProtocol.from_recurrence(
         6,
@@ -198,6 +226,84 @@ def test_protocol_manifest_round_trip_preserves_exact_repeating_rate() -> None:
 
     assert restored == original
     assert restored.fingerprint == original.fingerprint
+
+
+def test_markerless_protocol_v1_migration_preserves_known_rates_and_cycles() -> None:
+    migrated = FrequencyProtocol.from_manifest(
+        {
+            "version": LEGACY_FREQUENCY_PROTOCOL_VERSION,
+            "status": "ready",
+            "presentation_rate_hz": "3",
+            "oddball_input_mode": "oddball_rate_hz",
+            "oddball_every_n": 10,
+            "oddball_rate_hz": "0.3",
+            "entered_oddball_rate_hz": "0.3000",
+            "expected_analyzed_oddball_cycles": 90,
+            "expected_analyzed_oddball_cycles_source": "fpvs_studio_import",
+        }
+    )
+
+    assert migrated.version == FREQUENCY_PROTOCOL_VERSION
+    assert migrated.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
+    assert migrated.presentation_rate_hz == Fraction(3, 1)
+    assert migrated.oddball_every_n == 10
+    assert migrated.oddball_rate_hz == Fraction(3, 10)
+    assert migrated.entered_oddball_rate_hz == "0.3000"
+    assert migrated.expected_analyzed_oddball_cycles == 90
+    assert migrated.expected_analyzed_oddball_cycles_source == (
+        EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT
+    )
+    assert migrated.oddball_marker_code is None
+    assert migrated.oddball_marker_code_source is None
+    assert not migrated.is_ready
+
+
+def test_markerless_protocol_v1_migration_round_trips_without_erasing_known_data(
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "Marker Migration"
+    project_root.mkdir()
+    manifest_path = project_root / "project.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "name": "Historical",
+                "frequency_protocol": {
+                    "version": LEGACY_FREQUENCY_PROTOCOL_VERSION,
+                    "status": "incomplete",
+                    "presentation_rate_hz": "10",
+                    "oddball_input_mode": "oddball_every_n",
+                    "oddball_every_n": 4,
+                    "oddball_rate_hz": "2.5",
+                    "entered_oddball_rate_hz": None,
+                    "expected_analyzed_oddball_cycles": None,
+                    "expected_analyzed_oddball_cycles_source": None,
+                },
+                "tools": {"processing": {"historical_artifact": "keep"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    project = Project.load(project_root)
+    assert project.frequency_protocol.status == (
+        FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
+    )
+    assert project.frequency_protocol.presentation_rate_hz == Fraction(10, 1)
+    assert project.frequency_protocol.oddball_every_n == 4
+    project.save()
+
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    saved_protocol = saved["frequency_protocol"]
+    assert saved_protocol["version"] == FREQUENCY_PROTOCOL_VERSION
+    assert saved_protocol["status"] == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
+    assert saved_protocol["presentation_rate_hz"] == "10"
+    assert saved_protocol["oddball_every_n"] == 4
+    assert saved_protocol["oddball_rate_hz"] == "2.5"
+    assert saved_protocol["expected_analyzed_oddball_cycles"] is None
+    assert saved_protocol["oddball_marker_code"] is None
+    assert saved_protocol["oddball_marker_code_source"] is None
+    assert saved["tools"]["processing"]["historical_artifact"] == "keep"
 
 
 def test_new_project_persists_explicitly_incomplete_seed(tmp_path) -> None:
@@ -281,6 +387,8 @@ def test_malformed_persisted_protocol_is_rejected(tmp_path) -> None:
                     "oddball_rate_hz": "1.3",
                     "expected_analyzed_oddball_cycles": 144,
                     "expected_analyzed_oddball_cycles_source": "manual",
+                    "oddball_marker_code": 55,
+                    "oddball_marker_code_source": "manual",
                 }
             }
         ),

@@ -23,6 +23,11 @@ from Main_App.processing.processing_ledger import (
     refresh_skipped_ledger_fingerprints,
     with_processing_choice,
 )
+from Main_App.projects.frequency_protocol import (
+    EXPECTED_CYCLES_SOURCE_MANUAL,
+    ODDBALL_MARKER_SOURCE_MANUAL,
+    FrequencyProtocol,
+)
 from Main_App.projects.grouping import GroupConfigurationError
 from Main_App.projects.project import Project
 from Main_App.workers import process_runner
@@ -60,6 +65,34 @@ def _settings() -> dict[str, object]:
         "oddball_freq": 1.2,
         "bca_upper_limit": 14.4,
     }
+
+
+def test_detector_choice_provenance_does_not_change_processing_fingerprint(
+    tmp_path,
+) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    settings = _settings()
+    original = build_processing_fingerprint(project, settings, project.event_map)
+
+    project.preprocessing = {
+        **project.preprocessing,
+        "removed_electrode_detection_choice_source": "user_confirmed",
+    }
+    settings_with_provenance = {
+        **settings,
+        "removed_electrode_detection_choice_schema_version": "1.0.0",
+        "removed_electrode_detection_choice_status": "ready",
+        "removed_electrode_detection_choice_source": "user_confirmed",
+    }
+
+    assert (
+        build_processing_fingerprint(
+            project,
+            settings_with_provenance,
+            project.event_map,
+        )
+        == original
+    )
 
 
 def test_classification_fingerprint_uses_canonical_limit_when_alias_is_none(
@@ -151,6 +184,7 @@ def test_removed_runtime_epoch_window_preserves_existing_fingerprint(
         options=project.options,
         subfolders=project.subfolders,
         groups=project.groups,
+        frequency_protocol=project.frequency_protocol,
     )
 
     legacy = build_processing_fingerprint(
@@ -244,6 +278,61 @@ def test_participant_condition_exclusions_do_not_change_raw_processing_fingerpri
         build_processing_fingerprint(project, settings, project.event_map)
         == baseline
     )
+
+
+def test_processing_fingerprint_uses_canonical_project_frequency_protocol(
+    tmp_path: Path,
+) -> None:
+    project, _raw_info = _project_with_raw(tmp_path)
+    settings = _settings()
+    base = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+
+    project.frequency_protocol = base
+    object_identity = build_processing_fingerprint(
+        project,
+        {**settings, "frequency_protocol": base},
+        project.event_map,
+    )
+    manifest_identity = build_processing_fingerprint(
+        project,
+        {**settings, "frequency_protocol": base.to_manifest()},
+        project.event_map,
+    )
+    assert manifest_identity == object_identity
+
+    variants = (
+        FrequencyProtocol.from_recurrence(
+            3,
+            5,
+            expected_analyzed_oddball_cycles=120,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ),
+        FrequencyProtocol.from_recurrence(
+            6,
+            10,
+            expected_analyzed_oddball_cycles=120,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ),
+        base.with_expected_cycles(100, source=EXPECTED_CYCLES_SOURCE_MANUAL),
+        base.with_oddball_marker_code(56, source=ODDBALL_MARKER_SOURCE_MANUAL),
+    )
+    changed: set[str] = set()
+    for variant in variants:
+        project.frequency_protocol = variant
+        changed.add(
+            build_processing_fingerprint(
+                project,
+                {**settings, "frequency_protocol": variant.to_manifest()},
+                project.event_map,
+            )
+        )
+    assert object_identity not in changed
+    assert len(changed) == len(variants)
 
 
 def _write_expected_outputs(plan) -> None:
@@ -369,7 +458,7 @@ def test_record_results_persists_complete_source_derivative_contract(tmp_path) -
     entry = ledger["entries"]["P01"]
     assert (
         PROCESSING_FINGERPRINT_VERSION
-        == "processing_fingerprint_v10_biosemi64_geometry"
+        == "processing_fingerprint_v11_biosemi64_frequency_protocol"
     )
     assert entry["geometry"] == plan.geometry_identity
     assert entry["source_derivative_status"] == "complete"

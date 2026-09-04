@@ -38,8 +38,19 @@ _RECORDING_PREFLIGHT_NAMES = {
 _RAW_IDENTITY_NAMES = {"infer_raw_participant_id"}
 _SESSION_COMPATIBILITY_NAMES = {"repeated_session_tool_block_reason"}
 _PROJECT_CONTEXT_NAMES = {"resolve_active_project_root"}
+_EXPERIMENTAL_QC_SETTINGS_NAMES = {
+    "EXPERIMENTAL_QC_SETTINGS_SCHEMA_VERSION",
+    "SUMMED_BCA_SCREENING_BRIEF_TEXT",
+    "SUMMED_BCA_SCREENING_POLICY_VERSION",
+    "ExperimentalQcSettings",
+    "ExperimentalQcSettingsError",
+    "SummedBcaScreeningSettings",
+    "normalize_experimental_qc_settings",
+    "normalize_summed_bca_screening_settings",
+}
 _FREQUENCY_PROTOCOL_NAMES = {
     "DEFAULT_ODDBALL_EVERY_N",
+    "DEFAULT_ODDBALL_MARKER_CODE",
     "DEFAULT_PRESENTATION_RATE_HZ",
     "DIRECT_HZ_DISPLAY_DECIMAL_PLACES",
     "DIRECT_HZ_DISPLAY_TOLERANCE_HZ",
@@ -49,15 +60,21 @@ _FREQUENCY_PROTOCOL_NAMES = {
     "FREQUENCY_PROTOCOL_STATUS_INCOMPLETE",
     "FREQUENCY_PROTOCOL_STATUS_READY",
     "FREQUENCY_PROTOCOL_VERSION",
+    "LEGACY_FREQUENCY_PROTOCOL_VERSION",
     "FrequencyProtocol",
     "FrequencyProtocolError",
     "HarmonicTarget",
     "ODDBALL_INPUT_MODE_DIRECT_HZ",
     "ODDBALL_INPUT_MODE_RECURRENCE",
+    "ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT",
+    "ODDBALL_MARKER_SOURCE_LEGACY_DEFAULT_55",
+    "ODDBALL_MARKER_SOURCE_LEGACY_EVIDENCE",
+    "ODDBALL_MARKER_SOURCE_MANUAL",
     "enumerate_exact_harmonics",
     "enumerate_protocol_harmonics",
     "new_manual_frequency_protocol",
     "normalize_frequency_protocol",
+    "validate_protocol_condition_codes",
 }
 _GROUPING_NAMES = {
     "GroupConfigurationError",
@@ -96,14 +113,28 @@ _PREPROCESSING_NAMES = {
     "HARMONIC_SELECTION_PROFILE_VERSION",
     "FIXED_HARMONIC_SELECTION_PROFILE",
     "LEGACY_HARMONIC_SELECTION_PROFILE",
+    "MANUAL_REMOVED_ELECTRODES_ENABLED_KEY",
     "NEW_PROJECT_HARMONIC_SELECTION_PROFILE",
     "SIGNIFICANT_ONLY_HARMONIC_SELECTION_PROFILE",
     "PREPROCESSING_CANONICAL_KEYS",
     "PREPROCESSING_DEFAULTS",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SCHEMA_VERSION",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_INVALID_SAVED_VALUE",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_BOOLEAN",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_SAVED_MODE",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED",
+    "REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY",
     "REPEATED_SESSION_PREPROCESSING_KEYS",
+    "RemovedElectrodeDetectionConfirmationRequired",
     "SUPPORTED_ELECTRODE_MAPPING_PROFILES",
     "SUPPORTED_ELECTRODE_MONTAGES",
     "is_recording_condition_excluded",
+    "confirm_removed_electrode_detection_choice",
     "is_participant_condition_excluded",
     "normalize_manual_excluded_participant_conditions",
     "normalize_manual_excluded_participants",
@@ -113,11 +144,15 @@ _PREPROCESSING_NAMES = {
     "normalize_electrode_montage",
     "normalize_preprocessing_settings",
     "new_project_preprocessing_settings",
+    "removed_electrode_detection_choice_requires_confirmation",
+    "removed_electrode_detection_choice_was_saved",
+    "require_removed_electrode_detection_choice_ready",
 }
 
 __all__ = sorted(
     _DATASET_INDEX_NAMES
     | _DATASET_PATH_NAMES
+    | _EXPERIMENTAL_QC_SETTINGS_NAMES
     | _FREQUENCY_PROTOCOL_NAMES
     | _GROUPING_NAMES
     | _PROJECT_NAMES
@@ -149,6 +184,12 @@ def __getattr__(name: str) -> Any:
         )
 
         return getattr(frequency_protocol, name)
+    if name in _EXPERIMENTAL_QC_SETTINGS_NAMES:
+        experimental_qc_settings = importlib.import_module(
+            "Main_App.projects.experimental_qc_settings"
+        )
+
+        return getattr(experimental_qc_settings, name)
     if name in _PROJECT_NAMES:
         project = importlib.import_module("Main_App.projects.project")
 

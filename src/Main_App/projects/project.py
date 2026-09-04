@@ -9,6 +9,10 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
+from .experimental_qc_settings import (
+    ExperimentalQcSettings,
+    normalize_experimental_qc_settings,
+)
 from .frequency_protocol import (
     FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED,
     FrequencyProtocol,
@@ -22,8 +26,14 @@ from .grouping import (
 )
 from .preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED,
     REPEATED_SESSION_PREPROCESSING_KEYS,
+    confirm_removed_electrode_detection_choice,
+    new_project_preprocessing_settings,
     normalize_preprocessing_settings,
+    removed_electrode_detection_choice_was_saved,
 )
 from .recordings import (
     normalize_project_recording_sources,
@@ -76,12 +86,16 @@ def _preprocessing_manifest_payload(
     normalized: Mapping[str, Any],
     *,
     repeated_session: bool,
+    include_removed_electrode_choice: bool = True,
 ) -> dict[str, Any]:
     """Persist legacy keys exactly and recording-scoped QC only for v2.2."""
 
     payload = {
         key: normalized[key] for key in PREPROCESSING_CANONICAL_KEYS
     }
+    if not include_removed_electrode_choice:
+        for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
+            payload.pop(key, None)
     if not repeated_session:
         return payload
     for key in REPEATED_SESSION_PREPROCESSING_KEYS:
@@ -324,6 +338,7 @@ class Project:
       - subfolders: Dict[str, Path] (absolute paths under results_folder)
       - options: Dict[str, Any]
       - preprocessing: Dict[str, Any]
+      - experimental_qc_settings: ExperimentalQcSettings
       - frequency_protocol: FrequencyProtocol
       - event_map: Dict[str, Any]
       - groups: Dict[str, Dict[str, Any]]
@@ -347,6 +362,11 @@ class Project:
             manifest_path.resolve() if manifest_path is not None else self.project_root / "project.json"
         )
         self.manifest = manifest
+
+        raw_experimental_qc = manifest.get("experimental_qc")
+        self.experimental_qc_settings = normalize_experimental_qc_settings(
+            raw_experimental_qc if "experimental_qc" in manifest else None
+        )
 
         self._frequency_protocol_was_persisted = "frequency_protocol" in manifest
         raw_frequency_protocol = manifest.get("frequency_protocol")
@@ -390,6 +410,10 @@ class Project:
 
         # Preprocessing dict
         pp = manifest.get("preprocessing", {})
+        raw_pp = pp if isinstance(pp, Mapping) else {}
+        self._removed_electrode_detection_choice_was_persisted = (
+            removed_electrode_detection_choice_was_saved(raw_pp)
+        )
         legacy_inversion: dict[str, float] = {}
         try:
             self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
@@ -432,6 +456,9 @@ class Project:
                 manifest.get("sessions")
                 or manifest.get("recording_sources")
                 or manifest.get("recordings")
+            ),
+            include_removed_electrode_choice=(
+                self._removed_electrode_detection_choice_was_persisted
             ),
         )
         _store_processing_fingerprint_v9_compatibility(
@@ -584,6 +611,8 @@ class Project:
         # Existing manifests remain unconfirmed when the record is absent.
         if "frequency_protocol" not in data and not resolved_manifest_path.exists():
             data["frequency_protocol"] = new_manual_frequency_protocol().to_manifest()
+        if "preprocessing" not in data and not resolved_manifest_path.exists():
+            data["preprocessing"] = new_project_preprocessing_settings()
 
         # Shallow-merge defaults with existing data
         merged: Dict[str, Any] = dict(DEFAULTS)
@@ -609,6 +638,9 @@ class Project:
                     raw_manifest.get("sessions")
                     or raw_manifest.get("recording_sources")
                     or raw_manifest.get("recordings")
+                ),
+                include_removed_electrode_choice=(
+                    proj._removed_electrode_detection_choice_was_persisted
                 ),
             )
             _store_processing_fingerprint_v9_compatibility(
@@ -674,12 +706,20 @@ class Project:
             self.preprocessing if isinstance(self.preprocessing, Mapping) else {}
         )
         self.preprocessing = normalized_pp
+        detector_choice_unresolved = (
+            normalized_pp["removed_electrode_detection_choice_status"]
+            == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        )
         data["preprocessing"] = _preprocessing_manifest_payload(
             normalized_pp,
             repeated_session=bool(
                 getattr(self, "sessions", {})
                 or getattr(self, "recording_sources", {})
                 or getattr(self, "recordings", {})
+            ),
+            include_removed_electrode_choice=(
+                self._removed_electrode_detection_choice_was_persisted
+                or not detector_choice_unresolved
             ),
         )
         _store_processing_fingerprint_v9_compatibility(
@@ -707,6 +747,12 @@ class Project:
         else:
             data["frequency_protocol"] = normalized_frequency_protocol.to_manifest()
             self._frequency_protocol_was_persisted = True
+
+        normalized_experimental_qc = normalize_experimental_qc_settings(
+            getattr(self, "experimental_qc_settings", None)
+        )
+        self.experimental_qc_settings = normalized_experimental_qc
+        data["experimental_qc"] = normalized_experimental_qc.to_manifest()
 
         # Persist the live event map from runtime state, normalized to {str: int}
         live_map: Dict[str, Any] = getattr(self, "event_map", {}) or {}
@@ -947,8 +993,60 @@ class Project:
     def update_preprocessing(self, values: Mapping[str, Any]) -> Dict[str, Any]:
         """Update preprocessing settings using the shared normalizer."""
 
-        normalized = normalize_preprocessing_settings(values)
+        candidate_values = dict(values)
+        current_settings = normalize_preprocessing_settings(
+            self.preprocessing if isinstance(self.preprocessing, Mapping) else {}
+        )
+        current_choice_unresolved = (
+            current_settings["removed_electrode_detection_choice_status"]
+            == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        )
+        if (
+            current_choice_unresolved
+            and not self._removed_electrode_detection_choice_was_persisted
+        ):
+            # Generic settings saves are not evidence that the user answered the
+            # legacy migration question.  Only the explicit confirmation method
+            # below may turn this provisional Off value into a saved choice.
+            for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
+                candidate_values[key] = current_settings[key]
+        normalized = normalize_preprocessing_settings(candidate_values)
         self.preprocessing = normalized
+        detector_choice_unresolved = (
+            normalized["removed_electrode_detection_choice_status"]
+            == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        )
+        if not detector_choice_unresolved:
+            self._removed_electrode_detection_choice_was_persisted = True
+        self.manifest["preprocessing"] = _preprocessing_manifest_payload(
+            normalized,
+            repeated_session=bool(
+                getattr(self, "sessions", {})
+                or getattr(self, "recording_sources", {})
+                or getattr(self, "recordings", {})
+            ),
+            include_removed_electrode_choice=(
+                self._removed_electrode_detection_choice_was_persisted
+                or not detector_choice_unresolved
+            ),
+        )
+        return normalized
+
+    def confirm_removed_electrode_detection_choice(
+        self,
+        mode: Any,
+        *,
+        source: str = REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_USER_CONFIRMED,
+    ) -> Dict[str, Any]:
+        """Record the user's detector choice without altering manual channel maps."""
+
+        normalized = confirm_removed_electrode_detection_choice(
+            self.preprocessing,
+            mode,
+            source=source,
+        )
+        self.preprocessing = normalized
+        self._removed_electrode_detection_choice_was_persisted = True
         self.manifest["preprocessing"] = _preprocessing_manifest_payload(
             normalized,
             repeated_session=bool(
@@ -957,6 +1055,17 @@ class Project:
                 or getattr(self, "recordings", {})
             ),
         )
+        return normalized
+
+    def update_experimental_qc_settings(
+        self,
+        value: ExperimentalQcSettings | Mapping[str, Any],
+    ) -> ExperimentalQcSettings:
+        """Replace the versioned project-owned experimental QC settings."""
+
+        normalized = normalize_experimental_qc_settings(value)
+        self.experimental_qc_settings = normalized
+        self.manifest["experimental_qc"] = normalized.to_manifest()
         return normalized
 
     def update_frequency_protocol(

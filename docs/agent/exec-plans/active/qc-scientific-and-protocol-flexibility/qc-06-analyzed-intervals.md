@@ -5,10 +5,14 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** accepted on 2026-09-03. The user explicitly broadened the proposed
+**Status:** implemented on 2026-09-04. The user explicitly broadened the proposed
 amplitude-only boundary to analysis and flagging generally. Implementation
-waits for the cumulative plan. The user subsequently requested item 15's
-separate investigation of processing scope, then explicitly confirmed
+uses one fingerprinted reviewed source plan, validates it against the current
+protocol/event map before cache access, realizes the same bounds on the actual
+post-resample grid, and reuses them for signal QC, kurtosis, and epoch creation.
+Calls without analyzed-interval context return `not_evaluated`; they do not run
+legacy whole-file or first-90-second scoring. The user requested item 15's
+separate investigation of processing scope and explicitly confirmed
 analyzed-period bad-channel decisions with no change to interpolation
 application. Filtering/resampling context remains under investigation.
 
@@ -76,6 +80,11 @@ inspect the file information needed to locate the analysis spans.
    never present whole-recording cached decisions as interval-scoped results.
    Preserve historical outputs and confirmed manual decisions. Later cohort
    exclusions alone must not silently rewrite time spans or reprocess EEG.
+   Bind cache lookup to the current canonical project protocol and condition
+   event map as well as the reviewed source-span fingerprint. Validate that
+   context before cache lookup. A caller without the project root and event map
+   must receive an explicit `not_evaluated` planning result rather than legacy
+   whole-file or first-90-second signal QC.
 6. Pool each channel's unique retained samples as specified in item 4, so
    longer retained spans contribute more samples; do not equal-weight
    conditions. Treat this kurtosis result as recording-wide evidence over the

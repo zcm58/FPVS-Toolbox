@@ -12,6 +12,7 @@ from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS
 from Main_App.processing.processing_controller import RawFileInfo
 import Main_App.processing.preflight_qc as preflight_qc
 from Main_App.processing.raw_channel_qc import SCALP_CHANNELS
+from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
 
 
 def _event_rows(offset: int = 0) -> np.ndarray:
@@ -41,6 +42,12 @@ def _settings() -> dict[str, object]:
         "oddball_freq": 1.2,
         "line_noise_filter_enabled": True,
         "line_noise_frequency_hz": 60,
+        "frequency_protocol": FrequencyProtocol.from_recurrence(
+            6,
+            5,
+            expected_analyzed_oddball_cycles=3,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ),
     }
 
 
@@ -51,11 +58,13 @@ class _LazyRaw:
         channel_names: list[str],
         *,
         read_hook=None,
+        first_samp: int = 0,
     ) -> None:
         self._data = data
         self.ch_names = channel_names
         self.info = {"sfreq": 256.0}
         self.n_times = data.shape[1]
+        self.first_samp = int(first_samp)
         self.reads: list[tuple[tuple[int, ...], int, int]] = []
         self._read_hook = read_hook
 
@@ -112,7 +121,7 @@ def test_v3_accepts_canonical_project_reference_keys() -> None:
     ]
     assert "epoch_end" not in preflight_qc._preflight_cache_settings(settings)
     method = preflight_qc._preflight_cache_method()
-    assert method["version"] == "v4_biosemi64_geometry"
+    assert method["version"] == "v5_analyzed_interval_coordinates"
     assert method["geometry"]["montage_id"] == "biosemi64"
     assert method["condition_completion_policy"] == "locked_fft_span_v1"
     assert "condition_minimum_completion_s" not in method
@@ -243,7 +252,35 @@ def test_v3_reads_exact_locked_condition_samples_and_reuses_cache(
     assert stim_arguments == ["Trigger", "Trigger"]
 
 
-def test_v3_invalid_locked_crop_is_a_file_error_without_sample_read_or_cache(
+def test_v3_converts_absolute_plan_bounds_to_relative_raw_reads(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06-nonzero-origin.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names, first_samp=1_000)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows(offset=1_000))
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        _settings(),
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    assert scan.results[0].load_error is None
+    assert raw.reads == [(tuple(range(len(names) - 1)), 300, 940)]
+    event_plan = scan.results[0].condition_qc["event_plan"]
+    assert event_plan["first_samp"] == 1_000
+    coordinates = event_plan["source_analysis_span_plan"]["spans"][0][
+        "source_coordinates"
+    ]
+    assert coordinates["start_sample"] == 1_300
+    assert coordinates["start_relative_sample"] == 300
+
+
+def test_v3_missing_marker_pauses_without_sample_read_or_cache(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -265,16 +302,24 @@ def test_v3_invalid_locked_crop_is_a_file_error_without_sample_read_or_cache(
     )
 
     result = scan.results[0]
-    assert result.load_error is not None
-    assert "Locked FFT crop required" in result.load_error
-    assert "insufficient_55" in result.load_error
-    assert result.condition_qc == {
-        "method_name": "condition_aware_preflight_qc",
-        "method_version": "v4_biosemi64_geometry",
-        "cache_status": "error",
-    }
+    assert result.load_error is None
+    assert result.condition_qc["marker_review_required"] is True
+    unresolved = result.condition_qc["event_plan"]["unresolved_occurrences"]
+    assert unresolved[0]["review_reasons"] == [
+        "insufficient_project_oddball_markers"
+    ]
+    assert result.condition_qc["method_name"] == "condition_aware_preflight_qc"
+    assert result.condition_qc["method_version"] == (
+        "v5_analyzed_interval_coordinates"
+    )
+    assert result.condition_qc["cache_status"] == "marker_review_required"
     assert raw.reads == []
-    cache_directory = tmp_path / ".fpvs_processing" / "preflight_qc" / "v2"
+    cache_directory = (
+        tmp_path
+        / ".fpvs_processing"
+        / "preflight_qc"
+        / "v5_analyzed_interval_coordinates"
+    )
     assert not list(cache_directory.glob("*.json"))
 
 

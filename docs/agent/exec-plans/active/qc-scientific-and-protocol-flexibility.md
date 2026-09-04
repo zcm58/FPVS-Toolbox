@@ -131,8 +131,8 @@ beyond QC-02 and the existing freshness contracts.
 | --- | --- | --- |
 | Plan activation and v3 branch baseline | Complete | Active plan moved onto `codex/qc-scientific-protocol-v3` at the exact v3 release base; documentation validation precedes the first source change. |
 | Wave 0: QC-15 BioSemi64 geometry | Complete | Canonical loading, reduced-set QC, interpolation and failure provenance, cache invalidation, legacy/mixed-output gates, downstream validation, and clean synthetic sensitivity receipt implemented in `efdac5e8` and `c261996e`. Representative lab-data validation remains explicitly limited follow-up evidence. |
-| Wave 1: protocol and identity foundation | In progress | Implementing the project-owned exact rate/cycle protocol before marker and identity consumers. |
-| Wave 2: analyzed-interval signal QC | Not started | Blocked by Waves 0-1. |
+| Wave 1: protocol and identity foundation | Complete | Project-owned exact rates/cycles/marker identity, Studio/manual migration, audited marker review, experimental-settings schemas, preprocessing/frequency identity foundations, the pre-run QC-20 matrix, and fixed-ROI validators are implemented. Integrated evidence: processing focused gate 418 passed/1 skipped; project-I/O 214 passed; new foundation/static suites 76 passed. Qt execution remains CI-only. |
+| Wave 2: analyzed-interval signal QC | In progress | QC-06 is complete: one reviewed source plan is validated against current protocol/event map before cache lookup, realized on the post-resample grid, and reused for signal QC, kurtosis, and epoch construction. Unscoped compatibility calls report `not_evaluated`. QC-01/QC-05 and the QC-04/QC-08/QC-09/QC-16/QC-18 authority and review behaviors remain. |
 | Wave 3: outcomes and integrity | Not started | Blocked by required earlier foundations. |
 | Wave 4: frequency and ROI finalization | Not started | Blocked by Waves 0-3. |
 | Wave 5: integration and handoff | Not started | Requires every action-level gate and final repository verification. |

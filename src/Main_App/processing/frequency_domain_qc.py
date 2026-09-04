@@ -15,6 +15,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from Main_App.processing.frequency_qc_identity import (
+    resolve_frequency_qc_recording_decisions,
+)
 from Main_App.projects import ProjectDatasetIndex, load_project_dataset_index
 from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
@@ -301,6 +304,10 @@ def apply_frequency_domain_qc_decision(
 ) -> dict[str, object]:
     """Persist a reviewed QC decision and write the human-readable report."""
 
+    resolved_recording_decisions = resolve_frequency_qc_recording_decisions(
+        report,
+        manual_recording_reasons,
+    )
     root = Path(project_root).resolve()
     manifest_path = root / "project.json"
     manifest = _read_manifest(manifest_path)
@@ -339,22 +346,20 @@ def apply_frequency_domain_qc_decision(
     manual_entries = sorted(manual_by_pid.values(), key=lambda item: item["participant_id"])
     existing_manual_recordings = _manual_recording_entries_from_state(state)
     manual_by_recording = {
-        str(entry["recording_id"]): dict(entry)
+        str(entry["recording_id"]).casefold(): dict(entry)
         for entry in existing_manual_recordings
     }
-    for raw_recording_id, raw_reason in (manual_recording_reasons or {}).items():
-        recording_id = _normalize_recording_id(raw_recording_id)
-        if not recording_id:
-            continue
-        reason = str(raw_reason or WARNING_REASON_UNUSUAL_VALUES).strip()
+    for decision in resolved_recording_decisions:
+        recording_id = str(decision.identity.recording_id)
+        reason = str(decision.reason or WARNING_REASON_UNUSUAL_VALUES).strip()
         if reason not in MANUAL_EXCLUSION_REASONS:
             reason = WARNING_REASON_UNUSUAL_VALUES
-        previous = manual_by_recording.get(recording_id, {})
-        assignment = _report_recording_assignment(report, recording_id)
-        manual_by_recording[recording_id] = {
+        recording_key = recording_id.casefold()
+        previous = manual_by_recording.get(recording_key, {})
+        manual_by_recording[recording_key] = {
             "recording_id": recording_id,
-            "participant_id": str(assignment.get("participant_id") or ""),
-            "session_id": str(assignment.get("session_id") or ""),
+            "participant_id": decision.identity.participant_id,
+            "session_id": str(decision.identity.session_id or ""),
             "reason": reason,
             "source": "manual_qc_review",
             "added_at": str(previous.get("added_at") or now),
@@ -733,12 +738,14 @@ def clear_manual_frequency_domain_recording_exclusions(
         return []
     existing = _manual_recording_entries_from_state(state)
     retained = [
-        entry for entry in existing if entry.get("recording_id") not in to_clear
+        entry
+        for entry in existing
+        if str(entry.get("recording_id") or "").upper() not in to_clear
     ]
     cleared = sorted(
         str(entry["recording_id"])
         for entry in existing
-        if entry.get("recording_id") in to_clear
+        if str(entry.get("recording_id") or "").upper() in to_clear
     )
     if not cleared:
         return []
@@ -1938,7 +1945,7 @@ def _normalize_auto_recording_entries(value: object) -> list[dict[str, object]]:
 def _normalize_manual_recording_entries(value: object) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     for item in _iter_mapping_entries(value):
-        recording_id = _normalize_recording_id(item.get("recording_id"))
+        recording_id = str(item.get("recording_id") or "").strip()
         if not recording_id:
             continue
         reason = str(item.get("reason") or WARNING_REASON_UNUSUAL_VALUES)
@@ -1946,9 +1953,7 @@ def _normalize_manual_recording_entries(value: object) -> list[dict[str, object]
             reason = WARNING_REASON_UNUSUAL_VALUES
         entry: dict[str, object] = {
             "recording_id": recording_id,
-            "participant_id": _normalize_participant_id(
-                item.get("participant_id")
-            ),
+            "participant_id": str(item.get("participant_id") or "").strip(),
             "session_id": str(item.get("session_id") or ""),
             "reason": reason,
             "source": str(item.get("source") or "manual_qc_review"),
@@ -1958,18 +1963,7 @@ def _normalize_manual_recording_entries(value: object) -> list[dict[str, object]
         if item.get("updated_at"):
             entry["updated_at"] = str(item.get("updated_at"))
         entries.append(entry)
-    return sorted(entries, key=lambda entry: str(entry["recording_id"]))
-
-
-def _report_recording_assignment(
-    report: Mapping[str, object],
-    recording_id: str,
-) -> Mapping[str, object]:
-    key = recording_id.casefold()
-    for item in _iter_mapping_entries(report.get("recording_assignments")):
-        if str(item.get("recording_id") or "").casefold() == key:
-            return item
-    return {}
+    return sorted(entries, key=lambda entry: str(entry["recording_id"]).casefold())
 
 
 def _iter_mapping_entries(value: object) -> list[Mapping[str, object]]:

@@ -6,7 +6,6 @@ from collections import Counter, defaultdict
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
-import gc
 import logging
 from pathlib import Path
 import tempfile
@@ -41,24 +40,24 @@ from Main_App.processing.preflight_qc_plan import (
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
 )
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocolError,
+    normalize_frequency_protocol,
+)
 from Main_App.processing.raw_channel_qc import (
     CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
-    RAW_CHANNEL_QC_EXCLUSION_REASON,
     SCALP_CHANNELS,
     ConditionRawChannelQCBlock,
     ConditionRawChannelQCCancelled,
     combine_condition_raw_channel_qc_v2,
     evaluate_condition_raw_channel_qc_v2,
-    evaluate_raw_channel_qc,
 )
 from Main_App.processing.raw_spectral_qc import (
     CONDITION_SPECTRAL_QC_METHOD_VERSION,
     ConditionSpectralQCCancelled,
     ConditionSpectralQCResult,
     ConditionSpectralQCThresholds,
-    RawSpectralQCResult,
     evaluate_condition_spectral_qc_v2,
-    evaluate_raw_spectral_qc,
 )
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -676,14 +675,6 @@ def _load_raw_for_preflight(
     )
 
 
-def _raw_channel_payload(result: Any) -> dict[str, object]:
-    payload = result.to_payload()
-    payload["excluded"] = bool(result.excluded)
-    payload["reason"] = result.reason or RAW_CHANNEL_QC_EXCLUSION_REASON
-    payload["message"] = result.message
-    return payload
-
-
 class _PreflightQcCancelled(RuntimeError):
     """Internal cooperative-cancellation signal for one participant scan."""
 
@@ -1191,14 +1182,71 @@ def _scan_one_preflight_file_v2(
                 raw,
                 stim_channel=_configured_stim_channel(qc_settings),
             )
+        raw_protocol = qc_settings.get("frequency_protocol")
+        if raw_protocol is None:
+            raise RuntimeError(
+                "A confirmed project FPVS protocol is required before preflight QC."
+            )
+        try:
+            frequency_protocol = normalize_frequency_protocol(raw_protocol)
+        except FrequencyProtocolError as exc:
+            raise RuntimeError(f"Invalid project FPVS protocol: {exc}") from exc
+        raw_decisions_by_file = qc_settings.get(
+            "_fpvs_marker_review_decisions_by_file"
+        )
+        marker_review_decisions = None
+        if isinstance(raw_decisions_by_file, Mapping):
+            path_candidates = (
+                str(file_path),
+                str(file_path.resolve()),
+                file_path.name,
+            )
+            for path_candidate in path_candidates:
+                candidate = raw_decisions_by_file.get(path_candidate)
+                if isinstance(candidate, Mapping):
+                    marker_review_decisions = candidate
+                    break
         event_plan = plan_preflight_qc_events(
             events=events,
             event_map=event_map,
             sfreq=float(raw.info["sfreq"]),
             n_times=int(raw.n_times),
+            first_samp=int(raw.first_samp),
+            frequency_protocol=frequency_protocol,
+            marker_review_decisions=marker_review_decisions,
+            marker_review_scope={
+                "source_file_path": str(file_path.resolve()),
+                "participant_id": participant_id,
+                "recording_id": recording_id,
+                "session_id": session_id,
+                "session_label": session_label,
+            },
         )
         _record_timing("events_and_plan", event_started)
         if not event_plan.spans:
+            if event_plan.unresolved_occurrences:
+                return PreflightQcFileResult(
+                    path=file_path,
+                    participant_id=participant_id,
+                    load_error=None,
+                    raw_channel_qc=None,
+                    raw_spectral_qc=None,
+                    group_id=group_id,
+                    condition_qc={
+                        "method_name": PREFLIGHT_QC_METHOD_NAME,
+                        "method_version": PREFLIGHT_QC_METHOD_VERSION,
+                        "review_only": True,
+                        "cache_status": "marker_review_required",
+                        "event_source": event_source,
+                        "event_plan": event_plan.to_payload(),
+                        "condition_count": 0,
+                        "marker_review_required": True,
+                    },
+                    recording_id=recording_id,
+                    session_id=session_id,
+                    session_label=session_label,
+                    visit_index=visit_index,
+                )
             raise RuntimeError("Preflight QC v4 planned no relevant condition intervals.")
 
         file_identity = _preflight_file_identity(
@@ -1275,8 +1323,8 @@ def _scan_one_preflight_file_v2(
             with _condition_data_buffer(
                 raw,
                 picks=picks,
-                start=span.time_start_sample,
-                stop=span.time_stop_sample,
+                start=span.time_start_sample - event_plan.first_samp,
+                stop=span.time_stop_sample - event_plan.first_samp,
                 sfreq=sfreq,
                 io_semaphore=io_semaphore,
                 should_cancel=should_cancel,
@@ -1388,6 +1436,7 @@ def _scan_one_preflight_file_v2(
             "event_source": event_source,
             "event_plan": event_plan_payload,
             "condition_count": len(event_plan.spans),
+            "marker_review_required": bool(event_plan.unresolved_occurrences),
             "samples_read_per_channel": samples_read,
             "recording_samples_per_channel": int(raw.n_times),
             "disk_buffered_condition_count": disk_buffered_condition_count,
@@ -1517,57 +1566,36 @@ def _scan_one_preflight_file(
                 visit_index=visit_index,
             )
 
-    raw = None
-    try:
-        preflight = load_utils.inspect_bdf_header(file_path)
-        if preflight and preflight.recording_not_started:
-            return None
-        raw = _load_raw_for_preflight(file_path, qc_settings)
-        if raw is None:
-            raise RuntimeError("BDF loader returned no raw data.")
-        raw_result = evaluate_raw_channel_qc(
-            raw,
-            qc_settings,
-            filename=file_path.name,
-        )
-        spectral_result: RawSpectralQCResult = evaluate_raw_spectral_qc(
-            raw,
-            qc_settings,
-            filename=file_path.name,
-        )
-        return PreflightQcFileResult(
-            path=file_path,
-            participant_id=participant_id,
-            load_error=None,
-            raw_channel_qc=_raw_channel_payload(raw_result),
-            raw_spectral_qc=spectral_result.to_payload(),
-            group_id=group_id,
-            recording_id=recording_id,
-            session_id=session_id,
-            session_label=session_label,
-            visit_index=visit_index,
-        )
-    except Exception as exc:
-        logger.exception(
-            "Preflight QC failed for %s",
-            file_path,
-            extra={"participant_id": participant_id, "group_id": group_id},
-        )
-        return PreflightQcFileResult(
-            path=file_path,
-            participant_id=participant_id,
-            load_error=str(exc),
-            raw_channel_qc=None,
-            raw_spectral_qc=None,
-            group_id=group_id,
-            recording_id=recording_id,
-            session_id=session_id,
-            session_label=session_label,
-            visit_index=visit_index,
-        )
-    finally:
-        raw = None
-        gc.collect()
+    message = (
+        "Signal-based preflight QC was not evaluated because an active project "
+        "root and condition event map are required to define the analyzed intervals."
+    )
+    logger.warning(
+        "preflight_qc_not_evaluated file=%s participant_id=%s reason=%s",
+        file_path,
+        participant_id,
+        "missing_analyzed_interval_context",
+    )
+    return PreflightQcFileResult(
+        path=file_path,
+        participant_id=participant_id,
+        load_error=None,
+        raw_channel_qc=None,
+        raw_spectral_qc=None,
+        group_id=group_id,
+        condition_qc={
+            "method_name": PREFLIGHT_QC_METHOD_NAME,
+            "method_version": PREFLIGHT_QC_METHOD_VERSION,
+            "evaluation_status": "not_evaluated",
+            "cache_status": "not_evaluated",
+            "reason": "missing_analyzed_interval_context",
+            "message": message,
+        },
+        recording_id=recording_id,
+        session_id=session_id,
+        session_label=session_label,
+        visit_index=visit_index,
+    )
 
 
 def _ordered_results(
@@ -1731,10 +1759,11 @@ def scan_preprocessing_qc(
     project_root: Path | None = None,
     event_map: Mapping[str, int] | None = None,
 ) -> PreflightQcScan:
-    """Run deterministic preflight QC, using condition-aware v4 when scoped.
+    """Run analyzed-interval preflight QC or report that it was not evaluated.
 
-    The v4 path is opt-in and requires both an explicit project root and event
-    map. Existing callers without either input retain the legacy scan behavior.
+    Signal-based QC requires both an explicit project root and condition event
+    map. Callers without that context receive a planning result and no EEG
+    samples are scored.
     """
 
     skip_keys = {_path_key(Path(path)) for path in skip_paths}

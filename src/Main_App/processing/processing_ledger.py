@@ -21,6 +21,36 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
 )
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    normalize_frequency_protocol,
+)
+
+from Main_App.processing.expected_processing_ledger import (
+    EXPECTED_CELL_ACTION_EXCLUDE_CONDITION as EXPECTED_CELL_ACTION_EXCLUDE_CONDITION,
+    EXPECTED_CELL_ACTION_EXCLUDE_RECORDING as EXPECTED_CELL_ACTION_EXCLUDE_RECORDING,
+    EXPECTED_CELL_ACTION_LEGACY_UNKNOWN as EXPECTED_CELL_ACTION_LEGACY_UNKNOWN,
+    EXPECTED_CELL_ACTION_PROCESS as EXPECTED_CELL_ACTION_PROCESS,
+    EXPECTED_PLANNING_STATE_LEGACY_UNKNOWN as EXPECTED_PLANNING_STATE_LEGACY_UNKNOWN,
+    EXPECTED_PLANNING_STATE_PLANNED as EXPECTED_PLANNING_STATE_PLANNED,
+    EXPECTED_RECORDING_ACTION_EXCLUDE as EXPECTED_RECORDING_ACTION_EXCLUDE,
+    EXPECTED_RECORDING_ACTION_LEGACY_UNKNOWN as EXPECTED_RECORDING_ACTION_LEGACY_UNKNOWN,
+    EXPECTED_RECORDING_ACTION_PROCESS as EXPECTED_RECORDING_ACTION_PROCESS,
+    EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY as EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY,
+    EXPECTED_RECORDING_CONDITION_PLAN_VERSION as EXPECTED_RECORDING_CONDITION_PLAN_VERSION,
+    EXPECTED_WORKBOOK_NOT_REQUIRED as EXPECTED_WORKBOOK_NOT_REQUIRED,
+    EXPECTED_WORKBOOK_REQUIRED as EXPECTED_WORKBOOK_REQUIRED,
+    EXPECTED_WORKBOOK_UNRESOLVED as EXPECTED_WORKBOOK_UNRESOLVED,
+    ExpectedOccurrencePlan as ExpectedOccurrencePlan,
+    ExpectedRecordingConditionCell as ExpectedRecordingConditionCell,
+    ExpectedRecordingConditionPlan as ExpectedRecordingConditionPlan,
+    ExpectedRecordingConditionPlanError as ExpectedRecordingConditionPlanError,
+    ExpectedRecordingPlan as ExpectedRecordingPlan,
+    build_expected_recording_condition_plan as build_expected_recording_condition_plan,
+    load_expected_recording_condition_plan as load_expected_recording_condition_plan,
+    save_expected_recording_condition_plan as save_expected_recording_condition_plan,
+)
 from Main_App.projects.grouping import (
     project_group_context,
     resolve_group_output_directory,
@@ -35,7 +65,9 @@ logger = logging.getLogger(__name__)
 PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
-PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v10_biosemi64_geometry"
+PROCESSING_FINGERPRINT_VERSION = (
+    "processing_fingerprint_v11_biosemi64_frequency_protocol"
+)
 _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
     {
         "manual_participant_exclusion",
@@ -47,6 +79,11 @@ _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
     {
         "manual_excluded_participant_conditions",
         "manual_excluded_recording_conditions",
+        # These describe how a detector choice was obtained, not the signal
+        # transformation. The effective mode remains fingerprinted separately.
+        "removed_electrode_detection_choice_schema_version",
+        "removed_electrode_detection_choice_status",
+        "removed_electrode_detection_choice_source",
     }
 )
 _REPEATED_SESSION_PREPROCESSING_KEYS = frozenset(
@@ -557,6 +594,39 @@ def _ledger_geometry_matches(
     return isinstance(candidate, Mapping) and dict(candidate) == dict(expected)
 
 
+def _canonical_frequency_protocol_identity(
+    project: Any,
+    settings: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve one canonical project protocol without hashing object reprs."""
+
+    candidates: list[tuple[str, FrequencyProtocol]] = []
+    for source, raw_value in (
+        ("processing settings", settings.get("frequency_protocol")),
+        ("project", getattr(project, "frequency_protocol", None)),
+    ):
+        if raw_value is None:
+            continue
+        try:
+            candidates.append((source, normalize_frequency_protocol(raw_value)))
+        except FrequencyProtocolError as exc:
+            raise ValueError(f"Invalid {source} frequency protocol: {exc}") from exc
+    if not candidates:
+        return None
+    selected_source, selected = candidates[0]
+    for source, candidate in candidates[1:]:
+        if candidate.fingerprint != selected.fingerprint:
+            raise ValueError(
+                "Processing settings and project frequency protocols disagree: "
+                f"{selected_source}={selected.fingerprint}, "
+                f"{source}={candidate.fingerprint}."
+            )
+    return {
+        "canonical_payload": selected.canonical_payload(),
+        "fingerprint": selected.fingerprint,
+    }
+
+
 def build_processing_fingerprint(
     project: Any,
     settings: Mapping[str, Any],
@@ -572,6 +642,7 @@ def build_processing_fingerprint(
         key: value
         for key, value in settings.items()
         if key not in _DOWNSTREAM_ONLY_PREPROCESSING_KEYS
+        and key != "frequency_protocol"
         and (
             repeated_session_project
             or key not in _REPEATED_SESSION_PREPROCESSING_KEYS
@@ -620,9 +691,14 @@ def build_processing_fingerprint(
         }
     )
     geometry_identity = _configured_geometry_identity(settings)
+    frequency_protocol_identity = _canonical_frequency_protocol_identity(
+        project,
+        settings,
+    )
     payload = {
         "version": PROCESSING_FINGERPRINT_VERSION,
         "geometry": geometry_identity,
+        "frequency_protocol": frequency_protocol_identity,
         "settings": fingerprint_settings,
         "fft_multinotch": {
             "enabled": settings.get("line_noise_filter_enabled", True),

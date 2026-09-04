@@ -22,6 +22,7 @@ class CropResult:
     last55_sample: Optional[int] = None
     available_samples: int = 0
     dedup_dropped: int = 0
+    early_extra_count: int = 0
     missing_gap_count: int = 0
     fallback: bool = False
     fallback_reason: Optional[str] = None
@@ -42,7 +43,6 @@ class ConditionFFTSpanPlan:
 
 
 ODDBALL_FREQ = Fraction(6, 5)
-CONDITION_SPECIFIC_ODDBALL_OFFSET = 50
 
 
 def compute_onbin_step(fs: float, f_oddball: Fraction = ODDBALL_FREQ) -> Tuple[Optional[int], Optional[int], Optional[str]]:
@@ -118,60 +118,21 @@ def plan_condition_fft_spans(
     )
 
 
-def condition_specific_oddball_id(
-    condition_id: int,
-    *,
-    offset: int = CONDITION_SPECIFIC_ODDBALL_OFFSET,
-) -> int:
-    return int(condition_id) + int(offset)
-
-
 def resolve_oddball_ids_by_condition(
     events: np.ndarray,
     onset_ids: Iterable[int],
     *,
     default_oddball_id: int = 55,
-    condition_specific_offset: int = CONDITION_SPECIFIC_ODDBALL_OFFSET,
     stream_end_sample: Optional[int] = None,
 ) -> dict[int, int]:
-    """Resolve the oddball marker code to use for each condition onset code.
+    """Compatibility helper returning one explicit project-wide marker code.
 
-    Standard projects use a global oddball marker code of 55. Some older or
-    task-specific projects encode oddballs as 50 + condition code, such as
-    51, 52, 53, 54, and 55 for condition onset codes 1-5. This resolver makes
-    that choice explicit per condition from the observed event stream.
+    Marker identity is never inferred from observed events. Active processing
+    consumes the reviewed marker-integrity plan instead of this adapter.
     """
+    _ = events, stream_end_sample
     onset_set = {int(v) for v in onset_ids}
-    resolved = {condition_id: int(default_oddball_id) for condition_id in onset_set}
-    if events.size == 0 or not onset_set:
-        return resolved
-
-    onset_events = [row for row in events if int(row[2]) in onset_set]
-    for idx, onset_event in enumerate(onset_events):
-        cond_id = int(onset_event[2])
-        condition_oddball_id = condition_specific_oddball_id(
-            cond_id,
-            offset=condition_specific_offset,
-        )
-        if condition_oddball_id == int(default_oddball_id):
-            resolved[cond_id] = int(default_oddball_id)
-            continue
-
-        onset_sample = int(onset_event[0])
-        next_block_start = (
-            int(onset_events[idx + 1][0])
-            if idx + 1 < len(onset_events)
-            else int(stream_end_sample or events[-1][0] + 1)
-        )
-        condition_specific_count = sum(
-            1
-            for row in events
-            if onset_sample < int(row[0]) < next_block_start
-            and int(row[2]) == condition_oddball_id
-        )
-        if condition_specific_count >= 2:
-            resolved[cond_id] = condition_oddball_id
-    return resolved
+    return {condition_id: int(default_oddball_id) for condition_id in onset_set}
 
 
 def _resolve_oddball_id_for_condition(
@@ -189,6 +150,7 @@ def compute_fft_crop_from_events(
     onset_ids: Iterable[int],
     oddball_id: int | Mapping[int, int] = 55,
     stream_end_sample: Optional[int] = None,
+    f_oddball: Fraction = ODDBALL_FREQ,
 ) -> tuple[Dict[Tuple[int, int], CropResult], Optional[int], list[str]]:
     onset_set = {int(v) for v in onset_ids}
     results: Dict[Tuple[int, int], CropResult] = {}
@@ -198,11 +160,11 @@ def compute_fft_crop_from_events(
         run_warnings.append("empty_events")
         return results, None, run_warnings
 
-    _, n_step, step_err = compute_onbin_step(fs=fs)
+    _, n_step, step_err = compute_onbin_step(fs=fs, f_oddball=f_oddball)
     if step_err:
         run_warnings.append(step_err)
 
-    expected_interval_samples = int(round(fs / 1.2))
+    expected_interval_samples = float(Fraction(str(fs)) / f_oddball)
     onset_events = [row for row in events if int(row[2]) in onset_set]
     if not onset_events:
         run_warnings.append("no_onsets")
@@ -226,15 +188,18 @@ def compute_fft_crop_from_events(
         raw_55 = [int(row[0]) for row in block_rows]
         dedup_55: list[int] = []
         dropped = 0
+        early_extra = 0
         missing_gaps = 0
         for sample in raw_55:
             if not dedup_55:
                 dedup_55.append(sample)
                 continue
             delta = sample - dedup_55[-1]
-            if delta < 0.5 * expected_interval_samples:
+            if delta == 0:
                 dropped += 1
                 continue
+            if delta < 0.5 * expected_interval_samples:
+                early_extra += 1
             if delta > 1.5 * expected_interval_samples:
                 missing_gaps += 1
             dedup_55.append(sample)
@@ -267,6 +232,8 @@ def compute_fft_crop_from_events(
             warnings.append(f"missing_55_gaps:{missing_gaps}")
         if dropped:
             warnings.append(f"dedup_dropped:{dropped}")
+        if early_extra:
+            warnings.append(f"early_extra_markers:{early_extra}")
 
         results[(cond_id, rep_index)] = CropResult(
             crop_start_sample=crop_start,
@@ -280,6 +247,7 @@ def compute_fft_crop_from_events(
             last55_sample=last55,
             available_samples=available,
             dedup_dropped=dropped,
+            early_extra_count=early_extra,
             missing_gap_count=missing_gaps,
             fallback=fallback,
             fallback_reason=fallback_reason,

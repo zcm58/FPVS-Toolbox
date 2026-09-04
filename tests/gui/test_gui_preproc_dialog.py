@@ -12,6 +12,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
 
 from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.projects import (
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
+    SUMMED_BCA_SCREENING_BRIEF_TEXT,
+    FrequencyProtocol,
+)
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
 from Main_App.gui.manual_participant_exclusions_dialog import (
@@ -130,6 +136,15 @@ def _prep_project(root):
             "stim_channel": "Status",
         }
     )
+    project.confirm_removed_electrode_detection_choice("auto")
+    project.update_frequency_protocol(
+        FrequencyProtocol.from_recurrence(
+            "6",
+            5,
+            expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source="manual",
+        )
+    )
     project.save()
     return project
 
@@ -180,6 +195,8 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     dlg.harmonic_electrode_scope_combo.setCurrentIndex(all_electrodes_index)
     dlg.auto_detect_removed_electrodes_check.setChecked(False)
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "off"
+    dlg.summed_bca_screening_enabled_check.setChecked(False)
+    dlg.summed_bca_threshold_edits["warning_summed_bca_uv"].setText("12.5")
     dlg.line_noise_frequency_combo.setCurrentIndex(
         dlg.line_noise_frequency_combo.findData(50)
     )
@@ -207,6 +224,11 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     )
     assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
     assert reloaded.preprocessing["removed_electrode_detection_mode"] == "off"
+    assert reloaded.experimental_qc_settings.summed_bca_screening.enabled is False
+    assert (
+        reloaded.experimental_qc_settings.summed_bca_screening.warning_summed_bca_uv
+        == 12.5
+    )
     assert reloaded.preprocessing["manual_excluded_participants"] == []
     assert reloaded.preprocessing["harmonic_selection_policy"] == (
         "Group-level significant harmonics (Volfart/Retter/Rossion style)"
@@ -259,6 +281,111 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["manual_excluded_participants"] == []
     assert params["stim_channel"] == "Status"
     assert params["save_preprocessed_fif"] is False
+
+
+def test_unrelated_settings_save_does_not_confirm_missing_detector_choice(
+    tmp_path,
+    qtbot,
+):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+    manifest_path = project.project_root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
+        manifest["preprocessing"].pop(key, None)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    project = Project.load(project.project_root)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    assert dlg.removed_electrode_detection_mode_combo.currentData() is None
+    dlg.preproc_edits[0].setText("40")
+    dlg._save()
+
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert saved["preprocessing"]["low_pass"] == 40.0
+    assert set(REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS).isdisjoint(
+        saved["preprocessing"]
+    )
+
+
+def test_protocol_tab_requires_explicit_legacy_confirmation(
+    tmp_path,
+    qtbot,
+    monkeypatch,
+):
+    project_root = tmp_path / "legacy_project"
+    project_root.mkdir()
+    (project_root / "project.json").write_text(
+        json.dumps({"event_map": {"Condition A": 11}}),
+        encoding="utf-8",
+    )
+    project = Project.load(project_root)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    QApplication.instance() or QApplication([])
+    dlg = SettingsDialog(manager, project=project)
+    qtbot.addWidget(dlg)
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda _parent, title, message, *_args, **_kwargs: warnings.append(
+            (title, message)
+        ),
+    )
+
+    assert dlg.protocol_presentation_rate_edit.text() == "6"
+    assert dlg.protocol_oddball_every_n_edit.text() == "5"
+    assert dlg.protocol_expected_cycles_edit.text() == ""
+    assert dlg.protocol_oddball_marker_code_edit.text() == "55"
+    assert dlg.protocol_marker_code_help.text() == (
+        "Oddball marker code: Event code emitted for each oddball in every "
+        "condition. Default: 55."
+    )
+
+    dlg._save()
+    assert warnings[0][0] == "Invalid FPVS Protocol"
+    assert "frequency_protocol" not in json.loads(
+        (project_root / "project.json").read_text(encoding="utf-8")
+    )
+
+    dlg.protocol_expected_cycles_edit.setText("144")
+    dlg._save()
+    reloaded = Project.load(project_root)
+    assert reloaded.frequency_protocol.is_ready
+    assert reloaded.frequency_protocol.expected_analyzed_oddball_cycles == 144
+
+
+def test_protocol_tab_direct_rate_updates_implied_recurrence(
+    tmp_path,
+    qtbot,
+):
+    project = _prep_project(tmp_path)
+    manager = SettingsManager(str(tmp_path / "settings.ini"))
+    QApplication.instance() or QApplication([])
+    dlg = SettingsDialog(manager, project=project)
+    qtbot.addWidget(dlg)
+
+    direct_index = dlg.protocol_oddball_mode_combo.findData(
+        "oddball_rate_hz"
+    )
+    dlg.protocol_oddball_mode_combo.setCurrentIndex(direct_index)
+    dlg.protocol_direct_oddball_rate_edit.setText("2")
+
+    assert dlg.protocol_oddball_every_n_edit.text() == "3"
+    assert dlg.protocol_resolved_oddball_rate_edit.text() == "2 Hz"
+    assert dlg.protocol_derived_duration_edit.text() == "72 seconds"
+
+    dlg._save()
+    reloaded = Project.load(project.project_root)
+    assert reloaded.frequency_protocol.oddball_input_mode == "oddball_rate_hz"
+    assert reloaded.frequency_protocol.oddball_every_n == 3
+    assert str(reloaded.frequency_protocol.entered_oddball_rate_hz) == "2"
 
 
 def test_dialog_loads_saves_app_line_noise_settings_without_project(tmp_path, qtbot):
@@ -353,9 +480,12 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
+    assert "Project FPVS Protocol" in cards
     assert "Harmonic Selection and Summation" in cards
     assert "Application Options" in cards
     assert "Processing QC" in cards
+    assert "Experimental Removed-Electrode Detection" in cards
+    assert "Experimental Summed-BCA Screening" in cards
     assert "Diagnostics" not in cards
     assert "Tool Visibility" not in cards
     assert "Analysis Defaults" in cards
@@ -363,9 +493,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert "Regions of Interest" in cards
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
         "Preprocessing",
+        "Protocol",
         "Harmonics",
         "Stats",
         "ROIs",
+        "Experimental",
         "Advanced",
     ]
     assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
@@ -435,20 +567,30 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     assert dlg.fixed_harmonic_upper_frequency_edit.isEnabled() is False
     assert cards["Application Options"].isAncestorOf(dlg.debug_check)
     assert cards["Application Options"].isAncestorOf(dlg.beta_tools_check)
-    assert cards["Processing QC"].isAncestorOf(dlg.auto_detect_removed_electrodes_check)
-    assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_mode_combo)
-    assert cards["Processing QC"].isAncestorOf(dlg.removed_electrode_detection_info_button)
-    assert cards["Processing QC"].isAncestorOf(dlg.manual_removed_electrodes_button)
+    detector_card = cards["Experimental Removed-Electrode Detection"]
+    summed_bca_card = cards["Experimental Summed-BCA Screening"]
+    assert detector_card.isAncestorOf(dlg.auto_detect_removed_electrodes_check)
+    assert detector_card.isAncestorOf(dlg.removed_electrode_detection_mode_combo)
+    assert detector_card.isAncestorOf(dlg.removed_electrode_detection_info_button)
+    assert detector_card.isAncestorOf(dlg.manual_removed_electrodes_enabled_check)
+    assert detector_card.isAncestorOf(dlg.manual_removed_electrodes_button)
     assert cards["Processing QC"].isAncestorOf(dlg.manual_participant_exclusions_button)
     assert dlg.auto_detect_removed_electrodes_check.isChecked() is True
     assert dlg.removed_electrode_detection_mode_combo.currentData() == "auto"
-    assert dlg.removed_electrode_detection_mode_combo.itemText(0) == "Off"
-    assert (
-        dlg.removed_electrode_detection_mode_combo.itemText(1)
-        == "Conservative auto-detect"
+    assert dlg.removed_electrode_detection_mode_combo.itemText(0) == (
+        "Off (recommended)"
     )
-    assert dlg.removed_electrode_detection_mode_combo.itemText(2) == "Manual list"
-    assert dlg.manual_removed_electrodes_button.isEnabled() is False
+    assert dlg.removed_electrode_detection_mode_combo.itemText(1) == "On"
+    assert dlg.removed_electrode_detection_mode_combo.count() == 2
+    assert dlg.manual_removed_electrodes_enabled_check.isChecked() is False
+    assert dlg.manual_removed_electrodes_button.isEnabled() is True
+    assert dlg.summed_bca_explanation_label.text() == SUMMED_BCA_SCREENING_BRIEF_TEXT
+    assert dlg.summed_bca_screening_enabled_check.isChecked() is True
+    assert len(dlg.summed_bca_threshold_edits) == 11
+    assert all(
+        summed_bca_card.isAncestorOf(edit)
+        for edit in dlg.summed_bca_threshold_edits.values()
+    )
     info_calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         QMessageBox,
@@ -464,9 +606,11 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     ]
     assert dlg.beta_tools_check.text() == "Enable Beta Tools"
     assert dlg.beta_tools_check.isChecked() is False
-    assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)
-    assert dlg.oddball_freq_edit.text() == "1.2"
+    assert cards["Project FPVS Protocol"].isAncestorOf(dlg.oddball_freq_edit)
+    assert dlg.oddball_freq_edit.text() == "1.2 Hz (exactly 6/5 Hz)"
     assert dlg.oddball_freq_edit.isReadOnly()
+    assert dlg.protocol_derived_duration_edit.text() == "120 seconds"
+    assert dlg.protocol_oddball_marker_code_edit.text() == "55"
     assert cards["Regions of Interest"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
@@ -483,6 +627,9 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     harmonics_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Harmonics"
     )
+    protocol_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Protocol"
+    )
     stats_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Stats"
     )
@@ -492,27 +639,43 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
     advanced_tab_index = next(
         i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Advanced"
     )
+    experimental_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Experimental"
+    )
     harmonics_tab = dlg.tabs.widget(harmonics_tab_index)
+    protocol_tab = dlg.tabs.widget(protocol_tab_index)
     stats_tab = dlg.tabs.widget(stats_tab_index)
     rois_tab = dlg.tabs.widget(rois_tab_index)
     advanced_tab = dlg.tabs.widget(advanced_tab_index)
+    experimental_tab = dlg.tabs.widget(experimental_tab_index)
     assert not preproc_tab.isAncestorOf(cards["Application Options"])
     assert not preproc_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
+    assert protocol_tab.isAncestorOf(cards["Project FPVS Protocol"])
+    assert protocol_tab.objectName() == "settings_protocol_tab"
     assert harmonics_tab.isAncestorOf(cards["Harmonic Selection and Summation"])
     assert harmonics_tab.objectName() == "settings_harmonics_tab"
     assert advanced_tab.isAncestorOf(cards["Application Options"])
     assert advanced_tab.isAncestorOf(cards["Processing QC"])
+    assert experimental_tab.isAncestorOf(detector_card)
+    assert experimental_tab.isAncestorOf(summed_bca_card)
+    assert experimental_tab.objectName() == "settings_experimental_tab"
     assert rois_tab.isAncestorOf(cards["Regions of Interest"])
     assert rois_tab.isAncestorOf(cards["Quick Add"])
     assert not stats_tab.isAncestorOf(cards["Regions of Interest"])
     rois_layout = rois_tab.layout()
     assert rois_layout.indexOf(cards["Regions of Interest"]) < rois_layout.indexOf(cards["Quick Add"])
     assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
+    assert protocol_tab.findChild(ActionRow, "settings_protocol_footer_actions") is not None
     assert harmonics_tab.findChild(ActionRow, "settings_harmonic_footer_actions") is not None
     assert stats_tab.findChild(ActionRow, "settings_stats_footer_actions") is not None
     assert rois_tab.findChild(ActionRow, "settings_rois_footer_actions") is not None
+    assert experimental_tab.findChild(
+        ActionRow,
+        "settings_experimental_footer_actions",
+    ) is not None
     assert advanced_tab.findChild(ActionRow, "settings_advanced_footer_actions") is not None
     assert preproc_tab.findChild(QWidget, "settings_preproc_footer") is not None
+    assert protocol_tab.findChild(QWidget, "settings_protocol_footer") is not None
     assert harmonics_tab.findChild(QWidget, "settings_harmonic_footer") is not None
     assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
     assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
@@ -612,8 +775,10 @@ def test_selection_derivative_signature_tracks_analysis_and_roi_inputs(
 
     original_base = dlg.base_freq_edit.text()
     dlg.base_freq_edit.setText("5.88")
-    assert dlg._harmonic_settings_changed_after_processing(validated) is True
+    assert dlg._harmonic_settings_changed_after_processing(validated) is False
+    assert dlg._project_protocol_changed_after_processing() is True
     dlg.base_freq_edit.setText(original_base)
+    assert dlg._project_protocol_changed_after_processing() is False
 
     original_limit = dlg.bca_limit_edit.text()
     dlg.bca_limit_edit.setText("18.0")
@@ -647,16 +812,15 @@ def test_explicit_harmonic_recalculation_persists_all_selection_inputs(
         lambda: resumed.append(True),
     )
 
-    dlg.base_freq_edit.setText("5.88")
     dlg.bca_limit_edit.setText("17.64")
     dlg.roi_editor.set_pairs([("Selection Audit", ["O1", "O2"])])
     dlg._on_recalculate_harmonics_clicked()
 
     assert resumed == [True]
-    assert float(win.settings.get("analysis", "base_freq", "0")) == pytest.approx(5.88)
     assert float(win.settings.get("analysis", "bca_upper_limit", "0")) == pytest.approx(
         17.64
     )
+    assert project.frequency_protocol.presentation_rate_hz == 6
     assert win.settings.get_roi_pairs() == [("Selection Audit", ["O1", "O2"])]
 
 
@@ -673,7 +837,7 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
     win.loadProject(project)
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    original_base = win.settings.get("analysis", "base_freq", "6.0")
+    original_protocol = project.frequency_protocol
     original_rois = win.settings.get_roi_pairs()
     original_condition_exclusions = {
         "P01": ["Condition A"],
@@ -701,7 +865,7 @@ def test_cancelled_grid_review_can_restore_staged_harmonic_settings(
 
     reloaded = Project.load(project.project_root)
     assert reloaded.preprocessing["harmonic_selection_profile"] == "legacy_fpvs_toolbox"
-    assert win.settings.get("analysis", "base_freq", "") == original_base
+    assert reloaded.frequency_protocol == original_protocol
     assert win.settings.get_roi_pairs() == original_rois
     assert (
         dlg._manual_excluded_participant_conditions
@@ -1194,8 +1358,8 @@ def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, mon
     monkeypatch.setattr(ManualRemovedElectrodesDialog, "exec", _fake_exec)
     dlg = SettingsDialog(win.settings, win, project)
     qtbot.addWidget(dlg)
-    manual_index = dlg.removed_electrode_detection_mode_combo.findData("manual")
-    dlg.removed_electrode_detection_mode_combo.setCurrentIndex(manual_index)
+    dlg.manual_removed_electrodes_enabled_check.setChecked(True)
+    dlg._edit_manual_removed_electrodes()
 
     assert dlg.manual_removed_electrodes_button.isEnabled() is True
     assert dlg._manual_removed_electrodes_by_pid == {
@@ -1205,8 +1369,9 @@ def test_manual_removed_electrodes_dialog_saves_project_map(tmp_path, qtbot, mon
 
     dlg._save()
     reloaded = Project.load(project.project_root)
-    assert reloaded.preprocessing["removed_electrode_detection_mode"] == "manual"
-    assert reloaded.preprocessing["auto_detect_removed_electrodes"] is False
+    assert reloaded.preprocessing["removed_electrode_detection_mode"] == "auto"
+    assert reloaded.preprocessing["auto_detect_removed_electrodes"] is True
+    assert reloaded.preprocessing[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is True
     assert reloaded.preprocessing["manual_removed_electrodes"] == {
         "P01": ["FT7", "P9"],
         "P02": ["Oz"],

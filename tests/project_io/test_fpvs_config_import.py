@@ -10,6 +10,13 @@ from Main_App.projects.fpvs_config_import import (
     read_fpvs_config,
 )
 from Main_App.projects.project import Project
+from Main_App.projects import (
+    FREQUENCY_PROTOCOL_STATUS_INCOMPLETE,
+    FREQUENCY_PROTOCOL_STATUS_READY,
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+    ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT,
+)
 
 
 def _write_fpvs_config(path, *, title: str = "Semantic Categories Test") -> None:
@@ -42,6 +49,8 @@ def test_read_fpvs_config_extracts_title_and_condition_event_map(tmp_path) -> No
     assert imported.project_title == "Semantic Categories Test"
     assert imported.event_map == {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2}
     assert imported.manual_removed_electrodes == {}
+    assert imported.oddball_marker_code == 55
+    assert imported.frequency_protocol is None
 
 
 def test_read_fpvs_config_extracts_manual_removed_electrodes_map(tmp_path) -> None:
@@ -93,6 +102,12 @@ def test_create_project_from_fpvs_config_saves_toolbox_project(tmp_path) -> None
     loaded = Project.load(project.project_root)
     assert loaded.name == "Semantic Categories Test"
     assert loaded.event_map == {"Fruit vs Vegetable": 1, "Veg vs Fruit": 2}
+    assert loaded.frequency_protocol.status == FREQUENCY_PROTOCOL_STATUS_INCOMPLETE
+    assert loaded.frequency_protocol.oddball_marker_code == 55
+    assert (
+        loaded.frequency_protocol.oddball_marker_code_source
+        == ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT
+    )
     assert loaded.preprocessing["harmonic_selection_profile"] == (
         "dzhelyova_poncet_two_consecutive_failures"
     )
@@ -113,14 +128,19 @@ def test_create_project_from_fpvs_config_seeds_manual_removed_electrodes(tmp_pat
 
     project = create_project_from_fpvs_config(tmp_path / "projects", config_path)
 
-    assert project.preprocessing["removed_electrode_detection_mode"] == "manual"
+    assert project.preprocessing["removed_electrode_detection_mode"] == "off"
     assert project.preprocessing["auto_detect_removed_electrodes"] is False
+    assert project.preprocessing[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is True
+    assert project.preprocessing["removed_electrode_detection_choice_source"] == (
+        REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_FPVS_STUDIO_IMPORT
+    )
     assert project.preprocessing["manual_removed_electrodes"] == {
         "P01": ["FT7", "P9"],
         "P02": [],
     }
     loaded = Project.load(project.project_root)
-    assert loaded.preprocessing["removed_electrode_detection_mode"] == "manual"
+    assert loaded.preprocessing["removed_electrode_detection_mode"] == "off"
+    assert loaded.preprocessing[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is True
     assert loaded.preprocessing["manual_removed_electrodes"] == {
         "P01": ["FT7", "P9"],
         "P02": [],
@@ -141,8 +161,8 @@ def test_create_project_from_fpvs_config_ignores_participants_without_electrodes
 
     project = create_project_from_fpvs_config(tmp_path / "projects", config_path)
 
-    assert project.preprocessing["removed_electrode_detection_mode"] == "auto"
-    assert project.preprocessing["auto_detect_removed_electrodes"] is True
+    assert project.preprocessing["removed_electrode_detection_mode"] == "off"
+    assert project.preprocessing["auto_detect_removed_electrodes"] is False
     assert project.preprocessing["manual_removed_electrodes"] == {}
 
 
@@ -179,3 +199,39 @@ def test_read_fpvs_config_rejects_fractional_trigger_codes(tmp_path) -> None:
 
     with pytest.raises(FPVSConfigImportError, match="trigger_code must be an integer"):
         read_fpvs_config(config_path)
+
+
+def test_read_fpvs_config_rejects_marker_code_that_collides_with_onset(tmp_path) -> None:
+    config_path = tmp_path / "project.fpvsconfig"
+    _write_fpvs_config(config_path)
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["triggers"]["oddball_trigger_code"] = 2
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FPVSConfigImportError, match="condition-onset"):
+        read_fpvs_config(config_path)
+
+
+def test_read_fpvs_config_imports_exact_frequency_protocol(tmp_path) -> None:
+    config_path = tmp_path / "project.fpvsconfig"
+    _write_fpvs_config(config_path)
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["frequency_protocol"] = {
+        "presentation_rate_hz": "3",
+        "oddball_input_mode": "oddball_every_n",
+        "oddball_every_n": 10,
+        "expected_analyzed_oddball_cycles": 90,
+    }
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    imported = read_fpvs_config(config_path)
+
+    assert imported.frequency_protocol is not None
+    assert imported.frequency_protocol.status == FREQUENCY_PROTOCOL_STATUS_READY
+    assert imported.frequency_protocol.oddball_every_n == 10
+    assert str(imported.frequency_protocol.oddball_rate_hz) == "3/10"
+    assert imported.frequency_protocol.expected_analyzed_oddball_cycles == 90
+    assert (
+        imported.frequency_protocol.oddball_marker_code_source
+        == ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT
+    )

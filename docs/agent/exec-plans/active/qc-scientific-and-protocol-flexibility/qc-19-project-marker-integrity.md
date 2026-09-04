@@ -5,9 +5,11 @@
 Load this module with the parent index, shared contracts, QC-02, and QC-11
 through QC-13. QC-06 is its downstream span consumer, not a prerequisite.
 
-**Status:** accepted on 2026-09-03. Marker identity is project-owned;
+**Status:** implemented on 2026-09-04. Marker identity is project-owned;
 unexplained marker loss cannot be treated as proof that stimulation remained
-continuous.
+continuous. Current GUI decisions are bound to the reviewed marker-plan and
+occurrence fingerprints and record exact scope, reason, UTC review time, and
+truthful reviewer-identity status.
 
 ## Accepted Behavior
 

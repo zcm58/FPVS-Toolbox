@@ -143,8 +143,12 @@ result includes `timings_ms` and `preproc_cache_status` so users can compare
 first-run and cache-hit runtimes.
 
 The preprocessed Raw cache version is
-`preprocessed-raw-v10-biosemi64-geometry`, and the project processing ledger
-uses `processing_fingerprint_v10_biosemi64_geometry`. The
+`preprocessed-raw-v11-analyzed-intervals`, and the project processing ledger
+uses `processing_fingerprint_v11_biosemi64_frequency_protocol`. The processing
+fingerprint stores the project frequency protocol's canonical payload and
+fingerprint, so equivalent protocol objects and manifests have one identity
+while a rate, analyzed-cycle count, recurrence, or marker-code change
+invalidates reuse. The
 raw channel-health QC threshold, removed-electrode QC mode, per-file manual
 removed-electrode list, baseline raw-amplitude metadata, and rare-burst
 candidate list are part of the cache payload so changes to those settings
@@ -162,6 +166,11 @@ raw-QC, manual removed-electrode, kurtosis, and interpolated bad-channel names
 plus the interpolation request/status/error, requested/applied/skipped FFT
 multi-notch centers, and complete geometry identity so cache-hit runs can still
 produce complete participant QC and preprocessing provenance.
+The cache key also binds the current canonical frequency-protocol payload and
+fingerprint, the exact condition event map, and the reviewed source-span-plan
+fingerprint. Processing validates that reviewed plan against the current
+protocol and event map before attempting a cache lookup; an internally valid
+plan from an older project context cannot authorize reuse.
 
 After frequency-domain QC is accepted, processing completion calculates the
 project-wide significant-harmonic list once through
@@ -234,10 +243,11 @@ those defaults.
 `src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
 scan without importing Qt. The normal GUI route supplies an explicit active
 project root and condition event map, which enables condition-aware preflight
-QC `v4_biosemi64_geometry`. The compatibility v1 route remains available to callers that do not
-supply both inputs.
+QC `v5_analyzed_interval_coordinates`. A caller that omits either required
+input receives an explicit `not_evaluated` planning result. It does not run the
+retired whole-recording/first-90-second signal checks.
 
-The v4 path reads the complete configured Status channel to plan events, then requests
+The v5 path reads the complete configured Status channel to plan events, then requests
 EEG samples only from each shared marker-derived locked FFT span. The
 time-domain and spectral intervals are identical to the samples that normal
 processing will analyze; there is no fixed minimum or maximum condition
@@ -247,6 +257,23 @@ marker-derived crop fails that participant's condition-aware preflight result
 explicitly without reading a substitute onset-based or fixed-duration interval.
 A condition configured in the project but absent from one recording retains the
 normal processing path's existing missing-condition warning behavior.
+The event plan records the source Raw sampling rate, `n_times`, and
+`first_samp`; its half-open absolute bounds are converted to Raw-relative
+indices for reads. It also carries stable event-plan, protocol, occurrence,
+approved-span, and source-span fingerprints. Normal processing validates this
+exact plan against the source event stream before any signal-based raw QC.
+
+Processing-time raw-channel metrics use the unique union of approved source
+spans. After the continuous filter/downsample stages, each source boundary is
+mapped to the actual target Raw grid by nearest-sample rounding with half-sample
+ties upward. The versioned target plan supplies the unique samples for the
+existing kurtosis statistic and the exact relative slices for epoch creation.
+MNE may independently round the absolute `first_samp` when it resamples a Raw;
+the target plan therefore records that observed target origin and maps interval
+times relative to the Raw start. It does not rescale source absolute indices.
+Interpolation still operates on the resident continuous Raw at its established
+pipeline position. Missing or stale source/target plans stop processing, and
+the preprocessed cache and source-ready provenance bind both plan identities.
 Time-domain
 QC examines every consecutive 10-second block plus the final partial block and
 retains exact float64 full-condition metrics plus transient worst-block
@@ -265,7 +292,7 @@ values, project loading moves them to
 ledger and source-ready sidecar identities. That compatibility metadata must
 never control extraction, preprocessing, or QC.
 
-The v4 spectral QC uses the same shared per-condition, shortest-repetition,
+The v5 spectral QC uses the same shared per-condition, shortest-repetition,
 integer-oddball-cycle FFT span planner as normal processing. It evaluates the
 Hann-windowed FFT for every channel in deterministic memory-bounded batches;
 focused parity tests require byte-identical per-channel amplitudes relative to
@@ -279,7 +306,7 @@ minimum and maximum, leaving 20 bins for the mean and population standard
 deviation. Expected FPVS harmonics, effective configured mains-notch centers,
 their collisions, and unexpected off-harmonic peaks are reported separately.
 
-Condition-aware findings are review-only in preflight v4. They do not create a
+Condition-aware findings are review-only in preflight v5. They do not create a
 new hard-exclusion rule; the established hard raw-channel rules remain
 unchanged in the normal process runner. A review-only condition finding can
 therefore be deferred to the existing processing-time decision rather than
@@ -291,10 +318,10 @@ created. V4 preserves deterministic result order and checks cancellation
 between condition reads, time blocks, FFT channel batches, and cache writes.
 Successful participant results
 are cached atomically under the active project root at
-`.fpvs_processing/preflight_qc/v4_biosemi64_geometry`; a missing, corrupt, or
+`.fpvs_processing/preflight_qc/v5_analyzed_interval_coordinates`; a missing, corrupt, or
 fingerprint-stale entry is a cache miss. The key includes raw path/size/mtime,
 relevant settings, method and dependency versions, the canonical BioSemi64
-geometry identity, and the resolved event/span plan. The v4 directory/method identity,
+geometry identity, and the resolved event/span plan. The v5 directory/method identity,
 `locked_fft_span_v1` completion policy, and geometry fingerprint invalidate
 results produced under earlier geometry or fixed-minimum coverage.
 
@@ -338,11 +365,22 @@ by recording ID so a second visit cannot overwrite the first. Participant ID
 remains the person/pairing identity. Declared sessions without a recording are
 shown as missing coverage and are never fabricated.
 
-The project preprocessing setting `removed_electrode_detection_mode` defaults
-to `auto` and is exposed in Settings > Advanced > Processing QC as Off,
-Conservative auto-detect, or Manual list. The legacy
-`auto_detect_removed_electrodes` boolean is retained for compatibility and is
-`True` only when the mode is `auto`. When conservative auto-detect is enabled,
+The project preprocessing setting `removed_electrode_detection_mode` now has a
+versioned choice status and source. New projects explicitly default to Off.
+Existing valid modes remain ready choices; legacy booleans map to ready Auto or
+Off choices. If neither was saved, the project loads as provisional Off with
+`confirmation_required`, and a routine save does not materialize that guess.
+`require_removed_electrode_detection_choice_ready()` is the GUI-neutral guard
+for the later processing entry-point integration. The legacy
+`auto_detect_removed_electrodes` boolean remains a compatibility projection and
+is `True` only when the mode is Auto. Participant and recording manual maps are
+normalized and preserved independently.
+
+This is the QC-04 Wave 1 settings foundation. Until the Wave 2 authority wiring
+is complete, preflight still forces Auto and the review workflow can still
+replace the configured mode; callers must not claim that the saved choice is
+already enforced end to end. Under the existing processing implementation,
+when conservative auto-detect is enabled,
 persistently flat/very low-variance scalp channels can be automatically added to
 `raw.info["bads"]` before preprocessing. The second-pass raw-QC detector adds
 flag-only candidate lists for extreme high-amplitude outliers, rare-burst
@@ -480,6 +518,26 @@ warning, not a hard participant exclusion. If no expected condition workbook is
 created for a successful worker result, the ledger records a failure with reason
 `no_expected_outputs` because there is no usable condition-level export for that
 participant.
+
+QC-20's Wave 1 foundation stores a separate, versioned
+`expected_recording_condition_plan` in that ledger before result accounting.
+It freezes canonical recording/session identity, raw-file identity, project
+conditions, protocol and geometry fingerprints, reviewed marker evidence, and
+each exact planned occurrence span. Every declared condition receives a cell,
+including a condition with no observed onset. Current cells are `planned`;
+skipped entries without current occurrence evidence are `legacy_unknown`.
+Current project-level recording and recording-condition exclusions are frozen
+as explicit no-output decisions with their reason, exact scope, evidence
+fingerprint, planning timestamp, and truthful reviewer-identity status. They do
+not require a marker plan or workbook for the excluded scope. The expected
+matrix is written only after any destructive reprocess confirmation and before
+the first generated output is removed. A reprocess scope that adds previously
+skipped files runs current pre-processing QC for those files and merges their
+reviewed marker plans before the matrix is frozen.
+Those planning states never claim a final processing outcome. In particular,
+the historical `condition_completeness=partial` compatibility flag is not
+migrated to QC-20's future `partially_retained` outcome. Atomic workbook
+receipts and readiness/release gates remain later QC-20 stages.
 
 ## Pipeline Order
 

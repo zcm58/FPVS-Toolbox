@@ -14,6 +14,7 @@ from Main_App.io.eeg_geometry import (
     BioSemi64GeometryError,
     validate_raw_biosemi64_geometry,
 )
+from Main_App.processing.analysis_spans import merge_relative_spans
 from Main_App.processing.removed_electrode_detection import (
     DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION,
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
@@ -27,7 +28,7 @@ from Main_App.processing.removed_electrode_detection import (
 )
 
 RAW_CHANNEL_QC_EXCLUSION_REASON = "raw_channel_qc_failure"
-RAW_CHANNEL_QC_METHOD_VERSION = "sampled_windows_v2_biosemi64_geometry"
+RAW_CHANNEL_QC_METHOD_VERSION = "analyzed_interval_union_v3_biosemi64_geometry"
 _CALIBRATION = DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION
 
 SCALP_CHANNEL_ORDER: tuple[str, ...] = BIOSEMI64_CHANNELS
@@ -146,6 +147,9 @@ class RawChannelQCResult:
     triggered_rules: tuple[str, ...]
     warning_rules: tuple[str, ...]
     thresholds: Mapping[str, float | int | bool]
+    scoring_scope: str = "legacy_sampled_windows"
+    scoring_spans: tuple[tuple[int, int], ...] = ()
+    scoring_sample_count: int = 0
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -175,6 +179,9 @@ class RawChannelQCResult:
             "triggered_rules": list(self.triggered_rules),
             "warning_rules": list(self.warning_rules),
             "thresholds": dict(self.thresholds),
+            "scoring_scope": self.scoring_scope,
+            "scoring_spans": [list(span) for span in self.scoring_spans],
+            "scoring_sample_count": self.scoring_sample_count,
         }
 
 
@@ -978,6 +985,8 @@ def _empty_result(
     message: str,
     thresholds: Mapping[str, float | int | bool],
     n_channels: int = 0,
+    scoring_scope: str = "legacy_sampled_windows",
+    scoring_spans: tuple[tuple[int, int], ...] = (),
 ) -> RawChannelQCResult:
     return RawChannelQCResult(
         excluded=False,
@@ -1008,6 +1017,9 @@ def _empty_result(
         triggered_rules=(),
         warning_rules=(),
         thresholds=thresholds,
+        scoring_scope=scoring_scope,
+        scoring_spans=scoring_spans,
+        scoring_sample_count=sum(stop - start for start, stop in scoring_spans),
     )
 
 
@@ -1016,6 +1028,7 @@ def evaluate_raw_channel_qc(
     settings: Mapping[str, Any],
     *,
     filename: str,
+    analysis_spans: Sequence[Sequence[int]] | None = None,
 ) -> RawChannelQCResult:
     """Detect flat/dead electrode channels before interpolation can hide them."""
 
@@ -1037,10 +1050,20 @@ def evaluate_raw_channel_qc(
         "bad_channel_cluster_experimental": True,
         **removed_electrode_threshold_payload(config),
     }
+    n_times = int(getattr(raw, "n_times", 0))
+    if analysis_spans is None:
+        scoring_scope = "legacy_sampled_windows"
+        spans = tuple(_sample_spans(n_times, float(raw.info.get("sfreq", 0.0)), config))
+    else:
+        scoring_scope = "approved_analyzed_interval_union"
+        spans = merge_relative_spans(analysis_spans, n_times=n_times)
+
     if n_channels == 0:
         return _empty_result(
             message=f"Raw channel QC skipped for {filename}: no scalp EEG channels found.",
             thresholds=thresholds,
+            scoring_scope=scoring_scope,
+            scoring_spans=spans,
         )
     if n_channels < config.min_channels_for_hard_qc:
         return _empty_result(
@@ -1050,10 +1073,10 @@ def evaluate_raw_channel_qc(
             ),
             thresholds=thresholds,
             n_channels=n_channels,
+            scoring_scope=scoring_scope,
+            scoring_spans=spans,
         )
 
-    sfreq = float(raw.info.get("sfreq", 0.0))
-    spans = _sample_spans(int(getattr(raw, "n_times", 0)), sfreq, config)
     if not spans:
         return RawChannelQCResult(
             excluded=True,
@@ -1084,6 +1107,9 @@ def evaluate_raw_channel_qc(
             triggered_rules=("no_samples",),
             warning_rules=(),
             thresholds=thresholds,
+            scoring_scope=scoring_scope,
+            scoring_spans=spans,
+            scoring_sample_count=0,
         )
 
     cluster_rules_enabled = (
@@ -1395,6 +1421,9 @@ def evaluate_raw_channel_qc(
         triggered_rules=tuple(triggered),
         warning_rules=tuple(warning_rules),
         thresholds=thresholds,
+        scoring_scope=scoring_scope,
+        scoring_spans=spans,
+        scoring_sample_count=sum(stop - start for start, stop in spans),
     )
 
 

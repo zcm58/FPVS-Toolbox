@@ -6,7 +6,7 @@ import logging
 import os
 import queue
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import psutil
 from PySide6.QtCore import QObject, QThread, QTimer, Slot
@@ -23,6 +23,7 @@ from Main_App.processing.processing_ledger import (
     MISSING_EXPECTED_OUTPUTS_WARNING,
     PROCESSING_FINGERPRINT_VERSION,
     ProcessingPlan,
+    build_expected_recording_condition_plan,
     carry_forward_pre_qc_completed_states,
     classify_processing_inputs,
     clean_downstream_outputs_for_reprocess_all,
@@ -32,11 +33,16 @@ from Main_App.processing.processing_ledger import (
     output_group_folder_by_file,
     record_processing_results,
     refresh_skipped_ledger_fingerprints,
+    save_expected_recording_condition_plan,
     with_processing_choice,
 )
 from Main_App.processing.qc_summary_export import export_processing_qc_summary
 from Main_App.projects.grouping import project_group_context
-from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.projects.preprocessing_settings import (
+    normalize_manual_excluded_participants,
+    normalize_manual_excluded_recordings,
+    normalize_preprocessing_settings,
+)
 from Main_App.processing.raw_channel_qc import RAW_CHANNEL_QC_EXCLUSION_REASON
 from Main_App.workers.mp_env import (
     compute_effective_max_workers,
@@ -985,7 +991,12 @@ def _choose_processing_plan(
     return None
 
 
-def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
+def _prepare_excel_outputs_for_plan(
+    host: Any,
+    plan: ProcessingPlan,
+    *,
+    before_mutation: Callable[[], None] | None = None,
+) -> bool:
     if plan.choice == "reprocess_all":
         excel_root = Path(host.currentProject.subfolders["excel"])
         reply = QMessageBox.warning(
@@ -1002,6 +1013,8 @@ def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
         )
         if reply != QMessageBox.Yes:
             return False
+        if before_mutation is not None:
+            before_mutation()
         clean_managed_excel_root(host.currentProject)
         host.log(f"Cleared managed Excel output folder: {excel_root}")
         deleted_downstream = clean_downstream_outputs_for_reprocess_all(host.currentProject)
@@ -1012,6 +1025,8 @@ def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
             )
         return True
 
+    if before_mutation is not None:
+        before_mutation()
     deleted = clean_participant_outputs(host.currentProject, plan)
     if deleted:
         host.log(f"Cleared {len(deleted)} stale participant Excel output file(s).")
@@ -1075,6 +1090,143 @@ def stop_processing(host: Any) -> None:
             "Stop Processing",
             "Unable to halt processing automatically. Please allow the current run to finish.",
         )
+
+
+def _freeze_expected_processing_matrix(
+    host: Any,
+    plan: ProcessingPlan,
+    settings: dict[str, Any],
+    event_map: Mapping[str, int],
+) -> None:
+    """Persist QC-20 intent before any generated output can be changed."""
+
+    raw_event_plans = settings.get("_fpvs_preflight_event_plans_by_file")
+    if raw_event_plans is None:
+        raw_event_plans = {}
+    elif not isinstance(raw_event_plans, Mapping):
+        raise ValueError(
+            "Current reviewed marker plans are missing. Run pre-processing QC "
+            "again before processing these files."
+        )
+    expected_plan = build_expected_recording_condition_plan(
+        processing_plan=plan,
+        event_map=event_map,
+        frequency_protocol=settings.get("frequency_protocol"),
+        approved_event_plans=raw_event_plans,
+        planning_settings=settings,
+    )
+    project_root = Path(host.currentProject.project_root)
+    save_expected_recording_condition_plan(project_root, expected_plan)
+    settings["_fpvs_expected_plan_run_id"] = expected_plan.run_id
+    settings["_fpvs_expected_plan_fingerprint"] = expected_plan.fingerprint
+
+
+def _event_plan_matches_state(
+    state: Any,
+    event_plans: Mapping[Any, Any],
+) -> bool:
+    processing_key = str(state.processing_id).casefold()
+    raw_path = Path(state.info.path).resolve(strict=False)
+    for raw_key, raw_plan in event_plans.items():
+        key_text = str(raw_key).strip()
+        if key_text.casefold() == processing_key and isinstance(raw_plan, Mapping):
+            return True
+        try:
+            path_match = Path(key_text).expanduser().resolve(strict=False) == raw_path
+        except (OSError, RuntimeError, TypeError, ValueError):
+            path_match = False
+        if path_match and isinstance(raw_plan, Mapping):
+            return True
+    return False
+
+
+def _additional_preflight_infos_for_chosen_scope(
+    plan: ProcessingPlan,
+    settings: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Return chosen run files that have no current QC-19 marker plan."""
+
+    raw_event_plans = settings.get("_fpvs_preflight_event_plans_by_file")
+    event_plans = raw_event_plans if isinstance(raw_event_plans, Mapping) else {}
+    excluded_participants = {
+        value.casefold()
+        for value in normalize_manual_excluded_participants(
+            settings.get("manual_excluded_participants")
+        )
+    }
+    excluded_recordings = {
+        value.casefold()
+        for value in normalize_manual_excluded_recordings(
+            settings.get("manual_excluded_recordings")
+        )
+    }
+    raw_header_exclusions = settings.get(
+        "_fpvs_preflight_recording_not_started_files",
+        (),
+    )
+    if isinstance(raw_header_exclusions, str):
+        raw_header_exclusions = (raw_header_exclusions,)
+    header_exclusions: set[Path] = set()
+    if isinstance(raw_header_exclusions, (list, tuple, set, frozenset)):
+        for raw_path in raw_header_exclusions:
+            try:
+                header_exclusions.add(
+                    Path(str(raw_path)).expanduser().resolve(strict=False)
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+    run_paths = {Path(path).resolve(strict=False) for path in plan.run_files}
+    missing: list[Any] = []
+    for state in plan.states:
+        raw_path = Path(state.info.path).resolve(strict=False)
+        if raw_path not in run_paths:
+            continue
+        explicitly_excluded = (
+            state.status == "excluded"
+            or state.participant_id.casefold() in excluded_participants
+            or state.processing_id.casefold() in excluded_recordings
+            or raw_path in header_exclusions
+        )
+        if explicitly_excluded or _event_plan_matches_state(state, event_plans):
+            continue
+        missing.append(state.info)
+    return tuple(missing)
+
+
+def _run_additional_preflight_for_chosen_scope(
+    host: Any,
+    plan: ProcessingPlan,
+    settings: dict[str, Any],
+) -> bool:
+    missing_infos = _additional_preflight_infos_for_chosen_scope(plan, settings)
+    if not missing_infos:
+        return True
+    from Main_App.gui import processing_inputs
+
+    qc_workflow = getattr(host, "run_preprocessing_qc_workflow", None)
+    if not callable(qc_workflow):
+        qc_workflow = getattr(processing_inputs, "run_preprocessing_qc_workflow", None)
+    if not callable(qc_workflow):
+        from Main_App.gui.preprocessing_qc_workflow import (
+            run_preprocessing_qc_workflow as qc_workflow,
+        )
+
+    try:
+        host.log(
+            "Running current pre-processing QC for "
+            f"{len(missing_infos)} additional file(s) selected for reprocessing.",
+            level=logging.INFO,
+        )
+    except (AttributeError, TypeError, RuntimeError):
+        pass
+    return bool(
+        qc_workflow(
+            host,
+            missing_infos,
+            settings,
+            preserve_existing_plans=True,
+        )
+    )
 
 
 def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
@@ -1239,7 +1391,36 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             host.log("No new or changed files need processing.", level=logging.INFO)
             _reset_failed_start(host)
             return
-        if not _prepare_excel_outputs_for_plan(host, chosen_plan):
+        if not _run_additional_preflight_for_chosen_scope(
+            host,
+            chosen_plan,
+            settings,
+        ):
+            _reset_failed_start(host)
+            return
+        refreshed_plan = classify_processing_inputs(
+            host.currentProject,
+            raw_file_infos,
+            settings,
+            event_map,
+        )
+        refreshed_plan = carry_forward_pre_qc_completed_states(
+            host.currentProject,
+            getattr(host, "_processing_pre_qc_plan", None),
+            refreshed_plan,
+        )
+        chosen_plan = with_processing_choice(refreshed_plan, chosen_plan.choice)
+        host.validated_params = dict(settings)
+        if not _prepare_excel_outputs_for_plan(
+            host,
+            chosen_plan,
+            before_mutation=lambda: _freeze_expected_processing_matrix(
+                host,
+                chosen_plan,
+                settings,
+                event_map,
+            ),
+        ):
             _reset_failed_start(host)
             return
         refreshed = refresh_skipped_ledger_fingerprints(

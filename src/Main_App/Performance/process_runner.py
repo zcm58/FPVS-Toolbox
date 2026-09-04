@@ -24,7 +24,6 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 from dataclasses import dataclass
-from fractions import Fraction
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,6 +51,15 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
 )
+from Main_App.processing.analysis_spans import (
+    ANALYSIS_SPAN_PLAN_VERSION,
+    AnalysisSpanPlanError,
+    canonical_condition_event_map,
+    relative_spans_from_plan,
+    validate_realized_target_analysis_span_plan,
+    validate_source_analysis_span_context,
+    validate_source_analysis_span_plan,
+)
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     manual_removed_electrodes_for_pid,
@@ -59,6 +67,11 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_removed_electrode_detection_mode,
 )
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
+from Main_App.projects.frequency_protocol import (
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    normalize_frequency_protocol,
+)
 from Main_App.projects.grouping import validate_group_folder_name
 from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MONTAGE_BIOSEMI64,
@@ -66,20 +79,14 @@ from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recordings,
 )
-from Main_App.Shared.fft_crop_utils import (
-    compute_fft_crop_from_events,
-    compute_onbin_step,
-    plan_condition_fft_spans,
-    resolve_oddball_ids_by_condition,
-)
+from Main_App.Shared.fft_crop_utils import compute_onbin_step
 
 import numpy as np
 import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
-ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v10-biosemi64-geometry"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v11-analyzed-intervals"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
@@ -115,6 +122,77 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return [str(item) for item in value if str(item).strip()]
     return []
+
+
+def _project_frequency_protocol(settings: Mapping[str, object]) -> FrequencyProtocol:
+    raw_protocol = settings.get("frequency_protocol")
+    if raw_protocol is None:
+        raise RuntimeError(
+            "A confirmed project FPVS protocol is required for processing."
+        )
+    try:
+        protocol = normalize_frequency_protocol(raw_protocol)
+    except FrequencyProtocolError as exc:
+        raise RuntimeError(f"Invalid project FPVS protocol: {exc}") from exc
+    if not protocol.is_ready:
+        raise RuntimeError(
+            "The project FPVS protocol requires confirmation and an expected "
+            "analyzed oddball-cycle count before processing."
+        )
+    return protocol
+
+
+def _preflight_event_plan_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+) -> Mapping[str, Any]:
+    plans = settings.get("_fpvs_preflight_event_plans_by_file")
+    if not isinstance(plans, Mapping):
+        raise RuntimeError(
+            "Processing requires the reviewed preflight marker plan for every file."
+        )
+    candidates = [str(file_path), file_path.name]
+    try:
+        candidates.insert(0, str(file_path.resolve()))
+    except (OSError, RuntimeError):
+        pass
+    for candidate in candidates:
+        value = plans.get(candidate)
+        if isinstance(value, Mapping):
+            return value
+    raise RuntimeError(
+        f"No reviewed preflight marker plan was supplied for {file_path.name}."
+    )
+
+
+def _find_raw_events(
+    raw: Any,
+    *,
+    mne_module: Any,
+    stim_channel: str,
+) -> tuple[np.ndarray, str]:
+    """Use the same event-discovery contract as condition-aware preflight."""
+
+    try:
+        events = mne_module.find_events(
+            raw,
+            stim_channel=stim_channel,
+            shortest_event=1,
+            verbose=False,
+        )
+        source = "stim"
+    except (RuntimeError, ValueError):
+        events, _event_ids = mne_module.events_from_annotations(
+            raw,
+            verbose=False,
+        )
+        source = "annotations"
+    result = np.asarray(events, dtype=np.int64)
+    if result.size == 0:
+        raise RuntimeError(
+            f"No events found (source={source!r}, stim={stim_channel!r})."
+        )
+    return result, source
 
 
 def _interpolation_provenance_from_settings(
@@ -724,9 +802,38 @@ def _preproc_cache_payload(
     settings: Dict[str, object],
     *,
     mne_version: str,
+    frequency_protocol: FrequencyProtocol | None = None,
+    event_map: Mapping[str, int] | None = None,
 ) -> Dict[str, object]:
     stat = file_path.stat()
     channel_limit = _configured_biosemi64_channel_limit(settings)
+    source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
+    if isinstance(source_span_plan, Mapping):
+        analysis_span_identity: dict[str, object] | None = {
+            "version": str(source_span_plan.get("version") or ""),
+            "fingerprint": str(source_span_plan.get("fingerprint") or ""),
+            "event_plan_fingerprint": str(
+                source_span_plan.get("event_plan_fingerprint") or ""
+            ),
+            "protocol_fingerprint": str(
+                source_span_plan.get("protocol_fingerprint") or ""
+            ),
+        }
+    else:
+        analysis_span_identity = None
+    protocol_identity = (
+        {
+            "canonical_payload": frequency_protocol.canonical_payload(),
+            "fingerprint": frequency_protocol.fingerprint,
+        }
+        if frequency_protocol is not None
+        else None
+    )
+    condition_event_map_identity = (
+        canonical_condition_event_map(event_map)
+        if event_map is not None
+        else None
+    )
     relevant_settings = {
         "high_pass": settings.get("high_pass"),
         "low_pass": settings.get("low_pass"),
@@ -775,6 +882,9 @@ def _preproc_cache_payload(
             "stim_channel": relevant_settings["stim_channel"],
         },
         "geometry": _geometry_identity_for_channels(settings),
+        "frequency_protocol": protocol_identity,
+        "condition_event_map": condition_event_map_identity,
+        "analysis_span_plan": analysis_span_identity,
         "preprocessing_settings": relevant_settings,
     }
 
@@ -857,6 +967,8 @@ def _load_preprocessed_cache(
     settings: Dict[str, object],
     project_root: Path,
     mne_module: Any,
+    frequency_protocol: FrequencyProtocol | None = None,
+    event_map: Mapping[str, int] | None = None,
 ) -> Tuple[Optional[Any], Optional[Dict[str, Any]], int, str]:
     if not _preproc_cache_enabled(settings):
         return None, None, 0, "disabled"
@@ -865,6 +977,8 @@ def _load_preprocessed_cache(
         file_path,
         settings,
         mne_version=str(getattr(mne_module, "__version__", "unknown")),
+        frequency_protocol=frequency_protocol,
+        event_map=event_map,
     )
     cache_key = _preproc_cache_key(payload)
     raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
@@ -891,6 +1005,43 @@ def _load_preprocessed_cache(
             if callable(close):
                 close()
             return None, None, 0, "miss_geometry_mismatch"
+        source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
+        cached_source_span_plan = metadata.get("source_analysis_span_plan")
+        cached_target_span_plan = metadata.get("realized_analysis_span_plan")
+        require_analysis_spans = bool(
+            settings.get("_fpvs_require_analysis_spans", False)
+        )
+        if require_analysis_spans:
+            if (
+                not isinstance(source_span_plan, Mapping)
+                or not isinstance(cached_source_span_plan, Mapping)
+                or dict(cached_source_span_plan) != dict(source_span_plan)
+                or not isinstance(
+                cached_target_span_plan,
+                Mapping,
+                )
+            ):
+                close = getattr(raw, "close", None)
+                if callable(close):
+                    close()
+                return None, None, 0, "miss_missing_analysis_spans"
+            try:
+                realized_span_plan = validate_realized_target_analysis_span_plan(
+                    cached_target_span_plan,
+                    source_plan=source_span_plan,
+                    target_sfreq_hz=float(raw.info["sfreq"]),
+                    target_n_times=int(raw.n_times),
+                    target_first_samp=int(raw.first_samp),
+                )
+            except AnalysisSpanPlanError:
+                close = getattr(raw, "close", None)
+                if callable(close):
+                    close()
+                return None, None, 0, "miss_analysis_span_mismatch"
+            settings["_fpvs_realized_analysis_span_plan"] = realized_span_plan
+            settings["_fpvs_analysis_scoring_sample_count"] = int(
+                realized_span_plan["unique_sample_count"]
+            )
         audit_before = metadata.get("audit_before")
         if not isinstance(audit_before, dict):
             return None, None, 0, "miss_missing_audit"
@@ -944,6 +1095,17 @@ def _load_preprocessed_cache(
         settings["_fpvs_raw_qc_baseline_excluded"] = bool(
             metadata.get("raw_qc_baseline_excluded")
         )
+        settings["_fpvs_raw_qc_scoring_scope"] = str(
+            metadata.get("raw_qc_scoring_scope") or ""
+        )
+        settings["_fpvs_raw_qc_scoring_spans"] = [
+            list(span)
+            for span in metadata.get("raw_qc_scoring_spans", [])
+            if isinstance(span, list) and len(span) == 2
+        ]
+        settings["_fpvs_raw_qc_scoring_sample_count"] = int(
+            metadata.get("raw_qc_scoring_sample_count") or 0
+        )
         settings["_fpvs_geometry"] = observed_geometry
         settings["_fpvs_retained_scalp_channels"] = list(
             observed_geometry["retained_scalp_channels"]
@@ -984,6 +1146,8 @@ def _store_preprocessed_cache(
     mne_module: Any,
     audit_before: Dict[str, Any],
     n_rejected: int,
+    frequency_protocol: FrequencyProtocol | None = None,
+    event_map: Mapping[str, int] | None = None,
 ) -> str:
     if not _preproc_cache_enabled(settings):
         return "disabled"
@@ -992,6 +1156,8 @@ def _store_preprocessed_cache(
         file_path,
         settings,
         mne_version=str(getattr(mne_module, "__version__", "unknown")),
+        frequency_protocol=frequency_protocol,
+        event_map=event_map,
     )
     cache_key = _preproc_cache_key(payload)
     raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
@@ -999,6 +1165,23 @@ def _store_preprocessed_cache(
     tmp_meta_path = meta_path.with_suffix(".json.tmp")
 
     try:
+        if settings.get("_fpvs_require_analysis_spans", False):
+            source_span_plan = settings.get("_fpvs_source_analysis_span_plan")
+            target_span_plan = settings.get("_fpvs_realized_analysis_span_plan")
+            if not isinstance(source_span_plan, Mapping) or not isinstance(
+                target_span_plan,
+                Mapping,
+            ):
+                raise AnalysisSpanPlanError(
+                    "Preprocessed cache requires current source and target span plans."
+                )
+            validate_realized_target_analysis_span_plan(
+                target_span_plan,
+                source_plan=source_span_plan,
+                target_sfreq_hz=float(raw.info["sfreq"]),
+                target_n_times=int(raw.n_times),
+                target_first_samp=int(raw.first_samp),
+            )
         geometry_identity = _attach_processed_geometry(raw, settings)
         settings["_fpvs_geometry"] = geometry_identity
         settings["_fpvs_retained_scalp_channels"] = list(
@@ -1017,6 +1200,12 @@ def _store_preprocessed_cache(
             ),
             "retained_scalp_set_fingerprint": str(
                 geometry_identity["retained_scalp_set_fingerprint"]
+            ),
+            "source_analysis_span_plan": settings.get(
+                "_fpvs_source_analysis_span_plan"
+            ),
+            "realized_analysis_span_plan": settings.get(
+                "_fpvs_realized_analysis_span_plan"
             ),
             "audit_before": audit_before,
             "n_rejected": int(n_rejected),
@@ -1076,6 +1265,16 @@ def _store_preprocessed_cache(
             ),
             "raw_qc_baseline_excluded": bool(
                 settings.get("_fpvs_raw_qc_baseline_excluded")
+            ),
+            "raw_qc_scoring_scope": str(
+                settings.get("_fpvs_raw_qc_scoring_scope") or ""
+            ),
+            "raw_qc_scoring_spans": settings.get(
+                "_fpvs_raw_qc_scoring_spans",
+                [],
+            ),
+            "raw_qc_scoring_sample_count": int(
+                settings.get("_fpvs_raw_qc_scoring_sample_count") or 0
             ),
             **_review_metadata_from_settings(settings),
         }
@@ -1353,6 +1552,26 @@ def _run_full_pipeline_for_file(
         ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2") or "EXG2"
         ref_pair = (str(ref_ch1), str(ref_ch2))
 
+        frequency_protocol = _project_frequency_protocol(settings)
+        event_plan_payload = _preflight_event_plan_for_file(file_path, settings)
+        unresolved_occurrences = event_plan_payload.get("unresolved_occurrences")
+        if unresolved_occurrences not in (None, [], ()):
+            raise RuntimeError(
+                "Processing cannot continue while marker occurrences require review."
+            )
+        source_analysis_span_plan = validate_source_analysis_span_context(
+            event_plan_payload=event_plan_payload,
+            event_map=event_map,
+            protocol=frequency_protocol,
+        )
+        if not source_analysis_span_plan.get("spans"):
+            raise RuntimeError(
+                "The reviewed preflight plan contains no retained analysis spans."
+            )
+        settings["_fpvs_source_analysis_span_plan"] = source_analysis_span_plan
+        settings["_fpvs_require_analysis_spans"] = True
+        stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
+
         # 1) Cache lookup, then load/preprocess only on misses.
         stage = "cache_lookup"
         logger.debug("[PIPELINE STAGE] file=%s stage=cache_lookup_start", file_path.name)
@@ -1362,6 +1581,8 @@ def _run_full_pipeline_for_file(
             settings=settings,
             project_root=project_root,
             mne_module=mne,
+            frequency_protocol=frequency_protocol,
+            event_map=event_map,
         )
         _record_timing("cache_lookup", section_started)
         logger.debug(
@@ -1405,6 +1626,36 @@ def _run_full_pipeline_for_file(
                 n_ch,
             )
 
+            source_events, source_event_source = _find_raw_events(
+                raw,
+                mne_module=mne,
+                stim_channel=stim,
+            )
+            source_analysis_span_plan = validate_source_analysis_span_plan(
+                event_plan_payload=event_plan_payload,
+                events=source_events,
+                sampling_rate_hz=float(raw.info["sfreq"]),
+                n_times=int(raw.n_times),
+                first_samp=int(raw.first_samp),
+                event_map=event_map,
+                protocol=frequency_protocol,
+            )
+            settings["_fpvs_source_analysis_span_plan"] = (
+                source_analysis_span_plan
+            )
+            source_qc_spans = relative_spans_from_plan(
+                source_analysis_span_plan
+            )
+            logger.debug(
+                "source_analysis_span_plan_validated file=%s event_source=%s "
+                "span_count=%d unique_sample_count=%d fingerprint=%s",
+                file_path.name,
+                source_event_source,
+                len(source_analysis_span_plan["spans"]),
+                int(source_analysis_span_plan["unique_sample_count"]),
+                source_analysis_span_plan["fingerprint"],
+            )
+
             settings["_fpvs_raw_qc_bad_channels"] = []
             settings["_fpvs_raw_qc_low_variance_channels"] = []
             settings["_fpvs_raw_qc_high_amplitude_channels"] = []
@@ -1428,6 +1679,7 @@ def _run_full_pipeline_for_file(
                 raw,
                 settings,
                 filename=file_path.name,
+                analysis_spans=source_qc_spans,
             )
             if raw_qc_result.excluded:
                 logger.warning(
@@ -1507,6 +1759,13 @@ def _run_full_pipeline_for_file(
             )
             settings["_fpvs_raw_qc_baseline_excluded"] = (
                 raw_qc_result.raw_baseline_excluded
+            )
+            settings["_fpvs_raw_qc_scoring_scope"] = raw_qc_result.scoring_scope
+            settings["_fpvs_raw_qc_scoring_spans"] = [
+                list(span) for span in raw_qc_result.scoring_spans
+            ]
+            settings["_fpvs_raw_qc_scoring_sample_count"] = (
+                raw_qc_result.scoring_sample_count
             )
             if raw_qc_bads:
                 existing_bads = {str(channel) for channel in raw.info.get("bads", [])}
@@ -1603,6 +1862,25 @@ def _run_full_pipeline_for_file(
             _record_timing("preprocessing", section_started)
             if raw_proc is None:
                 raise RuntimeError("perform_preprocessing returned None")
+            raw_target_span_plan = settings.get(
+                "_fpvs_realized_analysis_span_plan"
+            )
+            if not isinstance(raw_target_span_plan, Mapping):
+                raise RuntimeError(
+                    "Preprocessing did not realize the approved analysis spans."
+                )
+            target_analysis_span_plan = (
+                validate_realized_target_analysis_span_plan(
+                    raw_target_span_plan,
+                    source_plan=source_analysis_span_plan,
+                    target_sfreq_hz=float(raw_proc.info["sfreq"]),
+                    target_n_times=int(raw_proc.n_times),
+                    target_first_samp=int(raw_proc.first_samp),
+                )
+            )
+            settings["_fpvs_realized_analysis_span_plan"] = (
+                target_analysis_span_plan
+            )
             interpolated_count = len(
                 _string_list(settings.get("_fpvs_interpolated_channels"))
             )
@@ -1628,6 +1906,8 @@ def _run_full_pipeline_for_file(
                 mne_module=mne,
                 audit_before=audit_before,
                 n_rejected=int(n_rejected),
+                frequency_protocol=frequency_protocol,
+                event_map=event_map,
             )
             _record_timing("cache_store", section_started)
             logger.debug(
@@ -1651,32 +1931,28 @@ def _run_full_pipeline_for_file(
             geometry_identity["retained_scalp_set_fingerprint"]
         )
 
+        raw_target_span_plan = settings.get("_fpvs_realized_analysis_span_plan")
+        if not isinstance(raw_target_span_plan, Mapping):
+            raise RuntimeError(
+                "Processed data is missing realized analyzed-interval coordinates."
+            )
+        target_analysis_span_plan = validate_realized_target_analysis_span_plan(
+            raw_target_span_plan,
+            source_plan=source_analysis_span_plan,
+            target_sfreq_hz=float(raw_proc.info["sfreq"]),
+            target_n_times=int(raw_proc.n_times),
+            target_first_samp=int(raw_proc.first_samp),
+        )
+        settings["_fpvs_realized_analysis_span_plan"] = target_analysis_span_plan
+
         # 4) Events — prefer explicit stim channel (BioSemi 'Status')
         stage = "events"
         section_started = time.perf_counter()
-        stim = (
-            settings.get("stim_channel")
-            or settings.get("stim")
-            or "Status"
+        events, events_source = _find_raw_events(
+            raw_proc,
+            mne_module=mne,
+            stim_channel=stim,
         )
-        events_source = "stim"
-        try:
-            # Use the configured stim channel when available
-            events = mne.find_events(
-                raw_proc,
-                stim_channel=stim,
-                shortest_event=1,
-            )  # type: ignore[arg-type]
-        except Exception:
-            # Fallback to annotations if present
-            events, _ = mne.events_from_annotations(raw_proc)
-            events_source = "annotations"
-
-        # If there are no events at all, this is a true failure.
-        if events.size == 0:
-            raise RuntimeError(
-                f"No events found for {file_path.name} (source='{events_source}', stim='{stim}')"
-            )
 
         events_info = {
             "stim_channel": stim,
@@ -1692,182 +1968,212 @@ def _run_full_pipeline_for_file(
         )
         _record_timing("events", section_started)
 
-        # 5) Epochs per label/code (tolerant of missing runs)
+        # 5) Epochs from the exact preflight-approved occurrence spans.
         stage = "epochs"
         section_started = time.perf_counter()
         sfreq = float(raw_proc.info["sfreq"])
-        _, n_step, step_err = compute_onbin_step(fs=sfreq, f_oddball=ODDBALL_FREQ)
-        if step_err:
-            crop_logger.warning("file=%s step_error=%s", file_path.name, step_err)
-
-        # Which event codes are actually present in this recording?
-        have_codes = {int(c) for c in events[:, 2].tolist()}
-        onset_ids = set(int(v) for v in event_map.values())
-        oddball_ids_by_condition = resolve_oddball_ids_by_condition(
-            events=events,
-            onset_ids=onset_ids,
-            default_oddball_id=55,
-            stream_end_sample=int(raw_proc.n_times),
-        )
-        crop_logger.info(
-            "file=%s oddball_ids_by_condition=%s",
-            file_path.name,
-            oddball_ids_by_condition,
-        )
-        crop_results, _, run_warnings = compute_fft_crop_from_events(
-            events=events,
+        _, n_step, step_err = compute_onbin_step(
             fs=sfreq,
-            onset_ids=onset_ids,
-            oddball_id=oddball_ids_by_condition,
-            stream_end_sample=int(raw_proc.n_times),
+            f_oddball=frequency_protocol.oddball_rate_hz,
         )
-        for run_warning in run_warnings:
-            crop_logger.warning("file=%s run_warning=%s", file_path.name, run_warning)
+        if step_err or not n_step:
+            raise RuntimeError(
+                "The reviewed project marker plan has no exact FFT grid: "
+                f"{step_err or 'unknown'}."
+            )
 
+        raw_marker_plan = event_plan_payload.get("marker_integrity_plan")
+        if not isinstance(raw_marker_plan, Mapping):
+            raise RuntimeError("The reviewed marker plan is missing occurrence evidence.")
+        raw_occurrences = raw_marker_plan.get("occurrences")
+        if not isinstance(raw_occurrences, list):
+            raise RuntimeError("The reviewed marker occurrences are malformed.")
+        occurrence_evidence: dict[str, Mapping[str, object]] = {}
+        for raw_occurrence in raw_occurrences:
+            if not isinstance(raw_occurrence, Mapping):
+                raise RuntimeError("The reviewed marker occurrence is malformed.")
+            key = (
+                f"{int(raw_occurrence['condition_code'])}:"
+                f"{int(raw_occurrence['repetition_index'])}"
+            )
+            occurrence_evidence[key] = raw_occurrence
+
+        raw_approved_occurrences = event_plan_payload.get("approved_occurrences")
+        if not isinstance(raw_approved_occurrences, list):
+            raise RuntimeError("The reviewed approved occurrences are malformed.")
+        approved_by_condition: dict[int, list[Mapping[str, object]]] = {}
+        for raw_approved in raw_approved_occurrences:
+            if not isinstance(raw_approved, Mapping):
+                raise RuntimeError("A reviewed approved occurrence is malformed.")
+            approved_by_condition.setdefault(
+                int(raw_approved["condition_code"]),
+                [],
+            ).append(raw_approved)
+
+        raw_target_spans = target_analysis_span_plan.get("spans")
+        if not isinstance(raw_target_spans, list):
+            raise RuntimeError("Realized target analysis spans are malformed.")
+        target_spans_by_condition: dict[int, list[Mapping[str, object]]] = {}
+        for raw_target_span in raw_target_spans:
+            if not isinstance(raw_target_span, Mapping):
+                raise RuntimeError("A realized target analysis span is malformed.")
+            target_spans_by_condition.setdefault(
+                int(raw_target_span["condition_code"]),
+                [],
+            ).append(raw_target_span)
+
+        have_codes = {
+            int(item["condition_code"])
+            for item in raw_occurrences
+        }
         epochs_dict: Dict[str, List[object]] = {}
         skipped_conditions: list[tuple[str, int, str]] = []
         total_epochs = 0
+        expected_n = frequency_protocol.expected_analyzed_samples(sfreq)
 
         for label, code in event_map.items():
             code_int = int(code)
+            condition_occurrences = approved_by_condition.get(code_int, [])
+            retained_occurrences = target_spans_by_condition.get(code_int, [])
 
             if code_int not in have_codes:
-                skipped_conditions.append(
-                    (label, code_int, "0 matching events")
+                skipped_conditions.append((label, code_int, "0 matching events"))
+                epochs_dict[label] = []
+                continue
+            if not retained_occurrences:
+                reason = (
+                    "all marker occurrences excluded after review"
+                    if condition_occurrences
+                    else "no approved marker occurrences"
                 )
+                skipped_conditions.append((label, code_int, reason))
                 epochs_dict[label] = []
                 continue
 
-            span_plan = plan_condition_fft_spans(
-                crop_results=crop_results,
-                condition_id=code_int,
-                n_step=n_step,
-            )
-            rep_keys = list(span_plan.repetition_keys)
             rep_spans: List[Tuple[int, int]] = []
             rep_events: List[List[int]] = []
             rep_metadata: List[dict] = []
-
-            n_common = span_plan.n_common
-            fallback_rep_reasons = list(span_plan.fallback_repetition_reasons)
-
-            if not n_step:
-                raise RuntimeError(
-                    "Locked FFT crop required but no valid N_step is available "
-                    f"for {file_path.name} condition={label}. "
-                    "Fixed-epoch fallback is disabled for the normal processing pipeline."
-                )
-            if fallback_rep_reasons:
-                raise RuntimeError(
-                    "Locked FFT crop required but one or more repetitions could not be "
-                    f"cropped on-bin for {file_path.name} condition={label}: "
-                    f"{'; '.join(fallback_rep_reasons)}. "
-                    "Fixed-epoch fallback is disabled for the normal processing pipeline."
-                )
-            if n_common is None:
-                raise RuntimeError(
-                    "Locked FFT crop required but no common on-bin epoch length could be "
-                    f"computed for {file_path.name} condition={label}. "
-                    "Fixed-epoch fallback is disabled for the normal processing pipeline."
-                )
-            if int(n_common) % int(n_step) != 0:
-                raise RuntimeError(
-                    "Locked FFT crop invariant failed before epoching: "
-                    f"N_common={n_common}, N_step={n_step}, "
-                    f"file={file_path.name}, condition={label}."
-                )
-
-            crop_logger.info(
-                "file=%s condition=%s label_epoch_mode=55_onbin n_common=%d n_step=%s",
-                file_path.name,
-                label,
-                int(n_common),
-                n_step,
-            )
-
-            for rep_key, planned_span in zip(
-                rep_keys,
-                span_plan.repetition_spans,
-                strict=True,
-            ):
-                crop = crop_results[rep_key]
-                fallback_reason = ""
-                crop_mode = "55_onbin"
-                first55_samp = crop.first55_sample
-                last55_samp = crop.last55_sample
-                n55 = int(crop.n55_dedup)
-                n_rep = int(crop.n_samples)
-                available_samples = int(crop.available_samples)
-                oddball_marker_id = int(crop.oddball_id or 55)
-
-                if crop.fallback:
+            for target_span in retained_occurrences:
+                target_coordinates = target_span.get("target_coordinates")
+                source_coordinates = target_span.get("source_coordinates")
+                if not isinstance(target_coordinates, Mapping) or not isinstance(
+                    source_coordinates,
+                    Mapping,
+                ):
                     raise RuntimeError(
-                        "Locked FFT crop required but a fallback repetition reached "
-                        f"epoch building for {file_path.name} condition={label} "
-                        f"rep={int(rep_key[1])}: {crop.fallback_reason or 'unknown'}."
+                        "A retained occurrence reached epoching without coordinates."
                     )
-
-                start_samp, stop_samp = planned_span
-
-                expected_n = max(0, stop_samp - start_samp)
-
-                if stop_samp <= start_samp:
+                repetition_index = int(target_span["repetition_index"])
+                occurrence_key = str(target_span["occurrence_key"])
+                start_samp = int(target_coordinates["start_relative_sample"])
+                stop_samp = int(target_coordinates["stop_relative_sample"])
+                start_samp_absolute = int(target_coordinates["start_sample"])
+                stop_samp_absolute = int(target_coordinates["stop_sample"])
+                n_used = stop_samp - start_samp
+                if n_used != expected_n:
                     raise RuntimeError(
-                        "Locked FFT crop produced an empty segment: "
-                        f"file={file_path.name}, condition={label}, rep={int(rep_key[1])}, "
-                        f"start={start_samp}, stop={stop_samp}."
+                        "The realized marker span does not match the target protocol: "
+                        f"expected={expected_n}, actual={n_used}, file={file_path.name}, "
+                        f"condition={label}, rep={repetition_index}."
                     )
-
-                n_used = expected_n
                 n_mod_step = int(n_used % n_step)
                 if n_mod_step != 0:
                     raise RuntimeError(
-                        "Locked FFT crop invariant failed during epoching: "
-                        f"N={n_used}, N_step={n_step}, N_mod_step={n_mod_step}, "
-                        f"file={file_path.name}, condition={label}, rep={int(rep_key[1])}."
+                        "Approved marker span is not on the exact FFT grid: "
+                        f"N={n_used}, N_step={n_step}, file={file_path.name}, "
+                        f"condition={label}, rep={repetition_index}."
                     )
-                df_hz = (sfreq / float(n_used)) if n_used > 0 else 0.0
-                k0 = (1.2 * float(n_used) / sfreq) if n_used > 0 else 0.0
-                f_bin_hz = (round(k0) * df_hz) if n_used > 0 else 0.0
+
+                evidence = occurrence_evidence.get(occurrence_key)
+                if evidence is None:
+                    raise RuntimeError(
+                        "Approved marker occurrence lost its preflight evidence."
+                    )
+                retained_samples = evidence.get("retained_marker_samples")
+                if not isinstance(retained_samples, list):
+                    raise RuntimeError("Retained marker evidence is malformed.")
+                raw_samples = evidence.get("raw_marker_samples")
+                if not isinstance(raw_samples, list):
+                    raise RuntimeError("Raw marker evidence is malformed.")
+                first_marker = int(retained_samples[0]) if retained_samples else None
+                last_marker = int(retained_samples[-1]) if retained_samples else None
+                marker_code = int(frequency_protocol.oddball_marker_code)
+                df_hz = sfreq / float(n_used)
+                k0 = float(frequency_protocol.oddball_rate_hz) * n_used / sfreq
+                f_bin_hz = round(k0) * df_hz
 
                 crop_logger.info(
                     (
-                        "file=%s condition=%s rep=%d fs=%.6f N_step=%s oddball_id=%s n55=%d first55_samp=%s "
-                        "last55_samp=%s available_samples=%d N_rep=%d N_common=%s N_common_mod_step=%s "
-                        "df_hz=%.9f k0=%.9f f_bin_hz=%.9f crop_mode=%s fallback_reason=%s"
+                        "file=%s condition=%s rep=%d fs=%.6f N_step=%s "
+                        "oddball_id=%s marker_raw=%d marker_retained=%d "
+                        "first_marker_sample=%s last_marker_sample=%s N=%d "
+                        "N_mod_step=%s df_hz=%.9f k0=%.9f f_bin_hz=%.9f "
+                        "crop_mode=project_marker_plan_target_grid_v2 disposition=%s"
                     ),
                     file_path.name,
                     label,
-                    int(rep_key[1]),
+                    repetition_index,
                     sfreq,
                     n_step,
-                    oddball_marker_id,
-                    n55,
-                    first55_samp,
-                    last55_samp,
-                    available_samples,
-                    n_rep,
-                    n_common,
+                    marker_code,
+                    len(raw_samples),
+                    len(retained_samples),
+                    first_marker,
+                    last_marker,
+                    n_used,
                     n_mod_step,
                     df_hz,
                     k0,
                     f_bin_hz,
-                    crop_mode,
-                    fallback_reason,
+                    target_span.get("marker_disposition"),
                 )
 
                 rep_spans.append((start_samp, stop_samp))
-                rep_events.append([start_samp, 0, code_int])
+                rep_events.append([start_samp_absolute, 0, code_int])
                 rep_metadata.append(
                     {
-                        "crop_mode": crop_mode,
-                        "oddball_id": oddball_marker_id,
-                        "n55": n55,
-                        "first55_samp": first55_samp,
-                        "last55_samp": last55_samp,
-                        "N_step": int(n_step) if n_step else None,
-                        "N_mod_step": n_mod_step if n_step else None,
-                        "fallback_reason": fallback_reason,
+                        "crop_mode": "project_marker_plan_target_grid_v2",
+                        "oddball_id": marker_code,
+                        "n55": len(retained_samples),
+                        "first55_samp": first_marker,
+                        "last55_samp": last_marker,
+                        "N_step": int(n_step),
+                        "N_mod_step": n_mod_step,
+                        "fallback_reason": "",
+                        "marker_raw_count": len(raw_samples),
+                        "marker_retained_count": len(retained_samples),
+                        "marker_duplicate_count": len(raw_samples)
+                        - len(retained_samples),
+                        "marker_plan_fingerprint": target_span.get(
+                            "marker_plan_fingerprint"
+                        ),
+                        "approved_span_fingerprint": target_span.get(
+                            "approved_span_fingerprint"
+                        ),
+                        "marker_disposition": target_span.get(
+                            "marker_disposition"
+                        ),
+                        "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
+                        "source_analysis_span_plan_fingerprint": (
+                            source_analysis_span_plan["fingerprint"]
+                        ),
+                        "target_analysis_span_plan_fingerprint": (
+                            target_analysis_span_plan["fingerprint"]
+                        ),
+                        "source_start_sample": int(
+                            source_coordinates["start_sample"]
+                        ),
+                        "source_stop_sample": int(
+                            source_coordinates["stop_sample"]
+                        ),
+                        "source_first_samp": int(
+                            source_coordinates["first_samp"]
+                        ),
+                        "target_start_sample": start_samp_absolute,
+                        "target_stop_sample": stop_samp_absolute,
+                        "target_first_samp": int(
+                            target_coordinates["first_samp"]
+                        ),
                     }
                 )
 
@@ -1877,21 +2183,17 @@ def _run_full_pipeline_for_file(
                 file_path.name,
                 label,
                 code_int,
-                int((events[:, 2] == code_int).sum()),
+                sum(
+                    1
+                    for occurrence in raw_occurrences
+                    if int(occurrence["condition_code"]) == code_int
+                ),
                 n_ep,
             )
-
-            if n_ep == 0:
-                skipped_conditions.append(
-                    (label, code_int, "0 epochs after epoching")
-                )
-                epochs_dict[label] = []
-                continue
 
             import pandas as pd
 
             epoch_data = _build_epoch_data_from_spans(raw_proc, rep_spans)
-
             epochs = mne.EpochsArray(
                 epoch_data,
                 raw_proc.info.copy(),
@@ -1986,6 +2288,9 @@ def _run_full_pipeline_for_file(
                     "preprocessing_order_version": backend_preprocess.PREPROCESSING_ORDER_VERSION,
                     "preprocessed_raw_cache_version": PREPROC_CACHE_VERSION,
                     "geometry": geometry_identity,
+                    "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
+                    "source_analysis_span_plan": source_analysis_span_plan,
+                    "realized_analysis_span_plan": target_analysis_span_plan,
                 },
                 source_signature={
                     "raw_file": str(file_path.resolve()),
@@ -1994,8 +2299,23 @@ def _run_full_pipeline_for_file(
                 },
                 resolved_protocol_by_condition={
                     label: {
-                        "presentation_rate_hz": settings.get("base_freq"),
-                        "oddball_rate_hz": float(ODDBALL_FREQ),
+                        "presentation_rate_hz": float(
+                            frequency_protocol.presentation_rate_hz
+                        ),
+                        "oddball_rate_hz": float(
+                            frequency_protocol.oddball_rate_hz
+                        ),
+                        "oddball_every_n": frequency_protocol.oddball_every_n,
+                        "expected_analyzed_oddball_cycles": (
+                            frequency_protocol.expected_analyzed_oddball_cycles
+                        ),
+                        "oddball_marker_code": (
+                            frequency_protocol.oddball_marker_code
+                        ),
+                        "frequency_protocol_version": frequency_protocol.version,
+                        "frequency_protocol_fingerprint": (
+                            frequency_protocol.fingerprint
+                        ),
                         "contrast_modulation": settings.get("contrast_modulation"),
                     }
                     for label in source_epochs
@@ -2050,6 +2370,15 @@ def _run_full_pipeline_for_file(
         )
         audit_after["interpolation_error"] = str(
             settings.get("_fpvs_interpolation_error") or ""
+        )
+        audit_after["analysis_span_plan_version"] = ANALYSIS_SPAN_PLAN_VERSION
+        audit_after["source_analysis_span_plan"] = source_analysis_span_plan
+        audit_after["realized_analysis_span_plan"] = target_analysis_span_plan
+        audit_after["raw_qc_scoring_scope"] = str(
+            settings.get("_fpvs_raw_qc_scoring_scope") or ""
+        )
+        audit_after["raw_qc_scoring_sample_count"] = int(
+            settings.get("_fpvs_raw_qc_scoring_sample_count") or 0
         )
 
         logger.debug(
@@ -2139,6 +2468,13 @@ def _run_full_pipeline_for_file(
             "source_derivative_outputs": source_derivative_outputs,
             "source_derivative_warning": source_derivative_warning,
             "geometry": geometry_identity,
+            "analysis_span_plan_version": ANALYSIS_SPAN_PLAN_VERSION,
+            "source_analysis_span_plan_fingerprint": source_analysis_span_plan[
+                "fingerprint"
+            ],
+            "target_analysis_span_plan_fingerprint": target_analysis_span_plan[
+                "fingerprint"
+            ],
             **_interpolation_provenance_from_settings(settings),
         }
     except Exception as e:  # pragma: no cover - worker error path

@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 import Main_App.Shared.processing_mixin as compatibility_processing
-from Main_App.Shared.fft_crop_utils import CropResult
 from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     attach_raw_biosemi64_geometry,
@@ -23,6 +22,12 @@ from Main_App.processing.raw_channel_qc import (
     RAW_CHANNEL_QC_EXCLUSION_REASON,
     RIGHT_HEMISPHERE_CHANNELS,
 )
+from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
+from Main_App.processing.analysis_spans import (
+    read_source_analysis_span_plan,
+    realize_target_analysis_span_plan,
+)
+from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
 from Main_App.workers import process_runner
 
 
@@ -54,6 +59,86 @@ def _with_biosemi64_montage(raw: mne.io.BaseRaw) -> mne.io.BaseRaw:
         stim_channel="Status" if "Status" in raw.ch_names else None,
     )
     return raw
+
+
+def _protocol_settings(
+    *,
+    file_path: Path,
+    events: np.ndarray,
+    event_map: dict[str, int],
+    sfreq: float,
+    n_times: int,
+    presentation_rate_hz: float,
+    oddball_every_n: int,
+    expected_cycles: int,
+) -> dict[str, object]:
+    protocol = FrequencyProtocol.from_recurrence(
+        presentation_rate_hz,
+        oddball_every_n,
+        expected_analyzed_oddball_cycles=expected_cycles,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    plan = plan_preflight_qc_events(
+        events=events,
+        event_map=event_map,
+        sfreq=sfreq,
+        n_times=n_times,
+        frequency_protocol=protocol,
+    )
+    return {
+        "frequency_protocol": protocol,
+        "_fpvs_preflight_event_plans_by_file": {
+            str(file_path.resolve()): plan.to_payload()
+        },
+    }
+
+
+def _analysis_plan_fixture(
+    *,
+    file_path: Path,
+    sfreq: float,
+    n_times: int,
+    event_map: dict[str, int],
+) -> tuple[np.ndarray, dict[str, object]]:
+    cycles = max(1, min(500, (n_times - 2) // 2))
+    condition_code = int(next(iter(event_map.values())))
+    marker_samples = [1 + 2 * index for index in range(cycles + 1)]
+    events = np.asarray(
+        [
+            [0, 0, condition_code],
+            *[[sample, 0, 55] for sample in marker_samples],
+        ],
+        dtype=int,
+    )
+    return events, _protocol_settings(
+        file_path=file_path,
+        events=events,
+        event_map=event_map,
+        sfreq=sfreq,
+        n_times=n_times,
+        presentation_rate_hz=sfreq,
+        oddball_every_n=2,
+        expected_cycles=cycles,
+    )
+
+
+def _passthrough_preprocessing_with_realized_spans(
+    raw_input,
+    params,
+    *_args,
+    **_kwargs,
+):
+    target_plan = realize_target_analysis_span_plan(
+        params["_fpvs_source_analysis_span_plan"],
+        target_sfreq_hz=float(raw_input.info["sfreq"]),
+        target_n_times=int(raw_input.n_times),
+        target_first_samp=int(raw_input.first_samp),
+    )
+    params["_fpvs_realized_analysis_span_plan"] = target_plan
+    params["_fpvs_analysis_scoring_sample_count"] = target_plan[
+        "unique_sample_count"
+    ]
+    return raw_input, 0
 
 
 def _run_compatibility_worker(
@@ -602,6 +687,12 @@ def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
     monkeypatch.setattr(process_runner, "inspect_bdf_header", lambda _path: None)
     fake_bdf = tmp_path / "reduced.bdf"
     fake_bdf.write_bytes(b"fake bdf")
+    _events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256.0,
+        n_times=128,
+        event_map={"A": 21},
+    )
 
     result = process_runner._run_full_pipeline_for_file(
         file_path=fake_bdf,
@@ -610,9 +701,10 @@ def test_run_full_pipeline_passes_project_channel_limit_to_validating_loader(
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
-            "max_idx_keep": None,
-            "max_chan_idx_keep": 16,
-        },
+                "max_idx_keep": None,
+                "max_chan_idx_keep": 16,
+                **plan_settings,
+            },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
         project_root=tmp_path / "project",
@@ -674,6 +766,13 @@ def test_interpolation_failure_keeps_requested_and_error_provenance(
     )
     fake_bdf = tmp_path / "interpolation-failure.bdf"
     fake_bdf.write_bytes(b"fake bdf")
+    events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256.0,
+        n_times=128,
+        event_map={"A": 21},
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     result = process_runner._run_full_pipeline_for_file(
         file_path=fake_bdf,
@@ -683,9 +782,10 @@ def test_interpolation_failure_keeps_requested_and_error_provenance(
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
             "max_idx_keep": 2,
-            "auto_detect_removed_electrodes": False,
-            "removed_electrode_detection_mode": "off",
-        },
+                "auto_detect_removed_electrodes": False,
+                "removed_electrode_detection_mode": "off",
+                **plan_settings,
+            },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
         project_root=tmp_path / "project",
@@ -750,6 +850,13 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
 
     fake_bdf = tmp_path / "p21.bdf"
     fake_bdf.write_bytes(b"fake bdf")
+    events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256.0,
+        n_times=2_048,
+        event_map={"A": 21},
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     result = process_runner._run_full_pipeline_for_file(
         file_path=fake_bdf,
@@ -759,9 +866,10 @@ def test_run_full_pipeline_excludes_raw_channel_qc_failure_before_preprocessing(
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
             "max_bad_chans": 20,
-            "removed_electrode_detection_mode": "manual",
-            "manual_removed_electrodes": {"p21": []},
-        },
+                "removed_electrode_detection_mode": "manual",
+                "manual_removed_electrodes": {"p21": []},
+                **plan_settings,
+            },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
         project_root=tmp_path / "project",
@@ -822,6 +930,13 @@ def test_run_full_pipeline_auto_marks_removed_electrode_before_preprocessing(
 
     fake_bdf = tmp_path / "p03.bdf"
     fake_bdf.write_bytes(b"fake bdf")
+    events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256.0,
+        n_times=4_096,
+        event_map={"A": 21},
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     result = process_runner._run_full_pipeline_for_file(
         file_path=fake_bdf,
@@ -832,6 +947,7 @@ def test_run_full_pipeline_auto_marks_removed_electrode_before_preprocessing(
             "enable_preprocessed_cache": False,
             "max_bad_chans": 20,
             "auto_detect_removed_electrodes": True,
+            **plan_settings,
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -893,6 +1009,13 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
 
     fake_bdf = tmp_path / "p03.bdf"
     fake_bdf.write_bytes(b"fake bdf")
+    events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256.0,
+        n_times=4_096,
+        event_map={"A": 21},
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     result = process_runner._run_full_pipeline_for_file(
         file_path=fake_bdf,
@@ -908,6 +1031,7 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
             "_fpvs_participant_id_by_file": {
                 str(fake_bdf.resolve()): "P03",
             },
+            **plan_settings,
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -929,35 +1053,17 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     raw = _with_biosemi64_montage(
         mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
     )
-    events = np.asarray([[8, 0, 21], [32, 0, 21]], dtype=int)
-    crop_results = {
-        (21, 0): CropResult(
-            crop_start_sample=8,
-            n_samples=4,
-            n55_raw=2,
-            n55_dedup=2,
-            cycles=1,
-            block_start_sample=8,
-            block_end_sample=24,
-            first55_sample=8,
-            last55_sample=12,
-            available_samples=4,
-            fallback=False,
-        ),
-        (21, 1): CropResult(
-            crop_start_sample=32,
-            n_samples=4,
-            n55_raw=2,
-            n55_dedup=2,
-            cycles=1,
-            block_start_sample=32,
-            block_end_sample=48,
-            first55_sample=32,
-            last55_sample=36,
-            available_samples=4,
-            fallback=False,
-        ),
-    }
+    events = np.asarray(
+        [
+            [8, 0, 21],
+            [10, 0, 55],
+            [14, 0, 55],
+            [32, 0, 21],
+            [34, 0, 55],
+            [38, 0, 55],
+        ],
+        dtype=int,
+    )
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -968,7 +1074,7 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     monkeypatch.setattr(
         process_runner.backend_preprocess,
         "perform_preprocessing",
-        lambda raw_input, params, log_func, filename_for_log: (raw_input, 0),
+        _passthrough_preprocessing_with_realized_spans,
     )
     monkeypatch.setattr(
         process_runner.backend_preprocess,
@@ -1015,12 +1121,6 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         "write_source_ready_time_domain_derivatives",
         _capture_source_derivative,
     )
-    monkeypatch.setattr(process_runner, "compute_fft_crop_from_events", lambda **_kwargs: (crop_results, 4, []))
-    monkeypatch.setattr(
-        process_runner,
-        "compute_onbin_step",
-        lambda fs, f_oddball=process_runner.ODDBALL_FREQ: (int(fs), 4, None),
-    )
     monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     fake_bdf = tmp_path / "fake.bdf"
@@ -1035,6 +1135,16 @@ def test_run_full_pipeline_publishes_available_source_conditions(
             "enable_preprocessed_cache": False,
             "_fpvs_processing_fingerprint": "fixture-fingerprint",
             "_fpvs_processing_fingerprint_version": "fixture-version",
+            **_protocol_settings(
+                file_path=fake_bdf,
+                events=events,
+                event_map={"A": 21, "B": 22},
+                sfreq=8,
+                n_times=64,
+                presentation_rate_hz=4,
+                oddball_every_n=2,
+                expected_cycles=1,
+            ),
         },
         event_map={"A": 21, "B": 22},
         save_folder=tmp_path / "out",
@@ -1047,7 +1157,10 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     assert captured["epochs_dict"]["B"] == []
     epochs = captured["epochs_dict"]["A"][0]
     assert epochs.get_data().shape == (2, 3, 4)
-    assert epochs.metadata["crop_mode"].tolist() == ["55_onbin", "55_onbin"]
+    assert epochs.metadata["crop_mode"].tolist() == [
+        "project_marker_plan_target_grid_v2",
+        "project_marker_plan_target_grid_v2",
+    ]
     assert epochs.metadata["N_step"].tolist() == [4, 4]
     assert epochs.metadata["N_mod_step"].tolist() == [0, 0]
     assert epochs.metadata["fallback_reason"].tolist() == ["", ""]
@@ -1064,15 +1177,22 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         is captured["epochs_dict"]["A"]
     )
     assert source_kwargs["condition_ids"] == {"A": 21}
-    assert source_kwargs["processing_provenance"] == {
-        "processing_fingerprint": "fixture-fingerprint",
-        "processing_fingerprint_version": "fixture-version",
-        "preprocessing_order_version": process_runner.backend_preprocess.PREPROCESSING_ORDER_VERSION,
-        "preprocessed_raw_cache_version": process_runner.PREPROC_CACHE_VERSION,
-        "geometry": biosemi64_geometry_identity(
-            retained_channels=("Cz", "Pz")
-        ),
-    }
+    provenance = source_kwargs["processing_provenance"]
+    assert provenance["processing_fingerprint"] == "fixture-fingerprint"
+    assert provenance["processing_fingerprint_version"] == "fixture-version"
+    assert (
+        provenance["preprocessing_order_version"]
+        == process_runner.backend_preprocess.PREPROCESSING_ORDER_VERSION
+    )
+    assert provenance["preprocessed_raw_cache_version"] == (
+        process_runner.PREPROC_CACHE_VERSION
+    )
+    assert provenance["geometry"] == biosemi64_geometry_identity(
+        retained_channels=("Cz", "Pz")
+    )
+    assert provenance["analysis_span_plan_version"] == "analysis_span_plan_v1"
+    assert provenance["source_analysis_span_plan"]["fingerprint"]
+    assert provenance["realized_analysis_span_plan"]["fingerprint"]
     assert result["source_derivative_status"] == "complete"
     assert result["source_derivative_warning"] == ""
     assert result["source_derivative_manifest"].endswith("manifests/fake.json")
@@ -1084,7 +1204,7 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     assert len(result["source_derivative_outputs"]) == 3
 
 
-def test_run_full_pipeline_uses_condition_specific_oddball_markers(
+def test_run_full_pipeline_uses_one_project_oddball_marker_across_conditions(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -1095,13 +1215,15 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
     events = np.asarray(
         [
             [100, 0, 1],
-            [200, 0, 51],
-            [840, 0, 51],
-            [1480, 0, 51],
+            [200, 0, 55],
+            [413, 0, 55],
+            [627, 0, 55],
+            [840, 0, 55],
             [2200, 0, 2],
-            [2300, 0, 52],
-            [2940, 0, 52],
-            [3580, 0, 52],
+            [2300, 0, 55],
+            [2513, 0, 55],
+            [2727, 0, 55],
+            [2940, 0, 55],
         ],
         dtype=int,
     )
@@ -1115,7 +1237,7 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
     monkeypatch.setattr(
         process_runner.backend_preprocess,
         "perform_preprocessing",
-        lambda raw_input, params, log_func, filename_for_log: (raw_input, 0),
+        _passthrough_preprocessing_with_realized_spans,
     )
     monkeypatch.setattr(
         process_runner.backend_preprocess,
@@ -1162,6 +1284,16 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
             "enable_preprocessed_cache": False,
             "_fpvs_processing_fingerprint": "fixture-fingerprint",
             "_fpvs_processing_fingerprint_version": "fixture-version",
+            **_protocol_settings(
+                file_path=fake_bdf,
+                events=events,
+                event_map={"fruit": 1, "veg": 2},
+                sfreq=256,
+                n_times=5000,
+                presentation_rate_hz=6,
+                oddball_every_n=5,
+                expected_cycles=3,
+            ),
         },
         event_map={"fruit": 1, "veg": 2},
         save_folder=tmp_path / "out",
@@ -1171,10 +1303,14 @@ def test_run_full_pipeline_uses_condition_specific_oddball_markers(
     assert result["status"] == "ok"
     fruit_epochs = captured["epochs_dict"]["fruit"][0]
     veg_epochs = captured["epochs_dict"]["veg"][0]
-    assert fruit_epochs.metadata["crop_mode"].tolist() == ["55_onbin"]
-    assert veg_epochs.metadata["crop_mode"].tolist() == ["55_onbin"]
-    assert fruit_epochs.metadata["oddball_id"].tolist() == [51]
-    assert veg_epochs.metadata["oddball_id"].tolist() == [52]
+    assert fruit_epochs.metadata["crop_mode"].tolist() == [
+        "project_marker_plan_target_grid_v2"
+    ]
+    assert veg_epochs.metadata["crop_mode"].tolist() == [
+        "project_marker_plan_target_grid_v2"
+    ]
+    assert fruit_epochs.metadata["oddball_id"].tolist() == [55]
+    assert veg_epochs.metadata["oddball_id"].tolist() == [55]
     assert int(fruit_epochs.get_data().shape[2]) % 640 == 0
     assert int(veg_epochs.get_data().shape[2]) % 640 == 0
     assert result["post_export_ok"] is True
@@ -1191,34 +1327,16 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
     raw = _with_biosemi64_montage(
         mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
     )
-    events = np.asarray([[8, 0, 21], [32, 0, 21]], dtype=int)
-    crop_results = {
-        (21, 0): CropResult(
-            crop_start_sample=8,
-            n_samples=4,
-            n55_raw=2,
-            n55_dedup=2,
-            cycles=1,
-            block_start_sample=8,
-            block_end_sample=24,
-            first55_sample=8,
-            last55_sample=12,
-            available_samples=4,
-            fallback=False,
-        ),
-        (21, 1): CropResult(
-            crop_start_sample=32,
-            n_samples=0,
-            n55_raw=0,
-            n55_dedup=0,
-            cycles=0,
-            block_start_sample=32,
-            block_end_sample=48,
-            available_samples=0,
-            fallback=True,
-            fallback_reason="insufficient_55",
-        ),
-    }
+    events = np.asarray(
+        [
+            [8, 0, 21],
+            [10, 0, 55],
+            [14, 0, 55],
+            [32, 0, 21],
+            [34, 0, 55],
+        ],
+        dtype=int,
+    )
     post_export_calls: list[str] = []
 
     monkeypatch.setattr(
@@ -1253,12 +1371,6 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
         "Main_App.exports.post_export_adapter.run_post_export",
         _unexpected_post_export,
     )
-    monkeypatch.setattr(process_runner, "compute_fft_crop_from_events", lambda **_kwargs: (crop_results, 4, []))
-    monkeypatch.setattr(
-        process_runner,
-        "compute_onbin_step",
-        lambda fs, f_oddball=process_runner.ODDBALL_FREQ: (int(fs), 4, None),
-    )
     monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
     fake_bdf = tmp_path / "fake.bdf"
@@ -1271,6 +1383,16 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
             "enable_preprocessed_cache": False,
+            **_protocol_settings(
+                file_path=fake_bdf,
+                events=events,
+                event_map={"A": 21},
+                sfreq=8,
+                n_times=64,
+                presentation_rate_hz=4,
+                oddball_every_n=2,
+                expected_cycles=1,
+            ),
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -1278,9 +1400,8 @@ def test_run_full_pipeline_hard_fails_when_locked_fft_crop_is_missing(
     )
 
     assert result["status"] == "error"
-    assert result["stage"] == "epochs"
-    assert "Locked FFT crop required" in str(result["error"])
-    assert "Fixed-epoch fallback is disabled" in str(result["error"])
+    assert result["stage"] == "preflight"
+    assert "require review" in str(result["error"])
     assert post_export_calls == []
 
 
@@ -1380,7 +1501,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v10-biosemi64-geometry"
+    assert payload["version"] == "preprocessed-raw-v11-analyzed-intervals"
     assert payload["geometry"] == biosemi64_geometry_identity(
         retained_channels=("Fp1",)
     )
@@ -1437,6 +1558,186 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         {"center_hz": 120.0, "reason": "above_low_pass_transition"},
         {"center_hz": 180.0, "reason": "above_low_pass_transition"},
     ]
+
+
+def test_preprocessed_cache_identity_and_hit_require_current_span_plan(
+    tmp_path: Path,
+) -> None:
+    info = mne.create_info(["Fp1", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    )
+    fake_bdf = tmp_path / "span-cache.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    event_map = {"A": 21}
+    events = np.asarray(
+        [[0, 0, 21], [2, 0, 55], [6, 0, 55]],
+        dtype=int,
+    )
+    protocol_settings = _protocol_settings(
+        file_path=fake_bdf,
+        events=events,
+        event_map=event_map,
+        sfreq=8,
+        n_times=16,
+        presentation_rate_hz=4,
+        oddball_every_n=2,
+        expected_cycles=1,
+    )
+    event_plan = protocol_settings["_fpvs_preflight_event_plans_by_file"][
+        str(fake_bdf.resolve())
+    ]
+    source_plan = read_source_analysis_span_plan(event_plan)
+    target_plan = realize_target_analysis_span_plan(
+        source_plan,
+        target_sfreq_hz=8,
+        target_n_times=16,
+        target_first_samp=0,
+    )
+    settings = {
+        "stim_channel": "Status",
+        "ref_channel1": "EXG1",
+        "ref_channel2": "EXG2",
+        "downsample_rate": 8,
+        "max_idx_keep": 1,
+        "enable_preprocessed_cache": True,
+        "_fpvs_require_analysis_spans": True,
+        "_fpvs_source_analysis_span_plan": source_plan,
+        "_fpvs_realized_analysis_span_plan": target_plan,
+    }
+    payload = process_runner._preproc_cache_payload(
+        fake_bdf,
+        settings,
+        mne_version=str(mne.__version__),
+    )
+    assert payload["analysis_span_plan"]["fingerprint"] == source_plan[
+        "fingerprint"
+    ]
+    assert process_runner._store_preprocessed_cache(
+        raw=raw,
+        file_path=fake_bdf,
+        settings=settings,
+        project_root=tmp_path / "project",
+        mne_module=mne,
+        audit_before={"file": fake_bdf.name},
+        n_rejected=0,
+    ) == "stored"
+
+    cache_key = process_runner._preproc_cache_key(payload)
+    _raw_path, meta_path = process_runner._preproc_cache_paths(
+        tmp_path / "project",
+        fake_bdf,
+        cache_key,
+    )
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    metadata.pop("realized_analysis_span_plan")
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    loaded, _audit, _n_rejected, status = process_runner._load_preprocessed_cache(
+        file_path=fake_bdf,
+        settings={
+            **settings,
+            "_fpvs_realized_analysis_span_plan": None,
+        },
+        project_root=tmp_path / "project",
+        mne_module=mne,
+    )
+    assert loaded is None
+    assert status == "miss_missing_analysis_spans"
+
+
+def test_preprocessed_cache_key_binds_current_protocol_and_condition_map(
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "context-cache.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    changed_marker_protocol = FrequencyProtocol.from_recurrence(
+        6,
+        5,
+        expected_analyzed_oddball_cycles=144,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        oddball_marker_code=56,
+    )
+    settings = {"stim_channel": "Status", "max_idx_keep": 64}
+
+    original = process_runner._preproc_cache_payload(
+        fake_bdf,
+        settings,
+        mne_version=str(mne.__version__),
+        frequency_protocol=protocol,
+        event_map={"Faces": 21},
+    )
+    changed_protocol = process_runner._preproc_cache_payload(
+        fake_bdf,
+        settings,
+        mne_version=str(mne.__version__),
+        frequency_protocol=changed_marker_protocol,
+        event_map={"Faces": 21},
+    )
+    changed_event_map = process_runner._preproc_cache_payload(
+        fake_bdf,
+        settings,
+        mne_version=str(mne.__version__),
+        frequency_protocol=protocol,
+        event_map={"Objects": 21},
+    )
+
+    assert original["frequency_protocol"] == {
+        "canonical_payload": protocol.canonical_payload(),
+        "fingerprint": protocol.fingerprint,
+    }
+    assert original["condition_event_map"] == {"Faces": 21}
+    assert process_runner._preproc_cache_key(original) != (
+        process_runner._preproc_cache_key(changed_protocol)
+    )
+    assert process_runner._preproc_cache_key(original) != (
+        process_runner._preproc_cache_key(changed_event_map)
+    )
+
+
+def test_runner_rejects_stale_event_map_before_cache_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "stale-plan.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    _events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256,
+        n_times=128,
+        event_map={"Faces": 21},
+    )
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.inspect_bdf_header",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(
+        process_runner,
+        "_load_preprocessed_cache",
+        lambda **_kwargs: pytest.fail("stale context reached cache lookup"),
+    )
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "enable_preprocessed_cache": True,
+            **plan_settings,
+        },
+        event_map={"Objects": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "error"
+    assert result["stage"] == "preflight"
+    assert "event map is stale" in str(result["error"])
 
 
 def test_preprocessed_cache_key_tracks_fft_multinotch_settings(tmp_path: Path) -> None:

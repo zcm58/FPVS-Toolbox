@@ -10,7 +10,8 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Any, Mapping, TypeAlias
 
-FREQUENCY_PROTOCOL_VERSION = "1.0.0"
+LEGACY_FREQUENCY_PROTOCOL_VERSION = "1.0.0"
+FREQUENCY_PROTOCOL_VERSION = "1.1.0"
 
 ODDBALL_INPUT_MODE_RECURRENCE = "oddball_every_n"
 ODDBALL_INPUT_MODE_DIRECT_HZ = "oddball_rate_hz"
@@ -21,6 +22,11 @@ FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED = "confirmation_required"
 
 EXPECTED_CYCLES_SOURCE_MANUAL = "manual"
 EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT = "fpvs_studio_import"
+
+ODDBALL_MARKER_SOURCE_MANUAL = "manual"
+ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT = "fpvs_studio_import"
+ODDBALL_MARKER_SOURCE_LEGACY_DEFAULT_55 = "legacy_default_55"
+ODDBALL_MARKER_SOURCE_LEGACY_EVIDENCE = "legacy_evidence"
 
 # Protocol v1 accepts a directly entered rate when it is no farther than half
 # of one four-decimal display unit from an exact whole-stimulus recurrence.
@@ -33,6 +39,7 @@ DIRECT_HZ_DISPLAY_TOLERANCE_HZ = Fraction(
 
 DEFAULT_PRESENTATION_RATE_HZ = Fraction(6, 1)
 DEFAULT_ODDBALL_EVERY_N = 5
+DEFAULT_ODDBALL_MARKER_CODE = 55
 
 RateValue: TypeAlias = Fraction | Decimal | int | float | str
 
@@ -156,6 +163,8 @@ class FrequencyProtocol:
     entered_oddball_rate_hz: str | None
     expected_analyzed_oddball_cycles: int | None
     expected_analyzed_oddball_cycles_source: str | None
+    oddball_marker_code: int | None
+    oddball_marker_code_source: str | None
 
     def __post_init__(self) -> None:
         if self.version != FREQUENCY_PROTOCOL_VERSION:
@@ -171,8 +180,11 @@ class FrequencyProtocol:
         if self.status not in valid_statuses:
             raise FrequencyProtocolError(f"Unsupported frequency protocol status {self.status!r}.")
 
-        if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
-            values = (
+        marker_confirmation_required = (
+            self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
+        )
+        if marker_confirmation_required:
+            protocol_values = (
                 self.presentation_rate_hz,
                 self.oddball_input_mode,
                 self.oddball_every_n,
@@ -181,11 +193,17 @@ class FrequencyProtocol:
                 self.expected_analyzed_oddball_cycles,
                 self.expected_analyzed_oddball_cycles_source,
             )
-            if any(value is not None for value in values):
+            marker_values = (
+                self.oddball_marker_code,
+                self.oddball_marker_code_source,
+            )
+            if any(value is not None for value in marker_values):
                 raise FrequencyProtocolError(
-                    "A confirmation-required protocol cannot claim canonical rate or cycle values."
+                    "A confirmation-required protocol cannot claim a confirmed oddball "
+                    "marker code or source."
                 )
-            return
+            if not any(value is not None for value in protocol_values):
+                return
 
         presentation_rate = _positive_fraction(
             self.presentation_rate_hz,
@@ -256,12 +274,31 @@ class FrequencyProtocol:
                     "'fpvs_studio_import'."
                 )
 
+        marker_code: int | None = None
+        marker_source: str | None = None
+        if not marker_confirmation_required:
+            marker_code = _positive_integer(
+                self.oddball_marker_code,
+                field_name="oddball_marker_code",
+            )
+            marker_source = str(self.oddball_marker_code_source or "").strip()
+            if marker_source not in {
+                ODDBALL_MARKER_SOURCE_MANUAL,
+                ODDBALL_MARKER_SOURCE_FPVS_STUDIO_IMPORT,
+                ODDBALL_MARKER_SOURCE_LEGACY_DEFAULT_55,
+                ODDBALL_MARKER_SOURCE_LEGACY_EVIDENCE,
+            }:
+                raise FrequencyProtocolError(
+                    "oddball_marker_code_source must identify manual, FPVS Studio, "
+                    "or explicit legacy confirmation."
+                )
+
         expected_status = (
             FREQUENCY_PROTOCOL_STATUS_READY
             if cycles is not None
             else FREQUENCY_PROTOCOL_STATUS_INCOMPLETE
         )
-        if self.status != expected_status:
+        if not marker_confirmation_required and self.status != expected_status:
             raise FrequencyProtocolError(
                 f"Frequency protocol status must be {expected_status!r} for its cycle fields."
             )
@@ -275,6 +312,8 @@ class FrequencyProtocol:
         object.__setattr__(self, "entered_oddball_rate_hz", entered_text)
         object.__setattr__(self, "expected_analyzed_oddball_cycles", cycles)
         object.__setattr__(self, "expected_analyzed_oddball_cycles_source", source)
+        object.__setattr__(self, "oddball_marker_code", marker_code)
+        object.__setattr__(self, "oddball_marker_code_source", marker_source)
 
     @classmethod
     def confirmation_required(cls) -> "FrequencyProtocol":
@@ -290,6 +329,8 @@ class FrequencyProtocol:
             entered_oddball_rate_hz=None,
             expected_analyzed_oddball_cycles=None,
             expected_analyzed_oddball_cycles_source=None,
+            oddball_marker_code=None,
+            oddball_marker_code_source=None,
         )
 
     @classmethod
@@ -300,6 +341,8 @@ class FrequencyProtocol:
         *,
         expected_analyzed_oddball_cycles: Any | None = None,
         expected_analyzed_oddball_cycles_source: str | None = None,
+        oddball_marker_code: Any = DEFAULT_ODDBALL_MARKER_CODE,
+        oddball_marker_code_source: str = ODDBALL_MARKER_SOURCE_MANUAL,
     ) -> "FrequencyProtocol":
         presentation_rate = _positive_fraction(
             presentation_rate_hz,
@@ -324,6 +367,8 @@ class FrequencyProtocol:
             entered_oddball_rate_hz=None,
             expected_analyzed_oddball_cycles=cycles,
             expected_analyzed_oddball_cycles_source=source,
+            oddball_marker_code=oddball_marker_code,
+            oddball_marker_code_source=oddball_marker_code_source,
         )
 
     @classmethod
@@ -334,6 +379,8 @@ class FrequencyProtocol:
         *,
         expected_analyzed_oddball_cycles: Any | None = None,
         expected_analyzed_oddball_cycles_source: str | None = None,
+        oddball_marker_code: Any = DEFAULT_ODDBALL_MARKER_CODE,
+        oddball_marker_code_source: str = ODDBALL_MARKER_SOURCE_MANUAL,
     ) -> "FrequencyProtocol":
         presentation_rate = _positive_fraction(
             presentation_rate_hz,
@@ -375,6 +422,8 @@ class FrequencyProtocol:
             entered_oddball_rate_hz=str(oddball_rate_hz).strip(),
             expected_analyzed_oddball_cycles=cycles,
             expected_analyzed_oddball_cycles_source=source,
+            oddball_marker_code=oddball_marker_code,
+            oddball_marker_code_source=oddball_marker_code_source,
         )
 
     @classmethod
@@ -385,6 +434,19 @@ class FrequencyProtocol:
             raise FrequencyProtocolError("frequency_protocol must be a JSON object.")
         version = str(value.get("version") or "").strip()
         status = str(value.get("status") or "").strip()
+        has_marker_code = "oddball_marker_code" in value
+        has_marker_source = "oddball_marker_code_source" in value
+        if version == LEGACY_FREQUENCY_PROTOCOL_VERSION:
+            if has_marker_code != has_marker_source:
+                raise FrequencyProtocolError(
+                    "Legacy frequency protocol marker identity is incomplete."
+                )
+            version = FREQUENCY_PROTOCOL_VERSION
+            if not has_marker_code:
+                # Protocol v1.0 predated project-owned marker identity. Preserve
+                # every validated rate/cycle field, but require the proposed
+                # marker code to be explicitly confirmed before processing.
+                status = FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED
         if status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
             return cls(
                 version=version,
@@ -400,6 +462,8 @@ class FrequencyProtocol:
                 expected_analyzed_oddball_cycles_source=value.get(
                     "expected_analyzed_oddball_cycles_source"
                 ),
+                oddball_marker_code=value.get("oddball_marker_code"),
+                oddball_marker_code_source=value.get("oddball_marker_code_source"),
             )
         if not status:
             status = (
@@ -452,6 +516,8 @@ class FrequencyProtocol:
             entered_oddball_rate_hz=entered_rate,
             expected_analyzed_oddball_cycles=cycles,
             expected_analyzed_oddball_cycles_source=source,
+            oddball_marker_code=value.get("oddball_marker_code"),
+            oddball_marker_code_source=value.get("oddball_marker_code_source"),
         )
 
     @property
@@ -495,6 +561,8 @@ class FrequencyProtocol:
             "expected_analyzed_oddball_cycles_source": (
                 self.expected_analyzed_oddball_cycles_source
             ),
+            "oddball_marker_code": self.oddball_marker_code,
+            "oddball_marker_code_source": self.oddball_marker_code_source,
         }
 
     def canonical_json(self) -> str:
@@ -526,6 +594,24 @@ class FrequencyProtocol:
             status=status,
             expected_analyzed_oddball_cycles=normalized_cycles,
             expected_analyzed_oddball_cycles_source=normalized_source,
+        )
+
+    def with_oddball_marker_code(
+        self,
+        marker_code: Any,
+        *,
+        source: str,
+    ) -> "FrequencyProtocol":
+        """Return the same rate/cycle protocol with explicit marker identity."""
+
+        if self.status == FREQUENCY_PROTOCOL_STATUS_CONFIRMATION_REQUIRED:
+            raise FrequencyProtocolError(
+                "Confirm canonical project rates before setting the oddball marker code."
+            )
+        return replace(
+            self,
+            oddball_marker_code=marker_code,
+            oddball_marker_code_source=source,
         )
 
     def expected_analyzed_samples(self, sampling_rate_hz: RateValue) -> int:
@@ -596,6 +682,32 @@ def normalize_frequency_protocol(
     if isinstance(value, FrequencyProtocol):
         return value
     return FrequencyProtocol.from_manifest(value)
+
+
+def validate_protocol_condition_codes(
+    protocol: FrequencyProtocol,
+    condition_onset_codes: Any,
+) -> None:
+    """Reject a project marker code that is also a condition-onset code."""
+
+    if protocol.oddball_marker_code is None:
+        raise FrequencyProtocolError(
+            "Confirm the project oddball marker code before processing."
+        )
+    try:
+        onset_codes = {
+            _positive_integer(value, field_name="condition_onset_code")
+            for value in condition_onset_codes
+        }
+    except TypeError as exc:
+        raise FrequencyProtocolError(
+            "condition_onset_codes must be an iterable of positive integers."
+        ) from exc
+    if protocol.oddball_marker_code in onset_codes:
+        raise FrequencyProtocolError(
+            f"Oddball marker code {protocol.oddball_marker_code} is also a "
+            "condition-onset code. Choose a distinct project marker code."
+        )
 
 
 def enumerate_exact_harmonics(

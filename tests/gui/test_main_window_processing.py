@@ -11,12 +11,14 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
+from Main_App.projects import FrequencyProtocol
 from Main_App.projects.project import Project
 import Main_App.processing.preprocess as backend_preprocess
 import Main_App.projects.project_manager as project_manager
 import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 import Main_App.io.load_utils as load_utils
 import Main_App.gui.processing_inputs as processing_inputs
+import Main_App.gui.processing_workflows as processing_workflows
 import Main_App.processing.processing as processing
 import Main_App.Shared.post_process as post_process
 from Main_App.Shared import user_messages
@@ -40,6 +42,11 @@ def _stub_processing(monkeypatch, projects_root: Path) -> None:
         processing_inputs,
         "run_preprocessing_qc_workflow",
         lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        processing_workflows,
+        "_freeze_expected_processing_matrix",
+        lambda *_args, **_kwargs: None,
     )
 
     def fail_compat_start(self):
@@ -82,6 +89,14 @@ def _create_project(root: Path) -> Project:
     (data_dir / "sample.bdf").touch()
     project = Project.load(proj_root)
     project.input_folder = data_dir
+    project.update_frequency_protocol(
+        FrequencyProtocol.from_recurrence(
+            "6",
+            5,
+            expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source="manual",
+        )
+    )
     project.save()
     return project
 

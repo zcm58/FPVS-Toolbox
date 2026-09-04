@@ -50,6 +50,14 @@ from Main_App.gui.manual_removed_electrodes_dialog import ManualRemovedElectrode
 from Main_App.gui.participant_condition_exclusions_dialog import (
     ParticipantConditionExclusionsDialog,
 )
+from Main_App.gui.project_protocol import (
+    ProtocolEditorValues,
+    build_manual_protocol,
+    duration_summary,
+    editor_values_for_protocol,
+    protocol_settings_save_requested,
+    rate_summary,
+)
 from Main_App.gui.recording_qc_identity import project_recording_coverage_rows
 from Main_App.gui.roi_settings_editor import ROISettingsEditor
 from Main_App.processing.processing_controller import prepare_batch_file_infos
@@ -60,13 +68,28 @@ from Main_App.processing.frequency_domain_qc import (
     mark_frequency_domain_outputs_stale,
     thresholds_summary_lines,
 )
-from Main_App.projects import DatasetIndexError, load_project_dataset_index
+from Main_App.projects import (
+    DatasetIndexError,
+    ExperimentalQcSettings,
+    ExperimentalQcSettingsError,
+    FrequencyProtocol,
+    FrequencyProtocolError,
+    ODDBALL_INPUT_MODE_DIRECT_HZ,
+    ODDBALL_INPUT_MODE_RECURRENCE,
+    SUMMED_BCA_SCREENING_BRIEF_TEXT,
+    SummedBcaScreeningSettings,
+    load_project_dataset_index,
+    validate_protocol_condition_codes,
+)
 from Main_App.projects.projects_root import changeProjectsRoot
 from Main_App.projects.project import Project
 from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MAPPING_PROFILE_ANATOMICAL,
     ELECTRODE_MONTAGE_BIOSEMI64,
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     PREPROCESSING_DEFAULTS,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED,
     SUPPORTED_ELECTRODE_MAPPING_PROFILES,
     SUPPORTED_ELECTRODE_MONTAGES,
     normalize_manual_excluded_participant_conditions,
@@ -78,7 +101,6 @@ from Main_App.projects.preprocessing_settings import (
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
-    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     REMOVED_ELECTRODE_DETECTION_MODE_OFF,
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
@@ -250,11 +272,16 @@ class SettingsDialog(QDialog):
 
         preproc_tab = self._init_preproc_tab(self.tabs)
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
+        protocol_tab = self._init_protocol_tab(self.tabs)
+        self._protocol_tab_index = self.tabs.indexOf(protocol_tab)
         harmonic_tab = self._init_harmonic_tab(self.tabs)
         self._harmonic_tab_index = self.tabs.indexOf(harmonic_tab)
         self._init_stats_tab(self.tabs)
         self._init_rois_tab(self.tabs)
+        experimental_tab = self._init_experimental_tab(self.tabs)
+        self._experimental_tab_index = self.tabs.indexOf(experimental_tab)
         self._init_advanced_tab(self.tabs)
+        self._initial_protocol_editor_values = self._protocol_editor_values()
         self._initial_harmonic_settings_signature = (
             self._harmonic_settings_signature_from_preprocessing(
                 self._project_preprocessing()
@@ -495,6 +522,206 @@ class SettingsDialog(QDialog):
                 lambda canon=canonical, field=edit: self._on_preproc_edit_finished(canon, field)
             )
 
+        return tab
+
+    def _init_protocol_tab(self, tabs: QTabWidget) -> QWidget:
+        tab = QWidget()
+        tab.setObjectName("settings_protocol_tab")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        protocol_card = SectionCard(
+            "Project FPVS Protocol",
+            tab,
+            object_name="settings_project_protocol_card",
+        )
+        protocol_form = make_form_layout()
+
+        if self.project is None:
+            values = None
+        else:
+            values = editor_values_for_protocol(self.project.frequency_protocol)
+
+        self.protocol_presentation_rate_edit = QLineEdit(protocol_card)
+        self.protocol_presentation_rate_edit.setObjectName(
+            "settings_protocol_presentation_rate_hz"
+        )
+        self.protocol_presentation_rate_edit.setPlaceholderText("6")
+        self.protocol_presentation_rate_edit.setToolTip(
+            "The project-wide visual presentation rate in Hz. Decimal and exact "
+            "fraction entries are accepted."
+        )
+        protocol_form.addRow(
+            QLabel("Presentation rate (Hz):", protocol_card),
+            self.protocol_presentation_rate_edit,
+        )
+
+        self.protocol_oddball_mode_combo = QComboBox(protocol_card)
+        self.protocol_oddball_mode_combo.setObjectName(
+            "settings_protocol_oddball_input_mode"
+        )
+        self.protocol_oddball_mode_combo.addItem(
+            "Oddball every N stimuli",
+            ODDBALL_INPUT_MODE_RECURRENCE,
+        )
+        self.protocol_oddball_mode_combo.addItem(
+            "Direct oddball frequency",
+            ODDBALL_INPUT_MODE_DIRECT_HZ,
+        )
+        protocol_form.addRow(
+            QLabel("Oddball specification:", protocol_card),
+            self.protocol_oddball_mode_combo,
+        )
+
+        self.protocol_oddball_every_n_edit = QLineEdit(protocol_card)
+        self.protocol_oddball_every_n_edit.setObjectName(
+            "settings_protocol_oddball_every_n"
+        )
+        self.protocol_oddball_every_n_edit.setPlaceholderText("5")
+        self.protocol_oddball_every_n_edit.setToolTip(
+            "A whole number of stimuli between oddballs; the minimum is 2."
+        )
+        protocol_form.addRow(
+            QLabel("Oddball every N stimuli:", protocol_card),
+            self.protocol_oddball_every_n_edit,
+        )
+
+        self.protocol_direct_oddball_rate_edit = QLineEdit(protocol_card)
+        self.protocol_direct_oddball_rate_edit.setObjectName(
+            "settings_protocol_direct_oddball_rate_hz"
+        )
+        self.protocol_direct_oddball_rate_edit.setPlaceholderText("1.2")
+        self.protocol_direct_oddball_rate_edit.setToolTip(
+            "The entered rate must resolve to a whole-number stimulus recurrence."
+        )
+        protocol_form.addRow(
+            QLabel("Direct oddball frequency (Hz):", protocol_card),
+            self.protocol_direct_oddball_rate_edit,
+        )
+
+        self.protocol_expected_cycles_edit = QLineEdit(protocol_card)
+        self.protocol_expected_cycles_edit.setObjectName(
+            "settings_protocol_expected_analyzed_cycles"
+        )
+        self.protocol_expected_cycles_edit.setPlaceholderText("144")
+        self.protocol_expected_cycles_edit.setToolTip(
+            "The project-wide number of complete oddball cycles intended for the FFT."
+        )
+        protocol_form.addRow(
+            QLabel("Expected analyzed oddball cycles:", protocol_card),
+            self.protocol_expected_cycles_edit,
+        )
+
+        self.protocol_oddball_marker_code_edit = QLineEdit(protocol_card)
+        self.protocol_oddball_marker_code_edit.setObjectName(
+            "settings_protocol_oddball_marker_code"
+        )
+        self.protocol_oddball_marker_code_edit.setPlaceholderText("55")
+        self.protocol_oddball_marker_code_edit.setToolTip(
+            "The project-wide event code emitted for each oddball. It must differ "
+            "from every condition-onset code."
+        )
+        protocol_form.addRow(
+            QLabel("Oddball marker code:", protocol_card),
+            self.protocol_oddball_marker_code_edit,
+        )
+        self.protocol_marker_code_help = QLabel(
+            "Oddball marker code: Event code emitted for each oddball in every "
+            "condition. Default: 55.",
+            protocol_card,
+        )
+        self.protocol_marker_code_help.setObjectName(
+            "settings_protocol_oddball_marker_code_help"
+        )
+        self.protocol_marker_code_help.setWordWrap(True)
+
+        self.protocol_resolved_oddball_rate_edit = QLineEdit(protocol_card)
+        self.protocol_resolved_oddball_rate_edit.setObjectName(
+            "settings_protocol_resolved_oddball_rate_hz"
+        )
+        self.protocol_resolved_oddball_rate_edit.setReadOnly(True)
+        protocol_form.addRow(
+            QLabel("Resolved oddball frequency:", protocol_card),
+            self.protocol_resolved_oddball_rate_edit,
+        )
+
+        self.protocol_derived_duration_edit = QLineEdit(protocol_card)
+        self.protocol_derived_duration_edit.setObjectName(
+            "settings_protocol_derived_duration"
+        )
+        self.protocol_derived_duration_edit.setReadOnly(True)
+        protocol_form.addRow(
+            QLabel("Expected analyzed duration:", protocol_card),
+            self.protocol_derived_duration_edit,
+        )
+        protocol_card.content_layout.addLayout(protocol_form)
+        protocol_card.content_layout.addWidget(self.protocol_marker_code_help)
+
+        self.protocol_status = StatusBanner("", protocol_card, variant="info")
+        self.protocol_status.setObjectName("settings_protocol_status")
+        protocol_card.content_layout.addWidget(self.protocol_status)
+        layout.addWidget(protocol_card)
+
+        if values is not None:
+            self.protocol_presentation_rate_edit.setText(values.presentation_rate_hz)
+            mode_index = self.protocol_oddball_mode_combo.findData(
+                values.oddball_input_mode
+            )
+            self.protocol_oddball_mode_combo.setCurrentIndex(max(0, mode_index))
+            self.protocol_oddball_every_n_edit.setText(values.oddball_every_n)
+            self.protocol_direct_oddball_rate_edit.setText(
+                values.entered_oddball_rate_hz
+            )
+            self.protocol_expected_cycles_edit.setText(
+                values.expected_analyzed_oddball_cycles
+            )
+            self.protocol_oddball_marker_code_edit.setText(
+                values.oddball_marker_code
+            )
+
+        project_enabled = self.project is not None
+        for widget in (
+            self.protocol_presentation_rate_edit,
+            self.protocol_oddball_mode_combo,
+            self.protocol_oddball_every_n_edit,
+            self.protocol_direct_oddball_rate_edit,
+            self.protocol_expected_cycles_edit,
+            self.protocol_oddball_marker_code_edit,
+        ):
+            widget.setEnabled(project_enabled)
+
+        self.protocol_oddball_mode_combo.currentIndexChanged.connect(
+            self._refresh_protocol_preview
+        )
+        self.protocol_presentation_rate_edit.textChanged.connect(
+            self._refresh_protocol_preview
+        )
+        self.protocol_oddball_every_n_edit.textChanged.connect(
+            self._refresh_protocol_preview
+        )
+        self.protocol_direct_oddball_rate_edit.textChanged.connect(
+            self._refresh_protocol_preview
+        )
+        self.protocol_expected_cycles_edit.textChanged.connect(
+            self._refresh_protocol_preview
+        )
+        self.protocol_oddball_marker_code_edit.textChanged.connect(
+            self._refresh_protocol_preview
+        )
+        self._protocol_requires_confirmation = bool(
+            values is not None and values.requires_confirmation
+        )
+        self._refresh_protocol_preview()
+
+        # Temporary aliases keep established internal consumers on the new
+        # project-owned widgets until the Wave 4 ceiling cleanup lands.
+        self.base_freq_edit = self.protocol_presentation_rate_edit
+        self.oddball_freq_edit = self.protocol_resolved_oddball_rate_edit
+
+        layout.addStretch(1)
+        self._add_settings_footer(tab, layout, "settings_protocol_footer")
+        tabs.addTab(tab, "Protocol")
         return tab
 
     def _init_harmonic_tab(self, tabs: QTabWidget) -> QWidget:
@@ -875,16 +1102,6 @@ class SettingsDialog(QDialog):
         )
         analysis_form = make_form_layout()
 
-        self.base_freq_edit = QLineEdit(self.manager.get("analysis", "base_freq", "6.0"))
-        analysis_form.addRow(QLabel("FPVS base frequency (Hz):"), self.base_freq_edit)
-
-        self.oddball_freq_edit = QLineEdit(str(config.DEFAULT_ODDBALL_FREQ))
-        self.oddball_freq_edit.setReadOnly(True)
-        self.oddball_freq_edit.setToolTip(
-            "Locked at 1.2 Hz. Use BCA harmonic upper limit to choose how high harmonics are calculated."
-        )
-        analysis_form.addRow(QLabel("Oddball frequency (Hz):"), self.oddball_freq_edit)
-
         self.bca_limit_edit = QLineEdit(self.manager.get("analysis", "bca_upper_limit", "16.8"))
         analysis_form.addRow(QLabel("BCA harmonic upper limit:"), self.bca_limit_edit)
 
@@ -992,6 +1209,391 @@ class SettingsDialog(QDialog):
         tabs.addTab(tab, "ROIs")
 
     # ------------------------------------------------------------------
+    def _init_experimental_tab(self, tabs: QTabWidget) -> QWidget:
+        tab = QWidget()
+        tab.setObjectName("settings_experimental_tab")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        if self.project is not None:
+            qc_preproc = self._project_preprocessing()
+            experimental_settings = self.project.experimental_qc_settings
+        else:
+            qc_preproc = normalize_preprocessing_settings(
+                {
+                    **PREPROCESSING_DEFAULTS,
+                    "removed_electrode_detection_choice_schema_version": "1.0.0",
+                    "removed_electrode_detection_choice_status": "ready",
+                    "removed_electrode_detection_choice_source": (
+                        "new_project_default_off"
+                    ),
+                }
+            )
+            experimental_settings = ExperimentalQcSettings()
+
+        removed_detection_mode = normalize_removed_electrode_detection_mode(
+            qc_preproc.get("removed_electrode_detection_mode"),
+            auto_detect_removed_electrodes=qc_preproc.get(
+                "auto_detect_removed_electrodes",
+                False,
+            ),
+        )
+        self._initial_removed_electrode_detection_mode = removed_detection_mode
+        self._removed_electrode_choice_unresolved = (
+            self.project is not None
+            and qc_preproc.get("removed_electrode_detection_choice_status")
+            == REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+        )
+        self._manual_removed_electrodes_by_pid = (
+            normalize_manual_removed_electrodes_map(
+                qc_preproc.get("manual_removed_electrodes", {})
+            )
+        )
+        self._manual_removed_electrodes_by_recording = (
+            normalize_manual_removed_electrodes_map(
+                qc_preproc.get("manual_removed_electrodes_by_recording", {})
+            )
+        )
+
+        recording_aware_qc = bool(
+            self.project is not None
+            and (getattr(self.project, "sessions", {}) or {})
+        )
+        detector_card = SectionCard(
+            "Experimental Removed-Electrode Detection",
+            tab,
+            object_name="settings_experimental_removed_electrode_card",
+        )
+        detector_text = QLabel(
+            "Automatic detection was developed with one lab's BioSemi ActiveTwo "
+            "64 recordings. Treat its output as suggestions for review. Manual "
+            "removed-electrode lists are controlled separately.",
+            detector_card,
+        )
+        detector_text.setObjectName(
+            "settings_experimental_removed_electrode_explanation"
+        )
+        detector_text.setWordWrap(True)
+        detector_card.content_layout.addWidget(detector_text)
+
+        detector_form = make_form_layout()
+        self.removed_electrode_detection_mode_combo = QComboBox(detector_card)
+        self.removed_electrode_detection_mode_combo.setObjectName(
+            "settings_removed_electrode_detection_mode"
+        )
+        if self._removed_electrode_choice_unresolved:
+            self.removed_electrode_detection_mode_combo.addItem(
+                "Choose before processing (Off recommended)",
+                None,
+            )
+        self.removed_electrode_detection_mode_combo.addItem(
+            "Off (recommended)",
+            REMOVED_ELECTRODE_DETECTION_MODE_OFF,
+        )
+        self.removed_electrode_detection_mode_combo.addItem(
+            "On",
+            REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+        )
+        if self._removed_electrode_choice_unresolved:
+            self.removed_electrode_detection_mode_combo.setCurrentIndex(0)
+        else:
+            mode_index = self.removed_electrode_detection_mode_combo.findData(
+                removed_detection_mode
+            )
+            self.removed_electrode_detection_mode_combo.setCurrentIndex(
+                max(0, mode_index)
+            )
+        self.removed_electrode_detection_mode_combo.setToolTip(
+            "Enable or disable the project-wide experimental automatic detector. "
+            "Its findings require review and are separate from manual lists."
+        )
+
+        self.removed_electrode_detection_info_button = QToolButton(detector_card)
+        self.removed_electrode_detection_info_button.setObjectName(
+            "settings_removed_electrode_detection_info"
+        )
+        self.removed_electrode_detection_info_button.setIcon(
+            sidebar_icon("info", 16)
+        )
+        self.removed_electrode_detection_info_button.setToolTip(
+            "About experimental removed-electrode detection"
+        )
+        self.removed_electrode_detection_info_button.setCursor(
+            Qt.PointingHandCursor
+        )
+        self.removed_electrode_detection_info_button.setProperty("compact", True)
+        self.removed_electrode_detection_info_button.setProperty(
+            "iconButton",
+            True,
+        )
+        self.removed_electrode_detection_info_button.clicked.connect(
+            self._show_removed_electrode_detection_info
+        )
+
+        detector_choice_row = QWidget(detector_card)
+        detector_choice_row.setObjectName(
+            "settings_removed_electrode_detection_row"
+        )
+        detector_choice_layout = QHBoxLayout(detector_choice_row)
+        detector_choice_layout.setContentsMargins(0, 0, 0, 0)
+        detector_choice_layout.setSpacing(8)
+        detector_choice_layout.addWidget(
+            self.removed_electrode_detection_mode_combo,
+            1,
+        )
+        detector_choice_layout.addWidget(
+            self.removed_electrode_detection_info_button
+        )
+        detector_form.addRow(
+            QLabel("Automatic detection:", detector_card),
+            detector_choice_row,
+        )
+
+        self.manual_removed_electrodes_enabled_check = QCheckBox(
+            "Apply saved manual lists during processing",
+            detector_card,
+        )
+        self.manual_removed_electrodes_enabled_check.setObjectName(
+            "settings_manual_removed_electrodes_enabled"
+        )
+        self.manual_removed_electrodes_enabled_check.setChecked(
+            bool(
+                qc_preproc.get(
+                    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
+                    False,
+                )
+            )
+        )
+        self.manual_removed_electrodes_enabled_check.setToolTip(
+            "This choice is independent of automatic detection. Stored lists "
+            "remain available when application is Off."
+        )
+        self.manual_removed_electrodes_button = make_action_button(
+            "Edit Lists",
+            compact=True,
+            parent=detector_card,
+        )
+        self.manual_removed_electrodes_button.setObjectName(
+            "settings_manual_removed_electrodes_edit"
+        )
+        self.manual_removed_electrodes_button.setToolTip(
+            "Edit participant-wide fallbacks and recording-specific removed electrodes"
+            if recording_aware_qc
+            else "Edit participant-level manually removed electrodes"
+        )
+        self.manual_removed_electrodes_button.clicked.connect(
+            self._edit_manual_removed_electrodes
+        )
+        manual_row = QWidget(detector_card)
+        manual_layout = QHBoxLayout(manual_row)
+        manual_layout.setContentsMargins(0, 0, 0, 0)
+        manual_layout.setSpacing(8)
+        manual_layout.addWidget(
+            self.manual_removed_electrodes_enabled_check,
+            1,
+        )
+        manual_layout.addWidget(self.manual_removed_electrodes_button)
+        detector_form.addRow(
+            QLabel("Manual removed electrodes:", detector_card),
+            manual_row,
+        )
+        detector_card.content_layout.addLayout(detector_form)
+
+        self.removed_electrode_detection_status = StatusBanner(
+            "",
+            detector_card,
+            variant="warning",
+        )
+        self.removed_electrode_detection_status.setObjectName(
+            "settings_removed_electrode_detection_status"
+        )
+        detector_card.content_layout.addWidget(
+            self.removed_electrode_detection_status
+        )
+
+        # Compatibility for callers that still read the former hidden checkbox.
+        self.auto_detect_removed_electrodes_check = QCheckBox(detector_card)
+        self.auto_detect_removed_electrodes_check.setObjectName(
+            "settings_auto_detect_removed_electrodes"
+        )
+        self.auto_detect_removed_electrodes_check.setChecked(
+            removed_detection_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+            and not self._removed_electrode_choice_unresolved
+        )
+        self.auto_detect_removed_electrodes_check.hide()
+        self.auto_detect_removed_electrodes_check.toggled.connect(
+            self._set_removed_electrode_detection_enabled
+        )
+        self.removed_electrode_detection_mode_combo.currentIndexChanged.connect(
+            self._on_removed_electrode_detection_mode_changed
+        )
+        self._sync_removed_electrode_detection_checkbox()
+        self._refresh_removed_electrode_detection_status()
+        layout.addWidget(detector_card)
+
+        screening = experimental_settings.summed_bca_screening
+        summed_bca_card = SectionCard(
+            "Experimental Summed-BCA Screening",
+            tab,
+            object_name="settings_experimental_summed_bca_card",
+        )
+        self.summed_bca_explanation_label = QLabel(
+            SUMMED_BCA_SCREENING_BRIEF_TEXT,
+            summed_bca_card,
+        )
+        self.summed_bca_explanation_label.setObjectName(
+            "settings_experimental_summed_bca_explanation"
+        )
+        self.summed_bca_explanation_label.setWordWrap(True)
+        summed_bca_card.content_layout.addWidget(
+            self.summed_bca_explanation_label
+        )
+
+        self.summed_bca_screening_enabled_check = QCheckBox(
+            "Enable experimental summed-BCA screening",
+            summed_bca_card,
+        )
+        self.summed_bca_screening_enabled_check.setObjectName(
+            "settings_summed_bca_screening_enabled"
+        )
+        self.summed_bca_screening_enabled_check.setChecked(screening.enabled)
+        summed_bca_card.content_layout.addWidget(
+            self.summed_bca_screening_enabled_check
+        )
+
+        absolute_header = SubsectionHeaderLabel(
+            "Absolute summed-BCA review limits",
+            summed_bca_card,
+        )
+        summed_bca_card.content_layout.addWidget(absolute_header)
+        absolute_grid = QGridLayout()
+        absolute_specs = (
+            (
+                "warning_summed_bca_uv",
+                "Warning above (uV):",
+                screening.warning_summed_bca_uv,
+            ),
+            (
+                "strong_warning_summed_bca_uv",
+                "Strong warning above (uV):",
+                screening.strong_warning_summed_bca_uv,
+            ),
+            (
+                "extreme_review_summed_bca_uv",
+                "Extreme review above (uV):",
+                screening.extreme_review_summed_bca_uv,
+            ),
+            (
+                "concentrated_review_flagged_cells",
+                "Concentrated review cells:",
+                screening.concentrated_review_flagged_cells,
+            ),
+            (
+                "broad_extreme_review_unique_electrodes",
+                "Broad review electrodes:",
+                screening.broad_extreme_review_unique_electrodes,
+            ),
+        )
+        self.summed_bca_threshold_edits: dict[str, QLineEdit] = {}
+        self._add_experimental_threshold_grid(
+            absolute_grid,
+            absolute_specs,
+            summed_bca_card,
+        )
+        summed_bca_card.content_layout.addLayout(absolute_grid)
+
+        cohort_header = SubsectionHeaderLabel(
+            "Optional cohort-relative context",
+            summed_bca_card,
+        )
+        summed_bca_card.content_layout.addWidget(cohort_header)
+        cohort_grid = QGridLayout()
+        cohort_specs = (
+            (
+                "cohort_warning_robust_score",
+                "Robust score warning:",
+                screening.cohort_warning_robust_score,
+            ),
+            (
+                "cohort_extreme_robust_score",
+                "Robust score extreme:",
+                screening.cohort_extreme_robust_score,
+            ),
+            (
+                "cohort_warning_sum_floor_uv",
+                "Sum floor warning (uV):",
+                screening.cohort_warning_sum_floor_uv,
+            ),
+            (
+                "cohort_extreme_sum_floor_uv",
+                "Sum floor extreme (uV):",
+                screening.cohort_extreme_sum_floor_uv,
+            ),
+            (
+                "cohort_warning_peak_floor_uv",
+                "Peak floor warning (uV):",
+                screening.cohort_warning_peak_floor_uv,
+            ),
+            (
+                "cohort_extreme_peak_floor_uv",
+                "Peak floor extreme (uV):",
+                screening.cohort_extreme_peak_floor_uv,
+            ),
+        )
+        self._add_experimental_threshold_grid(
+            cohort_grid,
+            cohort_specs,
+            summed_bca_card,
+        )
+        summed_bca_card.content_layout.addLayout(cohort_grid)
+        layout.addWidget(summed_bca_card)
+
+        project_controls_enabled = self.project is not None
+        for control in (
+            self.removed_electrode_detection_mode_combo,
+            self.removed_electrode_detection_info_button,
+            self.manual_removed_electrodes_enabled_check,
+            self.manual_removed_electrodes_button,
+            self.summed_bca_screening_enabled_check,
+            *self.summed_bca_threshold_edits.values(),
+        ):
+            control.setEnabled(project_controls_enabled)
+        if not project_controls_enabled:
+            self.removed_electrode_detection_status.set_variant("info")
+            self.removed_electrode_detection_status.set_text(
+                "Open a project to edit its experimental QC settings."
+            )
+            self.removed_electrode_detection_status.setVisible(True)
+
+        layout.addStretch(1)
+        self._add_settings_footer(
+            tab,
+            layout,
+            "settings_experimental_footer",
+        )
+        tabs.addTab(tab, "Experimental")
+        return tab
+
+    def _add_experimental_threshold_grid(
+        self,
+        grid: QGridLayout,
+        specs: tuple[tuple[str, str, object], ...],
+        parent: QWidget,
+    ) -> None:
+        for index, (field_name, label_text, value) in enumerate(specs):
+            row = index // 2
+            column = (index % 2) * 2
+            edit = QLineEdit(parent)
+            edit.setObjectName(f"settings_summed_bca_{field_name}")
+            edit.setText(str(value))
+            edit.setMaximumWidth(120)
+            grid.addWidget(QLabel(label_text, parent), row, column)
+            grid.addWidget(edit, row, column + 1)
+            self.summed_bca_threshold_edits[field_name] = edit
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+
     def _init_advanced_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -1019,36 +1621,17 @@ class SettingsDialog(QDialog):
         advanced_group.content_layout.addLayout(advanced_form)
         layout.addWidget(advanced_group)
 
-        qc_group = SectionCard(
-            "Processing QC",
-            tab,
-            object_name="settings_advanced_processing_qc_card",
-        )
-        qc_form = make_form_layout()
         if self.project is not None:
             qc_preproc = self._project_preprocessing()
-            removed_detection_mode = normalize_removed_electrode_detection_mode(
-                qc_preproc.get("removed_electrode_detection_mode"),
-                auto_detect_removed_electrodes=qc_preproc.get(
-                    "auto_detect_removed_electrodes",
-                    PREPROCESSING_DEFAULTS["auto_detect_removed_electrodes"],
-                ),
-            )
-            self._manual_removed_electrodes_by_pid = (
-                normalize_manual_removed_electrodes_map(
-                    qc_preproc.get("manual_removed_electrodes", {})
+            self._manual_excluded_participants = (
+                normalize_manual_excluded_participants(
+                    qc_preproc.get("manual_excluded_participants", [])
                 )
             )
-            self._manual_removed_electrodes_by_recording = (
-                normalize_manual_removed_electrodes_map(
-                    qc_preproc.get("manual_removed_electrodes_by_recording", {})
+            self._manual_excluded_recordings = (
+                normalize_manual_excluded_recordings(
+                    qc_preproc.get("manual_excluded_recordings", [])
                 )
-            )
-            self._manual_excluded_participants = normalize_manual_excluded_participants(
-                qc_preproc.get("manual_excluded_participants", [])
-            )
-            self._manual_excluded_recordings = normalize_manual_excluded_recordings(
-                qc_preproc.get("manual_excluded_recordings", [])
             )
             self._manual_excluded_participant_conditions = (
                 normalize_manual_excluded_participant_conditions(
@@ -1067,104 +1650,29 @@ class SettingsDialog(QDialog):
                 )
             )
         else:
-            auto_detect_default = (
-                self.manager.get(
-                    "preprocessing",
-                    "auto_detect_removed_electrodes",
-                    str(PREPROCESSING_DEFAULTS["auto_detect_removed_electrodes"]),
-                ).lower()
-                == "true"
-            )
-            removed_detection_mode = normalize_removed_electrode_detection_mode(
-                self.manager.get(
-                    "preprocessing",
-                    "removed_electrode_detection_mode",
-                    "",
-                ),
-                auto_detect_removed_electrodes=auto_detect_default,
-            )
-            self._manual_removed_electrodes_by_pid = (
-                normalize_manual_removed_electrodes_map(
+            self._manual_excluded_participants = (
+                normalize_manual_excluded_participants(
                     self.manager.get(
                         "preprocessing",
-                        "manual_removed_electrodes",
-                        "{}",
+                        "manual_excluded_participants",
+                        "[]",
                     )
-                )
-            )
-            self._manual_removed_electrodes_by_recording = {}
-            self._manual_excluded_participants = normalize_manual_excluded_participants(
-                self.manager.get(
-                    "preprocessing",
-                    "manual_excluded_participants",
-                    "[]",
                 )
             )
             self._manual_excluded_recordings = []
             self._manual_excluded_participant_conditions = {}
             self._manual_excluded_recording_conditions = {}
+
         recording_aware_qc = bool(
             self.project is not None
             and (getattr(self.project, "sessions", {}) or {})
         )
-        self.removed_electrode_detection_mode_combo = QComboBox(qc_group)
-        self.removed_electrode_detection_mode_combo.setObjectName(
-            "settings_removed_electrode_detection_mode"
+        qc_group = SectionCard(
+            "Processing QC",
+            tab,
+            object_name="settings_advanced_processing_qc_card",
         )
-        self.removed_electrode_detection_mode_combo.addItem(
-            "Off",
-            REMOVED_ELECTRODE_DETECTION_MODE_OFF,
-        )
-        self.removed_electrode_detection_mode_combo.addItem(
-            "Conservative auto-detect",
-            REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
-        )
-        self.removed_electrode_detection_mode_combo.addItem(
-            "Manual list",
-            REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
-        )
-        mode_index = self.removed_electrode_detection_mode_combo.findData(
-            removed_detection_mode
-        )
-        self.removed_electrode_detection_mode_combo.setCurrentIndex(max(0, mode_index))
-        self.removed_electrode_detection_mode_combo.setToolTip(
-            "Choose whether raw-channel QC should mark high-confidence automatic "
-            "candidates or use manual participant/recording removed-electrode metadata."
-            if recording_aware_qc
-            else "Choose whether raw-channel QC should mark high-confidence automatic "
-            "candidates or use manual participant-level removed-electrode metadata."
-        )
-
-        self.removed_electrode_detection_info_button = QToolButton(qc_group)
-        self.removed_electrode_detection_info_button.setObjectName(
-            "settings_removed_electrode_detection_info"
-        )
-        self.removed_electrode_detection_info_button.setIcon(sidebar_icon("info", 16))
-        self.removed_electrode_detection_info_button.setToolTip(
-            "About conservative removed-electrode detection"
-        )
-        self.removed_electrode_detection_info_button.setCursor(Qt.PointingHandCursor)
-        self.removed_electrode_detection_info_button.setProperty("compact", True)
-        self.removed_electrode_detection_info_button.setProperty("iconButton", True)
-        self.removed_electrode_detection_info_button.clicked.connect(
-            self._show_removed_electrode_detection_info
-        )
-        self.manual_removed_electrodes_button = make_action_button(
-            "Edit",
-            compact=True,
-            parent=qc_group,
-        )
-        self.manual_removed_electrodes_button.setObjectName(
-            "settings_manual_removed_electrodes_edit"
-        )
-        self.manual_removed_electrodes_button.setToolTip(
-            "Edit participant-wide fallbacks and recording-specific removed electrodes"
-            if recording_aware_qc
-            else "Edit participant-level manually removed electrodes"
-        )
-        self.manual_removed_electrodes_button.clicked.connect(
-            self._edit_manual_removed_electrodes
-        )
+        qc_form = make_form_layout()
         self.manual_participant_exclusions_button = make_action_button(
             "Edit",
             compact=True,
@@ -1180,38 +1688,6 @@ class SettingsDialog(QDialog):
         )
         self.manual_participant_exclusions_button.clicked.connect(
             self._edit_manual_participant_exclusions
-        )
-
-        removed_detection_row = QWidget(qc_group)
-        removed_detection_row.setObjectName("settings_removed_electrode_detection_row")
-        removed_detection_layout = QHBoxLayout(removed_detection_row)
-        removed_detection_layout.setContentsMargins(0, 0, 0, 0)
-        removed_detection_layout.setSpacing(8)
-        removed_detection_layout.addWidget(self.removed_electrode_detection_mode_combo, 1)
-        removed_detection_layout.addWidget(self.manual_removed_electrodes_button)
-        removed_detection_layout.addWidget(self.removed_electrode_detection_info_button)
-
-        # Legacy compatibility for older helpers/tests that read the prior
-        # checkbox attribute while the visible UI now uses a mode selector.
-        self.auto_detect_removed_electrodes_check = QCheckBox(qc_group)
-        self.auto_detect_removed_electrodes_check.setObjectName(
-            "settings_auto_detect_removed_electrodes"
-        )
-        self.auto_detect_removed_electrodes_check.setChecked(
-            removed_detection_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
-        )
-        self.auto_detect_removed_electrodes_check.hide()
-        self.auto_detect_removed_electrodes_check.toggled.connect(
-            self._set_removed_electrode_detection_enabled
-        )
-        self.removed_electrode_detection_mode_combo.currentIndexChanged.connect(
-            self._on_removed_electrode_detection_mode_changed
-        )
-        self._sync_removed_electrode_detection_checkbox()
-        self._update_manual_removed_electrodes_button()
-        qc_form.addRow(
-            QLabel("Removed-electrode QC mode", qc_group),
-            removed_detection_row,
         )
         qc_form.addRow(
             QLabel(
@@ -1352,6 +1828,155 @@ class SettingsDialog(QDialog):
             == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         )
 
+    def _protocol_input_mode(self) -> str:
+        return str(
+            self.protocol_oddball_mode_combo.currentData()
+            or ODDBALL_INPUT_MODE_RECURRENCE
+        )
+
+    def _protocol_editor_values(self) -> ProtocolEditorValues:
+        return ProtocolEditorValues(
+            presentation_rate_hz=self.protocol_presentation_rate_edit.text(),
+            oddball_input_mode=self._protocol_input_mode(),
+            oddball_every_n=self.protocol_oddball_every_n_edit.text(),
+            entered_oddball_rate_hz=self.protocol_direct_oddball_rate_edit.text(),
+            expected_analyzed_oddball_cycles=self.protocol_expected_cycles_edit.text(),
+            oddball_marker_code=self.protocol_oddball_marker_code_edit.text(),
+            requires_confirmation=bool(
+                getattr(self, "_protocol_requires_confirmation", False)
+            ),
+        )
+
+    def _protocol_save_requested(self) -> bool:
+        initial = getattr(
+            self,
+            "_initial_protocol_editor_values",
+            self._protocol_editor_values(),
+        )
+        return protocol_settings_save_requested(
+            initial,
+            self._protocol_editor_values(),
+            protocol_tab_active=(
+                self.tabs.currentIndex() == self._protocol_tab_index
+            ),
+        )
+
+    def _protocol_from_editor(self, *, require_ready: bool) -> FrequencyProtocol:
+        values = self._protocol_editor_values()
+        return build_manual_protocol(
+            presentation_rate_hz=values.presentation_rate_hz,
+            oddball_input_mode=values.oddball_input_mode,
+            oddball_every_n=values.oddball_every_n,
+            oddball_rate_hz=values.entered_oddball_rate_hz,
+            expected_analyzed_oddball_cycles=(
+                values.expected_analyzed_oddball_cycles
+            ),
+            oddball_marker_code=values.oddball_marker_code,
+            existing_protocol=self.project.frequency_protocol,
+            require_ready=require_ready,
+        )
+
+    def _refresh_protocol_preview(self, *_args: object) -> None:
+        if self.project is None:
+            self.protocol_resolved_oddball_rate_edit.setText("—")
+            self.protocol_derived_duration_edit.setText("Open a project to edit")
+            self.protocol_status.set_variant("info")
+            self.protocol_status.set_text(
+                "FPVS protocol values belong to the active project. Open a project "
+                "to view or edit them."
+            )
+            self.protocol_status.setVisible(True)
+            return
+
+        direct_mode = self._protocol_input_mode() == ODDBALL_INPUT_MODE_DIRECT_HZ
+        self.protocol_oddball_every_n_edit.setEnabled(not direct_mode)
+        self.protocol_direct_oddball_rate_edit.setEnabled(direct_mode)
+        try:
+            protocol = self._protocol_from_editor(require_ready=False)
+            validate_protocol_condition_codes(
+                protocol,
+                (getattr(self.project, "event_map", {}) or {}).values(),
+            )
+        except FrequencyProtocolError as exc:
+            self.protocol_resolved_oddball_rate_edit.setText("Invalid protocol")
+            self.protocol_derived_duration_edit.setText("—")
+            self.protocol_status.set_variant("warning")
+            self.protocol_status.set_text(str(exc))
+            self.protocol_status.setVisible(True)
+            return
+
+        if direct_mode and protocol.oddball_every_n is not None:
+            previous = self.protocol_oddball_every_n_edit.blockSignals(True)
+            self.protocol_oddball_every_n_edit.setText(str(protocol.oddball_every_n))
+            self.protocol_oddball_every_n_edit.blockSignals(previous)
+        elif protocol.oddball_rate_hz is not None:
+            canonical_rate_text = protocol.to_manifest()["oddball_rate_hz"]
+            previous = self.protocol_direct_oddball_rate_edit.blockSignals(True)
+            self.protocol_direct_oddball_rate_edit.setText(
+                str(canonical_rate_text or "")
+            )
+            self.protocol_direct_oddball_rate_edit.blockSignals(previous)
+        self.protocol_resolved_oddball_rate_edit.setText(
+            rate_summary(protocol.oddball_rate_hz)
+        )
+        self.protocol_derived_duration_edit.setText(
+            duration_summary(protocol.derived_analyzed_seconds)
+        )
+        if getattr(self, "_protocol_requires_confirmation", False):
+            self.protocol_status.set_variant("warning")
+            if protocol.expected_analyzed_oddball_cycles is None:
+                self.protocol_status.set_text(
+                    "Review the retained or proposed protocol, enter the expected "
+                    "analyzed oddball cycles, then save from Protocol to confirm it."
+                )
+            else:
+                self.protocol_status.set_text(
+                    "Review the retained protocol and proposed oddball marker code, "
+                    "then save from Protocol to confirm them."
+                )
+        elif not protocol.is_ready:
+            self.protocol_status.set_variant("warning")
+            self.protocol_status.set_text(
+                "Enter the expected analyzed oddball cycles before processing."
+            )
+        else:
+            self.protocol_status.set_variant("success")
+            self.protocol_status.set_text(
+                f"Every {protocol.oddball_every_n} stimuli; oddball marker code "
+                f"{protocol.oddball_marker_code}; ready to save for this project."
+            )
+        self.protocol_status.setVisible(True)
+
+    def _validated_project_protocol(self) -> FrequencyProtocol | None:
+        if self.project is None:
+            return None
+        try:
+            protocol = self._protocol_from_editor(require_ready=True)
+            validate_protocol_condition_codes(
+                protocol,
+                (getattr(self.project, "event_map", {}) or {}).values(),
+            )
+            return protocol
+        except FrequencyProtocolError as exc:
+            QMessageBox.warning(self, "Invalid FPVS Protocol", str(exc))
+            self.tabs.setCurrentIndex(self._protocol_tab_index)
+            return None
+
+    def _project_protocol_signature(self) -> object:
+        if self.project is None:
+            return None
+        try:
+            return self._protocol_from_editor(require_ready=False).fingerprint
+        except FrequencyProtocolError:
+            return (
+                self.protocol_presentation_rate_edit.text().strip(),
+                self._protocol_input_mode(),
+                self.protocol_oddball_every_n_edit.text().strip(),
+                self.protocol_direct_oddball_rate_edit.text().strip(),
+                self.protocol_expected_cycles_edit.text().strip(),
+                self.protocol_oddball_marker_code_edit.text().strip(),
+            )
+
     def _harmonic_settings_signature_from_settings(self, settings: Any) -> tuple[object, ...]:
         return (
             settings.name,
@@ -1374,11 +1999,6 @@ class SettingsDialog(QDialog):
         settings = normalize_dv_policy(
             self._harmonic_policy_payload_from_preprocessing(preprocessing)
         )
-        base_frequency = (
-            self.base_freq_edit.text()
-            if hasattr(self, "base_freq_edit")
-            else self.manager.get("analysis", "base_freq", "6.0")
-        )
         bca_upper_limit = (
             self.bca_limit_edit.text()
             if hasattr(self, "bca_limit_edit")
@@ -1398,7 +2018,6 @@ class SettingsDialog(QDialog):
         )
         return (
             *self._harmonic_settings_signature_from_settings(settings),
-            self._normalized_signature_number(base_frequency),
             self._normalized_signature_number(bca_upper_limit),
             normalized_rois,
         )
@@ -1446,7 +2065,7 @@ class SettingsDialog(QDialog):
 
     def _frequency_analysis_settings_signature(self) -> tuple[object, object]:
         return (
-            self._normalized_signature_number(self.base_freq_edit.text()),
+            self._project_protocol_signature(),
             self._normalized_signature_number(self.bca_limit_edit.text()),
         )
 
@@ -1457,6 +2076,15 @@ class SettingsDialog(QDialog):
         return (
             initial is not None
             and self._frequency_analysis_settings_signature() != initial
+        )
+
+    def _project_protocol_changed_after_processing(self) -> bool:
+        if self.project is None or not self._project_has_processed_outputs():
+            return False
+        initial = getattr(self, "_initial_frequency_analysis_signature", None)
+        return (
+            initial is not None
+            and self._project_protocol_signature() != initial[0]
         )
 
     def _ask_recalculate_harmonics_after_settings_change(self) -> bool:
@@ -1580,32 +2208,49 @@ class SettingsDialog(QDialog):
     def _save_analysis_inputs_for_harmonic_recalculation(self) -> bool:
         """Persist every non-project input consumed by harmonic selection."""
 
+        protocol = None
+        if self.project is not None:
+            if self._protocol_save_requested():
+                protocol = self._validated_project_protocol()
+                if protocol is None:
+                    return False
+            else:
+                protocol = self.project.frequency_protocol
+                if not protocol.is_ready:
+                    QMessageBox.warning(
+                        self,
+                        "FPVS Protocol Required",
+                        "Confirm the project FPVS protocol in Settings > Protocol "
+                        "before recalculating harmonics.",
+                    )
+                    self.tabs.setCurrentIndex(self._protocol_tab_index)
+                    return False
         try:
-            base_frequency = float(self.base_freq_edit.text())
             bca_upper_limit = float(self.bca_limit_edit.text())
         except (TypeError, ValueError):
             QMessageBox.warning(
                 self,
                 "Invalid Analysis Settings",
-                "Base frequency and BCA harmonic upper limit must be numbers.",
+                "BCA harmonic upper limit must be a number.",
             )
             return False
-        if base_frequency <= 0.0 or bca_upper_limit <= 0.0:
+        if bca_upper_limit <= 0.0:
             QMessageBox.warning(
                 self,
                 "Invalid Analysis Settings",
-                "Base frequency and BCA harmonic upper limit must be positive.",
+                "BCA harmonic upper limit must be positive.",
             )
             return False
         try:
-            self.manager.set("analysis", "base_freq", f"{base_frequency:g}")
-            self.manager.set("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
             self.manager.set("analysis", "bca_upper_limit", f"{bca_upper_limit:g}")
             self.manager.set_roi_montage(self._current_roi_montage())
             self.manager.set_roi_pairs(self.roi_editor.get_pairs())
             for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
                 self.manager.set_custom_roi_presets(montage_key, custom_presets)
             self.manager.save()
+            if self.project is not None and protocol is not None:
+                self.project.update_frequency_protocol(protocol)
+                self.project.save()
         except Exception as exc:  # pragma: no cover - settings I/O failure
             QMessageBox.critical(self, "Save Error", str(exc))
             return False
@@ -1618,6 +2263,7 @@ class SettingsDialog(QDialog):
             return
         self._harmonic_settings_rollback = {
             "preprocessing": copy.deepcopy(self.project.preprocessing),
+            "frequency_protocol": self.project.frequency_protocol,
             "manager_config": copy.deepcopy(self.manager.config),
             "project_cache": copy.deepcopy(self._project_cache),
             "manual_excluded_participant_conditions": copy.deepcopy(
@@ -1642,6 +2288,9 @@ class SettingsDialog(QDialog):
                 try:
                     preprocessing = copy.deepcopy(snapshot["preprocessing"])
                     self.project.update_preprocessing(preprocessing)
+                    self.project.update_frequency_protocol(
+                        snapshot["frequency_protocol"]
+                    )
                     self.project.save()
                     self._project_cache = copy.deepcopy(snapshot["project_cache"])
                     self._manual_excluded_participant_conditions = copy.deepcopy(
@@ -1715,7 +2364,7 @@ class SettingsDialog(QDialog):
         mark_frequency_domain_outputs_stale(
             self.project.project_root,
             reason=(
-                "Base frequency or BCA harmonic upper limit changed; rerun "
+                "The project FPVS protocol or legacy BCA harmonic upper limit changed; rerun "
                 "frequency-domain post-processing and QC."
             ),
         )
@@ -1735,6 +2384,16 @@ class SettingsDialog(QDialog):
     def _on_recalculate_harmonics_clicked(self) -> None:
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
+            return
+        if self._project_protocol_changed_after_processing():
+            QMessageBox.warning(
+                self,
+                "Project Reprocessing Required",
+                "Presentation rate, oddball recurrence or rate, expected analyzed "
+                "cycles, or the oddball marker code changed. Save Settings, then "
+                "reprocess the project so crops and FFT outputs use the confirmed "
+                "protocol.",
+            )
             return
         frequency_analysis_changed = (
             self._frequency_analysis_settings_changed_after_processing()
@@ -2588,9 +3247,26 @@ class SettingsDialog(QDialog):
         return True
 
     def _removed_electrode_detection_mode(self) -> str:
-        return normalize_removed_electrode_detection_mode(
-            self.removed_electrode_detection_mode_combo.currentData(),
-            auto_detect_removed_electrodes=True,
+        if (
+            self.removed_electrode_detection_mode_combo.currentData()
+            == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        ):
+            return REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        return REMOVED_ELECTRODE_DETECTION_MODE_OFF
+
+    def _removed_electrode_choice_should_be_confirmed(self) -> bool:
+        current_data = self.removed_electrode_detection_mode_combo.currentData()
+        if self._removed_electrode_choice_unresolved:
+            return current_data in {
+                REMOVED_ELECTRODE_DETECTION_MODE_OFF,
+                REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+            }
+        return (
+            current_data in {
+                REMOVED_ELECTRODE_DETECTION_MODE_OFF,
+                REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+            }
+            and current_data != self._initial_removed_electrode_detection_mode
         )
 
     def _set_removed_electrode_detection_enabled(self, enabled: bool) -> None:
@@ -2615,15 +3291,30 @@ class SettingsDialog(QDialog):
 
     def _on_removed_electrode_detection_mode_changed(self) -> None:
         self._sync_removed_electrode_detection_checkbox()
-        self._update_manual_removed_electrodes_button()
-        if self._removed_electrode_detection_mode() == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
-            self._edit_manual_removed_electrodes()
+        self._refresh_removed_electrode_detection_status()
 
     def _update_manual_removed_electrodes_button(self) -> None:
-        self.manual_removed_electrodes_button.setEnabled(
-            self._removed_electrode_detection_mode()
-            == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
-        )
+        self.manual_removed_electrodes_button.setEnabled(self.project is not None)
+
+    def _refresh_removed_electrode_detection_status(self) -> None:
+        status = self.removed_electrode_detection_status
+        if self.project is None:
+            status.set_variant("info")
+            status.set_text("Open a project to edit its experimental QC settings.")
+            status.setVisible(True)
+            return
+        if (
+            self._removed_electrode_choice_unresolved
+            and self.removed_electrode_detection_mode_combo.currentData() is None
+        ):
+            status.set_variant("warning")
+            status.set_text(
+                "Choose On or Off before the next processing run. Off is "
+                "recommended. Saving other settings will not record a choice."
+            )
+            status.setVisible(True)
+            return
+        status.setVisible(False)
 
     def _manual_removed_electrode_participant_ids(self) -> list[str]:
         participant_ids: list[str] = []
@@ -2835,6 +3526,67 @@ class SettingsDialog(QDialog):
             edit.setFocus()
             edit.selectAll()
 
+    def _experimental_qc_settings_from_editor(self) -> ExperimentalQcSettings:
+        if self.project is None:
+            return ExperimentalQcSettings()
+        values = {
+            field_name: edit.text()
+            for field_name, edit in self.summed_bca_threshold_edits.items()
+        }
+        screening = SummedBcaScreeningSettings(
+            enabled=self.summed_bca_screening_enabled_check.isChecked(),
+            warning_summed_bca_uv=values["warning_summed_bca_uv"],
+            strong_warning_summed_bca_uv=values[
+                "strong_warning_summed_bca_uv"
+            ],
+            extreme_review_summed_bca_uv=values[
+                "extreme_review_summed_bca_uv"
+            ],
+            concentrated_review_flagged_cells=values[
+                "concentrated_review_flagged_cells"
+            ],
+            broad_extreme_review_unique_electrodes=values[
+                "broad_extreme_review_unique_electrodes"
+            ],
+            cohort_warning_robust_score=values[
+                "cohort_warning_robust_score"
+            ],
+            cohort_extreme_robust_score=values[
+                "cohort_extreme_robust_score"
+            ],
+            cohort_warning_sum_floor_uv=values[
+                "cohort_warning_sum_floor_uv"
+            ],
+            cohort_extreme_sum_floor_uv=values[
+                "cohort_extreme_sum_floor_uv"
+            ],
+            cohort_warning_peak_floor_uv=values[
+                "cohort_warning_peak_floor_uv"
+            ],
+            cohort_extreme_peak_floor_uv=values[
+                "cohort_extreme_peak_floor_uv"
+            ],
+        )
+        return self.project.experimental_qc_settings.with_summed_bca_screening(
+            screening
+        )
+
+    def _validated_experimental_qc_settings(
+        self,
+    ) -> ExperimentalQcSettings | None:
+        try:
+            return self._experimental_qc_settings_from_editor()
+        except ExperimentalQcSettingsError as exc:
+            QMessageBox.warning(self, "Invalid Experimental Settings", str(exc))
+            self.tabs.setCurrentIndex(self._experimental_tab_index)
+            message = str(exc).casefold()
+            for field_name, edit in self.summed_bca_threshold_edits.items():
+                if field_name.casefold() in message:
+                    edit.setFocus()
+                    edit.selectAll()
+                    break
+            return None
+
     def _validated_preproc_payload(self) -> Dict[str, Any] | None:
         try:
             normalized = normalize_preprocessing_settings(
@@ -2987,6 +3739,19 @@ class SettingsDialog(QDialog):
             return
         using_project = self.project is not None
 
+        protocol_save_requested = bool(
+            using_project and self._protocol_save_requested()
+        )
+        validated_protocol = (
+            self._validated_project_protocol()
+            if protocol_save_requested
+            else None
+        )
+        if protocol_save_requested and validated_protocol is None:
+            return
+        validated_experimental_qc = self._validated_experimental_qc_settings()
+        if using_project and validated_experimental_qc is None:
+            return
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
             return
@@ -2998,8 +3763,11 @@ class SettingsDialog(QDialog):
         frequency_analysis_changed = (
             self._frequency_analysis_settings_changed_after_processing()
         )
+        protocol_changed_after_processing = (
+            self._project_protocol_changed_after_processing()
+        )
         recalculate_harmonics_after_save = False
-        if harmonic_settings_changed:
+        if harmonic_settings_changed and not protocol_changed_after_processing:
             recalculate_harmonics_after_save = (
                 self._ask_recalculate_harmonics_after_settings_change()
             )
@@ -3008,8 +3776,6 @@ class SettingsDialog(QDialog):
 
         if not using_project:
             self.manager.set("stim", "channel", config.DEFAULT_STIM_CHANNEL)
-        self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
-        self.manager.set("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_montage(self._current_roi_montage())
@@ -3031,21 +3797,6 @@ class SettingsDialog(QDialog):
             for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
                 value = validated_preproc.get(canonical, "")
                 self.manager.set(sec, opt, str(value))
-            self.manager.set(
-                "preprocessing",
-                "auto_detect_removed_electrodes",
-                str(bool(validated_preproc.get("auto_detect_removed_electrodes"))),
-            )
-            self.manager.set(
-                "preprocessing",
-                "removed_electrode_detection_mode",
-                str(validated_preproc.get("removed_electrode_detection_mode")),
-            )
-            self.manager.set(
-                "preprocessing",
-                "manual_removed_electrodes",
-                json.dumps(validated_preproc.get("manual_removed_electrodes", {})),
-            )
             self.manager.set(
                 "preprocessing",
                 "manual_excluded_participants",
@@ -3082,6 +3833,17 @@ class SettingsDialog(QDialog):
         else:
             try:
                 normalized = self.project.update_preprocessing(validated_preproc)
+                if self._removed_electrode_choice_should_be_confirmed():
+                    normalized = (
+                        self.project.confirm_removed_electrode_detection_choice(
+                            self._removed_electrode_detection_mode()
+                        )
+                    )
+                if validated_protocol is not None:
+                    self.project.update_frequency_protocol(validated_protocol)
+                self.project.update_experimental_qc_settings(
+                    validated_experimental_qc
+                )
                 self._project_cache = normalized
                 self.project.save()
             except ValueError as exc:
@@ -3123,6 +3885,14 @@ class SettingsDialog(QDialog):
                 if recalculate_harmonics_after_save:
                     self._restore_harmonic_settings_after_cancel()
                     return
+
+        if protocol_changed_after_processing:
+            QMessageBox.warning(
+                self,
+                "Project Reprocessing Required",
+                "The project FPVS protocol was saved. Reprocess this project before "
+                "using its FFT, QC, harmonic-selection, or statistical outputs.",
+            )
 
         if not prev_debug and self.manager.debug_enabled():
             QMessageBox.information(
@@ -3177,7 +3947,7 @@ class SettingsDialog(QDialog):
                 return
             self._restore_harmonic_settings_after_cancel()
             return
-        if harmonic_settings_changed:
+        if harmonic_settings_changed and not protocol_changed_after_processing:
             remedy = (
                 "Use Resume Post-processing before running downstream analyses. "
                 "Free Harmonic Clustering will remain blocked until neutral "
@@ -3242,12 +4012,19 @@ class SettingsDialog(QDialog):
             self.electrode_mapping_profile_combo.currentData()
             or ELECTRODE_MAPPING_PROFILE_ANATOMICAL
         )
+        if self.project is not None:
+            for key in REMOVED_ELECTRODE_DETECTION_CHOICE_CANONICAL_KEYS:
+                if key in self.project.preprocessing:
+                    values[key] = self.project.preprocessing[key]
         mode = self._removed_electrode_detection_mode()
         values["removed_electrode_detection_mode"] = mode
         values["auto_detect_removed_electrodes"] = (
             mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         )
         values["manual_removed_electrodes"] = dict(self._manual_removed_electrodes_by_pid)
+        values[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = (
+            self.manual_removed_electrodes_enabled_check.isChecked()
+        )
         values["manual_removed_electrodes_by_recording"] = dict(
             self._manual_removed_electrodes_by_recording
         )

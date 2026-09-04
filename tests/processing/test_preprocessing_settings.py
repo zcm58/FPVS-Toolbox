@@ -8,8 +8,13 @@ from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MONTAGE_BIOSEMI64,
     HARMONIC_SELECTION_PROFILE_VERSION,
     LEGACY_HARMONIC_SELECTION_PROFILE,
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
     PREPROCESSING_CANONICAL_KEYS,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED,
+    REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY,
     is_participant_condition_excluded,
     is_recording_condition_excluded,
     new_project_preprocessing_settings,
@@ -38,9 +43,16 @@ def test_defaults_use_expected_bandpass():
         normalized["electrode_mapping_profile"]
         == ELECTRODE_MAPPING_PROFILE_ANATOMICAL
     )
-    assert normalized["auto_detect_removed_electrodes"] is True
-    assert normalized["removed_electrode_detection_mode"] == "auto"
+    assert normalized["auto_detect_removed_electrodes"] is False
+    assert normalized["removed_electrode_detection_mode"] == "off"
+    assert normalized["removed_electrode_detection_choice_status"] == (
+        REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_CONFIRMATION_REQUIRED
+    )
+    assert normalized["removed_electrode_detection_choice_source"] == (
+        REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_LEGACY_MISSING
+    )
     assert normalized["manual_removed_electrodes"] == {}
+    assert normalized[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is False
     assert normalized["manual_removed_electrodes_by_recording"] == {}
     assert normalized["manual_excluded_participants"] == []
     assert normalized["manual_excluded_recordings"] == []
@@ -96,6 +108,15 @@ def test_biosemi64_channel_limit_must_be_between_one_and_64(channel_limit):
 def test_new_projects_explicitly_use_publication_aligned_harmonic_profile():
     settings = new_project_preprocessing_settings()
 
+    assert settings["removed_electrode_detection_mode"] == "off"
+    assert settings["auto_detect_removed_electrodes"] is False
+    assert settings[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is False
+    assert settings["removed_electrode_detection_choice_status"] == (
+        REMOVED_ELECTRODE_DETECTION_CHOICE_STATUS_READY
+    )
+    assert settings["removed_electrode_detection_choice_source"] == (
+        REMOVED_ELECTRODE_DETECTION_CHOICE_SOURCE_NEW_PROJECT_DEFAULT_OFF
+    )
     assert settings["harmonic_selection_profile"] == NEW_PROJECT_HARMONIC_SELECTION_PROFILE
     assert settings["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
     assert settings["group_significant_electrode_scope"] == "all_scalp_electrodes"
@@ -205,7 +226,7 @@ def test_auto_detect_removed_electrodes_boolean_aliases():
     assert normalized["auto_mark_removed_electrodes"] is False
 
 
-def test_manual_removed_electrodes_mode_supersedes_auto_boolean():
+def test_legacy_manual_removed_electrodes_mode_becomes_independent_active_list():
     normalized = normalize_preprocessing_settings(
         {
             "auto_detect_removed_electrodes": True,
@@ -218,7 +239,8 @@ def test_manual_removed_electrodes_mode_supersedes_auto_boolean():
     )
 
     assert normalized["auto_detect_removed_electrodes"] is False
-    assert normalized["removed_electrode_detection_mode"] == "manual"
+    assert normalized["removed_electrode_detection_mode"] == "off"
+    assert normalized[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] is True
     assert normalized["manual_removed_electrodes"] == {
         "p1": ["FT7", "P9", "Oz"],
         "P2": ["POz", "O2"],
