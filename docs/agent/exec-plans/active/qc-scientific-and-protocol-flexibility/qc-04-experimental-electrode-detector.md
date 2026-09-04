@@ -5,13 +5,15 @@
 Load this module with the parent index and shared contracts when executing this action. Other action modules are unnecessary unless listed as dependencies below.
 
 
-**Status:** feature direction, existing-project migration, calibration-claim
-policy, and separation from whole-recording amplitude QC accepted on
-2026-09-03. Implementation waits for the completed cumulative plan; QC-05
-records its accepted review-only authority, and QC-06 records the accepted
-analyzed-interval scoring boundary. Calibration execution remains future work
-under this module. Here, recording-level amplitude describes the scope of
-the finding, not permission to score the entire file.
+**Status:** software behavior implemented on the active QC branch. The detector
+is project-owned, experimental, Off by default for new projects, independent
+from manual channel authority, and restricted to analyzed intervals. The
+historical percentages are now named as sensitivity, specificity, and positive
+predictive value from an earlier in-lab dataset. Current-method recalibration
+remains blocked on the versioned labeled dataset and is recorded explicitly in
+the pending receipt; no current or external-validation claim is made. Here,
+recording-level amplitude describes the scope of the finding, not permission to
+score the entire file.
 
 ### Problem and Accepted Direction
 
@@ -149,3 +151,20 @@ path for the settings, preflight review, and saved-state round trip. Update
 the preprocessing contract, calibration guide, and relevant user QC/methods
 instructions with the approved control matrix and migration. Retain the locked
 preprocessing order and harmonic-selection contracts.
+
+### Implementation Evidence
+
+The project schema, migration prompt, Settings control, preflight cache,
+review workflow, processing inputs, per-recording manual override, and final
+processing authority now consume one saved detector choice. Focused tests cover
+new-project Off, explicit On, legacy choices, unresolved-project prompting,
+manual-only operation, analyzed-condition restriction, and separation of
+review-only flags from interpolation/exclusion authority.
+
+`docs/agent/quality/removed-electrode-detection-calibration-pending-receipt.json`
+preserves the three historical in-lab estimates while leaving unknown
+denominators, uncertainty, sample identity, and validation split null. This is
+deliberate evidence of the remaining data dependency, not a completed receipt.
+Replace it with a reproducible current-method receipt only after the user makes
+the labeled development-lab dataset available and the participant-split rerun
+is independently checked.

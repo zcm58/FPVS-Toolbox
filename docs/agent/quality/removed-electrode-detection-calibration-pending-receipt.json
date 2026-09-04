@@ -1,0 +1,43 @@
+{
+  "schema_version": "removed_electrode_detector_calibration_receipt_v1",
+  "status": "pending_current_method_recalibration",
+  "claim_scope": "historical_development_lab_estimates",
+  "reported_estimates": {
+    "sensitivity": {
+      "value_approximate": 0.6,
+      "numerator": null,
+      "denominator": null,
+      "confidence_interval": null
+    },
+    "specificity": {
+      "lower_bound_reported": 0.99,
+      "numerator": null,
+      "denominator": null,
+      "confidence_interval": null
+    },
+    "positive_predictive_value": {
+      "value_reported": 0.997,
+      "numerator": null,
+      "denominator": null,
+      "confidence_interval": null
+    }
+  },
+  "current_target_method": {
+    "raw_channel_qc_method_version": "analyzed_interval_review_flags_v4",
+    "condition_method_version": "condition_windows_v6_five_second_half_overlap_biosemi64",
+    "montage": "biosemi64",
+    "scoring_scope": "marker_reviewed_included_analyzed_occurrences"
+  },
+  "missing_reproducibility_inputs": [
+    "versioned labeled source dataset or immutable release",
+    "connected and physically removed electrode counts",
+    "participant and recording counts",
+    "prevalence and confusion matrix",
+    "development versus holdout assignment",
+    "threshold-selection record",
+    "confidence intervals",
+    "exact current-method analysis command and environment"
+  ],
+  "interpretation": "The percentages are retained only as historical in-lab estimates. This file is not a completed performance receipt and does not support a current-method or external-validation claim.",
+  "completion_rule": "Replace null fields from a participant-split rerun on the versioned in-lab dataset, record source hashes and environment, verify the confusion matrix reproduces every metric, then change status only after independent review."
+}

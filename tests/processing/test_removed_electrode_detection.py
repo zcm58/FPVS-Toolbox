@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from Main_App.processing.raw_channel_qc import RawChannelQCConfig
 from Main_App.processing.removed_electrode_detection import (
     DEFAULT_REMOVED_ELECTRODE_DETECTION_CALIBRATION,
@@ -135,9 +138,32 @@ def test_spatial_predictability_detector_is_conservative() -> None:
 
 def test_info_text_documents_training_accuracy_tradeoff() -> None:
     assert "CMS/DRL error" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
-    assert "over 99% specific" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
-    assert "around 60%" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+    assert "greater than 99% specificity" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+    assert "60% sensitivity" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
     assert "99.7%" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+    assert "positive predictive value" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+    assert "historical in-lab dataset" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+    assert "not independent validation" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+    assert "reproducible rerun" in REMOVED_ELECTRODE_DETECTION_INFO_TEXT
+
+
+def test_historical_estimates_have_an_explicit_pending_receipt() -> None:
+    root = Path(__file__).resolve().parents[2]
+    path = (
+        root
+        / "docs"
+        / "agent"
+        / "quality"
+        / "removed-electrode-detection-calibration-pending-receipt.json"
+    )
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+
+    assert receipt["status"] == "pending_current_method_recalibration"
+    assert receipt["reported_estimates"]["sensitivity"]["value_approximate"] == 0.6
+    assert receipt["reported_estimates"]["positive_predictive_value"]["value_reported"] == 0.997
+    assert receipt["reported_estimates"]["sensitivity"]["denominator"] is None
+    assert receipt["missing_reproducibility_inputs"]
+    assert "not a completed performance receipt" in receipt["interpretation"]
 
 
 def test_manual_removed_electrode_helpers_normalize_pid_and_channels() -> None:

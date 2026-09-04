@@ -70,6 +70,13 @@ before shipping the detailed claim, with denominators, uncertainty, detector
 version, and threshold-development/evaluation design. Dataset publication can
 enable independent validation; it is not itself external validation.
 
+The machine-readable
+`removed-electrode-detection-calibration-pending-receipt.json` records the
+historical estimates and every missing reproducibility input without inventing
+counts or uncertainty. Its pending status is intentional: it is not a completed
+calibration receipt and cannot support a current-method performance claim. Fill
+and independently check it only after the versioned in-lab dataset is available.
+
 Use the
 [BioSemi64 geometry sensitivity diagnostic](biosemi64-geometry-sensitivity.md)
 as the geometry-isolation receipt. A representative labeled lab-data rerun is

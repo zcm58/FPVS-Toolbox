@@ -25,16 +25,13 @@ REMOVED_ELECTRODE_DETECTION_MODES = (
 )
 
 REMOVED_ELECTRODE_DETECTION_INFO_TEXT = (
-    "In the development of FPVS Toolbox, this automatic detection method was "
-    "designed to identify electrodes that needed to be physically removed prior "
-    "to the start of a recording. In our lab, we were dealing with electrodes "
-    "that would sometimes cause a CMS/DRL error, and I calibrated this detection "
-    "method using real experimental data. This method was over 99% specific in "
-    "removing the correct channels in our training data, but this method is "
-    "intentionally very conservative and prioritizes avoiding false positive "
-    "electrode removals. As a result, this method only detects around 60% of "
-    "electrodes that were actually physically unplugged prior to recording, but "
-    "when it does identify an electrode, it is correct 99.7% of the time."
+    "Experimental. This detector was developed for BioSemi ActiveTwo 64 "
+    "recordings after physically unplugged electrodes caused CMS/DRL errors in "
+    "the development lab. A historical in-lab dataset produced approximate "
+    "estimates of 60% sensitivity, greater than 99% specificity, and 99.7% "
+    "positive predictive value. Those figures describe the earlier in-lab "
+    "evaluation, not independent validation, and still need a reproducible "
+    "rerun with the current analyzed-interval and BioSemi64 implementation."
 )
 
 
