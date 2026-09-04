@@ -455,6 +455,51 @@ def test_group_output_settings_are_routed_per_raw_file_and_require_complete_map(
         )
 
 
+def test_file_settings_default_detector_off_and_select_kurtosis_receipts(
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "P01.bdf"
+    file_key = str(fake_bdf.resolve())
+    settings = {
+        "_fpvs_participant_id_by_file": {file_key: "P01"},
+        "kurtosis_review_decisions_by_recording": {
+            "p01": {"Oz": {"decision": "approve"}},
+            "P02": {"P9": {"decision": "reject"}},
+        },
+    }
+
+    resolved = process_runner._settings_for_file(fake_bdf, settings)
+
+    assert resolved["removed_electrode_detection_mode"] == "off"
+    assert resolved["auto_detect_removed_electrodes"] is False
+    assert resolved["_fpvs_source_file_path"] == file_key
+    assert resolved["_fpvs_participant_id"] == "P01"
+    assert resolved["_fpvs_kurtosis_review_decisions"] == {
+        "Oz": {"decision": "approve"}
+    }
+
+
+def test_condition_exclusions_resolve_by_participant_and_recording(
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "P12_visit2.bdf"
+    file_key = str(fake_bdf.resolve())
+    settings = {
+        "_fpvs_participant_id_by_file": {file_key: "P12"},
+        "_fpvs_recording_id_by_file": {file_key: "P12__visit2"},
+        "manual_excluded_participant_conditions": {"p12": ["Faces"]},
+        "manual_excluded_recording_conditions": {
+            "p12__VISIT2": ["Objects"]
+        },
+    }
+
+    assert process_runner._excluded_condition_labels_for_file(
+        fake_bdf,
+        settings,
+        {"Faces": 21, "Objects": 22, "Words": 23},
+    ) == ("Faces", "Objects")
+
+
 def test_run_full_pipeline_excludes_header_only_bdf_before_loader(monkeypatch, tmp_path: Path) -> None:
     fake_bdf = tmp_path / "p16.bdf"
     _write_bdf_header(fake_bdf, header_bytes=512, data_records=0, channels=1)
@@ -486,6 +531,140 @@ def test_run_full_pipeline_excludes_header_only_bdf_before_loader(monkeypatch, t
     assert result["bdf_preflight"]["file_size"] == 512
     assert result["bdf_preflight"]["header_bytes"] == 512
     assert result["bdf_preflight"]["data_records"] == 0
+
+
+def test_run_full_pipeline_skips_loader_when_every_condition_is_excluded(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_bdf = tmp_path / "P12.bdf"
+    fake_bdf.write_bytes(b"not a real bdf")
+    events, plan_settings = _analysis_plan_fixture(
+        file_path=fake_bdf,
+        sfreq=256.0,
+        n_times=128,
+        event_map={"Faces": 21},
+    )
+
+    def _unexpected_loader(*_args, **_kwargs):
+        raise AssertionError("fully excluded conditions must skip raw loading")
+
+    monkeypatch.setattr(process_runner, "inspect_bdf_header", lambda _path: None)
+    monkeypatch.setattr("Main_App.io.load_utils.load_eeg_file", _unexpected_loader)
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "manual_excluded_participant_conditions": {"P12": ["Faces"]},
+            "_fpvs_participant_id_by_file": {
+                str(fake_bdf.resolve()): "P12"
+            },
+            **plan_settings,
+        },
+        event_map={"Faces": 21},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert events.size
+    assert result["status"] == "excluded"
+    assert result["stage"] == "condition_scope"
+    assert result["reason"] == "all_conditions_excluded_from_analysis"
+
+
+def test_run_full_pipeline_scores_only_included_condition_spans(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    info = mne.create_info(
+        ["Cz", "Pz", "Status"],
+        sfreq=8.0,
+        ch_types=["eeg", "eeg", "stim"],
+    )
+    raw = _with_biosemi64_montage(
+        mne.io.RawArray(np.zeros((3, 64), dtype=float), info, verbose=False)
+    )
+    events = np.asarray(
+        [
+            [8, 0, 21],
+            [10, 0, 55],
+            [14, 0, 55],
+            [32, 0, 22],
+            [34, 0, 55],
+            [38, 0, 55],
+        ],
+        dtype=int,
+    )
+    fake_bdf = tmp_path / "P12-partial.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(process_runner, "inspect_bdf_header", lambda _path: None)
+    monkeypatch.setattr(
+        "Main_App.io.load_utils.load_eeg_file",
+        lambda _app, _filepath, **_kwargs: raw.copy(),
+    )
+    monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "begin_preproc_audit",
+        lambda *_args, **_kwargs: {"file": fake_bdf.name},
+    )
+
+    def _capture_scoring_scope(raw_input, params, *_args, **_kwargs):  # noqa: ARG001
+        captured["source_plan"] = params["_fpvs_source_analysis_span_plan"]
+        captured["raw_qc_spans"] = list(params["_fpvs_raw_qc_scoring_spans"])
+        raise RuntimeError("stop after analyzed-scope capture")
+
+    monkeypatch.setattr(
+        process_runner.backend_preprocess,
+        "perform_preprocessing",
+        _capture_scoring_scope,
+    )
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={
+            "stim_channel": "Status",
+            "ref_channel1": "EXG1",
+            "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
+            "removed_electrode_detection_mode": "off",
+            "auto_detect_removed_electrodes": False,
+            "manual_excluded_participant_conditions": {"P12": ["Objects"]},
+            "_fpvs_participant_id_by_file": {
+                str(fake_bdf.resolve()): "P12"
+            },
+            **_protocol_settings(
+                file_path=fake_bdf,
+                events=events,
+                event_map={"Faces": 21, "Objects": 22},
+                sfreq=8.0,
+                n_times=64,
+                presentation_rate_hz=4.0,
+                oddball_every_n=2,
+                expected_cycles=1,
+            ),
+        },
+        event_map={"Faces": 21, "Objects": 22},
+        save_folder=tmp_path / "out",
+        project_root=tmp_path / "project",
+    )
+
+    assert result["status"] == "error"
+    assert result["stage"] == "preprocess"
+    source_plan = captured["source_plan"]
+    assert isinstance(source_plan, dict)
+    assert source_plan["condition_selection"]["excluded_condition_labels"] == [
+        "Objects"
+    ]
+    assert [span["condition_label"] for span in source_plan["spans"]] == [
+        "Faces"
+    ]
+    assert captured["raw_qc_spans"] == [[10, 14]]
 
 
 def test_run_full_pipeline_manual_participant_exclusion_skips_loader(
@@ -565,7 +744,9 @@ def test_recording_manual_removed_electrodes_override_participant_defaults(
     follicular.write_bytes(b"not a real bdf")
     file_key = str(follicular.resolve())
     settings = {
-        "removed_electrode_detection_mode": "manual",
+        "removed_electrode_detection_mode": "auto",
+        "auto_detect_removed_electrodes": True,
+        "manual_removed_electrodes_enabled": True,
         "manual_removed_electrodes": {"P12": ["P9"]},
         "manual_removed_electrodes_by_recording": {
             "P12__follicular": ["Oz"],
@@ -578,6 +759,27 @@ def test_recording_manual_removed_electrodes_override_participant_defaults(
         follicular,
         settings,
     ) == ["Oz"]
+    assert process_runner._manual_removed_electrodes_for_file(
+        follicular,
+        {
+            **settings,
+            "removed_electrode_detection_mode": "off",
+            "auto_detect_removed_electrodes": False,
+        },
+    ) == ["Oz"]
+    assert process_runner._manual_removed_electrodes_for_file(
+        follicular,
+        {**settings, "manual_removed_electrodes_enabled": False},
+    ) == []
+    assert process_runner._manual_removed_electrodes_for_file(
+        follicular,
+        {
+            **settings,
+            "manual_removed_electrodes_by_recording": {
+                "P12__follicular": [],
+            },
+        },
+    ) == []
 
 
 def test_parallel_runner_skips_manual_participant_exclusions_before_pool(
@@ -736,6 +938,8 @@ def test_preproc_cache_fingerprints_effective_detector_mode_and_manual_switch(
         "auto_detect_removed_electrodes": False,
         "manual_removed_electrodes_enabled": False,
         "removed_electrode_detection_choice_schema_version": "1.0",
+        "removed_electrode_detection_choice_status": "ready",
+        "removed_electrode_detection_choice_source": "user_confirmed",
     }
 
     detector_off = process_runner._preproc_cache_payload(
@@ -756,8 +960,29 @@ def test_preproc_cache_fingerprints_effective_detector_mode_and_manual_switch(
     assert detector_settings["removed_electrode_detection_choice_schema_version"] == (
         "1.0"
     )
+    assert detector_settings["removed_electrode_detection_choice_status"] == "ready"
+    assert detector_settings["removed_electrode_detection_choice_source"] == (
+        "user_confirmed"
+    )
     assert process_runner._preproc_cache_key(detector_off) != (
         process_runner._preproc_cache_key(manual_enabled)
+    )
+
+    reviewed = process_runner._preproc_cache_payload(
+        fake_bdf,
+        {
+            **base_settings,
+            "_fpvs_kurtosis_review_decisions": {
+                "Oz": {"decision": "approve", "fingerprint": "current"}
+            },
+        },
+        mne_version=str(mne.__version__),
+    )
+    assert reviewed["preprocessing_settings"][
+        "kurtosis_review_decisions_for_file"
+    ] == {"Oz": {"decision": "approve", "fingerprint": "current"}}
+    assert process_runner._preproc_cache_key(detector_off) != (
+        process_runner._preproc_cache_key(reviewed)
     )
 
 
@@ -1686,7 +1911,9 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
-    assert payload["version"] == "preprocessed-raw-v11-analyzed-intervals"
+    assert payload["version"] == (
+        "preprocessed-raw-v12-condition-scope-kurtosis-review"
+    )
     assert payload["geometry"] == biosemi64_geometry_identity(
         retained_channels=("Fp1",)
     )

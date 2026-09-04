@@ -46,7 +46,7 @@ its filter order, or any generated scientific output.
 - Transient, severe-amplitude, and candidate-burden findings are review signals.
   They do not automatically exclude a recording or select channels for repair.
 - Cache state lives only under the active project root at
-  `.fpvs_processing/preflight_qc/v6_five_second_overlapping_transients`, is
+  `.fpvs_processing/preflight_qc/v7_analyzed_condition_scope`, is
   written atomically, and treats missing, corrupt, or stale entries as cache
   misses. Window, hop, tail, overlap interpretation, geometry, and locked-span
   identities invalidate incompatible entries.

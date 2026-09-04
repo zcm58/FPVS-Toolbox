@@ -51,6 +51,7 @@ def test_suggested_removed_electrodes_are_keyed_by_recording_not_participant(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _result(
                 tmp_path,
@@ -77,6 +78,7 @@ def test_recording_condition_exclusion_removes_only_one_visit(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _result(
                 tmp_path,

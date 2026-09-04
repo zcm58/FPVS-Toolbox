@@ -6,7 +6,9 @@ from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_INFO_TEXT,
     RemovedElectrodeDetectionCalibration,
     build_removed_electrode_review_record,
+    manual_removed_electrodes_are_enabled,
     manual_removed_electrodes_for_pid,
+    manual_removed_electrodes_for_recording,
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
     parse_electrode_list,
@@ -158,6 +160,59 @@ def test_manual_removed_electrode_helpers_normalize_pid_and_channels() -> None:
         "P9",
     )
     assert parse_electrode_list("P2; p9\nOZ") == ["P2", "P9", "Oz"]
+
+
+def test_manual_removed_electrode_switch_and_recording_override_are_authoritative() -> None:
+    settings = {
+        "removed_electrode_detection_mode": "auto",
+        "manual_removed_electrodes_enabled": True,
+        "manual_removed_electrodes": {"P12": ["P9"]},
+        "manual_removed_electrodes_by_recording": {
+            "P12__follicular": ["Oz"],
+            "P12__luteal": [],
+        },
+    }
+
+    assert manual_removed_electrodes_are_enabled(settings) is True
+    assert manual_removed_electrodes_for_recording(
+        settings,
+        participant_id="p12",
+        recording_id="p12__FOLLICULAR",
+    ) == ("Oz",)
+    assert manual_removed_electrodes_for_recording(
+        settings,
+        participant_id="P12",
+        recording_id="P12__luteal",
+    ) == ()
+    assert manual_removed_electrodes_for_recording(
+        settings,
+        participant_id="P12",
+        recording_id="P12__unknown",
+    ) == ("P9",)
+
+    disabled = {**settings, "manual_removed_electrodes_enabled": False}
+    assert manual_removed_electrodes_are_enabled(disabled) is False
+    assert manual_removed_electrodes_for_recording(
+        disabled,
+        participant_id="P12",
+        recording_id="P12__follicular",
+    ) == ()
+
+
+def test_legacy_manual_mode_activates_maps_only_when_switch_is_missing() -> None:
+    legacy = {
+        "removed_electrode_detection_mode": "manual",
+        "manual_removed_electrodes": {"P12": ["P9"]},
+    }
+
+    assert manual_removed_electrodes_are_enabled(legacy) is True
+    assert manual_removed_electrodes_for_recording(
+        legacy,
+        participant_id="P12",
+    ) == ("P9",)
+    assert manual_removed_electrodes_are_enabled(
+        {**legacy, "manual_removed_electrodes_enabled": False}
+    ) is False
 
 
 def test_removed_electrode_detection_mode_normalization() -> None:

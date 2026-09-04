@@ -27,7 +27,7 @@ recording error.
   project-level manual participant exclusions.
 - `src/Main_App/processing/raw_channel_qc.py`: raw BDF sampling, BioSemi64
   neighbor lookup, structured review rules, and pipeline result payloads.
-- `src/Main_App/gui/settings_panel.py`: Advanced Settings control and info
+- `src/Main_App/gui/settings_panel.py`: Experimental Settings control and info
   dialog text import.
 - `tests/processing/test_removed_electrode_detection.py`: focused tests for the
   calibration surface.
@@ -194,10 +194,11 @@ When tuning:
   false positives.
 - Do not tune thresholds directly against the target channel list for one study
   without validating against a holdout participant or study when available.
-- Keep manual metadata as the highest-authority input. In Manual list mode,
-  manual removed-electrode metadata overrides automatic detection for that
-  participant and should be used as the ground truth reference when calibrating
-  future automatic thresholds.
+- Keep manual metadata as the highest-authority input. When its independent
+  switch is enabled, recording-specific entries override participant entries
+  and remain active whether automatic detection is On or Off. Under On, retain
+  separate manual and automatic provenance. Use confirmed manual metadata as
+  the ground-truth reference when calibrating future automatic thresholds.
 
 ## Verification Commands
 

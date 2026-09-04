@@ -7,6 +7,8 @@ from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1,
     ELECTRODE_MONTAGE_BIOSEMI64,
     HARMONIC_SELECTION_PROFILE_VERSION,
+    INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY,
+    KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
     LEGACY_HARMONIC_SELECTION_PROFILE,
     MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     NEW_PROJECT_HARMONIC_SELECTION_PROFILE,
@@ -21,6 +23,11 @@ from Main_App.projects.preprocessing_settings import (
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_recording_conditions,
     normalize_preprocessing_settings,
+)
+from Main_App.processing.interpolation_burden import (
+    INTERPOLATION_BURDEN_DECISION_EXCLUDE,
+    InterpolationBurdenReviewFinding,
+    build_interpolation_burden_review_decision,
 )
 
 
@@ -58,6 +65,8 @@ def test_defaults_use_expected_bandpass():
     assert normalized["manual_excluded_recordings"] == []
     assert normalized["manual_excluded_participant_conditions"] == {}
     assert normalized["manual_excluded_recording_conditions"] == {}
+    assert normalized[INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY] == {}
+    assert normalized[KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY] == {}
     assert normalized["harmonic_selection_profile"] == LEGACY_HARMONIC_SELECTION_PROFILE
     assert normalized["harmonic_selection_profile_version"] == HARMONIC_SELECTION_PROFILE_VERSION
     assert _RETIRED_EPOCH_KEYS.isdisjoint(normalized)
@@ -330,3 +339,65 @@ def test_recording_scoped_qc_settings_normalize_without_changing_participant_sco
         "p01__FOLLICULAR",
         "faces",
     )
+
+
+def _interpolation_burden_decision_payload() -> dict[str, object]:
+    finding = InterpolationBurdenReviewFinding(
+        recording_id="P01__luteal",
+        burden_fingerprint="a" * 64,
+        successfully_interpolated_channels=("Fp1", "Fp2", "AF7", "AF3"),
+        numerator=4,
+        denominator=64,
+        percentage=6.25,
+        message="Review this recording.",
+    )
+    return build_interpolation_burden_review_decision(
+        finding,
+        participant_id="P01",
+        decision=INTERPOLATION_BURDEN_DECISION_EXCLUDE,
+        reason="Four electrodes required interpolation.",
+        reviewed_at_utc="2026-09-02T12:00:00Z",
+    ).to_payload()
+
+
+def test_interpolation_burden_review_decision_normalizes_and_preserves_audit():
+    decision = _interpolation_burden_decision_payload()
+
+    normalized = normalize_preprocessing_settings(
+        {
+            INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY: {
+                "P01__luteal": decision,
+            }
+        }
+    )
+
+    assert normalized[INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY] == {
+        "P01__luteal": decision,
+    }
+
+
+def test_interpolation_burden_review_decision_rejects_stale_fingerprint():
+    decision = _interpolation_burden_decision_payload()
+    decision["fingerprint"] = "b" * 64
+
+    with pytest.raises(ValueError, match="fingerprint is stale"):
+        normalize_preprocessing_settings(
+            {
+                INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY: {
+                    "P01__luteal": decision,
+                }
+            }
+        )
+
+
+def test_interpolation_burden_review_decision_key_must_match_recording():
+    decision = _interpolation_burden_decision_payload()
+
+    with pytest.raises(ValueError, match="key does not match"):
+        normalize_preprocessing_settings(
+            {
+                INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY: {
+                    "P02__luteal": decision,
+                }
+            }
+        )

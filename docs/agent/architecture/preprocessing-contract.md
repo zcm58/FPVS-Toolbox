@@ -243,7 +243,7 @@ those defaults.
 `src/Main_App/processing/preflight_qc.py` coordinates the embedded GUI preflight
 scan without importing Qt. The normal GUI route supplies an explicit active
 project root and condition event map, which enables condition-aware preflight
-QC `v6_five_second_overlapping_transients`. A caller that omits either required
+QC `v7_analyzed_condition_scope`. A caller that omits either required
 input receives an explicit `not_evaluated` planning result. It does not run the
 retired whole-recording/first-90-second signal checks.
 
@@ -323,7 +323,7 @@ created. V4 preserves deterministic result order and checks cancellation
 between condition reads, diagnostic windows, FFT channel batches, and cache writes.
 Successful participant results
 are cached atomically under the active project root at
-`.fpvs_processing/preflight_qc/v6_five_second_overlapping_transients`; a missing, corrupt, or
+`.fpvs_processing/preflight_qc/v7_analyzed_condition_scope`; a missing, corrupt, or
 fingerprint-stale entry is a cache miss. The key includes raw path/size/mtime,
 relevant settings, method and dependency versions, the canonical BioSemi64
 geometry identity, and the resolved event/span plan. The v6 directory/method identity,
@@ -376,16 +376,16 @@ Existing valid modes remain ready choices; legacy booleans map to ready Auto or
 Off choices. If neither was saved, the project loads as provisional Off with
 `confirmation_required`, and a routine save does not materialize that guess.
 `require_removed_electrode_detection_choice_ready()` is the GUI-neutral guard
-for the later processing entry-point integration. The legacy
-`auto_detect_removed_electrodes` boolean remains a compatibility projection and
-is `True` only when the mode is Auto. Participant and recording manual maps are
-normalized and preserved independently.
+used by processing input validation. Before an unresolved legacy project can
+process, the GUI asks once whether to enable the experimental detector,
+recommends Off, and persists the explicit choice and migration provenance. The
+legacy `auto_detect_removed_electrodes` boolean remains a compatibility
+projection and is `True` only when the mode is Auto. Participant and recording
+manual maps are normalized and preserved independently.
 
-This is the QC-04 Wave 1 settings foundation. Until the Wave 2 authority wiring
-is complete, preflight still forces Auto and the review workflow can still
-replace the configured mode; callers must not claim that the saved choice is
-already enforced end to end. Under the existing processing implementation,
-when conservative auto-detect is enabled,
+Preflight and processing use the same saved automatic-detector mode. Reviewing
+removed electrodes activates the independent manual-list switch without
+changing Auto or Off. When conservative auto-detect is enabled,
 persistently flat/very low-variance scalp channels can be automatically added to
 `raw.info["bads"]` before preprocessing. The second-pass raw-QC detector adds
 flag-only candidate lists for extreme high-amplitude outliers, rare-burst
@@ -406,21 +406,25 @@ electrical noise and links to BioSemi's CMS/DRL/referencing explanation. It
 does not imply that referencing repairs clipping or missing data. Metrics,
 severity, reviewed decisions, and analyzed scope are retained in provenance.
 
-Manual list mode stores `manual_removed_electrodes` as a PID-to-electrode map in
-project preprocessing settings. Manual entries supersede automatic detection for
-that participant: only the manually listed valid scalp electrodes are treated as
-removed-electrode raw-QC candidates, added to `raw.info["bads"]`, excluded from
-kurtosis donor/pick calculations, and included in the later spherical
-interpolation target list. Manual entries can contribute to candidate count,
-fraction, hemisphere, and BioSemi64 connected-cluster review findings, but
-those findings cannot exclude a recording automatically. When the experimental
-detector is Off, it emits no low-variance, high-amplitude, rare-burst, spatial,
-or detector-derived burden evidence. Independent manual entries retain their
-own authority.
+The independent `manual_removed_electrodes_enabled` switch controls the
+PID-to-electrode `manual_removed_electrodes` map in project preprocessing
+settings. When enabled, valid manual entries remain authoritative under Auto or
+Off: they are treated as confirmed removed-electrode raw-QC candidates, added
+to `raw.info["bads"]`, excluded from kurtosis donor/pick calculations, and
+included in the later spherical interpolation target list. Under Auto they are
+combined with accepted detector interpolation candidates while retaining a
+separate manual source label. When the switch is disabled, stored maps remain
+dormant and do not affect processing. Manual entries can contribute to
+candidate count, fraction, hemisphere, and BioSemi64 connected-cluster review
+findings, but those findings cannot exclude a recording automatically. When
+the experimental detector is Off, it emits no low-variance, high-amplitude,
+rare-burst, spatial, or detector-derived burden evidence. Independent manual
+entries retain their own authority.
 
 Repeated projects may additionally store
-`manual_removed_electrodes_by_recording`. An explicit recording row overrides
-the participant-level compatibility fallback for that recording only. Likewise
+`manual_removed_electrodes_by_recording`. An explicit recording row, including
+an empty row, overrides the participant-level compatibility fallback for that
+recording only. Likewise
 `manual_excluded_recordings` and
 `manual_excluded_recording_conditions` are distinct from participant-wide and
 participant-condition scopes. GUI review tables must show participant,

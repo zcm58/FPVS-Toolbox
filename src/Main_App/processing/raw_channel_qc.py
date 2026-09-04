@@ -22,6 +22,7 @@ from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     is_high_amplitude_removed_channel,
     is_low_variance_removed_channel,
+    manual_removed_electrodes_are_enabled,
     normalize_removed_electrode_detection_mode,
     parse_electrode_list,
     removed_electrode_threshold_payload,
@@ -818,7 +819,7 @@ def _config_from_settings(settings: Mapping[str, Any]) -> RawChannelQCConfig:
     )
     manual_removed = (
         tuple(parse_electrode_list(settings.get("_fpvs_manual_removed_electrodes")))
-        if mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        if manual_removed_electrodes_are_enabled(settings)
         else ()
     )
     return RawChannelQCConfig(
@@ -1446,8 +1447,7 @@ def evaluate_raw_channel_qc(
         ),
         "bad_channel_cluster_experimental": bool(
             config.auto_detect_removed_electrodes
-            or config.removed_electrode_detection_mode
-            == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+            or config.manual_removed_electrodes
         ),
         **removed_electrode_threshold_payload(config),
         "baseline_severe_review_median_std_uv": (
@@ -1525,8 +1525,7 @@ def evaluate_raw_channel_qc(
 
     cluster_rules_enabled = (
         config.auto_detect_removed_electrodes
-        or config.removed_electrode_detection_mode
-        == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        or bool(config.manual_removed_electrodes)
     )
     spatial_predictability_enabled = (
         config.auto_detect_removed_electrodes and config.spatial_qc_enabled
@@ -1853,8 +1852,7 @@ def _v2_thresholds(config: RawChannelQCConfig) -> dict[str, float | int | bool]:
         ),
         "bad_channel_cluster_experimental": bool(
             config.auto_detect_removed_electrodes
-            or config.removed_electrode_detection_mode
-            == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+            or config.manual_removed_electrodes
         ),
         "review_only": True,
         **removed_electrode_threshold_payload(config),
@@ -2316,8 +2314,7 @@ def _condition_result(
     )
     cluster_rules_enabled = (
         config.auto_detect_removed_electrodes
-        or config.removed_electrode_detection_mode
-        == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+        or bool(config.manual_removed_electrodes)
     )
     burden = _candidate_burden(
         channel_names,

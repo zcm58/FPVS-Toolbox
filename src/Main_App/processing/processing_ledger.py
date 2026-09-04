@@ -15,6 +15,25 @@ from Main_App.io.eeg_geometry import (
     BIOSEMI64_CHANNELS,
     biosemi64_geometry_identity,
 )
+from Main_App.processing.interpolation_burden import build_interpolation_burden
+from Main_App.processing.preprocessing_outcome import (
+    INTERPOLATION_STATUSES,
+    INTERPOLATION_STATUS_LEGACY_UNKNOWN,
+    INTERPOLATION_STATUS_SKIPPED,
+    PROCESSING_STATUS_COMPLETED,
+    PROCESSING_STATUS_COMPLETED_MISSING_CONDITIONS,
+    PROCESSING_STATUS_EXCLUDED,
+    PROCESSING_STATUS_FAILED,
+    PROCESSING_STATUS_PENDING,
+    PreprocessingOutcomeError,
+    build_preprocessing_outcome,
+)
+from Main_App.processing.recording_condition_outcomes import (
+    RECORDING_CONDITION_OUTCOME_LEDGER_KEY,
+    RECORDING_CONDITION_OUTCOME_VERSION,
+    RecordingConditionOutcomeError,
+    reconcile_recording_condition_outputs,
+)
 
 from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_COMPONENT_COUNT,
@@ -66,7 +85,7 @@ PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
 PROCESSING_FINGERPRINT_VERSION = (
-    "processing_fingerprint_v11_biosemi64_frequency_protocol"
+    "processing_fingerprint_v12_analyzed_condition_scope"
 )
 _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
     {
@@ -77,8 +96,7 @@ _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
 )
 _DOWNSTREAM_ONLY_PREPROCESSING_KEYS = frozenset(
     {
-        "manual_excluded_participant_conditions",
-        "manual_excluded_recording_conditions",
+        "interpolation_burden_review_decisions",
         # These describe how a detector choice was obtained, not the signal
         # transformation. The effective mode remains fingerprinted separately.
         "removed_electrode_detection_choice_schema_version",
@@ -229,6 +247,20 @@ def _string_list(value: Any) -> list[str]:
     return []
 
 
+def _export_receipts_payload(
+    source: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(source, Mapping):
+        return []
+    raw_receipts = source.get("export_receipts")
+    if not isinstance(raw_receipts, Sequence) or isinstance(
+        raw_receipts,
+        (str, bytes),
+    ):
+        return []
+    return [dict(item) for item in raw_receipts if isinstance(item, Mapping)]
+
+
 def _removed_electrode_review_payload(source: Mapping[str, Any] | None) -> dict[str, object]:
     payload: dict[str, object] = {}
     source = source or {}
@@ -283,6 +315,123 @@ def _interpolation_payload(source: Mapping[str, Any] | None) -> dict[str, object
             source.get("interpolation_requested_channels")
         ),
         "interpolation_error": str(source.get("interpolation_error") or ""),
+    }
+
+
+def _kurtosis_qc_payload(source: Mapping[str, Any] | None) -> dict[str, object]:
+    """Preserve QC-16 evidence and authority separately from repair outcomes."""
+
+    source = source or {}
+    raw_evidence = source.get("kurtosis_qc_evidence")
+    raw_decision_plan = source.get("kurtosis_decision_plan")
+    candidates = _string_list(
+        source.get("kurtosis_candidate_channels")
+        or source.get("kurtosis_bad_channels")
+    )
+    return {
+        "kurtosis_qc_evidence": (
+            dict(raw_evidence) if isinstance(raw_evidence, Mapping) else {}
+        ),
+        "kurtosis_decision_plan": (
+            dict(raw_decision_plan)
+            if isinstance(raw_decision_plan, Mapping)
+            else {}
+        ),
+        "kurtosis_candidate_channels": candidates,
+        "kurtosis_review_required_channels": _string_list(
+            source.get("kurtosis_review_required_channels")
+        ),
+        "kurtosis_corroborated_channels": _string_list(
+            source.get("kurtosis_corroborated_channels")
+        ),
+        "kurtosis_user_approved_channels": _string_list(
+            source.get("kurtosis_user_approved_channels")
+        ),
+        "kurtosis_user_rejected_channels": _string_list(
+            source.get("kurtosis_user_rejected_channels")
+        ),
+    }
+
+
+def _has_observed_geometry(source: Mapping[str, Any] | None) -> bool:
+    if not isinstance(source, Mapping):
+        return False
+    if isinstance(source.get("geometry"), Mapping):
+        return True
+    audit = source.get("audit")
+    return isinstance(audit, Mapping) and isinstance(audit.get("geometry"), Mapping)
+
+
+def _preprocessing_evidence_payload(
+    *,
+    processing_status: str,
+    processing_reason: str,
+    missing_conditions: Sequence[object] = (),
+    interpolation_source: Mapping[str, Any] | None,
+    geometry_identity: Mapping[str, Any],
+    geometry_was_observed: bool,
+    excluded_before_preprocessing: bool = False,
+) -> dict[str, object]:
+    """Build versioned outcomes without inferring repair success from flags."""
+
+    source = interpolation_source or {}
+    raw_status = str(source.get("interpolation_status") or "").strip().casefold()
+    requested = _string_list(source.get("interpolation_requested_channels"))
+    successful = _string_list(source.get("interpolated_channels"))
+    detail = str(
+        source.get("interpolation_detail")
+        or source.get("interpolation_error")
+        or ""
+    ).strip()
+
+    if excluded_before_preprocessing and not raw_status:
+        raw_status = INTERPOLATION_STATUS_SKIPPED
+        requested = []
+        successful = []
+        detail = "Recording was excluded before interpolation."
+    elif raw_status not in INTERPOLATION_STATUSES:
+        raw_status = INTERPOLATION_STATUS_LEGACY_UNKNOWN
+        requested = []
+        successful = []
+        detail = ""
+    elif raw_status != "succeeded":
+        # A target or detector flag is not evidence of a successful repair.
+        successful = []
+
+    try:
+        outcome = build_preprocessing_outcome(
+            processing_status=processing_status,
+            processing_reason=processing_reason,
+            missing_conditions=missing_conditions,
+            interpolation_status=raw_status,
+            interpolation_requested_channels=requested,
+            interpolation_successful_channels=successful,
+            interpolation_detail=detail,
+        )
+    except PreprocessingOutcomeError as exc:
+        logger.warning(
+            "preprocessing_outcome_provenance_invalid",
+            extra={
+                "processing_status": processing_status,
+                "interpolation_status": raw_status,
+                "error": str(exc),
+            },
+        )
+        outcome = build_preprocessing_outcome(
+            processing_status=processing_status,
+            processing_reason=processing_reason,
+            missing_conditions=missing_conditions,
+            interpolation_status=INTERPOLATION_STATUS_LEGACY_UNKNOWN,
+        )
+
+    burden = build_interpolation_burden(
+        outcome,
+        geometry_identity if geometry_was_observed else None,
+    )
+    return {
+        "preprocessing_outcome": outcome.to_payload(),
+        "interpolation_burden": burden.to_payload(),
+        **_kurtosis_qc_payload(source),
     }
 
 
@@ -1495,6 +1644,18 @@ def record_processing_results(
         kurtosis_bad_channels = _string_list(audit.get("kurtosis_bad_channels"))
         interpolated_channels = _string_list(audit.get("interpolated_channels"))
         n_rejected = _int_or_default(audit.get("n_rejected"), len(kurtosis_bad_channels))
+        preprocessing_evidence = _preprocessing_evidence_payload(
+            processing_status=(
+                PROCESSING_STATUS_COMPLETED_MISSING_CONDITIONS
+                if missing_outputs
+                else PROCESSING_STATUS_COMPLETED
+            ),
+            processing_reason="",
+            missing_conditions=missing_condition_labels,
+            interpolation_source=audit,
+            geometry_identity=geometry_identity,
+            geometry_was_observed=True,
+        )
         entries[state.processing_id] = {
             **_recording_identity_payload(state.info),
             "group_id": state.info.group,
@@ -1503,6 +1664,7 @@ def record_processing_results(
             "processing_fingerprint": plan.fingerprint,
             "geometry": geometry_identity,
             "expected_outputs": [str(path) for path in state.expected_outputs],
+            "export_receipts": _export_receipts_payload(result),
             "status": "completed",
             "completed_at": _now_iso(),
             "run_mode": run_mode,
@@ -1517,6 +1679,7 @@ def record_processing_results(
             "kurtosis_bad_channels": kurtosis_bad_channels,
             "interpolated_channels": interpolated_channels,
             **_interpolation_payload(audit),
+            **preprocessing_evidence,
             "n_rejected": n_rejected,
             "condition_completeness": "partial" if missing_outputs else "complete",
             "completion_warning": (
@@ -1575,6 +1738,16 @@ def record_processing_results(
                 qc_payload.get("n_bad_channels"),
                 len(raw_qc_bad_channels),
             )
+            preprocessing_evidence = _preprocessing_evidence_payload(
+                processing_status=PROCESSING_STATUS_EXCLUDED,
+                processing_reason=str(
+                    excluded_result.get("message") or exclusion_reason
+                ),
+                interpolation_source=qc_payload,
+                geometry_identity=geometry_identity,
+                geometry_was_observed=_has_observed_geometry(excluded_result),
+                excluded_before_preprocessing=True,
+            )
             entries[state.processing_id] = {
                 **_recording_identity_payload(state.info),
                 "group_id": state.info.group,
@@ -1583,6 +1756,7 @@ def record_processing_results(
                 "processing_fingerprint": plan.fingerprint,
                 "geometry": geometry_identity,
                 "expected_outputs": [str(path) for path in state.expected_outputs],
+                "export_receipts": _export_receipts_payload(excluded_result),
                 "status": "excluded",
                 "completed_at": None,
                 "run_mode": run_mode,
@@ -1603,6 +1777,7 @@ def record_processing_results(
                 "kurtosis_bad_channels": [],
                 "interpolated_channels": [],
                 **_interpolation_payload(qc_payload),
+                **preprocessing_evidence,
                 "n_rejected": n_rejected,
                 **_source_derivative_result_payload(excluded_result),
             }
@@ -1642,14 +1817,29 @@ def record_processing_results(
                 str(label)
                 for label in no_output_failure.get("missing_condition_labels", [])
             ]
+            geometry_identity = _result_geometry_identity(
+                result,
+                plan.geometry_identity,
+            )
+            preprocessing_evidence = _preprocessing_evidence_payload(
+                processing_status=PROCESSING_STATUS_FAILED,
+                processing_reason=(
+                    "Processing did not produce any expected condition workbooks."
+                ),
+                missing_conditions=missing_condition_labels,
+                interpolation_source=audit,
+                geometry_identity=geometry_identity,
+                geometry_was_observed=_has_observed_geometry(result),
+            )
             entries[state.processing_id] = {
                 **_recording_identity_payload(state.info),
                 "group_id": state.info.group,
                 **raw_file_metadata(state.info.path),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
                 "processing_fingerprint": plan.fingerprint,
-                "geometry": _result_geometry_identity(result, plan.geometry_identity),
+                "geometry": geometry_identity,
                 "expected_outputs": [str(path) for path in state.expected_outputs],
+                "export_receipts": _export_receipts_payload(result),
                 "status": "failed",
                 "completed_at": None,
                 "run_mode": run_mode,
@@ -1672,6 +1862,7 @@ def record_processing_results(
                 "kurtosis_bad_channels": kurtosis_bad_channels,
                 "interpolated_channels": interpolated_channels,
                 **_interpolation_payload(audit),
+                **preprocessing_evidence,
                 "n_rejected": n_rejected,
                 **_source_derivative_result_payload(result),
             }
@@ -1694,14 +1885,32 @@ def record_processing_results(
         interpolated_channels = _string_list(
             failed_provenance.get("interpolated_channels")
         )
+        geometry_identity = _result_geometry_identity(
+            failed_result,
+            plan.geometry_identity,
+        )
+        processing_status = (
+            PROCESSING_STATUS_PENDING if cancelled else PROCESSING_STATUS_FAILED
+        )
+        processing_reason = "" if cancelled else str(
+            (failed_result or {}).get("error") or "Processing did not complete."
+        )
+        preprocessing_evidence = _preprocessing_evidence_payload(
+            processing_status=processing_status,
+            processing_reason=processing_reason,
+            interpolation_source=failed_provenance,
+            geometry_identity=geometry_identity,
+            geometry_was_observed=_has_observed_geometry(failed_result),
+        )
         entries[state.processing_id] = {
             **_recording_identity_payload(state.info),
             "group_id": state.info.group,
             **raw_file_metadata(state.info.path),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
-            "geometry": _result_geometry_identity(failed_result, plan.geometry_identity),
+            "geometry": geometry_identity,
             "expected_outputs": [str(path) for path in state.expected_outputs],
+            "export_receipts": _export_receipts_payload(failed_result),
             "status": "incomplete" if cancelled else "failed",
             "completed_at": None,
             "run_mode": run_mode,
@@ -1717,9 +1926,61 @@ def record_processing_results(
             "kurtosis_bad_channels": [],
             "interpolated_channels": interpolated_channels,
             **_interpolation_payload(failed_provenance),
+            **preprocessing_evidence,
             "n_rejected": 0,
             **_source_derivative_result_payload(failed_result),
         }
+
+    recording_condition_outcome_payload: dict[str, Any] | None = None
+    try:
+        expected_plan = load_expected_recording_condition_plan(project_root)
+        if expected_plan is not None:
+            if expected_plan.processing_fingerprint != plan.fingerprint:
+                raise RecordingConditionOutcomeError(
+                    "The expected recording-condition plan belongs to a different "
+                    "processing fingerprint."
+                )
+            current_export_receipts = [
+                receipt
+                for result in results
+                for receipt in _export_receipts_payload(result)
+            ]
+            outcomes = reconcile_recording_condition_outputs(
+                expected_plan,
+                current_export_receipts,
+            )
+            recording_condition_outcome_payload = outcomes.to_payload()
+            recording_condition_outcome_payload["reconciliation_status"] = (
+                "complete"
+            )
+            ledger[RECORDING_CONDITION_OUTCOME_LEDGER_KEY] = (
+                recording_condition_outcome_payload
+            )
+    except (ExpectedRecordingConditionPlanError, RecordingConditionOutcomeError) as exc:
+        raw_expected = ledger.get(EXPECTED_RECORDING_CONDITION_PLAN_LEDGER_KEY)
+        expected_run_id = (
+            str(raw_expected.get("run_id") or "")
+            if isinstance(raw_expected, Mapping)
+            else ""
+        )
+        expected_fingerprint = (
+            str(raw_expected.get("fingerprint") or "")
+            if isinstance(raw_expected, Mapping)
+            else ""
+        )
+        recording_condition_outcome_payload = {
+            "version": RECORDING_CONDITION_OUTCOME_VERSION,
+            "reconciliation_status": "blocked",
+            "expected_plan_run_id": expected_run_id,
+            "expected_plan_fingerprint": expected_fingerprint,
+            "is_pre_review_ready": False,
+            "status_counts": {"blocked": len(plan.states)},
+            "cells": [],
+            "reason": str(exc),
+        }
+        ledger[RECORDING_CONDITION_OUTCOME_LEDGER_KEY] = (
+            recording_condition_outcome_payload
+        )
 
     save_ledger(project_root, ledger)
 
@@ -1750,5 +2011,6 @@ def record_processing_results(
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
             "geometry": dict(plan.geometry_identity),
+            "recording_condition_outcomes": recording_condition_outcome_payload,
         },
     )

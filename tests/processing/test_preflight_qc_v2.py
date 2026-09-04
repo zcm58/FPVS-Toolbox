@@ -134,7 +134,7 @@ def test_v3_accepts_canonical_project_reference_keys() -> None:
     assert cache_settings["_fpvs_manual_removed_electrodes"] == ["P9"]
     assert "epoch_end" not in preflight_qc._preflight_cache_settings(settings)
     method = preflight_qc._preflight_cache_method()
-    assert method["version"] == "v6_five_second_overlapping_transients"
+    assert method["version"] == "v7_analyzed_condition_scope"
     assert method["condition_io_chunk_duration_s"] == 10.0
     assert method["transient_window_duration_s"] == 5.0
     assert method["transient_window_hop_s"] == 2.5
@@ -460,6 +460,116 @@ def test_preflight_preserves_detector_off_without_signal_candidate_leakage(
     }
 
 
+def test_preflight_applies_manual_channels_with_detector_off_without_auto_label(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06-manual.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows())
+    settings = {
+        **_settings(),
+        "removed_electrode_detection_mode": "off",
+        "auto_detect_removed_electrodes": False,
+        "manual_removed_electrodes_enabled": True,
+        "manual_removed_electrodes": {"P06": ["P9"]},
+    }
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        settings,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    result = scan.results[0]
+    assert result.raw_channel_qc["manual_removed_channels"] == ["P9"]
+    assert "P9" in result.raw_channel_qc["channels_to_interpolate"]
+    assert result.auto_removed_electrodes == ()
+    assert result.raw_channel_qc["experimental_removed_electrode_detector"] == {
+        "evaluation_status": "not_evaluated",
+        "reason": "disabled_in_project_settings",
+    }
+
+
+def test_preflight_recording_empty_manual_override_beats_participant_map(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06_visit2.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows())
+    settings = {
+        **_settings(),
+        "removed_electrode_detection_mode": "off",
+        "auto_detect_removed_electrodes": False,
+        "manual_removed_electrodes_enabled": True,
+        "manual_removed_electrodes": {"P06": ["P9"]},
+        "manual_removed_electrodes_by_recording": {"P06_visit2": []},
+    }
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [
+            RawFileInfo(
+                raw_path,
+                "P06",
+                "control",
+                recording_id="P06_visit2",
+            )
+        ],
+        settings,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    result = scan.results[0]
+    assert result.raw_channel_qc["manual_removed_channels"] == []
+    assert result.raw_channel_qc["channels_to_interpolate"] == []
+    assert result.auto_removed_electrodes == ()
+
+
+def test_preflight_does_not_score_an_explicitly_excluded_condition(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    raw_path = tmp_path / "P06-excluded-condition.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    _install_lazy_fakes(monkeypatch, [raw], _event_rows())
+    settings = {
+        **_settings(),
+        "manual_excluded_participant_conditions": {"P06": ["Faces"]},
+    }
+
+    scan = preflight_qc.scan_preprocessing_qc(
+        [RawFileInfo(raw_path, "P06", "control")],
+        settings,
+        project_root=tmp_path,
+        event_map={"Faces": 1},
+    )
+
+    result = scan.results[0]
+    assert raw.reads == []
+    assert result.condition_qc["condition_count"] == 0
+    assert result.condition_qc["excluded_condition_labels"] == ["Faces"]
+    scored_plan = result.condition_qc["scored_source_analysis_span_plan"]
+    assert scored_plan["spans"] == []
+    assert scored_plan["condition_selection"]["scope"] == {
+        "participant_id": "P06",
+        "recording_id": None,
+    }
+    assert result.raw_channel_qc["evaluation_status"] == "not_evaluated"
+    assert result.raw_channel_qc["reason"] == "all_conditions_excluded_from_analysis"
+    assert result.raw_channel_qc["occurrence_evaluation_scope"][0]["reason"] == (
+        "condition_excluded_from_analysis"
+    )
+
+
 def test_v3_converts_absolute_plan_bounds_to_relative_raw_reads(
     monkeypatch,
     tmp_path: Path,
@@ -518,7 +628,7 @@ def test_v3_missing_marker_pauses_without_sample_read_or_cache(
     ]
     assert result.condition_qc["method_name"] == "condition_aware_preflight_qc"
     assert result.condition_qc["method_version"] == (
-        "v6_five_second_overlapping_transients"
+        "v7_analyzed_condition_scope"
     )
     assert result.condition_qc["cache_status"] == "marker_review_required"
     assert raw.reads == []
@@ -526,7 +636,7 @@ def test_v3_missing_marker_pauses_without_sample_read_or_cache(
         tmp_path
         / ".fpvs_processing"
         / "preflight_qc"
-        / "v6_five_second_overlapping_transients"
+        / "v7_analyzed_condition_scope"
     )
     assert not list(cache_directory.glob("*.json"))
 

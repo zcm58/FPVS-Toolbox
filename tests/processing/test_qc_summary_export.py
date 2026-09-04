@@ -20,6 +20,7 @@ from Main_App.processing.qc_summary_export import (
     QC_SUMMARY_HEADERS,
     RECORDING_QC_IDENTITY_HEADERS,
     DATA_QUALITY_REVIEW_FLAGS_FILENAME,
+    INTERPOLATION_BURDEN_SUMMARY_SHEET,
     QUALITY_CHECK_FOLDER,
     build_processing_qc_rows,
     export_processing_qc_summary,
@@ -92,6 +93,18 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
                 "removed_electrode_auto_manual_overlap": ["FT7"],
                 "removed_electrode_agreement_status": "partial",
                 "kurtosis_bad_channels": ["P1", "P3"],
+                "kurtosis_candidate_channels": ["P1", "P3"],
+                "kurtosis_review_required_channels": [],
+                "kurtosis_corroborated_channels": [],
+                "kurtosis_user_approved_channels": ["P3"],
+                "kurtosis_user_rejected_channels": ["P1"],
+                "kurtosis_qc_evidence": {
+                    "status": "valid",
+                    "method_label": "EEGLAB-inspired trimmed kurtosis",
+                    "fingerprint": "a" * 64,
+                },
+                "interpolation_status": "succeeded",
+                "interpolation_requested_channels": ["FT7", "P9", "P1", "P3"],
                 "interpolated_channels": ["FT7", "P9", "P1", "P3"],
             },
         },
@@ -132,17 +145,31 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "Auto/Manual Removed-Electrode Agreement": "partial",
             "Flagged Removed-Electrode Candidates (High Amplitude)": "FT8",
             "Flagged Removed-Electrode Candidates (Rare Burst)": "P10",
-            "Flagged Removed-Electrode Candidates (Spatial Consistency)": "FT7",
-            "Kurtosis-Rejected Electrodes": "P1, P3",
-            "Electrodes Interpolated": "FT7, P9, P1, P3",
-            "Total Number of Electrodes removed/rejected": 4,
+                "Flagged Removed-Electrode Candidates (Spatial Consistency)": "FT7",
+                "Kurtosis QC Status": "valid",
+                "Kurtosis Method": "EEGLAB-inspired trimmed kurtosis",
+                "Kurtosis Candidate Electrodes": "P1, P3",
+                "Kurtosis Review-Required Electrodes": "None",
+                "Kurtosis Corroborated Automatic Electrodes": "None",
+                "Kurtosis User-Approved Electrodes": "P3",
+                "Kurtosis User-Rejected Electrodes": "P1",
+                "Kurtosis Evidence Fingerprint": "a" * 64,
+                "Interpolation Requested Electrodes": "FT7, P9, P1, P3",
+                "Successfully Interpolated Electrodes": "FT7, P9, P1, P3",
+                "Successfully Interpolated Count": 4,
+                "Eligible Scalp Electrode Count": 64,
+                "Interpolation Burden (%)": 6.25,
+                "Interpolation Review (>5%)": "Review required",
+                "Interpolation Outcome": "Succeeded",
+                "Interpolation Detail": "None",
+                "Preprocessing Status": "Completed",
+                "Total Number of Electrodes removed/rejected": 4,
             "Raw QC Warnings": "possible_bad_channel_cluster",
             "Raw Baseline Median STD (uV)": "520.4",
             "Raw Baseline Median P2P99 (uV)": "1671.6",
-            "Raw Baseline QC": "OK",
-            "Missing Conditions": "None",
-            "Included in Final Set": "Included",
-            "Exclusion Reason": "",
+                "Raw Baseline QC": "OK",
+                "Missing Conditions": "None",
+                "Exclusion Reason": "",
         },
         {
             "PID": "P02",
@@ -158,17 +185,31 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
             "Auto/Manual Removed-Electrode Agreement": "None",
             "Flagged Removed-Electrode Candidates (High Amplitude)": "None",
             "Flagged Removed-Electrode Candidates (Rare Burst)": "None",
-            "Flagged Removed-Electrode Candidates (Spatial Consistency)": "None",
-            "Kurtosis-Rejected Electrodes": "None",
-            "Electrodes Interpolated": "None",
-            "Total Number of Electrodes removed/rejected": 0,
+                "Flagged Removed-Electrode Candidates (Spatial Consistency)": "None",
+                "Kurtosis QC Status": "not evaluated",
+                "Kurtosis Method": "Not recorded",
+                "Kurtosis Candidate Electrodes": "None",
+                "Kurtosis Review-Required Electrodes": "None",
+                "Kurtosis Corroborated Automatic Electrodes": "None",
+                "Kurtosis User-Approved Electrodes": "None",
+                "Kurtosis User-Rejected Electrodes": "None",
+                "Kurtosis Evidence Fingerprint": "Not recorded",
+                "Interpolation Requested Electrodes": "None",
+                "Successfully Interpolated Electrodes": "None",
+                "Successfully Interpolated Count": "Unavailable",
+                "Eligible Scalp Electrode Count": "Unavailable",
+                "Interpolation Burden (%)": "Unavailable",
+                "Interpolation Review (>5%)": "Unavailable",
+                "Interpolation Outcome": "Skipped",
+                "Interpolation Detail": "Recording was excluded before interpolation.",
+                "Preprocessing Status": "Excluded before preprocessing",
+                "Total Number of Electrodes removed/rejected": 0,
             "Raw QC Warnings": "None",
             "Raw Baseline Median STD (uV)": "None",
             "Raw Baseline Median P2P99 (uV)": "None",
-            "Raw Baseline QC": "None",
-            "Missing Conditions": "None",
-            "Included in Final Set": "Excluded",
-            "Exclusion Reason": "Header-only BDF.",
+                "Raw Baseline QC": "None",
+                "Missing Conditions": "None",
+                "Exclusion Reason": "Header-only BDF.",
         },
     ]
 
@@ -189,6 +230,16 @@ def test_processing_qc_summary_rows_and_formatting(tmp_path: Path) -> None:
     assert worksheet.column_dimensions["C"].width >= len(
         "Auto-Detected Removed Electrodes (Low SD)"
     )
+    burden_sheet = workbook[INTERPOLATION_BURDEN_SUMMARY_SHEET]
+    burden_metrics = {
+        row[0].value: row[1].value
+        for row in burden_sheet.iter_rows(min_row=2, max_col=2)
+    }
+    assert burden_metrics["Recordings in preprocessing cohort"] == 2
+    assert burden_metrics["Recordings contributing to burden summary"] == 1
+    assert burden_metrics["Recordings with unavailable burden"] == 1
+    assert burden_metrics["Mean interpolation burden (%)"] == pytest.approx(6.25)
+    assert burden_metrics["Recordings above 5%"] == 1
 
 
 def test_repeated_session_qc_is_recording_keyed_and_exports_session_identity(
@@ -220,6 +271,8 @@ def test_repeated_session_qc_is_recording_keyed_and_exports_session_identity(
             "audit": {
                 "n_rejected": 1,
                 "raw_qc_bad_channels": ["P9"],
+                "interpolation_status": "succeeded",
+                "interpolation_requested_channels": ["P9"],
                 "interpolated_channels": ["P9"],
             },
         }
@@ -238,13 +291,14 @@ def test_repeated_session_qc_is_recording_keyed_and_exports_session_identity(
     assert rows[0]["Recording ID"] == "P01__luteal"
     assert rows[0]["Session ID"] == "luteal"
     assert rows[0]["Visit Index"] == 1
-    assert rows[0]["Electrodes Interpolated"] == "P9"
+    assert rows[0]["Successfully Interpolated Electrodes"] == "P9"
+    assert rows[0]["Interpolation Burden (%)"] == pytest.approx(1.5625)
 
     output_path = export_processing_qc_summary(project, plan, results)
     workbook = load_workbook(output_path, read_only=True)
     worksheet = workbook.active
     expected_headers = RECORDING_QC_IDENTITY_HEADERS + QC_SUMMARY_HEADERS[1:]
-    assert worksheet.title == "Recording QC"
+    assert worksheet.title == "Preprocessing QC"
     assert [cell.value for cell in worksheet[1]] == list(expected_headers)
 
 
@@ -343,6 +397,8 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
                     "removed_electrode_auto_manual_overlap": ["FT7"],
                     "removed_electrode_agreement_status": "partial",
                     "kurtosis_bad_channels": ["Oz"],
+                    "interpolation_status": "succeeded",
+                    "interpolation_requested_channels": ["FT7", "P9", "Oz"],
                     "interpolated_channels": ["FT7", "P9", "Oz"],
                 },
             }
@@ -354,7 +410,7 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
 
     # Simulate a later incremental run where P01 was already completed and skipped.
     rows = build_processing_qc_rows(project, plan, [])
-    assert rows[0]["Included in Final Set"] == "Included"
+    assert rows[0]["Preprocessing Status"] == "Completed"
     assert rows[0]["Exclusion Reason"] == ""
     assert rows[0]["Missing Conditions"] == "None"
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
@@ -369,8 +425,8 @@ def test_processing_qc_summary_uses_ledger_for_skipped_completed_participant(tmp
     assert rows[0]["Auto/Manual Removed-Electrode Agreement"] == "partial"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
-    assert rows[0]["Kurtosis-Rejected Electrodes"] == "Oz"
-    assert rows[0]["Electrodes Interpolated"] == "FT7, P9, Oz"
+    assert rows[0]["Kurtosis Candidate Electrodes"] == "Oz"
+    assert rows[0]["Successfully Interpolated Electrodes"] == "FT7, P9, Oz"
     assert rows[0]["Total Number of Electrodes removed/rejected"] == 3
 
     ledger = json.loads(
@@ -404,6 +460,8 @@ def test_processing_qc_summary_merges_saved_preflight_review_flags(
                 "audit": {
                     "n_rejected": 1,
                     "kurtosis_bad_channels": ["Oz"],
+                    "interpolation_status": "succeeded",
+                    "interpolation_requested_channels": ["Oz"],
                     "interpolated_channels": ["Oz"],
                 },
             }
@@ -441,8 +499,8 @@ def test_processing_qc_summary_merges_saved_preflight_review_flags(
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "F8, FC6"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "AF7, C6"
     assert rows[0]["Raw QC Warnings"] == "possible_bad_channel_cluster"
-    assert rows[0]["Kurtosis-Rejected Electrodes"] == "Oz"
-    assert rows[0]["Electrodes Interpolated"] == "Oz"
+    assert rows[0]["Kurtosis Candidate Electrodes"] == "Oz"
+    assert rows[0]["Successfully Interpolated Electrodes"] == "Oz"
 
 
 def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Path) -> None:
@@ -463,6 +521,8 @@ def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Pat
                 "raw_qc_bad_channels": ["P9"],
                 "raw_qc_manual_removed_channels": ["FT7"],
                 "kurtosis_bad_channels": ["P8"],
+                "interpolation_status": "succeeded",
+                "interpolation_requested_channels": ["FT7", "P9", "P8"],
                 "interpolated_channels": ["FT7", "P9", "P8"],
             },
         }
@@ -480,13 +540,13 @@ def test_processing_qc_summary_flags_partial_condition_participant(tmp_path: Pat
     rows = build_processing_qc_rows(project, plan, results)
 
     assert rows[0]["Missing Conditions"] == "Condition B"
-    assert rows[0]["Included in Final Set"] == "Included (partial conditions)"
+    assert rows[0]["Preprocessing Status"] == "Completed with missing conditions"
     assert rows[0]["Exclusion Reason"] == ""
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
-    assert rows[0]["Kurtosis-Rejected Electrodes"] == "P8"
+    assert rows[0]["Kurtosis Candidate Electrodes"] == "P8"
 
 
 def test_processing_qc_summary_uses_matching_cache_for_legacy_failed_entry(tmp_path: Path) -> None:
@@ -538,15 +598,16 @@ def test_processing_qc_summary_uses_matching_cache_for_legacy_failed_entry(tmp_p
 
     rows = build_processing_qc_rows(project, plan, [])
 
-    assert rows[0]["Included in Final Set"] == "Excluded"
+    assert rows[0]["Preprocessing Status"] == "Not recorded (legacy result)"
     assert rows[0]["Exclusion Reason"] == ""
     assert rows[0]["Missing Conditions"] == "None"
     assert rows[0]["Manually Removed Electrodes"] == "FT7"
     assert rows[0]["Auto-Detected Removed Electrodes (Low SD)"] == "P9"
     assert rows[0]["Flagged Removed-Electrode Candidates (High Amplitude)"] == "None"
     assert rows[0]["Flagged Removed-Electrode Candidates (Spatial Consistency)"] == "None"
-    assert rows[0]["Kurtosis-Rejected Electrodes"] == "P8"
-    assert rows[0]["Electrodes Interpolated"] == "FT7, P9, P8"
+    assert rows[0]["Kurtosis Candidate Electrodes"] == "P8"
+    assert rows[0]["Successfully Interpolated Electrodes"] == "Not recorded"
+    assert rows[0]["Interpolation Burden (%)"] == "Unavailable"
     assert rows[0]["Total Number of Electrodes removed/rejected"] == 3
 
 
@@ -706,4 +767,4 @@ def test_processing_qc_summary_treats_legacy_missing_condition_as_included(
     rows = build_processing_qc_rows(project, plan, [])
 
     assert rows[0]["Missing Conditions"] == "Condition B"
-    assert rows[0]["Included in Final Set"] == "Included (partial conditions)"
+    assert rows[0]["Preprocessing Status"] == "Not recorded (legacy result)"

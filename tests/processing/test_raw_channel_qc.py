@@ -762,6 +762,63 @@ def test_raw_channel_qc_manual_mode_only_interpolates_manual_list() -> None:
     assert result.candidate_sources == {"FT8": ("manual_removed",)}
 
 
+def test_active_manual_list_is_applied_alongside_auto_detector_output() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_clustered_removed_channels(["P9"]),
+        {
+            "stim_channel": "Status",
+            "max_bad_chans": 20,
+            "removed_electrode_detection_mode": "auto",
+            "auto_detect_removed_electrodes": True,
+            "manual_removed_electrodes_enabled": True,
+            "_fpvs_manual_removed_electrodes": ["FT8"],
+        },
+        filename="p03.bdf",
+    )
+
+    assert result.manual_removed_channels == ("FT8",)
+    assert result.low_variance_channels == ("P9",)
+    assert set(result.channels_to_interpolate) == {"FT8", "P9"}
+    assert result.candidate_sources["FT8"] == ("manual_removed",)
+    assert result.candidate_sources["P9"] == ("low_variance",)
+
+
+def test_off_detector_keeps_active_manual_list_without_detector_output() -> None:
+    result = evaluate_raw_channel_qc(
+        _raw_with_clustered_removed_channels(["P9"]),
+        {
+            "stim_channel": "Status",
+            "max_bad_chans": 20,
+            "removed_electrode_detection_mode": "off",
+            "auto_detect_removed_electrodes": False,
+            "manual_removed_electrodes_enabled": True,
+            "_fpvs_manual_removed_electrodes": ["FT8"],
+        },
+        filename="p03.bdf",
+    )
+
+    assert result.manual_removed_channels == ("FT8",)
+    assert result.low_variance_channels == ()
+    assert result.high_amplitude_channels == ()
+    assert result.rare_burst_channels == ()
+    assert result.spatial_outlier_channels == ()
+    assert result.channels_to_interpolate == ("FT8",)
+    assert result.candidate_sources == {"FT8": ("manual_removed",)}
+
+
+def test_disabled_manual_switch_makes_resolved_manual_list_dormant() -> None:
+    config = raw_channel_qc_module._config_from_settings(
+        {
+            "removed_electrode_detection_mode": "off",
+            "manual_removed_electrodes_enabled": False,
+            "_fpvs_manual_removed_electrodes": ["FT8"],
+        }
+    )
+
+    assert config.auto_detect_removed_electrodes is False
+    assert config.manual_removed_electrodes == ()
+
+
 def test_raw_channel_qc_manual_mode_does_not_emit_detector_hemisphere_evidence() -> None:
     result = evaluate_raw_channel_qc(
         _raw_with_left_failure(),

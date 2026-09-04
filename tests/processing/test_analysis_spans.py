@@ -13,6 +13,7 @@ from Main_App.processing.analysis_spans import (
     read_source_analysis_span_plan,
     realize_target_analysis_span_plan,
     relative_spans_from_plan,
+    restrict_source_analysis_span_plan_by_condition,
     validate_realized_target_analysis_span_plan,
     validate_source_analysis_span_context,
     validate_source_analysis_span_plan,
@@ -53,6 +54,34 @@ def _event_plan(first_samp: int = 100) -> dict[str, object]:
         event_map={"Faces": 1},
         sfreq=12.0,
         n_times=60,
+        first_samp=first_samp,
+        frequency_protocol=_protocol(),
+    ).to_payload()
+
+
+def _two_condition_event_plan(first_samp: int = 100) -> dict[str, object]:
+    events = np.asarray(
+        [
+            [first_samp, 0, 1],
+            [first_samp + 10, 0, 55],
+            [first_samp + 16, 0, 55],
+            [first_samp + 22, 0, 55],
+            [first_samp + 28, 0, 55],
+            [first_samp + 34, 0, 55],
+            [first_samp + 40, 0, 2],
+            [first_samp + 50, 0, 55],
+            [first_samp + 56, 0, 55],
+            [first_samp + 62, 0, 55],
+            [first_samp + 68, 0, 55],
+            [first_samp + 74, 0, 55],
+        ],
+        dtype=int,
+    )
+    return plan_preflight_qc_events(
+        events=events,
+        event_map={"Faces": 1, "Objects": 2},
+        sfreq=12.0,
+        n_times=100,
         first_samp=first_samp,
         frequency_protocol=_protocol(),
     ).to_payload()
@@ -113,6 +142,53 @@ def test_target_realization_uses_actual_grid_and_half_up_rounding() -> None:
         target_n_times=30,
         target_first_samp=50,
     ) == target_plan
+
+
+def test_condition_exclusion_derives_a_fingerprinted_analyzed_subset() -> None:
+    parent = read_source_analysis_span_plan(_two_condition_event_plan())
+
+    restricted = restrict_source_analysis_span_plan_by_condition(
+        parent,
+        excluded_condition_labels=["objects"],
+        exclusion_scope={"participant_id": "P01", "recording_id": "P01__visit-1"},
+    )
+
+    assert [span["condition_label"] for span in restricted["spans"]] == ["Faces"]
+    assert restricted["condition_selection"] == {
+        "version": "manual_condition_exclusion_v1",
+        "parent_source_plan_fingerprint": parent["fingerprint"],
+        "excluded_condition_labels": ["objects"],
+        "scope": {"participant_id": "P01", "recording_id": "P01__visit-1"},
+    }
+    assert restricted["fingerprint"] != parent["fingerprint"]
+    target = realize_target_analysis_span_plan(
+        restricted,
+        target_sfreq_hz=6,
+        target_n_times=50,
+        target_first_samp=50,
+    )
+    assert target["condition_selection"] == restricted["condition_selection"]
+    assert [span["condition_label"] for span in target["spans"]] == ["Faces"]
+
+
+def test_condition_exclusion_can_account_for_an_all_condition_no_output_state() -> None:
+    parent = read_source_analysis_span_plan(_two_condition_event_plan())
+
+    restricted = restrict_source_analysis_span_plan_by_condition(
+        parent,
+        excluded_condition_labels=["Faces", "Objects"],
+        exclusion_scope={"participant_id": "P01"},
+    )
+
+    assert restricted["spans"] == []
+    assert relative_spans_from_plan(restricted) == ()
+    with pytest.raises(AnalysisSpanPlanError, match="No retained analyzed"):
+        realize_target_analysis_span_plan(
+            restricted,
+            target_sfreq_hz=6,
+            target_n_times=50,
+            target_first_samp=50,
+        )
 
 
 def test_unique_union_never_weights_overlapping_samples_twice() -> None:

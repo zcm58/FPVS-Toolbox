@@ -11,6 +11,14 @@ from Main_App.processing.removed_electrode_detection import (
     normalize_manual_removed_electrodes_map,
     normalize_removed_electrode_detection_mode,
 )
+from Main_App.processing.interpolation_burden import (
+    InterpolationBurdenError,
+    normalize_interpolation_burden_review_decision,
+)
+from Main_App.processing.kurtosis_qc import (
+    KurtosisQCError,
+    normalize_kurtosis_review_decisions_by_recording,
+)
 
 try:  # pragma: no cover - fallback for isolated usage
     import config  # type: ignore
@@ -55,6 +63,16 @@ _MANUAL_EXCLUDED_PARTICIPANT_CONDITIONS = (
 )
 _MANUAL_EXCLUDED_RECORDING_CONDITIONS = (
     "manual_excluded_recording_conditions"
+)
+INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY = (
+    "interpolation_burden_review_decisions"
+)
+_INTERPOLATION_BURDEN_REVIEW_DECISIONS = "interpolation_burden_review_decisions"
+KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY = (
+    "kurtosis_review_decisions_by_recording"
+)
+_KURTOSIS_REVIEW_DECISIONS_BY_RECORDING = (
+    "kurtosis_review_decisions_by_recording"
 )
 
 _GROUP_SIGNIFICANT_POLICY_NAME = "Group-level significant harmonics (Volfart/Retter/Rossion style)"
@@ -253,6 +271,18 @@ _FIELDS: tuple[_Field, ...] = (
         ),
         {},
         _MANUAL_EXCLUDED_RECORDING_CONDITIONS,
+    ),
+    _Field(
+        INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY,
+        (INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY,),
+        {},
+        _INTERPOLATION_BURDEN_REVIEW_DECISIONS,
+    ),
+    _Field(
+        KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+        (KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,),
+        {},
+        _KURTOSIS_REVIEW_DECISIONS_BY_RECORDING,
     ),
     _Field(
         "max_parallel_workers_override",
@@ -810,6 +840,54 @@ def normalize_manual_excluded_recordings(value: Any) -> list[str]:
     return normalize_manual_excluded_participants(value)
 
 
+def normalize_interpolation_burden_review_decisions(
+    value: Any,
+) -> dict[str, dict[str, object]]:
+    """Validate recording-scoped QC-07 decisions without applying them."""
+
+    if value in (None, ""):
+        return {}
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            import json
+
+            decoded = json.loads(text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Interpolation-burden decisions must be a recording-to-decision map."
+            ) from exc
+        return normalize_interpolation_burden_review_decisions(decoded)
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "Interpolation-burden decisions must be a recording-to-decision map."
+        )
+
+    normalized: dict[str, dict[str, object]] = {}
+    seen: set[str] = set()
+    for raw_key, raw_decision in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        try:
+            decision = normalize_interpolation_burden_review_decision(raw_decision)
+        except InterpolationBurdenError as exc:
+            raise ValueError(str(exc)) from exc
+        if key.casefold() != decision.processing_id.casefold():
+            raise ValueError(
+                "Interpolation-burden decision key does not match its recording identity."
+            )
+        if key.casefold() in seen:
+            raise ValueError(
+                "Interpolation-burden decisions contain duplicate recording identities."
+            )
+        seen.add(key.casefold())
+        normalized[decision.processing_id] = decision.to_payload()
+    return dict(sorted(normalized.items(), key=lambda item: item[0].casefold()))
+
+
 def normalize_manual_excluded_participant_conditions(
     value: Any,
 ) -> dict[str, list[str]]:
@@ -1009,6 +1087,17 @@ def normalize_preprocessing_settings(
             normalized[field.name] = (
                 normalize_manual_excluded_recording_conditions(raw_value)
             )
+        elif field.type == _INTERPOLATION_BURDEN_REVIEW_DECISIONS:
+            normalized[field.name] = normalize_interpolation_burden_review_decisions(
+                raw_value
+            )
+        elif field.type == _KURTOSIS_REVIEW_DECISIONS_BY_RECORDING:
+            try:
+                normalized[field.name] = (
+                    normalize_kurtosis_review_decisions_by_recording(raw_value)
+                )
+            except KurtosisQCError as exc:
+                raise ValueError(str(exc)) from exc
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
 
@@ -1197,10 +1286,13 @@ __all__ = [
     "require_removed_electrode_detection_choice_ready",
     "normalize_manual_excluded_participants",
     "normalize_manual_excluded_recordings",
+    "normalize_interpolation_burden_review_decisions",
     "normalize_manual_excluded_participant_conditions",
     "normalize_manual_excluded_recording_conditions",
     "is_participant_condition_excluded",
     "is_recording_condition_excluded",
+    "INTERPOLATION_BURDEN_REVIEW_DECISIONS_KEY",
+    "KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY",
     "PREPROCESSING_CANONICAL_KEYS",
     "REPEATED_SESSION_PREPROCESSING_KEYS",
     "PREPROCESSING_DEFAULTS",

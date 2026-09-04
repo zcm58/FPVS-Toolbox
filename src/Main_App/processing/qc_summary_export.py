@@ -1,4 +1,4 @@
-"""Participant-level processing QC summary workbook export."""
+"""Recording-level preprocessing QC report workbook export."""
 
 from __future__ import annotations
 
@@ -11,6 +11,28 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
+from Main_App.processing.interpolation_burden import (
+    INTERPOLATION_BURDEN_AVAILABLE,
+    INTERPOLATION_BURDEN_REVIEW_THRESHOLD_PERCENT,
+    InterpolationBurden,
+    build_interpolation_burden,
+    summarize_interpolation_burdens,
+)
+from Main_App.processing.preprocessing_outcome import (
+    INTERPOLATION_STATUS_ATTEMPTED,
+    INTERPOLATION_STATUS_FAILED,
+    INTERPOLATION_STATUS_LEGACY_UNKNOWN,
+    INTERPOLATION_STATUS_NOT_NEEDED,
+    INTERPOLATION_STATUS_SKIPPED,
+    INTERPOLATION_STATUS_SUCCEEDED,
+    PROCESSING_STATUS_COMPLETED,
+    PROCESSING_STATUS_COMPLETED_MISSING_CONDITIONS,
+    PROCESSING_STATUS_EXCLUDED,
+    PROCESSING_STATUS_FAILED,
+    PROCESSING_STATUS_LEGACY_UNKNOWN,
+    PROCESSING_STATUS_PENDING,
+    normalize_preprocessing_outcome,
+)
 from Main_App.processing.processing_ledger import (
     MISSING_EXPECTED_OUTPUTS_WARNING,
     ProcessingInputState,
@@ -19,7 +41,8 @@ from Main_App.processing.processing_ledger import (
 )
 
 QC_SUMMARY_FILENAME = "Processing_QC_Summary.xlsx"
-QC_SUMMARY_SHEET = "Participant QC"
+QC_SUMMARY_SHEET = "Preprocessing QC"
+INTERPOLATION_BURDEN_SUMMARY_SHEET = "Burden Summary"
 QUALITY_CHECK_FOLDER = "Quality Check"
 DATA_QUALITY_REVIEW_FLAGS_FILENAME = "Data_Quality_Check_Review_Flags.xlsx"
 QC_SUMMARY_HEADERS = (
@@ -37,15 +60,29 @@ QC_SUMMARY_HEADERS = (
     "Flagged Removed-Electrode Candidates (High Amplitude)",
     "Flagged Removed-Electrode Candidates (Rare Burst)",
     "Flagged Removed-Electrode Candidates (Spatial Consistency)",
-    "Kurtosis-Rejected Electrodes",
-    "Electrodes Interpolated",
+    "Kurtosis QC Status",
+    "Kurtosis Method",
+    "Kurtosis Candidate Electrodes",
+    "Kurtosis Review-Required Electrodes",
+    "Kurtosis Corroborated Automatic Electrodes",
+    "Kurtosis User-Approved Electrodes",
+    "Kurtosis User-Rejected Electrodes",
+    "Kurtosis Evidence Fingerprint",
+    "Interpolation Requested Electrodes",
+    "Successfully Interpolated Electrodes",
+    "Successfully Interpolated Count",
+    "Eligible Scalp Electrode Count",
+    "Interpolation Burden (%)",
+    "Interpolation Review (>5%)",
+    "Interpolation Outcome",
+    "Interpolation Detail",
     "Total Number of Electrodes removed/rejected",
     "Raw QC Warnings",
     "Raw Baseline Median STD (uV)",
     "Raw Baseline Median P2P99 (uV)",
     "Raw Baseline QC",
     "Missing Conditions",
-    "Included in Final Set",
+    "Preprocessing Status",
     "Exclusion Reason",
 )
 RECORDING_QC_IDENTITY_HEADERS = (
@@ -240,6 +277,68 @@ def _kurtosis_channels_from_result(result: Mapping[str, Any] | None) -> list[str
     return _string_list(audit.get("kurtosis_bad_channels"))
 
 
+def _kurtosis_report_fields(
+    result: Mapping[str, Any] | None,
+    entry: Mapping[str, Any],
+    cache_entry: Mapping[str, Any],
+) -> dict[str, object]:
+    """Render QC-16 evidence and decisions without conflating them with repair."""
+
+    audit = (
+        result.get("audit")
+        if result and isinstance(result.get("audit"), Mapping)
+        else {}
+    )
+
+    def _channels(key: str, *, legacy_key: str | None = None) -> list[str]:
+        for source in (audit, entry, cache_entry):
+            values = _string_list(source.get(key))
+            if values:
+                return values
+            if legacy_key:
+                values = _string_list(source.get(legacy_key))
+                if values:
+                    return values
+        return []
+
+    evidence: Mapping[str, Any] = {}
+    for source in (audit, entry, cache_entry):
+        candidate = source.get("kurtosis_qc_evidence")
+        if isinstance(candidate, Mapping):
+            evidence = candidate
+            break
+    status = str(
+        evidence.get("status")
+        or evidence.get("evaluation_status")
+        or ("legacy/not recorded" if _channels("kurtosis_bad_channels") else "not evaluated")
+    ).strip()
+    method = str(evidence.get("method_label") or evidence.get("method_version") or "").strip()
+    fingerprint = str(evidence.get("fingerprint") or "").strip()
+    return {
+        "Kurtosis QC Status": status or "not evaluated",
+        "Kurtosis Method": method or "Not recorded",
+        "Kurtosis Candidate Electrodes": _join_channels(
+            _channels(
+                "kurtosis_candidate_channels",
+                legacy_key="kurtosis_bad_channels",
+            )
+        ),
+        "Kurtosis Review-Required Electrodes": _join_channels(
+            _channels("kurtosis_review_required_channels")
+        ),
+        "Kurtosis Corroborated Automatic Electrodes": _join_channels(
+            _channels("kurtosis_corroborated_channels")
+        ),
+        "Kurtosis User-Approved Electrodes": _join_channels(
+            _channels("kurtosis_user_approved_channels")
+        ),
+        "Kurtosis User-Rejected Electrodes": _join_channels(
+            _channels("kurtosis_user_rejected_channels")
+        ),
+        "Kurtosis Evidence Fingerprint": fingerprint or "Not recorded",
+    }
+
+
 def _join_channels(channels: Sequence[str]) -> str:
     return ", ".join(channels) if channels else "None"
 
@@ -381,6 +480,75 @@ def _exclusion_reason(
     if status == "failed":
         return str(entry.get("failure_message") or entry.get("failure_reason") or "")
     return ""
+
+
+_PROCESSING_STATUS_LABELS = {
+    PROCESSING_STATUS_COMPLETED: "Completed",
+    PROCESSING_STATUS_COMPLETED_MISSING_CONDITIONS: (
+        "Completed with missing conditions"
+    ),
+    PROCESSING_STATUS_EXCLUDED: "Excluded before preprocessing",
+    PROCESSING_STATUS_FAILED: "Failed",
+    PROCESSING_STATUS_PENDING: "Pending",
+    PROCESSING_STATUS_LEGACY_UNKNOWN: "Not recorded (legacy result)",
+}
+_INTERPOLATION_STATUS_LABELS = {
+    INTERPOLATION_STATUS_SUCCEEDED: "Succeeded",
+    INTERPOLATION_STATUS_FAILED: "Failed",
+    INTERPOLATION_STATUS_ATTEMPTED: "Attempted; outcome not confirmed",
+    INTERPOLATION_STATUS_SKIPPED: "Skipped",
+    INTERPOLATION_STATUS_NOT_NEEDED: "Not needed",
+    INTERPOLATION_STATUS_LEGACY_UNKNOWN: "Not recorded",
+}
+
+
+def _interpolation_burden_for_entry(
+    entry: Mapping[str, Any],
+) -> InterpolationBurden:
+    outcome = normalize_preprocessing_outcome(entry)
+    geometry = entry.get("geometry")
+    return build_interpolation_burden(
+        outcome,
+        geometry if isinstance(geometry, Mapping) else None,
+    )
+
+
+def _preprocessing_report_fields(entry: Mapping[str, Any]) -> dict[str, object]:
+    outcome = normalize_preprocessing_outcome(entry)
+    burden = _interpolation_burden_for_entry(entry)
+    if outcome.interpolation_status == INTERPOLATION_STATUS_LEGACY_UNKNOWN:
+        requested: object = "Not recorded"
+        successful: object = "Not recorded"
+    else:
+        requested = _join_channels(list(outcome.interpolation_requested_channels))
+        successful = _join_channels(list(outcome.interpolation_successful_channels))
+
+    if burden.status == INTERPOLATION_BURDEN_AVAILABLE:
+        burden_count: object = int(burden.numerator or 0)
+        eligible_count: object = int(burden.denominator or 0)
+        burden_percentage: object = float(burden.percentage or 0.0)
+        review = "Review required" if burden.requires_review else "No review flag"
+    else:
+        burden_count = "Unavailable"
+        eligible_count = "Unavailable"
+        burden_percentage = "Unavailable"
+        review = "Unavailable"
+
+    return {
+        "Interpolation Requested Electrodes": requested,
+        "Successfully Interpolated Electrodes": successful,
+        "Successfully Interpolated Count": burden_count,
+        "Eligible Scalp Electrode Count": eligible_count,
+        "Interpolation Burden (%)": burden_percentage,
+        "Interpolation Review (>5%)": review,
+        "Interpolation Outcome": _INTERPOLATION_STATUS_LABELS[
+            outcome.interpolation_status
+        ],
+        "Interpolation Detail": outcome.interpolation_detail or "None",
+        "Preprocessing Status": _PROCESSING_STATUS_LABELS[
+            outcome.processing_status
+        ],
+    }
 
 
 def _is_legacy_partial_condition_entry(
@@ -736,27 +904,19 @@ def build_processing_qc_rows(
         ) or _string_list(
             cache_entry.get("kurtosis_bad_channels")
         )
-        interpolated_channels = _channels_from_result(result) or _string_list(
-            entry.get("interpolated_channels")
-        ) or _string_list(
-            cache_entry.get("interpolated_channels")
-        )
-        status = str(entry.get("status") or "").strip().casefold()
-        has_missing_conditions = _has_missing_condition_warning(
-            entry
-        ) or _is_legacy_partial_condition_entry(state, entry)
+        kurtosis_report = _kurtosis_report_fields(result, entry, cache_entry)
+        preprocessing_report = _preprocessing_report_fields(entry)
         missing_condition_labels = _missing_condition_labels(plan, state, entry)
-        if status == "completed" and not interpolated_channels:
-            interpolated_channels = _unique_ordered(raw_qc_channels, kurtosis_channels)
+        successful_count = preprocessing_report["Successfully Interpolated Count"]
         fallback_count = max(
             _int_or_default(entry.get("n_rejected"), 0),
             _int_or_default(cache_entry.get("n_rejected"), 0),
+            successful_count if isinstance(successful_count, int) else 0,
             len(
                 _unique_ordered(
                     raw_qc_channels,
                     raw_qc_manual_removed_channels,
                     kurtosis_channels,
-                    interpolated_channels,
                 )
             ),
         )
@@ -764,11 +924,6 @@ def build_processing_qc_rows(
             result,
             fallback_count,
         )
-        included = status == "completed" or has_missing_conditions
-        if included and has_missing_conditions:
-            included_text = "Included (partial conditions)"
-        else:
-            included_text = "Included" if included else "Excluded"
         row: dict[str, object] = {
                 "PID": state.participant_id,
                 "Manually Removed Electrodes": _join_channels(
@@ -806,8 +961,8 @@ def build_processing_qc_rows(
                 "Flagged Removed-Electrode Candidates (Spatial Consistency)": _join_channels(
                     raw_qc_spatial_outlier_channels
                 ),
-                "Kurtosis-Rejected Electrodes": _join_channels(kurtosis_channels),
-                "Electrodes Interpolated": _join_channels(interpolated_channels),
+                **kurtosis_report,
+                **preprocessing_report,
                 "Total Number of Electrodes removed/rejected": count,
                 "Raw QC Warnings": _join_channels(raw_qc_warning_rules),
                 "Raw Baseline Median STD (uV)": (
@@ -822,7 +977,6 @@ def build_processing_qc_rows(
                 ),
                 "Raw Baseline QC": baseline_status,
                 "Missing Conditions": _join_channels(missing_condition_labels),
-                "Included in Final Set": included_text,
                 "Exclusion Reason": _exclusion_reason(entry, result),
             }
         if state.info.recording_id:
@@ -839,18 +993,73 @@ def build_processing_qc_rows(
     return rows
 
 
+def _interpolation_burden_summary_rows(
+    project: Any,
+    plan: ProcessingPlan,
+) -> list[tuple[str, object]]:
+    ledger = load_ledger(Path(project.project_root))
+    burdens = [
+        _interpolation_burden_for_entry(
+            _entry_for_pid(ledger, state.processing_id)
+        )
+        for state in plan.states
+    ]
+    summary = summarize_interpolation_burdens(burdens)
+    cohort_ids = [state.processing_id for state in plan.states]
+    if summary.mean_percentage is not None:
+        assert summary.minimum_percentage is not None
+        assert summary.maximum_percentage is not None
+        mean_value: object = summary.mean_percentage
+        range_value: object = (
+            f"{summary.minimum_percentage:.6g} to "
+            f"{summary.maximum_percentage:.6g}"
+        )
+    else:
+        mean_value = "Unavailable"
+        range_value = "Unavailable"
+    return [
+        ("Report", "Preprocessing QC Report"),
+        ("Cohort unit", "Recording"),
+        ("Cohort recording IDs", ", ".join(cohort_ids) or "None"),
+        ("Processing fingerprint", plan.fingerprint),
+        ("Recordings in preprocessing cohort", summary.recording_count),
+        (
+            "Recordings contributing to burden summary",
+            summary.contributing_recording_count,
+        ),
+        (
+            "Recordings with unavailable burden",
+            summary.unavailable_recording_count,
+        ),
+        ("Mean interpolation burden (%)", mean_value),
+        ("Interpolation burden range (%)", range_value),
+        (
+            f"Recordings above {INTERPOLATION_BURDEN_REVIEW_THRESHOLD_PERCENT:g}%",
+            summary.recordings_above_threshold,
+        ),
+        (
+            "Review rule",
+            (
+                "Strictly above 5% prompts manual review; it does not "
+                "automatically exclude a recording."
+            ),
+        ),
+    ]
+
+
 def export_processing_qc_summary(
     project: Any,
     plan: ProcessingPlan,
     results: Sequence[Mapping[str, Any]],
 ) -> Path:
-    """Write the participant QC summary workbook under the project Quality Check folder."""
+    """Write the preprocessing QC report under the project Quality Check folder."""
 
     rows = build_processing_qc_rows(project, plan, results)
     target = _quality_check_root(project).resolve() / QC_SUMMARY_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
 
     workbook = Workbook()
+    workbook.properties.title = "Preprocessing QC Report"
     worksheet = workbook.active
     repeated_session = any(row.get("Recording ID") for row in rows)
     headers = (
@@ -858,7 +1067,7 @@ def export_processing_qc_summary(
         if repeated_session
         else QC_SUMMARY_HEADERS
     )
-    worksheet.title = "Recording QC" if repeated_session else QC_SUMMARY_SHEET
+    worksheet.title = QC_SUMMARY_SHEET
     worksheet.append(list(headers))
     for row in rows:
         worksheet.append([row.get(header, "") for header in headers])
@@ -879,12 +1088,27 @@ def export_processing_qc_summary(
         width = min(max(max_length + 2, 12), 80)
         worksheet.column_dimensions[get_column_letter(column_index)].width = width
 
+    burden_sheet = workbook.create_sheet(INTERPOLATION_BURDEN_SUMMARY_SHEET)
+    burden_sheet.append(["Metric", "Value"])
+    for metric, value in _interpolation_burden_summary_rows(project, plan):
+        burden_sheet.append([metric, value])
+    burden_sheet.freeze_panes = "A2"
+    burden_sheet.auto_filter.ref = burden_sheet.dimensions
+    for cell in burden_sheet[1]:
+        cell.font = Font(bold=True)
+    for row in burden_sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    burden_sheet.column_dimensions["A"].width = 48
+    burden_sheet.column_dimensions["B"].width = 80
+
     workbook.save(target)
     return target
 
 
 __all__ = [
     "DATA_QUALITY_REVIEW_FLAGS_FILENAME",
+    "INTERPOLATION_BURDEN_SUMMARY_SHEET",
     "QC_SUMMARY_FILENAME",
     "QC_SUMMARY_HEADERS",
     "RECORDING_QC_IDENTITY_HEADERS",

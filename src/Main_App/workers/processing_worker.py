@@ -85,12 +85,14 @@ class PostProcessWorker(QObject):
 
             before_snapshot = _excel_snapshot()
 
+            export_receipts: list[dict[str, Any]] = []
             ctx = LegacyCtx(
                 preprocessed_data=self._epochs or {},
                 save_folder_path=save_folder_obj,
                 data_paths=self._data_paths,
                 settings=self._settings,
                 log=self._log,
+                export_receipts=export_receipts,
             )
 
             run_post_export(ctx, self._labels)
@@ -127,6 +129,7 @@ class PostProcessWorker(QObject):
                     "output_root": str(output_root) if output_root else "",
                     "generated_excel_paths": generated_excel_paths,
                     "existing_excel_paths": existing_excel_paths,
+                    "export_receipts": export_receipts,
                 }
             )
 

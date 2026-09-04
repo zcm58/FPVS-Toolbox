@@ -20,6 +20,7 @@ class LegacyCtx:
     settings: Optional[Any] = None
     log: Optional[Callable[[str], None]] = None
     export_timing_records: Optional[List[Dict[str, Any]]] = None
+    export_receipts: Optional[List[Dict[str, Any]]] = None
 
 
 def _normalize_save_folder(save_folder_path: Any) -> Any:
@@ -64,6 +65,9 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     else:
         settings_dict = {}
 
+    if ctx.export_receipts is None:
+        ctx.export_receipts = []
+
     shim = SimpleNamespace(
         preprocessed_data=ctx.preprocessed_data,
         save_folder_path=_normalize_save_folder(ctx.save_folder_path),
@@ -71,6 +75,7 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
         settings=settings_dict,
         log=log,
         export_timing_records=ctx.export_timing_records,
+        export_receipts=ctx.export_receipts,
     )
 
     # Exporting preprocessed FIF files is no longer supported, but legacy

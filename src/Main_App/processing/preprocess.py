@@ -20,12 +20,12 @@ Pipeline Order:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import traceback
-from typing import Callable, Optional, Tuple, Dict, Any, List
+from typing import Callable, Optional, Tuple, Dict, Any, List, Sequence
 
 import mne
 import numpy as np
-from scipy.stats import kurtosis
 
 from Main_App.diagnostics.audit import (
     start_preproc_audit,
@@ -52,10 +52,19 @@ from Main_App.processing.analysis_spans import (
     realize_target_analysis_span_plan,
     relative_spans_from_plan,
 )
+from Main_App.processing.kurtosis_qc import (
+    build_kurtosis_decision_plan,
+    evaluate_kurtosis_qc,
+)
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["perform_preprocessing", "begin_preproc_audit", "finalize_preproc_audit"]
+__all__ = [
+    "perform_preprocessing",
+    "prepare_kurtosis_review_evidence",
+    "begin_preproc_audit",
+    "finalize_preproc_audit",
+]
 
 PREPROCESSING_ORDER_VERSION = (
     "filter_then_optional_fft_multinotch_then_downsample_v2"
@@ -159,6 +168,109 @@ def _kurtosis_scoring_data(
         [raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans],
         axis=1,
     )
+
+
+def _kurtosis_filter_identity(
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+) -> dict[str, object]:
+    """Describe the exact filtering state presented to QC-16."""
+
+    return {
+        "method_version": "mne_fir_zero_double_hamming_firwin_plus_fft_multinotch_v1",
+        "preprocessing_order_version": PREPROCESSING_ORDER_VERSION,
+        "requested_high_pass_hz": params.get("high_pass"),
+        "requested_low_pass_hz": params.get("low_pass"),
+        "applied_high_pass_hz": float(raw.info.get("highpass", 0.0)),
+        "applied_low_pass_hz": float(raw.info.get("lowpass", 0.0)),
+        "line_noise_filter_enabled": bool(
+            params.get("line_noise_filter_enabled", True)
+        ),
+        "line_noise_frequency_hz": params.get("line_noise_frequency_hz", 60),
+        "fft_multinotch_method_version": FFT_MULTINOTCH_METHOD_VERSION,
+        "fft_multinotch_half_width_hz": FFT_MULTINOTCH_HALF_WIDTH_HZ,
+        "fft_multinotch_component_count": FFT_MULTINOTCH_COMPONENT_COUNT,
+        "fft_multinotch_requested_centers_hz": list(
+            params.get("_fpvs_fft_multinotch_requested_centers_hz", ())
+        ),
+        "fft_multinotch_applied_centers_hz": list(
+            params.get("_fpvs_fft_multinotch_applied_centers_hz", ())
+        ),
+        "fft_multinotch_skipped_centers": list(
+            params.get("_fpvs_fft_multinotch_skipped_centers", ())
+        ),
+    }
+
+
+def _kurtosis_downsample_identity(
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+    *,
+    source_sfreq_hz: float,
+) -> dict[str, object]:
+    """Describe the versioned resampling state presented to QC-16."""
+
+    requested = params.get("downsample_rate", params.get("downsample"))
+    return {
+        "method_version": "mne_raw_resample_hann_npad_auto_v1",
+        "source_sfreq_hz": float(source_sfreq_hz),
+        "requested_sfreq_hz": requested,
+        "realized_sfreq_hz": float(raw.info["sfreq"]),
+        "resampled": bool(float(raw.info["sfreq"]) != float(source_sfreq_hz)),
+    }
+
+
+def _kurtosis_review_scope(
+    params: Dict[str, Any],
+    *,
+    filename_for_log: str,
+) -> dict[str, object]:
+    participant_id = str(params.get("_fpvs_participant_id") or "").strip()
+    recording_id = str(params.get("_fpvs_recording_id") or participant_id).strip()
+    source_path = str(
+        params.get("_fpvs_source_file_path") or Path(filename_for_log).resolve()
+    )
+    return {
+        "source_file_path": source_path,
+        "participant_id": participant_id,
+        "recording_id": recording_id,
+        "session_id": params.get("_fpvs_session_id"),
+        "session_label": params.get("_fpvs_session_label"),
+    }
+
+
+def _kurtosis_signal_preview(
+    data: np.ndarray,
+    channel_names: List[str],
+    review_channels: tuple[str, ...],
+) -> dict[str, object]:
+    """Return a bounded signal preview for the GUI without altering evidence."""
+
+    if not review_channels or data.shape[1] < 1:
+        return {"unit": "uV", "sample_count": 0, "channels": {}}
+    preview_count = min(256, int(data.shape[1]))
+    sample_indices = np.linspace(
+        0,
+        int(data.shape[1]) - 1,
+        num=preview_count,
+        dtype=int,
+    )
+    channel_index = {name: index for index, name in enumerate(channel_names)}
+    rows: dict[str, list[float | None]] = {}
+    for channel in review_channels:
+        row_index = channel_index.get(channel)
+        if row_index is None:
+            continue
+        values = np.asarray(data[row_index, sample_indices], dtype=np.float64) * 1e6
+        rows[channel] = [
+            float(value) if np.isfinite(value) else None for value in values
+        ]
+    return {
+        "unit": "uV",
+        "sample_count": preview_count,
+        "source_sample_count": int(data.shape[1]),
+        "channels": rows,
+    }
 
 
 def _freeze_retained_biosemi64_geometry(
@@ -423,6 +535,57 @@ def _coerce_refs_to_eeg_if_needed(raw: mne.io.BaseRaw, pair: tuple[str, str]) ->
         raw.set_channel_types(to_flip)
         changed = list(to_flip)
     return changed
+
+
+def prepare_kurtosis_review_evidence(
+    raw_input: mne.io.BaseRaw,
+    params: Dict[str, Any],
+    log_func: Callable[[str], None],
+    filename_for_log: str = "UnknownFile",
+    *,
+    direct_bad_channels: Sequence[str] = (),
+) -> dict[str, object]:
+    """Run the shared preprocessing stages to the QC-16 review boundary."""
+
+    working = raw_input.copy()
+    scan_params = dict(params)
+    scan_params["_fpvs_stop_before_kurtosis_interpolation"] = True
+    direct = [
+        str(channel)
+        for channel in direct_bad_channels
+        if str(channel) in working.ch_names
+    ]
+    if direct:
+        working.info["bads"] = list(
+            dict.fromkeys([*working.info["bads"], *direct])
+        )
+    try:
+        working.load_data()
+        processed, _candidate_count = perform_preprocessing(
+            working,
+            scan_params,
+            log_func,
+            filename_for_log,
+        )
+        evidence = scan_params.get("_fpvs_kurtosis_qc_evidence")
+        decision_plan = scan_params.get("_fpvs_kurtosis_decision_plan")
+        if processed is None or not isinstance(evidence, dict):
+            raise RuntimeError(
+                f"Kurtosis review evidence could not be prepared for {filename_for_log}."
+            )
+        preview = scan_params.get("_fpvs_kurtosis_signal_preview")
+        return {
+            "evidence": dict(evidence),
+            "decision_plan": (
+                dict(decision_plan) if isinstance(decision_plan, dict) else None
+            ),
+            "signal_preview": dict(preview) if isinstance(preview, dict) else {},
+        }
+    finally:
+        try:
+            working.close()
+        except (AttributeError, OSError, RuntimeError, ValueError):
+            pass
 
 
 def perform_preprocessing(
@@ -1051,11 +1214,18 @@ def perform_preprocessing(
 
         # 7) Kurtosis rejection & interpolation
         params["_fpvs_kurtosis_bad_channels"] = []
+        params["_fpvs_kurtosis_review_required_channels"] = []
+        params["_fpvs_kurtosis_corroborated_channels"] = []
+        params["_fpvs_kurtosis_user_approved_channels"] = []
+        params["_fpvs_kurtosis_user_rejected_channels"] = []
+        params.pop("_fpvs_kurtosis_qc_evidence", None)
+        params.pop("_fpvs_kurtosis_decision_plan", None)
+        params.pop("_fpvs_kurtosis_signal_preview", None)
         params["_fpvs_interpolated_channels"] = []
         bad_k_auto: List[str] = []
         if reject_thresh:
             log_func(
-                f"Kurtosis rejection for {filename_for_log} "
+                f"Kurtosis screening for {filename_for_log} "
                 f"(Z > {reject_thresh})..."
             )
             eeg_picks = mne.pick_types(
@@ -1071,84 +1241,124 @@ def perform_preprocessing(
                     else []
                 ),
             )
-            if len(eeg_picks) >= 2:
+            realized_plan = params.get("_fpvs_realized_analysis_span_plan")
+            if not isinstance(realized_plan, dict):
+                params["_fpvs_kurtosis_qc_evidence"] = {
+                    "evaluation_status": "not_evaluated",
+                    "reason": "missing_analyzed_interval_context",
+                    "authority": "no_automatic_kurtosis_interpolation",
+                }
+                log_func(
+                    f"Kurtosis was not evaluated for {filename_for_log} because "
+                    "approved analyzed intervals were unavailable."
+                )
+            elif len(eeg_picks) >= 1:
                 data = _kurtosis_scoring_data(
                     raw,
                     picks=eeg_picks,
                     params=params,
                 )
-                k_values = kurtosis(
-                    data, axis=1, fisher=True, bias=False
+                ch_names_pick = [raw.info["ch_names"][i] for i in eeg_picks]
+                evidence = evaluate_kurtosis_qc(
+                    data,
+                    ch_names_pick,
+                    threshold=reject_thresh,
+                    realized_analysis_span_plan=realized_plan,
+                    filter_identity=_kurtosis_filter_identity(raw, params),
+                    downsample_identity=_kurtosis_downsample_identity(
+                        raw,
+                        params,
+                        source_sfreq_hz=orig_sfreq,
+                    ),
+                    geometry_identity=geometry_identity,
                 )
-                k_values = np.nan_to_num(k_values, copy=False)
-                proportion_to_cut = 0.1
-                n_k = len(k_values)
-                trim_count = int(np.floor(n_k * proportion_to_cut))
-                if n_k - 2 * trim_count > 1:
-                    k_sorted = np.sort(k_values)
-                    k_trimmed = k_sorted[trim_count : n_k - trim_count]
-                    m_trimmed = float(np.mean(k_trimmed))
-                    s_trimmed = float(np.std(k_trimmed))
-                    log_func(
-                        f"Trimmed Norm for {filename_for_log}: "
-                        f"Mean={m_trimmed:.3f}, Std={s_trimmed:.3f} "
-                        f"(N_trimmed={len(k_trimmed)})"
-                    )
-                    if s_trimmed > 1e-9:
-                        z_scores = (k_values - m_trimmed) / s_trimmed
-                        bad_idx = np.where(
-                            np.abs(z_scores) > reject_thresh
-                        )[0]
-                        ch_names_pick = [
-                            raw.info["ch_names"][i] for i in eeg_picks
-                        ]
-                        bad_k_auto = [ch_names_pick[i] for i in bad_idx]
-                    else:
-                        log_func(
-                            f"Kurtosis Trimmed Std Dev near zero for "
-                            f"{filename_for_log}."
-                        )
-                else:
-                    log_func(
-                        f"Not enough data for Kurtosis trimmed stats in "
-                        f"{filename_for_log} (N_k={n_k})."
-                    )
+                direct_bad_channels = {
+                    str(channel): "confirmed_upstream_bad_channel"
+                    for channel in raw.info.get("bads", [])
+                    if str(channel) in geometry_identity["retained_scalp_channels"]
+                }
+                raw_decisions = params.get("_fpvs_kurtosis_review_decisions")
+                review_decisions = raw_decisions if isinstance(raw_decisions, dict) else None
+                decision_plan = build_kurtosis_decision_plan(
+                    evidence,
+                    review_decisions=review_decisions,
+                    review_scope=_kurtosis_review_scope(
+                        params,
+                        filename_for_log=filename_for_log,
+                    ),
+                    direct_bad_channels=direct_bad_channels,
+                )
+                bad_k_auto = list(evidence.candidate_channels)
                 num_kurtosis_bads_identified = len(bad_k_auto)
-                if bad_k_auto:
-                    params["_fpvs_kurtosis_bad_channels"] = list(bad_k_auto)
-                    log_func(
-                        f"Bad by Kurtosis for {filename_for_log}: "
-                        f"{bad_k_auto} "
-                        f"(Count: {num_kurtosis_bads_identified})"
-                    )
-                else:
-                    log_func(
-                        f"No channels bad by Kurtosis for {filename_for_log}."
-                    )
+                params["_fpvs_kurtosis_bad_channels"] = list(bad_k_auto)
+                params["_fpvs_kurtosis_qc_evidence"] = evidence.to_payload()
+                params["_fpvs_kurtosis_decision_plan"] = decision_plan.to_payload()
+                params["_fpvs_kurtosis_review_required_channels"] = list(
+                    decision_plan.pending_review_channels
+                )
+                params["_fpvs_kurtosis_corroborated_channels"] = list(
+                    decision_plan.corroborated_automatic_channels
+                )
+                params["_fpvs_kurtosis_user_approved_channels"] = list(
+                    decision_plan.user_approved_channels
+                )
+                params["_fpvs_kurtosis_user_rejected_channels"] = list(
+                    decision_plan.user_rejected_channels
+                )
+                params["_fpvs_kurtosis_signal_preview"] = _kurtosis_signal_preview(
+                    data,
+                    ch_names_pick,
+                    decision_plan.pending_review_channels,
+                )
+                log_func(
+                    f"Kurtosis evidence for {filename_for_log}: "
+                    f"candidates={list(decision_plan.candidate_channels)}, "
+                    f"review_required={list(decision_plan.pending_review_channels)}, "
+                    "automatic="
+                    f"{list(decision_plan.corroborated_automatic_channels)}."
+                )
                 if debug_enabled:
                     print(
                         f"[KURTOSIS] {filename_for_log}: "
                         f"n_bad={num_kurtosis_bads_identified} "
                         f"bad_chs={bad_k_auto}"
                     )
+                if not decision_plan.ready_for_interpolation:
+                    if params.get("_fpvs_stop_before_kurtosis_interpolation", False):
+                        log_func(
+                            f"Stopped before interpolation for {filename_for_log}; "
+                            "kurtosis review evidence is ready for the GUI."
+                        )
+                        return raw, num_kurtosis_bads_identified
+                    reasons = ", ".join(decision_plan.blocking_reasons)
+                    raise RuntimeError(
+                        "Kurtosis interpolation is blocked pending current GUI review "
+                        f"or valid evidence for {filename_for_log}: {reasons}."
+                    )
+
+                authorized = set(decision_plan.authorized_interpolation_channels)
+                new_bads = [
+                    channel
+                    for channel in authorized
+                    if channel not in raw.info["bads"]
+                ]
+                if new_bads:
+                    raw.info["bads"].extend(new_bads)
             else:
+                params["_fpvs_kurtosis_qc_evidence"] = {
+                    "evaluation_status": "not_evaluated",
+                    "reason": "all_retained_channels_already_confirmed_bad",
+                    "authority": "direct_bad_channels_only",
+                }
                 log_func(
                     f"Skip Kurtosis for {filename_for_log} "
-                    f"(< 2 good EEG channels; n_picks={len(eeg_picks)})."
+                    f"(no unmarked EEG channels; n_picks={len(eeg_picks)})."
                 )
                 if debug_enabled:
                     print(
                         f"[KURTOSIS] {filename_for_log}: skip "
                         f"(n_eeg_picks={len(eeg_picks)})"
                     )
-
-            new_bads = [
-                b
-                for b in (bad_k_auto if reject_thresh else [])
-                if b not in raw.info["bads"]
-            ]
-            if new_bads:
-                raw.info["bads"].extend(new_bads)
 
             _interpolate_current_bads(
                 raw,

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -187,6 +187,71 @@ def manual_removed_electrodes_for_pid(
         if raw_pid.casefold() == pid_key:
             return tuple(electrodes)
     return ()
+
+
+def manual_removed_electrodes_are_enabled(settings: Mapping[str, Any]) -> bool:
+    """Return whether stored manual channel maps are active for this run.
+
+    The explicit independent switch is authoritative.  A missing switch falls
+    back to the retired mutually exclusive Manual mode so unnormalized legacy
+    settings retain their historical behavior.
+    """
+
+    for key in (
+        "manual_removed_electrodes_enabled",
+        "apply_manual_removed_electrodes",
+        "use_manual_removed_electrodes",
+    ):
+        if key not in settings:
+            continue
+        value = settings.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
+                return False
+        if isinstance(value, (int, float)) and value in {0, 1}:
+            return bool(value)
+        return False
+
+    mode = normalize_removed_electrode_detection_mode(
+        settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=settings.get(
+            "auto_detect_removed_electrodes",
+            False,
+        ),
+    )
+    return mode == REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+
+
+def manual_removed_electrodes_for_recording(
+    settings: Mapping[str, Any],
+    *,
+    participant_id: Any,
+    recording_id: Any = None,
+) -> tuple[str, ...]:
+    """Resolve one recording's active manual list with recording precedence."""
+
+    if not manual_removed_electrodes_are_enabled(settings):
+        return ()
+
+    normalized_recordings = normalize_manual_removed_electrodes_map(
+        settings.get("manual_removed_electrodes_by_recording")
+    )
+    recording = str(recording_id or "").strip()
+    if recording:
+        recording_key = recording.casefold()
+        for candidate, electrodes in normalized_recordings.items():
+            if candidate.casefold() == recording_key:
+                return tuple(electrodes)
+
+    return manual_removed_electrodes_for_pid(
+        settings.get("manual_removed_electrodes"),
+        participant_id,
+    )
 
 
 def _unique_electrodes(values: Any) -> list[str]:
@@ -491,7 +556,9 @@ __all__ = [
     "canonicalize_electrode_name",
     "is_high_amplitude_removed_channel",
     "is_low_variance_removed_channel",
+    "manual_removed_electrodes_are_enabled",
     "manual_removed_electrodes_for_pid",
+    "manual_removed_electrodes_for_recording",
     "normalize_manual_removed_electrodes_map",
     "normalize_removed_electrode_detection_mode",
     "parse_electrode_list",

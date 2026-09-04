@@ -17,6 +17,7 @@ def test_run_post_export_ignores_legacy_fif_flag(tmp_path, monkeypatch):
         called["labels"] = labels
         called["save_fif_var"] = shim.save_fif_var.get()
         called["save_condition_fif"] = shim.save_condition_fif
+        shim.export_receipts.append({"status": "written"})
         (save_root / "P01_results.xlsx").write_text("ok", encoding="utf-8")
 
     monkeypatch.setattr(adapter, "_shared_post_process", _fake_shared_post_process)
@@ -34,5 +35,6 @@ def test_run_post_export_ignores_legacy_fif_flag(tmp_path, monkeypatch):
     assert called["labels"] == ["CondA"]
     assert called["save_fif_var"] is False
     assert called["save_condition_fif"] is False
+    assert ctx.export_receipts == [{"status": "written"}]
     assert not (save_root / ".fif files").exists()
     assert (save_root / "P01_results.xlsx").exists()

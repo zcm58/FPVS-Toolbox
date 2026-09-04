@@ -20,6 +20,7 @@ from Main_App.processing.preflight_qc import (
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
+from Main_App.projects import FrequencyProtocol
 
 
 def _raw_with_removed_channel(channel: str) -> mne.io.RawArray:
@@ -67,6 +68,20 @@ def test_scan_recording_not_started_files_uses_bdf_header(monkeypatch, tmp_path:
     assert flagged[0].group_id == "control"
 
 
+def test_scan_carries_canonical_project_frequency_protocol() -> None:
+    protocol = FrequencyProtocol.from_recurrence(
+        10,
+        5,
+        expected_analyzed_oddball_cycles=120,
+        expected_analyzed_oddball_cycles_source="manual",
+    )
+
+    scan = scan_preprocessing_qc([], {"frequency_protocol": protocol})
+
+    assert scan.oddball_frequency_hz == 2.0
+    assert scan.frequency_protocol_fingerprint == protocol.fingerprint
+
+
 def test_unscoped_preflight_reports_not_evaluated_without_loading_signal(
     monkeypatch,
     tmp_path: Path,
@@ -96,7 +111,7 @@ def test_unscoped_preflight_reports_not_evaluated_without_loading_signal(
     assert scan.results[0].raw_spectral_qc is None
     assert scan.results[0].condition_qc == {
         "method_name": "condition_aware_preflight_qc",
-        "method_version": "v6_five_second_overlapping_transients",
+        "method_version": "v7_analyzed_condition_scope",
         "evaluation_status": "not_evaluated",
         "cache_status": "not_evaluated",
         "reason": "missing_analyzed_interval_context",
@@ -311,9 +326,10 @@ def _condition_crop_result(
     *,
     oddball_cycles: int,
     repetitions: int = 1,
+    oddball_frequency_hz: float = 1.2,
 ) -> PreflightQcFileResult:
     sfreq = 256.0
-    sample_count = int(round((oddball_cycles / 1.2) * sfreq))
+    sample_count = int(round((oddball_cycles / oddball_frequency_hz) * sfreq))
     return PreflightQcFileResult(
         path=tmp_path / f"{participant_id}.bdf",
         participant_id=participant_id,
@@ -345,6 +361,7 @@ def test_preflight_crop_grid_audit_flags_condition_against_project_majority(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
             _condition_crop_result(tmp_path, "P2", "Faces", oddball_cycles=144),
@@ -382,10 +399,43 @@ def test_preflight_crop_grid_audit_flags_condition_against_project_majority(
     ] == [("P4", "Negative Valence", 21, 3)]
 
 
+def test_preflight_crop_grid_audit_uses_project_oddball_rate_and_fingerprint(
+    tmp_path: Path,
+) -> None:
+    scan = PreflightQcScan(
+        oddball_frequency_hz=2.0,
+        frequency_protocol_fingerprint="project-protocol-fingerprint",
+        results=(
+            _condition_crop_result(
+                tmp_path,
+                "P1",
+                "Faces",
+                oddball_cycles=100,
+                oddball_frequency_hz=2.0,
+            ),
+            _condition_crop_result(
+                tmp_path,
+                "P2",
+                "Faces",
+                oddball_cycles=100,
+                oddball_frequency_hz=2.0,
+            ),
+        ),
+    )
+
+    audit = build_preflight_condition_crop_grid_audit(scan)
+
+    assert audit.reference_oddball_cycles == 100
+    assert audit.reference_duration_s == 50.0
+    assert audit.oddball_frequency_hz == 2.0
+    assert audit.frequency_protocol_fingerprint == "project-protocol-fingerprint"
+
+
 def test_preflight_crop_grid_audit_excludes_saved_pairs_from_reference(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
             _condition_crop_result(tmp_path, "P2", "Faces", oddball_cycles=144),
@@ -415,6 +465,7 @@ def test_preflight_crop_grid_audit_does_not_guess_from_tied_grids(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _condition_crop_result(tmp_path, "P1", "Faces", oddball_cycles=144),
             _condition_crop_result(tmp_path, "P2", "Faces", oddball_cycles=21),
@@ -452,6 +503,7 @@ def test_preflight_crop_grid_audit_uses_existing_project_grids_as_reference(
         for index in (1, 2)
     )
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _condition_crop_result(
                 tmp_path,
@@ -475,6 +527,7 @@ def test_preflight_current_raw_grid_replaces_existing_pair_observation(
     tmp_path: Path,
 ) -> None:
     scan = PreflightQcScan(
+        oddball_frequency_hz=1.2,
         results=(
             _condition_crop_result(
                 tmp_path,

@@ -234,6 +234,27 @@ def test_removed_electrode_review_scope_preserves_unreviewed_participants() -> N
     assert updated == {"P01": ["P9"], "P02": ["Oz"], "P03": ["PO8"]}
 
 
+@pytest.mark.parametrize("mode", ("auto", "off"))
+def test_reviewed_manual_maps_activate_without_changing_detector_mode(mode: str) -> None:
+    updated = workflow._settings_with_reviewed_manual_removed_electrodes(
+        {
+            "removed_electrode_detection_mode": mode,
+            "auto_detect_removed_electrodes": mode == "auto",
+            "manual_removed_electrodes_enabled": False,
+        },
+        participant_map={"P12": ["P9"]},
+        recording_map={"P12__follicular": ["Oz"]},
+    )
+
+    assert updated["removed_electrode_detection_mode"] == mode
+    assert updated["auto_detect_removed_electrodes"] is (mode == "auto")
+    assert updated["manual_removed_electrodes_enabled"] is True
+    assert updated["manual_removed_electrodes"] == {"P12": ["P9"]}
+    assert updated["manual_removed_electrodes_by_recording"] == {
+        "P12__follicular": ["Oz"]
+    }
+
+
 def test_removed_electrode_review_rows_split_auto_and_manual_sources() -> None:
     rows = workflow._removed_review_row_values(
         ["P34"],

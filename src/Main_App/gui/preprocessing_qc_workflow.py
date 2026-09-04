@@ -68,13 +68,13 @@ from Main_App.processing.frequency_domain_qc import (
     mark_frequency_domain_outputs_stale,
 )
 from Main_App.processing.removed_electrode_detection import (
-    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
     build_removed_electrode_review_record,
     normalize_manual_removed_electrodes_map,
     parse_electrode_list,
 )
 from Main_App.projects.grouping import project_group_context
 from Main_App.projects.preprocessing_settings import (
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     normalize_manual_excluded_participant_conditions,
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recording_conditions,
@@ -327,6 +327,28 @@ def _replace_removed_map_for_participants(
         if pid.casefold() in keys:
             merged[pid] = list(electrodes)
     return dict(sorted(merged.items(), key=lambda item: participant_sort_key(item[0])))
+
+
+def _settings_with_reviewed_manual_removed_electrodes(
+    preprocessing: Mapping[str, Any] | None,
+    *,
+    participant_map: Mapping[str, Sequence[str]],
+    recording_map: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any]:
+    """Activate reviewed manual maps without changing the detector mode."""
+
+    updated = dict(preprocessing or {})
+    updated[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = True
+    updated["manual_removed_electrodes"] = {
+        str(identity): list(electrodes)
+        for identity, electrodes in participant_map.items()
+    }
+    if recording_map is not None:
+        updated["manual_removed_electrodes_by_recording"] = {
+            str(identity): list(electrodes)
+            for identity, electrodes in recording_map.items()
+        }
+    return updated
 
 
 def _unique_channels(*values: Sequence[str]) -> list[str]:
@@ -1787,11 +1809,10 @@ def _review_removed_electrodes(
         updated_review_map,
         participant_ids,
     )
-    updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
-    updated_preproc["removed_electrode_detection_mode"] = (
-        REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    updated_preproc = _settings_with_reviewed_manual_removed_electrodes(
+        getattr(host.currentProject, "preprocessing", {}),
+        participant_map=updated_map,
     )
-    updated_preproc["manual_removed_electrodes"] = updated_map
     try:
         normalized = host.currentProject.update_preprocessing(updated_preproc)
         host.currentProject.save()
@@ -1811,6 +1832,9 @@ def _review_removed_electrodes(
     )
     params["auto_detect_removed_electrodes"] = bool(
         normalized.get("auto_detect_removed_electrodes")
+    )
+    params[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = bool(
+        normalized.get(MANUAL_REMOVED_ELECTRODES_ENABLED_KEY)
     )
     params["_fpvs_removed_electrode_review_by_pid"] = records
     host.validated_params = params
@@ -2121,12 +2145,11 @@ def _review_removed_electrodes_by_recording(
         recording_replacements,
         recording_ids,
     )
-    updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
-    updated_preproc["removed_electrode_detection_mode"] = (
-        REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
+    updated_preproc = _settings_with_reviewed_manual_removed_electrodes(
+        getattr(host.currentProject, "preprocessing", {}),
+        participant_map=updated_participants,
+        recording_map=updated_recordings,
     )
-    updated_preproc["manual_removed_electrodes"] = updated_participants
-    updated_preproc["manual_removed_electrodes_by_recording"] = updated_recordings
     try:
         normalized = host.currentProject.update_preprocessing(updated_preproc)
         host.currentProject.save()
@@ -2149,6 +2172,9 @@ def _review_removed_electrodes_by_recording(
     )
     params["auto_detect_removed_electrodes"] = bool(
         normalized.get("auto_detect_removed_electrodes")
+    )
+    params[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = bool(
+        normalized.get(MANUAL_REMOVED_ELECTRODES_ENABLED_KEY)
     )
     params["_fpvs_removed_electrode_review_by_recording"] = records
     host.validated_params = params
@@ -3649,6 +3675,19 @@ def run_preprocessing_qc_workflow(
         scan,
         group_labels,
     ):
+        return False
+
+    # Condition decisions define the signal that enters every later QC step.
+    # Re-run through the fingerprinted cache so unchanged files are reused and
+    # newly excluded conditions cannot contribute detector or review evidence.
+    scan = _run_scan_embedded(
+        host,
+        active_infos,
+        params,
+        skip_paths=(),
+        group_labels=group_labels,
+    )
+    if scan is None or scan.cancelled:
         return False
 
     if active_infos and not _review_removed_electrodes(

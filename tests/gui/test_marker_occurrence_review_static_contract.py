@@ -18,9 +18,19 @@ def test_marker_review_precedes_every_signal_qc_decision() -> None:
     initial_scan = workflow.index("scan = _run_scan_embedded(")
     marker_review = workflow.index("scan = _review_marker_occurrences(")
     condition_review = workflow.index("if not _confirm_condition_crop_exclusions(")
+    condition_scoped_rescan = workflow.index(
+        "scan = _run_scan_embedded(",
+        condition_review,
+    )
     electrode_review = workflow.index("if active_infos and not _review_removed_electrodes(")
 
-    assert initial_scan < marker_review < condition_review < electrode_review
+    assert (
+        initial_scan
+        < marker_review
+        < condition_review
+        < condition_scoped_rescan
+        < electrode_review
+    )
 
 
 def test_marker_review_rescans_only_affected_files_and_blocks_unresolved() -> None:

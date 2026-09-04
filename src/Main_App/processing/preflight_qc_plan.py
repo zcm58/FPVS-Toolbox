@@ -25,7 +25,7 @@ from Main_App.processing.marker_integrity import (
 from Main_App.projects.frequency_protocol import FrequencyProtocol
 
 PREFLIGHT_QC_METHOD_NAME = "condition_aware_preflight_qc"
-PREFLIGHT_QC_METHOD_VERSION = "v6_five_second_overlapping_transients"
+PREFLIGHT_QC_METHOD_VERSION = "v7_analyzed_condition_scope"
 # Disk-buffered reads remain in bounded ten-second chunks.  Diagnostic
 # transient windows are intentionally independent of this I/O chunk size.
 PREFLIGHT_QC_BLOCK_DURATION_S = 10.0

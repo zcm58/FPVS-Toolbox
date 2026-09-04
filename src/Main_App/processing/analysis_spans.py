@@ -22,6 +22,7 @@ from Main_App.projects.frequency_protocol import FrequencyProtocol
 ANALYSIS_SPAN_PLAN_VERSION = "analysis_span_plan_v1"
 ANALYSIS_SPAN_COORDINATE_VERSION = "raw_half_open_relative_to_first_samp_v1"
 TARGET_SPAN_ROUNDING_VERSION = "nearest_target_sample_half_up_v1"
+ANALYSIS_CONDITION_SELECTION_VERSION = "manual_condition_exclusion_v1"
 
 _EVENT_PLAN_DERIVED_KEYS = {
     "event_plan_fingerprint",
@@ -427,6 +428,104 @@ def validate_source_analysis_span_plan(
     return plan
 
 
+def restrict_source_analysis_span_plan_by_condition(
+    source_plan: Mapping[str, Any],
+    *,
+    excluded_condition_labels: Sequence[object],
+    exclusion_scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive the exact analyzed span plan after explicit condition exclusions.
+
+    The reviewed marker plan remains intact. This derived plan records which
+    condition windows can influence signal QC, kurtosis, preprocessing cache
+    identity, and epoch construction for one recording.
+    """
+
+    if not isinstance(source_plan, Mapping):
+        raise AnalysisSpanPlanError("Source analysis-span plan must be an object.")
+    source_core = _without_fingerprint(source_plan)
+    if source_plan.get("version") != ANALYSIS_SPAN_PLAN_VERSION:
+        raise AnalysisSpanPlanError("Source analysis-span plan version is not current.")
+    if str(source_plan.get("fingerprint") or "") != _fingerprint(source_core):
+        raise AnalysisSpanPlanError("Source analysis-span fingerprint is stale.")
+    if "condition_selection" in source_plan:
+        raise AnalysisSpanPlanError(
+            "Condition exclusions must be derived from the reviewed source plan once."
+        )
+    if isinstance(excluded_condition_labels, (str, bytes, bytearray)):
+        raise AnalysisSpanPlanError("Excluded condition labels must be a sequence.")
+
+    requested: list[str] = []
+    requested_keys: set[str] = set()
+    for raw_label in excluded_condition_labels:
+        label = str(raw_label or "").strip()
+        if not label:
+            raise AnalysisSpanPlanError("Excluded condition labels must not be blank.")
+        key = label.casefold()
+        if key in requested_keys:
+            continue
+        requested_keys.add(key)
+        requested.append(label)
+    requested.sort(key=str.casefold)
+
+    if not isinstance(exclusion_scope, Mapping) or not exclusion_scope:
+        raise AnalysisSpanPlanError("Condition-exclusion scope must be a nonempty object.")
+    try:
+        canonical_scope = json.loads(
+            json.dumps(
+                dict(exclusion_scope),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise AnalysisSpanPlanError(
+            "Condition-exclusion scope must contain JSON-safe finite values."
+        ) from exc
+    if not isinstance(canonical_scope, dict) or not canonical_scope:
+        raise AnalysisSpanPlanError("Condition-exclusion scope must be a nonempty object.")
+
+    source_spans = _sequence_of_mappings(
+        source_plan.get("spans"),
+        field_name="source spans",
+    )
+    retained_spans = [
+        dict(span)
+        for span in source_spans
+        if str(span.get("condition_label") or "").strip().casefold()
+        not in requested_keys
+    ]
+    source_grid = source_plan.get("source_grid")
+    if not isinstance(source_grid, Mapping):
+        raise AnalysisSpanPlanError("Source analysis-span grid is malformed.")
+    unique_spans = merge_relative_spans(
+        [
+            (
+                int(span["source_coordinates"]["start_relative_sample"]),
+                int(span["source_coordinates"]["stop_relative_sample"]),
+            )
+            for span in retained_spans
+        ],
+        n_times=int(source_grid.get("n_times", -1)),
+    )
+    selection = {
+        "version": ANALYSIS_CONDITION_SELECTION_VERSION,
+        "parent_source_plan_fingerprint": str(source_plan.get("fingerprint") or ""),
+        "excluded_condition_labels": requested,
+        "scope": canonical_scope,
+    }
+    restricted_core = {
+        **source_core,
+        "spans": retained_spans,
+        "unique_relative_spans": [list(span) for span in unique_spans],
+        "unique_sample_count": sum(stop - start for start, stop in unique_spans),
+        "condition_selection": selection,
+    }
+    return {**restricted_core, "fingerprint": _fingerprint(restricted_core)}
+
+
 def _round_nonnegative_fraction_half_up(value: Fraction) -> int:
     if value < 0:
         raise AnalysisSpanPlanError("Target-grid coordinate cannot be negative.")
@@ -556,6 +655,9 @@ def realize_target_analysis_span_plan(
         "unique_relative_spans": [list(span) for span in unique_spans],
         "unique_sample_count": sum(stop - start for start, stop in unique_spans),
     }
+    condition_selection = source_plan.get("condition_selection")
+    if isinstance(condition_selection, Mapping):
+        plan_core["condition_selection"] = dict(condition_selection)
     return {**plan_core, "fingerprint": _fingerprint(plan_core)}
 
 
@@ -604,6 +706,7 @@ def relative_spans_from_plan(
 
 
 __all__ = [
+    "ANALYSIS_CONDITION_SELECTION_VERSION",
     "ANALYSIS_SPAN_COORDINATE_VERSION",
     "ANALYSIS_SPAN_PLAN_VERSION",
     "AnalysisSpanPlanError",
@@ -615,6 +718,7 @@ __all__ = [
     "read_source_analysis_span_plan",
     "realize_target_analysis_span_plan",
     "relative_spans_from_plan",
+    "restrict_source_analysis_span_plan_by_condition",
     "validate_realized_target_analysis_span_plan",
     "validate_source_analysis_span_context",
     "validate_source_analysis_span_plan",

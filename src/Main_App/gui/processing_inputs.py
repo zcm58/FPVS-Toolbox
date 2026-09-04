@@ -40,13 +40,20 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_METHOD_VERSION,
 )
 from Main_App.projects.preprocessing_settings import (
+    KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY,
+    MANUAL_REMOVED_ELECTRODES_ENABLED_KEY,
     PREPROCESSING_CANONICAL_KEYS,
+    RemovedElectrodeDetectionConfirmationRequired,
     normalize_preprocessing_settings,
+    removed_electrode_detection_choice_requires_confirmation,
+    require_removed_electrode_detection_choice_ready,
 )
 from Main_App.projects import FrequencyProtocolError, validate_protocol_condition_codes
 from Main_App.projects.recordings import project_recording_context
 from Main_App.processing.removed_electrode_detection import (
-    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
+    REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
+    REMOVED_ELECTRODE_DETECTION_MODE_OFF,
+    manual_removed_electrodes_are_enabled,
     normalize_manual_removed_electrodes_map,
 )
 from Main_App.gui.project_workflows import (
@@ -62,6 +69,63 @@ logger.addHandler(logging.NullHandler())
 run_preprocessing_qc_workflow = None
 
 
+def _ensure_removed_electrode_detection_choice_ready(host: Any) -> bool:
+    """Ask once for an unresolved legacy detector choice before processing."""
+
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        return False
+    if not removed_electrode_detection_choice_requires_confirmation(
+        getattr(project, "preprocessing", {})
+    ):
+        return True
+
+    response = QMessageBox.question(
+        host,
+        "Experimental Removed-Electrode Detection",
+        (
+            "This project has no saved preference for the experimental "
+            "automatic removed-electrode detector.\n\n"
+            "Turn it on for this project? Choose No to keep it Off "
+            "(recommended). Manual removed-electrode lists remain available "
+            "under either choice."
+        ),
+        (
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel
+        ),
+        QMessageBox.StandardButton.No,
+    )
+    if response == QMessageBox.StandardButton.Cancel:
+        try:
+            host.log("Processing cancelled before the detector choice was saved.")
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+        return False
+
+    mode = (
+        REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+        if response == QMessageBox.StandardButton.Yes
+        else REMOVED_ELECTRODE_DETECTION_MODE_OFF
+    )
+    try:
+        project.confirm_removed_electrode_detection_choice(mode)
+        project.save()
+    except (OSError, ValueError) as exc:
+        logger.exception("Failed to save the removed-electrode detector choice.")
+        QMessageBox.critical(host, "Project Save Error", str(exc))
+        return False
+    try:
+        host.log(
+            "Experimental removed-electrode detection saved as "
+            f"{'On' if mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO else 'Off'}."
+        )
+    except (AttributeError, TypeError, RuntimeError):
+        pass
+    return True
+
+
 def _planning_settings_from_params(
     params: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, int]]:
@@ -74,6 +138,8 @@ def validate_inputs(host: Any) -> bool:
     """Modern input validation + parameter collection."""
     if not getattr(host, "currentProject", None):
         QMessageBox.warning(host, "No Project", "Please open or create a project first.")
+        return False
+    if not _ensure_removed_electrode_detection_choice_ready(host):
         return False
 
     # File selection rules differ in Single vs Batch
@@ -334,7 +400,7 @@ def _ensure_manual_removed_electrodes_reviewed(
     raw_file_infos: list[Any],
     params: dict[str, Any],
 ) -> bool:
-    if params.get("removed_electrode_detection_mode") != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
+    if not manual_removed_electrodes_are_enabled(params):
         return True
     if not raw_file_infos:
         return True
@@ -408,9 +474,7 @@ def _ensure_manual_removed_electrodes_reviewed(
         else recording_map
     )
     updated_preproc = dict(getattr(host.currentProject, "preprocessing", {}) or {})
-    updated_preproc["removed_electrode_detection_mode"] = (
-        REMOVED_ELECTRODE_DETECTION_MODE_MANUAL
-    )
+    updated_preproc[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = True
     updated_preproc["manual_removed_electrodes"] = updated_map
     updated_preproc["manual_removed_electrodes_by_recording"] = (
         updated_recording_map
@@ -438,6 +502,9 @@ def _ensure_manual_removed_electrodes_reviewed(
     params["auto_detect_removed_electrodes"] = bool(
         normalized.get("auto_detect_removed_electrodes")
     )
+    params[MANUAL_REMOVED_ELECTRODES_ENABLED_KEY] = bool(
+        normalized.get(MANUAL_REMOVED_ELECTRODES_ENABLED_KEY)
+    )
     host.validated_params = params
     host.log(
         "Manual removed-electrode list reviewed for each current recording."
@@ -455,6 +522,15 @@ def build_validated_params(host: Any) -> dict | None:
         return None
 
     normalized = normalize_preprocessing_settings(host.currentProject.preprocessing)
+    try:
+        require_removed_electrode_detection_choice_ready(normalized)
+    except RemovedElectrodeDetectionConfirmationRequired as exc:
+        QMessageBox.warning(
+            host,
+            "Experimental Detector Choice Required",
+            str(exc),
+        )
+        return None
     logger.debug(
         "NORMALIZED_PREPROC_SNAPSHOT file_mode=%s normalized.high_pass=%r "
         "normalized.low_pass=%r normalized.downsample=%r "
@@ -511,16 +587,6 @@ def build_validated_params(host: Any) -> dict | None:
     stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
     base_freq = float(frequency_protocol.presentation_rate_hz)
     oddball_freq = float(frequency_protocol.oddball_rate_hz)
-    try:
-        bca_upper_limit = float(
-            host.settings.get(
-                "analysis",
-                "bca_upper_limit",
-                str(config.DEFAULT_BCA_UPPER_LIMIT),
-            )
-        )
-    except Exception:
-        bca_upper_limit = float(config.DEFAULT_BCA_UPPER_LIMIT)
 
     params = {
         "low_pass": float(normalized.get("low_pass")),
@@ -544,6 +610,18 @@ def build_validated_params(host: Any) -> dict | None:
         "removed_electrode_detection_mode": normalized.get(
             "removed_electrode_detection_mode"
         ),
+        MANUAL_REMOVED_ELECTRODES_ENABLED_KEY: bool(
+            normalized.get(MANUAL_REMOVED_ELECTRODES_ENABLED_KEY)
+        ),
+        "removed_electrode_detection_choice_schema_version": normalized.get(
+            "removed_electrode_detection_choice_schema_version"
+        ),
+        "removed_electrode_detection_choice_status": normalized.get(
+            "removed_electrode_detection_choice_status"
+        ),
+        "removed_electrode_detection_choice_source": normalized.get(
+            "removed_electrode_detection_choice_source"
+        ),
         "manual_removed_electrodes": dict(
             normalized.get("manual_removed_electrodes") or {}
         ),
@@ -562,6 +640,9 @@ def build_validated_params(host: Any) -> dict | None:
         "manual_excluded_recording_conditions": dict(
             normalized.get("manual_excluded_recording_conditions") or {}
         ),
+        KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY: dict(
+            normalized.get(KURTOSIS_REVIEW_DECISIONS_BY_RECORDING_KEY) or {}
+        ),
         "stim_channel": stim_channel,
         "save_preprocessed_fif": False,
         "event_id_map": event_map,
@@ -569,11 +650,9 @@ def build_validated_params(host: Any) -> dict | None:
         "frequency_protocol_fingerprint": frequency_protocol.fingerprint,
         "base_freq": base_freq,
         "oddball_freq": oddball_freq,
-        "bca_upper_limit": bca_upper_limit,
         "analysis": {
             "base_freq": base_freq,
             "oddball_freq": oddball_freq,
-            "bca_upper_limit": bca_upper_limit,
             "frequency_protocol": frequency_protocol.to_manifest(),
             "frequency_protocol_fingerprint": frequency_protocol.fingerprint,
         },

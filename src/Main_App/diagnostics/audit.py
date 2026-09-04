@@ -34,6 +34,14 @@ def _string_list(value: Any) -> list[str]:
     return []
 
 
+def _mapping_payload(value: Any) -> dict[str, Any]:
+    """Return a detached mapping for structured audit provenance."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
 def start_preproc_audit(raw: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
     """Capture the initial Raw metadata before preprocessing mutates it."""
     info = getattr(raw, "info", {})
@@ -164,6 +172,24 @@ def end_preproc_audit(
     raw_qc_baseline_warning = bool(params.get("_fpvs_raw_qc_baseline_warning"))
     raw_qc_baseline_excluded = bool(params.get("_fpvs_raw_qc_baseline_excluded"))
     kurtosis_bad_channels = _string_list(params.get("_fpvs_kurtosis_bad_channels"))
+    kurtosis_review_required_channels = _string_list(
+        params.get("_fpvs_kurtosis_review_required_channels")
+    )
+    kurtosis_corroborated_channels = _string_list(
+        params.get("_fpvs_kurtosis_corroborated_channels")
+    )
+    kurtosis_user_approved_channels = _string_list(
+        params.get("_fpvs_kurtosis_user_approved_channels")
+    )
+    kurtosis_user_rejected_channels = _string_list(
+        params.get("_fpvs_kurtosis_user_rejected_channels")
+    )
+    kurtosis_qc_evidence = _mapping_payload(
+        params.get("_fpvs_kurtosis_qc_evidence")
+    )
+    kurtosis_decision_plan = _mapping_payload(
+        params.get("_fpvs_kurtosis_decision_plan")
+    )
     interpolated_channels = _string_list(params.get("_fpvs_interpolated_channels"))
     total_rejected = len(interpolated_channels) if interpolated_channels else int(n_rejected)
 
@@ -205,6 +231,13 @@ def end_preproc_audit(
         "raw_qc_baseline_warning": raw_qc_baseline_warning,
         "raw_qc_baseline_excluded": raw_qc_baseline_excluded,
         "kurtosis_bad_channels": kurtosis_bad_channels,
+        "kurtosis_candidate_channels": kurtosis_bad_channels,
+        "kurtosis_review_required_channels": kurtosis_review_required_channels,
+        "kurtosis_corroborated_channels": kurtosis_corroborated_channels,
+        "kurtosis_user_approved_channels": kurtosis_user_approved_channels,
+        "kurtosis_user_rejected_channels": kurtosis_user_rejected_channels,
+        "kurtosis_qc_evidence": kurtosis_qc_evidence,
+        "kurtosis_decision_plan": kurtosis_decision_plan,
         "interpolated_channels": interpolated_channels,
         "stim_channel": stim_channel,
         "fif_written": int(fif_written),

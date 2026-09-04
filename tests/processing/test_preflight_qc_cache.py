@@ -130,7 +130,7 @@ def test_fingerprint_changes_with_each_input_category(
 def test_cache_path_is_project_local_and_read_does_not_create_it(tmp_path: Path) -> None:
     parts = _key_parts()
     assert PREFLIGHT_QC_CACHE_METHOD_DIRECTORY == (
-        "v6_five_second_overlapping_transients"
+        "v7_analyzed_condition_scope"
     )
     expected_directory = (
         tmp_path

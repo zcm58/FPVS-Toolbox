@@ -1566,6 +1566,82 @@ def _reset_failed_start(host: Any) -> None:
         host._update_start_enabled()
 
 
+def _review_interpolation_burden_before_post_processing(host: Any) -> bool:
+    """Return whether QC-07 permits this run to enter post-processing."""
+
+    from Main_App.gui.interpolation_burden_review_dialog import (
+        InterpolationBurdenReviewDialog,
+    )
+    from Main_App.processing.interpolation_burden import (
+        INTERPOLATION_BURDEN_DECISION_EXCLUDE,
+    )
+    from Main_App.processing.interpolation_burden_review import (
+        InterpolationBurdenReviewError,
+        apply_interpolation_burden_review,
+        collect_interpolation_burden_review,
+    )
+
+    project = getattr(host, "currentProject", None)
+    if project is None:
+        host.log(
+            "Interpolation-burden review could not start because no project is loaded.",
+            level=logging.WARNING,
+        )
+        return False
+    try:
+        batch = collect_interpolation_burden_review(project)
+    except (InterpolationBurdenReviewError, OSError, TypeError, ValueError) as exc:
+        logger.exception("interpolation_burden_review_collection_failed")
+        QMessageBox.critical(host, "Interpolation Burden Review Error", str(exc))
+        host.log(
+            f"Post-processing skipped: interpolation-burden evidence is invalid ({exc}).",
+            level=logging.WARNING,
+        )
+        return False
+    if not batch.requires_review:
+        return True
+
+    dialog = InterpolationBurdenReviewDialog(batch, host)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        host.log(
+            "Interpolation-burden review canceled. Downstream post-processing was skipped.",
+            level=logging.WARNING,
+        )
+        return False
+    try:
+        application = apply_interpolation_burden_review(
+            project,
+            batch,
+            dialog.choices(),
+        )
+    except (InterpolationBurdenReviewError, OSError, TypeError, ValueError) as exc:
+        logger.exception("interpolation_burden_review_apply_failed")
+        QMessageBox.critical(host, "Interpolation Burden Review Error", str(exc))
+        host.log(
+            f"Post-processing skipped: interpolation-burden decisions were not saved ({exc}).",
+            level=logging.WARNING,
+        )
+        return False
+
+    params = getattr(host, "validated_params", None)
+    if isinstance(params, dict):
+        params["manual_excluded_participants"] = list(
+            application.excluded_participants
+        )
+        params["manual_excluded_recordings"] = list(application.excluded_recordings)
+    excluded_count = sum(
+        decision.decision == INTERPOLATION_BURDEN_DECISION_EXCLUDE
+        for decision in application.decisions
+    )
+    host.log(
+        "Interpolation-burden review saved "
+        f"{len(application.decisions)} decision(s); {excluded_count} exclusion "
+        "decision(s) now feed the canonical downstream cohort.",
+        level=logging.INFO,
+    )
+    return True
+
+
 def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     results: list[dict] = []
     excluded_results: list[dict] = []
@@ -1710,10 +1786,16 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
                     plan,
                     [*results, *excluded_results],
                 )
-                host.log(f"Processing QC summary saved: {qc_summary_path}", level=logging.INFO)
+                host.log(
+                    f"Preprocessing QC Report saved: {qc_summary_path}",
+                    level=logging.INFO,
+                )
             except Exception as exc:
-                logger.exception("Failed to write processing QC summary workbook.")
-                host.log(f"Processing QC summary export failed: {exc}", level=logging.WARNING)
+                logger.exception("Failed to write the Preprocessing QC Report workbook.")
+                host.log(
+                    f"Preprocessing QC Report export failed: {exc}",
+                    level=logging.WARNING,
+                )
 
     def _finish_processing_run() -> None:
         _show_exclusion_summary_popup(host, [*excluded_results, *failed_run_results])
@@ -1738,6 +1820,9 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         if str(result.get("status") or "").casefold() in {"ok", "completed", "success"}
     ]
     if not cancelled and successful_results and ledger_update_succeeded:
+        if not _review_interpolation_burden_before_post_processing(host):
+            _finish_processing_run()
+            return
         started_post_processing = _start_post_processing_pipeline_after_processing(
             host,
             on_finished=_finish_processing_run,

@@ -51,20 +51,25 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
 )
+from Main_App.processing.kurtosis_qc import (
+    KURTOSIS_AUTHORITY_POLICY_VERSION,
+    KURTOSIS_CORROBORATOR_REGISTRY_VERSION,
+    KURTOSIS_QC_METHOD_VERSION,
+)
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_PLAN_VERSION,
     AnalysisSpanPlanError,
     canonical_condition_event_map,
     relative_spans_from_plan,
+    restrict_source_analysis_span_plan_by_condition,
     validate_realized_target_analysis_span_plan,
     validate_source_analysis_span_context,
     validate_source_analysis_span_plan,
 )
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
-    REMOVED_ELECTRODE_DETECTION_MODE_MANUAL,
-    manual_removed_electrodes_for_pid,
-    normalize_manual_removed_electrodes_map,
+    manual_removed_electrodes_are_enabled,
+    manual_removed_electrodes_for_recording,
     normalize_removed_electrode_detection_mode,
 )
 from Main_App.processing.raw_channel_qc import (
@@ -79,6 +84,8 @@ from Main_App.projects.frequency_protocol import (
 from Main_App.projects.grouping import validate_group_folder_name
 from Main_App.projects.preprocessing_settings import (
     ELECTRODE_MONTAGE_BIOSEMI64,
+    is_participant_condition_excluded,
+    is_recording_condition_excluded,
     normalize_electrode_montage,
     normalize_manual_excluded_participants,
     normalize_manual_excluded_recordings,
@@ -90,7 +97,7 @@ import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v11-analyzed-intervals"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v12-condition-scope-kurtosis-review"
 BDF_FIRST_N_CHANNELS = 64
 REMOVED_ELECTRODE_REVIEW_LIST_KEYS = (
     "removed_electrode_original_auto_flagged",
@@ -315,6 +322,53 @@ def _recording_id_for_file(
     return _mapped_text_for_file(file_path, settings, "_fpvs_recording_id_by_file")
 
 
+def _excluded_condition_labels_for_file(
+    file_path: Path,
+    settings: Mapping[str, object],
+    event_map: Mapping[str, int],
+) -> tuple[str, ...]:
+    """Resolve the exact project conditions omitted from one recording."""
+
+    participant_id = _participant_id_for_file(file_path, dict(settings))
+    recording_id = _recording_id_for_file(file_path, settings)
+    participant_exclusions = settings.get("manual_excluded_participant_conditions")
+    recording_exclusions = settings.get("manual_excluded_recording_conditions")
+    excluded: list[str] = []
+    for label in event_map:
+        if is_participant_condition_excluded(
+            participant_exclusions if isinstance(participant_exclusions, Mapping) else None,
+            participant_id,
+            label,
+        ) or (
+            recording_id is not None
+            and is_recording_condition_excluded(
+                recording_exclusions if isinstance(recording_exclusions, Mapping) else None,
+                recording_id,
+                label,
+            )
+        ):
+            excluded.append(str(label))
+    return tuple(excluded)
+
+
+def _recording_mapping_payload(
+    value: object,
+    recording_id: str,
+) -> dict[str, object]:
+    """Return one case-insensitive recording payload from a persisted map."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    lookup = recording_id.casefold()
+    for raw_id, raw_payload in value.items():
+        if str(raw_id).strip().casefold() != lookup:
+            continue
+        if isinstance(raw_payload, Mapping):
+            return {str(key): item for key, item in raw_payload.items()}
+        return {}
+    return {}
+
+
 def _session_id_for_file(
     file_path: Path,
     settings: Mapping[str, object],
@@ -412,29 +466,11 @@ def _manual_removed_electrodes_for_file(
     file_path: Path,
     settings: Dict[str, object],
 ) -> list[str]:
-    mode = normalize_removed_electrode_detection_mode(
-        settings.get("removed_electrode_detection_mode"),
-        auto_detect_removed_electrodes=settings.get(
-            "auto_detect_removed_electrodes",
-            True,
-        ),
-    )
-    if mode != REMOVED_ELECTRODE_DETECTION_MODE_MANUAL:
-        return []
-    recording_id = _recording_id_for_file(file_path, settings)
-    recording_map = normalize_manual_removed_electrodes_map(
-        settings.get("manual_removed_electrodes_by_recording")
-    )
-    if recording_id:
-        recording_key = recording_id.casefold()
-        for candidate, electrodes in recording_map.items():
-            if candidate.casefold() == recording_key:
-                return list(electrodes)
-    participant_id = _participant_id_for_file(file_path, settings)
     return list(
-        manual_removed_electrodes_for_pid(
-            settings.get("manual_removed_electrodes"),
-            participant_id,
+        manual_removed_electrodes_for_recording(
+            settings,
+            participant_id=_participant_id_for_file(file_path, settings),
+            recording_id=_recording_id_for_file(file_path, settings),
         )
     )
 
@@ -858,7 +894,7 @@ def _preproc_cache_payload(
         settings.get("removed_electrode_detection_mode"),
         auto_detect_removed_electrodes=settings.get(
             "auto_detect_removed_electrodes",
-            True,
+            False,
         ),
     )
     relevant_settings = {
@@ -887,15 +923,30 @@ def _preproc_cache_payload(
             effective_detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
         ),
         "removed_electrode_detection_mode": effective_detector_mode,
-        "manual_removed_electrodes_enabled": bool(
-            settings.get("manual_removed_electrodes_enabled", False)
+        "manual_removed_electrodes_enabled": (
+            manual_removed_electrodes_are_enabled(settings)
         ),
         "removed_electrode_detection_choice_schema_version": settings.get(
             "removed_electrode_detection_choice_schema_version"
         ),
+        "removed_electrode_detection_choice_status": settings.get(
+            "removed_electrode_detection_choice_status"
+        ),
+        "removed_electrode_detection_choice_source": settings.get(
+            "removed_electrode_detection_choice_source"
+        ),
         "manual_removed_electrodes_for_file": _manual_removed_electrodes_for_file(
             file_path,
             settings,
+        ),
+        "kurtosis_qc_method_version": KURTOSIS_QC_METHOD_VERSION,
+        "kurtosis_authority_policy_version": KURTOSIS_AUTHORITY_POLICY_VERSION,
+        "kurtosis_corroborator_registry_version": (
+            KURTOSIS_CORROBORATOR_REGISTRY_VERSION
+        ),
+        "kurtosis_review_decisions_for_file": settings.get(
+            "_fpvs_kurtosis_review_decisions",
+            {},
         ),
     }
     return {
@@ -1402,6 +1453,20 @@ def _settings_for_file(
     """Return per-file settings with strict canonical group output routing."""
 
     file_settings = dict(settings)
+    effective_detector_mode = normalize_removed_electrode_detection_mode(
+        file_settings.get("removed_electrode_detection_mode"),
+        auto_detect_removed_electrodes=file_settings.get(
+            "auto_detect_removed_electrodes",
+            False,
+        ),
+    )
+    file_settings["removed_electrode_detection_mode"] = effective_detector_mode
+    file_settings["auto_detect_removed_electrodes"] = (
+        effective_detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO
+    )
+    participant_id = _participant_id_for_file(file_path, file_settings)
+    file_settings["_fpvs_source_file_path"] = str(file_path.resolve())
+    file_settings["_fpvs_participant_id"] = participant_id
     file_settings["output_recording_stem"] = _output_stem_for_file(
         file_path,
         file_settings,
@@ -1425,6 +1490,14 @@ def _settings_for_file(
     )
     if recording_id:
         file_settings["_fpvs_recording_id"] = recording_id
+    processing_id = recording_id or participant_id
+    if "kurtosis_review_decisions_by_recording" in file_settings:
+        file_settings["_fpvs_kurtosis_review_decisions"] = (
+            _recording_mapping_payload(
+                file_settings.get("kurtosis_review_decisions_by_recording"),
+                processing_id,
+            )
+        )
     if session_id:
         file_settings["_fpvs_session_id"] = session_id
     if session_label:
@@ -1632,11 +1705,45 @@ def _run_full_pipeline_for_file(
             event_map=event_map,
             protocol=frequency_protocol,
         )
+        excluded_condition_labels = _excluded_condition_labels_for_file(
+            file_path,
+            settings,
+            event_map,
+        )
+        source_analysis_span_plan = (
+            restrict_source_analysis_span_plan_by_condition(
+                source_analysis_span_plan,
+                excluded_condition_labels=excluded_condition_labels,
+                exclusion_scope={
+                    "participant_id": participant_id,
+                    "recording_id": recording_id,
+                },
+            )
+        )
         if not source_analysis_span_plan.get("spans"):
-            raise RuntimeError(
-                "The reviewed preflight plan contains no retained analysis spans."
+            message = (
+                f"Every project condition is explicitly excluded for {file_path.name}; "
+                "no signal was preprocessed and no condition workbook was written."
+            )
+            logger.info(
+                "all_conditions_excluded file=%s participant_id=%s recording_id=%s "
+                "conditions=%s",
+                file_path.name,
+                participant_id,
+                recording_id,
+                list(excluded_condition_labels),
+            )
+            return _make_excluded_result(
+                file_path=file_path,
+                reason="all_conditions_excluded_from_analysis",
+                message=message,
+                stage="condition_scope",
+                start_time=t0,
             )
         settings["_fpvs_source_analysis_span_plan"] = source_analysis_span_plan
+        settings["_fpvs_excluded_condition_labels"] = list(
+            excluded_condition_labels
+        )
         settings["_fpvs_require_analysis_spans"] = True
         stim = str(settings.get("stim_channel") or settings.get("stim") or "Status")
 
@@ -1707,6 +1814,16 @@ def _run_full_pipeline_for_file(
                 first_samp=int(raw.first_samp),
                 event_map=event_map,
                 protocol=frequency_protocol,
+            )
+            source_analysis_span_plan = (
+                restrict_source_analysis_span_plan_by_condition(
+                    source_analysis_span_plan,
+                    excluded_condition_labels=excluded_condition_labels,
+                    exclusion_scope={
+                        "participant_id": participant_id,
+                        "recording_id": recording_id,
+                    },
+                )
             )
             settings["_fpvs_source_analysis_span_plan"] = (
                 source_analysis_span_plan
@@ -2122,6 +2239,9 @@ def _run_full_pipeline_for_file(
         skipped_conditions: list[tuple[str, int, str]] = []
         total_epochs = 0
         expected_n = frequency_protocol.expected_analyzed_samples(sfreq)
+        excluded_condition_keys = {
+            label.casefold() for label in excluded_condition_labels
+        }
 
         for label, code in event_map.items():
             code_int = int(code)
@@ -2133,11 +2253,14 @@ def _run_full_pipeline_for_file(
                 epochs_dict[label] = []
                 continue
             if not retained_occurrences:
-                reason = (
-                    "all marker occurrences excluded after review"
-                    if condition_occurrences
-                    else "no approved marker occurrences"
-                )
+                if label.casefold() in excluded_condition_keys:
+                    reason = "project condition exclusion"
+                else:
+                    reason = (
+                        "all marker occurrences excluded after review"
+                        if condition_occurrences
+                        else "no approved marker occurrences"
+                    )
                 skipped_conditions.append((label, code_int, reason))
                 epochs_dict[label] = []
                 continue

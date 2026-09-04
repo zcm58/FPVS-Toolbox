@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from pathlib import Path
 import tempfile
@@ -22,7 +22,6 @@ from Main_App.io.eeg_geometry import (
     biosemi64_geometry_identity,
 )
 from Main_App.io.load_utils import BDF_RECORDING_NOT_STARTED_REASON, BdfPreflightInfo
-from Main_App.Shared.fft_crop_utils import ODDBALL_FREQ
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.preflight_qc_cache import (
     load_preflight_qc_cache,
@@ -43,9 +42,21 @@ from Main_App.processing.preflight_qc_plan import (
     plan_preflight_qc_events,
     resolve_preflight_spectral_bounds,
 )
+from Main_App.processing.analysis_spans import (
+    restrict_source_analysis_span_plan_by_condition,
+)
+from Main_App.processing.removed_electrode_detection import (
+    manual_removed_electrodes_for_recording,
+)
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocolError,
     normalize_frequency_protocol,
+)
+from Main_App.projects.preprocessing_settings import (
+    is_participant_condition_excluded,
+    is_recording_condition_excluded,
+    normalize_manual_excluded_participant_conditions,
+    normalize_manual_excluded_recording_conditions,
 )
 from Main_App.processing.raw_channel_qc import (
     CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
@@ -113,7 +124,23 @@ class PreflightQcFileResult:
         values = payload.get("channels_to_interpolate")
         if not isinstance(values, Sequence) or isinstance(values, str):
             return ()
-        return tuple(str(value) for value in values if str(value).strip())
+        manual_values = payload.get("manual_removed_channels")
+        manual_keys = {
+            str(value).strip().casefold()
+            for value in (
+                manual_values
+                if isinstance(manual_values, Sequence)
+                and not isinstance(manual_values, str)
+                else ()
+            )
+            if str(value).strip()
+        }
+        return tuple(
+            str(value)
+            for value in values
+            if str(value).strip()
+            and str(value).strip().casefold() not in manual_keys
+        )
 
     @property
     def high_amplitude_channels(self) -> tuple[str, ...]:
@@ -240,6 +267,8 @@ class PreflightQcScan:
     project_grid_observations: tuple[
         "PreflightConditionCropObservation", ...
     ] = ()
+    oddball_frequency_hz: float | None = None
+    frequency_protocol_fingerprint: str = ""
 
     @property
     def suggested_removed_electrodes(self) -> dict[str, list[str]]:
@@ -330,12 +359,17 @@ class PreflightConditionCropGridAudit:
     reference_oddball_cycles: int | None
     reference_support: int
     reference_total: int
+    oddball_frequency_hz: float | None = None
+    frequency_protocol_fingerprint: str = ""
 
     @property
     def reference_duration_s(self) -> float | None:
-        if self.reference_oddball_cycles is None:
+        if (
+            self.reference_oddball_cycles is None
+            or self.oddball_frequency_hz is None
+        ):
             return None
-        return self.reference_oddball_cycles / float(ODDBALL_FREQ)
+        return self.reference_oddball_cycles / self.oddball_frequency_hz
 
     @property
     def review_candidates(self) -> tuple[PreflightConditionCropObservation, ...]:
@@ -485,6 +519,7 @@ def build_preflight_condition_crop_grid_audit(
         observations.extend(
             _condition_crop_observations(
                 result,
+                oddball_frequency_hz=scan.oddball_frequency_hz,
                 excluded_pair_keys=excluded_pair_keys,
                 excluded_recording_pair_keys=excluded_recording_pair_keys,
             )
@@ -558,12 +593,15 @@ def build_preflight_condition_crop_grid_audit(
         reference_oddball_cycles=reference,
         reference_support=int(support),
         reference_total=total,
+        oddball_frequency_hz=scan.oddball_frequency_hz,
+        frequency_protocol_fingerprint=scan.frequency_protocol_fingerprint,
     )
 
 
 def _condition_crop_observations(
     result: PreflightQcFileResult,
     *,
+    oddball_frequency_hz: float | None,
     excluded_pair_keys: set[tuple[str, str]],
     excluded_recording_pair_keys: set[tuple[str, str]],
 ) -> list[PreflightConditionCropObservation]:
@@ -619,13 +657,15 @@ def _condition_crop_observations(
         cycles: int | None = None
         duration_s: float | None = None
         if issue is None:
-            if not lengths:
+            if oddball_frequency_hz is None:
+                issue = "The project oddball frequency is unavailable."
+            elif not lengths:
                 issue = "No locked FFT crop was planned."
             elif len(set(lengths)) != 1:
                 issue = "Condition repetitions do not share one FFT crop length."
             else:
                 duration_s = lengths[0] / sfreq
-                raw_cycles = float(ODDBALL_FREQ) * duration_s
+                raw_cycles = oddball_frequency_hz * duration_s
                 rounded_cycles = int(round(raw_cycles))
                 if rounded_cycles <= 0 or abs(raw_cycles - rounded_cycles) > 1e-6:
                     issue = "The planned FFT crop is not exactly oddball-bin locked."
@@ -997,13 +1037,19 @@ def _transient_window_bounds(
 
 def _occurrence_evaluation_scope(
     event_plan: Any,
+    *,
+    evaluated_spans: Sequence[ConditionQcSpan] | None = None,
+    excluded_condition_labels: Sequence[str] = (),
 ) -> list[dict[str, object]]:
     """Account for evaluated and intentionally unavailable marker occurrences."""
 
     evaluated = {
         (int(span.condition_id), int(span.repetition_index))
-        for span in event_plan.spans
+        for span in (
+            event_plan.spans if evaluated_spans is None else evaluated_spans
+        )
     }
+    excluded_keys = {str(label).strip().casefold() for label in excluded_condition_labels}
     approved = {
         (
             int(item.get("condition_code", -1)),
@@ -1033,7 +1079,11 @@ def _occurrence_evaluation_scope(
         code = int(occurrence.get("condition_code", -1))
         repetition = int(occurrence.get("repetition_index", -1))
         key = (code, repetition)
-        if key in evaluated:
+        condition_label = str(occurrence.get("condition_label") or code)
+        if condition_label.strip().casefold() in excluded_keys:
+            status = "not_evaluated"
+            reason = "condition_excluded_from_analysis"
+        elif key in evaluated:
             status = "evaluated"
             reason = None
         elif key in unresolved:
@@ -1048,7 +1098,7 @@ def _occurrence_evaluation_scope(
             reason = "analysis_span_not_retained"
         rows.append(
             {
-                "condition_label": str(occurrence.get("condition_label") or code),
+                "condition_label": condition_label,
                 "condition_code": code,
                 "occurrence": repetition,
                 "occurrence_display": repetition + 1,
@@ -1081,6 +1131,8 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
         "_fpvs_manual_removed_electrodes",
         "manual_removed_electrodes",
         "manual_removed_electrodes_by_recording",
+        "manual_excluded_participant_conditions",
+        "manual_excluded_recording_conditions",
         "high_pass",
         "low_pass",
         "downsample",
@@ -1105,6 +1157,40 @@ def _preflight_cache_settings(settings: Mapping[str, Any]) -> dict[str, object]:
     )
     payload["reference_pair"] = list(_configured_ref_pair(settings))
     return payload
+
+
+def _excluded_condition_labels_for_scan(
+    settings: Mapping[str, Any],
+    *,
+    participant_id: str,
+    recording_id: str | None,
+    condition_labels: Sequence[str],
+) -> tuple[str, ...]:
+    """Resolve the final condition windows that must not influence signal QC."""
+
+    participant_exclusions = normalize_manual_excluded_participant_conditions(
+        settings.get("manual_excluded_participant_conditions")
+    )
+    recording_exclusions = normalize_manual_excluded_recording_conditions(
+        settings.get("manual_excluded_recording_conditions")
+    )
+    return tuple(
+        label
+        for label in condition_labels
+        if is_participant_condition_excluded(
+            participant_exclusions,
+            participant_id,
+            label,
+        )
+        or (
+            bool(recording_id)
+            and is_recording_condition_excluded(
+                recording_exclusions,
+                str(recording_id),
+                label,
+            )
+        )
+    )
 
 
 def _preflight_cache_method(
@@ -1291,6 +1377,14 @@ def _scan_one_preflight_file_v2(
     session_label = str(info.session_label).strip() if info.session_label else None
     visit_index = info.visit_index
     timings_ms: dict[str, float] = {}
+    file_qc_settings = dict(qc_settings)
+    file_qc_settings["_fpvs_manual_removed_electrodes"] = list(
+        manual_removed_electrodes_for_recording(
+            qc_settings,
+            participant_id=participant_id,
+            recording_id=recording_id,
+        )
+    )
 
     def _cancelled() -> bool:
         return bool(should_cancel and should_cancel())
@@ -1418,9 +1512,36 @@ def _scan_one_preflight_file_v2(
             file_path,
             recording_id=recording_id,
         )
-        cache_settings = _preflight_cache_settings(qc_settings)
-        cache_method = _preflight_cache_method(qc_settings)
+        cache_settings = _preflight_cache_settings(file_qc_settings)
+        cache_method = _preflight_cache_method(file_qc_settings)
         event_plan_payload = event_plan.to_payload()
+        excluded_condition_labels = _excluded_condition_labels_for_scan(
+            qc_settings,
+            participant_id=participant_id,
+            recording_id=recording_id,
+            condition_labels=tuple(str(label) for label in event_map),
+        )
+        excluded_condition_keys = {
+            label.casefold() for label in excluded_condition_labels
+        }
+        scored_spans = tuple(
+            span
+            for span in event_plan.spans
+            if span.condition_label.casefold() not in excluded_condition_keys
+        )
+        raw_source_plan = event_plan_payload.get("source_analysis_span_plan")
+        if not isinstance(raw_source_plan, Mapping):
+            raise RuntimeError(
+                "Preflight QC event plan has no canonical source analysis spans."
+            )
+        scored_source_plan = restrict_source_analysis_span_plan_by_condition(
+            raw_source_plan,
+            excluded_condition_labels=excluded_condition_labels,
+            exclusion_scope={
+                "participant_id": participant_id,
+                "recording_id": recording_id,
+            },
+        )
         cache_started = time.perf_counter()
         cached = load_preflight_qc_cache(
             project_root,
@@ -1449,11 +1570,14 @@ def _scan_one_preflight_file_v2(
                     "preflight_qc_cache_hit file=%s participant_id=%s conditions=%d",
                     file_path.name,
                     participant_id,
-                    len(event_plan.spans),
+                    len(scored_spans),
                 )
                 return cached_result
 
-        picks, channel_names = _preflight_scalp_picks(raw, settings=qc_settings)
+        picks, channel_names = _preflight_scalp_picks(
+            raw,
+            settings=file_qc_settings,
+        )
         sfreq = float(raw.info["sfreq"])
         lower_hz, upper_hz = resolve_preflight_spectral_bounds(
             qc_settings,
@@ -1473,9 +1597,9 @@ def _scan_one_preflight_file_v2(
         skipped_spectral_spans: list[ConditionQcSpan] = []
         samples_read = 0
         disk_buffered_condition_count = 0
-        conditions_total = len(event_plan.spans)
+        conditions_total = len(scored_spans)
         qc_started = time.perf_counter()
-        for condition_index, span in enumerate(event_plan.spans, start=1):
+        for condition_index, span in enumerate(scored_spans, start=1):
             if _cancelled():
                 raise _PreflightQcCancelled()
             detail_prefix = (
@@ -1513,7 +1637,7 @@ def _scan_one_preflight_file_v2(
                             evaluate_condition_raw_channel_qc_v2(
                                 blocks,
                                 channel_names,
-                                qc_settings,
+                                file_qc_settings,
                                 filename=file_path.name,
                                 sfreq=sfreq,
                                 block_duration_s=(
@@ -1586,17 +1710,54 @@ def _scan_one_preflight_file_v2(
         if _cancelled():
             raise _PreflightQcCancelled()
 
-        channel_result = combine_condition_raw_channel_qc_v2(
-            channel_results,
-            filename=file_path.name,
-        )
-        raw_channel_payload = channel_result.to_payload()
+        if channel_results:
+            channel_result = combine_condition_raw_channel_qc_v2(
+                channel_results,
+                filename=file_path.name,
+            )
+            raw_channel_payload = channel_result.to_payload()
+        else:
+            raw_channel_payload = {
+                "method_version": CONDITION_RAW_CHANNEL_QC_METHOD_VERSION,
+                "review_only": True,
+                "evaluation_status": "not_evaluated",
+                "reason": "all_conditions_excluded_from_analysis",
+                "message": (
+                    f"Signal QC was not evaluated for {file_path.name} because "
+                    "every project condition is explicitly excluded for this recording."
+                ),
+                "n_channels": len(channel_names),
+                "n_conditions": 0,
+                "n_blocks": 0,
+                "n_samples": 0,
+                "n_bad_channels": 0,
+                "bad_channels": [],
+                "channels_to_interpolate": [],
+                "manual_removed_channels": [],
+                "low_variance_channels": [],
+                "high_amplitude_channels": [],
+                "rare_burst_channels": [],
+                "spatial_outlier_channels": [],
+                "warning_rules": [],
+                "review_rules": [],
+                "candidate_sources": {},
+                "candidate_burden_findings": [],
+                "occurrence_review_findings": [],
+                "transient_review_findings": [],
+                "raw_amplitude_review_findings": [],
+                "thresholds": {},
+                "conditions": [],
+            }
         raw_channel_payload["scoring_scope"] = "approved_analyzed_occurrences"
         raw_channel_payload["occurrence_evaluation_scope"] = (
-            _occurrence_evaluation_scope(event_plan)
+            _occurrence_evaluation_scope(
+                event_plan,
+                evaluated_spans=scored_spans,
+                excluded_condition_labels=excluded_condition_labels,
+            )
         )
         raw_channel_payload["analysis_span_plan_fingerprint"] = str(
-            event_plan_payload["source_analysis_span_plan"]["fingerprint"]
+            scored_source_plan["fingerprint"]
         )
         thresholds = raw_channel_payload.get("thresholds")
         detector_evaluated = bool(
@@ -1621,7 +1782,9 @@ def _scan_one_preflight_file_v2(
             "cache_status": "miss",
             "event_source": event_source,
             "event_plan": event_plan_payload,
-            "condition_count": len(event_plan.spans),
+            "scored_source_analysis_span_plan": scored_source_plan,
+            "excluded_condition_labels": list(excluded_condition_labels),
+            "condition_count": len(scored_spans),
             "marker_review_required": bool(event_plan.unresolved_occurrences),
             "samples_read_per_channel": samples_read,
             "recording_samples_per_channel": int(raw.n_times),
@@ -1961,6 +2124,21 @@ def scan_preprocessing_qc(
     # In particular, an Off project must not acquire detector findings merely
     # because the scan runs before preprocessing.
     qc_settings = dict(settings)
+    oddball_frequency_hz: float | None = None
+    frequency_protocol_fingerprint = ""
+    raw_protocol = qc_settings.get("frequency_protocol")
+    if raw_protocol is not None:
+        try:
+            frequency_protocol = normalize_frequency_protocol(raw_protocol)
+        except FrequencyProtocolError:
+            frequency_protocol = None
+        if frequency_protocol is not None:
+            frequency_protocol_fingerprint = frequency_protocol.fingerprint
+            if (
+                frequency_protocol.is_ready
+                and frequency_protocol.oddball_rate_hz is not None
+            ):
+                oddball_frequency_hz = float(frequency_protocol.oddball_rate_hz)
     resolved_event_map = (
         {str(label): int(code) for label, code in event_map.items()}
         if event_map
@@ -1973,7 +2151,7 @@ def scan_preprocessing_qc(
     )
     worker_count = _preflight_worker_count(total, max_workers)
     if worker_count <= 1:
-        return _scan_preprocessing_qc_serial(
+        scan = _scan_preprocessing_qc_serial(
             pending_infos,
             qc_settings,
             project_root=resolved_project_root,
@@ -1983,16 +2161,22 @@ def scan_preprocessing_qc(
             progress=progress,
             should_cancel=should_cancel,
         )
-    return _scan_preprocessing_qc_parallel(
-        pending_infos,
-        qc_settings,
-        max_workers=worker_count,
-        project_root=resolved_project_root,
-        event_map=resolved_event_map,
-        io_semaphore=io_semaphore,
-        spectral_semaphore=spectral_semaphore,
-        progress=progress,
-        should_cancel=should_cancel,
+    else:
+        scan = _scan_preprocessing_qc_parallel(
+            pending_infos,
+            qc_settings,
+            max_workers=worker_count,
+            project_root=resolved_project_root,
+            event_map=resolved_event_map,
+            io_semaphore=io_semaphore,
+            spectral_semaphore=spectral_semaphore,
+            progress=progress,
+            should_cancel=should_cancel,
+        )
+    return replace(
+        scan,
+        oddball_frequency_hz=oddball_frequency_hz,
+        frequency_protocol_fingerprint=frequency_protocol_fingerprint,
     )
 
 

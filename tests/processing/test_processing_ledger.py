@@ -256,7 +256,7 @@ def test_completed_legacy_epoch_window_entry_remains_reusable(
     assert current_plan.states[0].status == "completed"
 
 
-def test_participant_condition_exclusions_do_not_change_raw_processing_fingerprint(
+def test_condition_exclusions_change_analyzed_interval_processing_fingerprint(
     tmp_path: Path,
 ) -> None:
     project, _raw_info = _project_with_raw(tmp_path)
@@ -274,9 +274,23 @@ def test_participant_condition_exclusions_do_not_change_raw_processing_fingerpri
         "P01": ["Condition A"]
     }
 
+    participant_scoped = build_processing_fingerprint(
+        project,
+        settings,
+        project.event_map,
+    )
+    assert participant_scoped != baseline
+
+    project.recordings = {"P01__visit-1": {"participant_id": "P01"}}
+    project.preprocessing["manual_excluded_recording_conditions"] = {
+        "P01__visit-1": ["Condition A"]
+    }
+    settings["manual_excluded_recording_conditions"] = {
+        "P01__visit-1": ["Condition A"]
+    }
     assert (
         build_processing_fingerprint(project, settings, project.event_map)
-        == baseline
+        != participant_scoped
     )
 
 
@@ -398,7 +412,18 @@ def test_record_results_creates_completed_ledger_and_run_log(tmp_path) -> None:
     record_processing_results(
         project,
         plan,
-        [{"status": "ok", "geometry": biosemi64_geometry_identity(), "file": str(info.path)}],
+        [
+            {
+                "status": "ok",
+                "geometry": biosemi64_geometry_identity(),
+                "file": str(info.path),
+                "audit": {
+                    "interpolation_status": "succeeded",
+                    "interpolation_requested_channels": ["Fp1", "AF7", "AF3", "F1"],
+                    "interpolated_channels": ["Fp1", "AF7", "AF3", "F1"],
+                },
+            }
+        ],
         run_mode="Batch",
         user_choice="incremental",
         cancelled=False,
@@ -416,6 +441,12 @@ def test_record_results_creates_completed_ledger_and_run_log(tmp_path) -> None:
     assert entry["status"] == "completed"
     assert entry["processing_fingerprint_version"] == PROCESSING_FINGERPRINT_VERSION
     assert entry["run_mode"] == "Batch"
+    assert entry["preprocessing_outcome"]["processing_status"] == "completed"
+    assert entry["preprocessing_outcome"]["interpolation_status"] == "succeeded"
+    assert entry["interpolation_burden"]["numerator"] == 4
+    assert entry["interpolation_burden"]["denominator"] == 64
+    assert entry["interpolation_burden"]["percentage"] == pytest.approx(6.25)
+    assert entry["interpolation_burden"]["requires_review"] is True
     assert '"successful_files": 1' in runs
 
 
@@ -458,7 +489,7 @@ def test_record_results_persists_complete_source_derivative_contract(tmp_path) -
     entry = ledger["entries"]["P01"]
     assert (
         PROCESSING_FINGERPRINT_VERSION
-        == "processing_fingerprint_v11_biosemi64_frequency_protocol"
+        == "processing_fingerprint_v12_analyzed_condition_scope"
     )
     assert entry["geometry"] == plan.geometry_identity
     assert entry["source_derivative_status"] == "complete"
@@ -1170,6 +1201,9 @@ def test_record_results_keeps_failed_interpolation_provenance(tmp_path) -> None:
     assert entry["interpolation_requested_channels"] == ["P9", "P10"]
     assert entry["interpolated_channels"] == []
     assert entry["interpolation_error"] == "spline solve failed"
+    assert entry["preprocessing_outcome"]["processing_status"] == "failed"
+    assert entry["preprocessing_outcome"]["interpolation_status"] == "failed"
+    assert entry["interpolation_burden"]["status"] == "unavailable"
 
 
 def test_record_results_flags_partial_condition_outputs_without_excluding(tmp_path) -> None:
@@ -1308,6 +1342,9 @@ def test_record_results_marks_excluded_file_and_skips_until_raw_changes(tmp_path
     entry = ledger["entries"]["P01"]
     assert entry["status"] == "excluded"
     assert entry["exclusion_reason"] == "recording_not_started"
+    assert entry["preprocessing_outcome"]["processing_status"] == "excluded"
+    assert entry["preprocessing_outcome"]["interpolation_status"] == "skipped"
+    assert entry["interpolation_burden"]["status"] == "unavailable"
     assert entry["removed_outputs"] == [str(path.resolve()) for path in expected_outputs]
     assert all(not path.exists() for path in expected_outputs)
     assert '"excluded_files": 1' in runs

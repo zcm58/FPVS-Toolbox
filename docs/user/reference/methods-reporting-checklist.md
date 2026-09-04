@@ -80,6 +80,9 @@ testing, or another specialized estimand.
 - Report the experimental removed-electrode detector mode and version. Separate
   persistent low-variance suggestions and manual targets from high-amplitude,
   rare-burst, spatial, condition/occurrence, and transient review evidence.
+  State whether manual maps were enabled and whether a recording-specific map
+  overrode the participant map; manual targets remain authoritative with the
+  automatic detector either On or Off.
 - Report severe raw amplitude and candidate count, fraction, hemisphere, and
   BioSemi64 cluster crossings as review flags, along with the user's explicit
   recording- or participant-scope inclusion/exclusion decision. These

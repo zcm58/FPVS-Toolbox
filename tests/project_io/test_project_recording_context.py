@@ -13,6 +13,11 @@ from Main_App.projects import (
     load_project_recording_context,
     project_recording_context,
 )
+from Main_App.processing.interpolation_burden import (
+    INTERPOLATION_BURDEN_DECISION_RETAIN,
+    InterpolationBurdenReviewFinding,
+    build_interpolation_burden_review_decision,
+)
 
 
 def _repeated_manifest(project_root: Path) -> dict[str, object]:
@@ -221,6 +226,40 @@ def test_recording_scoped_qc_persists_only_for_repeated_projects(
         (legacy_root / "project.json").read_text(encoding="utf-8")
     )
     assert "manual_excluded_recordings" not in legacy_saved["preprocessing"]
+
+
+def test_interpolation_burden_review_decision_survives_project_reload(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "Burden review"
+    project_root.mkdir()
+    project = Project.load(project_root)
+    finding = InterpolationBurdenReviewFinding(
+        recording_id="P01",
+        burden_fingerprint="c" * 64,
+        successfully_interpolated_channels=("Fp1", "Fp2", "AF7", "AF3"),
+        numerator=4,
+        denominator=64,
+        percentage=6.25,
+        message="Review this participant.",
+    )
+    decision = build_interpolation_burden_review_decision(
+        finding,
+        participant_id="P01",
+        decision=INTERPOLATION_BURDEN_DECISION_RETAIN,
+        reason="Reviewed preprocessing evidence and retained the participant.",
+        reviewed_at_utc="2026-09-02T12:00:00Z",
+    ).to_payload()
+    project.preprocessing["interpolation_burden_review_decisions"] = {
+        "P01": decision,
+    }
+
+    project.save()
+    reloaded = Project.load(project_root)
+
+    assert reloaded.preprocessing["interpolation_burden_review_decisions"] == {
+        "P01": decision,
+    }
 
 
 @pytest.mark.parametrize(
