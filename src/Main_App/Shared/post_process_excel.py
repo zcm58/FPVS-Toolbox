@@ -267,7 +267,7 @@ def build_fft_neighbors_rows(
     freqs: np.ndarray,
     fs: float,
     n_samples: int,
-    target_freq: float = 1.2,
+    target_freq: float,
     crop_mode: str = "55_onbin",
     n55: Optional[int] = None,
     first55_samp: Optional[int] = None,
